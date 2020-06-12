@@ -229,10 +229,11 @@ while t < tend:
         #Calculate new flux from new primitive variables
         rho, v, energy = cons2prim(up[i])
         
+        p = calc_pressure(gamma, energy, rho, v)
         momentum_dens = rho*v 
         energy_dens = rho*v**2 + p 
         beta = (energy + p)*v 
-        
+
         fp[i] = np.array([momentum_dens, energy_dens,
                           beta])
         
@@ -250,14 +251,18 @@ x_right = 1.0
 #X-Grid
 x_arr = np.linspace(x_left, x_right, N+1)
 
+# Separate the state vector into a human 
+# readable dictionary
 state = {}
 state['density'] = u[:,0]
 state['momentum_dens'] = u[:,1]
 state['energy'] = u[:,2]
 
-#print(x_arr, u[:,0])
-plt.plot(x_arr, state['density'])
-plt.plot(x_arr, state['momentum_dens'])
-plt.plot(x_arr, state['energy'])
+#Plot the results
+plt.plot(x_arr, state['density'], label='Density')
+plt.plot(x_arr, state['momentum_dens'], label='Momentum Density')
+plt.plot(x_arr, state['energy'], label='Energy')
+plt.xlabel('X')
 
+plt.legend()
 plt.show()
