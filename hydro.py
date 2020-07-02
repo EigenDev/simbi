@@ -8,6 +8,7 @@
 import numpy as np 
 import matplotlib.pyplot as plt 
 import math 
+import sys
 
 # Solving the 1D problem first
 # dU/dt + dF/dt = 0
@@ -30,7 +31,7 @@ import math
 # where alpha_p + alpha_m are related to the minimal and maximal eigenvalues of the Jacobians
 # of the left and right states in the form
 # alpha_pm = MAX{0,pm eigen(U_L), pm eigen(U_R)}
-# Here, the minal and maximum eigenvalues eigen_pm are given by
+# Here, the minimal and maximum eigenvalues eigen_pm are given by
 # eigen_pm = v pm c_s
 # where c_s = sqrt(gamma*P/rho) is the sound speed. 
 
@@ -38,93 +39,199 @@ import math
 
 class Hydro:
     
-    def __init__(self, gamma, left_state, right_state, Npts,
-                 geometry, dt = 1.e-4, dimensions=1):
+    def __init__(self, gamma, initial_state, Npts,
+                 geometry, dt = 1.e-4, n=3):
         """
         The initial conditions of the hydrodynamic system (1D for now)
         
         Parameters:
             gamma (float): Adiabatic Index
-            left_state (tuple): The initial state on the left side of the interface. Must be
-                                in the form (pressure, velocity, density)
-            right_state (tuple): Idem right side of the interface
+            initial_state (tuple or array): The initial conditions of the problem in the following format
+                                Ex. state = ((1.0, 1.0, 0.0), (0.1,0.125,0.0)) for Sod Shock Tube
+                                    state = (rho, pressure, velocity)
             Npts (int): Number of grid slices to make
-            geometry (tuple): The first starting point, the last, and the midpoint in the grid
+            geometry (tuple): The first starting point, the last, and an optional midpoint in the grid
+                                Ex. geometry = (0.0, 1.0, 0.5) for Sod Shock Tube
             dt (float): initial time_step for the calculation
-            dimensions (int): The number of dimensions for this hydro simulation
+            n (int): Number of variables in the problem
             
         Return:
             None
         """
         
-        # hydro = Hydro(gamma=1.4, left_state = (1.0,0.0,1.0), right_state=(0.125,0.0,0.1),
-        # Npts=500, geometry=(0.0,1.0,0.5)) 
+        # hydro = Hydro(gamma=1.4, initial_state = ((1.0,0.0,1.0),(0.125,0.0,0.1)),
+        # Npts=500, geometry=(0.0,1.0,0.5), n=3) 
+        
+        #Check dimensions of state
+        if len(initial_state) == 2:
+            print('Initializing the 1D Discontinuity...')
+            
+            discontinuity = True
+            left_state = initial_state[0]
+            right_state = initial_state[1]
+            
+            self.left_state = left_state
+            self.right_state = right_state 
+            
+            if len(left_state) != len(right_state):
+                print("ERROR: The left and right states must have the same number of variables")
+                print('Left State:', left_state)
+                print('Right State:', right_state)
+                sys.exit()
+                
+            elif len(left_state) > 4 and len(right_state) > 4:
+                print("Your state arrays contain too many variables. This version takes a maximum\n"
+                    "of 4 state variables")
+                
+            elif len(left_state) == 3 and len(right_state) == 3:
+                self.dimensions = 1
+                
+            elif len(left_state) == 4 and len(right_state) == 4:
+                self.dimensions = 2
         
         self.gamma = gamma 
         self.geometry = geometry
         self.dt = dt 
         self.Npts = Npts 
-        self.left_state = left_state
-        self.right_state = right_state 
-        self.dimensions = dimensions 
+        
+        
+        
 
         # step size
         self.dx = 1/self.Npts
                                         
         # Initial Conditions
-        # Primitive Variables on LHS
-        p_l = self.left_state[0]
-        v_l = self.left_state[1]
-        rho_l = self.left_state[2]
         
-        # Calculate Energy and Flux Variables on LHS
-        energy_l = p_l/(self.gamma - 1) + 0.5*rho_l*v_l**2
-        epsilon_l = rho_l*v_l**2 + p_l
-        beta_l = (energy_l + p_l)*v_l
+        # Check for Discontinuity
+        if len(initial_state) == 2:
+            # Primitive Variables on LHS
+            rho_l = self.left_state[0]
+            p_l = self.left_state[1]
+            v_l = self.left_state[2]
+            
+            # Calculate Energy on LHS
+            energy_l = p_l/(self.gamma - 1) + 0.5*rho_l*v_l**2
+            
+            
+            # Primitive Variables on RHS
+            rho_r = self.right_state[0]
+            p_r = self.right_state[1]
+            v_r = self.right_state[2]
         
-        # Primitive Variables on RHS
-        p_r = self.right_state[0]
-        v_r = self.right_state[1]
-        rho_r = self.right_state[2]
-    
-        # Calculate Energy and Flux Variables on RHS
-        energy_r = p_r/(self.gamma - 1) + 0.5*rho_r*v_r**2
-        epsilon_r = rho_r*v_r**2 + p_r
-        beta_r = (energy_r + p_r)*v_r
+            # Calculate Energy on RHS
+            energy_r = p_r/(self.gamma - 1) + 0.5*rho_r*v_r**2
+            
 
-        # Initialize conserved u-tensor and flux tensors
-        self.u = np.empty(shape = (3, self.Npts +1), dtype=float)
-        self.f = np.empty(shape = (3, self.Npts +1), dtype=float)
+            # Initialize conserved u-tensor and flux tensors
+            self.u = np.empty(shape = (3, self.Npts +1), dtype=float)
 
-        left_bound = self.geometry[0]
-        right_bound = self.geometry[1]
-        midpoint = self.geometry[2]
-        
-        size = abs(right_bound - left_bound)
-        breakpoint = size/midpoint                                          # Define the fluid breakpoint
-        slice_point = int(self.Npts/breakpoint)                             # Define the array slicepoint
-        
-        self.u[:, : slice_point] = np.array([rho_l, rho_l*v_l, energy_l]).reshape(3,1)              # Left State
-        self.u[:, slice_point: ] = np.array([rho_r, rho_r*v_r, energy_r]).reshape(3,1)              # Right State
-        self.f[:, : slice_point] = np.array([rho_l*v_l, epsilon_l, beta_l]).reshape(3,1)            # Left Flux
-        self.f[:, slice_point: ] = np.array([rho_r*v_r, epsilon_r, beta_r]).reshape(3,1)            # Right Flux
-        
-    def calc_flux(self, pressure, rho, velocity):
+            left_bound = self.geometry[0]
+            right_bound = self.geometry[1]
+            midpoint = self.geometry[2]
+            
+            size = abs(right_bound - left_bound)
+            breakpoint = size/midpoint                                          # Define the fluid breakpoint
+            slice_point = int(self.Npts/breakpoint)                             # Define the array slicepoint
+            
+            self.u[:, : slice_point] = np.array([rho_l, rho_l*v_l, energy_l]).reshape(3,1)              # Left State
+            self.u[:, slice_point: ] = np.array([rho_r, rho_r*v_r, energy_r]).reshape(3,1)              # Right State
+            
+        if len(initial_state) == 3:
+            self.dimensions = 1
+            
+            self.n_vars = len(initial_state)
+            
+            self.init_rho = initial_state[0]
+            self.init_pressure = initial_state[1]
+            self.init_v = initial_state[2]
+            
+            self.init_energy =  ( self.init_pressure/(self.gamma - 1) + 
+                                    0.5*self.init_rho*self.init_v**2 )
+            
+            
+        elif len(initial_state) == 4:
+            self.dimensions = 2
+            
+            n_vars = len(initial_state) 
+            
+            rho = initial_state[0]
+            pressure = initial_state[1]
+            v_x = initial_state[2]
+            v_y = initial_state[3]
+            
+            energy = pressure/(self.gamma - 1.) + 0.5*rho*(v_x**2 + v_y**2)
+            
+            # Flux variables in x-direction
+            epsilon_x = rho*v_x**2 + pressure 
+            convect_x = rho*v_x*v_y 
+            beta_x = (energy + pressure)*v_x
+            
+            # Flux variables in y-direction
+            epsilon_y = rho*v_y**2 + pressure 
+            convect_y = rho*v_x*v_y 
+            beta_y = (energy + pressure)*v_y 
+            
+            # Initialize conserved u-tensor and flux tensors
+            self.u = np.empty(shape = (n_vars, self.Npts + 1, self.Npts + 1), dtype=float)
+            
+            self.u[:, :] = np.array([rho, rho*v_x,rho*v_y, energy])
+                
+                
+    def periodic_bc(self, u): 
+        if self.dimensions == 1:
+            # A sloppy implementation of periodic BCs
+            
+            u[:, 0] = u[:, -2]
+            u[:,-1] = u[:,  1]
+            
+            return u     
+            
+    def calc_flux(self, rho, pressure, velocity, x_direction=True):
         """
         Calculate the new flux tensor given the necessary
         primitive parameters
         """
-        energy = self.calc_energy(self.gamma, pressure, rho, velocity)
-        momentum_dens = rho*velocity
-        energy_dens = rho*velocity**2 + pressure
-        beta = (energy + pressure)*velocity 
+        # Check if velocity is multi-dimensional
+        if self.dimensions == 1:
+            energy = self.calc_energy(self.gamma, rho, pressure, velocity)
+            momentum_dens = rho*velocity
+            energy_dens = rho*velocity**2 + pressure
+            beta = (energy + pressure)*velocity 
+            
+            flux = np.array([momentum_dens, energy_dens,
+                                        beta])
+            
+            return flux
+        else:
+            v_x = velocity[0]
+            v_y = velocity[1]
+            total_velocity = v_x**2 + v_y**2
+            
+            energy = self.calc_energy(self.gamma, rho, pressure, total_velocity)
+            
+            if x_direction:
+                momentum_x = rho*v_x
+                energy_dens_x = rho*v_x**2 + pressure 
+                convect_x = rho*v_x*v_y 
+                beta_x = (energy + pressure)*v_x
+                
+                flux = np.array([momentum_x, energy_dens_x,
+                                 convect_x, beta_x])
+                
+                return flux
+            else:
+                momentum_y = rho*v_y
+                energy_dens_y = rho*v_y**2 + pressure 
+                convect_y = rho*v_x*v_y 
+                beta_y = (energy + pressure)*v_y
+                
+                flux = np.array([momentum_y, convect_y,
+                                 energy_dens_y, beta_y])
+                
+                return flux
         
-        flux = np.array([momentum_dens, energy_dens,
-                                    beta])
         
-        return flux
-        
-    def calc_state(self, gamma, pressure, rho, velocity, ghosts=1):
+    def calc_state(self, gamma, rho, pressure, velocity, ghosts=1):
         """
         Calculate the new state tensor given the parameters
         """
@@ -150,41 +257,71 @@ class Hydro:
             plus/minus left/right values.
         """
         
-        # The state tensor decomposed into respective
-        # variables
-        #try:
-        #    left_state, right_state = np.array([[left_state], [right_state]])
-        #except:
-        #    print("Please input a tuple or array for the states")
+        if self.dimensions == 1:
+            rho_l, momentum_l, energy_l = left_state
+            rho_r, momentum_r, energy_r = right_state
+            
+            v_l = momentum_l/rho_l
+            v_r = momentum_r/rho_r
+            
+            p_l = self.calc_pressure(self.gamma, rho_l, energy_l, v_l)
+            p_r = self.calc_pressure(self.gamma, rho_r, energy_r, v_r)
+            
+            # Compute Sound Speed
+            c_s_right = self.calc_sound_speed(self.gamma, p_r, rho_r)
+            c_s_left = self.calc_sound_speed(self.gamma, p_l, rho_l)
+            
+            # Initialize Dictionary to store plus/minus 
+            # left/right eigenvalues
+            lam = {}
+            
+            lam['left'] = {}
+            lam['right'] = {}
+            
+            lam['left']['plus'] = v_l + c_s_left
+            lam['left']['minus'] = v_l - c_s_left
+            
+            lam['right']['plus'] = v_r + c_s_right
+            lam['right']['minus'] = v_r - c_s_right
+            
+            return lam 
         
-        rho_l, m_l, energy_l = left_state
-        rho_r, m_r, energy_r = right_state
+        else:
+            
+            rho_l, momentum_x_l, momentum_y_l, energy_l = left_state
+            rho_r, momentum_x_r, momentum_y_r, energy_r = right_state
+            
+            v_x_l = momentum_x_l/rho_l 
+            v_y_l = momentum_y_l/rho_r 
+            
+            v_x_r = momentum_x_r/rho_r
+            v_y_r = momentum_y_r/rho_r 
+            
+            v_tot_l = np.sqrt(v_x_l**2 + v_y_l**2)
+            v_tot_r = np.sqrt(v_x_r**2 + v_y_r**2)
+            
+            p_l = self.calc_pressure(self.gamma, rho_l, energy_l, v_tot_l)
+            p_r = self.calc_pressure(self.gamma, rho_r, energy_r, v_tot_r)
+            
+            # Compute Sound Speed
+            c_s_right = self.calc_sound_speed(self.gamma, p_r, rho_r)
+            c_s_left = self.calc_sound_speed(self.gamma, p_l, rho_l)
+            
+            # Initialize Dictionary to store plus/minus 
+            # left/right eigenvalues
+            lam = {}
+            
+            lam['left'] = {}
+            lam['right'] = {}
+            
+            lam['left']['plus'] = v_tot_l + c_s_left
+            lam['left']['minus'] = v_tot_l - c_s_left
+            
+            lam['right']['plus'] = v_tot_r + c_s_right
+            lam['right']['minus'] = v_tot_r - c_s_right
+            
+            return lam 
         
-        v_l = m_l/rho_l
-        v_r = m_r/rho_r
-        
-        p_l = self.calc_pressure(self.gamma, energy_l, rho_l, v_l)
-        p_r = self.calc_pressure(self.gamma, energy_r, rho_r, v_r)
-        
-        # Compute Sound Speed
-        c_s_right = self.calc_sound_speed(self.gamma, p_r, rho_r)
-        c_s_left = self.calc_sound_speed(self.gamma, p_l, rho_l)
-        
-        
-        # Initialize Dictionary to store plus/minus 
-        # left/right eigenvalues
-        lam = {}
-        
-        lam['left'] = {}
-        lam['right'] = {}
-        
-        lam['left']['plus'] = v_l + c_s_left
-        lam['left']['minus'] = v_l - c_s_left
-        
-        lam['right']['plus'] = v_r + c_s_right
-        lam['right']['minus'] = v_r - c_s_right
-        
-        return lam 
     
     def calc_hll_flux(self, left_state, right_state, 
                       left_flux, right_flux):
@@ -207,7 +344,7 @@ class Hydro:
         
         return f_hll 
     
-    def calc_energy(self, gamma, pressure, rho, velocity):
+    def calc_energy(self, gamma, rho, pressure, velocity):
         """
         Calculate the ideal gas energy given the adiabatic
         index, velocity, pressure, and fluid density
@@ -225,7 +362,7 @@ class Hydro:
         
         return energy
     
-    def calc_pressure(self, gamma, energy, rho, velocity):
+    def calc_pressure(self, gamma, rho, energy, velocity):
         """
         Calculate the ideal gas pressure given the adiabatic
         index, velocity, energy, and fluid density
@@ -275,19 +412,76 @@ class Hydro:
             pressure (float): fluid pressure
         """
         # Check dimensions of the states variable
-        state = np.array(state)
+        if self.dimensions == 1:
         
-        rho = state[0]
-        v = state[1]/rho 
-        energy = state[2]
+            rho = state[0]
+            v = state[1]/rho 
+            energy = state[2]
+            
+            pressure = self.calc_pressure(self.gamma, rho, energy, v)
+            
+            return np.array([rho, pressure, v])
+        else:
+            rho == state[0]
+            v_x = state[1]/rho 
+            v_y = state[2]/rho 
+            energy = state[4]
+            
+            v = np.sqrt(v_x**2 + v_y**2)
+            
+            pressure = self.calc_pressure(self.gamma, rho, energy, v)
+            
+            return np.array([rho, pressure, v_x, v_y])
         
-        pressure = self.calc_pressure(self.gamma, energy, rho, v)
+    def sign(self, y):
+        """
+        The mathematical sign function
+        returning either +1 or -1
+        based on the inputs
         
-        #print(np.array([pressure, rho, v]))
-        #zzz = input('')
-        return np.array([pressure, rho, v])
+        Parameters:
+            y (float/array): Some number
+            
+        Returns:
+            sgn (float/array): Sign of the number y
+        """
+        if isinstance(y, (int, float)):
+            sgn = math.copysign(1,y)
+            return sgn
+        elif isinstance(y, (list, np.ndarray)):
+            try:
+                y = np.array(y)
+            except:
+                pass
+            
+            sgn = np.sign(y)
+            return sgn
+            
+        else:
+            raise ValueError('The sign function only takes natural numbers')
+            
+    def minmod(self, x, y ,z):
+        """
+        A flux delimiter function
+        
+        Parameters:
+            x (float): Some Number
+            y (float): Idem 
+            z (float): Idem
+            
+        Returns:
+            values (float): Either x,y,z based on standard minmod requirements
+        """
+        # Must vectorize each parameter to compute the minimum
+        v = [np.abs(arr) for arr in [x,y,z]]
+        theta = 1.0 
+        
+        return (
+            0.25*np.abs(self.sign(x) + self.sign(y))*
+                (self.sign(x) + self.sign(z))*np.asarray(v).min(0)
+        )  
     
-    def u_dot(self, state, first_order = True, theta = 1.5):
+    def u_dot(self, state, first_order = True, theta = 1.5, periodic=False):
         """
         """
         
@@ -298,10 +492,10 @@ class Hydro:
             based on the inputs
             
             Parameters:
-                y (float): Some number
+                y (float/array): Some number
                 
             Returns:
-                sgn (float): Sign of the number y
+                sgn (float/array): Sign of the number y
             """
             if isinstance(y, (int, float)):
                 sgn = math.copysign(1,y)
@@ -332,105 +526,144 @@ class Hydro:
                 values (float): Either x,y,z based on standard minmod requirements
             """
             # Must vectorize each parameter to compute the minimum
-            v = [x,y,z]
+            v = [np.abs(arr) for arr in [x,y,z]]
             
             return (
-                0.25*(sign(x) + sign(y))*
+                0.25*np.abs(sign(x) + sign(y))*
                     (sign(x) + sign(z))*np.asarray(v).min(0)
             )
          
-        
-        if first_order:
-            # Right cell interface
-            u_l = state[:, 1: self.Npts]
-            u_r = state[:, 2: self.Npts + 1]
+        if self.dimensions == 1:
+            if first_order:
+                # Right cell interface
+                if periodic:
+                    u_l = state 
+                    u_r = np.roll(state, 1, axis=1)
+                    
+                else:
+                    u_l = state[:, 1: self.Npts]
+                    u_r = state[:, 2: self.Npts + 1]
+                
+                prims_l = self.cons2prim(state = u_l)
+                prims_r = self.cons2prim(state = u_r)
+                
+                f_l = self.calc_flux(*prims_l)
+                f_r = self.calc_flux(*prims_r)
+                
+                # The HLL flux calculated for f_[i+1/2]
+                f1 = self.calc_hll_flux(u_l, u_r, f_l, f_r)
+
+                # Left cell interface
+                if periodic:
+                    u_l = np.roll(state, -1, axis=1) 
+                    u_r = state
+                    
+                else:
+                    u_l = state[:, 0: self.Npts - 1]
+                    u_r = state[:, 1: self.Npts]
+                
+                prims_l = self.cons2prim(state = u_l)
+                prims_r = self.cons2prim(state = u_r)
+                
+                f_l = self.calc_flux(*prims_l)
+                f_r = self.calc_flux(*prims_r)
+                
+                # The HLL flux calculated for f_[i-1/2]
+                f2 = self.calc_hll_flux(u_l,u_r,f_l,f_r)
+                
+            else:
+                
+                # Right cell interface
+                if periodic:
+                    u_l = state
+                    u_r = np.roll(state, 1, axis=1)
+                    
+                    prims = self.cons2prim(state = state)
+                    
+                    left_most = np.roll(prims, -2, axis=1)
+                    left_mid = np.roll(prims, -1, axis=1)
+                    center = prims
+                    right_mid = np.roll(prims, 1, axis=1)
+                    right_most = np.roll(prims, 2, axis=1)
+                else:
+                    u_l = state[:, 2: self.Npts]
+                    u_r = state[:, 3: self.Npts + 1]
+                    
+                    left_most = prims[:, 0:self.Npts-2]
+                    left_mid = prims[:, 1:self.Npts - 1]
+                    center = prims[:, 2:self.Npts]
+                    right_mid = prims[:,3: self.Npts + 1]
+                    right_most = prims[:, 4: self.Npts + 2]
+                
+                
+                prims_l = ( center + 0.5*
+                        minmod(theta*(center - left_mid),
+                                0.5*(right_mid - left_mid),
+                                theta*(right_mid - center))
+                            )
+                
+                
+                prims_r = (right_mid - 0.5 *
+                        minmod(theta*(right_mid -center),
+                                0.5*(right_most - center),
+                                theta*(right_most - right_mid))
+                            )
+                
+                #print('Minmods:', minmod(theta*(center - left_mid),
+                #                0.5*(right_mid - left_mid),
+                #                theta*(right_mid - center)))
+                #print('Central Densities:', center[0])
+                #print('Left Densities', prims_l[0])
+                #zzz = input('')
+                #plt.plot(center[0], label='Centered Values')
+                #plt.plot(prims_l[0], label='Left of i+1/2')
+                #plt.plot(prims_r[0], label='Right of i+1/2')
+                #plt.ylabel('Density')
+                #plt.legend()
+                #plt.show()
+                
+                
+                f_l = self.calc_flux(*prims_l)
+                f_r = self.calc_flux(*prims_r)
+
+                # The HLL flux calculated for f_[i+1/2]
+                f1 = self.calc_hll_flux(u_l, u_r, f_l, f_r)
+                
+                # Left cell interface
+                if periodic:
+                    u_l = np.roll(state, -1, axis=1)
+                    u_r = state
+                else:
+                    u_l = state[:, 1: self.Npts - 1] 
+                    u_r = state[:, 2: self.Npts]
+                
+                prims_l = (left_mid + 0.5 *
+                        minmod(theta*(left_mid - left_most),
+                                0.5*(center -left_most),
+                                theta*(center - left_mid))
+                            )
+                
+                
+                prims_r = (center - 0.5 *
+                        minmod(theta*(center - left_mid),
+                                0.5*(right_mid - left_mid),
+                                theta*(right_mid - center))
+                            )
+                
+                
+                f_l = self.calc_flux(*prims_l)
+                f_r = self.calc_flux(*prims_r)
             
-            prims_l = self.cons2prim(state = u_l)
-            prims_r = self.cons2prim(state = u_r)
-            
-            f_l = self.calc_flux(*prims_l)
-            f_r = self.calc_flux(*prims_r)
-            
-            # The HLL flux calculated for f_[i+1/2]
-            f1 = self.calc_hll_flux(u_l, u_r, f_l, f_r)
-    
-            # Left cell interface
-            u_l = state[:, 0: self.Npts - 1] 
-            u_r = state[:, 1: self.Npts]
-            
-            prims_l = self.cons2prim(state = u_l)
-            prims_r = self.cons2prim(state = u_r)
-            
-            f_l = self.calc_flux(*prims_l)
-            f_r = self.calc_flux(*prims_r)
-            
-            # The HLL flux calculated for f_[i-1/2]
-            f2 = self.calc_hll_flux(u_l,u_r,f_l,f_r)
-            
+                # zzz = input("")
+                # The HLL flux calculated for f_[i-1/2]
+                f2 = self.calc_hll_flux(u_l, u_r, f_l, f_r)
+                
+            return -(f1 - f2)/self.dx
         else:
+            # TODO: Do the Higher Order 2-D Advection Problem
             
-            # Regenerate the state with the necessary ghost cells
-            ghost_vec = state[:, -1].reshape(3,1)
-            state = np.append(state, ghost_vec, axis=1)
+            pass
             
-            # Right cell interface
-            u_l = state[:, 2: self.Npts]
-            u_r = state[:, 3: self.Npts + 1]
-            
-            prims = self.cons2prim(state = state)
-            
-            left_most = prims[:, 0:self.Npts-2]
-            left_mid = prims[:, 1:self.Npts - 1]
-            center = prims[:, 2:self.Npts]
-            right_mid = prims[:,3: self.Npts + 1]
-            right_most = prims[:, 4: self.Npts + 2]
-            
-            # [i + 1/2] interface
-            prims_l = ( center + 0.5*
-                       minmod(theta*(center- left_mid),
-                              0.5*(right_mid - left_mid),
-                              theta*(right_mid - center))
-                        )
-           
-            prims_r = (right_mid - 0.5 *
-                       minmod(theta*(right_mid -center),
-                              0.5*(right_most - center),
-                              theta*(right_most - right_mid))
-                        )
-        
-
-            f_l = self.calc_flux(*prims_l)
-            f_r = self.calc_flux(*prims_r)
-        
-
-            # The HLL flux calculated for f_[i+1/2]
-            f1 = self.calc_hll_flux(u_l, u_r, f_l, f_r)
-            
-            # Left cell interface
-            u_l = state[:, 1: self.Npts - 1] 
-            u_r = state[:, 2: self.Npts]
-            
-            prims_l = (left_mid + 0.5 *
-                       minmod(theta*(left_mid - left_most),
-                              0.5*(center -left_most),
-                              theta*(center - left_mid))
-                        )
-            
-            prims_r = (center - 0.5 *
-                       minmod(theta*(center - left_mid),
-                              0.5*(right_mid - left_mid),
-                              theta*(right_mid - center))
-                        )
-            
-            f_l = self.calc_flux(*prims_l)
-            f_r = self.calc_flux(*prims_r)
-        
-
-            # The HLL flux calculated for f_[i+1/2]
-            f2 = self.calc_hll_flux(u_l, u_r, f_l, f_r)
-            
-        
-        return -(f1 - f2)/self.dx
         
     def adaptive_timestep(self, dx, alphas):
         """
@@ -459,7 +692,7 @@ class Hydro:
             dimensions = self.dimensions
         )
     
-    def simulate(self, tend=0.1, first_order=True):
+    def simulate(self, tend=0.1, first_order=True, periodic=False):
         """
         Simulate the hydro setup
         
@@ -471,64 +704,86 @@ class Hydro:
         Returns:
             u (array): The conserved variable tensor
         """
+        # Initialize conserved u-tensor
+        if periodic:
+            self.u = np.empty(shape = (self.n_vars, self.Npts), dtype = float)
+            
+            self.u[:, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
+                                    self.init_energy])
+        else:
+            if first_order:
+                self.u = np.empty(shape = (self.n_vars, self.Npts + 1), dtype=float)
+            else:
+                self.u = np.empty(shape = (self.n_vars, self.Npts + 2), dtype=float)
+                
+            self.u[:, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
+                                    self.init_energy])
         
         u = self.u 
-        f = self.f 
         dt = self.dt 
         dx = self.dx
         
-        theta = 1.5
-        
         # Copy state and flux profile tensors
         cons_p = u.copy()
-        flux_p = f.copy()
 
         t = 0
-        while t < tend:
-            # Calculate the new values of U and F
+        if first_order:
+            print("Computing First Order...")
+            while t < tend:
+                # Calculate the new values of U and F
+                if periodic:
+                    cons_p = u + dt*self.u_dot(u, periodic=True)
+                else:
+                    cons_p[:, 1: self.Npts] = u[:, 1: self.Npts] + dt*self.u_dot(u)
+
+                #if periodic:
+                #    cons_p = self.periodic_bc(cons_p)
+                    
+                u, cons_p = cons_p, u
             
-            if first_order:
-                cons_p[:, 1: self.Npts] = u[:, 1: self.Npts] + dt*self.u_dot(u)
-                
-                # Calculate new flux from new primitive variables
-                prims = self.cons2prim(state = cons_p)
-                
-                flux_p = self.calc_flux(*prims)
-                
-            else:
-                ########################## 
-                # RK3 ORDER IN TIME
-                ##########################
-                
-                u_1 = cons_p.copy()
-                u_2 = cons_p.copy()
-                
-                # First Order In U
-                u_1[:,1:self.Npts] = u[:, 1: self.Npts] + dt*self.u_dot(u)
-                
-                # Second Order In U
-                u_2[:, 1:self.Npts] = ( 0.75*u[:, 1:self.Npts] + 0.25*u_1[:, 1:self.Npts] 
-                                       + 0.25*dt*self.u_dot(u_1) )
-                
-                
-                # Final U 
-                cons_p[:, 2: self.Npts] = ( u[:, 2: self.Npts]/3 + (2/3)*u_2[:, 2:self.Npts] + 
-                                           (2/3)*dt*self.u_dot(u_2, first_order=False) )
-                
-                # Calculate new flux from new primitive variables
-                prims = self.cons2prim(state = cons_p)
-                
-                flux_p = self.calc_flux(*prims)
-                
-            u, cons_p = cons_p, u
-            f, flux_p = flux_p, f
+                # Update timestep
+                #dt = self.adaptive_timestep(dx, [alpha_plus, alpha_minus])
+                t += dt
+        else:
+            ########################## 
+            # RK3 ORDER IN TIME
+            ##########################
+            print('Computing Higher Order...')
+            u_1 = u.copy()
+            u_2 = u.copy()
             
-            # Update timestep
-            #dt = self.adaptive_timestep(dx, [alpha_plus, alpha_minus])
-            t += dt
-            
-        return u
-            
+            while t < tend:
+                # First Version Of U
+                if periodic:
+                    u_1 = u + dt*self.u_dot(u, first_order=True, periodic=True)
+                    
+                    u_2 = 0.75*u + 0.25*u_1 + 0.25*dt*self.u_dot(u, first_order= False, 
+                                                                 periodic=True)
+                    
+                    cons_p = (1/3)*u + (2/3)*u_2 + (2/3)*dt*self.u_dot(u_2, first_order=False,
+                                                                       periodic=True)
+                else:
+                    u_1[:, 2:self.Npts] = u[:, 2: self.Npts] + dt*self.u_dot(u, first_order=False)
+                    
+                    
+                    # Second Version Of U
+                    u_2[:, 2:self.Npts] = ( 0.75*u[:, 2:self.Npts] + 0.25*u_1[:, 2:self.Npts] 
+                                            + 0.25*dt*self.u_dot(u_1, first_order=False) )
+                    
+                    
+                    # Final U 
+                    cons_p[:, 2: self.Npts] = ( (1/3)*u[:, 2: self.Npts] + (2/3)*u_2[:, 2:self.Npts] + 
+                                                (2/3)*dt*self.u_dot(u_2, first_order=False) )
+                    
+                
+                u, cons_p = cons_p, u
+               
+                
+                # Update timestep
+                # dt = self.adaptive_timestep(dx, [alpha_plus, alpha_minus])
+                t += dt
+        
+        return u 
 class Visual(Hydro):
     """
     Store plotting results from the simulation
