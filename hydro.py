@@ -58,8 +58,9 @@ class Hydro:
         Return:
             None
         """
+        # TODO: Clean all of this up when you make it work
         
-        # hydro = Hydro(gamma=1.4, initial_state = ((1.0,0.0,1.0),(0.125,0.0,0.1)),
+        # hydro = Hydro(gamma=1.4, initial_state = ((1.0,1.0,0.0),(0.1,0.125,0.0)),
         # Npts=500, geometry=(0.0,1.0,0.5), n=3) 
         
         #Check dimensions of state
