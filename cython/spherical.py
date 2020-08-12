@@ -37,7 +37,7 @@ sedov = Hydro(gamma = gamma, initial_state=(rho, p ,v),
 #sedov2 = Hydro(gamma = gamma, initial_state=(rho, p, v), 
 #              Npts=N+1, geometry=(r_min, r_max), n_vars=3)
 
-# Simulate with linearly-spaced radial zones
+# Simulate with linearly-spaced radial zones. (Calls Simulate1D in the hydro.cpp file)
 u = sedov.simulate(tend=tend, first_order=False, dt=dt, linspace = True)
 # get the pressure and velocity
 p, v = sedov.cons2prim(u)[1: ]
