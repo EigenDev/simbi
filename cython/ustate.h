@@ -12,25 +12,27 @@
 #include <vector>
 #include <iostream>
 
-
 namespace states {
     class Ustate {
         public: 
             std::vector< std::vector<double> > state, cons_state; 
-            float theta, gamma, tend;
-            bool first_order, periodic;
+            std::vector<double> r;
+            float theta, gamma, tend, dt;
+            bool first_order, periodic, linspace;
+            std::string coord_system;
             Ustate();
-            Ustate(std:: vector <std::vector <double> > state, float gamma);
+            Ustate(std:: vector <std::vector <double> > state, float gamma,
+                    std::vector<double> r, std::string coord_system);
             ~Ustate();
             std::vector < std::vector<double > > cons2prim1D(
                 std::vector < std::vector<double > > cons_state);
 
             std::vector<std::vector<double> > u_dot1D(float gamma, 
                 std::vector<std::vector<double> > cons_state, bool first_order,
-                bool periodic, float theta);
+                bool periodic, float theta, bool linspace);
 
-            std::vector<std::vector<double> > simulate1D(float tend, bool first_order, 
-                                                            bool periodic);
+            std::vector<std::vector<double> > simulate1D(float tend, float dt, float theta, 
+                                                            bool first_order, bool periodic, bool linspace);
             
 
     };

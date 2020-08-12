@@ -43,7 +43,7 @@ from state import PyState, PyState2D
 class Hydro:
     
     def __init__(self, gamma, initial_state, Npts,
-                 geometry=None, n_vars = 3):
+                 geometry=None, n_vars = 3, coord_system = 'cartesian'):
         """
         The initial conditions of the hydrodynamic system (1D for now)
         
@@ -142,11 +142,12 @@ class Hydro:
         elif len(initial_state) == 3:
             self.dimensions = 1
             
+            
             left_bound = self.geometry[0]
             right_bound = self.geometry[1]
             
-            lx = right_bound - left_bound
-            self.dx = lx/self.Npts
+            length = right_bound - left_bound
+            self.dx = length/self.Npts
             
             self.n_vars = n_vars
             
@@ -159,7 +160,11 @@ class Hydro:
             
             # Define state variable to be defined later
             self.u = None
-            self.eos = eos
+            if coord_system == 'cartesian':
+                self.s = np.zeros((n_vars, self.Npts), float)
+            else:
+                self.s = np.zeros((n_vars, self.Npts), float)
+            
             
             
         elif len(initial_state) == 4:
@@ -362,6 +367,10 @@ class Hydro:
         
         alpha_minus = max(0, *-lam['left']['minus'].flatten(), 
                         *-lam['right']['minus'].flatten())
+        
+        print("Alpha Plus: {}".format(alpha_plus))
+        print("Alpha Minus: {}".format(alpha_minus))
+        zzz = input('')
         
         f_hll = ( (alpha_plus*left_flux + alpha_minus*right_flux - 
                 alpha_minus*alpha_plus*(right_state - left_state) ) /
@@ -633,15 +642,15 @@ class Hydro:
                 right_mid = np.roll(prims, 1, axis=2)
                 right_most = np.roll(prims, 2, axis=2)
             else:
-                x_left_most = prims[:, 0: self.Npts-2, 2:self.Npts]          # C_[i-2, j]
-                y_left_most = prims[:, 2: self.Npts, 0: self.Npts-2]
-                x_left_mid = prims[:, 1:self.Npts -1, 2: self.Npts]
-                y_left_mid = prims[:, 2:self.Npts, 1:self.Npts - 1]
+                x_left_most = prims[:, 2: self.Npts, 0:self.Npts - 2]          # C_[i-2, j]
+                y_left_most = prims[:, 0: self.Npts-2, 2: self.Npts]
+                x_left_mid = prims[:, 2:self.Npts, 1: self.Npts-1]
+                y_left_mid = prims[:, 1:self.Npts-1, 2:self.Npts]
                 center = prims[:, 2:self.Npts, 2:self.Npts]
-                x_right_mid = prims[:,  3: self.Npts +1, 2:self.Npts]
-                y_right_mid = prims[:, 2:self.Npts, 3: self.Npts + 1]
-                x_right_most = prims[:, 4: self.Npts+2, 2:self.Npts]
-                y_right_most = prims[:, 2:self.Npts, 4: self.Npts + 2]      # C_[i, j+2]
+                x_right_mid = prims[:,  2: self.Npts, 3:self.Npts+1]
+                y_right_mid = prims[:, 3:self.Npts+1, 2: self.Npts]
+                x_right_most = prims[:, 2: self.Npts, 4:self.Npts+2]
+                y_right_most = prims[:, 4:self.Npts+2, 2: self.Npts]      # C_[i, j+2]
                 
             x_prims_l = ( center + 0.5*
                     minmod(theta*(center - x_left_mid),
@@ -702,12 +711,38 @@ class Hydro:
             g_r = self.calc_flux(rho = y_prims_r[0], pressure= y_prims_r[1],
                                  velocity=(y_prims_r[2], y_prims_r[3]),
                                  x_direction = False)
+            
+            
+            
+            #print("Rho (R): {}".format(y_prims_r[0, 3, 5]))
+            #print("Rho (L): {}".format(y_prims_l[0, 3, 5]))
+            #print("P (R): {}".format(y_prims_r[1, 3, 5]))
+            #print("P (L): {}".format(y_prims_l[1, 3, 5]))
+            #print("Vx (R): {}".format(y_prims_r[2, 3, 5]))
+            #print("Vx (L): {}".format(y_prims_l[2, 3, 5]))
+            #print("Vy (R): {}".format(y_prims_r[3, 3, 5]))
+            #print("Vy (L): {}".format(y_prims_l[, 3, 5]))
+            #print("F (R): {}".format(f_l[3, 3, 5]))
+            #print("F (L): {}".format(f_r[3, 3, 5]))
+            #print("G (R): {}".format(g_r[3, 3, 5]))
+            #print("G (L): {}".format(g_l[3, 3, 5]))
+            #zzz = input('')
 
             # The HLL flux calculated for f_[i+1/2, j]
             f1 = self.calc_hll_flux(ux_l, ux_r, f_l, f_r)
             
             # The HLL flux calculated for g_[i, j+1/2]
             g1 = self.calc_hll_flux(uy_l, uy_r, g_l, g_r)
+            
+            print("i,j + 1/2")
+            print("Ux (R): {}".format(ux_r[3, 3, 5]))
+            print("Ux (L): {}".format(ux_l[3, 3, 5]))
+            print("Uy (R): {}".format(uy_r[3, 3, 5]))
+            print("Uy (L): {}".format(uy_l[3, 3, 5]))
+            print("F (R): {}".format(f_r[3, 3, 5]))
+            print("F (L): {}".format(f_l[3, 3, 5]))
+            print("G (R): {}".format(g_r[3, 3, 5]))
+            print("G (L): {}".format(g_l[3, 3, 5]))
             
             # Left cell interface
             x_prims_l = ( x_left_mid + 0.5*
@@ -736,6 +771,7 @@ class Hydro:
                             0.5*(y_right_mid - y_left_mid),
                             theta*(y_right_mid - center))
                         )
+            
             
             
             # Calculate the reconstructed left and right 
@@ -776,6 +812,23 @@ class Hydro:
             
             # The HLL flux calculated for g_[i, j-1/2]
             g2 = self.calc_hll_flux(uy_l, uy_r, g_l, g_r)
+            
+            print("")
+            print("i,j - 1/2")
+            print("Ux (R): {}".format(ux_r[3, 3, 5]))
+            print("Ux (L): {}".format(ux_l[3, 3, 5]))
+            print("Uy (R): {}".format(uy_r[3, 3, 5]))
+            print("Uy (L): {}".format(uy_l[3, 3, 5]))
+            print("F (R): {}".format(f_r[3, 3, 5]))
+            print("F (L): {}".format(f_l[3, 3, 5]))
+            print("G (R): {}".format(g_r[3, 3, 5]))
+            print("G (L): {}".format(g_l[3, 3, 5]))
+            
+            #print("F1: {}".format(f1[3, 3, 5]))
+            #print("G1: {}".format(g1[3, 3, 5]))
+            #print("F2: {}".format(f2[3, 3, 5]))
+            #print("G2: {}".format(g2[3, 3, 5]))
+            #zzz = input('')
            
             L = -(f1 - f2)/self.dx - (g1 -g2)/self.dy
             
@@ -811,7 +864,7 @@ class Hydro:
     
     #@nb.jit # numba this function
     def simulate(self, tend=0.1, dt = 1.e-4, 
-                 first_order=True, periodic=False):
+                 first_order=True, periodic=False, linspace=True):
         """
         Simulate the hydro setup
         
@@ -902,24 +955,24 @@ class Hydro:
                                                     self.init_rho*self.init_vy, self.init_energy])
                         
                         # Add boundary ghosts
-                        bottom_ghost = self.u[:, :, -1]
-                        upper_ghost = self.u[:, :,  0]
+                        bottom_ghost = self.u[:, -1]
+                        upper_ghost = self.u[:, 0]
                         
                         
-                        self.u = np.insert(self.u, self.u.shape[-1], 
-                                        (bottom_ghost, bottom_ghost) , axis=2)
+                        self.u = np.insert(self.u, self.u.shape[1], 
+                                        (bottom_ghost, bottom_ghost) , axis=1)
                         
                         self.u = np.insert(self.u, 0,
-                                        (upper_ghost, upper_ghost) , axis=2)
+                                        (upper_ghost, upper_ghost) , axis=1)
                         
-                        left_ghost = self.u[:, 0]
-                        right_ghost = self.u[:, -1]
+                        left_ghost = self.u[:, :, 0]
+                        right_ghost = self.u[:, :, -1]
                         
                         self.u = np.insert(self.u, 0, 
-                                        (left_ghost, left_ghost) , axis=1)
+                                        (left_ghost, left_ghost) , axis=2)
                         
-                        self.u = np.insert(self.u, self.u.shape[1],
-                                        (right_ghost, right_ghost) , axis=1)
+                        self.u = np.insert(self.u, self.u.shape[2],
+                                        (right_ghost, right_ghost) , axis=2)
                     
             else:
                 if not first_order:
@@ -939,9 +992,15 @@ class Hydro:
         if self.dimensions == 1:
             if first_order:
                 print("Computing First Order...")
-                
-                a = PyState(u, self.gamma)
-                u = a.simulate(tend)
+                r_min = self.geometry[0]
+                r_max = self.geometry[1]
+                if linspace:
+                    r_arr = np.linspace(r_min, r_max, self.Npts)
+                else:
+                    r_arr = np.logspace(np.log10(r_min), np.log10(r_max), self.Npts)
+                    
+                a = PyState(u, self.gamma, r = r_arr, coord_system = b"spherical")
+                u = a.simulate(tend, dt=dt, linspace=linspace)
                 """
                 while t < tend:
                     if periodic:
@@ -958,10 +1017,19 @@ class Hydro:
                 # RK3 ORDER IN TIME
                 ##########################
                 print('Computing Higher Order...')
+                r_min = self.geometry[0]
+                r_max = self.geometry[1]
+                if linspace:
+                    r_arr = np.linspace(r_min, r_max, self.Npts)
+                else:
+                    r_arr = np.logspace(np.log10(r_min), np.log10(r_max), self.Npts)
+                    
+                a = PyState(u, self.gamma, r = r_arr, coord_system = b"spherical")
+                u = a.simulate(tend=tend, first_order=False, dt=dt, linspace=linspace)
                 
+                """
                 u_1 = u.copy()
                 u_2 = u.copy()
-                
                 while t < tend:
                     # First Version Of U
                     if periodic:
@@ -987,39 +1055,72 @@ class Hydro:
                         
                     
                     u, cons_p = cons_p, u
+                    
+                    
                 
                     
                     # Update timestep
                     # dt = self.adaptive_timestep(dx, [alpha_plus, alpha_minus])
                     t += dt
+                """
         else:
             print('Computing Higher Order...')
-            
             b = PyState2D(u, self.gamma)
             u = b.simulate(tend)
+            
+            np.set_printoptions(precision=1, suppress=True)
+        
+            u_1 = u.copy()
+            u_2 = u.copy()
+            
+            o = np.zeros((9,9), int)
+            
+            
             """
             while t < tend:
-                u_1 = u.copy()
-                u_2 = u.copy()
+                #o = self.u_dot(u, first_order=False)[3]
+                #print(o)
+                
+                
+                # o = self.cons2prim(u_1)
+                # rint("Rho: {}".format(o[0,5,5]))
+                # print("Pressure: {}".format(o[1,5,5]))
+                # print("Vx: {}".format(o[2,5,5]))
+                # print("Vy: {}".format(o[3,5,5]))
+                # zzz = input('')
                 
                 u_1[:, 2:self.Npts, 2:self.Npts] = ( u[:, 2: self.Npts, 2:self.Npts] 
                                                     + dt*self.u_dot(u, first_order=False) )
-                        
+
+                
+                #print(u[2, 2:self.Npts + 2, 2:self.Npts + 2])
+                #print(u_1[2, 2:self.Npts + 2, 2:self.Npts + 2])
+                #zzz = input('')
+                
                 # Second Version Of U
-                u_2[:, 2:self.Npts, 2:self.Npts] = ( 0.75*u[:, 2:self.Npts:, 2:self.Npts] +
-                                                     0.25*u_1[:, 2:self.Npts, 2:self.Npts]
-                                        + 0.25*dt*self.u_dot(u_1, first_order=False) )
+                # u_2[:, 2:self.Npts, 2:self.Npts] = ( 0.75*u[:, 2:self.Npts:, 2:self.Npts] +
+                #                                     0.25*u_1[:, 2:self.Npts, 2:self.Npts]
+                #                        + 0.25*dt*self.u_dot(u_1, first_order=False) )
                 
                 
                 # Final U 
-                cons_p[:, 2: self.Npts, 2:self.Npts] = ( (1/3)*u[:, 2: self.Npts, 2:self.Npts] 
-                                                        + (2/3)*u_2[:, 2:self.Npts, 2:self.Npts] + 
-                                            (2/3)*dt*self.u_dot(u_2, first_order=False) )
+                # cons_p[:, 2: self.Npts, 2:self.Npts] = ( (1/3)*u[:, 2: self.Npts, 2:self.Npts] 
+                #                                         + (2/3)*u_2[:, 2:self.Npts, 2:self.Npts] + 
+                #                            (2/3)*dt*self.u_dot(u_2, first_order=False) )
                 
-                u, cons_p = cons_p, u
+                
+                
+                u, u_1 = u_1, u
                 
                 t += dt
             """
+            
+            
+            
+            
+            
+            
+            
         
         # Return the final state tensor, purging the ghost cells
         if first_order:

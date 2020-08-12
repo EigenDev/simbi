@@ -9,17 +9,20 @@ import numpy as np
 
 from libcpp.vector cimport vector 
 from libcpp cimport bool
+from libcpp.string cimport string
 
 # c++ interface to cython 
 cdef extern from "ustate.h" namespace "states":
     cdef cppclass Ustate:
         Ustate() except +
-        Ustate(vector[vector[double]], float) except + 
-        float theta, gamma, tend
-        bool first_order, periodic
+        Ustate(vector[vector[double]], float, vector[double], string) except + 
+        float theta, gamma, tend, dt
+        bool first_order, periodic, linspace
+        string coord_system
+        vector[double] r
         vector[vector[double]] state
         vector[vector [double]] cons2prim1D(vector[vector[double]])
-        vector[vector [double]] simulate1D(float, bool, bool)
+        vector[vector [double]] simulate1D(float, float, float, bool, bool, bool)
 
     cdef cppclass Ustate2D:
         Ustate2D() except +
@@ -35,15 +38,17 @@ cdef extern from "ustate.h" namespace "states":
 cdef class PyState:
     cdef Ustate*c_state             # hold a c++ instance that we're wrapping           
 
-    def __cinit__(self, vector[vector[double]] state, float gamma):
-        self.c_state = new Ustate(state, gamma)
+    def __cinit__(self, vector[vector[double]] state, float gamma, 
+                    vector[double] r = [0], string coord_system = "cartesian"):
+        self.c_state = new Ustate(state, gamma, r, coord_system)
 
     def cons2prim1D(self, vector[vector[double]] u_state):
 
         return np.array(self.c_state.cons2prim1D(u_state))
 
-    def simulate(self, float tend=0.1, bool first_order=True, bool periodic = False):
-        return np.array(self.c_state.simulate1D(tend, first_order, periodic))
+    def simulate(self, float tend=0.1, float dt=1.e-4, float theta = 1.5, 
+                        bool first_order=True, bool periodic = False, bool linspace = True):
+        return np.array(self.c_state.simulate1D(tend, dt, theta, first_order, periodic, linspace))
 
 cdef class PyState2D:
     cdef Ustate2D*c_state             # hold a c++ instance that we're wrapping           
