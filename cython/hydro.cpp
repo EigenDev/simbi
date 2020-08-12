@@ -133,6 +133,39 @@ vector<vector<double> > tranpose(vector<vector<double> > &mat){
 
     return trans_vec;
 };
+
+// void config_ghosts1D(vector<vector<double> >&, int grid_size);
+
+void config_ghosts1D(vector<vector<double> > &u_state, int grid_size,bool first_order=true){
+    if (first_order){
+        u_state[0][0] = u_state[0][1];
+        u_state[0][grid_size - 1] = u_state[0][grid_size - 2];
+
+        u_state[1][0] = - u_state[1][1];
+        u_state[1][grid_size - 1] = - u_state[1][grid_size - 2];
+
+        u_state[2][0] = u_state[2][1];
+        u_state[2][grid_size - 1] = u_state[2][grid_size - 2];
+    } else {
+        u_state[0][0] = u_state[0][2];
+        u_state[0][1] = u_state[0][2];
+        u_state[0][grid_size - 1] = u_state[0][grid_size - 3];
+        u_state[0][grid_size - 2] = u_state[0][grid_size - 3];
+
+        u_state[1][0] = - u_state[1][2];
+        u_state[1][1] = - u_state[1][2];
+        u_state[1][grid_size - 1] = - u_state[1][grid_size - 3];
+        u_state[1][grid_size - 2] = - u_state[1][grid_size - 3];
+
+        u_state[2][0] = u_state[2][2];
+        u_state[2][1] = u_state[2][2];
+        u_state[2][grid_size - 1] = u_state[2][grid_size - 3];
+        u_state[2][grid_size - 2] = u_state[2][grid_size - 3];
+
+    }
+};
+
+
 //----------------------------------------------------------------------------------------------------------
 //  PRESSURE CALCULATIONS
 //---------------------------------------------------------------------------------------------------------
@@ -1202,13 +1235,13 @@ vector<vector<double> > Ustate::u_dot1D(float gamma, vector<vector<double> > u_s
                     r_left = pow(10, log_rLeft);
                     r_right = pow(10, log_rRight);
                 }
-
                 
                 volAvg = 0.75*( ( pow(r_right, 4) - pow(r_left, 4) )/ ( pow(r_right, 3) - pow(r_left, 3) ) );
 
                 L[0][coordinate] = - (pow(r_right,2)*f1[0] - pow(r_left,2)*f2[0] )/(pow(volAvg,2)*dr);
                 L[1][coordinate] = - (pow(r_right,2)*f1[1] - pow(r_left,2)*f2[1] )/(pow(volAvg,2)*dr) + 2*pc/volAvg;
                 L[2][coordinate] = - (pow(r_right,2)*f1[2] - pow(r_left,2)*f2[2] )/(pow(volAvg,2)*dr);
+
 
             }
         
@@ -2087,7 +2120,7 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
         // cout << "E Init: " << u[2][1] << endl;
         while (t < tend){
             // Compute the REAL udot array, purging the ghost cells.
-            udot = u_dot1D(gamma, u);
+            udot = u_dot1D(gamma, u, true, periodic, theta, linspace);
 
             for (int ii = 0; ii < physical_grid; ii++){
                 // Get the non-ghost index 
@@ -2098,10 +2131,11 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
 
             }
 
+            // Readjust the ghost cells at i-1,i+1
+            config_ghosts1D(u_p, physical_grid);
+            
             // Swap the arrays
-            u[0].swap(u_p[0]);
-            u[1].swap(u_p[1]);
-            u[2].swap(u_p[2]);
+            u.swap(u_p);
             
             t += dt;
 
@@ -2120,7 +2154,7 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
         u2 = u;
         while (t < tend){
             // Compute the REAL udot array, purging the ghost cells.
-            udot = u_dot1D(gamma, u, first_order, periodic, theta, linspace);
+            udot = u_dot1D(gamma, u, false, periodic, theta, linspace);
             
             for (int ii = 0; ii < physical_grid; ii++){
                 // Get the non-ghost index 
@@ -2130,8 +2164,10 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
                 u1[2][i_real] = u[2][i_real] + dt*udot[2][ii];
 
             }
+            // Readjust the ghost cells at i-2,i-1,i+1,i+2
+            config_ghosts1D(u1, physical_grid, false);
 
-            udot1 = u_dot1D(gamma, u1, false);
+            udot1 = u_dot1D(gamma, u1, false, periodic, theta, linspace);
 
             for (int ii = 0; ii < physical_grid; ii++){
                 // Get the non-ghost index 
@@ -2141,8 +2177,10 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
                 u2[2][i_real] = 0.75*u[2][i_real] + 0.25*u1[2][i_real] + 0.25*dt*udot1[2][ii];
 
             }
+
+            config_ghosts1D(u2, physical_grid, false);
             
-            udot2 = u_dot1D(gamma, u2, false);
+            udot2 = u_dot1D(gamma, u2, false, periodic, theta, linspace);
 
             for (int ii = 0; ii < physical_grid; ii++){
                 // Get the non-ghost index 
@@ -2151,30 +2189,13 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
                 u_p[1][i_real] = (1.0/3.0)*u[1][i_real] + (2.0/3.0)*u2[1][i_real] + (2.0/3.0)*dt*udot2[1][ii];
                 u_p[2][i_real] = (1.0/3.0)*u[2][i_real] + (2.0/3.0)*u2[2][i_real] + (2.0/3.0)*dt*udot2[2][ii];
                 
-
             }
 
             // Readjust the ghost cells at i-2,i-1,i+1,i+2
-            
-            u_p[0][0] = u_p[0][2];
-            u_p[0][1] = u_p[0][2];
-            u_p[0][physical_grid - 1] = u_p[0][physical_grid - 3];
-            u_p[0][physical_grid - 2] = u_p[0][physical_grid - 3];
-
-            u_p[1][0] = u_p[1][2];
-            u_p[1][1] = u_p[1][2];
-            u_p[1][physical_grid - 1] = u_p[1][physical_grid - 3];
-            u_p[1][physical_grid - 2] = u_p[1][physical_grid - 3];
-
-            u_p[2][0] = u_p[2][2];
-            u_p[2][1] = u_p[2][2];
-            u_p[2][physical_grid - 1] = u_p[2][physical_grid - 3];
-            u_p[2][physical_grid - 2] = u_p[2][physical_grid - 3];
+            config_ghosts1D(u_p, physical_grid, false);
             
             // Swap the arrays
-            u[0].swap(u_p[0]);
-            u[1].swap(u_p[1]);
-            u[2].swap(u_p[2]);
+            u.swap(u_p);
             
             t += dt;
 
