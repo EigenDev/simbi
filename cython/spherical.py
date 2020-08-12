@@ -59,9 +59,14 @@ sedov = Hydro(gamma = gamma, initial_state=(rho, p ,v),
               Npts=N+1, geometry=(r_min, r_max), n_vars=3)
 
 
+<<<<<<< HEAD
 # Simulate with linearly-spaced radial zones
 u = sedov.simulate(tend=tend, first_order=False, dt=dt, linspace = False)
 
+=======
+# Simulate with linearly-spaced radial zones. (Calls Simulate1D in the hydro.cpp file)
+u = sedov.simulate(tend=tend, first_order=False, dt=dt, linspace = True)
+>>>>>>> 5e57792310a545b81a5cfb389cdb25e9850e3482
 # get the pressure and velocity
 p, v = sedov.cons2prim(u)[1: ]
 
@@ -83,5 +88,10 @@ ax.set_xlim(r_min, r_max)
 ax.set_xlabel("R", fontsize=15)
 ax.set_title("1D Sedov after t={:.3f} s at N = {}".format(tend, N), fontsize=20)
 ax.legend()
+<<<<<<< HEAD
 fig.savefig("Sedov_spherical_3.pdf")
 plt.show()
+=======
+fig.savefig("Sedov_spherical.pdf")
+plt.show()
+>>>>>>> 5e57792310a545b81a5cfb389cdb25e9850e3482
