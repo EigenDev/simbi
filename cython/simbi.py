@@ -997,7 +997,7 @@ class Hydro:
                 if linspace:
                     r_arr = np.linspace(r_min, r_max, self.Npts)
                 else:
-                    r_arr = np.logspace(np.log10(r_min), np.log10(r_max), self.Npts)
+                    r_arr = np.logspace(np.log(r_min), np.log(r_max), self.Npts, base=np.exp(1))
                     
                 a = PyState(u, self.gamma, r = r_arr, coord_system = b"spherical")
                 u = a.simulate(tend, dt=dt, linspace=linspace)

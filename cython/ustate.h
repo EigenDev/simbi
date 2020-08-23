@@ -19,6 +19,7 @@ namespace states {
             std::vector<double> r;
             float theta, gamma, tend, dt;
             bool first_order, periodic, linspace;
+            double CFL;
             std::string coord_system;
             Ustate();
             Ustate(std:: vector <std::vector <double> > state, float gamma,
@@ -33,6 +34,8 @@ namespace states {
 
             std::vector<std::vector<double> > simulate1D(float tend, float dt, float theta, 
                                                             bool first_order, bool periodic, bool linspace);
+            long double adapt_dt(double CFL, float gamma, 
+                        std::vector<std::vector<double> > &cons_state, std::vector<double> &r, bool linspace, bool first_order);
             
 
     };

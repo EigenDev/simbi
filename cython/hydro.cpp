@@ -98,16 +98,8 @@ vector<double> rollVector(const vector<double>& v, unsigned int n){
 };
 
 // Roll a single vector index
-double roll(vector<double>& v, unsigned int n) {
+double roll(vector<double>  &v, unsigned int n) {
    return v[n % v.size()];
-};
-
-// Compute the minmod flux limiter
-vector<vector<double> > minmodLimiter(vector<vector<double> > prims, bool periodic = false){
-    vector<vector<double> > left_most, left_mid, center, right_mid, right_most;
-
-    return left_mid;
-
 };
 
 vector<vector<double> > tranpose(vector<vector<double> > &mat){
@@ -241,7 +233,7 @@ vector<double>  cons2prim(float gamma, vector<double>  u_state, bool twoD=false)
     
 };
 
-vector < vector<double> > Ustate::cons2prim1D(vector<vector<double> > u_state){
+vector<vector<double> > Ustate::cons2prim1D(vector<vector<double> > u_state){
     /**
      * Return a vector containing the primitive
      * variables density (rho), pressure, and
@@ -320,6 +312,75 @@ vector<vector< vector<double> > > Ustate2D::cons2prim2D(vector<vector< vector<do
 };
 
 
+// Adapt the CFL conditonal timestep
+long double Ustate::adapt_dt(double CFL, float gamma, 
+                        vector<vector<double> > &u_state, vector<double> &r, bool linspace=true, bool first_order=true){
+
+    double r_left, r_right, left_cell, right_cell, dr, cs;
+    long double delta_logr, log_rLeft, log_rRight, min_dt, cfl_dt;
+    int shift_i, physical_grid;
+
+    // Get the primitive vector 
+    vector<vector<double> >  prims = cons2prim1D(u_state);
+
+    int grid_size = prims[0].size();
+
+    // Find the minimum timestep over all i
+    if (first_order){
+        physical_grid = grid_size - 2;
+    } else {
+        physical_grid = grid_size - 4;
+    }
+
+    // Compute the minimum timestep given CFL
+    for (int ii = 0; ii < physical_grid; ii++){
+        if (first_order){
+            shift_i = ii + 1;
+        } else {
+            shift_i = ii + 2;
+        }
+
+        if (ii - 1 < 0){
+            left_cell = r[ii];
+            right_cell = r[ii + 1];
+        }
+        else if (ii + 1 > physical_grid - 1){
+            right_cell = r[ii];
+            left_cell = r[ii - 1];
+        } else {
+            right_cell = r[ii + 1];
+            left_cell = r[ii];
+        }
+
+        // Check if using linearly-spaced grid or logspace
+        if (linspace){
+            r_right = 0.5*(right_cell + r[ii]);
+            r_left = 0.5*(r[ii] + left_cell);
+        } else {
+            delta_logr = (log(r[physical_grid - 1]) - log(r[0]))/physical_grid;
+            log_rLeft = log(r[0]) + ii*delta_logr;
+            log_rRight = log_rLeft + delta_logr;
+            r_left = exp(log_rLeft);
+            r_right = exp(log_rRight);
+        }
+
+        dr = r_right - r_left;
+
+        
+        cs = calc_sound_speed(gamma, prims[0][shift_i], prims[1][shift_i]);
+
+        cfl_dt = dr/(max(abs(prims[2][shift_i] + cs), abs(prims[2][shift_i] - cs)));
+
+        if (ii > 0){
+            min_dt = min(min_dt, cfl_dt);
+        }
+        else {
+            min_dt = cfl_dt;
+        }
+    }
+
+    return CFL*min_dt;
+};
 
 //----------------------------------------------------------------------------------------------------
 //              STATE TENSOR CALCULATIONS
@@ -388,8 +449,6 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> le
         rho_r = right_state[0];
         mom_r = right_state[1];
         energy_r = right_state[2];
-
-        // Initialize and populate the dictionary vectors
         
         v_l = mom_l/rho_l;
         v_r = mom_r/rho_r;
@@ -542,8 +601,6 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> le
     
 };
 
-
-
 //-----------------------------------------------------------------------------------------------------------
 //                                            FLUX CALCULATIONS
 //-----------------------------------------------------------------------------------------------------------
@@ -664,11 +721,6 @@ vector<double> calc_hll_flux2D(float gamma, vector<double> left_state,
     alpha_plus = findMax(0, lambda["left"]["plus"], lambda["right"]["plus"]);
     alpha_minus = findMax(0 , -lambda["left"]["minus"], -lambda["right"]["minus"]);
 
-    // cout << "Alpha Plus: " << alpha_plus << endl;
-    // cout << "Alpha Minus: " << alpha_minus << endl;
-
-    // alpha_minus *= 7;
-    // alpha_plus *= 7;
     // Compute the HLL Flux component-wise
     hll_flux[0] = ( alpha_plus*left_flux[0] + alpha_minus*right_flux[0]
                             - alpha_minus*alpha_plus*(right_state[0] - left_state[0] ) )  /
@@ -719,6 +771,9 @@ vector<vector<double> > Ustate::u_dot1D(float gamma, vector<vector<double> > u_s
             i_bound = true_npts;
         }
 
+        //==============================================
+        //              CARTESIAN
+        //==============================================
         if (coord_system == default_coordinates) {
             for (int ii= i_start; ii < i_bound; ii++){
                 if (periodic){
@@ -811,14 +866,16 @@ vector<vector<double> > Ustate::u_dot1D(float gamma, vector<vector<double> > u_s
             }
 
             
-        } 
-        else {
+        } else {
+            //==============================================
+            //                  RADIAL
+            //==============================================
             double r_left, r_right, volAvg, pc;
             double log_rLeft, log_rRight;
 
-            double delta_logr = (log10(r[physical_grid - 1]) - log10(r[0]))/physical_grid;
+            double delta_logr = (log(r[physical_grid - 1]) - log(r[0]))/physical_grid;
 
-            long double dr = (r[physical_grid - 1] - r[0])/physical_grid;
+            long double dr; 
 
             for (int ii= i_start; ii < i_bound; ii++){
                 if (periodic){
@@ -923,14 +980,14 @@ vector<vector<double> > Ustate::u_dot1D(float gamma, vector<vector<double> > u_s
                     r_left = 0.5*(r[coordinate] + left_cell);
 
                 } else {
-                    log_rLeft = log10(r[0]) + coordinate*delta_logr;
+                    log_rLeft = log(r[0]) + coordinate*delta_logr;
                     log_rRight = log_rLeft + delta_logr;
-                    r_left = pow(10, log_rLeft);
-                    r_right = pow(10, log_rRight);
+                    r_left = exp(log_rLeft);
+                    r_right = exp(log_rRight);
                 }
 
+                dr = r_right - r_left;
                 volAvg = 0.75*( ( pow(r_right, 4) - pow(r_left, 4) )/ ( pow(r_right, 3) - pow(r_left, 3) ) );
-                
 
                 L[0][coordinate] = - (pow(r_right,2)*f1[0] - pow(r_left,2)*f2[0] )/(pow(volAvg,2)*dr);
                 L[1][coordinate] = - (pow(r_right,2)*f1[1] - pow(r_left,2)*f2[1] )/(pow(volAvg,2)*dr) + 2*pc/volAvg;
@@ -963,6 +1020,9 @@ vector<vector<double> > Ustate::u_dot1D(float gamma, vector<vector<double> > u_s
         }
 
         if (coord_system == default_coordinates){
+            //==============================================
+            //                  CARTESIAN
+            //==============================================
             for (int ii = i_start; ii < i_bound; ii++){
                 if (periodic){
                     coordinate = ii;
@@ -1088,10 +1148,13 @@ vector<vector<double> > Ustate::u_dot1D(float gamma, vector<vector<double> > u_s
             }
 
         } else {
+            //==============================================
+            //                  RADIAL
+            //==============================================
             double r_left, r_right, volAvg, pc;
             double log_rLeft, log_rRight;
 
-            double delta_logr = (log10(r[physical_grid - 1]) - log10(r[0]))/physical_grid;
+            double delta_logr = (log(r[physical_grid - 1]) - log(r[0]))/physical_grid;
 
             long double dr = (r[physical_grid - 1] - r[0])/physical_grid;
             for (int ii = i_start; ii < i_bound; ii++){
@@ -1230,14 +1293,14 @@ vector<vector<double> > Ustate::u_dot1D(float gamma, vector<vector<double> > u_s
                     r_left = 0.5*(r[coordinate] + left_cell);
 
                 } else {
-                    log_rLeft = log10(r[0]) + coordinate*delta_logr;
+                    log_rLeft = log(r[0]) + coordinate*delta_logr;
                     log_rRight = log_rLeft + delta_logr;
                     r_left = pow(10, log_rLeft);
                     r_right = pow(10, log_rRight);
                 }
                 
                 volAvg = 0.75*( ( pow(r_right, 4) - pow(r_left, 4) )/ ( pow(r_right, 3) - pow(r_left, 3) ) );
-
+                dr = r_right - r_left;
                 L[0][coordinate] = - (pow(r_right,2)*f1[0] - pow(r_left,2)*f2[0] )/(pow(volAvg,2)*dr);
                 L[1][coordinate] = - (pow(r_right,2)*f1[1] - pow(r_left,2)*f2[1] )/(pow(volAvg,2)*dr) + 2*pc/volAvg;
                 L[2][coordinate] = - (pow(r_right,2)*f1[2] - pow(r_left,2)*f2[2] )/(pow(volAvg,2)*dr);
@@ -1297,15 +1360,7 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
     vector<vector<double> > vy_transpose(prims[0].size(), vector<double> (prims[0][0].size()));
 
     prims = cons2prim2D(u_state);
-
-    // cout << "Rho: " << prims[0][5][5] << endl;
-    // cout << "Pressure: " << prims[1][5][5] << endl;
-    // cout << "Vx: " << prims[2][5][5] << endl;
-    // cout << "Vy: " << prims[3][5][5] << endl;
-    // string a;
-    // cin >> a;
     
-
     // The periodic BC doesn't require ghost cells. Shift the index
     // to the beginning.
     if (periodic){ 
@@ -2133,6 +2188,12 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
 
             // Readjust the ghost cells at i-1,i+1
             config_ghosts1D(u_p, physical_grid);
+
+            // Adjust the timestep 
+            if (t > 0){
+                dt = adapt_dt(0.4, gamma, u_p, r, linspace, first_order);
+            }
+            
             
             // Swap the arrays
             u.swap(u_p);
@@ -2193,6 +2254,11 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
 
             // Readjust the ghost cells at i-2,i-1,i+1,i+2
             config_ghosts1D(u_p, physical_grid, false);
+            
+            // Adjust the timestep 
+            if (t > 0){
+                dt = adapt_dt(0.4, gamma, u_p, r, linspace, first_order);
+            }
             
             // Swap the arrays
             u.swap(u_p);
