@@ -10,7 +10,9 @@
         "name": "state",
         "sources": [
             "state.pyx",
-            "hydro.cpp"
+            "simbi_1d.cpp",
+            "helper_functions.cpp",
+            "simbi_2d.cpp"
         ]
     },
     "module_name": "state"
@@ -1735,6 +1737,10 @@ static PyObject *__pyx_builtin_ImportError;
 static const char __pyx_k_r[] = "r";
 static const char __pyx_k_dt[] = "dt";
 static const char __pyx_k_np[] = "np";
+static const char __pyx_k_x1[] = "x1";
+static const char __pyx_k_x2[] = "x2";
+static const char __pyx_k_CFL[] = "CFL";
+static const char __pyx_k_cfl[] = "cfl";
 static const char __pyx_k_main[] = "__main__";
 static const char __pyx_k_name[] = "__name__";
 static const char __pyx_k_tend[] = "tend";
@@ -1773,6 +1779,7 @@ static const char __pyx_k_ndarray_is_not_Fortran_contiguou[] = "ndarray is not F
 static const char __pyx_k_no_default___reduce___due_to_non[] = "no default __reduce__ due to non-trivial __cinit__";
 static const char __pyx_k_numpy_core_umath_failed_to_impor[] = "numpy.core.umath failed to import";
 static const char __pyx_k_Format_string_allocated_too_shor_2[] = "Format string allocated too short.";
+static PyObject *__pyx_n_s_CFL;
 static PyObject *__pyx_kp_u_Format_string_allocated_too_shor;
 static PyObject *__pyx_kp_u_Format_string_allocated_too_shor_2;
 static PyObject *__pyx_n_s_ImportError;
@@ -1784,6 +1791,7 @@ static PyObject *__pyx_n_s_TypeError;
 static PyObject *__pyx_n_s_ValueError;
 static PyObject *__pyx_n_s_array;
 static PyObject *__pyx_n_b_cartesian;
+static PyObject *__pyx_n_s_cfl;
 static PyObject *__pyx_n_s_cline_in_traceback;
 static PyObject *__pyx_n_s_coord_system;
 static PyObject *__pyx_n_s_dt;
@@ -1814,14 +1822,16 @@ static PyObject *__pyx_n_s_tend;
 static PyObject *__pyx_n_s_test;
 static PyObject *__pyx_n_s_theta;
 static PyObject *__pyx_kp_u_unknown_dtype_code_in_numpy_pxd;
-static int __pyx_pf_5state_7PyState___cinit__(struct __pyx_obj_5state_PyState *__pyx_v_self, std::vector<std::vector<double> >  __pyx_v_state, float __pyx_v_gamma, std::vector<double>  __pyx_v_r, std::string __pyx_v_coord_system); /* proto */
+static PyObject *__pyx_n_s_x1;
+static PyObject *__pyx_n_s_x2;
+static int __pyx_pf_5state_7PyState___cinit__(struct __pyx_obj_5state_PyState *__pyx_v_self, std::vector<std::vector<double> >  __pyx_v_state, float __pyx_v_gamma, float __pyx_v_CFL, std::vector<double>  __pyx_v_r, std::string __pyx_v_coord_system); /* proto */
 static PyObject *__pyx_pf_5state_7PyState_2cons2prim1D(struct __pyx_obj_5state_PyState *__pyx_v_self, std::vector<std::vector<double> >  __pyx_v_u_state); /* proto */
 static PyObject *__pyx_pf_5state_7PyState_4simulate(struct __pyx_obj_5state_PyState *__pyx_v_self, float __pyx_v_tend, float __pyx_v_dt, float __pyx_v_theta, bool __pyx_v_first_order, bool __pyx_v_periodic, bool __pyx_v_linspace); /* proto */
 static PyObject *__pyx_pf_5state_7PyState_6__reduce_cython__(CYTHON_UNUSED struct __pyx_obj_5state_PyState *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_5state_7PyState_8__setstate_cython__(CYTHON_UNUSED struct __pyx_obj_5state_PyState *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v___pyx_state); /* proto */
-static int __pyx_pf_5state_9PyState2D___cinit__(struct __pyx_obj_5state_PyState2D *__pyx_v_self, std::vector<std::vector<std::vector<double> > >  __pyx_v_state, float __pyx_v_gamma); /* proto */
+static int __pyx_pf_5state_9PyState2D___cinit__(struct __pyx_obj_5state_PyState2D *__pyx_v_self, std::vector<std::vector<std::vector<double> > >  __pyx_v_state, float __pyx_v_gamma, std::vector<double>  __pyx_v_x1, std::vector<double>  __pyx_v_x2, double __pyx_v_cfl, std::string __pyx_v_coord_system); /* proto */
 static PyObject *__pyx_pf_5state_9PyState2D_2cons2prim2D(struct __pyx_obj_5state_PyState2D *__pyx_v_self, std::vector<std::vector<std::vector<double> > >  __pyx_v_u_state); /* proto */
-static PyObject *__pyx_pf_5state_9PyState2D_4simulate(struct __pyx_obj_5state_PyState2D *__pyx_v_self, PyObject *__pyx_v_tend, bool __pyx_v_periodic); /* proto */
+static PyObject *__pyx_pf_5state_9PyState2D_4simulate(struct __pyx_obj_5state_PyState2D *__pyx_v_self, PyObject *__pyx_v_tend, bool __pyx_v_periodic, double __pyx_v_dt); /* proto */
 static PyObject *__pyx_pf_5state_9PyState2D_6__reduce_cython__(CYTHON_UNUSED struct __pyx_obj_5state_PyState2D *__pyx_v_self); /* proto */
 static PyObject *__pyx_pf_5state_9PyState2D_8__setstate_cython__(CYTHON_UNUSED struct __pyx_obj_5state_PyState2D *__pyx_v_self, CYTHON_UNUSED PyObject *__pyx_v___pyx_state); /* proto */
 static int __pyx_pf_5numpy_7ndarray___getbuffer__(PyArrayObject *__pyx_v_self, Py_buffer *__pyx_v_info, int __pyx_v_flags); /* proto */
@@ -1832,25 +1842,28 @@ static PyObject *__pyx_float_0_1;
 static PyObject *__pyx_int_0;
 static std::vector<double>  __pyx_k_;
 static std::string __pyx_k__2;
+static std::vector<double>  __pyx_k__5;
+static std::vector<double>  __pyx_k__6;
+static std::string __pyx_k__7;
 static PyObject *__pyx_tuple__3;
 static PyObject *__pyx_tuple__4;
-static PyObject *__pyx_tuple__5;
-static PyObject *__pyx_tuple__6;
-static PyObject *__pyx_tuple__7;
 static PyObject *__pyx_tuple__8;
 static PyObject *__pyx_tuple__9;
 static PyObject *__pyx_tuple__10;
 static PyObject *__pyx_tuple__11;
 static PyObject *__pyx_tuple__12;
 static PyObject *__pyx_tuple__13;
+static PyObject *__pyx_tuple__14;
+static PyObject *__pyx_tuple__15;
+static PyObject *__pyx_tuple__16;
 /* Late includes */
 
 /* "state.pyx":41
  *     cdef Ustate*c_state             # hold a c++ instance that we're wrapping
  * 
- *     def __cinit__(self, vector[vector[double]] state, float gamma,             # <<<<<<<<<<<<<<
+ *     def __cinit__(self, vector[vector[double]] state, float gamma, float CFL=0.4,             # <<<<<<<<<<<<<<
  *                     vector[double] r = [0], string coord_system = "cartesian"):
- *         self.c_state = new Ustate(state, gamma, r, coord_system)
+ *         self.c_state = new Ustate(state, gamma,CFL, r, coord_system)
  */
 
 /* Python wrapper */
@@ -1858,18 +1871,21 @@ static int __pyx_pw_5state_7PyState_1__cinit__(PyObject *__pyx_v_self, PyObject 
 static int __pyx_pw_5state_7PyState_1__cinit__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   std::vector<std::vector<double> >  __pyx_v_state;
   float __pyx_v_gamma;
+  float __pyx_v_CFL;
   std::vector<double>  __pyx_v_r;
   std::string __pyx_v_coord_system;
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__cinit__ (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_state,&__pyx_n_s_gamma,&__pyx_n_s_r,&__pyx_n_s_coord_system,0};
-    PyObject* values[4] = {0,0,0,0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_state,&__pyx_n_s_gamma,&__pyx_n_s_CFL,&__pyx_n_s_r,&__pyx_n_s_coord_system,0};
+    PyObject* values[5] = {0,0,0,0,0};
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  5: values[4] = PyTuple_GET_ITEM(__pyx_args, 4);
+        CYTHON_FALLTHROUGH;
         case  4: values[3] = PyTuple_GET_ITEM(__pyx_args, 3);
         CYTHON_FALLTHROUGH;
         case  3: values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
@@ -1890,19 +1906,25 @@ static int __pyx_pw_5state_7PyState_1__cinit__(PyObject *__pyx_v_self, PyObject 
         case  1:
         if (likely((values[1] = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_gamma)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 2, 4, 1); __PYX_ERR(1, 41, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 2, 5, 1); __PYX_ERR(1, 41, __pyx_L3_error)
         }
         CYTHON_FALLTHROUGH;
         case  2:
         if (kw_args > 0) {
-          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_r);
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_CFL);
           if (value) { values[2] = value; kw_args--; }
         }
         CYTHON_FALLTHROUGH;
         case  3:
         if (kw_args > 0) {
-          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_coord_system);
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_r);
           if (value) { values[3] = value; kw_args--; }
+        }
+        CYTHON_FALLTHROUGH;
+        case  4:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_coord_system);
+          if (value) { values[4] = value; kw_args--; }
         }
       }
       if (unlikely(kw_args > 0)) {
@@ -1910,6 +1932,8 @@ static int __pyx_pw_5state_7PyState_1__cinit__(PyObject *__pyx_v_self, PyObject 
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  5: values[4] = PyTuple_GET_ITEM(__pyx_args, 4);
+        CYTHON_FALLTHROUGH;
         case  4: values[3] = PyTuple_GET_ITEM(__pyx_args, 3);
         CYTHON_FALLTHROUGH;
         case  3: values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
@@ -1923,46 +1947,51 @@ static int __pyx_pw_5state_7PyState_1__cinit__(PyObject *__pyx_v_self, PyObject 
     __pyx_v_state = __pyx_convert_vector_from_py_std_3a__3a_vector_3c_double_3e___(values[0]); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 41, __pyx_L3_error)
     __pyx_v_gamma = __pyx_PyFloat_AsFloat(values[1]); if (unlikely((__pyx_v_gamma == (float)-1) && PyErr_Occurred())) __PYX_ERR(1, 41, __pyx_L3_error)
     if (values[2]) {
-      __pyx_v_r = __pyx_convert_vector_from_py_double(values[2]); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 42, __pyx_L3_error)
+      __pyx_v_CFL = __pyx_PyFloat_AsFloat(values[2]); if (unlikely((__pyx_v_CFL == (float)-1) && PyErr_Occurred())) __PYX_ERR(1, 41, __pyx_L3_error)
+    } else {
+      __pyx_v_CFL = ((float)0.4);
+    }
+    if (values[3]) {
+      __pyx_v_r = __pyx_convert_vector_from_py_double(values[3]); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 42, __pyx_L3_error)
     } else {
       __pyx_v_r = __pyx_k_;
     }
-    if (values[3]) {
-      __pyx_v_coord_system = __pyx_convert_string_from_py_std__in_string(values[3]); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 42, __pyx_L3_error)
+    if (values[4]) {
+      __pyx_v_coord_system = __pyx_convert_string_from_py_std__in_string(values[4]); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 42, __pyx_L3_error)
     } else {
       __pyx_v_coord_system = __pyx_k__2;
     }
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 2, 4, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(1, 41, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 2, 5, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(1, 41, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("state.PyState.__cinit__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_5state_7PyState___cinit__(((struct __pyx_obj_5state_PyState *)__pyx_v_self), __pyx_v_state, __pyx_v_gamma, __pyx_v_r, __pyx_v_coord_system);
+  __pyx_r = __pyx_pf_5state_7PyState___cinit__(((struct __pyx_obj_5state_PyState *)__pyx_v_self), __pyx_v_state, __pyx_v_gamma, __pyx_v_CFL, __pyx_v_r, __pyx_v_coord_system);
 
   /* function exit code */
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
 }
 
-static int __pyx_pf_5state_7PyState___cinit__(struct __pyx_obj_5state_PyState *__pyx_v_self, std::vector<std::vector<double> >  __pyx_v_state, float __pyx_v_gamma, std::vector<double>  __pyx_v_r, std::string __pyx_v_coord_system) {
+static int __pyx_pf_5state_7PyState___cinit__(struct __pyx_obj_5state_PyState *__pyx_v_self, std::vector<std::vector<double> >  __pyx_v_state, float __pyx_v_gamma, float __pyx_v_CFL, std::vector<double>  __pyx_v_r, std::string __pyx_v_coord_system) {
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   states::Ustate *__pyx_t_1;
   __Pyx_RefNannySetupContext("__cinit__", 0);
 
   /* "state.pyx":43
- *     def __cinit__(self, vector[vector[double]] state, float gamma,
+ *     def __cinit__(self, vector[vector[double]] state, float gamma, float CFL=0.4,
  *                     vector[double] r = [0], string coord_system = "cartesian"):
- *         self.c_state = new Ustate(state, gamma, r, coord_system)             # <<<<<<<<<<<<<<
+ *         self.c_state = new Ustate(state, gamma,CFL, r, coord_system)             # <<<<<<<<<<<<<<
  * 
  *     def cons2prim1D(self, vector[vector[double]] u_state):
  */
   try {
-    __pyx_t_1 = new states::Ustate(__pyx_v_state, __pyx_v_gamma, __pyx_v_r, __pyx_v_coord_system);
+    __pyx_t_1 = new states::Ustate(__pyx_v_state, __pyx_v_gamma, __pyx_v_CFL, __pyx_v_r, __pyx_v_coord_system);
   } catch(...) {
     __Pyx_CppExn2PyErr();
     __PYX_ERR(1, 43, __pyx_L1_error)
@@ -1972,9 +2001,9 @@ static int __pyx_pf_5state_7PyState___cinit__(struct __pyx_obj_5state_PyState *_
   /* "state.pyx":41
  *     cdef Ustate*c_state             # hold a c++ instance that we're wrapping
  * 
- *     def __cinit__(self, vector[vector[double]] state, float gamma,             # <<<<<<<<<<<<<<
+ *     def __cinit__(self, vector[vector[double]] state, float gamma, float CFL=0.4,             # <<<<<<<<<<<<<<
  *                     vector[double] r = [0], string coord_system = "cartesian"):
- *         self.c_state = new Ustate(state, gamma, r, coord_system)
+ *         self.c_state = new Ustate(state, gamma,CFL, r, coord_system)
  */
 
   /* function exit code */
@@ -1989,7 +2018,7 @@ static int __pyx_pf_5state_7PyState___cinit__(struct __pyx_obj_5state_PyState *_
 }
 
 /* "state.pyx":45
- *         self.c_state = new Ustate(state, gamma, r, coord_system)
+ *         self.c_state = new Ustate(state, gamma,CFL, r, coord_system)
  * 
  *     def cons2prim1D(self, vector[vector[double]] u_state):             # <<<<<<<<<<<<<<
  * 
@@ -2064,7 +2093,7 @@ static PyObject *__pyx_pf_5state_7PyState_2cons2prim1D(struct __pyx_obj_5state_P
   goto __pyx_L0;
 
   /* "state.pyx":45
- *         self.c_state = new Ustate(state, gamma, r, coord_system)
+ *         self.c_state = new Ustate(state, gamma,CFL, r, coord_system)
  * 
  *     def cons2prim1D(self, vector[vector[double]] u_state):             # <<<<<<<<<<<<<<
  * 
@@ -2424,9 +2453,9 @@ static PyObject *__pyx_pf_5state_7PyState_8__setstate_cython__(CYTHON_UNUSED str
 /* "state.pyx":56
  *     cdef Ustate2D*c_state             # hold a c++ instance that we're wrapping
  * 
- *     def __cinit__(self, vector[vector[vector[double]]] state, float gamma):             # <<<<<<<<<<<<<<
- *         self.c_state = new Ustate2D(state, gamma)
- * 
+ *     def __cinit__(self, vector[vector[vector[double]]] state, float gamma,             # <<<<<<<<<<<<<<
+ *                     vector[double] x1 = [0], vector[double] x2 = [0], double cfl=0.4, string coord_system = "cartesian"):
+ *         self.c_state = new Ustate2D(state, gamma, x1, x2, cfl, coord_system)
  */
 
 /* Python wrapper */
@@ -2434,16 +2463,28 @@ static int __pyx_pw_5state_9PyState2D_1__cinit__(PyObject *__pyx_v_self, PyObjec
 static int __pyx_pw_5state_9PyState2D_1__cinit__(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   std::vector<std::vector<std::vector<double> > >  __pyx_v_state;
   float __pyx_v_gamma;
+  std::vector<double>  __pyx_v_x1;
+  std::vector<double>  __pyx_v_x2;
+  double __pyx_v_cfl;
+  std::string __pyx_v_coord_system;
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("__cinit__ (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_state,&__pyx_n_s_gamma,0};
-    PyObject* values[2] = {0,0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_state,&__pyx_n_s_gamma,&__pyx_n_s_x1,&__pyx_n_s_x2,&__pyx_n_s_cfl,&__pyx_n_s_coord_system,0};
+    PyObject* values[6] = {0,0,0,0,0,0};
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  6: values[5] = PyTuple_GET_ITEM(__pyx_args, 5);
+        CYTHON_FALLTHROUGH;
+        case  5: values[4] = PyTuple_GET_ITEM(__pyx_args, 4);
+        CYTHON_FALLTHROUGH;
+        case  4: values[3] = PyTuple_GET_ITEM(__pyx_args, 3);
+        CYTHON_FALLTHROUGH;
+        case  3: values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
+        CYTHON_FALLTHROUGH;
         case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
         CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
@@ -2460,63 +2501,117 @@ static int __pyx_pw_5state_9PyState2D_1__cinit__(PyObject *__pyx_v_self, PyObjec
         case  1:
         if (likely((values[1] = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_gamma)) != 0)) kw_args--;
         else {
-          __Pyx_RaiseArgtupleInvalid("__cinit__", 1, 2, 2, 1); __PYX_ERR(1, 56, __pyx_L3_error)
+          __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 2, 6, 1); __PYX_ERR(1, 56, __pyx_L3_error)
+        }
+        CYTHON_FALLTHROUGH;
+        case  2:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_x1);
+          if (value) { values[2] = value; kw_args--; }
+        }
+        CYTHON_FALLTHROUGH;
+        case  3:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_x2);
+          if (value) { values[3] = value; kw_args--; }
+        }
+        CYTHON_FALLTHROUGH;
+        case  4:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_cfl);
+          if (value) { values[4] = value; kw_args--; }
+        }
+        CYTHON_FALLTHROUGH;
+        case  5:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_coord_system);
+          if (value) { values[5] = value; kw_args--; }
         }
       }
       if (unlikely(kw_args > 0)) {
         if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "__cinit__") < 0)) __PYX_ERR(1, 56, __pyx_L3_error)
       }
-    } else if (PyTuple_GET_SIZE(__pyx_args) != 2) {
-      goto __pyx_L5_argtuple_error;
     } else {
-      values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
-      values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+      switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  6: values[5] = PyTuple_GET_ITEM(__pyx_args, 5);
+        CYTHON_FALLTHROUGH;
+        case  5: values[4] = PyTuple_GET_ITEM(__pyx_args, 4);
+        CYTHON_FALLTHROUGH;
+        case  4: values[3] = PyTuple_GET_ITEM(__pyx_args, 3);
+        CYTHON_FALLTHROUGH;
+        case  3: values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
+        CYTHON_FALLTHROUGH;
+        case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
+        values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
+        break;
+        default: goto __pyx_L5_argtuple_error;
+      }
     }
     __pyx_v_state = __pyx_convert_vector_from_py_std_3a__3a_vector_3c_std_3a__3a_vector_3c_double_3e____3e___(values[0]); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 56, __pyx_L3_error)
     __pyx_v_gamma = __pyx_PyFloat_AsFloat(values[1]); if (unlikely((__pyx_v_gamma == (float)-1) && PyErr_Occurred())) __PYX_ERR(1, 56, __pyx_L3_error)
+    if (values[2]) {
+      __pyx_v_x1 = __pyx_convert_vector_from_py_double(values[2]); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 57, __pyx_L3_error)
+    } else {
+      __pyx_v_x1 = __pyx_k__5;
+    }
+    if (values[3]) {
+      __pyx_v_x2 = __pyx_convert_vector_from_py_double(values[3]); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 57, __pyx_L3_error)
+    } else {
+      __pyx_v_x2 = __pyx_k__6;
+    }
+    if (values[4]) {
+      __pyx_v_cfl = __pyx_PyFloat_AsDouble(values[4]); if (unlikely((__pyx_v_cfl == (double)-1) && PyErr_Occurred())) __PYX_ERR(1, 57, __pyx_L3_error)
+    } else {
+      __pyx_v_cfl = ((double)0.4);
+    }
+    if (values[5]) {
+      __pyx_v_coord_system = __pyx_convert_string_from_py_std__in_string(values[5]); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 57, __pyx_L3_error)
+    } else {
+      __pyx_v_coord_system = __pyx_k__7;
+    }
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("__cinit__", 1, 2, 2, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(1, 56, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("__cinit__", 0, 2, 6, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(1, 56, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("state.PyState2D.__cinit__", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return -1;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_5state_9PyState2D___cinit__(((struct __pyx_obj_5state_PyState2D *)__pyx_v_self), __pyx_v_state, __pyx_v_gamma);
+  __pyx_r = __pyx_pf_5state_9PyState2D___cinit__(((struct __pyx_obj_5state_PyState2D *)__pyx_v_self), __pyx_v_state, __pyx_v_gamma, __pyx_v_x1, __pyx_v_x2, __pyx_v_cfl, __pyx_v_coord_system);
 
   /* function exit code */
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
 }
 
-static int __pyx_pf_5state_9PyState2D___cinit__(struct __pyx_obj_5state_PyState2D *__pyx_v_self, std::vector<std::vector<std::vector<double> > >  __pyx_v_state, float __pyx_v_gamma) {
+static int __pyx_pf_5state_9PyState2D___cinit__(struct __pyx_obj_5state_PyState2D *__pyx_v_self, std::vector<std::vector<std::vector<double> > >  __pyx_v_state, float __pyx_v_gamma, std::vector<double>  __pyx_v_x1, std::vector<double>  __pyx_v_x2, double __pyx_v_cfl, std::string __pyx_v_coord_system) {
   int __pyx_r;
   __Pyx_RefNannyDeclarations
   states::Ustate2D *__pyx_t_1;
   __Pyx_RefNannySetupContext("__cinit__", 0);
 
-  /* "state.pyx":57
- * 
- *     def __cinit__(self, vector[vector[vector[double]]] state, float gamma):
- *         self.c_state = new Ustate2D(state, gamma)             # <<<<<<<<<<<<<<
+  /* "state.pyx":58
+ *     def __cinit__(self, vector[vector[vector[double]]] state, float gamma,
+ *                     vector[double] x1 = [0], vector[double] x2 = [0], double cfl=0.4, string coord_system = "cartesian"):
+ *         self.c_state = new Ustate2D(state, gamma, x1, x2, cfl, coord_system)             # <<<<<<<<<<<<<<
  * 
  *     def cons2prim2D(self, vector[vector[vector[double]]] u_state):
  */
   try {
-    __pyx_t_1 = new states::Ustate2D(__pyx_v_state, __pyx_v_gamma);
+    __pyx_t_1 = new states::Ustate2D(__pyx_v_state, __pyx_v_gamma, __pyx_v_x1, __pyx_v_x2, __pyx_v_cfl, __pyx_v_coord_system);
   } catch(...) {
     __Pyx_CppExn2PyErr();
-    __PYX_ERR(1, 57, __pyx_L1_error)
+    __PYX_ERR(1, 58, __pyx_L1_error)
   }
   __pyx_v_self->c_state = __pyx_t_1;
 
   /* "state.pyx":56
  *     cdef Ustate2D*c_state             # hold a c++ instance that we're wrapping
  * 
- *     def __cinit__(self, vector[vector[vector[double]]] state, float gamma):             # <<<<<<<<<<<<<<
- *         self.c_state = new Ustate2D(state, gamma)
- * 
+ *     def __cinit__(self, vector[vector[vector[double]]] state, float gamma,             # <<<<<<<<<<<<<<
+ *                     vector[double] x1 = [0], vector[double] x2 = [0], double cfl=0.4, string coord_system = "cartesian"):
+ *         self.c_state = new Ustate2D(state, gamma, x1, x2, cfl, coord_system)
  */
 
   /* function exit code */
@@ -2530,8 +2625,8 @@ static int __pyx_pf_5state_9PyState2D___cinit__(struct __pyx_obj_5state_PyState2
   return __pyx_r;
 }
 
-/* "state.pyx":59
- *         self.c_state = new Ustate2D(state, gamma)
+/* "state.pyx":60
+ *         self.c_state = new Ustate2D(state, gamma, x1, x2, cfl, coord_system)
  * 
  *     def cons2prim2D(self, vector[vector[vector[double]]] u_state):             # <<<<<<<<<<<<<<
  * 
@@ -2546,7 +2641,7 @@ static PyObject *__pyx_pw_5state_9PyState2D_3cons2prim2D(PyObject *__pyx_v_self,
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("cons2prim2D (wrapper)", 0);
   assert(__pyx_arg_u_state); {
-    __pyx_v_u_state = __pyx_convert_vector_from_py_std_3a__3a_vector_3c_std_3a__3a_vector_3c_double_3e____3e___(__pyx_arg_u_state); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 59, __pyx_L3_error)
+    __pyx_v_u_state = __pyx_convert_vector_from_py_std_3a__3a_vector_3c_std_3a__3a_vector_3c_double_3e____3e___(__pyx_arg_u_state); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 60, __pyx_L3_error)
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -2570,20 +2665,20 @@ static PyObject *__pyx_pf_5state_9PyState2D_2cons2prim2D(struct __pyx_obj_5state
   PyObject *__pyx_t_4 = NULL;
   __Pyx_RefNannySetupContext("cons2prim2D", 0);
 
-  /* "state.pyx":61
+  /* "state.pyx":62
  *     def cons2prim2D(self, vector[vector[vector[double]]] u_state):
  * 
  *         return np.array(self.c_state.cons2prim2D(u_state))             # <<<<<<<<<<<<<<
  * 
- *     def simulate(self, tend=0.1, bool periodic=False):
+ *     def simulate(self, tend=0.1, bool periodic=False, double dt = 1.e-4):
  */
   __Pyx_XDECREF(__pyx_r);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 61, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 62, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_array); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 61, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_array); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 62, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_2 = __pyx_convert_vector_to_py_std_3a__3a_vector_3c_std_3a__3a_vector_3c_double_3e____3e___(__pyx_v_self->c_state->cons2prim2D(__pyx_v_u_state)); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 61, __pyx_L1_error)
+  __pyx_t_2 = __pyx_convert_vector_to_py_std_3a__3a_vector_3c_std_3a__3a_vector_3c_double_3e____3e___(__pyx_v_self->c_state->cons2prim2D(__pyx_v_u_state)); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 62, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_t_4 = NULL;
   if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_3))) {
@@ -2598,15 +2693,15 @@ static PyObject *__pyx_pf_5state_9PyState2D_2cons2prim2D(struct __pyx_obj_5state
   __pyx_t_1 = (__pyx_t_4) ? __Pyx_PyObject_Call2Args(__pyx_t_3, __pyx_t_4, __pyx_t_2) : __Pyx_PyObject_CallOneArg(__pyx_t_3, __pyx_t_2);
   __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (unlikely(!__pyx_t_1)) __PYX_ERR(1, 61, __pyx_L1_error)
+  if (unlikely(!__pyx_t_1)) __PYX_ERR(1, 62, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
   goto __pyx_L0;
 
-  /* "state.pyx":59
- *         self.c_state = new Ustate2D(state, gamma)
+  /* "state.pyx":60
+ *         self.c_state = new Ustate2D(state, gamma, x1, x2, cfl, coord_system)
  * 
  *     def cons2prim2D(self, vector[vector[vector[double]]] u_state):             # <<<<<<<<<<<<<<
  * 
@@ -2627,12 +2722,12 @@ static PyObject *__pyx_pf_5state_9PyState2D_2cons2prim2D(struct __pyx_obj_5state
   return __pyx_r;
 }
 
-/* "state.pyx":63
+/* "state.pyx":64
  *         return np.array(self.c_state.cons2prim2D(u_state))
  * 
- *     def simulate(self, tend=0.1, bool periodic=False):             # <<<<<<<<<<<<<<
+ *     def simulate(self, tend=0.1, bool periodic=False, double dt = 1.e-4):             # <<<<<<<<<<<<<<
  * 
- *         return np.array(self.c_state.simulate2D(tend, periodic))
+ *         return np.array(self.c_state.simulate2D(tend, periodic, dt))
  */
 
 /* Python wrapper */
@@ -2640,17 +2735,20 @@ static PyObject *__pyx_pw_5state_9PyState2D_5simulate(PyObject *__pyx_v_self, Py
 static PyObject *__pyx_pw_5state_9PyState2D_5simulate(PyObject *__pyx_v_self, PyObject *__pyx_args, PyObject *__pyx_kwds) {
   PyObject *__pyx_v_tend = 0;
   bool __pyx_v_periodic;
+  double __pyx_v_dt;
   PyObject *__pyx_r = 0;
   __Pyx_RefNannyDeclarations
   __Pyx_RefNannySetupContext("simulate (wrapper)", 0);
   {
-    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_tend,&__pyx_n_s_periodic,0};
-    PyObject* values[2] = {0,0};
+    static PyObject **__pyx_pyargnames[] = {&__pyx_n_s_tend,&__pyx_n_s_periodic,&__pyx_n_s_dt,0};
+    PyObject* values[3] = {0,0,0};
     values[0] = ((PyObject *)__pyx_float_0_1);
     if (unlikely(__pyx_kwds)) {
       Py_ssize_t kw_args;
       const Py_ssize_t pos_args = PyTuple_GET_SIZE(__pyx_args);
       switch (pos_args) {
+        case  3: values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
+        CYTHON_FALLTHROUGH;
         case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
         CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
@@ -2671,12 +2769,20 @@ static PyObject *__pyx_pw_5state_9PyState2D_5simulate(PyObject *__pyx_v_self, Py
           PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_periodic);
           if (value) { values[1] = value; kw_args--; }
         }
+        CYTHON_FALLTHROUGH;
+        case  2:
+        if (kw_args > 0) {
+          PyObject* value = __Pyx_PyDict_GetItemStr(__pyx_kwds, __pyx_n_s_dt);
+          if (value) { values[2] = value; kw_args--; }
+        }
       }
       if (unlikely(kw_args > 0)) {
-        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "simulate") < 0)) __PYX_ERR(1, 63, __pyx_L3_error)
+        if (unlikely(__Pyx_ParseOptionalKeywords(__pyx_kwds, __pyx_pyargnames, 0, values, pos_args, "simulate") < 0)) __PYX_ERR(1, 64, __pyx_L3_error)
       }
     } else {
       switch (PyTuple_GET_SIZE(__pyx_args)) {
+        case  3: values[2] = PyTuple_GET_ITEM(__pyx_args, 2);
+        CYTHON_FALLTHROUGH;
         case  2: values[1] = PyTuple_GET_ITEM(__pyx_args, 1);
         CYTHON_FALLTHROUGH;
         case  1: values[0] = PyTuple_GET_ITEM(__pyx_args, 0);
@@ -2687,27 +2793,32 @@ static PyObject *__pyx_pw_5state_9PyState2D_5simulate(PyObject *__pyx_v_self, Py
     }
     __pyx_v_tend = values[0];
     if (values[1]) {
-      __pyx_v_periodic = __Pyx_PyObject_IsTrue(values[1]); if (unlikely((__pyx_v_periodic == ((bool)-1)) && PyErr_Occurred())) __PYX_ERR(1, 63, __pyx_L3_error)
+      __pyx_v_periodic = __Pyx_PyObject_IsTrue(values[1]); if (unlikely((__pyx_v_periodic == ((bool)-1)) && PyErr_Occurred())) __PYX_ERR(1, 64, __pyx_L3_error)
     } else {
       __pyx_v_periodic = ((bool)0);
+    }
+    if (values[2]) {
+      __pyx_v_dt = __pyx_PyFloat_AsDouble(values[2]); if (unlikely((__pyx_v_dt == (double)-1) && PyErr_Occurred())) __PYX_ERR(1, 64, __pyx_L3_error)
+    } else {
+      __pyx_v_dt = ((double)1.e-4);
     }
   }
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("simulate", 0, 0, 2, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(1, 63, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("simulate", 0, 0, 3, PyTuple_GET_SIZE(__pyx_args)); __PYX_ERR(1, 64, __pyx_L3_error)
   __pyx_L3_error:;
   __Pyx_AddTraceback("state.PyState2D.simulate", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  __pyx_r = __pyx_pf_5state_9PyState2D_4simulate(((struct __pyx_obj_5state_PyState2D *)__pyx_v_self), __pyx_v_tend, __pyx_v_periodic);
+  __pyx_r = __pyx_pf_5state_9PyState2D_4simulate(((struct __pyx_obj_5state_PyState2D *)__pyx_v_self), __pyx_v_tend, __pyx_v_periodic, __pyx_v_dt);
 
   /* function exit code */
   __Pyx_RefNannyFinishContext();
   return __pyx_r;
 }
 
-static PyObject *__pyx_pf_5state_9PyState2D_4simulate(struct __pyx_obj_5state_PyState2D *__pyx_v_self, PyObject *__pyx_v_tend, bool __pyx_v_periodic) {
+static PyObject *__pyx_pf_5state_9PyState2D_4simulate(struct __pyx_obj_5state_PyState2D *__pyx_v_self, PyObject *__pyx_v_tend, bool __pyx_v_periodic, double __pyx_v_dt) {
   PyObject *__pyx_r = NULL;
   __Pyx_RefNannyDeclarations
   PyObject *__pyx_t_1 = NULL;
@@ -2717,19 +2828,19 @@ static PyObject *__pyx_pf_5state_9PyState2D_4simulate(struct __pyx_obj_5state_Py
   PyObject *__pyx_t_5 = NULL;
   __Pyx_RefNannySetupContext("simulate", 0);
 
-  /* "state.pyx":65
- *     def simulate(self, tend=0.1, bool periodic=False):
+  /* "state.pyx":66
+ *     def simulate(self, tend=0.1, bool periodic=False, double dt = 1.e-4):
  * 
- *         return np.array(self.c_state.simulate2D(tend, periodic))             # <<<<<<<<<<<<<<
+ *         return np.array(self.c_state.simulate2D(tend, periodic, dt))             # <<<<<<<<<<<<<<
  */
   __Pyx_XDECREF(__pyx_r);
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 65, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_n_s_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 66, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_array); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 65, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_n_s_array); if (unlikely(!__pyx_t_3)) __PYX_ERR(1, 66, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  __pyx_t_4 = __pyx_PyFloat_AsFloat(__pyx_v_tend); if (unlikely((__pyx_t_4 == (float)-1) && PyErr_Occurred())) __PYX_ERR(1, 65, __pyx_L1_error)
-  __pyx_t_2 = __pyx_convert_vector_to_py_std_3a__3a_vector_3c_std_3a__3a_vector_3c_double_3e____3e___(__pyx_v_self->c_state->simulate2D(__pyx_t_4, __pyx_v_periodic)); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 65, __pyx_L1_error)
+  __pyx_t_4 = __pyx_PyFloat_AsFloat(__pyx_v_tend); if (unlikely((__pyx_t_4 == (float)-1) && PyErr_Occurred())) __PYX_ERR(1, 66, __pyx_L1_error)
+  __pyx_t_2 = __pyx_convert_vector_to_py_std_3a__3a_vector_3c_std_3a__3a_vector_3c_double_3e____3e___(__pyx_v_self->c_state->simulate2D(__pyx_t_4, __pyx_v_periodic, __pyx_v_dt)); if (unlikely(!__pyx_t_2)) __PYX_ERR(1, 66, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_t_5 = NULL;
   if (CYTHON_UNPACK_METHODS && unlikely(PyMethod_Check(__pyx_t_3))) {
@@ -2744,19 +2855,19 @@ static PyObject *__pyx_pf_5state_9PyState2D_4simulate(struct __pyx_obj_5state_Py
   __pyx_t_1 = (__pyx_t_5) ? __Pyx_PyObject_Call2Args(__pyx_t_3, __pyx_t_5, __pyx_t_2) : __Pyx_PyObject_CallOneArg(__pyx_t_3, __pyx_t_2);
   __Pyx_XDECREF(__pyx_t_5); __pyx_t_5 = 0;
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-  if (unlikely(!__pyx_t_1)) __PYX_ERR(1, 65, __pyx_L1_error)
+  if (unlikely(!__pyx_t_1)) __PYX_ERR(1, 66, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __pyx_r = __pyx_t_1;
   __pyx_t_1 = 0;
   goto __pyx_L0;
 
-  /* "state.pyx":63
+  /* "state.pyx":64
  *         return np.array(self.c_state.cons2prim2D(u_state))
  * 
- *     def simulate(self, tend=0.1, bool periodic=False):             # <<<<<<<<<<<<<<
+ *     def simulate(self, tend=0.1, bool periodic=False, double dt = 1.e-4):             # <<<<<<<<<<<<<<
  * 
- *         return np.array(self.c_state.simulate2D(tend, periodic))
+ *         return np.array(self.c_state.simulate2D(tend, periodic, dt))
  */
 
   /* function exit code */
@@ -2804,7 +2915,7 @@ static PyObject *__pyx_pf_5state_9PyState2D_6__reduce_cython__(CYTHON_UNUSED str
  * def __setstate_cython__(self, __pyx_state):
  *     raise TypeError("no default __reduce__ due to non-trivial __cinit__")
  */
-  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_builtin_TypeError, __pyx_tuple__5, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_builtin_TypeError, __pyx_tuple__8, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 2, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_Raise(__pyx_t_1, 0, 0, 0);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -2857,7 +2968,7 @@ static PyObject *__pyx_pf_5state_9PyState2D_8__setstate_cython__(CYTHON_UNUSED s
  * def __setstate_cython__(self, __pyx_state):
  *     raise TypeError("no default __reduce__ due to non-trivial __cinit__")             # <<<<<<<<<<<<<<
  */
-  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_builtin_TypeError, __pyx_tuple__6, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 4, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyObject_Call(__pyx_builtin_TypeError, __pyx_tuple__9, NULL); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 4, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __Pyx_Raise(__pyx_t_1, 0, 0, 0);
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
@@ -2997,7 +3108,7 @@ static int __pyx_pf_5numpy_7ndarray___getbuffer__(PyArrayObject *__pyx_v_self, P
  * 
  *             if ((flags & pybuf.PyBUF_F_CONTIGUOUS == pybuf.PyBUF_F_CONTIGUOUS)
  */
-    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__7, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(2, 272, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__10, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(2, 272, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_Raise(__pyx_t_3, 0, 0, 0);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -3053,7 +3164,7 @@ static int __pyx_pf_5numpy_7ndarray___getbuffer__(PyArrayObject *__pyx_v_self, P
  * 
  *             info.buf = PyArray_DATA(self)
  */
-    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__8, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(2, 276, __pyx_L1_error)
+    __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__11, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(2, 276, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_3);
     __Pyx_Raise(__pyx_t_3, 0, 0, 0);
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -3311,7 +3422,7 @@ static int __pyx_pf_5numpy_7ndarray___getbuffer__(PyArrayObject *__pyx_v_self, P
  *                 if   t == NPY_BYTE:        f = "b"
  *                 elif t == NPY_UBYTE:       f = "B"
  */
-      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__9, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(2, 306, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(2, 306, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_Raise(__pyx_t_3, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -4191,7 +4302,7 @@ static CYTHON_INLINE char *__pyx_f_5numpy__util_dtypestring(PyArray_Descr *__pyx
  * 
  *         if ((child.byteorder == c'>' and little_endian) or
  */
-      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_RuntimeError, __pyx_tuple__10, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(2, 856, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_RuntimeError, __pyx_tuple__13, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(2, 856, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_Raise(__pyx_t_3, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -4259,7 +4370,7 @@ static CYTHON_INLINE char *__pyx_f_5numpy__util_dtypestring(PyArray_Descr *__pyx
  *             # One could encode it in the format string and have Cython
  *             # complain instead, BUT: < and > in format strings also imply
  */
-      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__9, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(2, 860, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_Call(__pyx_builtin_ValueError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_3)) __PYX_ERR(2, 860, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_Raise(__pyx_t_3, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
@@ -4368,7 +4479,7 @@ static CYTHON_INLINE char *__pyx_f_5numpy__util_dtypestring(PyArray_Descr *__pyx
  * 
  *             # Until ticket #99 is fixed, use integers to avoid warnings
  */
-        __pyx_t_4 = __Pyx_PyObject_Call(__pyx_builtin_RuntimeError, __pyx_tuple__11, NULL); if (unlikely(!__pyx_t_4)) __PYX_ERR(2, 880, __pyx_L1_error)
+        __pyx_t_4 = __Pyx_PyObject_Call(__pyx_builtin_RuntimeError, __pyx_tuple__14, NULL); if (unlikely(!__pyx_t_4)) __PYX_ERR(2, 880, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_4);
         __Pyx_Raise(__pyx_t_4, 0, 0, 0);
         __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
@@ -4996,7 +5107,7 @@ static CYTHON_INLINE int __pyx_f_5numpy_import_array(void) {
  * 
  * cdef inline int import_umath() except -1:
  */
-      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__12, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(2, 1038, __pyx_L5_except_error)
+      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__15, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(2, 1038, __pyx_L5_except_error)
       __Pyx_GOTREF(__pyx_t_8);
       __Pyx_Raise(__pyx_t_8, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
@@ -5125,7 +5236,7 @@ static CYTHON_INLINE int __pyx_f_5numpy_import_umath(void) {
  * 
  * cdef inline int import_ufunc() except -1:
  */
-      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__13, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(2, 1044, __pyx_L5_except_error)
+      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__16, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(2, 1044, __pyx_L5_except_error)
       __Pyx_GOTREF(__pyx_t_8);
       __Pyx_Raise(__pyx_t_8, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
@@ -5251,7 +5362,7 @@ static CYTHON_INLINE int __pyx_f_5numpy_import_ufunc(void) {
  *     except Exception:
  *         raise ImportError("numpy.core.umath failed to import")             # <<<<<<<<<<<<<<
  */
-      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__13, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(2, 1050, __pyx_L5_except_error)
+      __pyx_t_8 = __Pyx_PyObject_Call(__pyx_builtin_ImportError, __pyx_tuple__16, NULL); if (unlikely(!__pyx_t_8)) __PYX_ERR(2, 1050, __pyx_L5_except_error)
       __Pyx_GOTREF(__pyx_t_8);
       __Pyx_Raise(__pyx_t_8, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
@@ -6102,6 +6213,7 @@ static struct PyModuleDef __pyx_moduledef = {
 #endif
 
 static __Pyx_StringTabEntry __pyx_string_tab[] = {
+  {&__pyx_n_s_CFL, __pyx_k_CFL, sizeof(__pyx_k_CFL), 0, 0, 1, 1},
   {&__pyx_kp_u_Format_string_allocated_too_shor, __pyx_k_Format_string_allocated_too_shor, sizeof(__pyx_k_Format_string_allocated_too_shor), 0, 1, 0, 0},
   {&__pyx_kp_u_Format_string_allocated_too_shor_2, __pyx_k_Format_string_allocated_too_shor_2, sizeof(__pyx_k_Format_string_allocated_too_shor_2), 0, 1, 0, 0},
   {&__pyx_n_s_ImportError, __pyx_k_ImportError, sizeof(__pyx_k_ImportError), 0, 0, 1, 1},
@@ -6113,6 +6225,7 @@ static __Pyx_StringTabEntry __pyx_string_tab[] = {
   {&__pyx_n_s_ValueError, __pyx_k_ValueError, sizeof(__pyx_k_ValueError), 0, 0, 1, 1},
   {&__pyx_n_s_array, __pyx_k_array, sizeof(__pyx_k_array), 0, 0, 1, 1},
   {&__pyx_n_b_cartesian, __pyx_k_cartesian, sizeof(__pyx_k_cartesian), 0, 0, 0, 1},
+  {&__pyx_n_s_cfl, __pyx_k_cfl, sizeof(__pyx_k_cfl), 0, 0, 1, 1},
   {&__pyx_n_s_cline_in_traceback, __pyx_k_cline_in_traceback, sizeof(__pyx_k_cline_in_traceback), 0, 0, 1, 1},
   {&__pyx_n_s_coord_system, __pyx_k_coord_system, sizeof(__pyx_k_coord_system), 0, 0, 1, 1},
   {&__pyx_n_s_dt, __pyx_k_dt, sizeof(__pyx_k_dt), 0, 0, 1, 1},
@@ -6143,6 +6256,8 @@ static __Pyx_StringTabEntry __pyx_string_tab[] = {
   {&__pyx_n_s_test, __pyx_k_test, sizeof(__pyx_k_test), 0, 0, 1, 1},
   {&__pyx_n_s_theta, __pyx_k_theta, sizeof(__pyx_k_theta), 0, 0, 1, 1},
   {&__pyx_kp_u_unknown_dtype_code_in_numpy_pxd, __pyx_k_unknown_dtype_code_in_numpy_pxd, sizeof(__pyx_k_unknown_dtype_code_in_numpy_pxd), 0, 1, 0, 0},
+  {&__pyx_n_s_x1, __pyx_k_x1, sizeof(__pyx_k_x1), 0, 0, 1, 1},
+  {&__pyx_n_s_x2, __pyx_k_x2, sizeof(__pyx_k_x2), 0, 0, 1, 1},
   {0, 0, 0, 0, 0, 0, 0}
 };
 static CYTHON_SMALL_CODE int __Pyx_InitCachedBuiltins(void) {
@@ -6185,18 +6300,18 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * def __setstate_cython__(self, __pyx_state):
  *     raise TypeError("no default __reduce__ due to non-trivial __cinit__")
  */
-  __pyx_tuple__5 = PyTuple_Pack(1, __pyx_kp_s_no_default___reduce___due_to_non); if (unlikely(!__pyx_tuple__5)) __PYX_ERR(0, 2, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__5);
-  __Pyx_GIVEREF(__pyx_tuple__5);
+  __pyx_tuple__8 = PyTuple_Pack(1, __pyx_kp_s_no_default___reduce___due_to_non); if (unlikely(!__pyx_tuple__8)) __PYX_ERR(0, 2, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__8);
+  __Pyx_GIVEREF(__pyx_tuple__8);
 
   /* "(tree fragment)":4
  *     raise TypeError("no default __reduce__ due to non-trivial __cinit__")
  * def __setstate_cython__(self, __pyx_state):
  *     raise TypeError("no default __reduce__ due to non-trivial __cinit__")             # <<<<<<<<<<<<<<
  */
-  __pyx_tuple__6 = PyTuple_Pack(1, __pyx_kp_s_no_default___reduce___due_to_non); if (unlikely(!__pyx_tuple__6)) __PYX_ERR(0, 4, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__6);
-  __Pyx_GIVEREF(__pyx_tuple__6);
+  __pyx_tuple__9 = PyTuple_Pack(1, __pyx_kp_s_no_default___reduce___due_to_non); if (unlikely(!__pyx_tuple__9)) __PYX_ERR(0, 4, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__9);
+  __Pyx_GIVEREF(__pyx_tuple__9);
 
   /* "../../../../anaconda3/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":272
  *             if ((flags & pybuf.PyBUF_C_CONTIGUOUS == pybuf.PyBUF_C_CONTIGUOUS)
@@ -6205,9 +6320,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  *             if ((flags & pybuf.PyBUF_F_CONTIGUOUS == pybuf.PyBUF_F_CONTIGUOUS)
  */
-  __pyx_tuple__7 = PyTuple_Pack(1, __pyx_kp_u_ndarray_is_not_C_contiguous); if (unlikely(!__pyx_tuple__7)) __PYX_ERR(2, 272, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__7);
-  __Pyx_GIVEREF(__pyx_tuple__7);
+  __pyx_tuple__10 = PyTuple_Pack(1, __pyx_kp_u_ndarray_is_not_C_contiguous); if (unlikely(!__pyx_tuple__10)) __PYX_ERR(2, 272, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__10);
+  __Pyx_GIVEREF(__pyx_tuple__10);
 
   /* "../../../../anaconda3/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":276
  *             if ((flags & pybuf.PyBUF_F_CONTIGUOUS == pybuf.PyBUF_F_CONTIGUOUS)
@@ -6216,9 +6331,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  *             info.buf = PyArray_DATA(self)
  */
-  __pyx_tuple__8 = PyTuple_Pack(1, __pyx_kp_u_ndarray_is_not_Fortran_contiguou); if (unlikely(!__pyx_tuple__8)) __PYX_ERR(2, 276, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__8);
-  __Pyx_GIVEREF(__pyx_tuple__8);
+  __pyx_tuple__11 = PyTuple_Pack(1, __pyx_kp_u_ndarray_is_not_Fortran_contiguou); if (unlikely(!__pyx_tuple__11)) __PYX_ERR(2, 276, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__11);
+  __Pyx_GIVEREF(__pyx_tuple__11);
 
   /* "../../../../anaconda3/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":306
  *                 if ((descr.byteorder == c'>' and little_endian) or
@@ -6227,9 +6342,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  *                 if   t == NPY_BYTE:        f = "b"
  *                 elif t == NPY_UBYTE:       f = "B"
  */
-  __pyx_tuple__9 = PyTuple_Pack(1, __pyx_kp_u_Non_native_byte_order_not_suppor); if (unlikely(!__pyx_tuple__9)) __PYX_ERR(2, 306, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__9);
-  __Pyx_GIVEREF(__pyx_tuple__9);
+  __pyx_tuple__12 = PyTuple_Pack(1, __pyx_kp_u_Non_native_byte_order_not_suppor); if (unlikely(!__pyx_tuple__12)) __PYX_ERR(2, 306, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__12);
+  __Pyx_GIVEREF(__pyx_tuple__12);
 
   /* "../../../../anaconda3/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":856
  * 
@@ -6238,9 +6353,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  *         if ((child.byteorder == c'>' and little_endian) or
  */
-  __pyx_tuple__10 = PyTuple_Pack(1, __pyx_kp_u_Format_string_allocated_too_shor); if (unlikely(!__pyx_tuple__10)) __PYX_ERR(2, 856, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__10);
-  __Pyx_GIVEREF(__pyx_tuple__10);
+  __pyx_tuple__13 = PyTuple_Pack(1, __pyx_kp_u_Format_string_allocated_too_shor); if (unlikely(!__pyx_tuple__13)) __PYX_ERR(2, 856, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__13);
+  __Pyx_GIVEREF(__pyx_tuple__13);
 
   /* "../../../../anaconda3/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":880
  *             t = child.type_num
@@ -6249,9 +6364,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  *             # Until ticket #99 is fixed, use integers to avoid warnings
  */
-  __pyx_tuple__11 = PyTuple_Pack(1, __pyx_kp_u_Format_string_allocated_too_shor_2); if (unlikely(!__pyx_tuple__11)) __PYX_ERR(2, 880, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__11);
-  __Pyx_GIVEREF(__pyx_tuple__11);
+  __pyx_tuple__14 = PyTuple_Pack(1, __pyx_kp_u_Format_string_allocated_too_shor_2); if (unlikely(!__pyx_tuple__14)) __PYX_ERR(2, 880, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__14);
+  __Pyx_GIVEREF(__pyx_tuple__14);
 
   /* "../../../../anaconda3/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":1038
  *         _import_array()
@@ -6260,9 +6375,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  * cdef inline int import_umath() except -1:
  */
-  __pyx_tuple__12 = PyTuple_Pack(1, __pyx_kp_s_numpy_core_multiarray_failed_to); if (unlikely(!__pyx_tuple__12)) __PYX_ERR(2, 1038, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__12);
-  __Pyx_GIVEREF(__pyx_tuple__12);
+  __pyx_tuple__15 = PyTuple_Pack(1, __pyx_kp_s_numpy_core_multiarray_failed_to); if (unlikely(!__pyx_tuple__15)) __PYX_ERR(2, 1038, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__15);
+  __Pyx_GIVEREF(__pyx_tuple__15);
 
   /* "../../../../anaconda3/lib/python3.7/site-packages/Cython/Includes/numpy/__init__.pxd":1044
  *         _import_umath()
@@ -6271,9 +6386,9 @@ static CYTHON_SMALL_CODE int __Pyx_InitCachedConstants(void) {
  * 
  * cdef inline int import_ufunc() except -1:
  */
-  __pyx_tuple__13 = PyTuple_Pack(1, __pyx_kp_s_numpy_core_umath_failed_to_impor); if (unlikely(!__pyx_tuple__13)) __PYX_ERR(2, 1044, __pyx_L1_error)
-  __Pyx_GOTREF(__pyx_tuple__13);
-  __Pyx_GIVEREF(__pyx_tuple__13);
+  __pyx_tuple__16 = PyTuple_Pack(1, __pyx_kp_s_numpy_core_umath_failed_to_impor); if (unlikely(!__pyx_tuple__16)) __PYX_ERR(2, 1044, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_tuple__16);
+  __Pyx_GIVEREF(__pyx_tuple__16);
   __Pyx_RefNannyFinishContext();
   return 0;
   __pyx_L1_error:;
@@ -6605,23 +6720,23 @@ if (!__Pyx_RefNanny) {
   if (__Pyx_patch_abc() < 0) __PYX_ERR(1, 1, __pyx_L1_error)
   #endif
 
-  /* "state.pyx":8
- * #
+  /* "state.pyx":7
+ * 
  * cimport numpy as np
  * import numpy as np             # <<<<<<<<<<<<<<
  * 
  * from libcpp.vector cimport vector
  */
-  __pyx_t_1 = __Pyx_Import(__pyx_n_s_numpy, 0, -1); if (unlikely(!__pyx_t_1)) __PYX_ERR(1, 8, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_Import(__pyx_n_s_numpy, 0, -1); if (unlikely(!__pyx_t_1)) __PYX_ERR(1, 7, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
-  if (PyDict_SetItem(__pyx_d, __pyx_n_s_np, __pyx_t_1) < 0) __PYX_ERR(1, 8, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_d, __pyx_n_s_np, __pyx_t_1) < 0) __PYX_ERR(1, 7, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
   /* "state.pyx":42
  * 
- *     def __cinit__(self, vector[vector[double]] state, float gamma,
+ *     def __cinit__(self, vector[vector[double]] state, float gamma, float CFL=0.4,
  *                     vector[double] r = [0], string coord_system = "cartesian"):             # <<<<<<<<<<<<<<
- *         self.c_state = new Ustate(state, gamma, r, coord_system)
+ *         self.c_state = new Ustate(state, gamma,CFL, r, coord_system)
  * 
  */
   __pyx_t_1 = PyList_New(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(1, 42, __pyx_L1_error)
@@ -6635,10 +6750,36 @@ if (!__Pyx_RefNanny) {
   __pyx_t_3 = __pyx_convert_string_from_py_std__in_string(__pyx_n_b_cartesian); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 42, __pyx_L1_error)
   __pyx_k__2 = __pyx_t_3;
 
-  /* "state.pyx":1
- * # distutils: language = c++             # <<<<<<<<<<<<<<
- * # distutils: sources = hydro.cpp
+  /* "state.pyx":57
  * 
+ *     def __cinit__(self, vector[vector[vector[double]]] state, float gamma,
+ *                     vector[double] x1 = [0], vector[double] x2 = [0], double cfl=0.4, string coord_system = "cartesian"):             # <<<<<<<<<<<<<<
+ *         self.c_state = new Ustate2D(state, gamma, x1, x2, cfl, coord_system)
+ * 
+ */
+  __pyx_t_1 = PyList_New(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(1, 57, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __Pyx_INCREF(__pyx_int_0);
+  __Pyx_GIVEREF(__pyx_int_0);
+  PyList_SET_ITEM(__pyx_t_1, 0, __pyx_int_0);
+  __pyx_t_2 = __pyx_convert_vector_from_py_double(__pyx_t_1); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 57, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __pyx_k__5 = __pyx_t_2;
+  __pyx_t_1 = PyList_New(1); if (unlikely(!__pyx_t_1)) __PYX_ERR(1, 57, __pyx_L1_error)
+  __Pyx_GOTREF(__pyx_t_1);
+  __Pyx_INCREF(__pyx_int_0);
+  __Pyx_GIVEREF(__pyx_int_0);
+  PyList_SET_ITEM(__pyx_t_1, 0, __pyx_int_0);
+  __pyx_t_2 = __pyx_convert_vector_from_py_double(__pyx_t_1); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 57, __pyx_L1_error)
+  __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
+  __pyx_k__6 = __pyx_t_2;
+  __pyx_t_3 = __pyx_convert_string_from_py_std__in_string(__pyx_n_b_cartesian); if (unlikely(PyErr_Occurred())) __PYX_ERR(1, 57, __pyx_L1_error)
+  __pyx_k__7 = __pyx_t_3;
+
+  /* "state.pyx":1
+ * # This is where we wrap the C++ code with Cython to take advantage of             # <<<<<<<<<<<<<<
+ * # the readability of pythonic coding.
+ * # distutils: language = c++
  */
   __pyx_t_1 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(1, 1, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);

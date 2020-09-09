@@ -9,7 +9,6 @@ import numpy as np
 import matplotlib.pyplot as plt 
 import math 
 import sys
-import numba as nb
 
 from state import PyState, PyState2D
 
@@ -361,16 +360,17 @@ class Hydro:
         """
         lam = self.calc_eigenvals(left_state = left_state, 
                              right_state = right_state)
+        
+        null = np.zeros(lam['left']['plus'].shape)
                     
-        alpha_plus = max(0, *lam['left']['plus'].flatten(), 
-                        *lam['right']['plus'].flatten())
+        alpha_plus = np.maximum.reduce([null, lam['left']['plus'], 
+                        lam['right']['plus']])
         
-        alpha_minus = max(0, *-lam['left']['minus'].flatten(), 
-                        *-lam['right']['minus'].flatten())
+        alpha_minus = np.maximum.reduce([null, -lam['left']['minus'], 
+                        -lam['right']['minus']])
         
-        print("Alpha Plus: {}".format(alpha_plus))
-        print("Alpha Minus: {}".format(alpha_minus))
-        zzz = input('')
+        #print(alpha_plus)
+        #zzz = input('')
         
         f_hll = ( (alpha_plus*left_flux + alpha_minus*right_flux - 
                 alpha_minus*alpha_plus*(right_state - left_state) ) /
@@ -469,7 +469,7 @@ class Hydro:
             return np.array([rho, pressure, v_x, v_y]) 
     
     #@nb.jit # numba this function
-    def u_dot(self, state, first_order = True, theta = 1.5, periodic=False):
+    def u_dot(self, state, first_order = True, theta = 1.5, periodic=False, coordinates='cartesian'):
         """
         """
         
@@ -529,11 +529,13 @@ class Hydro:
                     u_r = np.roll(state, 1, axis=1)
                     
                 else:
-                    u_l = state[:, 1: self.Npts]
-                    u_r = state[:, 2: self.Npts + 1]
+                    u_l = state[:, 1: self.Npts + 1]
+                    u_r = state[:, 2: self.Npts + 2]
                 
                 prims_l = self.cons2prim(state = u_l)
                 prims_r = self.cons2prim(state = u_r)
+                
+                pc = prims_l[1]
                 
                 f_l = self.calc_flux(*prims_l)
                 f_r = self.calc_flux(*prims_r)
@@ -547,8 +549,8 @@ class Hydro:
                     u_r = state
                     
                 else:
-                    u_l = state[:, 0: self.Npts - 1]
-                    u_r = state[:, 1: self.Npts]
+                    u_l = state[:, 0: self.Npts]
+                    u_r = state[:, 1: self.Npts + 1]
                 
                 prims_l = self.cons2prim(state = u_l)
                 prims_r = self.cons2prim(state = u_r)
@@ -559,6 +561,30 @@ class Hydro:
                 # The HLL flux calculated for f_[i-1/2]
                 f2 = self.calc_hll_flux(u_l,u_r,f_l,f_r)
                 
+                if (coordinates == 'cartesian'):
+                    return -(f1 - f2)/self.dx
+                else:
+                    r_max = self.geometry[1]
+                    r_min = self.geometry[0]
+                    
+                    #delta_logr = np.log(r_max/r_min)/self.Npts
+                    
+                    r = np.linspace(r_min, r_max, self.Npts)
+                    r = np.insert(r, 0, r[0])
+                    r = np.insert(r, -1, r[-1])
+                    
+                    r_left = 0.5*(r[0: self.Npts] + r[1: self.Npts+1])
+                    r_right = 0.5*(r[2:self.Npts+2] + r[1:self.Npts+1])
+                    volAvg = 0.75*( (r_right**4 - r_left**4) / (r_right**3 - r_left**3))
+                    dr = r_right - r_left
+                    
+                    L = np.zeros((self.n_vars, self.Npts))
+                    L[0] = -(r_right**2*f1[0] - r_left**2*f2[0])/(volAvg**2 *dr)
+                    L[1] = -(r_right**2*f1[1] - r_left**2*f2[1])/(volAvg**2 *dr) + 2*pc/volAvg
+                    L[2] = -(r_right**2*f1[2] - r_left**2*f2[2])/(volAvg**2 *dr)
+                    
+                    
+                    return L
             else:
                 # Calculate the primitives at the central interface
                 prims = self.cons2prim(state = state)
@@ -571,11 +597,11 @@ class Hydro:
                     right_mid = np.roll(prims, 1, axis=1)
                     right_most = np.roll(prims, 2, axis=1)
                 else:
-                    left_most = prims[:, 0:self.Npts-2]
-                    left_mid = prims[:, 1:self.Npts - 1]
-                    center = prims[:, 2:self.Npts]
-                    right_mid = prims[:,3: self.Npts + 1]
-                    right_most = prims[:, 4: self.Npts + 2]
+                    left_most = prims[:, 0:self.Npts]
+                    left_mid = prims[:, 1:self.Npts + 1]
+                    center = prims[:, 2:self.Npts + 2]
+                    right_mid = prims[:,3: self.Npts + 3]
+                    right_most = prims[:, 4: self.Npts + 4]
                 
                 
                 prims_l = ( center + 0.5*
@@ -591,6 +617,7 @@ class Hydro:
                                 theta*(right_most - right_mid))
                             )
                 
+                pc = prims_l[1]
                 # Calculate the reconstructed left and right 
                 # states using the higher order primitives
                 u_l = self.calc_state(self.gamma, *prims_l)
@@ -598,6 +625,7 @@ class Hydro:
                
                 f_l = self.calc_flux(*prims_l)
                 f_r = self.calc_flux(*prims_r)
+
 
                 # The HLL flux calculated for f_[i+1/2]
                 f1 = self.calc_hll_flux(u_l, u_r, f_l, f_r)
@@ -626,7 +654,33 @@ class Hydro:
                 # The HLL flux calculated for f_[i-1/2]
                 f2 = self.calc_hll_flux(u_l, u_r, f_l, f_r)
                 
-            return -(f1 - f2)/self.dx
+            if (coordinates == 'cartesian'):
+                return -(f1 - f2)/self.dx
+            else:
+                r_max = self.geometry[1]
+                r_min = self.geometry[0]
+                
+                #delta_logr = np.log(r_max/r_min)/self.Npts
+                
+                r = np.linspace(r_min, r_max, self.Npts)
+                r = np.insert(r, 0, r[0])
+                r = np.insert(r, -1, r[-1])
+                
+                r_left = 0.5*(r[0: self.Npts] + r[1: self.Npts+1])
+                r_right = 0.5*(r[2:self.Npts+2] + r[1:self.Npts+1])
+                volAvg = 0.75*( (r_right**4 - r_left**4) / (r_right**3 - r_left**3))
+                dr = r_right - r_left
+                
+                #print(dr)
+                #zzz = input('')
+                
+                L = np.zeros((self.n_vars, self.Npts))
+                L[0] = -(r_right**2*f1[0] - r_left**2*f2[0])/(volAvg**2 *dr)
+                L[1] = -(r_right**2*f1[1] - r_left**2*f2[1])/(volAvg**2 *dr) + 2*pc/volAvg
+                L[2] = -(r_right**2*f1[2] - r_left**2*f2[2])/(volAvg**2 *dr)
+                
+                
+                return L
         else:
             # TODO: Do the Higher Order 2-D Advection Problem
             # No Reason to do first order in 2D so ignore it
@@ -835,16 +889,29 @@ class Hydro:
             return L
             
         
-    def adaptive_timestep(self, dx, alphas):
+    def adaptive_timestep(self, u, CFL=0.4):
         """
         Returns the adjustable timestep based
         on the Courant number C = alpha* delta_t/delta_x < 1
         """
-        max_dt = dx/max(*alphas)
-        magnitude = int(np.log10(max_dt))
-        new_dt = max_dt - 10**magnitude
+        min_dt = 0
+        p, v = self.cons2prim(u)[1:, 1:self.Npts+1]
+        cs = self.calc_sound_speed(self.gamma, p, v)
         
-        return new_dt
+        r_max = self.geometry[0]
+        r_min = self.geometry[1]
+        
+        r = np.linspace(r_max, r_min, self.Npts)
+        r = np.insert(r, 0, r[0])
+        r = np.insert(r, -1, r[-1])
+        
+        r_left = 0.5*(r[0: self.Npts] + r[1: self.Npts+1])
+        r_right = 0.5*(r[2:self.Npts+2] + r[1:self.Npts+1])
+        dr = r_right - r_left
+        min_dt = CFL*min(dr/np.maximum(np.abs(v + cs), np.abs(v - cs)))
+        
+        
+        return min_dt
     
     def _initialize_simulation(self):
         """
@@ -864,7 +931,8 @@ class Hydro:
     
     #@nb.jit # numba this function
     def simulate(self, tend=0.1, dt = 1.e-4, 
-                 first_order=True, periodic=False, linspace=True):
+                 first_order=True, periodic=False, linspace=True,
+                 coordinates=b"cartesian", CFL=0.4):
         """
         Simulate the hydro setup
         
@@ -999,19 +1067,34 @@ class Hydro:
                 else:
                     r_arr = np.logspace(np.log(r_min), np.log(r_max), self.Npts, base=np.exp(1))
                     
-                a = PyState(u, self.gamma, r = r_arr, coord_system = b"spherical")
-                u = a.simulate(tend, dt=dt, linspace=linspace)
+                a = PyState(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
+                u = a.simulate(tend=tend, dt=dt, linspace=linspace, periodic=periodic)
+                
                 """
                 while t < tend:
                     if periodic:
-                        cons_p = u + dt*self.u_dot(u, periodic=True)
+                        cons_p = u + dt*self.u_dot(u, periodic=True, coordinates = 'cartesian')
                     else:
-                        cons_p[:, 1: self.Npts] = u[:, 1: self.Npts] + dt*self.u_dot(u)
+                        cons_p[:, 1: self.Npts+1] = u[:, 1: self.Npts+1] + dt*self.u_dot(u, coordinates = 'cartesian')
                     
+                    
+                    # cons_p[0][0] = cons_p[0][1]
+                    # cons_p[1][0] = - cons_p[1][1]
+                    # cons_p[2][0] = cons_p[2][1]
+                    
+                    # if (t > 0):
+                    #     dt = self.adaptive_timestep(cons_p)
+                        
                     u, cons_p = cons_p, u
                     
+
                     t += dt
                 """
+                
+                
+                
+                
+                
             else:
                 ########################## 
                 # RK3 ORDER IN TIME
@@ -1023,10 +1106,11 @@ class Hydro:
                     r_arr = np.linspace(r_min, r_max, self.Npts)
                 else:
                     r_arr = np.logspace(np.log10(r_min), np.log10(r_max), self.Npts)
-                    
-                a = PyState(u, self.gamma, r = r_arr, coord_system = b"spherical")
-                u = a.simulate(tend=tend, first_order=False, dt=dt, linspace=linspace)
+                   
+                a = PyState(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
+                u = a.simulate(tend=tend, first_order=False, dt=dt, linspace=linspace, periodic=periodic)
                 
+            
                 """
                 u_1 = u.copy()
                 u_2 = u.copy()
@@ -1041,17 +1125,20 @@ class Hydro:
                         cons_p = (1/3)*u + (2/3)*u_2 + (2/3)*dt*self.u_dot(u_2, first_order=False,
                                                                         periodic=True)
                     else:
-                        u_1[:, 2:self.Npts] = u[:, 2: self.Npts] + dt*self.u_dot(u, first_order=False)
+                        u_1[:, 2:self.Npts+2] = u[:, 2: self.Npts+2] + dt*self.u_dot(u, first_order=False, 
+                                                                                 coordinates='cartesian')
                         
                         
                         # Second Version Of U
-                        u_2[:, 2:self.Npts] = ( 0.75*u[:, 2:self.Npts] + 0.25*u_1[:, 2:self.Npts] 
-                                                + 0.25*dt*self.u_dot(u_1, first_order=False) )
+                        u_2[:, 2:self.Npts+2] = ( 0.75*u[:, 2:self.Npts+2] + 0.25*u_1[:, 2:self.Npts+2] 
+                                                + 0.25*dt*self.u_dot(u_1, first_order=False,
+                                                                     coordinates='cartesian') )
                         
                         
                         # Final U 
-                        cons_p[:, 2: self.Npts] = ( (1/3)*u[:, 2: self.Npts] + (2/3)*u_2[:, 2:self.Npts] + 
-                                                    (2/3)*dt*self.u_dot(u_2, first_order=False) )
+                        cons_p[:, 2: self.Npts+2] = ( (1/3)*u[:, 2: self.Npts+2] + (2/3)*u_2[:, 2:self.Npts+2] + 
+                                                    (2/3)*dt*self.u_dot(u_2, first_order=False, 
+                                                                        coordinates='cartesian') )
                         
                     
                     u, cons_p = cons_p, u
@@ -1063,10 +1150,17 @@ class Hydro:
                     # dt = self.adaptive_timestep(dx, [alpha_plus, alpha_minus])
                     t += dt
                 """
+                
+                
+                
+                
+                
+                
+                
         else:
             print('Computing Higher Order...')
-            b = PyState2D(u, self.gamma)
-            u = b.simulate(tend)
+            b = PyState2D(u, self.gamma, )
+            u = b.simulate(tend, dt=dt)
             
             np.set_printoptions(precision=1, suppress=True)
         
