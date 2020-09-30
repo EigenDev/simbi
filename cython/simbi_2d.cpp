@@ -20,13 +20,14 @@ Ustate2D::Ustate2D () {}
 
 // Overloaded Constructor
 Ustate2D::Ustate2D(vector<vector< vector<double> > > u_state2D, float Gamma, vector<double> X1, 
-                    vector<double> X2, double cfl, string coord_system = "cartesian")
+                    vector<double> X2, double cfl, string Coord_system = "cartesian")
 {
     state2D = u_state2D;
     gamma = Gamma;
     x1 = X1;
     x2 = X2;
     CFL = cfl;
+    coord_system = Coord_system;
 }
 
 // Destructor 
@@ -154,9 +155,9 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> &l
     // Initialize your important variables
     double vx_r, vx_l, vy_l, vy_r, p_r, p_l, cs_r, cs_l, vtot_l, vtot_r; 
     double rho_l, rho_r,  momx_l, momx_r, momy_l, momy_r, energy_l, energy_r;
-    double vl, vr;
     map<string, map<string, double > > lambda;
     string default_direction = "x";
+    string coord_system = "cartesian";
 
     // Separate the left and right state components 
     rho_l = left_state[0];
@@ -178,13 +179,12 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> &l
     vtot_l = sqrt( vx_l*vx_l + vy_l*vy_l );
     vtot_r = sqrt( vx_r*vx_r + vy_r*vy_r );
 
-    if (direction == default_direction){
-        p_r = calc_pressure(gamma, rho_r, energy_r, vtot_r);
-        p_l = calc_pressure(gamma, rho_l, energy_l, vtot_l);
-    } else {
-        p_r = calc_pressure(gamma, rho_r, energy_r, vtot_r);
-        p_l = calc_pressure(gamma, rho_l, energy_l, vtot_l);
-    }
+    
+    p_r = calc_pressure(gamma, rho_r, energy_r, vtot_r);
+    p_l = calc_pressure(gamma, rho_l, energy_l, vtot_l);
+    
+       
+    
 
     if ((sign(p_r) == -1) || (sign(p_l) == -1.) ){
         cout << "I Have Broken: " << endl;
@@ -276,9 +276,8 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> &l
             vtot_r *= -1.;
         }
     }
-    vl = vx_l + vy_l;
-    vr = vx_r + vy_r;
     // Populate the lambda dictionary
+    
     if (direction == default_direction){
         lambda["left"]["plus"] = vx_l + cs_l; 
         lambda["left"]["minus"] = vx_l - cs_l; 
@@ -290,8 +289,7 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> &l
         lambda["right"]["plus"] = vy_r + cs_r; 
         lambda["right"]["minus"] = vy_r - cs_r; 
     }
-    
-
+        
     return lambda;
 
     
@@ -302,81 +300,113 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> &l
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
 
-/**
-// Adapt the CFL conditonal timestep
-long double adapt_dt(vector<vector<double> > &u_state, vector<double> &x1, vector<double> &x2,
-                        bool linspace=true, 
-                        bool first_order=true){
 
-    double r_left, r_right, left_cell, right_cell, dr, cs;
-    long double delta_logr, log_rLeft, log_rRight, min_dt, cfl_dt;
-    int shift_i, physical_grid;
+// Adapt the CFL conditonal timestep
+double Ustate2D::adapt_dt(vector<vector<vector<double> > > &u_state,
+                        bool linspace=true){
+
+    double r_left, r_right, left_cell, right_cell, upper_cell, lower_cell;
+    double dx1, cs, dx2, x2_right, x2_left, rho, pressure, v1, v2, volAvg;
+    double delta_logr, log_rLeft, log_rRight, min_dt, cfl_dt;
+    int shift_i, shift_j, x1physical_grid, x2physical_grid;
 
     // Get the primitive vector 
-    vector<vector<double> >  prims = cons2prim1D(u_state);
+    vector<vector<vector<double> > >  prims = cons2prim2D(u_state);
 
-    int grid_size = prims[0].size();
+    int x1grid_size = prims[0][0].size();
+    int x2grid_size = prims[0].size();
 
     min_dt = 0;
     // Find the minimum timestep over all i
-    if (first_order){
-        xphysical_grid = xgrid_size - 2; 
-        physical_grid = grid_size - 2;
-    } else {
-        physical_grid = grid_size - 4;
-    }
+    x1physical_grid = x1grid_size - 4;
+    x2physical_grid = x2grid_size - 4;
+
 
     // Compute the minimum timestep given CFL
-    for (int ii = 0; ii < physical_grid; ii++){
-        for ()
-        if (first_order){
-            shift_i = ii + 1;
-        } else {
+    for (int jj = 0; jj < x2physical_grid; jj ++){
+        for (int ii = 0; ii < x1physical_grid; ii++){
             shift_i = ii + 2;
-        }
+            shift_j = jj + 2;
 
-        if (ii - 1 < 0){
-            left_cell = r[ii];
-            right_cell = r[ii + 1];
-        }
-        else if (ii + 1 > physical_grid - 1){
-            right_cell = r[ii];
-            left_cell = r[ii - 1];
-        } else {
-            right_cell = r[ii + 1];
-            left_cell = r[ii];
-        }
+            // Find the left and right cell centers in one direction
+            if (ii - 1 < 0){
+                left_cell = x1[ii];
+                right_cell = x1[ii + 1];
+            }
+            else if (ii + 1 > x1physical_grid - 1){
+                right_cell = x1[ii];
+                left_cell = x1[ii - 1];
+            } else {
+                right_cell = x1[ii + 1];
+                left_cell = x1[ii];
+            }
 
-        // Check if using linearly-spaced grid or logspace
-        if (linspace){
-            r_right = 0.5*(right_cell + r[ii]);
-            r_left = 0.5*(r[ii] + left_cell);
-        } else {
-            delta_logr = (log(r[physical_grid - 1]) - log(r[0]))/physical_grid;
-            log_rLeft = log(r[0]) + ii*delta_logr;
-            log_rRight = log_rLeft + delta_logr;
-            r_left = exp(log_rLeft);
-            r_right = exp(log_rRight);
+            if (jj - 1 < 0){
+                lower_cell = x2[jj];
+                upper_cell = x2[jj + 1];
+            }
+            else if (jj + 1 > x2physical_grid - 1){
+                upper_cell = x2[jj];
+                lower_cell = x2[jj - 1];
+            } else {
+                upper_cell = x2[jj + 1];
+                lower_cell = x2[jj];
+            }
+
+            // Check if using linearly-spaced grid or logspace
+            if (linspace){
+                r_right = 0.5*(right_cell + x1[ii]);
+                r_left = 0.5*(x1[ii] + left_cell);
+
+                if (coord_system == "cartesian"){
+                    x2_right = 0.5*(upper_cell + x2[jj]);
+                    x2_left = 0.5*(lower_cell + x2[jj]);
+                } else {
+                    x2_right = atan2 ( sin(upper_cell) + sin(x2[jj]), cos(upper_cell) + cos(x2[jj]) );
+                    x2_left = atan2( sin(lower_cell) + sin(x2[jj]), cos(lower_cell) + cos(x2[jj]) );      
+                }
+
+            } else {
+                delta_logr = (log(x1[x1physical_grid - 1]) - log(x1[0]))/x1physical_grid;
+                log_rLeft = log(x1[0]) + ii*delta_logr;
+                log_rRight = log_rLeft + delta_logr;
+                r_left = exp(log_rLeft);
+                r_right = exp(log_rRight);
+            }
+
+            dx1 = r_right - r_left;
+            dx2 = x2_right - x2_left;
+            rho = prims[0][shift_j][shift_i];
+            v1 = prims[2][shift_j][shift_i];
+            v2 = prims[3][shift_j][shift_i];
+            pressure = prims[1][shift_j][shift_i];
+            cs = calc_sound_speed(gamma, rho, pressure);
+
+            if (coord_system == "cartesian"){
+                
+                cfl_dt = min( dx1/(max(abs(v1 + cs), abs(v1 - cs))), dx2/(max(abs(v2 + cs), abs(v2 - cs))) );
+
+            } else {
+                volAvg = 0.75*( ( pow(r_right, 4) - pow(r_left, 4) )/ ( pow(r_right, 3) - pow(r_left, 3) ) );
+
+                cfl_dt = min( dx1/(max(abs(v1 + cs), abs(v1 - cs))), volAvg*dx2/(max(abs(v2 + cs), abs(v2 - cs))) );
+
+            }
+
+            
+            if ((ii > 0) | (jj > 0) ){
+                min_dt = min(min_dt, cfl_dt);
+            }
+            else {
+                min_dt = cfl_dt;
+            }
         }
-
-        dr = r_right - r_left;
-
         
-        cs = calc_sound_speed(gamma, prims[0][shift_i], prims[1][shift_i]);
-
-        cfl_dt = dr/(max(abs(prims[2][shift_i] + cs), abs(prims[2][shift_i] - cs)));
-
-        if (ii > 0){
-            min_dt = min(min_dt, cfl_dt);
-        }
-        else {
-            min_dt = cfl_dt;
-        }
     }
 
     return CFL*min_dt;
 };
-*/
+
 //-----------------------------------------------------------------------------------------------------------
 //                                            FLUX CALCULATIONS
 //-----------------------------------------------------------------------------------------------------------
@@ -471,7 +501,7 @@ vector<double> calc_hll_flux(float gamma, vector<double> &left_state,
 //-----------------------------------------------------------------------------------------------------------
 
 vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<vector<double> > > u_state, 
-                                        bool periodic = false, float theta = 1.5)
+                                        bool periodic = false, float theta = 1.5, bool  linspace=true)
 {
 
     int i_start, i_bound, j_start, j_bound, xcoordinate, ycoordinate, xcenter, ycenter;
@@ -481,11 +511,12 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
     int xphysical_grid = xgrid_size - 4;
     int yphysical_grid = ygrid_size - 4;
     int xl_coord[2], xr_coord[2], yl_coord[2], yr_coord[2];
+    string default_coordinates = "cartesian";
 
     int n_vars = u_state.size();
 
-    double dx = 2.0/xphysical_grid;
-    double dy = 2.0/yphysical_grid;
+    double dx = (x1[xphysical_grid - 1] - x1[0])/xphysical_grid;
+    double dy = (x2[yphysical_grid - 1] - x2[0])/yphysical_grid;
     xcenter = xphysical_grid/2 + 2; 
     ycenter = yphysical_grid/2 + 2;
 
@@ -623,566 +654,1045 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
     }
     */
 
-    
-
-    for (int jj = j_start; jj < j_bound; jj++){
-        for (int ii = i_start; ii < i_bound; ii++){
-            if (periodic){
-                xcoordinate = ii;
-                ycoordinate = jj;
-
-                // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
-
-                // X Coordinate
-                xleft_most[0] = roll(prims[0][ii], ii - 2);
-                xleft_mid[0] = roll(prims[0][ii], ii - 1);
-                center[0] = prims[0][ii][jj];
-                xright_mid[0] = roll(prims[0][ii], ii + 1);
-                xright_most[0] = roll(prims[0][ii], ii + 2);
-
-                xleft_most[1] = roll(prims[1][ii], ii - 2);
-                xleft_mid[1] = roll(prims[1][ii], ii - 1);
-                center[1] = prims[1][ii][jj];
-                xright_mid[1] = roll(prims[1][ii], ii + 1);
-                xright_most[1] = roll(prims[1][ii], ii + 2);
-
-                xleft_most[2] = roll(prims[2][ii], ii - 2);
-                xleft_mid[2] = roll(prims[2][ii], ii - 1);
-                center[2] = prims[2][ii][jj];
-                xright_mid[2] = roll(prims[2][ii], ii + 1);
-                xright_most[2] = roll(prims[2][ii], ii + 2);
-
-                xleft_most[3] = roll(prims[3][ii], ii - 2);
-                xleft_mid[3] = roll(prims[3][ii], ii - 1);
-                center[3] = prims[3][ii][jj];
-                xright_mid[3] = roll(prims[3][ii], ii + 1);
-                xright_most[3] = roll(prims[3][ii], ii + 2);
-
-                // Transpose the prims matrix to compute the Y Sweep
-                rho_transpose = transpose(prims[0]);
-                pressure_transpose = transpose(prims[1]);
-                vx_transpose = transpose(prims[2]);
-                vy_transpose = transpose(prims[3]);
-
-                yleft_most[0] = roll(rho_transpose[ii], ii - 2);
-                yleft_mid[0] = roll(rho_transpose[ii], ii - 1);
-                yright_mid[0] = roll(rho_transpose[ii], ii + 1);
-                yright_most[0] = roll(rho_transpose[ii], ii + 2);
-
-                yleft_most[1] = roll(pressure_transpose[ii], ii - 2);
-                yleft_mid[1] = roll(pressure_transpose[ii], ii - 1);
-                yright_mid[1] = roll(pressure_transpose[ii], ii + 1);
-                yright_most[1] = roll(pressure_transpose[ii], ii + 2);
-
-                yleft_most[2] = roll(vx_transpose[ii], ii - 2);
-                yleft_mid[2] = roll(vx_transpose[ii], ii - 1);
-                yright_mid[2] = roll(vx_transpose[ii], ii + 1);
-                yright_most[2] = roll(vx_transpose[ii], ii + 2);
-
-                yleft_most[3] = roll(vy_transpose[ii], ii - 2);
-                yleft_mid[3] = roll(vy_transpose[ii], ii - 1);
-                yright_mid[3] = roll(vy_transpose[ii], ii + 1);
-                yright_most[3] = roll(vy_transpose[ii], ii + 2);
-
-            } else {
-                // Adjust for beginning input of L vector
-                xcoordinate = ii - 2;
-                ycoordinate = jj - 2;
-
-                // Coordinate X
-                xleft_most[0] = prims[0][jj][ii - 2];
-                xleft_mid[0] = prims[0][jj][ii - 1];
-                center[0] = prims[0][jj][ii];
-                xright_mid[0] = prims[0][jj][ii + 1];
-                xright_most[0] = prims[0][jj][ii + 2];
-
-                xleft_most[1] = prims[1][jj][ii - 2];
-                xleft_mid[1] = prims[1][jj][ii - 1];
-                center[1] = prims[1][jj][ii];
-                xright_mid[1] = prims[1][jj][ii + 1];
-                xright_most[1] = prims[1][jj][ii + 2];
-
-                xleft_most[2] = prims[2][jj][ii - 2];
-                xleft_mid[2] = prims[2][jj][ii - 1];
-                center[2] = prims[2][jj][ii];
-                xright_mid[2] = prims[2][jj][ii + 1];
-                xright_most[2] = prims[2][jj][ii + 2];
-
-                xleft_most[3] = prims[3][jj][ii - 2];
-                xleft_mid[3] = prims[3][jj][ii - 1];
-                center[3] = prims[3][jj][ii];
-                xright_mid[3] = prims[3][jj][ii + 1];
-                xright_most[3] = prims[3][jj][ii + 2];
-
-                // Coordinate Y
-                yleft_most[0] = prims[0][jj - 2][ii];
-                yleft_mid[0] = prims[0][jj - 1][ii];
-                yright_mid[0] = prims[0][jj + 1][ii];
-                yright_most[0] = prims[0][jj + 2][ii];
-
-                yleft_most[1] = prims[1][jj - 2][ii];
-                yleft_mid[1] = prims[1][jj - 1][ii];
-                yright_mid[1] = prims[1][jj + 1][ii];
-                yright_most[1] = prims[1][jj + 2][ii];
-
-                yleft_most[2] = prims[2][jj - 2][ii];
-                yleft_mid[2] = prims[2][jj - 1][ii];
-                yright_mid[2] = prims[2][jj + 1][ii];
-                yright_most[2] = prims[2][jj + 2][ii];
-
-                yleft_most[3] = prims[3][jj - 2][ii];
-                yleft_mid[3] = prims[3][jj - 1][ii];
-                yright_mid[3] = prims[3][jj + 1][ii];
-                yright_most[3] = prims[3][jj + 2][ii];
-
-            }
-
-            // Figure out the coordinates of the left/right 
-            // primitives in each direction
-            xl_coord[0] = ii;
-            xl_coord[1] = jj;
-
-            xr_coord[0] = ii + 1;
-            xr_coord[1] = jj;
-
-            yl_coord[0] = ii;
-            yl_coord[1] = jj;
-
-            yr_coord[0] = ii;
-            yr_coord[1] = jj + 1;
-
-            // Check which quadrant (L/R) we are calculating in X_L
-            if ( (xl_coord[0] > xcenter) && (xl_coord[1] > ycenter ) ){
-                quadxL = 1;
-            } else if ( (xl_coord[0] < xcenter) && (xl_coord[1] > ycenter) ){
-                quadxL = 2;
-            } else if ( (xl_coord[0] < xcenter) && (xl_coord[1] < ycenter) ){
-                quadxL = 3;
-            } else if ( (xl_coord[0] > xcenter) && (xl_coord[1] < ycenter) ){
-                quadxL = 4;
-            } else {
-                quadxL = 1;
-            }
-
-            // Check if one x-y axes or in center
-            if ( (xl_coord[0] == xcenter) && (xl_coord[1] > ycenter) ) {
-                quadxL = 1.5;
-            } else if ( (xl_coord[0] == xcenter) && (xl_coord[1] < ycenter) ){
-                quadxL = 3.5;
-            } else if ( (xl_coord[1] == ycenter) && (xl_coord[0] < xcenter) ){
-                quadxL = 2.5;
-            } else if ( (xl_coord[1] == ycenter) && (xl_coord[1] > xcenter) ) {
-                quadxL = 0.5;
-            }
-
-            // Check which quadrant (L/R) we are calculating in X_R
-            if ( (xr_coord[0] > xcenter) && (xr_coord[1] > ycenter ) ){
-                quadxR = 1;
-            } else if ( (xr_coord[0] < xcenter) && (xr_coord[1] > ycenter) ){
-                quadxR = 2;
-            } else if ( (xr_coord[0] < xcenter) && (xr_coord[1] < ycenter) ){
-                quadxR = 3;
-            } else if ( (xr_coord[0] > xcenter) && (xr_coord[1] < ycenter) ){
-                quadxR = 4;
-            } else {
-                quadxR = 1;
-            }
-
-            // Check if one x-y axes or in center
-            if ( (xr_coord[0] == xcenter) && (xr_coord[1] > ycenter) ) {
-                quadxR = 1.5;
-            } else if ( (xr_coord[0] == xcenter) && (xr_coord[1] < ycenter) ){
-                quadxR = 3.5;
-            } else if ( (xr_coord[1] == ycenter) && (xr_coord[0] < xcenter) ){
-                quadxR = 2.5;
-            } else if ( (xr_coord[1] == ycenter) && (xr_coord[1] > xcenter) ) {
-                quadxR = 0.5;
-            }
-
-            // Check which quadrant (L/R) we are calculating in Y_L
-            if ( (yl_coord[0] > xcenter) && (yl_coord[1] > ycenter ) ){
-                quadyL = 1;
-            } else if ( (yl_coord[0] < xcenter) && (yl_coord[1] > ycenter) ){
-                quadyL = 2;
-            } else if ( (yl_coord[0] < xcenter) && (yl_coord[1] < ycenter) ){
-                quadyL = 3;
-            } else if ( (yl_coord[0] > xcenter) && (yl_coord[1] < ycenter) ){
-                quadyL = 4;
-            } else {
-                quadyL = 1;
-            }
-
-            // Check if one x-y axes or in center
-            if ( (yl_coord[0] == xcenter) && (yl_coord[1] > ycenter) ) {
-                quadyL = 1.5;
-            } else if ( (yl_coord[0] == xcenter) && (yl_coord[1] < ycenter) ){
-                quadyL = 3.5;
-            } else if ( (yl_coord[1] == ycenter) && (yl_coord[0] < xcenter) ){
-                quadyL = 2.5;
-            } else if ( (yl_coord[1] == ycenter) && (yl_coord[1] > xcenter) ) {
-                quadyL = 0.5;
-            }
-
-            // Check which quadrant (L/R) we are calculating in Y_R
-            if ( (yr_coord[0] > xcenter) && (yr_coord[1] > ycenter ) ){
-                quadyR = 1;
-            } else if ( (yr_coord[0] < xcenter) && (yr_coord[1] > ycenter) ){
-                quadyR = 2;
-            } else if ( (yr_coord[0] < xcenter) && (yr_coord[1] < ycenter) ){
-                quadyR = 3;
-            } else if ( (yr_coord[0] > xcenter) && (yr_coord[1] < ycenter) ){
-                quadyR = 4;
-            } else {
-                quadyR = 1;
-            }
-
-            // Check if one x-y axes or in center
-            if ( (yr_coord[0] == xcenter) && (yr_coord[1] > ycenter) ) {
-                quadyR = 1.5;
-            } else if ( (yr_coord[0] == xcenter) && (yr_coord[1] < ycenter) ){
-                quadyR = 3.5;
-            } else if ( (yr_coord[1] == ycenter) && (yr_coord[0] < xcenter) ){
-                quadyR = 2.5;
-            } else if ( (yr_coord[1] == ycenter) && (yr_coord[1] > xcenter) ) {
-                quadyR = 0.5;
-            }
-
-            // Check if we are at the very center of the grid
-            if ( (xl_coord[0] == xcenter) && (xl_coord[1] == ycenter)){
-                quadxL = 0;
-            } else if ( (xr_coord[0] == xcenter) && (xr_coord[1] == ycenter)){
-                quadxR = 0;
-            } else if ( (yl_coord[0] == xcenter) && (yl_coord[1] == ycenter)){
-                quadyL = 0;
-            } else if ( (yr_coord[0] == xcenter) && (yr_coord[1] == ycenter)){
-                quadyR = 0;
-            }
-            
-            // Reconstructed left X primitives vector at the i+1/2 interface
-            xprims_l[0] = center[0] + 0.5*minmod(theta*(center[0] - xleft_mid[0]),
-                                                0.5*(xright_mid[0] - xleft_mid[0]),
-                                                theta*(xright_mid[0] - center[0]));
-
-            
-            xprims_l[1] = center[1] + 0.5*minmod(theta*(center[1] - xleft_mid[1]),
-                                                0.5*(xright_mid[1] - xleft_mid[1]),
-                                                theta*(xright_mid[1] - center[1]));
-
-            xprims_l[2] = center[2] + 0.5*minmod(theta*(center[2] - xleft_mid[2]),
-                                                0.5*(xright_mid[2] - xleft_mid[2]),
-                                                theta*(xright_mid[2] - center[2]));
-
-            xprims_l[3] = center[3] + 0.5*minmod(theta*(center[3] - xleft_mid[3]),
-                                                0.5*(xright_mid[3] - xleft_mid[3]),
-                                                theta*(xright_mid[3] - center[3]));
-
-            // Reconstructed right primitives vector in x
-            xprims_r[0] = xright_mid[0] - 0.5*minmod(theta*(xright_mid[0] - center[0]),
-                                                0.5*(xright_most[0] - center[0]),
-                                                theta*(xright_most[0] - xright_mid[0]));
-
-            xprims_r[1] = xright_mid[1] - 0.5*minmod(theta*(xright_mid[1] - center[1]),
-                                                0.5*(xright_most[1] - center[1]),
-                                                theta*(xright_most[1] - xright_mid[1]));
-
-            xprims_r[2] = xright_mid[2] - 0.5*minmod(theta*(xright_mid[2] - center[2]),
-                                                0.5*(xright_most[2] - center[2]),
-                                                theta*(xright_most[2] - xright_mid[2]));
-
-            xprims_r[3] = xright_mid[3] - 0.5*minmod(theta*(xright_mid[3] - center[3]),
-                                                0.5*(xright_most[3] - center[3]),
-                                                theta*(xright_most[3] - xright_mid[3]));
-
-            
-            // Reconstructed right primitives vector in y-direction at j+1/2 interfce
-            yprims_l[0] = center[0] + 0.5*minmod(theta*(center[0] - yleft_mid[0]),
-                                                0.5*(yright_mid[0] - yleft_mid[0]),
-                                                theta*(yright_mid[0] - center[0]));
-
-            yprims_l[1] = center[1] + 0.5*minmod(theta*(center[1] - yleft_mid[1]),
-                                                0.5*(yright_mid[1] - yleft_mid[1]),
-                                                theta*(yright_mid[1] - center[1]));
-
-            yprims_l[2] = center[2] + 0.5*minmod(theta*(center[2] - yleft_mid[2]),
-                                                0.5*(yright_mid[2] - yleft_mid[2]),
-                                                theta*(yright_mid[2] - center[2]));
-
-            yprims_l[3] = center[3] + 0.5*minmod(theta*(center[3] - yleft_mid[3]),
-                                                0.5*(yright_mid[3] - yleft_mid[3]),
-                                                theta*(yright_mid[3] - center[3]));
-            
-
-            yprims_r[0] = yright_mid[0] - 0.5*minmod(theta*(yright_mid[0] - center[0]),
-                                                0.5*(yright_most[0] - center[0]),
-                                                theta*(yright_most[0] - yright_mid[0]));
-
-            yprims_r[1] = yright_mid[1] - 0.5*minmod(theta*(yright_mid[1] - center[1]),
-                                                0.5*(yright_most[1] - center[1]),
-                                                theta*(yright_most[1] - yright_mid[1]));
-
-            yprims_r[2] = yright_mid[2] - 0.5*minmod(theta*(yright_mid[2] - center[2]),
-                                                0.5*(yright_most[2] - center[2]),
-                                                theta*(yright_most[2] - yright_mid[2]));
-
-            yprims_r[3] = yright_mid[3] - 0.5*minmod(theta*(yright_mid[3] - center[3]),
-                                                0.5*(yright_most[3] - center[3]),
-                                                theta*(yright_most[3] - yright_mid[3]));
-
-        
-            
-            
-            
-            
-            // Calculate the left and right states using the reconstructed PLM primitives
-            ux_l = calc_state2D(gamma, xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
-            ux_r = calc_state2D(gamma, xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
-
-            uy_l = calc_state2D(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3]);
-            uy_r = calc_state2D(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3]);
-
-            f_l = calc_flux(gamma, xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
-            f_r = calc_flux(gamma, xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
-
-            g_l = calc_flux(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3], false);
-            g_r = calc_flux(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3], false);
-
-            f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, quadxL, quadxR, "x");
-            g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, quadyL, quadyR, "y");
-            
-            
-
-
-
-            // Do the same thing, but for the left side interface [i - 1/2]
-
-            // Figure out the coordinates of the left/right 
-            // primitives in each direction
-            xl_coord[0] = ii - 1;
-            xl_coord[1] = jj;
-
-            xr_coord[0] = ii;
-            xr_coord[1] = jj;
-
-            yl_coord[0] = ii;
-            yl_coord[1] = jj - 1;
-
-            yr_coord[0] = ii;
-            yr_coord[1] = jj;
-
-            // Check which quadrant (L/R) we are calculating in X_L
-            if ( (xl_coord[0] > xcenter) && (xl_coord[1] > ycenter ) ){
-                quadxL = 1;
-            } else if ( (xl_coord[0] < xcenter) && (xl_coord[1] > ycenter) ){
-                quadxL = 2;
-            } else if ( (xl_coord[0] < xcenter) && (xl_coord[1] < ycenter) ){
-                quadxL = 3;
-            } else if ( (xl_coord[0] > xcenter) && (xl_coord[1] < ycenter) ){
-                quadxL = 4;
-            } else {
-                quadxL = 1;
-            }
-
-            // Check if one x-y axes or in center
-            if ( (xl_coord[0] == xcenter) && (xl_coord[1] > ycenter) ) {
-                quadxL = 1.5;
-            } else if ( (xl_coord[0] == xcenter) && (xl_coord[1] < ycenter) ){
-                quadxL = 3.5;
-            } else if ( (xl_coord[1] == ycenter) && (xl_coord[0] < xcenter) ){
-                quadxL = 2.5;
-            } else if ( (xl_coord[1] == ycenter) && (xl_coord[1] > xcenter) ) {
-                quadxL = 0.5;
-            }
-
-            // Check which quadrant (L/R) we are calculating in X_R
-            if ( (xr_coord[0] > xcenter) && (xr_coord[1] > ycenter ) ){
-                quadxR = 1;
-            } else if ( (xr_coord[0] < xcenter) && (xr_coord[1] > ycenter) ){
-                quadxR = 2;
-            } else if ( (xr_coord[0] < xcenter) && (xr_coord[1] < ycenter) ){
-                quadxR = 3;
-            } else if ( (xr_coord[0] > xcenter) && (xr_coord[1] < ycenter) ){
-                quadxR = 4;
-            } else {
-                quadxR = 1;
-            }
-
-            // Check if one x-y axes or in center
-            if ( (xr_coord[0] == xcenter) && (xr_coord[1] > ycenter) ) {
-                quadxR = 1.5;
-            } else if ( (xr_coord[0] == xcenter) && (xr_coord[1] < ycenter) ){
-                quadxR = 3.5;
-            } else if ( (xr_coord[1] == ycenter) && (xr_coord[0] < xcenter) ){
-                quadxR = 2.5;
-            } else if ( (xr_coord[1] == ycenter) && (xr_coord[1] > xcenter) ) {
-                quadxR = 0.5;
-            }
-
-            // Check which quadrant (L/R) we are calculating in Y_L
-            if ( (yl_coord[0] > xcenter) && (yl_coord[1] > ycenter ) ){
-                quadyL = 1;
-            } else if ( (yl_coord[0] < xcenter) && (yl_coord[1] > ycenter) ){
-                quadyL = 2;
-            } else if ( (yl_coord[0] < xcenter) && (yl_coord[1] < ycenter) ){
-                quadyL = 3;
-            } else if ( (yl_coord[0] > xcenter) && (yl_coord[1] < ycenter) ){
-                quadyL = 4;
-            } else {
-                quadyL = 1;
-            }
-
-            // Check if one x-y axes or in center
-            if ( (yl_coord[0] == xcenter) && (yl_coord[1] > ycenter) ) {
-                quadyL = 1.5;
-            } else if ( (yl_coord[0] == xcenter) && (yl_coord[1] < ycenter) ){
-                quadyL = 3.5;
-            } else if ( (yl_coord[1] == ycenter) && (yl_coord[0] < xcenter) ){
-                quadyL = 2.5;
-            } else if ( (yl_coord[1] == ycenter) && (yl_coord[1] > xcenter) ) {
-                quadyL = 0.5;
-            }
-
-            // Check which quadrant (L/R) we are calculating in Y_R
-            if ( (yr_coord[0] > xcenter) && (yr_coord[1] > ycenter ) ){
-                quadyR = 1;
-            } else if ( (yr_coord[0] < xcenter) && (yr_coord[1] > ycenter) ){
-                quadyR = 2;
-            } else if ( (yr_coord[0] < xcenter) && (yr_coord[1] < ycenter) ){
-                quadyR = 3;
-            } else if ( (yr_coord[0] > xcenter) && (yr_coord[1] < ycenter) ){
-                quadyR = 4;
-            } else {
-                quadyR = 1;
-            }
-
-            // Check if one x-y axes or in center
-            if ( (yr_coord[0] == xcenter) && (yr_coord[1] > ycenter) ) {
-                quadyR = 1.5;
-            } else if ( (yr_coord[0] == xcenter) && (yr_coord[1] < ycenter) ){
-                quadyR = 3.5;
-            } else if ( (yr_coord[1] == ycenter) && (yr_coord[0] < xcenter) ){
-                quadyR = 2.5;
-            } else if ( (yr_coord[1] == ycenter) && (yr_coord[1] > xcenter) ) {
-                quadyR = 0.5;
-            }
-
-            // Check if we are at the very center of the grid
-            if ( (xl_coord[0] == xcenter) && (xl_coord[1] == ycenter)){
-                quadxL = 0;
-            } else if ( (xr_coord[0] == xcenter) && (xr_coord[1] == ycenter)){
-                quadxR = 0;
-            } else if ( (yl_coord[0] == xcenter) && (yl_coord[1] == ycenter)){
-                quadyL = 0;
-            } else if ( (yr_coord[0] == xcenter) && (yr_coord[1] == ycenter)){
-                quadyR = 0;
-            }
-
-            // Left side primitives in x
-            xprims_l[0] = xleft_mid[0] + 0.5 *minmod(theta*(xleft_mid[0] - xleft_most[0]),
-                                                    0.5*(center[0] - xleft_most[0]),
-                                                    theta*(center[0] - xleft_mid[0]));
-
-            xprims_l[1] = xleft_mid[1] + 0.5 *minmod(theta*(xleft_mid[1] - xleft_most[1]),
-                                                    0.5*(center[1] -xleft_most[1]),
-                                                    theta*(center[1] - xleft_mid[1]));
-            
-            xprims_l[2] = xleft_mid[2] + 0.5 *minmod(theta*(xleft_mid[2] - xleft_most[2]),
-                                                    0.5*(center[2] - xleft_most[2]),
-                                                    theta*(center[2] - xleft_mid[2]));
-            
-            xprims_l[3] = xleft_mid[3] + 0.5 *minmod(theta*(xleft_mid[3] - xleft_most[3]),
-                                                    0.5*(center[3] - xleft_most[3]),
-                                                    theta*(center[3] - xleft_mid[3]));
+    // cout << coord_system << endl;
+    // string a;
+    // cin >> a;
+    if (coord_system == "cartesian"){
+        // cout << "Am Cartesian" << endl;
+        for (int jj = j_start; jj < j_bound; jj++){
+            for (int ii = i_start; ii < i_bound; ii++){
+                if (periodic){
+                    xcoordinate = ii;
+                    ycoordinate = jj;
+
+                    // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
+
+                    // X Coordinate
+                    xleft_most[0] = roll(prims[0][ii], ii - 2);
+                    xleft_mid[0] = roll(prims[0][ii], ii - 1);
+                    center[0] = prims[0][ii][jj];
+                    xright_mid[0] = roll(prims[0][ii], ii + 1);
+                    xright_most[0] = roll(prims[0][ii], ii + 2);
+
+                    xleft_most[1] = roll(prims[1][ii], ii - 2);
+                    xleft_mid[1] = roll(prims[1][ii], ii - 1);
+                    center[1] = prims[1][ii][jj];
+                    xright_mid[1] = roll(prims[1][ii], ii + 1);
+                    xright_most[1] = roll(prims[1][ii], ii + 2);
+
+                    xleft_most[2] = roll(prims[2][ii], ii - 2);
+                    xleft_mid[2] = roll(prims[2][ii], ii - 1);
+                    center[2] = prims[2][ii][jj];
+                    xright_mid[2] = roll(prims[2][ii], ii + 1);
+                    xright_most[2] = roll(prims[2][ii], ii + 2);
+
+                    xleft_most[3] = roll(prims[3][ii], ii - 2);
+                    xleft_mid[3] = roll(prims[3][ii], ii - 1);
+                    center[3] = prims[3][ii][jj];
+                    xright_mid[3] = roll(prims[3][ii], ii + 1);
+                    xright_most[3] = roll(prims[3][ii], ii + 2);
+
+                    // Transpose the prims matrix to compute the Y Sweep
+                    rho_transpose = transpose(prims[0]);
+                    pressure_transpose = transpose(prims[1]);
+                    vx_transpose = transpose(prims[2]);
+                    vy_transpose = transpose(prims[3]);
+
+                    yleft_most[0] = roll(rho_transpose[ii], ii - 2);
+                    yleft_mid[0] = roll(rho_transpose[ii], ii - 1);
+                    yright_mid[0] = roll(rho_transpose[ii], ii + 1);
+                    yright_most[0] = roll(rho_transpose[ii], ii + 2);
+
+                    yleft_most[1] = roll(pressure_transpose[ii], ii - 2);
+                    yleft_mid[1] = roll(pressure_transpose[ii], ii - 1);
+                    yright_mid[1] = roll(pressure_transpose[ii], ii + 1);
+                    yright_most[1] = roll(pressure_transpose[ii], ii + 2);
+
+                    yleft_most[2] = roll(vx_transpose[ii], ii - 2);
+                    yleft_mid[2] = roll(vx_transpose[ii], ii - 1);
+                    yright_mid[2] = roll(vx_transpose[ii], ii + 1);
+                    yright_most[2] = roll(vx_transpose[ii], ii + 2);
+
+                    yleft_most[3] = roll(vy_transpose[ii], ii - 2);
+                    yleft_mid[3] = roll(vy_transpose[ii], ii - 1);
+                    yright_mid[3] = roll(vy_transpose[ii], ii + 1);
+                    yright_most[3] = roll(vy_transpose[ii], ii + 2);
+
+                } else {
+                    // Adjust for beginning input of L vector
+                    xcoordinate = ii - 2;
+                    ycoordinate = jj - 2;
+
+                    // Coordinate X
+                    xleft_most[0] = prims[0][jj][ii - 2];
+                    xleft_mid[0] = prims[0][jj][ii - 1];
+                    center[0] = prims[0][jj][ii];
+                    xright_mid[0] = prims[0][jj][ii + 1];
+                    xright_most[0] = prims[0][jj][ii + 2];
+
+                    xleft_most[1] = prims[1][jj][ii - 2];
+                    xleft_mid[1] = prims[1][jj][ii - 1];
+                    center[1] = prims[1][jj][ii];
+                    xright_mid[1] = prims[1][jj][ii + 1];
+                    xright_most[1] = prims[1][jj][ii + 2];
+
+                    xleft_most[2] = prims[2][jj][ii - 2];
+                    xleft_mid[2] = prims[2][jj][ii - 1];
+                    center[2] = prims[2][jj][ii];
+                    xright_mid[2] = prims[2][jj][ii + 1];
+                    xright_most[2] = prims[2][jj][ii + 2];
+
+                    xleft_most[3] = prims[3][jj][ii - 2];
+                    xleft_mid[3] = prims[3][jj][ii - 1];
+                    center[3] = prims[3][jj][ii];
+                    xright_mid[3] = prims[3][jj][ii + 1];
+                    xright_most[3] = prims[3][jj][ii + 2];
+
+                    // Coordinate Y
+                    yleft_most[0] = prims[0][jj - 2][ii];
+                    yleft_mid[0] = prims[0][jj - 1][ii];
+                    yright_mid[0] = prims[0][jj + 1][ii];
+                    yright_most[0] = prims[0][jj + 2][ii];
+
+                    yleft_most[1] = prims[1][jj - 2][ii];
+                    yleft_mid[1] = prims[1][jj - 1][ii];
+                    yright_mid[1] = prims[1][jj + 1][ii];
+                    yright_most[1] = prims[1][jj + 2][ii];
+
+                    yleft_most[2] = prims[2][jj - 2][ii];
+                    yleft_mid[2] = prims[2][jj - 1][ii];
+                    yright_mid[2] = prims[2][jj + 1][ii];
+                    yright_most[2] = prims[2][jj + 2][ii];
+
+                    yleft_most[3] = prims[3][jj - 2][ii];
+                    yleft_mid[3] = prims[3][jj - 1][ii];
+                    yright_mid[3] = prims[3][jj + 1][ii];
+                    yright_most[3] = prims[3][jj + 2][ii];
+
+                }
+
+                // Figure out the coordinates of the left/right 
+                // primitives in each direction
+                xl_coord[0] = ii;
+                xl_coord[1] = jj;
+
+                xr_coord[0] = ii + 1;
+                xr_coord[1] = jj;
+
+                yl_coord[0] = ii;
+                yl_coord[1] = jj;
+
+                yr_coord[0] = ii;
+                yr_coord[1] = jj + 1;
+
+                // Check which quadrant (L/R) we are calculating in X_L
+                if ( (xl_coord[0] > xcenter) && (xl_coord[1] > ycenter ) ){
+                    quadxL = 1;
+                } else if ( (xl_coord[0] < xcenter) && (xl_coord[1] > ycenter) ){
+                    quadxL = 2;
+                } else if ( (xl_coord[0] < xcenter) && (xl_coord[1] < ycenter) ){
+                    quadxL = 3;
+                } else if ( (xl_coord[0] > xcenter) && (xl_coord[1] < ycenter) ){
+                    quadxL = 4;
+                } else {
+                    quadxL = 1;
+                }
+
+                // Check if one x-y axes or in center
+                if ( (xl_coord[0] == xcenter) && (xl_coord[1] > ycenter) ) {
+                    quadxL = 1.5;
+                } else if ( (xl_coord[0] == xcenter) && (xl_coord[1] < ycenter) ){
+                    quadxL = 3.5;
+                } else if ( (xl_coord[1] == ycenter) && (xl_coord[0] < xcenter) ){
+                    quadxL = 2.5;
+                } else if ( (xl_coord[1] == ycenter) && (xl_coord[1] > xcenter) ) {
+                    quadxL = 0.5;
+                }
+
+                // Check which quadrant (L/R) we are calculating in X_R
+                if ( (xr_coord[0] > xcenter) && (xr_coord[1] > ycenter ) ){
+                    quadxR = 1;
+                } else if ( (xr_coord[0] < xcenter) && (xr_coord[1] > ycenter) ){
+                    quadxR = 2;
+                } else if ( (xr_coord[0] < xcenter) && (xr_coord[1] < ycenter) ){
+                    quadxR = 3;
+                } else if ( (xr_coord[0] > xcenter) && (xr_coord[1] < ycenter) ){
+                    quadxR = 4;
+                } else {
+                    quadxR = 1;
+                }
+
+                // Check if one x-y axes or in center
+                if ( (xr_coord[0] == xcenter) && (xr_coord[1] > ycenter) ) {
+                    quadxR = 1.5;
+                } else if ( (xr_coord[0] == xcenter) && (xr_coord[1] < ycenter) ){
+                    quadxR = 3.5;
+                } else if ( (xr_coord[1] == ycenter) && (xr_coord[0] < xcenter) ){
+                    quadxR = 2.5;
+                } else if ( (xr_coord[1] == ycenter) && (xr_coord[1] > xcenter) ) {
+                    quadxR = 0.5;
+                }
+
+                // Check which quadrant (L/R) we are calculating in Y_L
+                if ( (yl_coord[0] > xcenter) && (yl_coord[1] > ycenter ) ){
+                    quadyL = 1;
+                } else if ( (yl_coord[0] < xcenter) && (yl_coord[1] > ycenter) ){
+                    quadyL = 2;
+                } else if ( (yl_coord[0] < xcenter) && (yl_coord[1] < ycenter) ){
+                    quadyL = 3;
+                } else if ( (yl_coord[0] > xcenter) && (yl_coord[1] < ycenter) ){
+                    quadyL = 4;
+                } else {
+                    quadyL = 1;
+                }
+
+                // Check if one x-y axes or in center
+                if ( (yl_coord[0] == xcenter) && (yl_coord[1] > ycenter) ) {
+                    quadyL = 1.5;
+                } else if ( (yl_coord[0] == xcenter) && (yl_coord[1] < ycenter) ){
+                    quadyL = 3.5;
+                } else if ( (yl_coord[1] == ycenter) && (yl_coord[0] < xcenter) ){
+                    quadyL = 2.5;
+                } else if ( (yl_coord[1] == ycenter) && (yl_coord[1] > xcenter) ) {
+                    quadyL = 0.5;
+                }
+
+                // Check which quadrant (L/R) we are calculating in Y_R
+                if ( (yr_coord[0] > xcenter) && (yr_coord[1] > ycenter ) ){
+                    quadyR = 1;
+                } else if ( (yr_coord[0] < xcenter) && (yr_coord[1] > ycenter) ){
+                    quadyR = 2;
+                } else if ( (yr_coord[0] < xcenter) && (yr_coord[1] < ycenter) ){
+                    quadyR = 3;
+                } else if ( (yr_coord[0] > xcenter) && (yr_coord[1] < ycenter) ){
+                    quadyR = 4;
+                } else {
+                    quadyR = 1;
+                }
+
+                // Check if one x-y axes or in center
+                if ( (yr_coord[0] == xcenter) && (yr_coord[1] > ycenter) ) {
+                    quadyR = 1.5;
+                } else if ( (yr_coord[0] == xcenter) && (yr_coord[1] < ycenter) ){
+                    quadyR = 3.5;
+                } else if ( (yr_coord[1] == ycenter) && (yr_coord[0] < xcenter) ){
+                    quadyR = 2.5;
+                } else if ( (yr_coord[1] == ycenter) && (yr_coord[1] > xcenter) ) {
+                    quadyR = 0.5;
+                }
+
+                // Check if we are at the very center of the grid
+                if ( (xl_coord[0] == xcenter) && (xl_coord[1] == ycenter)){
+                    quadxL = 0;
+                } else if ( (xr_coord[0] == xcenter) && (xr_coord[1] == ycenter)){
+                    quadxR = 0;
+                } else if ( (yl_coord[0] == xcenter) && (yl_coord[1] == ycenter)){
+                    quadyL = 0;
+                } else if ( (yr_coord[0] == xcenter) && (yr_coord[1] == ycenter)){
+                    quadyR = 0;
+                }
+                
+                // Reconstructed left X primitives vector at the i+1/2 interface
+                xprims_l[0] = center[0] + 0.5*minmod(theta*(center[0] - xleft_mid[0]),
+                                                    0.5*(xright_mid[0] - xleft_mid[0]),
+                                                    theta*(xright_mid[0] - center[0]));
 
                 
-            // Right side primitives in x
-            xprims_r[0] = center[0] - 0.5 *minmod(theta*(center[0] - xleft_mid[0]),
-                                                0.5*(xright_mid[0] - xleft_mid[0]),
-                                                theta*(xright_mid[0] - center[0]));
+                xprims_l[1] = center[1] + 0.5*minmod(theta*(center[1] - xleft_mid[1]),
+                                                    0.5*(xright_mid[1] - xleft_mid[1]),
+                                                    theta*(xright_mid[1] - center[1]));
 
-            xprims_r[1] = center[1] - 0.5 *minmod(theta*(center[1] - xleft_mid[1]),
-                                                0.5*(xright_mid[1] - xleft_mid[1]),
-                                                theta*(xright_mid[1] - center[1]));
+                xprims_l[2] = center[2] + 0.5*minmod(theta*(center[2] - xleft_mid[2]),
+                                                    0.5*(xright_mid[2] - xleft_mid[2]),
+                                                    theta*(xright_mid[2] - center[2]));
 
-            xprims_r[2] = center[2] - 0.5 *minmod(theta*(center[2] - xleft_mid[2]),
-                                                0.5*(xright_mid[2] - xleft_mid[2]),
-                                                theta*(xright_mid[2] - center[2]));
+                xprims_l[3] = center[3] + 0.5*minmod(theta*(center[3] - xleft_mid[3]),
+                                                    0.5*(xright_mid[3] - xleft_mid[3]),
+                                                    theta*(xright_mid[3] - center[3]));
 
-            xprims_r[3] = center[3] - 0.5 *minmod(theta*(center[3] - xleft_mid[3]),
-                                                0.5*(xright_mid[3] - xleft_mid[3]),
-                                                theta*(xright_mid[3] - center[3]));
+                // Reconstructed right primitives vector in x
+                xprims_r[0] = xright_mid[0] - 0.5*minmod(theta*(xright_mid[0] - center[0]),
+                                                    0.5*(xright_most[0] - center[0]),
+                                                    theta*(xright_most[0] - xright_mid[0]));
 
+                xprims_r[1] = xright_mid[1] - 0.5*minmod(theta*(xright_mid[1] - center[1]),
+                                                    0.5*(xright_most[1] - center[1]),
+                                                    theta*(xright_most[1] - xright_mid[1]));
 
-            // Left side primitives in y
-            yprims_l[0] = yleft_mid[0] + 0.5 *minmod(theta*(yleft_mid[0] - yleft_most[0]),
-                                                    0.5*(center[0] - yleft_most[0]),
-                                                    theta*(center[0] - yleft_mid[0]));
+                xprims_r[2] = xright_mid[2] - 0.5*minmod(theta*(xright_mid[2] - center[2]),
+                                                    0.5*(xright_most[2] - center[2]),
+                                                    theta*(xright_most[2] - xright_mid[2]));
 
-            yprims_l[1] = yleft_mid[1] + 0.5 *minmod(theta*(yleft_mid[1] - yleft_most[1]),
-                                                    0.5*(center[1] -yleft_most[1]),
-                                                    theta*(center[1] - yleft_mid[1]));
-            
-            yprims_l[2] = yleft_mid[2] + 0.5 *minmod(theta*(yleft_mid[2] - yleft_most[2]),
-                                                    0.5*(center[2] - yleft_most[2]),
-                                                    theta*(center[2] - yleft_mid[2]));
-            
-            yprims_l[3] = yleft_mid[3] + 0.5 *minmod(theta*(yleft_mid[3] - yleft_most[3]),
-                                                    0.5*(center[3] - yleft_most[3]),
-                                                    theta*(center[3] - yleft_mid[3]));
+                xprims_r[3] = xright_mid[3] - 0.5*minmod(theta*(xright_mid[3] - center[3]),
+                                                    0.5*(xright_most[3] - center[3]),
+                                                    theta*(xright_most[3] - xright_mid[3]));
 
                 
-            // Right side primitives in y
-            yprims_r[0] = center[0] - 0.5 *minmod(theta*(center[0] - yleft_mid[0]),
-                                                0.5*(yright_mid[0] - yleft_mid[0]),
-                                                theta*(yright_mid[0] - center[0]));
+                // Reconstructed right primitives vector in y-direction at j+1/2 interfce
+                yprims_l[0] = center[0] + 0.5*minmod(theta*(center[0] - yleft_mid[0]),
+                                                    0.5*(yright_mid[0] - yleft_mid[0]),
+                                                    theta*(yright_mid[0] - center[0]));
 
-            yprims_r[1] = center[1] - 0.5 *minmod(theta*(center[1] - yleft_mid[1]),
-                                                0.5*(yright_mid[1] - yleft_mid[1]),
-                                                theta*(yright_mid[1] - center[1]));
+                yprims_l[1] = center[1] + 0.5*minmod(theta*(center[1] - yleft_mid[1]),
+                                                    0.5*(yright_mid[1] - yleft_mid[1]),
+                                                    theta*(yright_mid[1] - center[1]));
 
-            yprims_r[2] = center[2] - 0.5 *minmod(theta*(center[2] - yleft_mid[2]),
-                                                0.5*(yright_mid[2] - yleft_mid[2]),
-                                                theta*(yright_mid[2] - center[2]));
+                yprims_l[2] = center[2] + 0.5*minmod(theta*(center[2] - yleft_mid[2]),
+                                                    0.5*(yright_mid[2] - yleft_mid[2]),
+                                                    theta*(yright_mid[2] - center[2]));
 
-            yprims_r[3] = center[3]  - 0.5 *minmod(theta*(center[3] - yleft_mid[3]),
-                                                0.5*(yright_mid[3] - yleft_mid[3]),
-                                                theta*(yright_mid[3] - center[3])); 
-             
-        
+                yprims_l[3] = center[3] + 0.5*minmod(theta*(center[3] - yleft_mid[3]),
+                                                    0.5*(yright_mid[3] - yleft_mid[3]),
+                                                    theta*(yright_mid[3] - center[3]));
+                
 
-            // Calculate the left and right states using the reconstructed PLM primitives
-            ux_l = calc_state2D(gamma,xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
-            ux_r = calc_state2D(gamma,xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
+                yprims_r[0] = yright_mid[0] - 0.5*minmod(theta*(yright_mid[0] - center[0]),
+                                                    0.5*(yright_most[0] - center[0]),
+                                                    theta*(yright_most[0] - yright_mid[0]));
 
-            uy_l = calc_state2D(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3]);
-            uy_r = calc_state2D(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3]);
+                yprims_r[1] = yright_mid[1] - 0.5*minmod(theta*(yright_mid[1] - center[1]),
+                                                    0.5*(yright_most[1] - center[1]),
+                                                    theta*(yright_most[1] - yright_mid[1]));
 
-            f_l = calc_flux(gamma, xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
-            f_r = calc_flux(gamma, xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
+                yprims_r[2] = yright_mid[2] - 0.5*minmod(theta*(yright_mid[2] - center[2]),
+                                                    0.5*(yright_most[2] - center[2]),
+                                                    theta*(yright_most[2] - yright_mid[2]));
 
-            g_l = calc_flux(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3], false);
-            g_r = calc_flux(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3], false);
-
-            f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, quadxL, quadxR, "x");
-            g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, quadyL, quadyR, "y");
-            
+                yprims_r[3] = yright_mid[3] - 0.5*minmod(theta*(yright_mid[3] - center[3]),
+                                                    0.5*(yright_most[3] - center[3]),
+                                                    theta*(yright_most[3] - yright_mid[3]));
 
             
+                
+                
+                
+                
+                // Calculate the left and right states using the reconstructed PLM primitives
+                ux_l = calc_state2D(gamma, xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
+                ux_r = calc_state2D(gamma, xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
+
+                uy_l = calc_state2D(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3]);
+                uy_r = calc_state2D(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3]);
+
+                f_l = calc_flux(gamma, xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
+                f_r = calc_flux(gamma, xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
+
+                g_l = calc_flux(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3], false);
+                g_r = calc_flux(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3], false);
+
+                f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, quadxL, quadxR, "x");
+                g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, quadyL, quadyR, "y");
+                
+                
+
+
+
+                // Do the same thing, but for the left side interface [i - 1/2]
+
+                // Figure out the coordinates of the left/right 
+                // primitives in each direction
+                xl_coord[0] = ii - 1;
+                xl_coord[1] = jj;
+
+                xr_coord[0] = ii;
+                xr_coord[1] = jj;
+
+                yl_coord[0] = ii;
+                yl_coord[1] = jj - 1;
+
+                yr_coord[0] = ii;
+                yr_coord[1] = jj;
+
+                // Check which quadrant (L/R) we are calculating in X_L
+                if ( (xl_coord[0] > xcenter) && (xl_coord[1] > ycenter ) ){
+                    quadxL = 1;
+                } else if ( (xl_coord[0] < xcenter) && (xl_coord[1] > ycenter) ){
+                    quadxL = 2;
+                } else if ( (xl_coord[0] < xcenter) && (xl_coord[1] < ycenter) ){
+                    quadxL = 3;
+                } else if ( (xl_coord[0] > xcenter) && (xl_coord[1] < ycenter) ){
+                    quadxL = 4;
+                } else {
+                    quadxL = 1;
+                }
+
+                // Check if one x-y axes or in center
+                if ( (xl_coord[0] == xcenter) && (xl_coord[1] > ycenter) ) {
+                    quadxL = 1.5;
+                } else if ( (xl_coord[0] == xcenter) && (xl_coord[1] < ycenter) ){
+                    quadxL = 3.5;
+                } else if ( (xl_coord[1] == ycenter) && (xl_coord[0] < xcenter) ){
+                    quadxL = 2.5;
+                } else if ( (xl_coord[1] == ycenter) && (xl_coord[1] > xcenter) ) {
+                    quadxL = 0.5;
+                }
+
+                // Check which quadrant (L/R) we are calculating in X_R
+                if ( (xr_coord[0] > xcenter) && (xr_coord[1] > ycenter ) ){
+                    quadxR = 1;
+                } else if ( (xr_coord[0] < xcenter) && (xr_coord[1] > ycenter) ){
+                    quadxR = 2;
+                } else if ( (xr_coord[0] < xcenter) && (xr_coord[1] < ycenter) ){
+                    quadxR = 3;
+                } else if ( (xr_coord[0] > xcenter) && (xr_coord[1] < ycenter) ){
+                    quadxR = 4;
+                } else {
+                    quadxR = 1;
+                }
+
+                // Check if one x-y axes or in center
+                if ( (xr_coord[0] == xcenter) && (xr_coord[1] > ycenter) ) {
+                    quadxR = 1.5;
+                } else if ( (xr_coord[0] == xcenter) && (xr_coord[1] < ycenter) ){
+                    quadxR = 3.5;
+                } else if ( (xr_coord[1] == ycenter) && (xr_coord[0] < xcenter) ){
+                    quadxR = 2.5;
+                } else if ( (xr_coord[1] == ycenter) && (xr_coord[1] > xcenter) ) {
+                    quadxR = 0.5;
+                }
+
+                // Check which quadrant (L/R) we are calculating in Y_L
+                if ( (yl_coord[0] > xcenter) && (yl_coord[1] > ycenter ) ){
+                    quadyL = 1;
+                } else if ( (yl_coord[0] < xcenter) && (yl_coord[1] > ycenter) ){
+                    quadyL = 2;
+                } else if ( (yl_coord[0] < xcenter) && (yl_coord[1] < ycenter) ){
+                    quadyL = 3;
+                } else if ( (yl_coord[0] > xcenter) && (yl_coord[1] < ycenter) ){
+                    quadyL = 4;
+                } else {
+                    quadyL = 1;
+                }
+
+                // Check if one x-y axes or in center
+                if ( (yl_coord[0] == xcenter) && (yl_coord[1] > ycenter) ) {
+                    quadyL = 1.5;
+                } else if ( (yl_coord[0] == xcenter) && (yl_coord[1] < ycenter) ){
+                    quadyL = 3.5;
+                } else if ( (yl_coord[1] == ycenter) && (yl_coord[0] < xcenter) ){
+                    quadyL = 2.5;
+                } else if ( (yl_coord[1] == ycenter) && (yl_coord[1] > xcenter) ) {
+                    quadyL = 0.5;
+                }
+
+                // Check which quadrant (L/R) we are calculating in Y_R
+                if ( (yr_coord[0] > xcenter) && (yr_coord[1] > ycenter ) ){
+                    quadyR = 1;
+                } else if ( (yr_coord[0] < xcenter) && (yr_coord[1] > ycenter) ){
+                    quadyR = 2;
+                } else if ( (yr_coord[0] < xcenter) && (yr_coord[1] < ycenter) ){
+                    quadyR = 3;
+                } else if ( (yr_coord[0] > xcenter) && (yr_coord[1] < ycenter) ){
+                    quadyR = 4;
+                } else {
+                    quadyR = 1;
+                }
+
+                // Check if one x-y axes or in center
+                if ( (yr_coord[0] == xcenter) && (yr_coord[1] > ycenter) ) {
+                    quadyR = 1.5;
+                } else if ( (yr_coord[0] == xcenter) && (yr_coord[1] < ycenter) ){
+                    quadyR = 3.5;
+                } else if ( (yr_coord[1] == ycenter) && (yr_coord[0] < xcenter) ){
+                    quadyR = 2.5;
+                } else if ( (yr_coord[1] == ycenter) && (yr_coord[1] > xcenter) ) {
+                    quadyR = 0.5;
+                }
+
+                // Check if we are at the very center of the grid
+                if ( (xl_coord[0] == xcenter) && (xl_coord[1] == ycenter)){
+                    quadxL = 0;
+                } else if ( (xr_coord[0] == xcenter) && (xr_coord[1] == ycenter)){
+                    quadxR = 0;
+                } else if ( (yl_coord[0] == xcenter) && (yl_coord[1] == ycenter)){
+                    quadyL = 0;
+                } else if ( (yr_coord[0] == xcenter) && (yr_coord[1] == ycenter)){
+                    quadyR = 0;
+                }
+
+                // Left side primitives in x
+                xprims_l[0] = xleft_mid[0] + 0.5 *minmod(theta*(xleft_mid[0] - xleft_most[0]),
+                                                        0.5*(center[0] - xleft_most[0]),
+                                                        theta*(center[0] - xleft_mid[0]));
+
+                xprims_l[1] = xleft_mid[1] + 0.5 *minmod(theta*(xleft_mid[1] - xleft_most[1]),
+                                                        0.5*(center[1] -xleft_most[1]),
+                                                        theta*(center[1] - xleft_mid[1]));
+                
+                xprims_l[2] = xleft_mid[2] + 0.5 *minmod(theta*(xleft_mid[2] - xleft_most[2]),
+                                                        0.5*(center[2] - xleft_most[2]),
+                                                        theta*(center[2] - xleft_mid[2]));
+                
+                xprims_l[3] = xleft_mid[3] + 0.5 *minmod(theta*(xleft_mid[3] - xleft_most[3]),
+                                                        0.5*(center[3] - xleft_most[3]),
+                                                        theta*(center[3] - xleft_mid[3]));
+
+                    
+                // Right side primitives in x
+                xprims_r[0] = center[0] - 0.5 *minmod(theta*(center[0] - xleft_mid[0]),
+                                                    0.5*(xright_mid[0] - xleft_mid[0]),
+                                                    theta*(xright_mid[0] - center[0]));
+
+                xprims_r[1] = center[1] - 0.5 *minmod(theta*(center[1] - xleft_mid[1]),
+                                                    0.5*(xright_mid[1] - xleft_mid[1]),
+                                                    theta*(xright_mid[1] - center[1]));
+
+                xprims_r[2] = center[2] - 0.5 *minmod(theta*(center[2] - xleft_mid[2]),
+                                                    0.5*(xright_mid[2] - xleft_mid[2]),
+                                                    theta*(xright_mid[2] - center[2]));
+
+                xprims_r[3] = center[3] - 0.5 *minmod(theta*(center[3] - xleft_mid[3]),
+                                                    0.5*(xright_mid[3] - xleft_mid[3]),
+                                                    theta*(xright_mid[3] - center[3]));
+
+
+                // Left side primitives in y
+                yprims_l[0] = yleft_mid[0] + 0.5 *minmod(theta*(yleft_mid[0] - yleft_most[0]),
+                                                        0.5*(center[0] - yleft_most[0]),
+                                                        theta*(center[0] - yleft_mid[0]));
+
+                yprims_l[1] = yleft_mid[1] + 0.5 *minmod(theta*(yleft_mid[1] - yleft_most[1]),
+                                                        0.5*(center[1] -yleft_most[1]),
+                                                        theta*(center[1] - yleft_mid[1]));
+                
+                yprims_l[2] = yleft_mid[2] + 0.5 *minmod(theta*(yleft_mid[2] - yleft_most[2]),
+                                                        0.5*(center[2] - yleft_most[2]),
+                                                        theta*(center[2] - yleft_mid[2]));
+                
+                yprims_l[3] = yleft_mid[3] + 0.5 *minmod(theta*(yleft_mid[3] - yleft_most[3]),
+                                                        0.5*(center[3] - yleft_most[3]),
+                                                        theta*(center[3] - yleft_mid[3]));
+
+                    
+                // Right side primitives in y
+                yprims_r[0] = center[0] - 0.5 *minmod(theta*(center[0] - yleft_mid[0]),
+                                                    0.5*(yright_mid[0] - yleft_mid[0]),
+                                                    theta*(yright_mid[0] - center[0]));
+
+                yprims_r[1] = center[1] - 0.5 *minmod(theta*(center[1] - yleft_mid[1]),
+                                                    0.5*(yright_mid[1] - yleft_mid[1]),
+                                                    theta*(yright_mid[1] - center[1]));
+
+                yprims_r[2] = center[2] - 0.5 *minmod(theta*(center[2] - yleft_mid[2]),
+                                                    0.5*(yright_mid[2] - yleft_mid[2]),
+                                                    theta*(yright_mid[2] - center[2]));
+
+                yprims_r[3] = center[3]  - 0.5 *minmod(theta*(center[3] - yleft_mid[3]),
+                                                    0.5*(yright_mid[3] - yleft_mid[3]),
+                                                    theta*(yright_mid[3] - center[3])); 
+                
             
 
-            L[0][ycoordinate][xcoordinate] = - (f1[0] - f2[0])/dx - (g1[0] - g2[0])/dy;
-            L[1][ycoordinate][xcoordinate] = - (f1[1] - f2[1])/dx - (g1[1] - g2[1])/dy;
-            L[2][ycoordinate][xcoordinate] = - (f1[2] - f2[2])/dx - (g1[2] - g2[2])/dy;
-            L[3][ycoordinate][xcoordinate] = - (f1[3] - f2[3])/dx - (g1[3] - g2[3])/dy;
-            
+                // Calculate the left and right states using the reconstructed PLM primitives
+                ux_l = calc_state2D(gamma,xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
+                ux_r = calc_state2D(gamma,xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
+
+                uy_l = calc_state2D(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3]);
+                uy_r = calc_state2D(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3]);
+
+                f_l = calc_flux(gamma, xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
+                f_r = calc_flux(gamma, xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
+
+                g_l = calc_flux(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3], false);
+                g_r = calc_flux(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3], false);
+
+                f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, quadxL, quadxR, "x");
+                g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, quadyL, quadyR, "y");
+                
+
+                
+                
+
+                L[0][ycoordinate][xcoordinate] = - (f1[0] - f2[0])/dx - (g1[0] - g2[0])/dy;
+                L[1][ycoordinate][xcoordinate] = - (f1[1] - f2[1])/dx - (g1[1] - g2[1])/dy;
+                L[2][ycoordinate][xcoordinate] = - (f1[2] - f2[2])/dx - (g1[2] - g2[2])/dy;
+                L[3][ycoordinate][xcoordinate] = - (f1[3] - f2[3])/dx - (g1[3] - g2[3])/dy;
+                
+            }
+
         }
 
+        return L;
+
+    } else {
+        //==============================================================================================
+        //                                  SPHERICAL 
+        //==============================================================================================
+        double right_cell, left_cell, upper_cell, lower_cell, r_avg, ang_avg; 
+        double r_left, r_right, volAvg, pc, rhoc, vc, uc, deltaV1, deltaV2;
+        double log_rLeft, log_rRight;
+        double theta_right, theta_left, tcoordinate, rcoordinate;
+        double upper_tsurface, lower_tsurface, right_rsurface, left_rsurface;
+
+        double delta_logr = (log(x1[xphysical_grid - 1]) - log(x1[0]))/xphysical_grid;
+
+        double dr; 
+
+        double pi = 2*acos(0.0);
+
+        for (int jj = j_start; jj < j_bound; jj++){
+            for (int ii = i_start; ii < i_bound; ii++){
+                if (periodic){
+                    rcoordinate = ii;
+                    tcoordinate = jj;
+
+                    // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
+
+                    // X Coordinate
+                    xleft_most[0] = roll(prims[0][ii], ii - 2);
+                    xleft_mid[0] = roll(prims[0][ii], ii - 1);
+                    center[0] = prims[0][ii][jj];
+                    xright_mid[0] = roll(prims[0][ii], ii + 1);
+                    xright_most[0] = roll(prims[0][ii], ii + 2);
+
+                    xleft_most[1] = roll(prims[1][ii], ii - 2);
+                    xleft_mid[1] = roll(prims[1][ii], ii - 1);
+                    center[1] = prims[1][ii][jj];
+                    xright_mid[1] = roll(prims[1][ii], ii + 1);
+                    xright_most[1] = roll(prims[1][ii], ii + 2);
+
+                    xleft_most[2] = roll(prims[2][ii], ii - 2);
+                    xleft_mid[2] = roll(prims[2][ii], ii - 1);
+                    center[2] = prims[2][ii][jj];
+                    xright_mid[2] = roll(prims[2][ii], ii + 1);
+                    xright_most[2] = roll(prims[2][ii], ii + 2);
+
+                    xleft_most[3] = roll(prims[3][ii], ii - 2);
+                    xleft_mid[3] = roll(prims[3][ii], ii - 1);
+                    center[3] = prims[3][ii][jj];
+                    xright_mid[3] = roll(prims[3][ii], ii + 1);
+                    xright_most[3] = roll(prims[3][ii], ii + 2);
+
+                    // Transpose the prims matrix to compute the Y Sweep
+                    rho_transpose = transpose(prims[0]);
+                    pressure_transpose = transpose(prims[1]);
+                    vx_transpose = transpose(prims[2]);
+                    vy_transpose = transpose(prims[3]);
+
+                    yleft_most[0] = roll(rho_transpose[ii], ii - 2);
+                    yleft_mid[0] = roll(rho_transpose[ii], ii - 1);
+                    yright_mid[0] = roll(rho_transpose[ii], ii + 1);
+                    yright_most[0] = roll(rho_transpose[ii], ii + 2);
+
+                    yleft_most[1] = roll(pressure_transpose[ii], ii - 2);
+                    yleft_mid[1] = roll(pressure_transpose[ii], ii - 1);
+                    yright_mid[1] = roll(pressure_transpose[ii], ii + 1);
+                    yright_most[1] = roll(pressure_transpose[ii], ii + 2);
+
+                    yleft_most[2] = roll(vx_transpose[ii], ii - 2);
+                    yleft_mid[2] = roll(vx_transpose[ii], ii - 1);
+                    yright_mid[2] = roll(vx_transpose[ii], ii + 1);
+                    yright_most[2] = roll(vx_transpose[ii], ii + 2);
+
+                    yleft_most[3] = roll(vy_transpose[ii], ii - 2);
+                    yleft_mid[3] = roll(vy_transpose[ii], ii - 1);
+                    yright_mid[3] = roll(vy_transpose[ii], ii + 1);
+                    yright_most[3] = roll(vy_transpose[ii], ii + 2);
+
+                } else {
+                    // Adjust for beginning input of L vector
+                    rcoordinate = ii - 2;
+                    tcoordinate = jj - 2;
+
+                    // Coordinate X
+                    xleft_most[0] = prims[0][jj][ii - 2];
+                    xleft_mid[0] = prims[0][jj][ii - 1];
+                    center[0] = prims[0][jj][ii];
+                    xright_mid[0] = prims[0][jj][ii + 1];
+                    xright_most[0] = prims[0][jj][ii + 2];
+
+                    xleft_most[1] = prims[1][jj][ii - 2];
+                    xleft_mid[1] = prims[1][jj][ii - 1];
+                    center[1] = prims[1][jj][ii];
+                    xright_mid[1] = prims[1][jj][ii + 1];
+                    xright_most[1] = prims[1][jj][ii + 2];
+
+                    xleft_most[2] = prims[2][jj][ii - 2];
+                    xleft_mid[2] = prims[2][jj][ii - 1];
+                    center[2] = prims[2][jj][ii];
+                    xright_mid[2] = prims[2][jj][ii + 1];
+                    xright_most[2] = prims[2][jj][ii + 2];
+
+                    xleft_most[3] = prims[3][jj][ii - 2];
+                    xleft_mid[3] = prims[3][jj][ii - 1];
+                    center[3] = prims[3][jj][ii];
+                    xright_mid[3] = prims[3][jj][ii + 1];
+                    xright_most[3] = prims[3][jj][ii + 2];
+
+                    // Coordinate Y
+                    yleft_most[0] = prims[0][jj - 2][ii];
+                    yleft_mid[0] = prims[0][jj - 1][ii];
+                    yright_mid[0] = prims[0][jj + 1][ii];
+                    yright_most[0] = prims[0][jj + 2][ii];
+
+                    yleft_most[1] = prims[1][jj - 2][ii];
+                    yleft_mid[1] = prims[1][jj - 1][ii];
+                    yright_mid[1] = prims[1][jj + 1][ii];
+                    yright_most[1] = prims[1][jj + 2][ii];
+
+                    yleft_most[2] = prims[2][jj - 2][ii];
+                    yleft_mid[2] = prims[2][jj - 1][ii];
+                    yright_mid[2] = prims[2][jj + 1][ii];
+                    yright_most[2] = prims[2][jj + 2][ii];
+
+                    yleft_most[3] = prims[3][jj - 2][ii];
+                    yleft_mid[3] = prims[3][jj - 1][ii];
+                    yright_mid[3] = prims[3][jj + 1][ii];
+                    yright_most[3] = prims[3][jj + 2][ii];
+
+                }
+
+                // Figure out the coordinates of the left/right 
+                // primitives in each direction
+                xl_coord[0] = ii;
+                xl_coord[1] = jj;
+
+                xr_coord[0] = ii + 1;
+                xr_coord[1] = jj;
+
+                yl_coord[0] = ii;
+                yl_coord[1] = jj;
+
+                yr_coord[0] = ii;
+                yr_coord[1] = jj + 1;
+                
+                // Reconstructed left X primitives vector at the i+1/2 interface
+                xprims_l[0] = center[0] + 0.5*minmod(theta*(center[0] - xleft_mid[0]),
+                                                    0.5*(xright_mid[0] - xleft_mid[0]),
+                                                    theta*(xright_mid[0] - center[0]));
+
+                
+                xprims_l[1] = center[1] + 0.5*minmod(theta*(center[1] - xleft_mid[1]),
+                                                    0.5*(xright_mid[1] - xleft_mid[1]),
+                                                    theta*(xright_mid[1] - center[1]));
+
+                xprims_l[2] = center[2] + 0.5*minmod(theta*(center[2] - xleft_mid[2]),
+                                                    0.5*(xright_mid[2] - xleft_mid[2]),
+                                                    theta*(xright_mid[2] - center[2]));
+
+                xprims_l[3] = center[3] + 0.5*minmod(theta*(center[3] - xleft_mid[3]),
+                                                    0.5*(xright_mid[3] - xleft_mid[3]),
+                                                    theta*(xright_mid[3] - center[3]));
+
+                // Reconstructed right primitives vector in x
+                xprims_r[0] = xright_mid[0] - 0.5*minmod(theta*(xright_mid[0] - center[0]),
+                                                    0.5*(xright_most[0] - center[0]),
+                                                    theta*(xright_most[0] - xright_mid[0]));
+
+                xprims_r[1] = xright_mid[1] - 0.5*minmod(theta*(xright_mid[1] - center[1]),
+                                                    0.5*(xright_most[1] - center[1]),
+                                                    theta*(xright_most[1] - xright_mid[1]));
+
+                xprims_r[2] = xright_mid[2] - 0.5*minmod(theta*(xright_mid[2] - center[2]),
+                                                    0.5*(xright_most[2] - center[2]),
+                                                    theta*(xright_most[2] - xright_mid[2]));
+
+                xprims_r[3] = xright_mid[3] - 0.5*minmod(theta*(xright_mid[3] - center[3]),
+                                                    0.5*(xright_most[3] - center[3]),
+                                                    theta*(xright_most[3] - xright_mid[3]));
+
+                
+                // Reconstructed right primitives vector in y-direction at j+1/2 interfce
+                yprims_l[0] = center[0] + 0.5*minmod(theta*(center[0] - yleft_mid[0]),
+                                                    0.5*(yright_mid[0] - yleft_mid[0]),
+                                                    theta*(yright_mid[0] - center[0]));
+
+                yprims_l[1] = center[1] + 0.5*minmod(theta*(center[1] - yleft_mid[1]),
+                                                    0.5*(yright_mid[1] - yleft_mid[1]),
+                                                    theta*(yright_mid[1] - center[1]));
+
+                yprims_l[2] = center[2] + 0.5*minmod(theta*(center[2] - yleft_mid[2]),
+                                                    0.5*(yright_mid[2] - yleft_mid[2]),
+                                                    theta*(yright_mid[2] - center[2]));
+
+                yprims_l[3] = center[3] + 0.5*minmod(theta*(center[3] - yleft_mid[3]),
+                                                    0.5*(yright_mid[3] - yleft_mid[3]),
+                                                    theta*(yright_mid[3] - center[3]));
+                
+
+                yprims_r[0] = yright_mid[0] - 0.5*minmod(theta*(yright_mid[0] - center[0]),
+                                                    0.5*(yright_most[0] - center[0]),
+                                                    theta*(yright_most[0] - yright_mid[0]));
+
+                yprims_r[1] = yright_mid[1] - 0.5*minmod(theta*(yright_mid[1] - center[1]),
+                                                    0.5*(yright_most[1] - center[1]),
+                                                    theta*(yright_most[1] - yright_mid[1]));
+
+                yprims_r[2] = yright_mid[2] - 0.5*minmod(theta*(yright_mid[2] - center[2]),
+                                                    0.5*(yright_most[2] - center[2]),
+                                                    theta*(yright_most[2] - yright_mid[2]));
+
+                yprims_r[3] = yright_mid[3] - 0.5*minmod(theta*(yright_mid[3] - center[3]),
+                                                    0.5*(yright_most[3] - center[3]),
+                                                    theta*(yright_most[3] - yright_mid[3]));
+
+            
+                
+                
+                
+                
+                // Calculate the left and right states using the reconstructed PLM primitives
+                ux_l = calc_state2D(gamma, xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
+                ux_r = calc_state2D(gamma, xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
+
+                uy_l = calc_state2D(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3]);
+                uy_r = calc_state2D(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3]);
+
+                f_l = calc_flux(gamma, xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
+                f_r = calc_flux(gamma, xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
+
+                g_l = calc_flux(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3], false);
+                g_r = calc_flux(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3], false);
+
+                f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, quadxL, quadxR, "x");
+                g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, quadyL, quadyR, "y");
+
+
+                /**
+                if ((tcoordinate == 0) && (rcoordinate == 0)){
+                    cout << ii << endl;
+                    cout << jj << endl;
+                    cout << "Rho  (L): " << xprims_l[0] << endl;
+                    cout << "Rho  (R): " << xprims_r[0] << endl;
+                    cout << "P  (L): " << xprims_l[1] << endl;
+                    cout << "P  (R): " << xprims_r[1] << endl;
+                    cout << "V_r  (L): " << xprims_l[2] << endl;
+                    cout << "V_r  (R): " << xprims_l[2] << endl;
+                    cout << "V_t  (L): " << xprims_l[3] << endl;
+                    cout << "V_t  (R): " << xprims_l[3] << endl;
+                    cout << " " << endl;
+                    cout << "Rho  (L): " << yprims_l[0] << endl;
+                    cout << "Rho  (R): " << yprims_r[0] << endl;
+                    cout << "P  (L): " << yprims_l[1] << endl;
+                    cout << "P  (R): " << yprims_r[1] << endl;
+                    cout << "V_r  (L): " << yprims_l[2] << endl;
+                    cout << "V_r  (R): " << yprims_r[2] << endl;
+                    cout << "V_t  (L): " << yprims_l[3] << endl;
+                    cout << "V_t  (R): " << yprims_r[3] << endl;
+                    string h;
+                    cin >> h;
+
+                }
+                */
+                
+                
+                
+
+
+
+                // Do the same thing, but for the left side interface [i - 1/2]
+
+                // Left side primitives in x
+                xprims_l[0] = xleft_mid[0] + 0.5 *minmod(theta*(xleft_mid[0] - xleft_most[0]),
+                                                        0.5*(center[0] - xleft_most[0]),
+                                                        theta*(center[0] - xleft_mid[0]));
+
+                xprims_l[1] = xleft_mid[1] + 0.5 *minmod(theta*(xleft_mid[1] - xleft_most[1]),
+                                                        0.5*(center[1] -xleft_most[1]),
+                                                        theta*(center[1] - xleft_mid[1]));
+                
+                xprims_l[2] = xleft_mid[2] + 0.5 *minmod(theta*(xleft_mid[2] - xleft_most[2]),
+                                                        0.5*(center[2] - xleft_most[2]),
+                                                        theta*(center[2] - xleft_mid[2]));
+                
+                xprims_l[3] = xleft_mid[3] + 0.5 *minmod(theta*(xleft_mid[3] - xleft_most[3]),
+                                                        0.5*(center[3] - xleft_most[3]),
+                                                        theta*(center[3] - xleft_mid[3]));
+
+                    
+                // Right side primitives in x
+                xprims_r[0] = center[0] - 0.5 *minmod(theta*(center[0] - xleft_mid[0]),
+                                                    0.5*(xright_mid[0] - xleft_mid[0]),
+                                                    theta*(xright_mid[0] - center[0]));
+
+                xprims_r[1] = center[1] - 0.5 *minmod(theta*(center[1] - xleft_mid[1]),
+                                                    0.5*(xright_mid[1] - xleft_mid[1]),
+                                                    theta*(xright_mid[1] - center[1]));
+
+                xprims_r[2] = center[2] - 0.5 *minmod(theta*(center[2] - xleft_mid[2]),
+                                                    0.5*(xright_mid[2] - xleft_mid[2]),
+                                                    theta*(xright_mid[2] - center[2]));
+
+                xprims_r[3] = center[3] - 0.5 *minmod(theta*(center[3] - xleft_mid[3]),
+                                                    0.5*(xright_mid[3] - xleft_mid[3]),
+                                                    theta*(xright_mid[3] - center[3]));
+
+
+                // Left side primitives in y
+                yprims_l[0] = yleft_mid[0] + 0.5 *minmod(theta*(yleft_mid[0] - yleft_most[0]),
+                                                        0.5*(center[0] - yleft_most[0]),
+                                                        theta*(center[0] - yleft_mid[0]));
+
+                yprims_l[1] = yleft_mid[1] + 0.5 *minmod(theta*(yleft_mid[1] - yleft_most[1]),
+                                                        0.5*(center[1] -yleft_most[1]),
+                                                        theta*(center[1] - yleft_mid[1]));
+                
+                yprims_l[2] = yleft_mid[2] + 0.5 *minmod(theta*(yleft_mid[2] - yleft_most[2]),
+                                                        0.5*(center[2] - yleft_most[2]),
+                                                        theta*(center[2] - yleft_mid[2]));
+                
+                yprims_l[3] = yleft_mid[3] + 0.5 *minmod(theta*(yleft_mid[3] - yleft_most[3]),
+                                                        0.5*(center[3] - yleft_most[3]),
+                                                        theta*(center[3] - yleft_mid[3]));
+
+                    
+                // Right side primitives in y
+                yprims_r[0] = center[0] - 0.5 *minmod(theta*(center[0] - yleft_mid[0]),
+                                                    0.5*(yright_mid[0] - yleft_mid[0]),
+                                                    theta*(yright_mid[0] - center[0]));
+
+                yprims_r[1] = center[1] - 0.5 *minmod(theta*(center[1] - yleft_mid[1]),
+                                                    0.5*(yright_mid[1] - yleft_mid[1]),
+                                                    theta*(yright_mid[1] - center[1]));
+
+                yprims_r[2] = center[2] - 0.5 *minmod(theta*(center[2] - yleft_mid[2]),
+                                                    0.5*(yright_mid[2] - yleft_mid[2]),
+                                                    theta*(yright_mid[2] - center[2]));
+
+                yprims_r[3] = center[3]  - 0.5 *minmod(theta*(center[3] - yleft_mid[3]),
+                                                    0.5*(yright_mid[3] - yleft_mid[3]),
+                                                    theta*(yright_mid[3] - center[3])); 
+                
+            
+
+                // Calculate the left and right states using the reconstructed PLM primitives
+                ux_l = calc_state2D(gamma,xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
+                ux_r = calc_state2D(gamma,xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
+
+                uy_l = calc_state2D(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3]);
+                uy_r = calc_state2D(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3]);
+
+                f_l = calc_flux(gamma, xprims_l[0], xprims_l[1], xprims_l[2], xprims_l[3]);
+                f_r = calc_flux(gamma, xprims_r[0], xprims_r[1], xprims_r[2], xprims_r[3]);
+
+                g_l = calc_flux(gamma, yprims_l[0], yprims_l[1], yprims_l[2], yprims_l[3], false);
+                g_r = calc_flux(gamma, yprims_r[0], yprims_r[1], yprims_r[2], yprims_r[3], false);
+
+                f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, quadxL, quadxR, "x");
+                g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, quadyL, quadyR, "y");
+
+                if (linspace){
+                    right_cell = x1[rcoordinate + 1];
+                    left_cell = x1[rcoordinate - 1];
+                    upper_cell = x2[tcoordinate + 1];
+                    lower_cell = x2[tcoordinate - 1];
+
+                    // cout << "Theta Coordinate: " << tcoordinate << endl;
+                    // cout << "R Coordinate: " << rcoordinate << endl;
+                    
+                    // Outflow the left/right boundaries
+                    if (rcoordinate - 1 < 0){
+                        left_cell = x1[rcoordinate];
+
+                    } else if (rcoordinate == xphysical_grid - 1){
+                        right_cell = x1[rcoordinate];
+
+                    }
+
+                    if (tcoordinate - 1 < 0){
+
+                        lower_cell = x2[tcoordinate];
+                        
+                    }  else if(tcoordinate == yphysical_grid - 1){
+                        upper_cell = x2[tcoordinate];
+                    }
+
+                    r_right = 0.5*(right_cell + x1[rcoordinate]);
+                    r_left = 0.5*(x1[rcoordinate] + left_cell);
+
+                    theta_right = atan2( sin(upper_cell) + sin(x2[tcoordinate]) , 
+                                                cos(upper_cell) + cos(x2[tcoordinate]) );
+
+                    theta_left = atan2( sin(lower_cell) + sin(x2[tcoordinate]), 
+                                                cos(lower_cell) + cos(x2[tcoordinate]) );
+
+                } else {
+                    log_rLeft = log(x1[0]) + rcoordinate*delta_logr;
+                    log_rRight = log_rLeft + delta_logr;
+                    r_left = exp(log_rLeft);
+                    r_right = exp(log_rRight);
+
+                    upper_cell = x2[tcoordinate + 1];
+                    lower_cell = x2[tcoordinate - 1];
+                    
+                    // Outflow the left/right boundaries
+                    if (tcoordinate - 1 < 0){
+                        cout << "Am Here: " << endl;
+                        cout << "X2: " << x2[tcoordinate] << endl;
+                        lower_cell = x2[tcoordinate];
+                        cout << "Lower: " << lower_cell << endl;
+
+                    } else if(tcoordinate == yphysical_grid - 1){
+                        upper_cell = x2[tcoordinate];
+                    }
+
+                    theta_right = 0.5*(upper_cell + x2[tcoordinate]);
+                    theta_left = 0.5*(x2[tcoordinate] + lower_cell);
+                }
+
+                dr = r_right - r_left;
+                rhoc = center[0];
+                pc = center[1];
+                uc = center[2];
+                vc = center[3];
+
+                
+                
+                r_avg = 0.5*(r_right + r_left);
+                ang_avg =  atan2(sin(theta_right) + sin(theta_left), cos(theta_right) + cos(theta_left) );
+                // Compute the surface areas
+                right_rsurface = r_right*r_right;
+                left_rsurface = r_left*r_left;
+                upper_tsurface = 0.5*(r_right*r_right - r_left*r_left)*sin(theta_right);
+                lower_tsurface = 0.5*(r_right*r_right - r_left*r_left)*sin(theta_left);
+                volAvg = 0.75*((pow(r_right, 4) - pow(r_left, 4))/ (pow(r_right, 3) - pow(r_left, 3)) );
+                deltaV1 = pow(volAvg, 2)*dr;
+                deltaV2 = deltaV1*(cos(theta_left) - cos(theta_right)); 
+
+                // cout << "Theta [i + 1/2]: " << theta_right << endl;
+                // cout << "Theta[i - 1/2]: " << theta_left << endl;
+                // cout << "Ang Avg: " << ang_avg << endl;
+                // // string a;
+                // // cin >> a;
+                // cout << "Ang Avg: " << ang_avg << endl;
+                // string a;
+                // cin >> a;
+
+                
+                /**
+                cout << "Sub: " << (cos(theta_left) - cos(theta_right)) << endl;
+                cout << "VolAvg:" << volAvg << endl;
+                cout << "F1: "<< f1[0] << endl;
+                cout << "F2: "<< f2[0] << endl;
+                cout << "G1: "<< g1[0] << endl;
+                cout << "G2: "<< g2[0] << endl;
+                string a;
+                cin >> a;
+                */
+
+                L[0][tcoordinate][rcoordinate] = - (f1[0]*right_rsurface - f2[0]*left_rsurface)/deltaV1
+                                                    - (g1[0]*upper_tsurface - g2[0]*lower_tsurface)/deltaV2;
+
+                L[1][tcoordinate][rcoordinate] = - (f1[1]*right_rsurface - f2[1]*left_rsurface)/deltaV1
+                                                    - (g1[1]*upper_tsurface - g2[1]*lower_tsurface)/deltaV2 
+                                                    + rhoc*vc*vc/volAvg + 2*pc/volAvg;
+
+                L[2][tcoordinate][rcoordinate] = - (f1[2]*right_rsurface - f2[2]*left_rsurface)/deltaV1
+                                                    - (g1[2]*upper_tsurface - g2[2]*lower_tsurface)/deltaV2
+                                                    -(rhoc*uc*vc/volAvg - pc*cos(ang_avg)/(volAvg*sin(ang_avg)));
+
+                L[3][tcoordinate][rcoordinate] = - (f1[3]*right_rsurface - f2[3]*left_rsurface)/deltaV1
+                                                    - (g1[3]*upper_tsurface - g2[3]*lower_tsurface)/deltaV2;
+                
+            }
+
+        }
+
+        return L;
+        
     }
     
-    
-    
-    
-    
-    return L;
+
 };
 
 
@@ -1191,7 +1701,7 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, vector<vector<ve
 //                                            SIMULATE 
 //-----------------------------------------------------------------------------------------------------------
 vector<vector<vector<double> > > Ustate2D::simulate2D(float tend = 0.1, bool periodic = false, 
-                                                        double dt = 1.e-4){
+                                                        double dt = 1.e-4, bool linspace=true){
 
     // Define the swap vector for the integrated state
     int xgrid_size = state2D[0][0].size();
@@ -1230,6 +1740,23 @@ vector<vector<vector<double> > > Ustate2D::simulate2D(float tend = 0.1, bool per
     u2 = u;
     
     while (t < tend){
+
+        if (t == 0){
+            config_ghosts2D(u, xphysical_grid, ygrid_size, false);
+        }
+
+        // cout << " " << endl;
+        // cout << "U: " << endl;
+        // for (int jj=0; jj <ygrid_size; jj++){
+        //     for (int ii=0; ii < xgrid_size; ii++){
+        //         cout << u[1][jj][ii] << ", ";
+        //     }
+        //     cout << endl;
+        // }
+        // string a;
+        // cin >> a;
+        
+
         udot = u_dot2D(gamma, u);
 
         for (int jj = 0; jj < yphysical_grid; jj++){
@@ -1245,10 +1772,36 @@ vector<vector<vector<double> > > Ustate2D::simulate2D(float tend = 0.1, bool per
             }
         }
         
+        /**
+        cout << " " << endl;
+        cout << "U1: " << endl;
+        for (int jj=0; jj <ygrid_size; jj++){
+            for (int ii=0; ii < xgrid_size; ii++){
+                cout << u1[1][jj][ii] << ", ";
+            }
+            cout << endl;
+        }
+        string d;
+        cin >> d;
+        */
+
         
         config_ghosts2D(u1, xphysical_grid, ygrid_size, false);
 
         udot1 = u_dot2D(gamma, u1);
+
+        /**
+        cout << " " << endl;
+        cout << "UDot1: " << endl;
+        for (int jj=0; jj <yphysical_grid; jj++){
+            for (int ii=0; ii < xphysical_grid; ii++){
+                cout << udot1[0][jj][ii] << ", ";
+            }
+            cout << endl;
+        }
+        string p;
+        cin >> p;
+        */
 
         for (int jj = 0; jj < yphysical_grid; jj++){
             // Get the non-ghost index 
@@ -1264,6 +1817,19 @@ vector<vector<vector<double> > > Ustate2D::simulate2D(float tend = 0.1, bool per
             
 
         }
+
+        /**
+        cout << " " << endl;
+        cout << "U2: " << endl;
+        for (int jj=0; jj <ygrid_size; jj++){
+            for (int ii=0; ii < xgrid_size; ii++){
+                cout << u2[0][jj][ii] << ", ";
+            }
+            cout << endl;
+        }
+        string c;
+        cin >> c;
+        */
         
        
         config_ghosts2D(u2, xphysical_grid, ygrid_size, false);
@@ -1285,66 +1851,13 @@ vector<vector<vector<double> > > Ustate2D::simulate2D(float tend = 0.1, bool per
         }
         
         config_ghosts2D(u_p, xphysical_grid, ygrid_size, false);
-       
-        // Adjust the ghost cells at the boundaries of the new state tensor
         
         /**
-        for (int jj = 0; jj < ygrid_size; jj++){
-            for (int ii = 2; ii < xphysical_grid; ii++){
-                if (jj < 2){
-                    u_p[0][jj][ii] = u_p[0][2][ii];
-                    u_p[1][jj][ii] = u_p[1][2][ii];
-                    u_p[2][jj][ii] = u_p[2][2][ii];
-                    u_p[3][jj][ii] = u_p[3][2][ii];
-                    
-                } else if (jj > ygrid_size - 3) {
-                    u_p[0][jj][ii] = u_p[0][ygrid_size - 3][ii];
-                    u_p[1][jj][ii] = u_p[1][ygrid_size - 3][ii];
-                    u_p[2][jj][ii] = u_p[2][ygrid_size - 3][ii];
-                    u_p[3][jj][ii] = u_p[3][ygrid_size - 3][ii];
-
-                } else {
-                    u_p[0][jj][0] = u_p[0][jj][2];
-                    u_p[0][jj][1] = u_p[0][jj][2];
-                    u_p[0][jj][xgrid_size - 1] = u_p[0][jj][xgrid_size - 3];
-                    u_p[0][jj][xgrid_size - 2] = u_p[0][jj][xgrid_size - 3];
-
-                    u_p[1][jj][0] = u_p[1][jj][2];
-                    u_p[1][jj][1] = u_p[1][jj][2];
-                    u_p[1][jj][xgrid_size - 1] = u_p[1][jj][xgrid_size - 3];
-                    u_p[1][jj][xgrid_size - 2] = u_p[1][jj][xgrid_size - 3];
-
-                    u_p[2][jj][0] = u_p[2][jj][2];
-                    u_p[2][jj][1] = u_p[2][jj][2];
-                    u_p[2][jj][xgrid_size - 1] = u_p[2][jj][xgrid_size - 3];
-                    u_p[2][jj][xgrid_size - 2] = u_p[2][jj][xgrid_size - 3];
-
-                    u_p[3][jj][0] = u_p[3][jj][2];
-                    u_p[3][jj][1] = u_p[3][jj][2];
-                    u_p[3][jj][xgrid_size - 1] = u_p[3][jj][xgrid_size - 3];
-                    u_p[3][jj][xgrid_size - 2] = u_p[3][jj][xgrid_size - 3];
-                }
-            }
-        }
-        */
-
-        /**
         cout << " " << endl;
-        cout << "U: " << endl;
+        cout << "UP: " << endl;
         for (int jj=0; jj <ygrid_size; jj++){
             for (int ii=0; ii < xgrid_size; ii++){
-                cout << u[0][jj][ii] << ", ";
-            }
-            cout << endl;
-        }
-        string a;
-        cin >> a;
-        
-        cout << " " << endl;
-        cout << "U1: " << endl;
-        for (int jj=0; jj <ygrid_size; jj++){
-            for (int ii=0; ii < xgrid_size; ii++){
-                cout << u1[0][jj][ii] << ", ";
+                cout << u_p[1][jj][ii]/1.e-10 << ", ";
             }
             cout << endl;
         }
@@ -1353,13 +1866,17 @@ vector<vector<vector<double> > > Ustate2D::simulate2D(float tend = 0.1, bool per
         */
         
         
+        if (t > 0){
+            dt = adapt_dt(u_p);
+        }
+        
+        
+        
+        
+        
 
         // Swap the arrays
         u.swap(u_p);
-
-        
-
-        // u.swap(u1);
         
         t += dt;
 
@@ -1370,18 +1887,3 @@ vector<vector<vector<double> > > Ustate2D::simulate2D(float tend = 0.1, bool per
     return u;
 
  };
-
-
-
-
-//-----------------------------------------------------------------------------------------------------------
-//                                            FLUX CALCULATIONS
-//-----------------------------------------------------------------------------------------------------------
-
-
-
-
-
-//-----------------------------------------------------------------------------------------------------------
-//                                            FLUX CALCULATIONS
-//-----------------------------------------------------------------------------------------------------------

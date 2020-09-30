@@ -6,7 +6,7 @@ from distutils.core import setup
 from distutils.extension import Extension
 from Cython.Build import cythonize 
 
-sourcefiles = ['state.pyx', 'simbi_1d.cpp', 'helper_functions.cpp', 'simbi_2d.cpp']
+sourcefiles = ['state.pyx', 'simbi_1d.cpp', 'relativistic1D.cpp', 'helper_functions.cpp', 'simbi_2d.cpp', 'relativistic2D.cpp']
 
 extensions = [Extension("state", sourcefiles)]
 

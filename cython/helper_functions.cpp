@@ -7,6 +7,7 @@
 #include <cmath>
 #include <map>
 #include <algorithm>
+#include <cstdarg>
 
 using namespace std;
 
@@ -155,17 +156,17 @@ void config_ghosts2D(vector<vector<vector<double> > > &u_state, int x1grid_size,
 
     } else {
         for (int jj = 0; jj < x2grid_size; jj++){
-            for (int ii = 2; ii < x1grid_size; ii++){
+            for (int ii = 2; ii < x1grid_size + 2; ii++){
                 if (jj < 2){
                     u_state[0][jj][ii] = u_state[0][2][ii];
-                    u_state[1][jj][ii] = u_state[1][2][ii];
-                    u_state[2][jj][ii] = u_state[2][2][ii];
+                    u_state[1][jj][ii] = - u_state[1][2][ii];
+                    u_state[2][jj][ii] = - u_state[2][2][ii];
                     u_state[3][jj][ii] = u_state[3][2][ii];
                     
                 } else if (jj > x2grid_size - 3) {
                     u_state[0][jj][ii] = u_state[0][x2grid_size - 3][ii];
-                    u_state[1][jj][ii] = u_state[1][x2grid_size - 3][ii];
-                    u_state[2][jj][ii] = u_state[2][x2grid_size - 3][ii];
+                    u_state[1][jj][ii] = - u_state[1][x2grid_size - 3][ii];
+                    u_state[2][jj][ii] = - u_state[2][x2grid_size - 3][ii];
                     u_state[3][jj][ii] = u_state[3][x2grid_size - 3][ii];
 
                 } else {
@@ -174,13 +175,13 @@ void config_ghosts2D(vector<vector<vector<double> > > &u_state, int x1grid_size,
                     u_state[0][jj][x1grid_size - 1] = u_state[0][jj][x1grid_size - 3];
                     u_state[0][jj][x1grid_size - 2] = u_state[0][jj][x1grid_size - 3];
 
-                    u_state[1][jj][0] = u_state[1][jj][2];
-                    u_state[1][jj][1] = u_state[1][jj][2];
+                    u_state[1][jj][0] = - u_state[1][jj][2];
+                    u_state[1][jj][1] = - u_state[1][jj][2];
                     u_state[1][jj][x1grid_size - 1] = u_state[1][jj][x1grid_size - 3];
                     u_state[1][jj][x1grid_size - 2] = u_state[1][jj][x1grid_size - 3];
 
-                    u_state[2][jj][0] = u_state[2][jj][2];
-                    u_state[2][jj][1] = u_state[2][jj][2];
+                    u_state[2][jj][0] = - u_state[2][jj][2];
+                    u_state[2][jj][1] = - u_state[2][jj][2];
                     u_state[2][jj][x1grid_size - 1] = u_state[2][jj][x1grid_size - 3];
                     u_state[2][jj][x1grid_size - 2] = u_state[2][jj][x1grid_size - 3];
 
@@ -246,32 +247,7 @@ double central_difference(double x, double (*f)(double), double h){
 
     m3 = ( (*f)(x + 3*h/2) - (*f)(x - 3*h/2))/(3*h);
 }
-//---------------------------------------------------------------------------------------------------------
-//  NEWTON-RAPHSON 
-//---------------------------------------------------------------------------------------------------------
-double newton_raphson(double x, double (*f)(double),  double (*g)(double), double epsilon){
-    /**
-     * Newton Raphson Method:
-     * 
-     * x0: The initial guess
-     * f:  The key function f(x)
-     * g: The derivative of the key function -- f'(x)
-     * epsilon: THe error tolerance
-     * 
-     */
-     
-    double h = (*f)(x)/(*g)(x);
 
-    while (abs(h) >= epsilon){
-        h = (*f)(x)/(*g)(x);
-
-        // x[ii + 1] = x[ii] - f(x)/f'(x)
-        x = x - h; 
-    }
-
-    return x; 
-
-}
 
 //------------------------------------------------------------------------------------------------------------
 //  SPECIFIC ENTHALPY CALCULATIONS
@@ -280,6 +256,13 @@ double calc_enthalpy(float gamma, double rho, double pressure){
         return 1 + gamma*pressure/(rho*(gamma - 1));
 };
 
+double epsilon_rel(double pressure, double D, double tau, double lorentz_gamma){
+    return (tau + D*(1 - lorentz_gamma) + (1- lorentz_gamma*lorentz_gamma)*pressure)/(D*lorentz_gamma);
+}
+
+double rho_rel(double D, double lorentz_gamma, double root_g){
+    return D/(lorentz_gamma*root_g);
+}
 //------------------------------------------------------------------------------------------------------------
 //  VELOCITY CALCULATION
 //------------------------------------------------------------------------------------------------------------
@@ -291,22 +274,59 @@ double calc_velocity(double s, double tau, double pressure, double D, double roo
 //------------------------------------------------------------------------------------------------------------
 //  LORENTZ FACTOR CALCULATION
 //------------------------------------------------------------------------------------------------------------
-double lorentz_gamma(double v){
+double calc_lorentz_gamma(double v){
     return 1/sqrt(1 - v*v);
 }
 
-double calc_rel_sound_speed(float gamma, double lorentz_factor){
-    return gamma;
+vector<double> calc_lorentz_gamma(vector<double> &v){
+    int vsize = v.size();
+    vector<double> W(vsize); 
+
+    for (int ii=0; ii < vsize; ii++){
+        W[ii] = 1/sqrt(1 - v[ii]*v[ii]);
+    }
+
+    return W;
+}
+
+vector<vector<double> > calc_lorentz_gamma(vector<vector<double> > &v1, vector<vector<double> > &v2){
+    int v1size = v1[0].size();
+    int v2size = v2[0].size();
+    double vtot;
+    vector<vector<double> > W(v2size, vector<double> (v1size, 0)); 
+
+    for (int jj=0; jj < v2size; jj++){
+        for (int ii=0; ii < v1size; ii++){
+            vtot = sqrt(v1[jj][ii]*v1[jj][ii] + v2[jj][ii]*v2[jj][ii]);
+
+            W[jj][ii] = 1/sqrt(1 - vtot*vtot);
+        }
+    }
+    
+    return W;
+}
+
+
+double calc_rel_sound_speed(double pressure, double D, double tau, double lorentz_gamma, float gamma){
+    double epsilon = epsilon_rel(pressure, D, tau, lorentz_gamma);
+
+    return sqrt((gamma - 1)*gamma*epsilon/(1 + gamma*epsilon));
 }
 //------------------------------------------------------------------------------------------------------------
 //  F-FUNCTION FOR ROOT FINDING: F(P)
 //------------------------------------------------------------------------------------------------------------
-double f(float gamma, double pressure, double epsilon, double rho){
+double pressure_func(double pressure, double D, double tau, double lorentz_gamma, float gamma, double S){
+
+    double rho = rho_rel(D, lorentz_gamma, 1);
+    double epsilon = epsilon_rel(pressure, D, tau, lorentz_gamma);
+
     return (gamma - 1)*rho*epsilon - pressure;
 }
 
-double dfdp(float gamma, double pressure, double epsilon, double rho){
-    return (gamma - 1)*rho*epsilon - pressure;
+double dfdp(double pressure, double D, double tau, double lorentz_gamma, float gamma, double S){
+
+    double cs = calc_rel_sound_speed(pressure, D, tau, lorentz_gamma, gamma);
+    double v = S/(tau + D + pressure);
+
+    return v*v*cs*cs - 1;
 }
-
-

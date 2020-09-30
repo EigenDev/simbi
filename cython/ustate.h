@@ -39,6 +39,35 @@ namespace states {
 
     };
 
+    class UstateSR {
+        public: 
+            std::vector< std::vector<double> > state, cons_state; 
+            std::vector<double> r;
+            float theta, gamma, tend, dt;
+            bool first_order, periodic, linspace;
+            double CFL;
+            std::string coord_system;
+            UstateSR();
+            UstateSR(std:: vector <std::vector <double> > state, float gamma, double CFL,
+                    std::vector<double> r, std::string coord_system);
+            ~UstateSR();
+            std::vector < std::vector<double > > cons2prim1D(
+                std::vector < std::vector<double > > &cons_state, std::vector<double> &lorentz_gamma);
+
+            std::vector<std::vector<double> > u_dot1D(std::vector<std::vector<double> > &cons_state,
+                                                        std::vector<double> &lorentz_gamma, bool first_order,
+                                                        bool periodic, float theta, bool linspace);
+
+            std::vector<std::vector<double> > simulate1D(std::vector<double> &lorentz_gamma, float tend, float dt, float theta, 
+                                                            bool first_order, bool periodic, bool linspace);
+            double adapt_dt(std::vector<std::vector<double> > &cons_state, 
+                                    std::vector<double> &r,
+                                    std::vector<double> &lorentz_gamma,
+                                     bool linspace, bool first_order);
+            
+
+    };
+
     class Ustate2D {
         public:
         std::vector<std::vector<std::vector<double> > > state2D, cons_state2D;
@@ -56,9 +85,79 @@ namespace states {
 
         std::vector<std::vector<std::vector<double> > > u_dot2D(float gamma, 
             std::vector<std::vector<std::vector<double> > >  cons_state,
-            bool periodic, float theta);
+            bool periodic, float theta, bool linspace);
 
-        std::vector<std::vector<std::vector<double> > > simulate2D(float tend, bool periodic, double dt);
+        double adapt_dt(std::vector<std::vector<std::vector<double> > >  &cons_state,
+                                    bool linspace);
+
+        std::vector<std::vector<std::vector<double> > > simulate2D(float tend, bool periodic, double dt, bool linspace);
+    };
+
+    class UstateSR2D {
+        public:
+        std::vector<std::vector<std::vector<double> > > state2D, cons_state2D;
+        float theta, gamma, tend;
+        bool first_order, periodic;
+        double CFL, dt;
+        std::string coord_system;
+        std::vector<double> x1, x2;
+        UstateSR2D();
+        UstateSR2D(std::vector< std::vector< std::vector<double> > > state2D, float gamma, std::vector<double> x1,
+                            std::vector<double> x2,
+                            double CFL, std::string coord_system);
+        ~UstateSR2D();
+        std::vector<double> cons2prim(float gamma, std::vector<double> &u_state, double lorent_gamma);
+        std::vector <std::vector < std::vector<double > > > cons2prim2D(
+            std::vector<std::vector<std::vector<double> > > &cons_state2D,
+            std::vector<std::vector<double> > &lorentz_gamma);
+
+        std::vector<std::vector<std::vector<double> > > u_dot2D( 
+            std::vector<std::vector<std::vector<double> > >  &cons_state,
+            std::vector<std::vector<double> > &lorentz_gamma,
+            bool periodic, float theta, bool linspace);
+
+        std::vector<std::vector<std::vector<double> > > u_dot2D( 
+            std::vector<std::vector<std::vector<double> > >  &cons_state,
+            std::vector<std::vector<double> > &source1,
+            std::vector<std::vector<double> > &lorentz_gamma,
+            bool periodic, float theta, bool linspace);
+
+        std::vector<std::vector<std::vector<double> > > u_dot2D(
+            std::vector<std::vector<std::vector<double> > >  &cons_state,
+            std::vector<std::vector<double> > &source1, 
+            std::vector<std::vector<double> > &source2,
+            std::vector<std::vector<double> > &lorentz_gamma,
+            bool periodic, float theta, bool linspace);
+
+        std::vector<std::vector<std::vector<double> > > u_dot2D(
+            std::vector<std::vector<std::vector<double> > >  &cons_state,
+            std::vector<std::vector<double> > &source1, 
+            std::vector<std::vector<double> > &source2,
+            std::vector<std::vector<double> > &source3,
+            std::vector<std::vector<double> > &lorentz_gamma,
+            bool periodic, float theta, bool linspace);
+
+
+        double adapt_dt(std::vector<std::vector<std::vector<double> > >  &prims,
+                                   bool linspace);
+
+        std::vector<std::vector<std::vector<double> > > simulate2D(std::vector<std::vector<double> > &lorentz_gamma,
+                                                                float tend, bool periodic, double dt, bool linspace);
+
+        std::vector<std::vector<std::vector<double> > > simulate2D(std::vector<std::vector<double> > &lorentz_gamma,
+                                                                std::vector<std::vector<double> >  &source1,
+                                                                float tend, bool periodic, double dt, bool linspace);
+
+        std::vector<std::vector<std::vector<double> > > simulate2D(std::vector<std::vector<double> > &lorentz_gamma,
+                                                                std::vector<std::vector<double> >  &source1,
+                                                                std::vector<std::vector<double> >  &source2,
+                                                                float tend, bool periodic, double dt, bool linspace);
+
+        std::vector<std::vector<std::vector<double> > > simulate2D(std::vector<std::vector<double> > &lorentz_gamma,
+                                                                std::vector<std::vector<double> >  &source1,
+                                                                std::vector<std::vector<double> >  &source2,
+                                                                std::vector<std::vector<double> >  &source3,
+                                                                float tend, bool periodic, double dt, bool linspace);
     };
 }
 

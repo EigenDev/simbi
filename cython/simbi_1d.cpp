@@ -40,14 +40,13 @@ Ustate::~Ustate() {}
 //--------------------------------------------------------------------------------------------------
 
 // Return a 1D array containing (rho, pressure, v) at a *single grid point*
-vector<double>  cons2prim(float gamma, vector<double>  u_state, bool twoD=false){
+vector<double>  cons2prim(float gamma, vector<double>  u_state){
     /**
      * Return a vector containing the primitive
      * variables density (rho), pressure, and
      * velocity (v)
      */
 
-    if (twoD == false){
         double rho, energy, mom;
         vector<double> prims(3);
         double v, pressure;
@@ -65,31 +64,7 @@ vector<double>  cons2prim(float gamma, vector<double>  u_state, bool twoD=false)
 
         return prims;
         
-    } else {
-        double rho, energy, momx, momy;
-        vector<double> prims(4);
-        double vx, vy, vtot, pressure;
-
-        rho = u_state[0];
-        momx = u_state[1];
-        momy = u_state[2];
-        energy = u_state[3];
-
-        vx = momx/rho;
-        vy = momy/rho;
-
-        vtot = sqrt(vx*vx + vy*vy);
-
-        pressure = calc_pressure(gamma, rho, energy, vtot);
-        
-        prims[0] = rho;
-        prims[1] = pressure;
-        prims[2] = vx;
-        prims[3] = vy;
-
-        return prims;
-
-    }
+    
     
 };
 
@@ -931,7 +906,7 @@ vector<vector<double> > Ustate::u_dot1D(vector<vector<double> > &u_state, bool f
         if (periodic){
             physical_grid = grid_size;
         } else {
-            physical_grid = grid_size - 4;
+            physical_grid = grid_size - 2;
         }
         vector<vector<double> > udot(n_vars, vector<double>(physical_grid, 0));
 
