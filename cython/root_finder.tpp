@@ -5,7 +5,7 @@
 #include <cmath>
 
 template <typename T, typename... Args>
-double newton_raphson(T x, T (*f)(T, Args... args),  T (*g)(T, Args... args), 
+double newton_raphson(T x1, T (*f)(T, Args... args),  T (*g)(T, Args... args), 
                         double epsilon, Args... args)
 {
     /**
@@ -18,22 +18,45 @@ double newton_raphson(T x, T (*f)(T, Args... args),  T (*g)(T, Args... args),
      * 
      */
       
-     
     
-    double h = (*f)(x, args...)/(*g)(x, args...);
+    
+    
+    // double x = x1;
+    double h = 0;
+    // double q = (*f)(x, args...);
 
+    
+    do {
+        h = (*f)(x1, args...)/(*g)(x1, args...);
+
+        x1 = x1 - h; 
+    }while (std::abs(h) > epsilon);
+    
+    /**
+    double x, h;
     int ii = 0;
-    while (std::abs(h) >= epsilon){
+    int maximum_iteration = 100;
+    do {
+        x = x1;
         h = (*f)(x, args...)/(*g)(x, args...);
 
-        // x[ii + 1] = x[ii] - f(x)/f'(x)
-        
-        // increase the iteration count
-        ii++;
-        x = x - h; 
-    }
+        x1 = x - h;
 
+        // std::cout << "H: "<<  h << std::endl;
+        // std::cout << "X1: " << x1 << std::endl;
+        // std::cout << "X: " << x << std::endl;
+        // std::cin.get();
+
+        ii++;
+
+        if (ii > maximum_iteration){
+            std::cout << "Not Convergent" << std::endl;
+        }
+
+    } while(abs(x1 - x) >= epsilon);
+    */
+    
     // std::cout << "Newton Raphson took: " << ii << " iterations" << std::endl;
 
-    return x; 
+    return x1; 
 }

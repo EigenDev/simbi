@@ -31,11 +31,9 @@ theta_jet = jet_ang*np.pi/180
 dOmega = 2*np.pi*theta_jet**2
 rho_init = rho0(0, np.pi)
 v_init = 0.
-N = 70
+N = 100
 rmin = 0.01
-rmax = 1 
-N_init = 5 
-
+rmax = 1
 N_exp = 5
 
 
@@ -54,7 +52,7 @@ p_zones = int(p_zones)
 #print(p_zones)
 
 
-p_c = (gamma - 1.)*(3*epsilon/((nu + 1)*np.pi*dr**nu))
+p_c = 2*(gamma - 1.)*(3*epsilon/((nu + 1)*np.pi*dr**nu))
 
 print("Central Pressure:", p_c)
 
@@ -76,14 +74,15 @@ vy = np.zeros((N+1,N+1), np.double)
 
 
 
-tend = 0.5
-dt = 1.e-5
-
+tend = 0.01
+dt = 1.e-8
+# with PackageResource() as bm:
+#     bm.Hydro()
 bm = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy), 
-              Npts=N+1, geometry=((rmin, rmax),(0.,np.pi)), n_vars=4, regime="relativistic")
+              Npts=(N+1, N+1), geometry=((rmin, rmax),(0.,np.pi)), n_vars=4, regime="relativistic")
 
 t1 = (time.time()*u.s).to(u.min)
-sol = bm.simulate(tend=tend, first_order=False, dt=dt, coordinates=b"spherical")
+sol = bm.simulate(tend=tend, first_order=False, dt=dt, coordinates=b"spherical", CFL=0.1)
 print("The 2D BM Simulation for N = {} took {:.3f}".format(N, (time.time()*u.s).to(u.min) - t1))
 
 #density = b.cons2prim(sol)[0]
@@ -93,22 +92,28 @@ print(sol[2].max())
 rr, tt = np.meshgrid(r, theta)
 rr, t2 = np.meshgrid(r, theta_mirror)
 
-fig, ax= plt.subplots(1, 1, figsize=(10,10), subplot_kw=dict(projection='polar'), constrained_layout=True)
-c1 = ax.contourf(tt, rr, W_r, 100, cmap='plasma')
-c2 = ax.contourf(t2, rr, np.flip(W_r, axis=0), 100, cmap='plasma')
+fig, ax= plt.subplots(1, 1, figsize=(8,10), subplot_kw=dict(projection='polar'), constrained_layout=True)
+c1 = ax.contourf(tt, rr, W_r, 50, cmap='inferno')
+c2 = ax.contourf(t2, rr, np.flip(W_r, axis=0), 50, cmap='inferno')
 
-fig.suptitle('Blandford-McKee Problem at t={} s on {} x {} grid'.format(tend, N, N), fontsize=25)
+fig.suptitle('Blandford-McKee Problem at t={} s on {} x {} grid'.format(tend, N, N), fontsize=15)
 ax.set_title(r'$\rho(\theta) = 1.0 - 0.95\cos(n \ \theta)$ with n = {}'.format(n), fontsize=10)
 cbar = fig.colorbar(c1)
 ax.set_theta_zero_location("N")
 ax.set_theta_direction(-1)
 ax.set_rmax(1)
+ax.yaxis.label.set_color('white')
+ax.tick_params(axis='y', colors='white')
+ax.yaxis.grid(True, alpha=0.4)
+ax.xaxis.grid(True, alpha=0.4)
 ax.set_thetamin(0)
 ax.set_thetamax(360)
 #plt.gca().set_aspect('equal', adjustable='box')
+
+del bm
 
 #np.savetxt('blandford_mckee_test.txt', sol)
 cbar.ax.set_ylabel('Radial $\Gamma$', fontsize=20)
 # plt.tight_layout()
 plt.show()
-fig.savefig('plots/2D_bm_lorentzr_chokedjet_spherical_.pdf', bbox_inches="tight")
+#fig.savefig('plots/2D_bm_lorentzr__test_spherical_.eps', bbox_inches="tight")

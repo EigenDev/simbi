@@ -55,15 +55,17 @@ namespace states {
                 std::vector < std::vector<double > > &cons_state, std::vector<double> &lorentz_gamma);
 
             std::vector<std::vector<double> > u_dot1D(std::vector<std::vector<double> > &cons_state,
-                                                        std::vector<double> &lorentz_gamma, bool first_order,
+                                                        std::vector<double> &lorentz_gamma, 
+                                                        std::vector<std::vector<double> > &sources,
+                                                        bool first_order,
                                                         bool periodic, float theta, bool linspace);
 
-            std::vector<std::vector<double> > simulate1D(std::vector<double> &lorentz_gamma, float tend, float dt, float theta, 
+            std::vector<std::vector<double> > simulate1D(std::vector<double> &lorentz_gamma, 
+                                                            std::vector<std::vector<double> > &sources,
+                                                            float tend, float dt, float theta, 
                                                             bool first_order, bool periodic, bool linspace);
-            double adapt_dt(std::vector<std::vector<double> > &cons_state, 
-                                    std::vector<double> &r,
-                                    std::vector<double> &lorentz_gamma,
-                                     bool linspace, bool first_order);
+            double adapt_dt(std::vector<std::vector<double> > &prims, 
+                                     bool linspace, bool first_order, bool periodic);
             
 
     };
@@ -114,50 +116,18 @@ namespace states {
         std::vector<std::vector<std::vector<double> > > u_dot2D( 
             std::vector<std::vector<std::vector<double> > >  &cons_state,
             std::vector<std::vector<double> > &lorentz_gamma,
-            bool periodic, float theta, bool linspace);
-
-        std::vector<std::vector<std::vector<double> > > u_dot2D( 
-            std::vector<std::vector<std::vector<double> > >  &cons_state,
-            std::vector<std::vector<double> > &source1,
-            std::vector<std::vector<double> > &lorentz_gamma,
-            bool periodic, float theta, bool linspace);
-
-        std::vector<std::vector<std::vector<double> > > u_dot2D(
-            std::vector<std::vector<std::vector<double> > >  &cons_state,
-            std::vector<std::vector<double> > &source1, 
-            std::vector<std::vector<double> > &source2,
-            std::vector<std::vector<double> > &lorentz_gamma,
-            bool periodic, float theta, bool linspace);
-
-        std::vector<std::vector<std::vector<double> > > u_dot2D(
-            std::vector<std::vector<std::vector<double> > >  &cons_state,
-            std::vector<std::vector<double> > &source1, 
-            std::vector<std::vector<double> > &source2,
-            std::vector<std::vector<double> > &source3,
-            std::vector<std::vector<double> > &lorentz_gamma,
+            std::vector<std::vector<std::vector<double> > > & sources,
+            bool first_order,
             bool periodic, float theta, bool linspace);
 
 
         double adapt_dt(std::vector<std::vector<std::vector<double> > >  &prims,
-                                   bool linspace);
+                                   bool linspace, bool first_order);
 
         std::vector<std::vector<std::vector<double> > > simulate2D(std::vector<std::vector<double> > &lorentz_gamma,
-                                                                float tend, bool periodic, double dt, bool linspace);
-
-        std::vector<std::vector<std::vector<double> > > simulate2D(std::vector<std::vector<double> > &lorentz_gamma,
-                                                                std::vector<std::vector<double> >  &source1,
-                                                                float tend, bool periodic, double dt, bool linspace);
-
-        std::vector<std::vector<std::vector<double> > > simulate2D(std::vector<std::vector<double> > &lorentz_gamma,
-                                                                std::vector<std::vector<double> >  &source1,
-                                                                std::vector<std::vector<double> >  &source2,
-                                                                float tend, bool periodic, double dt, bool linspace);
-
-        std::vector<std::vector<std::vector<double> > > simulate2D(std::vector<std::vector<double> > &lorentz_gamma,
-                                                                std::vector<std::vector<double> >  &source1,
-                                                                std::vector<std::vector<double> >  &source2,
-                                                                std::vector<std::vector<double> >  &source3,
-                                                                float tend, bool periodic, double dt, bool linspace);
+                                                                std::vector<std::vector<std::vector<double> > > & sources,
+                                                                float tend,bool first_order,  bool periodic, double dt, bool linspace);
+                                                                
     };
 }
 

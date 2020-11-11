@@ -115,7 +115,7 @@ class Hydro:
             p_r = self.right_state[1]
             v_r = self.right_state[2]
         
-            if regime == "classical":
+            if self.regime == "classical":
                 # Calculate Energy Density on LHS
                 energy_l = p_l/(self.gamma - 1) + 0.5*rho_l*v_l**2
                 
@@ -151,7 +151,7 @@ class Hydro:
             breakpoint = size/midpoint                                          # Define the fluid breakpoint
             slice_point = int((self.Npts+2)/breakpoint)                             # Define the array slicepoint
             
-            if regime == "classical":
+            if self.regime == "classical":
                 self.u[:, : slice_point] = np.array([rho_l, rho_l*v_l, energy_l]).reshape(3,1)              # Left State
                 self.u[:, slice_point: ] = np.array([rho_r, rho_r*v_r, energy_r]).reshape(3,1)              # Right State
             else:
@@ -194,15 +194,7 @@ class Hydro:
                 self.init_tau = (self.init_rho*self.init_h*self.W**2 - self.init_pressure
                                   - self.init_rho*self.W)
             
-            
-            
-            
-            # Define state variable to be expanded upon later
-            self.u = None
-            if coord_system == 'cartesian':
-                self.s = np.zeros((n_vars, self.Npts), float)
-            else:
-                self.s = np.zeros((n_vars, self.Npts), float)
+            self.u= None 
             
             
             
@@ -218,12 +210,14 @@ class Hydro:
             lx = right_x - left_x
             ly = right_y - left_y
             
-            self.dx = lx/self.Npts
-            self.dy = ly/self.Npts
+            self.xNpts, self.yNpts = Npts 
+            
+            # self.dx = lx/self.Npts
+            # self.dy = ly/self.Npts
             
             self.n_vars = n_vars 
             
-            if regime == "classical":
+            if self.regime == "classical":
                 self.init_rho = initial_state[0]
                 self.init_pressure = initial_state[1]
                 self.init_vx = initial_state[2]
@@ -250,8 +244,8 @@ class Hydro:
                 self.initS1 = self.init_h*self.init_rho*self.W**2*self.init_v1
                 self.initS2 = self.init_h*self.init_rho*self.W**2*self.init_v2 
                 
-                self.init_tau = (self.init_rho*self.init_h*self.W**2 - self.init_pressure
-                                  - self.init_rho*self.W)
+                self.init_tau = (self.init_rho*self.init_h*(self.W)**2 - self.init_pressure
+                                  - self.init_rho*(self.W))
             
             
             
@@ -1080,11 +1074,17 @@ class Hydro:
                             right_ghost = self.u[:, -1]
                             left_ghost = self.u[:, 0]
                             
+                            
+                            
                             self.u = np.insert(self.u, self.u.shape[-1], 
                                             (right_ghost, right_ghost) , axis=1)
                             
                             self.u = np.insert(self.u, 0,
                                             (left_ghost, left_ghost) , axis=1)
+                            
+                            self.W = np.insert(self.W, self.W.shape[-1],
+                                              right_ghost)
+                            self.W = np.insert(self.W, 0, left_ghost)
                             
                     
             else:
@@ -1094,35 +1094,90 @@ class Hydro:
                     left_ghost = self.u[:, 0]
                     self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=1)
                     self.u = np.insert(self.u, 0, left_ghost , axis=1)
+                    
+                    print(self.W[0])
+                    right_gamma = self.W[-1]
+                    left_gamma = self.W[0]
+
+                    
+                    self.W = np.insert(self.W, -1, right_gamma, axis=0)
+                    self.W = np.insert(self.W, 0, left_gamma)
+                    
+                    
+                    #zzz = input('')
         else:
             if not self.u.any():
                 if periodic:
-                    self.u = np.empty(shape = (self.n_vars, self.Npts), dtype = float)
+                    self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype = float)
                     
                     self.u[:, :, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
                                             self.init_energy])
                 else:
                     if first_order:
-                        self.u = np.empty(shape = (self.n_vars, self.Npts, self.Npts), dtype=float)
-                        self.u[:, :, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
-                                            self.init_energy])
-                        
-                        # Add boundary ghosts
-                        right_ghost = self.u[:, :, -1]
-                        left_ghost = self.u[:, :, 0]
-                        
-                        self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=2)
-                        self.u = np.insert(self.u, 0, left_ghost , axis=2)
-                        
-                        upper_ghost = self.u[:, 0]
-                        bottom_ghost = self.u[:, -1]
-                        
-                        self.u = np.insert(self.u, self.u.shape[1], bottom_ghost , axis=1)
-                        self.u = np.insert(self.u, 0, upper_ghost , axis=1)
+                        if self.regime == "classical":
+                            self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
+                            self.u[:, :, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
+                                                self.init_energy])
+                            
+                            # Add boundary ghosts
+                            right_ghost = self.u[:, :, -1]
+                            left_ghost = self.u[:, :, 0]
+                            
+                            self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=2)
+                            self.u = np.insert(self.u, 0, left_ghost , axis=2)
+                            
+                            upper_ghost = self.u[:, 0]
+                            bottom_ghost = self.u[:, -1]
+                            
+                            self.u = np.insert(self.u, self.u.shape[1], bottom_ghost , axis=1)
+                            self.u = np.insert(self.u, 0, upper_ghost , axis=1)
+                        else:
+                            self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
+                            self.u[:, :, :] = np.array([self.initD, self.initS1,
+                                                        self.initS2, self.init_tau])
+                            
+                            # Add boundary ghosts
+                            bottom_ghost = self.u[:, -1]
+                            upper_ghost = self.u[:, 0]
+                            
+                            bottom_gamma = self.W[-1]
+                            upper_gamma = self.W[0]
+                            
+                            self.u = np.insert(self.u, self.u.shape[1], 
+                                            bottom_ghost , axis=1)
+                            
+                            self.u = np.insert(self.u, 0,
+                                            upper_ghost , axis=1)
+                            
+                            self.W = np.insert(self.W, self.W.shape[0], 
+                                            bottom_gamma , axis=0)
+                            
+                            self.W = np.insert(self.W, 0,
+                                            upper_gamma , axis=0)
+                            
+                            left_ghost = self.u[:, :, 0]
+                            right_ghost = self.u[:, :, -1]
+                            
+                            left_gamma = self.W[ :, 0]
+                            right_gamma = self.W[ :,  -1]
+                            
+                            
+                            self.u = np.insert(self.u, 0, 
+                                            left_ghost , axis=2)
+                            
+                            self.u = np.insert(self.u, self.u.shape[2],
+                                            right_ghost , axis=2)
+                            
+                            self.W = np.insert(self.W, 0, 
+                                            left_gamma , axis=1)
+                            
+                            self.W = np.insert(self.W, self.W.shape[1],
+                                            right_gamma, axis=1)
+                            
                         
                     else:
                         if self.regime == "classical":
-                            self.u = np.empty(shape = (self.n_vars, self.Npts, self.Npts), dtype=float)
+                            self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
                             self.u[:, :, :] = np.array([self.init_rho, self.init_rho*self.init_vx,
                                                         self.init_rho*self.init_vy, self.init_energy])
                             
@@ -1146,7 +1201,7 @@ class Hydro:
                             self.u = np.insert(self.u, self.u.shape[2],
                                             (right_ghost, right_ghost) , axis=2)
                         else:
-                            self.u = np.empty(shape = (self.n_vars, self.Npts, self.Npts), dtype=float)
+                            self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
                             self.u[:, :, :] = np.array([self.initD, self.initS1,
                                                         self.initS2, self.init_tau])
                             
@@ -1163,7 +1218,7 @@ class Hydro:
                             self.u = np.insert(self.u, 0,
                                             (upper_ghost, upper_ghost) , axis=1)
                             
-                            self.W = np.insert(self.W, self.W.shape[1], 
+                            self.W = np.insert(self.W, self.W.shape[0], 
                                             (bottom_gamma, bottom_gamma) , axis=0)
                             
                             self.W = np.insert(self.W, 0,
@@ -1225,8 +1280,9 @@ class Hydro:
                     a = PyState(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
                     u = a.simulate(tend=tend, dt=dt, linspace=linspace, periodic=periodic)
                 else:
+                    print("FO W: ", self.W.size)
                     a = PyStateSR(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
-                    u = a.simulate(tend=tend, dt=dt, linspace=linspace, periodic=periodic, lorentz_gamma=self.W)
+                    u = a.simulate(tend=tend, dt=dt, linspace=linspace, sources=sources, periodic=periodic, lorentz_gamma=self.W)
                     
                 
                 """
@@ -1270,8 +1326,10 @@ class Hydro:
                     a = PyState(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
                     u = a.simulate(tend=tend, first_order=False,  dt=dt, linspace=linspace, periodic=periodic)
                 else:
+                    print(self.W.size)
+                    print(u.shape)
                     a = PyStateSR(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
-                    u = a.simulate(tend=tend, first_order=False, dt=dt, linspace=linspace, periodic=periodic, lorentz_gamma=self.W)
+                    u = a.simulate(tend=tend, first_order=False, sources=sources, dt=dt, linspace=linspace, periodic=periodic, lorentz_gamma=self.W)
                    
                 #a = PyState(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
                 #u = a.simulate(tend=tend, first_order=False, dt=dt, linspace=linspace, periodic=periodic)
@@ -1324,28 +1382,68 @@ class Hydro:
                 
                 
         else:
-            print('Computing Higher Order...')
-            x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.Npts)
-            x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.Npts)
-            
-            if not sources:
-                if self.regime == "classical":
-                    b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tend, dt=dt, linspace=linspace)
-                    
+            if (first_order):
+                print("Comptuing First Order...")
+                if (linspace):
+                    x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
+                    x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
                 else:
-                    #print(self.W)
-                    b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tend, dt=dt, lorentz_gamma = self.W, linspace=linspace)
+                    x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
+                    x0 = x1[0]
+                    xn = x1[1]
+                    xi = 0.5*(x0 + xn)
+                    volavg = 0.75*(xi**4 - x0**4)/(xi**3 - x0**3)
+                    dx2 = (xi - x0)/volavg
+                    #x2 = np.arange(self.geometry[1][0], self.geometry[1][1], dx2)
+                    x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+                if not sources:
+                    if self.regime == "classical":
+                        b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                        u = b.simulate(tend, dt=dt, linspace=linspace)
+                        
+                    else:
+                        b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                        u = b.simulate(tend, dt=dt, first_order=first_order, lorentz_gamma = self.W, linspace=linspace)
+                else:
+                    if self.regime == "classical":
+                        b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                        u = b.simulate(tend, dt=dt)
+                        
+                    else:
+                        b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates, cfl=CFL)
+                        u = b.simulate(tend=tend, dt=dt, first_order=first_order, lorentz_gamma = self.W, sources = sources,
+                                    linspace=linspace)
             else:
-                if self.regime == "classical":
-                    b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tend, dt=dt)
-                    
+                print('Computing Higher Order...')
+                if (linspace):
+                    x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
+                    x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
                 else:
-                    b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tend=tend, dt=dt, lorentz_gamma = self.W, sources = sources,
-                                   linspace=linspace)
+                    x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
+                    x0 = x1[0]
+                    xn = x1[1]
+                    xi = 0.5*(x0 + xn)
+                    volavg = 0.75*(xi**4 - x0**4)/(xi**3 - x0**3)
+                    dx2 = (xi - x0)/volavg
+                    #x2 = np.arange(self.geometry[1][0], self.geometry[1][1], dx2)
+                    x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+                if not sources:
+                    if self.regime == "classical":
+                        b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                        u = b.simulate(tend, dt=dt, linspace=linspace)
+                        
+                    else:
+                        b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                        u = b.simulate(tend, dt=dt, lorentz_gamma = self.W, linspace=linspace)
+                else:
+                    if self.regime == "classical":
+                        b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                        u = b.simulate(tend, dt=dt)
+                        
+                    else:
+                        b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates, cfl=CFL)
+                        u = b.simulate(tend=tend, dt=dt, lorentz_gamma = self.W, sources = sources,
+                                    linspace=linspace, first_order=False)
                 
             
                 
@@ -1394,19 +1492,16 @@ class Hydro:
                 t += dt
             """
             
-            
-            
-            
-            
-            
-            
         
         # Return the final state tensor, purging the ghost cells
         if first_order:
             if periodic:
                 return u
             else:
-                return u[:, 1: -1]
+                if self.dimensions == 1:
+                    return u[:, 1: -1]
+                else:
+                    return u[:, 1:-1, 1:-1]
         else:
             if periodic:
                 return u
@@ -1418,6 +1513,16 @@ class Hydro:
         
         
         
+    def __del__(self):
+        print("Destroying Object")
 
+class PackageResource:
+    def __enter__(self):
+        class Student(Hydro):
+            pass
         
+        self.package_obj = Student()
+        return self.package_obj
 
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.package_obj.cleanup()
