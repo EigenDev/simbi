@@ -67,7 +67,7 @@ vector<double>  cons2primSR(float gamma, vector<double>  &u_state, double lorent
     // cout << "Tau: " << tau << endl;
     // cout << "Pmin:" << pmin << endl;
     
-    double pressure = newton_raphson(pmin, pressure_func, dfdp, 1.e-10, D, tau, lorentz_gamma, gamma, S);
+    double pressure = newton_raphson(pmin, pressure_func, dfdp, 1.e-6, D, tau, lorentz_gamma, gamma, S);
 
     // cout << "NR Pressure: " << pressure << endl;
 
@@ -118,7 +118,6 @@ vector<vector< vector<double> > > UstateSR2D::cons2prim2D(vector<vector< vector<
     double S0, Sn, D_n, S1_n, S2_n, tau_n, pn, p0;
     
     for (int jj=0; jj < ny_gridpts; jj++){
-
         p0 = 0;
         for(int ii=0; ii< nx_gridpts; ii++){
             D = u_state2D[0][jj][ii];       // Relativistic Density
@@ -127,7 +126,7 @@ vector<vector< vector<double> > > UstateSR2D::cons2prim2D(vector<vector< vector<
             tau = u_state2D[3][jj][ii];    // Energy Density
             W = lorentz_gamma[jj][ii];
 
-            
+
 
             S = sqrt(S1*S1 + S2*S2);
 
@@ -148,7 +147,7 @@ vector<vector< vector<double> > > UstateSR2D::cons2prim2D(vector<vector< vector<
             // cin.get();
             
 
-            pressure = newton_raphson(pmin, pressure_func, dfdp, 1.e-10, D, tau, W, gamma, S);
+            pressure = newton_raphson(pmin, pressure_func, dfdp, 1.e-6, D, tau, W, gamma, S);
 
             // cout << "Pressure:" << pressure << endl;
             // cin.get();
@@ -272,8 +271,13 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> &p
         plus_vR = (vbar + cbar)/(1 + vbar*cbar);
         minus_vL = (vbar - cbar)/(1 - vbar*cbar);
 
-        lambda["left"]["minus"] = minus_vL; 
-        lambda["right"]["plus"] = plus_vR; 
+        lambda["signal"]["aL"] = minus_vL; 
+        lambda["signal"]["aR"] = plus_vR; 
+
+        lambda["left"]["plus"] = (v1_l + cs_l)/(1 + v1_l*cs_l);
+        lambda["left"]["minus"] = (v1_l - cs_l)/(1 - v1_l*cs_l);
+        lambda["right"]["plus"] = (v1_r + cs_r)/(1 + v1_r*cs_r);
+        lambda["right"]["minus"] = (v1_r + cs_r)/(1 - v1_r*cs_r);
     } else {
         vbar = 0.5*(v2_l + v2_r);
         cbar = 0.5*(cs_l + cs_r);
@@ -281,8 +285,13 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> &p
         plus_vR = (vbar + cbar)/(1 + vbar*cbar);
         minus_vL = (vbar - cbar)/(1 - vbar*cbar);
 
-        lambda["left"]["minus"] = minus_vL; 
-        lambda["right"]["plus"] = plus_vR; 
+        lambda["signal"]["aL"] = minus_vL; 
+        lambda["signal"]["aR"] = plus_vR; 
+
+        lambda["left"]["plus"] = (v2_l + cs_l)/(1 + v2_l*cs_l);
+        lambda["left"]["minus"] = (v2_l - cs_l)/(1 - v2_l*cs_l);
+        lambda["right"]["plus"] = (v2_r + cs_r)/(1 + v2_r*cs_r);
+        lambda["right"]["minus"] = (v2_r - cs_r)/(1 - v2_r*cs_r);
     }
         
     return lambda;
@@ -391,8 +400,8 @@ double UstateSR2D::adapt_dt(vector<vector<vector<double> > > &prims,
 
                 // cout << "R_right: " << r_right << endl;
                 // cout << "R_left: " << r_left << endl;
-                r_right = right_cell; // + x1[ii]);
-                r_left = left_cell; //+ x1[ii]
+                r_right = 0.5*(right_cell + x1[ii]);
+                r_left = 0.5*(left_cell + x1[ii]);
                 // cout << "R_right: " << r_right << endl;
                 // cout << "R_left: " << r_left << endl;
                 // cin.get();
@@ -522,33 +531,37 @@ vector<double> calc_hll_flux(float gamma,
 {
     map<string, map<string, double > > lambda; 
     vector<double> hll_flux(4);
-    double aL, aR, aLminus, aRplus;  
+    double aL, aR, aLminus, aRplus, alpha_plus, alpha_minus;  
     
     lambda = calc_eigenvals(gamma, left_prims, right_prims, direction);
 
-    aL = lambda["left"]["minus"];
-    aR = lambda["right"]["plus"];
+    aL = lambda["signal"]["aL"];
+    aR = lambda["signal"]["aR"];
     // Calculate /pm alphas
-    aLminus = min(0.0, aL);
+    aLminus = max(0.0, - aL);
     aRplus = max(0.0 , aR);
 
 
+    // aRplus = findMax(0.0, lambda["left"]["plus"], lambda["right"]["plus"]);
+    // aLminus = findMax(0.0, -lambda["left"]["minus"], -lambda["right"]["minus"]);
+
+
     // Compute the HLL Flux component-wise
-    hll_flux[0] = ( aRplus*left_flux[0] - aLminus*right_flux[0]
-                            + aRplus*aLminus*(right_state[0] - left_state[0] ) )  /
-                            (aRplus - aLminus);
+    hll_flux[0] = ( aRplus*left_flux[0] + aLminus*right_flux[0]
+                            - aRplus*aLminus*(right_state[0] - left_state[0] ) )  /
+                            (aRplus + aLminus);
 
-    hll_flux[1] = ( aRplus*left_flux[1] - aLminus*right_flux[1]
-                            + aRplus*aLminus*(right_state[1] - left_state[1] ) )  /
-                            (aRplus - aLminus);
+    hll_flux[1] = ( aRplus*left_flux[1] + aLminus*right_flux[1]
+                            - aRplus*aLminus*(right_state[1] - left_state[1] ) )  /
+                            (aRplus + aLminus);
 
-    hll_flux[2] = ( aRplus*left_flux[2] - aLminus*right_flux[2]
-                            + aRplus*aLminus*(right_state[2] - left_state[2]) )  /
-                            (aRplus - aLminus);
+    hll_flux[2] = ( aRplus*left_flux[2] + aLminus*right_flux[2]
+                            - aRplus*aLminus*(right_state[2] - left_state[2]) )  /
+                            (aRplus + aLminus);
 
-    hll_flux[3] = ( aRplus*left_flux[3] - aLminus*right_flux[3]
-                            + aRplus*aLminus*(right_state[3] - left_state[3]) )  /
-                            (aRplus - aLminus);
+    hll_flux[3] = ( aRplus*left_flux[3] + aLminus*right_flux[3]
+                            - aRplus*aLminus*(right_state[3] - left_state[3]) )  /
+                            (aRplus + aLminus);
 
     return hll_flux;
 };
@@ -1238,6 +1251,9 @@ vector<vector<vector<double> > > UstateSR2D::u_dot2D(vector<vector<vector<double
                         theta_left = atan2( sin(lower_cell) + sin(x2[tcoordinate]), 
                                                     cos(lower_cell) + cos(x2[tcoordinate]) );
 
+                        theta_right = 0.5*(upper_cell + x2[tcoordinate]);
+                        theta_left = 0.5*(lower_cell + x2[tcoordinate]);
+
                 } else {
                     // log_rLeft = log10(x1[0]) + rcoordinate*delta_logr;
                     // log_rRight = log_rLeft + delta_logr;
@@ -1278,9 +1294,9 @@ vector<vector<vector<double> > > UstateSR2D::u_dot2D(vector<vector<vector<double
                 }
 
                 dr = r_right - r_left;
-
                 
-                ang_avg =  atan2(sin(theta_right) + sin(theta_left), cos(theta_right) + cos(theta_left) );
+                
+                ang_avg = 0.5*(theta_left + theta_right); // atan2(sin(theta_right) + sin(theta_left), cos(theta_right) + cos(theta_left) );
                 // Compute the surface areas
                 right_rsurface = r_right*r_right;
                 left_rsurface = r_left*r_left;
@@ -1697,8 +1713,8 @@ vector<vector<vector<double> > > UstateSR2D::u_dot2D(vector<vector<vector<double
                         right_cell = x1[rcoordinate];
                     }
 
-                    r_right = right_cell; //+ x1[rcoordinate]);
-                    r_left = left_cell; // + left_cell);
+                    r_right = 0.5*(right_cell + x1[rcoordinate]); //+ x1[rcoordinate]);
+                    r_left = 0.5*(left_cell + x1[rcoordinate]); // + left_cell);
 
                     // Outflow the left/right boundaries
                     if (tcoordinate - 1 < 0){
@@ -1745,8 +1761,12 @@ vector<vector<vector<double> > > UstateSR2D::u_dot2D(vector<vector<vector<double
                 // string a;
                 // cin >> a;
 
-                
-                
+                // cout << "SD: " << sourceD[tcoordinate][rcoordinate] << endl;
+                // cout << "S1: " << source_S1[tcoordinate][rcoordinate] << endl;
+                // cout << "S2: " << source_S2[tcoordinate][rcoordinate] << endl;
+                // cout << "S_tau: " << source_tau[tcoordinate][rcoordinate] << endl;
+                // cin.get();
+
                 
 
                 L[0][tcoordinate][rcoordinate] = - (f1[0]*right_rsurface - f2[0]*left_rsurface)/deltaV1
@@ -1874,7 +1894,14 @@ vector<vector<vector<double> > > UstateSR2D::simulate2D(vector<vector<double> > 
             if (t > 0){
                 dt = adapt_dt(prims, linspace);
             }
-            
+
+            // for (int jj = 0; jj < ygrid_size; jj++){
+            //     for (int ii =0; ii < xgrid_size; ii++){
+            //         cout << prims[2][jj][ii] << ", " << flush;;
+            //     }
+            //     cout << endl;
+            // }
+            // cin.get();
 
             u.swap(u_p);
             
@@ -1977,7 +2004,7 @@ vector<vector<vector<double> > > UstateSR2D::simulate2D(vector<vector<double> > 
             cin.get();
             */
             
-            // config_ghosts2D(u1, xgrid_size, ygrid_size, false);
+            config_ghosts2D(u1, xgrid_size, ygrid_size, false);
             prims = cons2prim2D(u1, lorentz_gamma);
             lorentz_gamma = calc_lorentz_gamma(prims[2], prims[3]);
 
@@ -2002,7 +2029,7 @@ vector<vector<vector<double> > > UstateSR2D::simulate2D(vector<vector<double> > 
             dt = adapt_dt(prims, linspace, false);
             
             
-            udot1 = u_dot2D(u1, lorentz_gamma, sources, periodic, theta, linspace);
+            udot1 = u_dot2D(u1, lorentz_gamma, sources, first_order, periodic, theta, linspace);
 
             // for (int jj=0; jj <ygrid_size; jj++){
             //     for (int ii=0; ii < xgrid_size; ii++){
@@ -2045,7 +2072,7 @@ vector<vector<vector<double> > > UstateSR2D::simulate2D(vector<vector<double> > 
                 }
                 // cout << endl;
             }
-            dt = adapt_dt(prims, linspace);
+            // dt = adapt_dt(prims, linspace, false);
             
 
             if (isnan(dt)){
@@ -2100,7 +2127,8 @@ vector<vector<vector<double> > > UstateSR2D::simulate2D(vector<vector<double> > 
             prims = cons2prim2D(u2, lorentz_gamma);
             lorentz_gamma = calc_lorentz_gamma(prims[2], prims[3]);
 
-            udot2 = u_dot2D(u2, lorentz_gamma, sources, periodic, theta, linspace);
+            
+            udot2 = u_dot2D(u2, lorentz_gamma, sources, first_order, periodic, theta, linspace);
 
             // for (int jj=0; jj <ygrid_size; jj++){
             //     for (int ii=0; ii < xgrid_size; ii++){
@@ -2112,6 +2140,7 @@ vector<vector<vector<double> > > UstateSR2D::simulate2D(vector<vector<double> > 
             //     }
             //     // cout << endl;
             // }
+
             for (int jj=0; jj <ygrid_size; jj++){
                 for (int ii=0; ii < xgrid_size; ii++){
                     // cout << u[0][jj][ii] << endl;
@@ -2142,7 +2171,7 @@ vector<vector<vector<double> > > UstateSR2D::simulate2D(vector<vector<double> > 
                 }
                 // cout << endl;
             }
-            dt = adapt_dt(prims, linspace);
+            dt = adapt_dt(prims, linspace, false);
             
 
             if (isnan(dt)){
@@ -2202,13 +2231,14 @@ vector<vector<vector<double> > > UstateSR2D::simulate2D(vector<vector<double> > 
             prims = cons2prim2D(u_p, lorentz_gamma);
             lorentz_gamma = calc_lorentz_gamma(prims[2], prims[3]);
 
-            dt = adapt_dt(prims, linspace);
+            dt = adapt_dt(prims, linspace, false);
             
 
             if (isnan(dt)){
                 break;
             }
             
+
             /**
             cout << " " << endl;
             cout << "UP: " << endl;

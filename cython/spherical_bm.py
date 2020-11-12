@@ -31,7 +31,7 @@ theta_jet = jet_ang*np.pi/180
 dOmega = 2*np.pi*theta_jet**2
 rho_init = rho0(0, np.pi)
 v_init = 0.
-N = 100
+N = 50
 rmin = 0.01
 rmax = 1
 N_exp = 5
@@ -61,6 +61,8 @@ p = np.zeros((N+1,N+1), np.double)
 p[:, :p_zones] = p_c 
 p[:, p_zones:] = p_init
 
+print(p)
+zzz = input("")
 
 n = 2.0
 rho = np.zeros((N+1,N+1), float)
@@ -74,7 +76,7 @@ vy = np.zeros((N+1,N+1), np.double)
 
 
 
-tend = 0.01
+tend = 0.5
 dt = 1.e-8
 # with PackageResource() as bm:
 #     bm.Hydro()
@@ -82,7 +84,7 @@ bm = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy),
               Npts=(N+1, N+1), geometry=((rmin, rmax),(0.,np.pi)), n_vars=4, regime="relativistic")
 
 t1 = (time.time()*u.s).to(u.min)
-sol = bm.simulate(tend=tend, first_order=False, dt=dt, coordinates=b"spherical", CFL=0.1)
+sol = bm.simulate(tend=tend, first_order=False, dt=dt, coordinates=b"spherical", CFL=0.25)
 print("The 2D BM Simulation for N = {} took {:.3f}".format(N, (time.time()*u.s).to(u.min) - t1))
 
 #density = b.cons2prim(sol)[0]
@@ -93,8 +95,8 @@ rr, tt = np.meshgrid(r, theta)
 rr, t2 = np.meshgrid(r, theta_mirror)
 
 fig, ax= plt.subplots(1, 1, figsize=(8,10), subplot_kw=dict(projection='polar'), constrained_layout=True)
-c1 = ax.contourf(tt, rr, W_r, 50, cmap='inferno')
-c2 = ax.contourf(t2, rr, np.flip(W_r, axis=0), 50, cmap='inferno')
+c1 = ax.pcolormesh(tt, rr, W_r, cmap='inferno', shading = "gouraud")
+c2 = ax.pcolormesh(t2, rr, np.flip(W_r, axis=0), cmap='inferno', shading = "gouraud")
 
 fig.suptitle('Blandford-McKee Problem at t={} s on {} x {} grid'.format(tend, N, N), fontsize=15)
 ax.set_title(r'$\rho(\theta) = 1.0 - 0.95\cos(n \ \theta)$ with n = {}'.format(n), fontsize=10)

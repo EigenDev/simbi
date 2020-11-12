@@ -10,7 +10,7 @@ from state import PyStateSR
 
 gamma = 5/3 
 tend = 0.4249
-N = 264
+N = 2 * 264
 dt = 1.e-4
 
 fig, axs = plt.subplots(3, 1, figsize=(15,30), sharex=True)

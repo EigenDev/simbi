@@ -22,17 +22,18 @@ double newton_raphson(T x1, T (*f)(T, Args... args),  T (*g)(T, Args... args),
     
     
     // double x = x1;
-    double h = 0;
+    // double h = 0;
     // double q = (*f)(x, args...);
 
-    
+    /**
     do {
         h = (*f)(x1, args...)/(*g)(x1, args...);
 
         x1 = x1 - h; 
     }while (std::abs(h) > epsilon);
+    */
+
     
-    /**
     double x, h;
     int ii = 0;
     int maximum_iteration = 100;
@@ -42,19 +43,17 @@ double newton_raphson(T x1, T (*f)(T, Args... args),  T (*g)(T, Args... args),
 
         x1 = x - h;
 
-        // std::cout << "H: "<<  h << std::endl;
-        // std::cout << "X1: " << x1 << std::endl;
-        // std::cout << "X: " << x << std::endl;
-        // std::cin.get();
-
         ii++;
 
-        if (ii > maximum_iteration){
-            std::cout << "Not Convergent" << std::endl;
-        }
+        
+        // if (ii > maximum_iteration){
+        //     std::cout << "Not Convergent" << std::endl;
+        // }
+        
 
-    } while(abs(x1 - x) >= epsilon);
-    */
+    } while(std::abs(x1 - x) >= epsilon);
+    
+    
     
     // std::cout << "Newton Raphson took: " << ii << " iterations" << std::endl;
 

@@ -376,7 +376,7 @@ vector<double> calc_hll_flux(float gamma, vector<double> left_prims,
 
     alpha_plus = findMax(0, lambda["left"]["plus"], lambda["right"]["plus"]);
     alpha_minus = findMax(0 , - lambda["left"]["minus"], - lambda["right"]["minus"]);
-
+    
     // cout << "alpha_plus: " << alpha_plus << endl;
     // cout << "alpha_minus: " << alpha_minus << endl;
 

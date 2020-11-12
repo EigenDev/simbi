@@ -61,7 +61,7 @@ gamma = 4/3
 N_0 = 4*np.pi*(r_0/R_0)**3 * (1. - np.exp(-2./(theta_0**2)))*theta_0**2
 xnpts = 64
 
-rmin = 5.e-3 #((r_0/R_0)/1e3).value
+rmin = 1.e-3 #((r_0/R_0)/1e3).value
 rmax = 1.0
 theta_min = 0
 theta_max = np.pi/2
@@ -71,14 +71,14 @@ r = np.logspace(np.log10(rmin), np.log10(rmax), xnpts)
 r1 = r[1]
 r0 = r[0]
 ri = 0.5*(r1 + r0)
-volavg = 0.75*(r1**4 - r0**4)/(r1**3 - r0**3)
+volavg = 0.75*(ri**4 - r0**4)/(ri**3 - r0**3)
 # Choose dtheta carefully such that the grid zones remain roughly square
-dtheta = (r1 - r0)/volavg
-print(theta_max/dtheta)
+dtheta = (ri - r0)/volavg
+#print(theta_max/dtheta)
 ynpts = int(theta_max/dtheta)
 #r = np.linspace(rmin, rmax, xnpts)
 #theta = np.logspace(np.log10(theta_min), np.log10(theta_max),  ynpts)
-theta = np.arange(theta_min, theta_max,  dtheta)
+#theta = np.arange(theta_min, theta_max,  dtheta)
 theta = np.linspace(theta_min, theta_max, ynpts)
 ynpts = theta.size
 theta_mirror = - theta[::-1]
@@ -88,9 +88,9 @@ theta_mirror[-1] *= -1.
 rr, tt = np.meshgrid(r, theta)
 rr, t2 = np.meshgrid(r, theta_mirror)
 
-print(dtheta)
-print(theta)
-print(tt)
+# print(dtheta)
+# print(theta)
+# print(tt)
 
 #print(ynpts)
 print("Grid Dimensions: {} x {} ".format(r.size, theta.size) )
@@ -109,7 +109,6 @@ S_0 =  L*g*scale
 S_r = S_0*np.sqrt(1 - 1/gamma_0**2)
 S_D = S_0/eta_0
 S_theta = np.zeros(S_r.shape)
-
 
 p = np.zeros((ynpts, xnpts), float)
 p[:] = p_init
@@ -132,8 +131,8 @@ Jet = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt),
               Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4, regime="relativistic")
 
 t1 = (time.time()*u.s).to(u.min)
-sol = Jet.simulate(tend=tend, first_order=True, dt=dt, coordinates=b"spherical", sources=(S_D, S_r,S_theta ,S_0),
-                   linspace=False, CFL=0.1)
+sol = Jet.simulate(tend=tend, first_order=False, dt=dt, coordinates=b"spherical", sources=(S_D, S_r,S_theta ,S_0),
+                   linspace=False, CFL=0.4)
 
 print("The 2D Jet Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 

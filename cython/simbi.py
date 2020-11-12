@@ -1434,13 +1434,14 @@ class Hydro:
                         
                     else:
                         b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                        u = b.simulate(tend, dt=dt, lorentz_gamma = self.W, linspace=linspace)
+                        u = b.simulate(tend, dt=dt, first_order=False, lorentz_gamma = self.W, linspace=linspace)
                 else:
                     if self.regime == "classical":
                         b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
                         u = b.simulate(tend, dt=dt)
                         
                     else:
+                        
                         b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates, cfl=CFL)
                         u = b.simulate(tend=tend, dt=dt, lorentz_gamma = self.W, sources = sources,
                                     linspace=linspace, first_order=False)
