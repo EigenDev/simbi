@@ -25,6 +25,13 @@ struct PrimData
     std::vector<double> rho, v1, v2, p, v;
 };
 
+struct DataWriteMembers
+{
+    float t;
+    double xmin, xmax, ymin, ymax;
+    int NX, NY, xactive_zones, yactive_zones;
+};
+
 template <typename T, size_t N>
 constexpr size_t array_size(T (&)[N]);
 
