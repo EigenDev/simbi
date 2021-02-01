@@ -6,7 +6,7 @@ import time
 import scipy.ndimage
 import matplotlib.colors as colors
 
-from simbi import Hydro 
+from simbi_py import Hydro 
 from astropy import units as u, constants as const
 
 

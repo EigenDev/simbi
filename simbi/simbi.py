@@ -1424,12 +1424,12 @@ class Hydro:
                     x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
                 
                 sources = np.zeros((4, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
-                sources = sources.reshape(sources.shape[0], -1)
                 if self.regime == "classical":
                     b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
                     u = b.simulate(tend, dt=dt, linspace=linspace, hllc=hllc, sources=sources)
                 else:
                     self.W = self.W.flatten()
+                    sources = sources.reshape(sources.shape[0], -1)
                     b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
                     u = b.simulate(tend, dt=dt, first_order=False, lorentz_gamma = self.W, 
                                     linspace=linspace, hllc = hllc, sources=sources)
@@ -1504,14 +1504,3 @@ class Hydro:
         
     def __del__(self):
         print("Destroying Object")
-
-class PackageResource:
-    def __enter__(self):
-        class Student(Hydro):
-            pass
-        
-        self.package_obj = Student()
-        return self.package_obj
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.package_obj.cleanup()

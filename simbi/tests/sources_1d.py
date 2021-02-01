@@ -2,7 +2,7 @@
 
 import numpy as np 
 import matplotlib.pyplot as plt 
-from simbi import * 
+from simbi_py import * 
 
 
 gamma = 4/3 

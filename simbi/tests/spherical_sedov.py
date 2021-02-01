@@ -5,7 +5,7 @@
 import numpy as np 
 import matplotlib.pyplot as plt
 import time
-from simbi import Hydro 
+from simbi_py import Hydro 
 from state import PyState2D
 from astropy import units as u
 

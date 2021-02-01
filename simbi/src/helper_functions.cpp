@@ -5,14 +5,15 @@
 */
 
 #include "helper_functions.h" 
+#include "ustate.h"
 #include <cmath>
 #include <map>
 #include <algorithm>
 #include <cstdarg>
-// #include <h5cpp/all>
-// #include <H5Cpp.h>
+
+
 using namespace std;
-// using namespace H5;
+using namespace states;
 
 // =========================================================================================================
 //        HELPER FUNCTIONS FOR COMPUTATION
@@ -107,8 +108,9 @@ vector<vector<double> > transpose(vector<vector<double> > &mat){
     return trans_vec;
 };
 
-// void config_ghosts1D(vector<vector<double> >&, int grid_size);
 
+// void config_ghosts1D(vector<vector<double> >&, int grid_size);
+/**
 void config_ghosts1D(vector<vector<double> > &u_state, int grid_size, bool first_order){
     if (first_order){
         u_state[0][0] = u_state[0][1];
@@ -137,7 +139,7 @@ void config_ghosts1D(vector<vector<double> > &u_state, int grid_size, bool first
     }
 };
 
-void config_ghosts2D(vector<vector<vector<double> > > &u_state, 
+void config_ghosts2D(vector &u_state, 
                         int x1grid_size, int x2grid_size, bool first_order,
                         char kind){
 
@@ -231,11 +233,34 @@ void config_ghosts2D(vector<vector<vector<double> > > &u_state,
 
     }
 };
-
+*/
 
 //====================================================================================================
 //                                  WRITE DATA TO FILE
 //====================================================================================================
+
+void write_hdf5(string filename, PrimData prims, float t, double dt, int NX, int NY)
+{
+    string filePath = "data/SR/";
+    cout << "Writing File...: " << filePath + filename << endl;
+    h5::fd_t fd = h5::create(filePath + filename, H5F_ACC_TRUNC);
+    
+    // Write the Current Simulation Conditions in a File
+    h5::write( filePath + filename, "rho",  prims.rho);
+    h5::write( filePath + filename, "v1",   prims.v1 );
+    h5::write( filePath + filename, "v2",   prims.v2 );
+    h5::write( filePath + filename, "p",    prims.p  );
+
+
+    h5::write( filePath + filename, "t" , t );
+    h5::write( filePath + filename, "dt", dt );
+    h5::write( filePath + filename, "NX", NX );
+    h5::write( filePath + filename, "NY", NY );
+    
+    cout << "Done" << endl;
+    cin.get();
+    
+}
 
 
 
@@ -322,37 +347,7 @@ double calc_intermed_pressure(double a,double aStar, double energy, double norm_
 //------------------------------------------------------------------------------------------------------------
 //  LORENTZ FACTOR CALCULATION
 //------------------------------------------------------------------------------------------------------------
-double calc_lorentz_gamma(double v){
-    return 1/sqrt(1 - v*v);
-}
 
-vector<double> calc_lorentz_gamma(vector<double> &v){
-    int vsize = v.size();
-    vector<double> W(vsize); 
-
-    for (int ii=0; ii < vsize; ii++){
-        W[ii] = 1/sqrt(1 - v[ii]*v[ii]);
-    }
-
-    return W;
-}
-
-vector<vector<double> > calc_lorentz_gamma(vector<vector<double> > &v1, vector<vector<double> > &v2){
-    int xgrid_size = v1[0].size();
-    int ygrid_size = v1.size();
-    double vtot;
-    vector<vector<double> > W(ygrid_size, vector<double> (xgrid_size, 0)); 
-
-    for (int jj=0; jj < ygrid_size; jj++){
-        for (int ii=0; ii < xgrid_size; ii++){
-            vtot = sqrt(v1[jj][ii]*v1[jj][ii] + v2[jj][ii]*v2[jj][ii]);
-
-            W[jj][ii] = 1/sqrt(1 - vtot*vtot);
-        }
-    }
-    
-    return W;
-}
 
 
 double calc_rel_sound_speed(double pressure, double D, double tau, double lorentz_gamma, float gamma){

@@ -11,12 +11,11 @@ from Cython.Build import cythonize
 with open("README.md", "r", encoding = "utf-8") as fh:
     description = fh.read()
     
-sourcefiles = ['state.pyx', 'simbi_1d.cpp', 'relativistic1D.cpp', 'helper_functions.cpp', 'simbi_2d.cpp', 'relativistic2D.cpp']
+sourcefiles = ['src/state.pyx', 'src/simbi_1d.cpp', 'src/relativistic1D.cpp', 'src/helper_functions.cpp', 'src/simbi_2d.cpp', 'src/relativistic2D.cpp']
 
 extensions = [Extension("state", sourcefiles, 
                         include_dirs=[numpy.get_include()],
                         libraries=['hdf5', 'hdf5_hl'],
-                        library_dirs=['/usr/local/lib/'],
                         extra_compile_args = ['-std=c++11', '-march=native', '-fno-wrapv', '-O3'] )]
 
 os.environ["CC"] = ("g++ -o -DNDEBUG -g -O2 -Wall -Wstrict-prototypes " +
@@ -29,7 +28,7 @@ setup(
     author_email="md4469@nyu.edu",
     description="Cython module to solve hydrodynamic systems using a c++ backend",
     ext_modules=cythonize(extensions),
-    #packages=['simbi_py'],
+    packages=['simbi_py'],
     #install_requires=['numpy', 'matplotlib', 'cython'],
     #python_requires='>=3.6',
 )

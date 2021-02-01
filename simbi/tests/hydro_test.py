@@ -4,7 +4,7 @@
 
 import numpy as np 
 import matplotlib.pyplot as  plt
-from simbi import Hydro
+from simbi_py import Hydro
 
 # Define Constants 
 gamma = 1.4 

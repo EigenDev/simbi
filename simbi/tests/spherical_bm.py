@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from state import PyStateSR2D
-from simbi import Hydro 
+from simbi_py import Hydro 
 
 from astropy import units as u
 
@@ -25,52 +25,58 @@ gamma = 4/3
 p_init = 1.e-10
 r_init = 0.01
 nu = 3.
-epsilon = 10.
-jet_ang = 4
-theta_jet = jet_ang*np.pi/180
-dOmega = 2*np.pi*theta_jet**2
+epsilon = 2.
+
 rho_init = rho0(0, np.pi)
 v_init = 0.
-N = 128
+ntheta = 64
 rmin = 0.01
 rmax = 1
-N_exp = 5
+N_exp = 20
 
 
-r = np.linspace(rmin, rmax, N + 1)
-r_right = 0.5*(r[1:N] + r[0:N-1])
+theta_min = 0
+theta_max = np.pi/2
+
+theta = np.linspace(theta_min, theta_max, ntheta)
+theta_mirror = np.linspace(np.pi, 2*np.pi, ntheta)
+
+# Choose xnpts carefully such that the grid zones remain roughly square
+theta_rface = 0.5*(theta[0] + theta[1])
+dtheta_face = theta_rface - theta[0]
+dtheta = theta_max/ntheta
+nr = int(np.log10(1 + rmax/rmin)/dtheta_face )
+
+r = np.logspace(np.log10(rmin), np.log10(rmax), nr) 
+
+r_right = 0.5*(r[1:nr] + r[0:nr-1])
 dr = r_right[N_exp]
 
-theta = np.linspace(0., np.pi,  N + 1)
-theta_mirror = np.linspace(np.pi, 2*np.pi, N + 1)
 
 
 delta_r = dr - rmin
 p_zones = find_nearest(r, (rmin + dr))[0]
 p_zones = int(p_zones)
-#p_zones = (int(rmin*N))
-#print(p_zones)
-
 
 p_c = 2*(gamma - 1.)*(3*epsilon/((nu + 1)*np.pi*dr**nu))
 
 print("Central Pressure:", p_c)
 
 
-p = np.zeros((N+1,N+1), np.double)
+p = np.zeros((ntheta ,nr), np.double)
 p[:, :p_zones] = p_c 
 p[:, p_zones:] = p_init
 
 
 n = 2.0
-rho = np.zeros((N+1,N+1), float)
-rho[:] = (rho0(n, theta)).reshape(N+1, 1)
+rho = np.zeros((ntheta , nr), float)
+rho[:] = (rho0(n, theta)).reshape(ntheta, 1)
 
 
 # print(rho)
 # zzz = input()
-vx = np.zeros((N+1,N+1), np.double)
-vy = np.zeros((N+1,N+1), np.double)
+vx = np.zeros((ntheta ,nr), np.double)
+vy = np.zeros((ntheta ,nr), np.double)
 
 
 
@@ -79,11 +85,16 @@ dt = 1.e-8
 # with PackageResource() as bm:
 #     bm.Hydro()
 bm = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy), 
-              Npts=(N+1, N+1), geometry=((rmin, rmax),(0.,np.pi)), n_vars=4, regime="relativistic")
+            Npts=(nr, ntheta), 
+            geometry=((rmin, rmax),(theta_min, theta_max)), 
+            n_vars=4, regime="relativistic")
 
 t1 = (time.time()*u.s).to(u.min)
-sol = bm.simulate(tend=tend, first_order= False, dt=dt, coordinates=b"spherical", CFL=0.4, hllc=False)
-print("The 2D BM Simulation for N = {} took {:.3f}".format(N, (time.time()*u.s).to(u.min) - t1))
+sol = bm.simulate(tend=tend, first_order= True, dt=dt,
+                  coordinates=b"spherical", CFL=0.4, 
+                  hllc=False, linspace=False)
+
+print("The 2D BM Simulation for N = {} took {:.3f}".format(ntheta, (time.time()*u.s).to(u.min) - t1))
 
 #density = b.cons2prim(sol)[0]
 
@@ -96,7 +107,7 @@ fig, ax= plt.subplots(1, 1, figsize=(8,10), subplot_kw=dict(projection='polar'),
 c1 = ax.pcolormesh(tt, rr, W_r, cmap='inferno', shading = "gouraud")
 c2 = ax.pcolormesh(t2, rr, np.flip(W_r, axis=0), cmap='inferno', shading = "gouraud")
 
-fig.suptitle('Blandford-McKee Problem at t={} s on {} x {} grid'.format(tend, N, N), fontsize=15)
+fig.suptitle('Blandford-McKee Problem at t={} s on {} x {} grid'.format(tend, nr, ntheta), fontsize=15)
 ax.set_title(r'$\rho(\theta) = 1.0 - 0.95\cos(n \ \theta)$ with n = {}'.format(n), fontsize=10)
 cbar = fig.colorbar(c1)
 ax.set_theta_zero_location("N")

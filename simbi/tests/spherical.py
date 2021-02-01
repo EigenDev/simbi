@@ -7,7 +7,7 @@ import math
 import matplotlib as mpl
 import time 
 import astropy.units as u
-from simbi import Hydro 
+from simbi_py import Hydro 
 
 
 
