@@ -90,7 +90,7 @@ vector<double>  cons2prim(float gamma, vector<double>  &u_state, double lorentz_
 
     double v = S/(tau + pressure + D);
 
-    double Wnew = calc_lorentz_gamma(v);
+    double Wnew = 1/sqrt(1 - v * v);
 
     
 
@@ -131,7 +131,7 @@ vector<vector<double> > UstateSR::cons2prim1D(vector<vector<double> > &u_state, 
 
         v = S/(tau + D + pressure);
 
-        W = calc_lorentz_gamma(v);
+        W = 1./sqrt(1 - v * v);
 
         rho = D/W;
 
@@ -164,7 +164,7 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> &p
     p_l = prims_l[1];
     v_l = prims_l[2];
     h_l = calc_enthalpy(gamma, rho_l, p_l);
-    W_l = calc_lorentz_gamma(v_l);
+    W_l = 1./sqrt(1 - v_l * v_l);
     D_l = W_l*rho_l;
     tau_l = rho_l*h_l*W_l*W_l - p_l - rho_l*W_l;
 
@@ -174,7 +174,7 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> &p
     p_r = prims_r[1];
     v_r = prims_r[2];
     h_r = calc_enthalpy(gamma, rho_r, p_r);
-    W_r = calc_lorentz_gamma(v_r);
+    W_r =1./sqrt(1 - v_r * v_r);
     D_r = W_r*rho_r;
     tau_r = rho_r*h_r*W_r*W_r- p_r - rho_r*W_r;
    
@@ -307,7 +307,7 @@ double UstateSR::adapt_dt(vector<vector<double> > &prims,
         p = prims[1][shift_i];
         v = prims[2][shift_i];
         h = calc_enthalpy(gamma, rho, p);
-        W = calc_lorentz_gamma(v);
+        W = 1./sqrt(1 - v * v);
 
         D = rho*W;
         tau = rho*h*W*W - p - rho*W;
@@ -347,7 +347,7 @@ vector<double>  calc_state(float gamma, double rho, double pressure, double v)
     double D, S,  tau, W, h;
 
     h = calc_enthalpy(gamma, rho, pressure);
-    W = calc_lorentz_gamma(v);
+    W = 1./sqrt(1 - v * v);
 
     D = rho*W;
     S = rho*h*W*W*v;
@@ -437,7 +437,7 @@ vector<double> calc_flux(double gamma, double rho, double pressure, double v){
     // The Flux components
     double mom, energy_dens, zeta, D, S, tau, h, W;
 
-    W = calc_lorentz_gamma(v);
+    W = 1./sqrt(1 - v * v);
     h = calc_enthalpy(gamma, rho, pressure);
     D = rho*W;
     S = rho*h*W*W*v;
@@ -1070,8 +1070,8 @@ vector<vector<double> > UstateSR::u_dot1D(vector<vector<double> > &u_state, vect
                 f_l = calc_flux(gamma, prims_l[0], prims_l[1], prims_l[2]);
                 f_r = calc_flux(gamma, prims_r[0], prims_r[1], prims_r[2]);
 
-                W_l = calc_lorentz_gamma(prims_l[2]);
-                W_r = calc_lorentz_gamma(prims_r[2]);
+                W_l = 1/sqrt(1. - prims_l[2] * prims_l[2]);
+                W_r = 1/sqrt(1. - prims_r[2] * prims_r[2]);
 
                 if (hllc){
                     f1 = calc_hllc_fluxSR1D(gamma, u_l, u_r, f_l, f_r, prims_l, prims_r, lorentz_gamma[ii]);
@@ -1114,8 +1114,8 @@ vector<vector<double> > UstateSR::u_dot1D(vector<vector<double> > &u_state, vect
                 f_l = calc_flux(gamma, prims_l[0], prims_l[1], prims_l[2]);
                 f_r = calc_flux(gamma, prims_r[0], prims_r[1], prims_r[2]);
 
-                W_l = calc_lorentz_gamma(prims_l[2]);
-                W_r = calc_lorentz_gamma(prims_r[2]);
+                W_l = 1./sqrt(1. - prims_l[2] * prims_l[2]);
+                W_r = 1./sqrt(1. - prims_r[2] * prims_r[2]);
 
                 if (hllc){
                     f2 = calc_hllc_fluxSR1D(gamma, u_l, u_r, f_l, f_r, prims_l, prims_r, lorentz_gamma[ii]);
@@ -1238,8 +1238,8 @@ vector<vector<double> > UstateSR::u_dot1D(vector<vector<double> > &u_state, vect
                 f_l = calc_flux(gamma, prims_l[0], prims_l[1], prims_l[2]);
                 f_r = calc_flux(gamma, prims_r[0], prims_r[1], prims_r[2]);
 
-                W_l = calc_lorentz_gamma(prims_l[2]);
-                W_r = calc_lorentz_gamma(prims_r[2]);
+                W_l = 1./sqrt(1. - prims_l[2] * prims_l[2]);
+                W_r = 1./sqrt(1. - prims_r[2] * prims_r[2]);
 
                 f1 = calc_hll_flux(gamma,prims_l, prims_r,  u_l, u_r, f_l, f_r);
 
@@ -1277,8 +1277,8 @@ vector<vector<double> > UstateSR::u_dot1D(vector<vector<double> > &u_state, vect
                 f_l = calc_flux(gamma, prims_l[0], prims_l[1], prims_l[2]);
                 f_r = calc_flux(gamma, prims_r[0], prims_r[1], prims_r[2]);
 
-                W_l = calc_lorentz_gamma(prims_l[2]);
-                W_r = calc_lorentz_gamma(prims_r[2]);
+                W_l = 1./sqrt(1. - prims_l[2] * prims_l[2]);
+                W_r = 1./sqrt(1. - prims_r[2] * prims_r[2]);
 
                 f2 = calc_hll_flux(gamma, prims_l, prims_r,  u_l, u_r, f_l, f_r);
 

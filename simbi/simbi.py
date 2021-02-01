@@ -1399,23 +1399,21 @@ class Hydro:
                 else:
                     x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
                     x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-                if not sources:
-                    if self.regime == "classical":
-                        b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                        u = b.simulate(tend, dt=dt, linspace=linspace, hllc=hllc)
-                        
-                    else:
-                        b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                        u = b.simulate(tend, dt=dt, first_order=first_order, lorentz_gamma = self.W, linspace=linspace)
+                    
+                sources = np.zeros((4, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
+                sources = sources.reshape(sources.shape[0], -1)
+                
+                if self.regime == "classical":
+                    b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                    u = b.simulate(tend, dt=dt, linspace=linspace, hllc=hllc)
+                    
                 else:
-                    if self.regime == "classical":
-                        b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                        u = b.simulate(tend, dt=dt)
-                        
-                    else:
-                        b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates, cfl=CFL)
-                        u = b.simulate(tend=tend, dt=dt, first_order=first_order, lorentz_gamma = self.W, sources = sources,
-                                    linspace=linspace)
+                    self.W = self.W.flatten()
+                    b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                    u = b.simulate(tend, dt=dt, first_order=first_order, 
+                                   lorentz_gamma = self.W, linspace=linspace,
+                                   sources=sources)
+            
             else:
                 print('Computing Higher Order...')
                 if (linspace):
@@ -1424,25 +1422,17 @@ class Hydro:
                 else:
                     x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
                     x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-                if not sources:
-                    if self.regime == "classical":
-                        b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                        u = b.simulate(tend, dt=dt, linspace=linspace, hllc=hllc)
-                        
-                    else:
-                        b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                        u = b.simulate(tend, dt=dt, first_order=False, lorentz_gamma = self.W, 
-                                       linspace=linspace, hllc = hllc)
+                
+                sources = np.zeros((4, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
+                sources = sources.reshape(sources.shape[0], -1)
+                if self.regime == "classical":
+                    b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                    u = b.simulate(tend, dt=dt, linspace=linspace, hllc=hllc, sources=sources)
                 else:
-                    if self.regime == "classical":
-                        b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                        u = b.simulate(tend, dt=dt, hllc=hllc, linspace=linspace, sources=sources, 
-                                       periodic=periodic)
-                        
-                    else:
-                        b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates, cfl=CFL)
-                        u = b.simulate(tend=tend, dt=dt, lorentz_gamma = self.W, sources = sources,
-                                    linspace=linspace, first_order=False, hllc = hllc)
+                    self.W = self.W.flatten()
+                    b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                    u = b.simulate(tend, dt=dt, first_order=False, lorentz_gamma = self.W, 
+                                    linspace=linspace, hllc = hllc, sources=sources)
                 
             
                 

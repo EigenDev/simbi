@@ -2664,15 +2664,16 @@ vector<vector<vector<double> > > Ustate2D::simulate2D(vector<vector<vector<doubl
     u1 = u; 
     u2 = u;
     
+    
     while (t <= tend){
         /* Compute the loop execution time */
         high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
-        if (!periodic){
-            if (t == 0){
-                config_ghosts2D(u, xgrid_size, ygrid_size, false);
-            }
-        }
+        // if (!periodic){
+        //     if (t == 0){
+        //         config_ghosts2D(u, xgrid_size, ygrid_size, false);
+        //     }
+        // }
         
         /**
         cout << " " << endl;
@@ -2722,9 +2723,9 @@ vector<vector<vector<double> > > Ustate2D::simulate2D(vector<vector<vector<doubl
         cin.get();
         */
 
-        if (!periodic){
-            config_ghosts2D(u1, xgrid_size, ygrid_size, false);
-        }
+        // if (!periodic){
+        //     config_ghosts2D(u1, xgrid_size, ygrid_size, false);
+        // }
         
 
         udot1 = u_dot2D(gamma, u1, sources, periodic, theta, linspace, hllc);
@@ -2754,9 +2755,9 @@ vector<vector<vector<double> > > Ustate2D::simulate2D(vector<vector<vector<doubl
 
         }
         
-        if (!periodic){
-            config_ghosts2D(u2, xgrid_size, ygrid_size, false);
-        }
+        // if (!periodic){
+        //     config_ghosts2D(u2, xgrid_size, ygrid_size, false);
+        // }
         
         udot2 = u_dot2D(gamma, u2, sources, periodic, theta, linspace, hllc);
 
@@ -2782,9 +2783,9 @@ vector<vector<vector<double> > > Ustate2D::simulate2D(vector<vector<vector<doubl
 
         }
         
-        if (!periodic){
-            config_ghosts2D(u_p, xgrid_size, ygrid_size, false);
-        }
+        // if (!periodic){
+        //     config_ghosts2D(u_p, xgrid_size, ygrid_size, false);
+        // }
         
         
         if (t > 0){

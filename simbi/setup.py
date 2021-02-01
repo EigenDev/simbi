@@ -11,11 +11,13 @@ from Cython.Build import cythonize
 with open("README.md", "r", encoding = "utf-8") as fh:
     description = fh.read()
     
-sourcefiles = ['state.pyx', 'src/simbi_1d.cpp', 'src/relativistic1D.cpp', 'src/helper_functions.cpp', 'src/simbi_2d.cpp', 'src/relativistic2D.cpp']
+sourcefiles = ['state.pyx', 'simbi_1d.cpp', 'relativistic1D.cpp', 'helper_functions.cpp', 'simbi_2d.cpp', 'relativistic2D.cpp']
 
 extensions = [Extension("state", sourcefiles, 
                         include_dirs=[numpy.get_include()],
-                        extra_compile_args = ['-std=c++11', '-Ofast', '-march=native', '-fno-wrapv'] )]
+                        libraries=['hdf5', 'hdf5_hl'],
+                        library_dirs=['/usr/local/lib/'],
+                        extra_compile_args = ['-std=c++11', '-march=native', '-fno-wrapv', '-O3'] )]
 
 os.environ["CC"] = ("g++ -o -DNDEBUG -g -O2 -Wall -Wstrict-prototypes " +
                     "-fno-strict-aliasing -Wdate-time -D_FORTIFY_SOURCE=2 -g -fstack-protector-strong " +
@@ -25,9 +27,9 @@ setup(
     version="0.0.1",
     author="M. DuPont",
     author_email="md4469@nyu.edu",
-    description="Cython module to work solve hydrodynamic systems using a c++ backend",
+    description="Cython module to solve hydrodynamic systems using a c++ backend",
     ext_modules=cythonize(extensions),
-    packages=['simbi_py'],
-    install_requires=['numpy', 'matplotlib', 'cython'],
-    python_requires='>=3.6',
+    #packages=['simbi_py'],
+    #install_requires=['numpy', 'matplotlib', 'cython'],
+    #python_requires='>=3.6',
 )
