@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: SIMBI-2D-Hydro-Code
+Version: 0.0.1
+Summary: Cython module to solve hydrodynamic systems using a c++ backend
+Home-page: UNKNOWN
+Author: M. DuPont
+Author-email: md4469@nyu.edu
+License: UNKNOWN
+Description: UNKNOWN
+Platform: UNKNOWN
