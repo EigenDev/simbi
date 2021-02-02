@@ -54,7 +54,7 @@ N_0 = 4*np.pi*(r_0/R_0)**3 * (1. - np.exp(-2./(theta_0**2)))*theta_0**2
 
 # The angular zones are the terms that resolve 
 # the KH instability
-ynpts = 128
+ynpts = 32
 
 rmin = 0.01 #((r_0/R_0)/1e3).value
 rmax = 0.5
@@ -104,7 +104,7 @@ g = (rr*R_0/r_0)* np.exp(-(rr*R_0/r_0)**2 / 2) * np.exp( (np.cos(tt) - 1) / thet
 
 L_norm = ( (m_0*c**3)/(R_0) ).to(u.erg/u.s)
 L = L_0/L_norm
-scale = 1.
+scale = 0.
 S_0 =  L*g*scale
 S_r = S_0*np.sqrt(1 - 1/gamma_0**2)
 S_D = S_0/eta_0

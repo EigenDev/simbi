@@ -239,26 +239,67 @@ void config_ghosts2D(vector &u_state,
 //                                  WRITE DATA TO FILE
 //====================================================================================================
 
+string create_step_str(double t_interval, string &tnow){
+
+    // Convert the time interval into an int with 2 decimal displacements
+    cout << t_interval << endl;
+    int t_interval_int = round( 1.e3 * t_interval );
+    int a, b;
+
+    string s = to_string(t_interval_int);
+
+    // Pad the file string if size less than 6
+    if (s.size() < tnow.size()) {
+
+        int num_zeros = tnow.size() - s.size();
+        string pad_zeros = string(num_zeros, '0');
+        s.insert(0, pad_zeros);
+
+    }
+
+    for (int i = 0; i < 6; i++){
+        a = tnow[i] - '0';
+        b = s[i] - '0';
+        s[i] = a + b + '0';
+    }
+
+    return s;
+
+
+}
 void write_hdf5(string filename, PrimData prims, float t, double dt, int NX, int NY)
 {
-    string filePath = "data/SR/";
+    string filePath = "data/sr/";
     cout << "Writing File...: " << filePath + filename << endl;
-    h5::fd_t fd = h5::create(filePath + filename, H5F_ACC_TRUNC);
+    h5::fd_t fd = h5::create(filePath + filename, H5F_ACC_TRUNC, h5::default_fcpl,
+                    h5::libver_bounds({H5F_LIBVER_V18, H5F_LIBVER_V18}) );
+
+    h5::ds_t ds = h5::write(fd,"Simulation Data w/ Attributes", prims.rho);
     
+    // Datset objects
+    ds["rho"] = prims.rho;
+    ds["v1"]  = prims.v1;
+    ds["v2"]  = prims.v2;
+    ds["p"]   = prims.p;
+
+    // Dataset Attributes
+    ds["current_time"] = t;
+    ds["time_step"]    = dt;
+    ds["NX"]           = NX;
+    ds["NY"]           = NY;
+
     // Write the Current Simulation Conditions in a File
-    h5::write( filePath + filename, "rho",  prims.rho);
-    h5::write( filePath + filename, "v1",   prims.v1 );
-    h5::write( filePath + filename, "v2",   prims.v2 );
-    h5::write( filePath + filename, "p",    prims.p  );
+    // h5::write( filename, "rho",  prims.rho);
+    // h5::write( filename, "v1",   prims.v1 );
+    // h5::write( filename, "v2",   prims.v2 );
+    // h5::write( filename, "p",    prims.p  );
 
 
-    h5::write( filePath + filename, "t" , t );
-    h5::write( filePath + filename, "dt", dt );
-    h5::write( filePath + filename, "NX", NX );
-    h5::write( filePath + filename, "NY", NY );
+    // h5::write( filename, "t" , t );
+    // h5::write( filename, "dt", dt );
+    // h5::write( filename, "NX", NX );
+    // h5::write( filename, "NY", NY );
     
-    cout << "Done" << endl;
-    cin.get();
     
 }
 

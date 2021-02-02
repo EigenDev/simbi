@@ -2869,12 +2869,16 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
                                     bool linspace=true, bool hllc=false,
                                     double dt = 1.e-4){
 
-    // Define the swap vector for the integrated state
+    
     int xphysical_grid, yphysical_grid;
+    string tnow, tchunk, tstep;
     int total_zones = NX * NY;
-
-    double interval = 0.1;
+    double t0 = 0;
+    double t_interval = 0.1;
+    double s_interval = 0.1;
     float t = 0;
+    char buffer [64];
+    string filename;
 
     this->sources       = sources;
     this->first_order   = first_order;
@@ -2997,6 +3001,7 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
         }
 
     } else {
+            tchunk = "000000";
             // Initialize the primitives for the initial conditions
             prims = cons2prim2D(u, lorentz_gamma);
             while (t < tend){
@@ -3100,12 +3105,15 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
                 pressure_guess = prims.p;
 
                 /* Write to a File every tenth of a second */
-                // if (t - interval < interval){
-                //     toWritePrim(&prims, &prods);
-                //     write_hdf5("test_file.h5", prods, t, dt, NX, NY);
-                //     interval += interval
+                if (t - t0 >= t_interval){
+                    toWritePrim(&prims, &prods);
+                    tnow = tchunk;
+                    tstep = create_step_str(t_interval, tnow);
+                    filename = string_format("%d.prods." + tstep + ".h5", NY);
+                    write_hdf5(filename, prods, t, dt, NX, NY);
+                    t_interval += s_interval;
  
-                // }
+                }
                 
             }
             

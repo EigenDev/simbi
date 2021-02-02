@@ -55,6 +55,8 @@ std::vector<double> calc_lorentz_gamma(T &v1, T &v2, int nx, int ny);
 template <typename T>
 void toWritePrim(T *from, PrimData *to, int ndim = 1);
 
+template <typename ...Args>
+std::string string_format(const std::string& format, Args ...args );
 
 
 double findMax(double, double, double);
@@ -66,7 +68,7 @@ std::vector<double> rollVector(const std::vector<double>&, unsigned int);
 double roll(std::vector<double>&, unsigned int);
 double roll(std::vector<std::vector<double>>&, unsigned int xpos, unsigned int ypos);
 std::vector<std::vector<double> > transpose(std::vector<std::vector<double> > &);
-
+std::string create_step_str(double t_interval, std::string &tnow);
 void write_hdf5(std::string filename, PrimData prims, float t, double dt, int NX, int NY);
 // void config_ghosts1D(std::vector<std::vector<double> > &, int, bool=true);
 // void config_ghosts2D(std::vector<std::vector< std::vector< double> > > &, int, int, bool=true, char kind='outflow');
