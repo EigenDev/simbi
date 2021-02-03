@@ -3041,10 +3041,10 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
                     for (int ii = 0; ii < xphysical_grid; ii++){
                         int i_real = ii + 2;
                         L = u_dot(u1, lorentz_gamma, make_tuple(i_real, j_real));
-                        u2.D[i_real + NX * j_real] = 0.75*u.D[i_real + NX * j_real]     + 0.25*u1.D[i_real + NX * j_real]   + dt * L.D; //+  0.25*dt*udot.D[ii + xphysical_grid * jj];
-                        u2.S1[i_real + NX * j_real] = 0.75*u.S1[i_real + NX * j_real]   + 0.25*u1.S1[i_real + NX * j_real]  + dt * L.S1; //+  0.25*dt*udot.S1[ii + xphysical_grid * jj];
-                        u2.S2[i_real + NX * j_real] = 0.75*u.S2[i_real + NX * j_real]   + 0.25*u1.S2[i_real + NX * j_real]  + dt * L.S2; //+  0.25*dt*udot.S2[ii + xphysical_grid * jj];
-                        u2.tau[i_real + NX * j_real] = 0.75*u.tau[i_real + NX * j_real] + 0.25*u1.tau[i_real + NX * j_real] + dt * L.tau; //+  0.25*dt*udot.tau[ii + xphysical_grid * jj];
+                        u2.D[i_real + NX * j_real] = 0.75*u.D[i_real + NX * j_real]     + 0.25*u1.D[i_real + NX * j_real]   + 0.25 * dt * L.D; //+  0.25*dt*udot.D[ii + xphysical_grid * jj];
+                        u2.S1[i_real + NX * j_real] = 0.75*u.S1[i_real + NX * j_real]   + 0.25*u1.S1[i_real + NX * j_real]  + 0.25 * dt * L.S1; //+  0.25*dt*udot.S1[ii + xphysical_grid * jj];
+                        u2.S2[i_real + NX * j_real] = 0.75*u.S2[i_real + NX * j_real]   + 0.25*u1.S2[i_real + NX * j_real]  + 0.25 * dt * L.S2; //+  0.25*dt*udot.S2[ii + xphysical_grid * jj];
+                        u2.tau[i_real + NX * j_real] = 0.75*u.tau[i_real + NX * j_real] + 0.25*u1.tau[i_real + NX * j_real] + 0.25 * dt * L.tau; //+  0.25*dt*udot.tau[ii + xphysical_grid * jj];
 
                     }
 
@@ -3064,10 +3064,10 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
                     for (int ii = 0; ii < xphysical_grid; ii++){
                         int i_real = ii + 2;
                         L = u_dot(u2, lorentz_gamma, make_tuple(i_real, j_real));
-                        u_p.D  [i_real + NX * j_real] = (1.0/3.0)*u.D  [i_real + NX * j_real] + (2.0/3.0)*u2.D  [i_real + NX * j_real] + dt * L.D; //+ (2.0/3.0)*dt*udot.D[ii + xphysical_grid * jj];
-                        u_p.S1 [i_real + NX * j_real] = (1.0/3.0)*u.S1 [i_real + NX * j_real] + (2.0/3.0)*u2.S1 [i_real + NX * j_real] + dt * L.S1; //+ (2.0/3.0)*dt*udot.S1[ii + xphysical_grid * jj];
-                        u_p.S2 [i_real + NX * j_real] = (1.0/3.0)*u.S2 [i_real + NX * j_real] + (2.0/3.0)*u2.S2 [i_real + NX * j_real] + dt * L.S2; //+ (2.0/3.0)*dt*udot.S2[ii + xphysical_grid * jj];
-                        u_p.tau[i_real + NX * j_real] = (1.0/3.0)*u.tau[i_real + NX * j_real] + (2.0/3.0)*u2.tau[i_real + NX * j_real] + dt * L.tau; //+ (2.0/3.0)*dt*udot.tau[ii + xphysical_grid * jj];
+                        u_p.D  [i_real + NX * j_real] = (1.0/3.0)*u.D  [i_real + NX * j_real] + (2.0/3.0)*u2.D  [i_real + NX * j_real] + (2.0/3.0) * dt * L.D; //+ (2.0/3.0)*dt*udot.D[ii + xphysical_grid * jj];
+                        u_p.S1 [i_real + NX * j_real] = (1.0/3.0)*u.S1 [i_real + NX * j_real] + (2.0/3.0)*u2.S1 [i_real + NX * j_real] + (2.0/3.0) * dt * L.S1; //+ (2.0/3.0)*dt*udot.S1[ii + xphysical_grid * jj];
+                        u_p.S2 [i_real + NX * j_real] = (1.0/3.0)*u.S2 [i_real + NX * j_real] + (2.0/3.0)*u2.S2 [i_real + NX * j_real] + (2.0/3.0) * dt * L.S2; //+ (2.0/3.0)*dt*udot.S2[ii + xphysical_grid * jj];
+                        u_p.tau[i_real + NX * j_real] = (1.0/3.0)*u.tau[i_real + NX * j_real] + (2.0/3.0)*u2.tau[i_real + NX * j_real] + (2.0/3.0) * dt * L.tau; //+ (2.0/3.0)*dt*udot.tau[ii + xphysical_grid * jj];
 
                     }
 
@@ -3077,8 +3077,9 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
                 prims = cons2prim2D(u_p, lorentz_gamma);
                 lorentz_gamma = calc_lorentz_gamma(prims.v1, prims.v2, NX, NY);
                 
-                dt = adapt_dt(prims, linspace, false);
-                
+                if (t > 0){
+                    dt = adapt_dt(prims, linspace, false);
+                }
 
                 if (isnan(dt)){
                     break;
