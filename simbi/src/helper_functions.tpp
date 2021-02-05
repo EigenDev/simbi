@@ -67,10 +67,10 @@ double newton_raphson(T x1, T (*f)(T, Args... args),  T (*g)(T, Args... args),
         ii++;
 
         
-        if (ii > maximum_iteration){
-            std::cout << "\n Not Convergent" << std::endl;
-            exit(EXIT_FAILURE);
-        }
+        // if (ii > maximum_iteration){
+        //     std::cout << "\n Not Convergent" << std::endl;
+        //     exit(EXIT_FAILURE);
+        // }
         
 
     } while(std::abs(x1 - x) >= epsilon);

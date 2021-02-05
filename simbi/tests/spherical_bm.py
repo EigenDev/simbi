@@ -23,20 +23,20 @@ def rho0(n, theta):
 # Constants
 gamma = 4/3
 p_init = 1.e-10
-r_init = 0.01
+r_init = 0.05
 nu = 3.
 epsilon = 2.
 
 rho_init = rho0(0, np.pi)
 v_init = 0.
-ntheta = 64
-rmin = 0.01
+ntheta = 200
+rmin = 0.05
 rmax = 1
 N_exp = 20
 
 
 theta_min = 0
-theta_max = np.pi/2
+theta_max = np.pi
 
 theta = np.linspace(theta_min, theta_max, ntheta)
 theta_mirror = np.linspace(np.pi, 2*np.pi, ntheta)
@@ -45,7 +45,7 @@ theta_mirror = np.linspace(np.pi, 2*np.pi, ntheta)
 theta_rface = 0.5*(theta[0] + theta[1])
 dtheta_face = theta_rface - theta[0]
 dtheta = theta_max/ntheta
-nr = int(np.log10(1 + rmax/rmin)/dtheta_face )
+nr = int(1 + np.log10(rmax/rmin)/dtheta_face )
 
 r = np.logspace(np.log10(rmin), np.log10(rmax), nr) 
 
@@ -70,7 +70,7 @@ p[:, p_zones:] = p_init
 
 n = 2.0
 rho = np.zeros((ntheta , nr), float)
-rho[:] = (rho0(n, theta)).reshape(ntheta, 1)
+rho[:] = 1.0 #(rho0(n, theta)).reshape(ntheta, 1)
 
 
 # print(rho)
@@ -80,7 +80,7 @@ vy = np.zeros((ntheta ,nr), np.double)
 
 
 
-tend = 0.5
+tend = 0.1
 dt = 1.e-8
 # with PackageResource() as bm:
 #     bm.Hydro()
@@ -90,7 +90,7 @@ bm = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy),
             n_vars=4, regime="relativistic")
 
 t1 = (time.time()*u.s).to(u.min)
-sol = bm.simulate(tend=tend, first_order= True, dt=dt,
+sol = bm.simulate(tend=tend, first_order= False, dt=dt,
                   coordinates=b"spherical", CFL=0.4, 
                   hllc=False, linspace=False)
 
@@ -98,17 +98,17 @@ print("The 2D BM Simulation for N = {} took {:.3f}".format(ntheta, (time.time()*
 
 #density = b.cons2prim(sol)[0]
 
-W_r = 1/np.sqrt(1 - sol[1]**2)
+W = 1/np.sqrt(1 - sol[1]**2 + sol[2]**2)
 print(sol[1].max())
 rr, tt = np.meshgrid(r, theta)
 rr, t2 = np.meshgrid(r, theta_mirror)
 
 fig, ax= plt.subplots(1, 1, figsize=(8,10), subplot_kw=dict(projection='polar'), constrained_layout=True)
-c1 = ax.pcolormesh(tt, rr, W_r, cmap='inferno', shading = "gouraud")
-c2 = ax.pcolormesh(t2, rr, np.flip(W_r, axis=0), cmap='inferno', shading = "gouraud")
+c1 = ax.pcolormesh(tt, rr, W, cmap='inferno', shading = "gouraud")
+c2 = ax.pcolormesh(t2, rr, W, cmap='inferno', shading = "gouraud")
 
 fig.suptitle('Blandford-McKee Problem at t={} s on {} x {} grid'.format(tend, nr, ntheta), fontsize=15)
-ax.set_title(r'$\rho(\theta) = 1.0 - 0.95\cos(n \ \theta)$ with n = {}'.format(n), fontsize=10)
+# ax.set_title(r'$\rho(\theta) = 1.0 - 0.95\cos(n \ \theta)$ with n = {}'.format(n), fontsize=10)
 cbar = fig.colorbar(c1)
 ax.set_theta_zero_location("N")
 ax.set_theta_direction(-1)
@@ -119,12 +119,8 @@ ax.yaxis.grid(True, alpha=0.4)
 ax.xaxis.grid(True, alpha=0.4)
 ax.set_thetamin(0)
 ax.set_thetamax(360)
-#plt.gca().set_aspect('equal', adjustable='box')
 
-del bm
+cbar.ax.set_ylabel('Lorentz Factor', fontsize=20)
 
-#np.savetxt('blandford_mckee_test.txt', sol)
-cbar.ax.set_ylabel('Radial $\Gamma$', fontsize=20)
-# plt.tight_layout()
 plt.show()
-#fig.savefig('plots/2D_bm_lorentzr__test_spherical_.eps', bbox_inches="tight")
+fig.savefig('plots/2D/SR/2D_bm_0.1_.pdf', bbox_inches="tight")

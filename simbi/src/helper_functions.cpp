@@ -274,7 +274,7 @@ void write_hdf5(string filename, PrimData prims, float t, double dt, int NX, int
     h5::fd_t fd = h5::create(filePath + filename, H5F_ACC_TRUNC, h5::default_fcpl,
                     h5::libver_bounds({H5F_LIBVER_V18, H5F_LIBVER_V18}) );
 
-    h5::ds_t ds = h5::write(fd,"Simulation Data w/ Attributes", prims.rho);
+    h5::ds_t ds = h5::write(fd,"Simulation Data", prims.rho);
     
     // Datset objects
     ds["rho"] = prims.rho;

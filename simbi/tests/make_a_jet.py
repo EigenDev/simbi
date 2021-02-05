@@ -29,8 +29,8 @@ n        = 16.7                       # Atmosphere Cutoff Slope
 rho_wind = 1e-9 * m_0/R_0**3          # Wind Density
 
 theta_0 = 0.1                         # Injection Angle
-gamma_0 = 10.                         # Injected Lorentz Factor
-eta_0   = 2.                        # Energy-to-Mass Ratio
+gamma_0 = 50.                         # Injected Lorentz Factor
+eta_0   = 100.                        # Energy-to-Mass Ratio
 r_0     = 0.01 * R_0                  # Nozzle size
 L_0     = (2.e-3 * m_0 * c**3 / R_0).to(u.erg/u.s)   # Engine Power (One-Sided)
 tau_0   = 4.3 * R_0/c                 # Enginge Duration
@@ -54,7 +54,7 @@ N_0 = 4*np.pi*(r_0/R_0)**3 * (1. - np.exp(-2./(theta_0**2)))*theta_0**2
 
 # The angular zones are the terms that resolve 
 # the KH instability
-ynpts = 256
+ynpts = 512
 
 rmin = 0.01 #((r_0/R_0)/1e3).value
 rmax = 0.5
@@ -119,7 +119,7 @@ rho[:] = rho_init
 vr = np.zeros((ynpts, xnpts), float)
 vt = np.zeros((ynpts, xnpts), float)
 
-tend = 2.5
+tend = 2.0
 
 theta_rface = 0.5*(theta[0] + theta[1])
 dtheta_face = theta_rface - theta[0]
