@@ -54,7 +54,7 @@ N_0 = 4*np.pi*(r_0/R_0)**3 * (1. - np.exp(-2./(theta_0**2)))*theta_0**2
 
 # The angular zones are the terms that resolve 
 # the KH instability
-ynpts = 512
+ynpts = 64
 
 rmin = 0.01 #((r_0/R_0)/1e3).value
 rmax = 0.5
@@ -97,14 +97,12 @@ print("Grid Dimensions: {} x {} ".format(r.size, theta.size) )
 rho_norm = m_0/R_0**3
 rho_init = rho0(r, rho_c, rho_wind)/rho_norm
 
-# plt.loglog(r, rho_init)
-# plt.show()
 p_init =  1.e-6*rho_init 
 g = (rr*R_0/r_0)* np.exp(-(rr*R_0/r_0)**2 / 2) * np.exp( (np.cos(tt) - 1) / theta_0**2 ) / N_0
 
 L_norm = ( (m_0*c**3)/(R_0) ).to(u.erg/u.s)
 L = L_0/L_norm
-scale = 1.
+scale = 0.
 S_0 =  L*g*scale
 S_r = S_0*np.sqrt(1 - 1/gamma_0**2)
 S_D = S_0/eta_0
@@ -119,7 +117,7 @@ rho[:] = rho_init
 vr = np.zeros((ynpts, xnpts), float)
 vt = np.zeros((ynpts, xnpts), float)
 
-tend = 2.0
+tend = 1.5
 
 theta_rface = 0.5*(theta[0] + theta[1])
 dtheta_face = theta_rface - theta[0]
@@ -144,7 +142,7 @@ Jet = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt),
 
 t1 = (time.time()*u.s).to(u.min)
 sol = Jet.simulate(tend=tend, first_order = False, dt=dt, coordinates=b"spherical", sources=(S_D, S_r,S_theta ,S_0),
-                   linspace=False, CFL=0.4, hllc = True)
+                   linspace=False, CFL=0.4, hllc = False)
 
 print("The 2D Jet Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 
@@ -223,5 +221,3 @@ if zzz == "y":
   
 del Jet
 del sol 
-
-#fig.savefig('plots/2D_jet_propagation_break.png', bbox_inches="tight")

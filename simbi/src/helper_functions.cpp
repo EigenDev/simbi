@@ -59,13 +59,210 @@ int sign(double x){
 
 // The Minmod slope delimiter
 double minmod(double x, double y, double z){
-    // The intermediate minimum
-    double intermin = min(abs(x), abs(y));
-    double min_val = min(intermin, abs(z)); 
+    // The minimum
+    double min_val = min(min(abs(x), abs(y)), abs(z)); 
 
     return 0.25*abs(sign(x) + sign(y))*(sign(x) + sign(z))*min_val;
 
 };
+
+MinMod minmod(PrimData &prims, double theta, int face, int i, int j, int NX){
+    MinMod slope; 
+    double x, y, z;
+
+    switch (face)
+    {
+    // Compute flux limit at i,j+1/2 interface
+    case 1:
+        //------------ Left Cell Face X-Direction-------------------
+        x = theta * (prims.rho[i + NX * j] - prims.rho[(i - 1) + NX * j]);
+        y = 0.5 * (prims.rho[(i + 1) + NX * j] - prims.rho[(i - 1) + NX * j]);
+        z = theta * (prims.rho[(i + 1) + NX * j] + prims.rho[i + NX * j]);
+        slope.rhoL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v1[i + NX * j] - prims.v1[(i - 1) + NX * j]);
+        y = 0.5 * (prims.v1[(i + 1) + NX * j] - prims.v1[(i - 1) + NX * j]);
+        z = theta * (prims.v1[(i + 1) + NX * j] + prims.v1[i + NX * j]);
+        slope.v1L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v2[i + NX * j] - prims.v2[(i - 1) + NX * j]);
+        y = 0.5 * (prims.v2[(i + 1) + NX * j] - prims.v2[(i - 1) + NX * j]);
+        z = theta * (prims.v2[(i + 1) + NX * j] + prims.v2[i + NX * j]);
+        slope.v2L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.p[i + NX * j] - prims.p[(i - 1) + NX * j]);
+        y = 0.5 * (prims.p[(i + 1) + NX * j] - prims.p[(i - 1) + NX * j]);
+        z = theta * (prims.p[(i + 1) + NX * j] + prims.p[i + NX * j]);
+        slope.pL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+
+
+        // -----------Right Cell Face X-Direction -------------------------
+        x = theta * (prims.rho[(i + 1) + NX * j] - prims.rho[i + NX * j]);
+        y = 0.5 * (prims.rho[(i + 2) + NX * j] - prims.rho[i + NX * j]);
+        z = theta * (prims.rho[(i + 2) + NX * j] + prims.rho[(i + 1) + NX * j]);
+        slope.rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v1[(i + 1) + NX * j] - prims.v1[i + NX * j]);
+        y = 0.5 * (prims.v1[(i + 2) + NX * j] - prims.v1[i + NX * j]);
+        z = theta * (prims.v1[(i + 2) + NX * j] + prims.v1[(i + 1) + NX * j]);
+        slope.v1R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v2[(i + 1) + NX * j] - prims.v2[i + NX * j]);
+        y = 0.5 * (prims.v2[(i + 2) + NX * j] - prims.v2[i + NX * j]);
+        z = theta * (prims.v2[(i + 2) + NX * j] + prims.v2[(i + 1) + NX * j]);
+        slope.v2R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.p[(i + 1) + NX * j] - prims.p[i + NX * j]);
+        y = 0.5 * (prims.p[(i + 2) + NX * j] - prims.p[i + NX * j]);
+        z = theta * (prims.p[(i + 2) + NX * j] + prims.p[(i + 1) + NX * j]);
+        slope.rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+
+
+        //------------- Upper Cell Face ---------------------------------
+        x = theta * (prims.rho[i + NX * j] - prims.rho[i + NX * (j - 1)]);
+        y = 0.5   * (prims.rho[i + NX * (j + 1)] - prims.rho[i + NX * (j - 1)]);
+        z = theta * (prims.rho[i + NX * (j + 1)] + prims.rho[i + NX * j]);
+        slope.rhoT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v1[i + NX * j] - prims.v1[i + NX * (j - 1)]);
+        y = 0.5   * (prims.v1[i + NX * (j + 1)] - prims.v1[i + NX * (j - 1)]);
+        z = theta * (prims.v1[i + NX * (j + 1)] + prims.v1[i + NX * j]);
+        slope.v1T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v2[i + NX * j] - prims.v2[i + NX * (j - 1)]);
+        y = 0.5   * (prims.v2[i + NX * (j + 1)] - prims.v2[i + NX * (j - 1)]);
+        z = theta * (prims.v2[i + NX * (j + 1)] + prims.v2[i + NX * j]);
+        slope.v2T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.p[i + NX * j] - prims.p[i + NX * (j - 1)]);
+        y = 0.5   * (prims.p[i + NX * (j + 1)] - prims.p[i + NX * (j - 1)]);
+        z = theta * (prims.p[i + NX * (j + 1)] + prims.p[i + NX * j]);
+        slope.pT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+
+
+        //---------------Lower Face--------------------------------------
+        x = theta * (prims.rho[i + NX * (j + 1)] - prims.rho[i + NX * j]);
+        y = 0.5   * (prims.rho[i + NX * (j + 2)] - prims.rho[i + NX * j]);
+        z = theta * (prims.rho[i + NX * (j + 2)] + prims.rho[i + NX * (j + 1)]);
+        slope.rhoB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v1[i + NX * (j + 1)] - prims.v1[i + NX * j]);
+        y = 0.5   * (prims.v1[i + NX * (j + 2)] - prims.v1[i + NX * j]);
+        z = theta * (prims.v1[i + NX * (j + 2)] + prims.v1[i + NX * (j + 1)]);
+        slope.v1B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v2[i + NX * (j + 1)] - prims.v2[i + NX * j]);
+        y = 0.5   * (prims.v2[i + NX * (j + 2)] - prims.v2[i + NX * j]);
+        z = theta * (prims.v2[i + NX * (j + 2)] + prims.v2[i + NX * (j + 1)]);
+        slope.v2B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.p[i + NX * (j + 1)] - prims.p[i + NX * j]);
+        y = 0.5   * (prims.p[i + NX * (j + 2)] - prims.p[i + NX * j]);
+        z = theta * (prims.p[i + NX * (j + 2)] + prims.p[i + NX * (j + 1)]);
+        slope.pB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        break;
+    // Compute flux limiter at i,j-1/2 interface 
+    case 2:
+        //------------ Left Cell Face Y-Direction-------------------
+        x = theta * (prims.rho[(i - 1) + NX * j] - prims.rho[(i - 2) + NX * j]);
+        y = 0.5 * (prims.rho[i + NX * j] - prims.rho[(i - 2) + NX * j]);
+        z = theta * (prims.rho[i + NX * j] + prims.rho[(i - 1) + NX * j]);
+        slope.rhoL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v1[(i - 1) + NX * j] - prims.v1[(i - 2) + NX * j]);
+        y = 0.5 * (prims.v1[i + NX * j] - prims.v1[(i - 2) + NX * j]);
+        z = theta * (prims.v1[i + NX * j] + prims.v1[(i - 1) + NX * j]);
+        slope.v1L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v2[(i - 1) + NX * j] - prims.v2[(i - 2) + NX * j]);
+        y = 0.5 * (prims.v2[i + NX * j] - prims.v2[(i - 2) + NX * j]);
+        z = theta * (prims.v2[i + NX * j] + prims.v2[(i - 1) + NX * j]);
+        slope.v2L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.p[(i - 1) + NX * j] - prims.p[(i - 2) + NX * j]);
+        y = 0.5 * (prims.p[i + NX * j] - prims.p[(i - 2) + NX * j]);
+        z = theta * (prims.p[i + NX * j] + prims.p[(i - 1) + NX * j]);
+        slope.pL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+
+
+        // -----------Right Cell Face X-Direction -------------------------
+        x = theta * (prims.rho[i  + NX * j] - prims.rho[(i  - 1) + NX * j]);
+        y = 0.5 * (prims.rho[(i + 1) + NX * j] - prims.rho[(i - 1) + NX * j]);
+        z = theta * (prims.rho[(i + 1) + NX * j] + prims.rho[i + NX * j]);
+        slope.rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v1[i + NX * j] - prims.v1[(i - 1) + NX * j]);
+        y = 0.5 * (prims.v1[(i + 1) + NX * j] - prims.v1[(i - 1) + NX * j]);
+        z = theta * (prims.v1[(i + 1) + NX * j] + prims.v1[i + NX * j]);
+        slope.v1R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v2[i + NX * j] - prims.v2[(i - 1) + NX * j]);
+        y = 0.5 * (prims.v2[(i + 1) + NX * j] - prims.v2[(i - 1) + NX * j]);
+        z = theta * (prims.v2[(i + 1) + NX * j] + prims.v2[i + NX * j]);
+        slope.v2R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.p[i + NX * j] - prims.p[(i - 1) + NX * j]);
+        y = 0.5   * (prims.p[(i + 1) + NX * j] - prims.p[(i - 1) + NX * j]);
+        z = theta * (prims.p[(i + 1) + NX * j] + prims.p[i + NX * j]);
+        slope.rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+
+
+        //------------- Upper Cell Face ---------------------------------
+        x = theta * (prims.rho[i + NX * (j - 1)] - prims.rho[i + NX * (j - 2)]);
+        y = 0.5   * (prims.rho[i + NX * j] - prims.rho[i + NX * (j - 2)]);
+        z = theta * (prims.rho[i + NX * j] + prims.rho[i + NX * (j - 1)]);
+        slope.rhoT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v1[i + NX * (j - 1)] - prims.v1[i + NX * (j - 2)]);
+        y = 0.5   * (prims.v1[i + NX * j] - prims.v1[i + NX * (j - 2)]);
+        z = theta * (prims.v1[i + NX * j] + prims.v1[i + NX * (j - 1)]);
+        slope.v1T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v2[i + NX * (j - 1)] - prims.v2[i + NX * (j - 2)]);
+        y = 0.5   * (prims.v2[i + NX * j] - prims.v2[i + NX * (j - 2)]);
+        z = theta * (prims.v2[i + NX * j] + prims.v2[i + NX * (j - 1)]);
+        slope.v2T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.p[i + NX * (j - 1)] - prims.p[i + NX * (j - 2)]);
+        y = 0.5   * (prims.p[i + NX * j] - prims.p[i + NX * (j - 2)]);
+        z = theta * (prims.p[i + NX * j] + prims.p[i + NX * (j - 1)]);
+        slope.pT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+
+
+        //---------------Bottom Face--------------------------------------
+        x = theta * (prims.rho[i + NX * j] - prims.rho[i + NX * (j - 1)]);
+        y = 0.5   * (prims.rho[i + NX * (j + 1)] - prims.rho[i + NX * (j - 1)]);
+        z = theta * (prims.rho[i + NX * (j + 1)] + prims.rho[i + NX * j]);
+        slope.rhoB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v1[i + NX * j] - prims.v1[i + NX * (j - 1)]);
+        y = 0.5   * (prims.v1[i + NX * (j + 1)] - prims.v1[i + NX * (j - 1)]);
+        z = theta * (prims.v1[i + NX * (j + 1)] + prims.v1[i + NX * j]);
+        slope.v1B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.v2[i + NX * j] - prims.v2[i + NX * (j - 1)]);
+        y = 0.5   * (prims.v2[i + NX * (j + 1)] - prims.v2[i + NX * (j - 1)]);
+        z = theta * (prims.v2[i + NX * (j + 1)] + prims.v2[i + NX * j]);
+        slope.v2B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        x = theta * (prims.p[i + NX * j] - prims.p[i + NX * (j - 1)]);
+        y = 0.5   * (prims.p[i + NX * (j + 1)] - prims.p[i + NX * (j - 1)]);
+        z = theta * (prims.p[i + NX * (j + 1)] + prims.p[i + NX * j]);
+        slope.pB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+
+        break;
+    }
+
+    return slope;
+
+}
 
 // Roll a vector for use with periodic boundary conditions
 vector<double> rollVector(const vector<double>& v, unsigned int n){
@@ -242,7 +439,6 @@ void config_ghosts2D(vector &u_state,
 string create_step_str(double t_interval, string &tnow){
 
     // Convert the time interval into an int with 2 decimal displacements
-    cout << t_interval << endl;
     int t_interval_int = round( 1.e3 * t_interval );
     int a, b;
 
@@ -267,10 +463,10 @@ string create_step_str(double t_interval, string &tnow){
 
 
 }
-void write_hdf5(string filename, PrimData prims, float t, double dt, int NX, int NY)
+void write_hdf5(string filename, PrimData prims, DataWriteMembers setup)
 {
     string filePath = "data/sr/";
-    cout << "Writing File...: " << filePath + filename << endl;
+    cout << "\n" <<  "Writing File...: " << filePath + filename << endl;
     h5::fd_t fd = h5::create(filePath + filename, H5F_ACC_TRUNC, h5::default_fcpl,
                     h5::libver_bounds({H5F_LIBVER_V18, H5F_LIBVER_V18}) );
 
@@ -283,10 +479,16 @@ void write_hdf5(string filename, PrimData prims, float t, double dt, int NX, int
     ds["p"]   = prims.p;
 
     // Dataset Attributes
-    ds["current_time"] = t;
-    ds["time_step"]    = dt;
-    ds["NX"]           = NX;
-    ds["NY"]           = NY;
+    ds["current_time"]   = setup.t;
+    ds["time_step"]      = setup.dt;
+    ds["NX"]             = setup.NX;
+    ds["NY"]             = setup.NY;
+    ds["xmax"]           = setup.xmax;
+    ds["xmin"]           = setup.xmin;
+    ds["ymax"]           = setup.ymax;
+    ds["ymin"]           = setup.ymin;
+    ds["xactive_zones"]  = setup.xactive_zones;
+    ds["yactive_zones"]  = setup.yactive_zones;
 
     // Write the Current Simulation Conditions in a File
     // h5::write( filename, "rho",  prims.rho);

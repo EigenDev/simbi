@@ -100,15 +100,19 @@ std::vector<double>  calc_lorentz_gamma(T &v1, T &v2, int nx, int ny){
     int xgrid_size = nx;
     int ygrid_size = ny;
     double vtot;
-    std::vector<double> W(ygrid_size * xgrid_size); 
+    std::vector<double> W; 
+    W.reserve(ygrid_size * xgrid_size);
 
-    for (int jj=0; jj < ygrid_size; jj++){
-        for (int ii=0; ii < xgrid_size; ii++){
-            vtot = sqrt(v1[ii + xgrid_size * jj]*v1[ii + xgrid_size * jj] + v2[ii + xgrid_size * jj]*v2[ii + xgrid_size * jj]);
-
-            W[ii + xgrid_size * jj] = 1/sqrt(1 - vtot*vtot);
-        }
-    }
+    std::transform(v1.begin(), v1.end(), v2.begin(), back_inserter(W), [&](const double& vx, const double& vy){
+        return 1./sqrt(1 - vx*vx + vy*vy);
+    });
+    // for (int jj=0; jj < ygrid_size; jj++){
+    //     for (int ii=0; ii < xgrid_size; ii++){
+    //         vtot = sqrt(v1[ii + xgrid_size * jj]*v1[ii + xgrid_size * jj] + v2[ii + xgrid_size * jj]*v2[ii + xgrid_size * jj]);
+// 
+    //         W[ii + xgrid_size * jj] = 1/sqrt(1 - vtot*vtot);
+    //     }
+    // }
     
     return W;
 };

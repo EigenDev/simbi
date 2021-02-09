@@ -175,15 +175,16 @@ namespace states {
         /* Shared Data Members */
         Eigenvals lambda;
         PrimitiveData prims; 
-        ConserveData u_now; 
+        ConserveData u_state; 
         std::vector<std::vector<double> > state2D, sources;
         float theta, gamma, tend;
         bool first_order, periodic, hllc, linspace;
         double CFL, dt;
-        int NX, NY, nzones, n;
+        int NX, NY, nzones, n, block_size, xphysical_grid, yphysical_grid;
+        int active_zones; 
         std::string coord_system;
         std::vector<double> x1, x2, sourceD, source_S1, source_S2, source_tau, pressure_guess;
-
+        std::vector<double> lorentz_gamma;
 
         /* Methods */
         UstateSR2D();
@@ -246,16 +247,9 @@ namespace states {
                         Primitives   &right_prims,
                         unsigned int nhat);
 
-        Conserved  u_dot( 
-            const ConserveData  &cons_state,
-            const std::vector<double>  &lorentz_gamma,
-            std::tuple<int , int> coordinates);
+        Conserved  u_dot(unsigned int ii, unsigned int jj);
 
-        ConserveData  u_dot2D( 
-            const ConserveData  &cons_state,
-            const std::vector<double>  &lorentz_gamma,
-            bool first_order,
-            bool periodic, bool linspace, bool hllc, float theta);
+        ConserveData  u_dot2D(const ConserveData  &cons_state);
 
 
         double adapt_dt(const PrimitiveData &prims,

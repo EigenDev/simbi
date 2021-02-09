@@ -16,6 +16,7 @@
 #include <cmath>
 #include <h5cpp/all>
 #include "ustate.h"
+#include <algorithm>
 
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-TEMPLATES 
@@ -25,11 +26,20 @@ struct PrimData
     std::vector<double> rho, v1, v2, p, v;
 };
 
+struct MinMod
+{
+    double rhoL,rhoR, rhoT, rhoB;
+    double v1L,v1R, v1T, v1B;
+    double v2L,v2R, v2T, v2B;
+    double pL,pR, pT, pB;
+};
+
 struct DataWriteMembers
 {
     float t;
-    double xmin, xmax, ymin, ymax;
+    double xmin, xmax, ymin, ymax, dt;
     int NX, NY, xactive_zones, yactive_zones;
+
 };
 
 template <typename T, size_t N>
@@ -63,13 +73,14 @@ double findMax(double, double, double);
 double findMin(double a, double b, double c);
 double calc_sound_speed(float, double, double);
 int sign(double);
+MinMod minmod(PrimData &prims, double theta, int face, int i, int j, int NX);
 double minmod(double, double, double);
 std::vector<double> rollVector(const std::vector<double>&, unsigned int);
 double roll(std::vector<double>&, unsigned int);
 double roll(std::vector<std::vector<double>>&, unsigned int xpos, unsigned int ypos);
 std::vector<std::vector<double> > transpose(std::vector<std::vector<double> > &);
 std::string create_step_str(double t_interval, std::string &tnow);
-void write_hdf5(std::string filename, PrimData prims, float t, double dt, int NX, int NY);
+void write_hdf5(std::string filename, PrimData prims, DataWriteMembers setup);
 // void config_ghosts1D(std::vector<std::vector<double> > &, int, bool=true);
 // void config_ghosts2D(std::vector<std::vector< std::vector< double> > > &, int, int, bool=true, char kind='outflow');
 void write_data(std::vector<std::vector<double> > &sim_data,double time, std::string sim_type );
