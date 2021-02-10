@@ -1,2 +1,6 @@
-simbi/plots/
-simbi/data/
+plots/
+data/
+*.h5
+*.pdf
+*.png
+*.eps
