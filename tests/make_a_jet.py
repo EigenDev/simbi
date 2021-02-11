@@ -52,6 +52,10 @@ def rho0(r, c_scale=1, wind_scale=1):
 gamma = 4/3
 N_0 = 4*np.pi*(r_0/R_0)**3 * (1. - np.exp(-2./(theta_0**2)))*theta_0**2
 
+#======================================================================
+#                            BUILD THE MESH
+#======================================================================
+
 # The angular zones are the terms that resolve 
 # the KH instability
 ynpts = 512
@@ -119,15 +123,14 @@ vt = np.zeros((ynpts, xnpts), float)
 
 tend = 1.5
 
-theta_rface = 0.5*(theta[0] + theta[1])
-dtheta_face = theta_rface - theta[0]
-volavg = 0.75*(ri**4 - r[0]**4)/(ri**3 - r[0]**3)
 dt = 0.4*min(ri - r[0], volavg*dtheta_face)
 
+#=========================================================================
+#                            PRINT SETUP
+#=========================================================================
 print("Engine Power: {power:.3e}".format(power = scale * L_0 * g[0,0]))
 print("Central Density: {density:.3e}".format(density = rho_c))
 print("Wind Density: {density:.3e}".format(density = rho_wind))
-
 print("minimum dt: {:.3e}".format(dt) )
 print("Rmin: {}".format(rmin))
 print("Rmax: {}".format(rmax))
@@ -141,8 +144,8 @@ Jet = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt),
               Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4, regime="relativistic")
 
 t1 = (time.time()*u.s).to(u.min)
-sol = Jet.simulate(tend=tend, first_order = False, dt=dt, coordinates=b"spherical", sources=(S_D, S_r,S_theta ,S_0),
-                   linspace=False, CFL=0.4, hllc = False)
+sol = Jet.simulate(tend=tend, first_order = True, dt=dt, coordinates=b"spherical", sources=(S_D, S_r,S_theta ,S_0),
+                   linspace=False, CFL=0.4, hllc = True)
 
 print("The 2D Jet Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 

@@ -1,6 +1,11 @@
 plots/
+__pycache__/
+SIMBI_2D_Hydro_Code.egg-info/
+build/
 data/
 *.h5
 *.pdf
 *.png
 *.eps
+*.so
+*.deb

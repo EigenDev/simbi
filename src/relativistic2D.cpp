@@ -157,9 +157,6 @@ PrimitiveArray UstateSR2D::cons2prim2D(const ConserveArray &u_state2D, const vec
             }  
         }
     }
-    
-    // cout << prims.rho.size() << endl;
-    // cin.get();
 
     return prims;
 };
@@ -436,40 +433,31 @@ double UstateSR2D::adapt_dt(const PrimitiveArray &prims,
 
             } else {
 
-                // log_rLeft = log10(x1[0]) + ii*delta_logr;
-                // log_rRight = log_rLeft + delta_logr;
-                // r_left = pow(10, log_rLeft);
-                // r_right = pow(10, log_rRight);
                 if (coord_system == "cartesian"){
                     x2_right = 0.5*(upper_cell + x2[jj]);
                     x2_left = 0.5*(lower_cell + x2[jj]);
                 } else {
-                    x2_right = atan2( sin(upper_cell) + sin(x2[jj]), cos(upper_cell) + cos(x2[jj]) );
-                    x2_left = atan2( sin(lower_cell) + sin(x2[jj]), cos(lower_cell) + cos(x2[jj]) ); 
+                    // x2_right = atan2( sin(upper_cell) + sin(x2[jj]), cos(upper_cell) + cos(x2[jj]) );
+                    // x2_left = atan2( sin(lower_cell) + sin(x2[jj]), cos(lower_cell) + cos(x2[jj]) ); 
     
-                    // x2_right = 0.5*(upper_cell + x2[jj]);
-                    // x2_left = 0.5*(lower_cell + x2[jj]);
+                    x2_right = 0.5 * (upper_cell + x2[jj]);
+                    x2_left  = 0.5 * (lower_cell + x2[jj]);
   
                 }
 
-                // cout << "r_right: " << r_right << endl;
-                // cout << "r_left: " << r_left << endl;
                 r_right = sqrt(right_cell * x1[ii]); //0.5 * (right_cell + x1[ii]);
                 r_left  = sqrt(left_cell  * x1[ii]); //0.5 * (left_cell  + x1[ii]);
-                // cout << "r_right: " << r_right << endl;
-                // cout << "r_left: " << r_left << endl;
 
             }
 
             dx1      = r_right - r_left;
             dx2      = x2_right - x2_left;
             rho      = prims.rho[shift_i + NX * shift_j];
-            v1       = prims.v1[shift_i + NX * shift_j];
-            v2       = prims.v2[shift_i + NX * shift_j];
-            pressure = prims.p[shift_i + NX * shift_j];
+            v1       = prims.v1 [shift_i + NX * shift_j];
+            v2       = prims.v2 [shift_i + NX * shift_j];
+            pressure = prims.p  [shift_i + NX * shift_j];
 
-            vtot = sqrt(v1*v1 + v2*v2);
-            W    = 1./sqrt(1 - vtot*vtot);
+            W    = 1./sqrt(1 - v1*v1 + v2*v2);
             D    = rho*W;
             h    = 1. + gamma*pressure/(rho*(gamma - 1.));
             tau  = rho*h*W*W - pressure - rho*W;
@@ -487,7 +475,9 @@ double UstateSR2D::adapt_dt(const PrimitiveArray &prims,
                 cfl_dt = min( dx1/(max(abs(plus_v1), abs(minus_v1))), dx2/(max(abs(plus_v2), abs(minus_v2))) );
 
             } else {
-                volAvg = 0.75*( ( pow(r_right, 4) - pow(r_left, 4) )/ ( pow(r_right, 3) - pow(r_left, 3) ) );
+                // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
+                volAvg = 0.75*( ( r_right * r_right * r_right * r_right - r_left * r_left * r_left * r_left ) / 
+                                    ( r_right * r_right * r_right - r_left * r_left * r_left) );
                 // cout << r_right << endl;
                 // cout << r_left << endl;
                 // cout << dx1 << endl;
@@ -530,8 +520,7 @@ Flux UstateSR2D::calc_Flux(float gamma, double rho, double vx,
     double h, D, S1, S2, convect_12, tau, zeta;
     double mom1, mom2, energy_dens;
 
-    double vtot = sqrt(vx*vx + vy*vy );
-    double lorentz_gamma = 1./sqrt(1. - vtot*vtot);
+    double lorentz_gamma = 1./sqrt(1. - vx*vx + vy*vy );
 
     h   = calc_enthalpy(gamma, rho, pressure);
     D   = rho*lorentz_gamma;
@@ -873,11 +862,7 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
         }
     }
     
-    
 
-    // cout << coord_system << endl;
-    // string a;
-    // cin >> a;
     if (coord_system == "cartesian"){
         double dx = (x1[xphysical_grid - 1] - x1[0])/xphysical_grid;
         double dy = (x2[yphysical_grid - 1] - x2[0])/yphysical_grid;
