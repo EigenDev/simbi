@@ -9,3 +9,4 @@ data/
 *.eps
 *.so
 *.deb
+*.out

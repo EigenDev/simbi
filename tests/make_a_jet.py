@@ -58,7 +58,7 @@ N_0 = 4*np.pi*(r_0/R_0)**3 * (1. - np.exp(-2./(theta_0**2)))*theta_0**2
 
 # The angular zones are the terms that resolve 
 # the KH instability
-ynpts = 512
+ynpts = 64
 
 rmin = 0.01 #((r_0/R_0)/1e3).value
 rmax = 0.5
@@ -121,7 +121,7 @@ rho[:] = rho_init
 vr = np.zeros((ynpts, xnpts), float)
 vt = np.zeros((ynpts, xnpts), float)
 
-tend = 1.5
+tend = 0.5
 
 dt = 0.4*min(ri - r[0], volavg*dtheta_face)
 
@@ -144,7 +144,7 @@ Jet = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt),
               Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4, regime="relativistic")
 
 t1 = (time.time()*u.s).to(u.min)
-sol = Jet.simulate(tend=tend, first_order = True, dt=dt, coordinates=b"spherical", sources=(S_D, S_r,S_theta ,S_0),
+sol = Jet.simulate(tend=tend, first_order = False, dt=dt, coordinates=b"spherical", sources=(S_D, S_r,S_theta ,S_0),
                    linspace=False, CFL=0.4, hllc = True)
 
 print("The 2D Jet Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))

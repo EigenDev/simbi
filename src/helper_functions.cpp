@@ -470,15 +470,17 @@ void write_hdf5(string filename, PrimData prims, DataWriteMembers setup)
     h5::fd_t fd = h5::create(filePath + filename, H5F_ACC_TRUNC, h5::default_fcpl,
                     h5::libver_bounds({H5F_LIBVER_V18, H5F_LIBVER_V18}) );
 
-    h5::ds_t ds = h5::write(fd,"Simulation Data", prims.rho);
-    
+    h5::ds_t ds = h5::write(fd,"rho", prims.rho);
+                  h5::write(fd,"v1",  prims.v1);
+                  h5::write(fd,"v2",  prims.v2);
+                  h5::write(fd,"p",   prims.p);
+                  
     // Datset objects
     ds["rho"] = prims.rho;
     ds["v1"]  = prims.v1;
     ds["v2"]  = prims.v2;
     ds["p"]   = prims.p;
 
-    // Dataset Attributes
     ds["current_time"]   = setup.t;
     ds["time_step"]      = setup.dt;
     ds["NX"]             = setup.NX;

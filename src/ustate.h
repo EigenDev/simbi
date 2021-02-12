@@ -181,7 +181,7 @@ namespace states {
         bool first_order, periodic, hllc, linspace;
         double CFL, dt;
         int NX, NY, nzones, n, block_size, xphysical_grid, yphysical_grid;
-        int active_zones; 
+        int active_zones, idx_active, x_bound, y_bound; 
         std::string coord_system;
         std::vector<double> x1, x2, sourceD, source_S1, source_S2, source_tau, pressure_guess;
         std::vector<double> lorentz_gamma;

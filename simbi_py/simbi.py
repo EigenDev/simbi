@@ -4,9 +4,8 @@
 # 06/10/2020
 
 import numpy as np 
-import matplotlib.pyplot as plt 
-import math 
-import sys
+import sys 
+import h5py 
 
 from state import PyState, PyState2D, PyStateSR, PyStateSR2D
 
@@ -243,290 +242,302 @@ class Hydro:
             dimensions = self.dimensions
         )
     
-    #@nb.jit # numba this function
+
     def simulate(self, tend=0.1, dt = 1.e-4, 
                  first_order=True, periodic=False, linspace=True,
-                 coordinates=b"cartesian", CFL=0.4, sources = None, hllc=False):
+                 coordinates=b"cartesian", CFL=0.4, sources = None, hllc=False,
+                 chkpt=None):
         """
-        Simulate the hydro setup
+        Simulate the Hydro Setup
         
         Parameters:
-            tend (float): The desired time to end the simulation
-            first_order (bollean): The switch the runs the FTCS method
-            or the RK3 method in time.
+            tend        (float): The desired time to end the simulation
+            dt          (float): The desired timestep
+            first_order (boolean): First order RK1 or the RK2 PLM.
+            period      (boolean): Periodic BCs or not
+            linspace    (boolean): Prompts a linearly spaced mesh or log spaced if False
+            coordinate  (boolean): The coordinate system the simulation is taking place in
+            CFL         (float):   The CFL number for min adaptive timestep
+            sources     (array_like): The source terms for the simulations
+            hllc        (boolean): Tells the simulation whether to perform HLLC or HLLE
+            chkpt       (string): The path to the checkpoint file to read into the simulation
             
         Returns:
-            u (array): The conserved variable tensor
+            u (array): The conserved/primitive variable array
         """
         # Initialize conserved u-tensor
         
         self.u = np.asarray(self.u)
         
-        # Check if u-tensor is empty. If it is, generate an array.
-        if self.dimensions == 1:
-            if not self.u.any():
-                if periodic:
-                    if self.regime == "classical":
-                        self.u = np.empty(shape = (self.n_vars, self.Npts), dtype = float)
-                        
-                        self.u[:, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
-                                                self.init_energy])
-                    else:
-                        self.u = np.empty(shape = (self.n_vars, self.Npts), dtype = float)
-                        
-                        self.u[:, :] = np.array([self.initD, self.initS, 
-                                                self.init_tau])
-                        
-                else:
-                    if first_order:
+        if not chkpt:
+             
+            # Check if u-tensor is empty. If it is, generate an array.
+            if self.dimensions == 1:
+                if not self.u.any():
+                    if periodic:
                         if self.regime == "classical":
-                            self.u = np.empty(shape = (self.n_vars, self.Npts), dtype=float)
+                            self.u = np.empty(shape = (self.n_vars, self.Npts), dtype = float)
+                            
                             self.u[:, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
-                                                self.init_energy])
+                                                    self.init_energy])
+                        else:
+                            self.u = np.empty(shape = (self.n_vars, self.Npts), dtype = float)
                             
-                            # Add boundary ghosts
-                            right_ghost = self.u[:, -1]
-                            left_ghost = self.u[:, 0]
+                            self.u[:, :] = np.array([self.initD, self.initS, 
+                                                    self.init_tau])
                             
-                            self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=1)
-                            self.u = np.insert(self.u, 0, left_ghost , axis=1)
+                    else:
+                        if first_order:
+                            if self.regime == "classical":
+                                self.u = np.empty(shape = (self.n_vars, self.Npts), dtype=float)
+                                self.u[:, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
+                                                    self.init_energy])
+                                
+                                # Add boundary ghosts
+                                right_ghost = self.u[:, -1]
+                                left_ghost = self.u[:, 0]
+                                
+                                self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=1)
+                                self.u = np.insert(self.u, 0, left_ghost , axis=1)
+                                
+                            else:
+                                self.u = np.empty(shape = (self.n_vars, self.Npts), dtype=float)
+                                self.u[:, :] = np.array([self.initD, self.initS, 
+                                                    self.init_tau])
+                                
+                                # Add boundary ghosts
+                                right_ghost = self.u[:, -1]
+                                left_ghost = self.u[:, 0]
+                                
+                                right_gamma = self.W[-1]
+                                left_gamma = self.W[0]
+                                
+                                self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=1)
+                                self.u = np.insert(self.u, 0, left_ghost , axis=1)
+                                
+                                self.W = np.insert(self.W, self.W.shape[-1], right_gamma)
+                                self.W = np.insert(self.W, 0, left_gamma)
+                                
                             
                         else:
-                            self.u = np.empty(shape = (self.n_vars, self.Npts), dtype=float)
-                            self.u[:, :] = np.array([self.initD, self.initS, 
-                                                self.init_tau])
-                            
-                            # Add boundary ghosts
-                            right_ghost = self.u[:, -1]
-                            left_ghost = self.u[:, 0]
-                            
+                            if self.regime == "classical":
+                                self.u = np.empty(shape = (self.n_vars, self.Npts), dtype=float)
+                                self.u[:, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
+                                                    self.init_energy])
+                                
+                                # Add boundary ghosts
+                                right_ghost = self.u[:, -1]
+                                left_ghost = self.u[:, 0]
+                                
+                                self.u = np.insert(self.u, self.u.shape[-1], 
+                                                (right_ghost, right_ghost) , axis=1)
+                                
+                                self.u = np.insert(self.u, 0,
+                                                (left_ghost, left_ghost) , axis=1)
+                            else:
+                                self.u = np.empty(shape = (self.n_vars, self.Npts), dtype=float)
+                                self.u[:, :] = np.array([self.initD, self.initS, 
+                                                    self.init_tau])
+                                
+                                # Add boundary ghosts
+                                right_ghost = self.u[:, -1]
+                                left_ghost = self.u[:, 0]
+                                
+                                
+                                self.u = np.insert(self.u, self.u.shape[-1], 
+                                                (right_ghost, right_ghost) , axis=1)
+                                
+                                self.u = np.insert(self.u, 0,
+                                                (left_ghost, left_ghost) , axis=1)
+                                
+                                right_gamma = self.W[-1]
+                                left_gamma = self.W[0]
+                                
+                                
+                                self.W = np.insert(self.W, -1, (right_gamma, right_gamma))
+                                self.W = np.insert(self.W, 0, (left_gamma, left_gamma))
+                                
+                                print(self.W)
+                                print("present")
+                                zzz = input('')
+                                
+                        
+                else:
+                    if not first_order:
+                        # Add the extra ghost cells for i-2, i+2
+                        right_ghost = self.u[:, -1]
+                        left_ghost = self.u[:, 0]
+                        self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=1)
+                        self.u = np.insert(self.u, 0, left_ghost , axis=1)
+                        
+                        if self.regime != "classical":
                             right_gamma = self.W[-1]
                             left_gamma = self.W[0]
                             
-                            self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=1)
-                            self.u = np.insert(self.u, 0, left_ghost , axis=1)
-                            
-                            self.W = np.insert(self.W, self.W.shape[-1], right_gamma)
+                            self.W = np.insert(self.W, -1, right_gamma, axis=0)
                             self.W = np.insert(self.W, 0, left_gamma)
-                            
-                        
-                    else:
-                        if self.regime == "classical":
-                            self.u = np.empty(shape = (self.n_vars, self.Npts), dtype=float)
-                            self.u[:, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
-                                                self.init_energy])
-                            
-                            # Add boundary ghosts
-                            right_ghost = self.u[:, -1]
-                            left_ghost = self.u[:, 0]
-                            
-                            self.u = np.insert(self.u, self.u.shape[-1], 
-                                            (right_ghost, right_ghost) , axis=1)
-                            
-                            self.u = np.insert(self.u, 0,
-                                            (left_ghost, left_ghost) , axis=1)
-                        else:
-                            self.u = np.empty(shape = (self.n_vars, self.Npts), dtype=float)
-                            self.u[:, :] = np.array([self.initD, self.initS, 
-                                                self.init_tau])
-                            
-                            # Add boundary ghosts
-                            right_ghost = self.u[:, -1]
-                            left_ghost = self.u[:, 0]
-                            
-                            
-                            self.u = np.insert(self.u, self.u.shape[-1], 
-                                            (right_ghost, right_ghost) , axis=1)
-                            
-                            self.u = np.insert(self.u, 0,
-                                            (left_ghost, left_ghost) , axis=1)
-                            
-                            right_gamma = self.W[-1]
-                            left_gamma = self.W[0]
-                            
-                            
-                            self.W = np.insert(self.W, -1, (right_gamma, right_gamma))
-                            self.W = np.insert(self.W, 0, (left_gamma, left_gamma))
-                            
-                            print(self.W)
-                            print("present")
-                            zzz = input('')
-                            
                     
+                        
+                        
+                        #zzz = input('')
             else:
-                if not first_order:
-                    # Add the extra ghost cells for i-2, i+2
-                    right_ghost = self.u[:, -1]
-                    left_ghost = self.u[:, 0]
-                    self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=1)
-                    self.u = np.insert(self.u, 0, left_ghost , axis=1)
-                    
-                    if self.regime != "classical":
-                        right_gamma = self.W[-1]
-                        left_gamma = self.W[0]
+                if not self.u.any():
+                    if periodic:
+                        self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype = float)
                         
-                        self.W = np.insert(self.W, -1, right_gamma, axis=0)
-                        self.W = np.insert(self.W, 0, left_gamma)
-                
-                    
-                    
-                    #zzz = input('')
-        else:
-            if not self.u.any():
-                if periodic:
-                    self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype = float)
-                    
-                    self.u[:, :, :] = np.array([self.init_rho, self.init_rho*self.init_vx,
-                                                self.init_rho*self.init_vy, 
-                                                self.init_energy])
+                        self.u[:, :, :] = np.array([self.init_rho, self.init_rho*self.init_vx,
+                                                    self.init_rho*self.init_vy, 
+                                                    self.init_energy])
+                    else:
+                        if first_order:
+                            if self.regime == "classical":
+                                self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
+                                self.u[:, :, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
+                                                    self.init_energy])
+                                
+                                # Add boundary ghosts
+                                right_ghost = self.u[:, :, -1]
+                                left_ghost = self.u[:, :, 0]
+                                
+                                self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=2)
+                                self.u = np.insert(self.u, 0, left_ghost , axis=2)
+                                
+                                upper_ghost = self.u[:, 0]
+                                bottom_ghost = self.u[:, -1]
+                                
+                                self.u = np.insert(self.u, self.u.shape[1], bottom_ghost , axis=1)
+                                self.u = np.insert(self.u, 0, upper_ghost , axis=1)
+                            else:
+                                self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
+                                self.u[:, :, :] = np.array([self.initD, self.initS1,
+                                                            self.initS2, self.init_tau])
+                                
+                                # Add boundary ghosts
+                                bottom_ghost = self.u[:, -1]
+                                upper_ghost = self.u[:, 0]
+                                
+                                bottom_gamma = self.W[-1]
+                                upper_gamma = self.W[0]
+                                
+                                self.u = np.insert(self.u, self.u.shape[1], 
+                                                bottom_ghost , axis=1)
+                                
+                                self.u = np.insert(self.u, 0,
+                                                upper_ghost , axis=1)
+                                
+                                self.W = np.insert(self.W, self.W.shape[0], 
+                                                bottom_gamma , axis=0)
+                                
+                                self.W = np.insert(self.W, 0,
+                                                upper_gamma , axis=0)
+                                
+                                left_ghost = self.u[:, :, 0]
+                                right_ghost = self.u[:, :, -1]
+                                
+                                left_gamma = self.W[ :, 0]
+                                right_gamma = self.W[ :,  -1]
+                                
+                                
+                                self.u = np.insert(self.u, 0, 
+                                                left_ghost , axis=2)
+                                
+                                self.u = np.insert(self.u, self.u.shape[2],
+                                                right_ghost , axis=2)
+                                
+                                self.W = np.insert(self.W, 0, 
+                                                left_gamma , axis=1)
+                                
+                                self.W = np.insert(self.W, self.W.shape[1],
+                                                right_gamma, axis=1)
+                                
+                            
+                        else:
+                            if self.regime == "classical":
+                                self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
+                                self.u[:, :, :] = np.array([self.init_rho, self.init_rho*self.init_vx,
+                                                            self.init_rho*self.init_vy, self.init_energy])
+                                
+                                # Add boundary ghosts
+                                bottom_ghost = self.u[:, -1]
+                                upper_ghost = self.u[:, 0]
+                                
+                                
+                                self.u = np.insert(self.u, self.u.shape[1], 
+                                                (bottom_ghost, bottom_ghost) , axis=1)
+                                
+                                self.u = np.insert(self.u, 0,
+                                                (upper_ghost, upper_ghost) , axis=1)
+                                
+                                left_ghost = self.u[:, :, 0]
+                                right_ghost = self.u[:, :, -1]
+                                
+                                self.u = np.insert(self.u, 0, 
+                                                (left_ghost, left_ghost) , axis=2)
+                                
+                                self.u = np.insert(self.u, self.u.shape[2],
+                                                (right_ghost, right_ghost) , axis=2)
+                            else:
+                                self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
+                                self.u[:, :, :] = np.array([self.initD, self.initS1,
+                                                            self.initS2, self.init_tau])
+                                
+                                # Add boundary ghosts
+                                bottom_ghost = self.u[:, -1]
+                                upper_ghost = self.u[:, 0]
+                                
+                                bottom_gamma = self.W[-1]
+                                upper_gamma = self.W[0]
+                                
+                                self.u = np.insert(self.u, self.u.shape[1], 
+                                                (bottom_ghost, bottom_ghost) , axis=1)
+                                
+                                self.u = np.insert(self.u, 0,
+                                                (upper_ghost, upper_ghost) , axis=1)
+                                
+                                self.W = np.insert(self.W, self.W.shape[0], 
+                                                (bottom_gamma, bottom_gamma) , axis=0)
+                                
+                                self.W = np.insert(self.W, 0,
+                                                (upper_gamma, upper_gamma) , axis=0)
+                                
+                                left_ghost = self.u[:, :, 0]
+                                right_ghost = self.u[:, :, -1]
+                                
+                                left_gamma = self.W[ :, 0]
+                                right_gamma = self.W[ :,  -1]
+                                
+                                
+                                self.u = np.insert(self.u, 0, 
+                                                (left_ghost, left_ghost) , axis=2)
+                                
+                                self.u = np.insert(self.u, self.u.shape[2],
+                                                (right_ghost, right_ghost) , axis=2)
+                                
+                                self.W = np.insert(self.W, 0, 
+                                                (left_gamma, left_gamma) , axis=1)
+                                
+                                self.W = np.insert(self.W, self.W.shape[1],
+                                                (right_gamma, right_gamma) , axis=1)
+                                
+                        
                 else:
-                    if first_order:
-                        if self.regime == "classical":
-                            self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
-                            self.u[:, :, :] = np.array([self.init_rho, self.init_rho*self.init_v, 
-                                                self.init_energy])
-                            
-                            # Add boundary ghosts
-                            right_ghost = self.u[:, :, -1]
-                            left_ghost = self.u[:, :, 0]
-                            
-                            self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=2)
-                            self.u = np.insert(self.u, 0, left_ghost , axis=2)
-                            
-                            upper_ghost = self.u[:, 0]
-                            bottom_ghost = self.u[:, -1]
-                            
-                            self.u = np.insert(self.u, self.u.shape[1], bottom_ghost , axis=1)
-                            self.u = np.insert(self.u, 0, upper_ghost , axis=1)
-                        else:
-                            self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
-                            self.u[:, :, :] = np.array([self.initD, self.initS1,
-                                                        self.initS2, self.init_tau])
-                            
-                            # Add boundary ghosts
-                            bottom_ghost = self.u[:, -1]
-                            upper_ghost = self.u[:, 0]
-                            
-                            bottom_gamma = self.W[-1]
-                            upper_gamma = self.W[0]
-                            
-                            self.u = np.insert(self.u, self.u.shape[1], 
-                                            bottom_ghost , axis=1)
-                            
-                            self.u = np.insert(self.u, 0,
-                                            upper_ghost , axis=1)
-                            
-                            self.W = np.insert(self.W, self.W.shape[0], 
-                                            bottom_gamma , axis=0)
-                            
-                            self.W = np.insert(self.W, 0,
-                                            upper_gamma , axis=0)
-                            
-                            left_ghost = self.u[:, :, 0]
-                            right_ghost = self.u[:, :, -1]
-                            
-                            left_gamma = self.W[ :, 0]
-                            right_gamma = self.W[ :,  -1]
-                            
-                            
-                            self.u = np.insert(self.u, 0, 
-                                            left_ghost , axis=2)
-                            
-                            self.u = np.insert(self.u, self.u.shape[2],
-                                            right_ghost , axis=2)
-                            
-                            self.W = np.insert(self.W, 0, 
-                                            left_gamma , axis=1)
-                            
-                            self.W = np.insert(self.W, self.W.shape[1],
-                                            right_gamma, axis=1)
-                            
+                    if not first_order:
+                        # Add the extra ghost cells for i-2, i+2
+                        right_ghost = self.u[:, :, -1]
+                        left_ghost = self.u[:, :, 0]
                         
-                    else:
-                        if self.regime == "classical":
-                            self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
-                            self.u[:, :, :] = np.array([self.init_rho, self.init_rho*self.init_vx,
-                                                        self.init_rho*self.init_vy, self.init_energy])
-                            
-                            # Add boundary ghosts
-                            bottom_ghost = self.u[:, -1]
-                            upper_ghost = self.u[:, 0]
-                            
-                            
-                            self.u = np.insert(self.u, self.u.shape[1], 
-                                            (bottom_ghost, bottom_ghost) , axis=1)
-                            
-                            self.u = np.insert(self.u, 0,
-                                            (upper_ghost, upper_ghost) , axis=1)
-                            
-                            left_ghost = self.u[:, :, 0]
-                            right_ghost = self.u[:, :, -1]
-                            
-                            self.u = np.insert(self.u, 0, 
-                                            (left_ghost, left_ghost) , axis=2)
-                            
-                            self.u = np.insert(self.u, self.u.shape[2],
-                                            (right_ghost, right_ghost) , axis=2)
-                        else:
-                            self.u = np.empty(shape = (self.n_vars, self.yNpts, self.xNpts), dtype=float)
-                            self.u[:, :, :] = np.array([self.initD, self.initS1,
-                                                        self.initS2, self.init_tau])
-                            
-                            # Add boundary ghosts
-                            bottom_ghost = self.u[:, -1]
-                            upper_ghost = self.u[:, 0]
-                            
-                            bottom_gamma = self.W[-1]
-                            upper_gamma = self.W[0]
-                            
-                            self.u = np.insert(self.u, self.u.shape[1], 
-                                            (bottom_ghost, bottom_ghost) , axis=1)
-                            
-                            self.u = np.insert(self.u, 0,
-                                            (upper_ghost, upper_ghost) , axis=1)
-                            
-                            self.W = np.insert(self.W, self.W.shape[0], 
-                                            (bottom_gamma, bottom_gamma) , axis=0)
-                            
-                            self.W = np.insert(self.W, 0,
-                                            (upper_gamma, upper_gamma) , axis=0)
-                            
-                            left_ghost = self.u[:, :, 0]
-                            right_ghost = self.u[:, :, -1]
-                            
-                            left_gamma = self.W[ :, 0]
-                            right_gamma = self.W[ :,  -1]
-                            
-                            
-                            self.u = np.insert(self.u, 0, 
-                                            (left_ghost, left_ghost) , axis=2)
-                            
-                            self.u = np.insert(self.u, self.u.shape[2],
-                                            (right_ghost, right_ghost) , axis=2)
-                            
-                            self.W = np.insert(self.W, 0, 
-                                            (left_gamma, left_gamma) , axis=1)
-                            
-                            self.W = np.insert(self.W, self.W.shape[1],
-                                            (right_gamma, right_gamma) , axis=1)
-                            
-                    
-            else:
-                if not first_order:
-                    # Add the extra ghost cells for i-2, i+2
-                    right_ghost = self.u[:, :, -1]
-                    left_ghost = self.u[:, :, 0]
-                    
-                    right_W_ghost = self.W[-1]
-                    left_W_ghost = self.W[0]
-                    
-                    self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=2)
-                    self.u = np.insert(self.u, 0, left_ghost , axis=2)
-                    
-                    self.W = np.insert(self.W, self.W.shape[-1], right_W_ghost)
-                    self.W = np.insert(self.W, 0, right_W_ghost)
+                        right_W_ghost = self.W[-1]
+                        left_W_ghost = self.W[0]
+                        
+                        self.u = np.insert(self.u, self.u.shape[-1], right_ghost , axis=2)
+                        self.u = np.insert(self.u, 0, left_ghost , axis=2)
+                        
+                        self.W = np.insert(self.W, self.W.shape[-1], right_W_ghost)
+                        self.W = np.insert(self.W, 0, right_W_ghost)
+        else:
+            # TODO: Read in H5 file and create the necessary Simulation Checkpoint
+            pass
             
-        
         u = self.u 
         
         # Copy state tensor
@@ -573,7 +584,7 @@ class Hydro:
                 
         else:
             if (first_order):
-                print("Comptuing First Order...")
+                print("Computing First Order...")
                 if (linspace):
                     x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
                     x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)

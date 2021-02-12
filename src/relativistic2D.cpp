@@ -361,44 +361,24 @@ double UstateSR2D::adapt_dt(const PrimitiveArray &prims,
 
     double r_left, r_right, left_cell, right_cell, upper_cell, lower_cell;
     double dx1, cs, dx2, x2_right, x2_left, rho, pressure, v1, v2, volAvg, h;
-    double delta_logr, min_dt, cfl_dt, vtot, D, tau, W;
-    int shift_i, shift_j, x1physical_grid, x2physical_grid;
+    double delta_logr, min_dt, cfl_dt, D, tau, W;
+    int shift_i, shift_j;
     double plus_v1, plus_v2, minus_v1, minus_v2;
 
-    // int x1grid_size = prims.rho[0].size();
-    // int x2grid_size = prims.rho.size();
-
     min_dt = 0;
-    // Find the minimum timestep over all i
-    if (firs_order){
-        x1physical_grid = NX - 2;
-        x2physical_grid = NY - 2;
-        
-    } else {
-        x1physical_grid = NX - 4;
-        x2physical_grid = NY - 4;
-    }
-
-    delta_logr = (log10(x1[x1physical_grid - 1]) - log10(x1[0]))/(x1physical_grid - 1);
-
     // Compute the minimum timestep given CFL
-    for (int jj = 0; jj < x2physical_grid; jj ++){
-        for (int ii = 0; ii < x1physical_grid; ii++){
-            if (firs_order){
-                shift_i = ii + 1;
-                shift_j = jj + 1;
-            } else {
-                shift_i = ii + 2;
-                shift_j = jj + 2;
-            }
-            
+    for (int jj = 0; jj < yphysical_grid; jj ++){
+        shift_j = jj + idx_active;
+        for (int ii = 0; ii < xphysical_grid; ii++){
+           
+            shift_i = ii + idx_active;
 
             // Find the left and right cell centers in one direction
             if (ii - 1 < 0){
                 left_cell = x1[ii];
                 right_cell = x1[ii + 1];
             }
-            else if (ii + 1 > x1physical_grid - 1){
+            else if (ii + 1 > xphysical_grid - 1){
                 right_cell = x1[ii];
                 left_cell = x1[ii - 1];
             } else {
@@ -410,7 +390,7 @@ double UstateSR2D::adapt_dt(const PrimitiveArray &prims,
                 lower_cell = x2[jj];
                 upper_cell = x2[jj + 1];
             }
-            else if (jj + 1 > x2physical_grid - 1){
+            else if (jj + 1 > yphysical_grid - 1){
                 upper_cell = x2[jj];
                 lower_cell = x2[jj - 1];
             } else {
@@ -421,34 +401,17 @@ double UstateSR2D::adapt_dt(const PrimitiveArray &prims,
             // Check if using linearly-spaced grid or logspace
             if (linspace){
                 r_right = 0.5*(right_cell + x1[ii]);
-                r_left = 0.5*(x1[ii] + left_cell);
-
-                if (coord_system == "cartesian"){
-                    x2_right = 0.5*(upper_cell + x2[jj]);
-                    x2_left = 0.5*(lower_cell + x2[jj]);
-                } else {
-                    x2_right = atan2 ( sin(upper_cell) + sin(x2[jj]), cos(upper_cell) + cos(x2[jj]) );
-                    x2_left = atan2( sin(lower_cell) + sin(x2[jj]), cos(lower_cell) + cos(x2[jj]) );      
-                }
+                r_left  = 0.5*(x1[ii] + left_cell);
 
             } else {
-
-                if (coord_system == "cartesian"){
-                    x2_right = 0.5*(upper_cell + x2[jj]);
-                    x2_left = 0.5*(lower_cell + x2[jj]);
-                } else {
-                    // x2_right = atan2( sin(upper_cell) + sin(x2[jj]), cos(upper_cell) + cos(x2[jj]) );
-                    // x2_left = atan2( sin(lower_cell) + sin(x2[jj]), cos(lower_cell) + cos(x2[jj]) ); 
-    
-                    x2_right = 0.5 * (upper_cell + x2[jj]);
-                    x2_left  = 0.5 * (lower_cell + x2[jj]);
-  
-                }
 
                 r_right = sqrt(right_cell * x1[ii]); //0.5 * (right_cell + x1[ii]);
                 r_left  = sqrt(left_cell  * x1[ii]); //0.5 * (left_cell  + x1[ii]);
 
             }
+
+            x2_right = 0.5 * (upper_cell + x2[jj]);
+            x2_left  = 0.5 * (lower_cell + x2[jj]);
 
             dx1      = r_right - r_left;
             dx2      = x2_right - x2_left;
@@ -522,7 +485,7 @@ Flux UstateSR2D::calc_Flux(float gamma, double rho, double vx,
 
     double lorentz_gamma = 1./sqrt(1. - vx*vx + vy*vy );
 
-    h   = calc_enthalpy(gamma, rho, pressure);
+    h   = 1. + gamma*pressure/(rho*(gamma - 1));
     D   = rho*lorentz_gamma;
     S1  = rho*lorentz_gamma*lorentz_gamma*h*vx;
     S2  = rho*lorentz_gamma*lorentz_gamma*h*vy;
@@ -619,7 +582,7 @@ Flux UstateSR2D::calc_hllc_flux(float gamma,
     Conserved interstate_left, interstate_right, hll_state;
 
     double aL, aR, aStar, pStar; 
-    double fe, fs, e, s; 
+    double fe, fs, e, s, a, b, c, quad; 
     double aLminus, aRplus;
     double rho, pressure, v1, v2, cofactor;
     double D, S1, S2, tau;
@@ -669,7 +632,11 @@ Flux UstateSR2D::calc_hllc_flux(float gamma,
     fe = hll_flux.tau + hll_flux.D;
     fs = hll_flux.momentum(nhat);
 
-    aStar = calc_intermed_wave(e, s, fs, fe);
+    a = fe;
+    b = -(fs + e);
+    c = s;
+    quad = quad = - 0.5 * (b + sign(b)*sqrt(b * b - 4 * a * c));
+    aStar = c/quad;
     pStar = -fe * aStar + fs;
 
     /* Compute the L/R Star State */
@@ -776,26 +743,25 @@ Flux UstateSR2D::calc_hllc_flux(float gamma,
         break;
     }
 
-
-
-    // Compute the intermediate left flux
-    interflux_left.D    = left_flux.D   + aL*(interstate_left.D   - left_state.D   );
-    interflux_left.S1   = left_flux.S1  + aL*(interstate_left.S1  - left_state.S1  );
-    interflux_left.S2   = left_flux.S2  + aL*(interstate_left.S2  - left_state.S2  );
-    interflux_left.tau  = left_flux.tau + aL*(interstate_left.tau - left_state.tau );
-
-    // Compute the intermediate right flux
-    interflux_right.D   = right_flux.D   + aR*(interstate_right.D   - right_state.D   );
-    interflux_right.S1  = right_flux.S1  + aR*(interstate_right.S1  - right_state.S1  );
-    interflux_right.S2  = right_flux.S2  + aR*(interstate_right.S2  - right_state.S2  );
-    interflux_right.tau = right_flux.tau + aR*(interstate_right.tau - right_state.tau );
-
-    
     if (0.0 <= aL){
         return left_flux;
     }  else if (aL <= 0.0 && 0.0 <= aStar){
+        // Compute the intermediate left flux
+        interflux_left.D    = left_flux.D   + aL*(interstate_left.D   - left_state.D   );
+        interflux_left.S1   = left_flux.S1  + aL*(interstate_left.S1  - left_state.S1  );
+        interflux_left.S2   = left_flux.S2  + aL*(interstate_left.S2  - left_state.S2  );
+        interflux_left.tau  = left_flux.tau + aL*(interstate_left.tau - left_state.tau );
+
         return interflux_left;
     } else if (aStar <= 0.0 && 0.0 <= aR){
+
+        // Compute the intermediate right flux
+        interflux_right.D   = right_flux.D   + aR*(interstate_right.D   - right_state.D   );
+        interflux_right.S1  = right_flux.S1  + aR*(interstate_right.S1  - right_state.S1  );
+        interflux_right.S2  = right_flux.S2  + aR*(interstate_right.S2  - right_state.S2  );
+        interflux_right.tau = right_flux.tau + aR*(interstate_right.tau - right_state.tau );
+
+    
         return interflux_right;
     } else {
         return right_flux;
@@ -841,26 +807,9 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
     
     // The periodic BC doesn't require ghost cells. Shift the index
     // to the beginning.
-    if (periodic){ 
-        i_start = 0;
-        i_bound = NX;
-
-        j_start = 0;
-        j_bound = NY;
-    } else {
-        if (first_order){
-            i_start = 1;
-            i_bound = NX - 1;
-            j_start = 1;
-            j_bound = NY - 1;
-
-        } else {
-            i_start = 2;
-            i_bound = NX - 2;
-            j_start = 2;
-            j_bound = NY - 2;
-        }
-    }
+    i_start = j_start = idx_active; 
+    i_bound = x_bound;
+    j_bound = y_bound;
     
 
     if (coord_system == "cartesian"){
@@ -1424,12 +1373,6 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                         r_right = 0.5*(right_cell + x1[xcoordinate]);
                         r_left  = 0.5*(x1[xcoordinate] + left_cell);
 
-                        theta_right = atan2( sin(upper_cell) + sin(x2[ycoordinate]) , 
-                                                    cos(upper_cell) + cos(x2[ycoordinate]) );
-
-                        theta_left = atan2( sin(lower_cell) + sin(x2[ycoordinate]), 
-                                                    cos(lower_cell) + cos(x2[ycoordinate]) );
-
                         theta_right = 0.5*(upper_cell + x2[ycoordinate]);
                         theta_left = 0.5*(lower_cell + x2[ycoordinate]);
 
@@ -1461,12 +1404,6 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                     } else if(ycoordinate == yphysical_grid - 1){
                         upper_cell = x2[ycoordinate];
                     }
-
-                    // theta_right = atan2( sin(upper_cell) + sin(x2[ycoordinate]) , 
-                    //                             cos(upper_cell) + cos(x2[ycoordinate]) );
-
-                    // theta_left = atan2( sin(lower_cell) + sin(x2[ycoordinate]), 
-                    //                             cos(lower_cell) + cos(x2[ycoordinate]) );
 
                     theta_right = 0.5 * (upper_cell + x2[ycoordinate]);
                     theta_left  = 0.5 * (lower_cell + x2[ycoordinate]);
@@ -1514,8 +1451,10 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
         } else {
             // prims = cons2prim2D(u_state, lorentz_gamma);
             // cout << "High Order Spherical" << endl;
-            for (int jj = j_start; jj < j_bound; jj++){
-                for (int ii = i_start; ii < i_bound; ii++){
+            for (int j = j_start; j < j_bound; j+=block_size){
+                for (int i = i_start; i < i_bound; i+=block_size){
+                    for (int jj=j; jj < min(j + block_size, yphysical_grid); jj++){
+                            for(int ii = i; ii < min(i + block_size, xphysical_grid); ii ++){
                 if (periodic){
                     xcoordinate = ii;
                     ycoordinate = jj;
@@ -1792,18 +1731,11 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                     r_right = 0.5*(right_cell + x1[xcoordinate]);
                     r_left = 0.5*(x1[xcoordinate] + left_cell);
 
-                    theta_right = atan2( sin(upper_cell) + sin(x2[ycoordinate]) , 
-                                                cos(upper_cell) + cos(x2[ycoordinate]) );
-
-                    theta_left = atan2( sin(lower_cell) + sin(x2[ycoordinate]), 
-                                                cos(lower_cell) + cos(x2[ycoordinate]) );
+                    theta_right = 0.5 * (upper_cell + x2[ycoordinate]);
+                    theta_left  = 0.5 * (lower_cell + x2[ycoordinate]);
 
                 } else {
-                    // log_rLeft = log10(x1[0]) + xcoordinate*delta_logr;
-                    // log_rRight = log_rLeft + delta_logr;
-                    // r_left = pow(10, log_rLeft);
-                    // r_right = pow(10, log_rRight);
-
+                    
                     right_cell = x1[xcoordinate + 1];
                     left_cell  = x1[xcoordinate - 1];
 
@@ -1827,12 +1759,6 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                     } else if(ycoordinate == yphysical_grid - 1){
                         upper_cell = x2[ycoordinate];
                     }
-
-                    // theta_right = atan2( sin(upper_cell) + sin(x2[ycoordinate]) , 
-                    //                             cos(upper_cell) + cos(x2[ycoordinate]) );
-
-                    // theta_left = atan2( sin(lower_cell) + sin(x2[ycoordinate]), 
-                    //                             cos(lower_cell) + cos(x2[ycoordinate]) );
 
                     theta_right = 0.5 * (upper_cell + x2[ycoordinate]);
                     theta_left  = 0.5 * (lower_cell + x2[ycoordinate]);
@@ -1874,6 +1800,8 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                                                     - (g1.tau*upper_tsurface - g2.tau*lower_tsurface)/deltaV2 + source_tau[xcoordinate + xphysical_grid*ycoordinate] );
 
             }
+                    }
+                }
 
         }
 
@@ -2914,14 +2842,20 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
     if (first_order){
         this->xphysical_grid = NX - 2;
         this->yphysical_grid = NY - 2;
+        this->idx_active = 1;
+        this->x_bound = NX - 1;
+        this->y_bound = NY - 1;
     } else {
         this->xphysical_grid = NX - 4;
         this->yphysical_grid = NY - 4;
+        this->idx_active = 2;
+        this->x_bound = NX - 2;
+        this->y_bound = NY - 2;
     }
 
     this->active_zones = xphysical_grid * yphysical_grid;
 
-    // Write some info about the setup
+    // Write some info about the setup for writeup later
     DataWriteMembers setup;
     setup.xmax = x1[xphysical_grid - 1];
     setup.xmin = x1[0];
