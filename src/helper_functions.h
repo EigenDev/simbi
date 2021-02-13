@@ -28,10 +28,15 @@ struct PrimData
 
 struct MinMod
 {
+    PrimData prims;
+
     double rhoL,rhoR, rhoT, rhoB;
     double v1L,v1R, v1T, v1B;
     double v2L,v2R, v2T, v2B;
     double pL,pR, pT, pB;
+    double theta, NX;
+
+    void compute(int face, int i, int j);
 };
 
 struct DataWriteMembers

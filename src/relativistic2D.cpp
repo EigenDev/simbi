@@ -55,7 +55,7 @@ typedef UstateSR2D::Eigenvals Eigenvals;
 //-----------------------------------------------------------------------------------------
 
 // Return a 1D array containing (rho, pressure, v) at a *single grid point*
-Primitives UstateSR2D::cons2primSR(float gamma, Conserved  &u_state, 
+Primitives UstateSR2D::cons2primSR(Conserved  &u_state, 
                                     double lorentz_gamma, tuple<int, int>(coordinates)){
     /**
      * Return a vector containing the primitive
@@ -107,54 +107,48 @@ PrimitiveArray UstateSR2D::cons2prim2D(const ConserveArray &u_state2D, const vec
     double rho, S1, S2, S, D, tau, pmin, tol;
     double pressure, W;
     double v1, v2, vtot;
-    int i2, j2;
 
     PrimitiveArray prims;
-    prims.rho.resize(nzones);
-    prims.v1.resize(nzones);
-    prims.v2.resize(nzones);
-    prims.p.resize(nzones);
-    for (int jj=0; jj < NY; jj += block_size){
-        for(int ii=0; ii< NX; ii += block_size){
-            for(j2 = jj; j2 < min(jj + block_size, NY); j2++){
-                for(i2 = ii; i2 < min(ii + block_size, NX); i2++){
-                    D   =  u_state2D.D  [i2 + NX * j2];      // Relativistic Density
-                    S1  =  u_state2D.S1 [i2 + NX * j2];      // X1-Momentum Denity
-                    S2  =  u_state2D.S2 [i2 + NX * j2];      // X2-Momentum Density
-                    tau =  u_state2D.tau[i2 + NX * j2];      // Energy Density
-                    W   =  lorentz_gamma[i2 + NX * j2]; 
+    prims.rho.reserve(nzones);
+    prims.v1.reserve(nzones);
+    prims.v2.reserve(nzones);
+    prims.p.reserve(nzones);
+    for (int jj=0; jj < NY; jj ++){
+        for(int ii=0; ii< NX; ii ++){
+            D   =  u_state2D.D  [ii + NX * jj];      // Relativistic Density
+            S1  =  u_state2D.S1 [ii + NX * jj];      // X1-Momentum Denity
+            S2  =  u_state2D.S2 [ii + NX * jj];      // X2-Momentum Density
+            tau =  u_state2D.tau[ii + NX * jj];      // Energy Density
+            W   =  lorentz_gamma[ii + NX * jj]; 
 
-                    S = sqrt(S1*S1 + S2*S2);
+            S = sqrt(S1*S1 + S2*S2);
 
-                    pmin = abs(S - tau - D) ? n == 0: pressure_guess[i2 + NX * j2];
+            pmin = abs(S - tau - D) ? n == 0: pressure_guess[ii + NX * jj];
 
-                    tol = 1.e-12; //D*1.e-12;
+            tol = 1.e-6; //D*1.e-12;
 
-                    pressure = newton_raphson(pmin, pressure_func, dfdp, tol, D, tau, W, gamma, S);
+            pressure = newton_raphson(pmin, pressure_func, dfdp, tol, D, tau, W, gamma, S);
 
-                    v1 = S1/(tau + D + pressure);
+            v1 = S1/(tau + D + pressure);
 
-                    v2 = S2/(tau + D + pressure);
+            v2 = S2/(tau + D + pressure);
 
-                    vtot = sqrt( v1*v1 + v2*v2 );
+            W = 1./sqrt(1 - v1*v1 + v2*v2);
 
-                    W = 1./sqrt(1 - vtot*vtot);
+            rho = D/W;
 
-                    rho = D/W;
+            
+            /* TODO: Is this faster than the [] operator? */
+            // prims.rho.emplace_back(rho);
+            // prims.v1.emplace_back(v1);
+            // prims.v2.emplace_back(v2);
+            // prims.p.emplace_back(pressure);
 
-                    
-                    /* TODO: Is this faster than the [] operator? */
-                    // prims.rho.emplace_back(rho);
-                    // prims.v1.emplace_back(v1);
-                    // prims.v2.emplace_back(v2);
-                    // prims.p.emplace_back(pressure);
-
-                    prims.rho [i2 + NX * j2] = rho;
-                    prims.v1  [i2 + NX * j2] = v1;
-                    prims.v2  [i2 + NX * j2] = v2;
-                    prims.p   [i2 + NX * j2] = pressure;
-                }
-            }  
+            prims.rho.emplace_back(rho);
+            prims.v1.emplace_back(v1);
+            prims.v2.emplace_back(v2);
+            prims.p.emplace_back(pressure);
+                
         }
     }
 
@@ -164,7 +158,7 @@ PrimitiveArray UstateSR2D::cons2prim2D(const ConserveArray &u_state2D, const vec
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
-Eigenvals UstateSR2D::calc_Eigenvals(float gamma, Primitives &prims_l,
+Eigenvals UstateSR2D::calc_Eigenvals(Primitives &prims_l,
                                       Primitives &prims_r,
                                       unsigned int nhat = 1)
 {
@@ -180,24 +174,24 @@ Eigenvals UstateSR2D::calc_Eigenvals(float gamma, Primitives &prims_l,
     p_l   = prims_l.p;
     v1_l  = prims_l.v1;
     v2_l  = prims_l.v2;
-    W_l   = 1./sqrt(1 - v1_l*v1_l + v2_l*v2_l);
+    // W_l   = 1./sqrt(1 - v1_l*v1_l + v2_l*v2_l);
     h_l   = 1. + gamma*p_l/(rho_l*(gamma - 1));
 
     rho_r = prims_r.rho;
     p_r   = prims_r.p;
     v1_r  = prims_r.v1;
     v2_r  = prims_r.v2;
-    W_r   = 1./sqrt(1 - v1_r*v1_r + v2_r*v2_r);
+    // W_r   = 1./sqrt(1 - v1_r*v1_r + v2_r*v2_r);
     h_r   = 1. + gamma*p_r/(rho_r*(gamma - 1));
 
     
-    D_l = W_l*rho_l;
-    D_r = W_r*rho_r;
-    tau_l = rho_l*h_l*W_l*W_l - p_l - rho_l*W_l;
-    tau_r = rho_r*h_r*W_r*W_r - p_r - rho_r*W_r;
+    //D_l = W_l*rho_l;
+    //D_r = W_r*rho_r;
+    //tau_l = rho_l*h_l*W_l*W_l - p_l - rho_l*W_l;
+    //tau_r = rho_r*h_r*W_r*W_r - p_r - rho_r*W_r;
 
-    cs_r = calc_rel_sound_speed(p_r, D_r, tau_r, W_r, gamma);
-    cs_l = calc_rel_sound_speed(p_l, D_l, tau_l, W_l, gamma);
+    cs_r = sqrt(gamma * p_r/(h_r*rho_r)); //calc_rel_sound_speed(p_r, D_r, tau_r, W_r, gamma);
+    cs_l = sqrt(gamma * p_l/(h_l*rho_l)); //calc_rel_sound_speed(p_l, D_l, tau_l, W_l, gamma);
  
     switch (nhat){
         case 1:
@@ -241,15 +235,13 @@ Eigenvals UstateSR2D::calc_Eigenvals(float gamma, Primitives &prims_l,
 //                              CALCULATE THE STATE TENSOR
 //-----------------------------------------------------------------------------------------
 
-Conserved UstateSR2D::calc_stateSR2D(float gamma, 
-                                    double rho, double vx,
-                                    double vy, double pressure)
+Conserved UstateSR2D::calc_stateSR2D(double rho, double vx,
+                                     double vy, double pressure)
 {
     Conserved state;
-    double h, vtot, lorentz_gamma;
+    double h, lorentz_gamma;
 
-    vtot = sqrt(vx*vx + vy*vy);
-    lorentz_gamma = 1./sqrt(1 - vtot*vtot);
+    lorentz_gamma = 1./sqrt(1 - vx*vx + vy*vy);
 
     h         = 1. + gamma*pressure/(rho*(gamma - 1.)); 
     state.D   = rho*lorentz_gamma; 
@@ -261,7 +253,7 @@ Conserved UstateSR2D::calc_stateSR2D(float gamma,
 
 };
 
-Conserved UstateSR2D::calc_hll_state(float gamma,
+Conserved UstateSR2D::calc_hll_state(
                                 Conserved  &left_state,
                                 Conserved  &right_state,
                                 Flux      &left_flux,
@@ -274,7 +266,7 @@ Conserved UstateSR2D::calc_hll_state(float gamma,
     Eigenvals lambda; 
     Conserved hll_states;
 
-    lambda = calc_Eigenvals(gamma, left_prims, right_prims, nhat);
+    lambda = calc_Eigenvals(left_prims, right_prims, nhat);
 
     aL = lambda.aL;
     aR = lambda.aR;
@@ -420,12 +412,12 @@ double UstateSR2D::adapt_dt(const PrimitiveArray &prims,
             v2       = prims.v2 [shift_i + NX * shift_j];
             pressure = prims.p  [shift_i + NX * shift_j];
 
-            W    = 1./sqrt(1 - v1*v1 + v2*v2);
-            D    = rho*W;
+            // W    = 1./sqrt(1 - v1*v1 + v2*v2);
+            // D    = rho*W;
             h    = 1. + gamma*pressure/(rho*(gamma - 1.));
-            tau  = rho*h*W*W - pressure - rho*W;
+            // tau  = rho*h*W*W - pressure - rho*W;
 
-            cs = calc_rel_sound_speed(pressure, D, tau, W, gamma);
+            cs = sqrt(gamma * pressure/(rho * h)); //calc_rel_sound_speed(pressure, D, tau, W, gamma);
 
             plus_v1 = (v1 + cs)/(1 + v1*cs);
             plus_v2 = (v2 + cs)/(1 + v2*cs);
@@ -472,9 +464,9 @@ double UstateSR2D::adapt_dt(const PrimitiveArray &prims,
 //-----------------------------------------------------------------------------------------------------------
 
 // Get the 2D Flux array (4,1). Either return F or G depending on directional flag
-Flux UstateSR2D::calc_Flux(float gamma, double rho, double vx, 
-                                        double vy, double pressure, 
-                                        bool x_direction=true){
+Flux UstateSR2D::calc_Flux(double rho, double vx, 
+                                double vy, double pressure, 
+                                bool x_direction=true){
     
     // The Flux Tensor
     Flux flux;
@@ -525,7 +517,7 @@ Flux UstateSR2D::calc_Flux(float gamma, double rho, double vx,
 };
 
 
-Flux UstateSR2D::calc_hll_flux(float gamma,
+Flux UstateSR2D::calc_hll_flux(
                         Conserved &left_state,
                         Conserved &right_state,
                         Flux     &left_flux,
@@ -538,7 +530,7 @@ Flux UstateSR2D::calc_hll_flux(float gamma,
     Flux  hll_flux;
     double aL, aR, aLminus, aRplus;  
     
-    lambda = calc_Eigenvals(gamma, left_prims, right_prims, nhat);
+    lambda = calc_Eigenvals(left_prims, right_prims, nhat);
 
     aL = lambda.aL;
     aR = lambda.aR;
@@ -568,7 +560,7 @@ Flux UstateSR2D::calc_hll_flux(float gamma,
 };
 
 
-Flux UstateSR2D::calc_hllc_flux(float gamma,
+Flux UstateSR2D::calc_hllc_flux(
                                 Conserved &left_state,
                                 Conserved &right_state,
                                 Flux     &left_flux,
@@ -588,7 +580,7 @@ Flux UstateSR2D::calc_hllc_flux(float gamma,
     double D, S1, S2, tau;
     double Dstar, S1star, S2star, tauStar, Estar, E;
 
-    lambda = calc_Eigenvals(gamma, left_prims, right_prims, nhat);
+    lambda = calc_Eigenvals(left_prims, right_prims, nhat);
 
     aL = lambda.aL;
     aR = lambda.aR;
@@ -626,7 +618,7 @@ Flux UstateSR2D::calc_hllc_flux(float gamma,
                             - aRplus*aLminus*(right_state.tau - left_state.tau) )  /
                             (aRplus + aLminus);
 
-    /* Mignone & Bodo subtract off the mass Density */
+    /* Mignone & Bodo subtract off the rest mass density */
     e  = hll_state.tau + hll_state.D;
     s  = hll_state.momentum(nhat);
     fe = hll_flux.tau + hll_flux.D;
@@ -782,8 +774,7 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
     
     
 
-    MinMod fslope;
-    PrimData prods;
+    
     ConserveArray L;
     L.D.reserve(active_zones);
     L.S1.reserve(active_zones);
@@ -795,7 +786,6 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
     // L.S2.resize(active_zones);
     // L.tau.resize(active_zones);
 
-    toWritePrim(&prims, &prods);
     Conserved ux_l, ux_r, uy_l, uy_r; 
     Flux     f_l, f_r, f1, f2, g1, g2, g_l, g_r;
     Primitives   xprims_l, xprims_r, yprims_l, yprims_r;
@@ -863,15 +853,15 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                     yprims_r.v2  = prims.v2 [ii + (jj + 1) * NX];
                     yprims_r.p   = prims.p  [ii + (jj + 1) * NX];
                     
-                    f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                    f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                    f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                    g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-                    g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+                    g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+                    g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
                     // Calc HLL Flux at i+1/2 interface
-                    f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                    g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                    f1 = calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                    g1 = calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
 
                     // Set up the left and right state interfaces for i-1/2
 
@@ -917,15 +907,15 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                     yprims_r.v2  = prims.v2 [ii + jj * NX];
                     yprims_r.p   = prims.p  [ii + jj * NX];
 
-                    f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                    f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                    f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                    g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-                    g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+                    g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+                    g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
                     // Calc HLL Flux at i+1/2 interface
-                    f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                    g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                    f2 = calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                    g2 = calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                     
 
                     L.D[xcoordinate + xphysical_grid*ycoordinate] = - (f1.D - f2.D)/dx - (g1.D - g2.D)/dy;
@@ -1077,21 +1067,21 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                 
                     
                     // Calculate the left and right states using the reconstructed PLM Primitives
-                    ux_l = calc_stateSR2D(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                    ux_r = calc_stateSR2D(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                    ux_l = calc_stateSR2D(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    ux_r = calc_stateSR2D(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                    uy_l = calc_stateSR2D(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
-                    uy_r = calc_stateSR2D(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
+                    uy_l = calc_stateSR2D(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
+                    uy_r = calc_stateSR2D(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
 
-                    f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                    f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                    f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                    g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-                    g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+                    g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+                    g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
 
-                    f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                    g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r,yprims_l, yprims_r,  2);
+                    f1 = calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                    g1 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r,  2);
                     
 
 
@@ -1171,21 +1161,21 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                 
 
                     // Calculate the left and right states using the reconstructed PLM Primitives
-                    ux_l = calc_stateSR2D(gamma,xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                    ux_r = calc_stateSR2D(gamma,xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                    ux_l = calc_stateSR2D(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    ux_r = calc_stateSR2D(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                    uy_l = calc_stateSR2D(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
-                    uy_r = calc_stateSR2D(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
+                    uy_l = calc_stateSR2D(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
+                    uy_r = calc_stateSR2D(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
 
-                    f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                    f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                    f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                    g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-                    g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+                    g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+                    g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
 
-                    f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
-                    g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
+                    f2 = calc_hll_flux(ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
+                    g2 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
                     
 
                     
@@ -1271,19 +1261,19 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                     uc   = xprims_l.v1;
                     vc   = xprims_l.v2;
                     
-                    f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                    f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                    f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                    g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-                    g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+                    g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+                    g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
                     // Calc HLL Flux at i,j +1/2 interface
                     if (hllc){
-                        f1 = calc_hllc_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                        g1 = calc_hllc_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                        f1 = calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                        g1 = calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                     } else {
-                        f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
-                        g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
+                        f1 = calc_hll_flux(ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
+                        g1 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
                     }
                     
                     // Set up the left and right state interfaces for i-1/2
@@ -1330,19 +1320,19 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
                     yprims_r.v2  = prims.v2 [ii + jj * NX];
                     yprims_r.p   = prims.p  [ii + jj * NX];
 
-                    f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                    f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                    f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                    g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-                    g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+                    g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+                    g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
                     // Calc HLL Flux at i,j - 1/2 interface
                     if (hllc){
-                        f2 = calc_hllc_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                        g2 = calc_hllc_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                        f2 = calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                        g2 = calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                     } else {
-                        f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
-                        g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
+                        f2 = calc_hll_flux(ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
+                        g2 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
                     }
 
                     if (linspace){
@@ -1449,361 +1439,361 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
             return L;
 
         } else {
-            // prims = cons2prim2D(u_state, lorentz_gamma);
-            // cout << "High Order Spherical" << endl;
-            for (int j = j_start; j < j_bound; j+=block_size){
-                for (int i = i_start; i < i_bound; i+=block_size){
-                    for (int jj=j; jj < min(j + block_size, yphysical_grid); jj++){
-                            for(int ii = i; ii < min(i + block_size, xphysical_grid); ii ++){
-                if (periodic){
-                    xcoordinate = ii;
-                    ycoordinate = jj;
+            MinMod fslope;
+            PrimData prods;
+            toWritePrim(&prims, &prods);
+            fslope.NX    = NX;
+            fslope.theta = theta;
+            fslope.prims = prods;
+            for (int jj = j_start; jj < j_bound; jj++){
+                for (int ii = i_start; ii < i_bound; ii++){
+                    if (periodic){
+                        xcoordinate = ii;
+                        ycoordinate = jj;
 
-                    // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
+                        // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
 
-                    /* TODO: Fix this */
+                        /* TODO: Fix this */
 
-                } else {
-                    // Adjust for beginning input of L vector
-                    xcoordinate = ii - 2;
-                    ycoordinate = jj - 2;
+                    } else {
+                        // Adjust for beginning input of L vector
+                        xcoordinate = ii - 2;
+                        ycoordinate = jj - 2;
 
-                    // Coordinate X
-                    xleft_most.rho  = prims.rho[(ii - 2) + NX * jj];
-                    xleft_mid.rho   = prims.rho[(ii - 1) + NX * jj];
-                    center.rho      = prims.rho[ii + NX * jj];
-                    xright_mid.rho  = prims.rho[(ii + 1) + NX * jj];
-                    xright_most.rho = prims.rho[(ii + 2) + NX * jj];
+                        // Coordinate X
+                        xleft_most.rho  = prims.rho[(ii - 2) + NX * jj];
+                        xleft_mid.rho   = prims.rho[(ii - 1) + NX * jj];
+                        center.rho      = prims.rho[ii + NX * jj];
+                        xright_mid.rho  = prims.rho[(ii + 1) + NX * jj];
+                        xright_most.rho = prims.rho[(ii + 2) + NX * jj];
 
-                    xleft_most.v1   = prims.v1[(ii - 2) + NX * jj];
-                    xleft_mid.v1    = prims.v1[(ii - 1) + NX * jj];
-                    center.v1       = prims.v1[ii + NX * jj];
-                    xright_mid.v1   = prims.v1[(ii + 1) + NX * jj];
-                    xright_most.v1  = prims.v1[(ii + 2) + NX * jj];
+                        xleft_most.v1   = prims.v1[(ii - 2) + NX * jj];
+                        xleft_mid.v1    = prims.v1[(ii - 1) + NX * jj];
+                        center.v1       = prims.v1[ii + NX * jj];
+                        xright_mid.v1   = prims.v1[(ii + 1) + NX * jj];
+                        xright_most.v1  = prims.v1[(ii + 2) + NX * jj];
 
-                    xleft_most.v2   = prims.v2[(ii - 2) + NX * jj];
-                    xleft_mid.v2    = prims.v2[(ii - 1) + NX * jj];
-                    center.v2       = prims.v2[ii + NX * jj];
-                    xright_mid.v2   = prims.v2[(ii + 1) + NX * jj];
-                    xright_most.v2  = prims.v2[(ii + 2) + NX * jj];
+                        xleft_most.v2   = prims.v2[(ii - 2) + NX * jj];
+                        xleft_mid.v2    = prims.v2[(ii - 1) + NX * jj];
+                        center.v2       = prims.v2[ii + NX * jj];
+                        xright_mid.v2   = prims.v2[(ii + 1) + NX * jj];
+                        xright_most.v2  = prims.v2[(ii + 2) + NX * jj];
 
-                    xleft_most.p    = prims.p[(ii - 2) + NX * jj];
-                    xleft_mid.p     = prims.p[(ii - 1) + NX * jj];
-                    center.p        = prims.p[ii + NX * jj];
-                    xright_mid.p    = prims.p[(ii + 1) + NX * jj];
-                    xright_most.p   = prims.p[(ii + 2) + NX * jj];
+                        xleft_most.p    = prims.p[(ii - 2) + NX * jj];
+                        xleft_mid.p     = prims.p[(ii - 1) + NX * jj];
+                        center.p        = prims.p[ii + NX * jj];
+                        xright_mid.p    = prims.p[(ii + 1) + NX * jj];
+                        xright_most.p   = prims.p[(ii + 2) + NX * jj];
 
-                    // Coordinate Y
-                    yleft_most.rho  = prims.rho[ii + NX * (jj - 2)];
-                    yleft_mid.rho   = prims.rho[ii + NX * (jj - 1)];
-                    yright_mid.rho  = prims.rho[ii + NX * (jj + 1)];
-                    yright_most.rho = prims.rho[ii + NX * (jj + 2)];
+                        // Coordinate Y
+                        yleft_most.rho  = prims.rho[ii + NX * (jj - 2)];
+                        yleft_mid.rho   = prims.rho[ii + NX * (jj - 1)];
+                        yright_mid.rho  = prims.rho[ii + NX * (jj + 1)];
+                        yright_most.rho = prims.rho[ii + NX * (jj + 2)];
 
-                    yleft_most.v1   = prims.v1[ii + NX * (jj - 2)];
-                    yleft_mid.v1    = prims.v1[ii + NX * (jj - 1)];
-                    yright_mid.v1   = prims.v1[ii + NX * (jj + 1)];
-                    yright_most.v1  = prims.v1[ii + NX * (jj + 2)];
+                        yleft_most.v1   = prims.v1[ii + NX * (jj - 2)];
+                        yleft_mid.v1    = prims.v1[ii + NX * (jj - 1)];
+                        yright_mid.v1   = prims.v1[ii + NX * (jj + 1)];
+                        yright_most.v1  = prims.v1[ii + NX * (jj + 2)];
 
-                    yleft_most.v2   = prims.v2[ii + NX * (jj - 2)];
-                    yleft_mid.v2    = prims.v2[ii + NX * (jj - 1)];
-                    yright_mid.v2   = prims.v2[ii + NX * (jj + 1)];
-                    yright_most.v2  = prims.v2[ii + NX * (jj - 2)];
+                        yleft_most.v2   = prims.v2[ii + NX * (jj - 2)];
+                        yleft_mid.v2    = prims.v2[ii + NX * (jj - 1)];
+                        yright_mid.v2   = prims.v2[ii + NX * (jj + 1)];
+                        yright_most.v2  = prims.v2[ii + NX * (jj - 2)];
 
-                    yleft_most.p    = prims.p[ii + NX * (jj - 2)];
-                    yleft_mid.p     = prims.p[ii + NX * (jj - 1)];
-                    yright_mid.p    = prims.p[ii + NX * (jj + 1)];
-                    yright_most.p   = prims.p[ii + NX * (jj + 2)];
+                        yleft_most.p    = prims.p[ii + NX * (jj - 2)];
+                        yleft_mid.p     = prims.p[ii + NX * (jj - 1)];
+                        yright_mid.p    = prims.p[ii + NX * (jj + 1)];
+                        yright_most.p   = prims.p[ii + NX * (jj + 2)];
+
+                    }
+                    
+                    // Reconstructed left X Primitives vector at the i+1/2 interface
+                    // toWritePrim(&prims, &prods);
+                    // fslope = minmod(prods, theta, 1, ii, jj, NX);
+                    xprims_l.rho = center.rho + 0.5*minmod(theta*(center.rho - xleft_mid.rho),
+                                                        0.5*(xright_mid.rho - xleft_mid.rho),
+                                                        theta*(xright_mid.rho - center.rho));
+
+                    
+                    xprims_l.v1 = center.v1 + 0.5*minmod(theta*(center.v1 - xleft_mid.v1),
+                                                        0.5*(xright_mid.v1 - xleft_mid.v1),
+                                                        theta*(xright_mid.v1 - center.v1));
+
+                    xprims_l.v2 = center.v2 + 0.5*minmod(theta*(center.v2 - xleft_mid.v2),
+                                                        0.5*(xright_mid.v2 - xleft_mid.v2),
+                                                        theta*(xright_mid.v2 - center.v2));
+
+                    xprims_l.p = center.p + 0.5*minmod(theta*(center.p - xleft_mid.p),
+                                                        0.5*(xright_mid.p - xleft_mid.p),
+                                                        theta*(xright_mid.p - center.p));
+
+                    // Reconstructed right Primitives vector in x
+                    xprims_r.rho = xright_mid.rho - 0.5*minmod(theta*(xright_mid.rho - center.rho),
+                                                        0.5*(xright_most.rho - center.rho),
+                                                        theta*(xright_most.rho - xright_mid.rho));
+
+                    xprims_r.v1 = xright_mid.v1 - 0.5*minmod(theta*(xright_mid.v1 - center.v1),
+                                                        0.5*(xright_most.v1 - center.v1),
+                                                        theta*(xright_most.v1 - xright_mid.v1));
+
+                    xprims_r.v2 = xright_mid.v2 - 0.5*minmod(theta*(xright_mid.v2 - center.v2),
+                                                        0.5*(xright_most.v2 - center.v2),
+                                                        theta*(xright_most.v2 - xright_mid.v2));
+
+                    xprims_r.p = xright_mid.p - 0.5*minmod(theta*(xright_mid.p - center.p),
+                                                        0.5*(xright_most.p - center.p),
+                                                        theta*(xright_most.p - xright_mid.p));
+
+                    
+                    // Reconstructed right Primitives vector in y-direction at j+1/2 interfce
+                    yprims_l.rho = center.rho + 0.5*minmod(theta*(center.rho - yleft_mid.rho),
+                                                        0.5*(yright_mid.rho - yleft_mid.rho),
+                                                        theta*(yright_mid.rho - center.rho));
+
+                    yprims_l.v1 = center.v1 + 0.5*minmod(theta*(center.v1 - yleft_mid.v1),
+                                                        0.5*(yright_mid.v1 - yleft_mid.v1),
+                                                        theta*(yright_mid.v1 - center.v1));
+
+                    yprims_l.v2 = center.v2 + 0.5*minmod(theta*(center.v2 - yleft_mid.v2),
+                                                        0.5*(yright_mid.v2 - yleft_mid.v2),
+                                                        theta*(yright_mid.v2 - center.v2));
+
+                    yprims_l.p = center.p + 0.5*minmod(theta*(center.p - yleft_mid.p),
+                                                        0.5*(yright_mid.p - yleft_mid.p),
+                                                        theta*(yright_mid.p - center.p));
+                    
+
+                    yprims_r.rho = yright_mid.rho - 0.5*minmod(theta*(yright_mid.rho - center.rho),
+                                                        0.5*(yright_most.rho - center.rho),
+                                                        theta*(yright_most.rho - yright_mid.rho));
+
+                    yprims_r.v1 = yright_mid.v1 - 0.5*minmod(theta*(yright_mid.v1 - center.v1),
+                                                        0.5*(yright_most.v1 - center.v1),
+                                                        theta*(yright_most.v1 - yright_mid.v1));
+
+                    yprims_r.v2 = yright_mid.v2 - 0.5*minmod(theta*(yright_mid.v2 - center.v2),
+                                                        0.5*(yright_most.v2 - center.v2),
+                                                        theta*(yright_most.v2 - yright_mid.v2));
+
+                    yprims_r.p = yright_mid.p - 0.5*minmod(theta*(yright_mid.p - center.p),
+                                                        0.5*(yright_most.p - center.p),
+                                                        theta*(yright_most.p - yright_mid.p));
+                    
+                    // Calculate the left and right states using the reconstructed PLM Primitives
+                    ux_l = calc_stateSR2D(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    ux_r = calc_stateSR2D(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+
+                    uy_l = calc_stateSR2D(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
+                    uy_r = calc_stateSR2D(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
+
+                    f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+
+                    g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+                    g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+
+                    if (hllc){
+                        f1 = calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                        g1 = calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                    } else {
+                        f1 = calc_hll_flux(ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
+                        g1 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
+                    }
+                    
+                    // Do the same thing, but for the left side interface [i - 1/2]
+
+                    // Left side Primitives in x
+                    xprims_l.rho = xleft_mid.rho + 0.5 *minmod(theta*(xleft_mid.rho - xleft_most.rho),
+                                                            0.5*(center.rho - xleft_most.rho),
+                                                            theta*(center.rho - xleft_mid.rho));
+
+                    xprims_l.v1 = xleft_mid.v1 + 0.5 *minmod(theta*(xleft_mid.v1 - xleft_most.v1),
+                                                            0.5*(center.v1 -xleft_most.v1),
+                                                            theta*(center.v1 - xleft_mid.v1));
+                    
+                    xprims_l.v2 = xleft_mid.v2 + 0.5 *minmod(theta*(xleft_mid.v2 - xleft_most.v2),
+                                                            0.5*(center.v2 - xleft_most.v2),
+                                                            theta*(center.v2 - xleft_mid.v2));
+                    
+                    xprims_l.p = xleft_mid.p + 0.5 *minmod(theta*(xleft_mid.p - xleft_most.p),
+                                                            0.5*(center.p - xleft_most.p),
+                                                            theta*(center.p - xleft_mid.p));
+
+
+                    // Right side Primitives in x
+                    xprims_r.rho = center.rho - 0.5 *minmod(theta*(center.rho - xleft_mid.rho),
+                                                        0.5*(xright_mid.rho - xleft_mid.rho),
+                                                        theta*(xright_mid.rho - center.rho));
+
+                    xprims_r.v1 = center.v1 - 0.5 *minmod(theta*(center.v1 - xleft_mid.v1),
+                                                        0.5*(xright_mid.v1 - xleft_mid.v1),
+                                                        theta*(xright_mid.v1 - center.v1));
+
+                    xprims_r.v2 = center.v2 - 0.5 *minmod(theta*(center.v2 - xleft_mid.v2),
+                                                        0.5*(xright_mid.v2 - xleft_mid.v2),
+                                                        theta*(xright_mid.v2 - center.v2));
+
+                    xprims_r.p = center.p - 0.5 *minmod(theta*(center.p - xleft_mid.p),
+                                                        0.5*(xright_mid.p - xleft_mid.p),
+                                                        theta*(xright_mid.p - center.p));
+
+
+                    // Left side Primitives in y
+                    yprims_l.rho = yleft_mid.rho + 0.5 *minmod(theta*(yleft_mid.rho - yleft_most.rho),
+                                                            0.5*(center.rho - yleft_most.rho),
+                                                            theta*(center.rho - yleft_mid.rho));
+
+                    yprims_l.v1 = yleft_mid.v1 + 0.5 *minmod(theta*(yleft_mid.v1 - yleft_most.v1),
+                                                            0.5*(center.v1 -yleft_most.v1),
+                                                            theta*(center.v1 - yleft_mid.v1));
+                    
+                    yprims_l.v2 = yleft_mid.v2 + 0.5 *minmod(theta*(yleft_mid.v2 - yleft_most.v2),
+                                                            0.5*(center.v2 - yleft_most.v2),
+                                                            theta*(center.v2 - yleft_mid.v2));
+                    
+                    yprims_l.p = yleft_mid.p + 0.5 *minmod(theta*(yleft_mid.p - yleft_most.p),
+                                                            0.5*(center.p - yleft_most.p),
+                                                            theta*(center.p - yleft_mid.p));
+
+                        
+                    // Right side Primitives in y
+                    yprims_r.rho = center.rho - 0.5 *minmod(theta*(center.rho - yleft_mid.rho),
+                                                        0.5*(yright_mid.rho - yleft_mid.rho),
+                                                        theta*(yright_mid.rho - center.rho));
+
+                    yprims_r.v1 = center.v1 - 0.5 *minmod(theta*(center.v1 - yleft_mid.v1),
+                                                        0.5*(yright_mid.v1 - yleft_mid.v1),
+                                                        theta*(yright_mid.v1 - center.v1));
+
+                    yprims_r.v2 = center.v2 - 0.5 *minmod(theta*(center.v2 - yleft_mid.v2),
+                                                        0.5*(yright_mid.v2 - yleft_mid.v2),
+                                                        theta*(yright_mid.v2 - center.v2));
+
+                    yprims_r.p = center.p  - 0.5 *minmod(theta*(center.p - yleft_mid.p),
+                                                        0.5*(yright_mid.p - yleft_mid.p),
+                                                        theta*(yright_mid.p - center.p)); 
+                    
+                
+
+                    // Calculate the left and right states using the reconstructed PLM Primitives
+                    ux_l = calc_stateSR2D(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    ux_r = calc_stateSR2D(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+
+                    uy_l = calc_stateSR2D(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
+                    uy_r = calc_stateSR2D(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
+
+                    f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                    f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+
+                    g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+                    g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+                    
+                    
+                    if (hllc){
+                        f2 = calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                        g2 = calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                    } else {
+                        f2 = calc_hll_flux(ux_l, ux_r, f_l, f_r,xprims_l,xprims_r,  1);
+                        g2 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
+                    }
+                    
+                    if (linspace){
+                        right_cell = x1[xcoordinate + 1];
+                        left_cell  = x1[xcoordinate - 1];
+                        upper_cell = x2[ycoordinate + 1];
+                        lower_cell = x2[ycoordinate - 1];
+                        
+                        // Outflow the left/right boundaries
+                        if (xcoordinate - 1 < 0){
+                            left_cell = x1[xcoordinate];
+
+                        } else if (xcoordinate == xphysical_grid - 1){
+                            right_cell = x1[xcoordinate];
+
+                        }
+
+                        if (ycoordinate - 1 < 0){
+                            lower_cell = x2[ycoordinate];
+                        }  else if(ycoordinate == yphysical_grid - 1){
+                            upper_cell = x2[ycoordinate];
+                        }
+
+                        
+                        r_right = 0.5*(right_cell + x1[xcoordinate]);
+                        r_left = 0.5*(x1[xcoordinate] + left_cell);
+
+                        theta_right = 0.5 * (upper_cell + x2[ycoordinate]);
+                        theta_left  = 0.5 * (lower_cell + x2[ycoordinate]);
+
+                    } else {
+                        
+                        right_cell = x1[xcoordinate + 1];
+                        left_cell  = x1[xcoordinate - 1];
+
+                        upper_cell = x2[ycoordinate + 1];
+                        lower_cell = x2[ycoordinate - 1];
+                        
+                        if (xcoordinate - 1 < 0){
+                            left_cell = x1[xcoordinate];
+
+                        } else if (xcoordinate == xphysical_grid - 1){
+                            right_cell = x1[xcoordinate];
+                        }
+
+                        r_right = sqrt(right_cell * x1[xcoordinate]); //sqrt(right_cell * x1[xcoordinate]); //+ x1[xcoordinate]);
+                        r_left  = sqrt(left_cell  * x1[xcoordinate]); //sqrt(left_cell  * x1[xcoordinate]); // + left_cell);
+
+                        // Outflow the left/right boundaries
+                        if (ycoordinate - 1 < 0){
+                            lower_cell = x2[ycoordinate];
+
+                        } else if(ycoordinate == yphysical_grid - 1){
+                            upper_cell = x2[ycoordinate];
+                        }
+
+                        theta_right = 0.5 * (upper_cell + x2[ycoordinate]);
+                        theta_left  = 0.5 * (lower_cell + x2[ycoordinate]);
+
+                    }   
+
+                    dr   = r_right - r_left;
+                    rhoc = center.rho;
+                    pc   = center.p;
+                    uc   = center.v1;
+                    vc   = center.v2;
+
+                    ang_avg = 0.5 *(theta_right + theta_left); //atan2(sin(theta_right) + sin(theta_left), cos(theta_right) + cos(theta_left) );
+
+                    // Compute the surface areas
+                    right_rsurface = r_right * r_right ;
+                    left_rsurface  = r_left  * r_left  ;
+                    upper_tsurface = sin(theta_right); //0.5*(r_right*r_right - r_left*r_left)*sin(theta_right);
+                    lower_tsurface = sin(theta_left) ; //0.5*(r_right*r_right - r_left*r_left)*sin(theta_left);
+                    volAvg = 0.75*( (r_right * r_right * r_right * r_right - r_left * r_left * r_left * r_left) / 
+                                            (r_right * r_right * r_right -  r_left * r_left * r_left) );
+
+                    deltaV1 = volAvg * volAvg * dr;
+                    deltaV2 = volAvg * sin(ang_avg)*(theta_right - theta_left); 
+
+
+                    L.D.emplace_back(- (f1.D*right_rsurface - f2.D*left_rsurface)/deltaV1
+                                                        - (g1.D*upper_tsurface - g2.D*lower_tsurface)/deltaV2 + sourceD[xcoordinate + xphysical_grid*ycoordinate]);
+
+                    L.S1.emplace_back( - (f1.S1*right_rsurface - f2.S1*left_rsurface)/deltaV1
+                                                        - (g1.S1*upper_tsurface - g2.S1*lower_tsurface)/deltaV2 
+                                                        + rhoc*vc*vc/volAvg + 2*pc/volAvg + source_S1[xcoordinate + xphysical_grid*ycoordinate]);
+
+                    L.S2.emplace_back( - (f1.S2*right_rsurface - f2.S2*left_rsurface)/deltaV1
+                                                        - (g1.S2*upper_tsurface - g2.S2*lower_tsurface)/deltaV2
+                                                        -(rhoc*uc*vc/volAvg - pc*cos(ang_avg)/(volAvg*sin(ang_avg))) + source_S2[xcoordinate + xphysical_grid*ycoordinate] );
+
+                    L.tau.emplace_back(- (f1.tau*right_rsurface - f2.tau*left_rsurface)/deltaV1
+                                                        - (g1.tau*upper_tsurface - g2.tau*lower_tsurface)/deltaV2 + source_tau[xcoordinate + xphysical_grid*ycoordinate] );
 
                 }
-                
-                // Reconstructed left X Primitives vector at the i+1/2 interface
-                // toWritePrim(&prims, &prods);
-                // fslope = minmod(prods, theta, 1, ii, jj, NX);
-                xprims_l.rho = center.rho + 0.5*minmod(theta*(center.rho - xleft_mid.rho),
-                                                    0.5*(xright_mid.rho - xleft_mid.rho),
-                                                    theta*(xright_mid.rho - center.rho));
-
-                
-                xprims_l.v1 = center.v1 + 0.5*minmod(theta*(center.v1 - xleft_mid.v1),
-                                                    0.5*(xright_mid.v1 - xleft_mid.v1),
-                                                    theta*(xright_mid.v1 - center.v1));
-
-                xprims_l.v2 = center.v2 + 0.5*minmod(theta*(center.v2 - xleft_mid.v2),
-                                                    0.5*(xright_mid.v2 - xleft_mid.v2),
-                                                    theta*(xright_mid.v2 - center.v2));
-
-                xprims_l.p = center.p + 0.5*minmod(theta*(center.p - xleft_mid.p),
-                                                    0.5*(xright_mid.p - xleft_mid.p),
-                                                    theta*(xright_mid.p - center.p));
-
-                // Reconstructed right Primitives vector in x
-                xprims_r.rho = xright_mid.rho - 0.5*minmod(theta*(xright_mid.rho - center.rho),
-                                                    0.5*(xright_most.rho - center.rho),
-                                                    theta*(xright_most.rho - xright_mid.rho));
-
-                xprims_r.v1 = xright_mid.v1 - 0.5*minmod(theta*(xright_mid.v1 - center.v1),
-                                                    0.5*(xright_most.v1 - center.v1),
-                                                    theta*(xright_most.v1 - xright_mid.v1));
-
-                xprims_r.v2 = xright_mid.v2 - 0.5*minmod(theta*(xright_mid.v2 - center.v2),
-                                                    0.5*(xright_most.v2 - center.v2),
-                                                    theta*(xright_most.v2 - xright_mid.v2));
-
-                xprims_r.p = xright_mid.p - 0.5*minmod(theta*(xright_mid.p - center.p),
-                                                    0.5*(xright_most.p - center.p),
-                                                    theta*(xright_most.p - xright_mid.p));
-
-                
-                // Reconstructed right Primitives vector in y-direction at j+1/2 interfce
-                yprims_l.rho = center.rho + 0.5*minmod(theta*(center.rho - yleft_mid.rho),
-                                                    0.5*(yright_mid.rho - yleft_mid.rho),
-                                                    theta*(yright_mid.rho - center.rho));
-
-                yprims_l.v1 = center.v1 + 0.5*minmod(theta*(center.v1 - yleft_mid.v1),
-                                                    0.5*(yright_mid.v1 - yleft_mid.v1),
-                                                    theta*(yright_mid.v1 - center.v1));
-
-                yprims_l.v2 = center.v2 + 0.5*minmod(theta*(center.v2 - yleft_mid.v2),
-                                                    0.5*(yright_mid.v2 - yleft_mid.v2),
-                                                    theta*(yright_mid.v2 - center.v2));
-
-                yprims_l.p = center.p + 0.5*minmod(theta*(center.p - yleft_mid.p),
-                                                    0.5*(yright_mid.p - yleft_mid.p),
-                                                    theta*(yright_mid.p - center.p));
-                
-
-                yprims_r.rho = yright_mid.rho - 0.5*minmod(theta*(yright_mid.rho - center.rho),
-                                                    0.5*(yright_most.rho - center.rho),
-                                                    theta*(yright_most.rho - yright_mid.rho));
-
-                yprims_r.v1 = yright_mid.v1 - 0.5*minmod(theta*(yright_mid.v1 - center.v1),
-                                                    0.5*(yright_most.v1 - center.v1),
-                                                    theta*(yright_most.v1 - yright_mid.v1));
-
-                yprims_r.v2 = yright_mid.v2 - 0.5*minmod(theta*(yright_mid.v2 - center.v2),
-                                                    0.5*(yright_most.v2 - center.v2),
-                                                    theta*(yright_most.v2 - yright_mid.v2));
-
-                yprims_r.p = yright_mid.p - 0.5*minmod(theta*(yright_mid.p - center.p),
-                                                    0.5*(yright_most.p - center.p),
-                                                    theta*(yright_most.p - yright_mid.p));
-                
-                // Calculate the left and right states using the reconstructed PLM Primitives
-                ux_l = calc_stateSR2D(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                ux_r = calc_stateSR2D(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
-
-                uy_l = calc_stateSR2D(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
-                uy_r = calc_stateSR2D(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
-
-                f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
-
-                g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-                g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
-
-                if (hllc){
-                    f1 = calc_hllc_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                    g1 = calc_hllc_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                } else {
-                    f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
-                    g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
-                }
-                
-                // Do the same thing, but for the left side interface [i - 1/2]
-
-                // Left side Primitives in x
-                xprims_l.rho = xleft_mid.rho + 0.5 *minmod(theta*(xleft_mid.rho - xleft_most.rho),
-                                                        0.5*(center.rho - xleft_most.rho),
-                                                        theta*(center.rho - xleft_mid.rho));
-
-                xprims_l.v1 = xleft_mid.v1 + 0.5 *minmod(theta*(xleft_mid.v1 - xleft_most.v1),
-                                                        0.5*(center.v1 -xleft_most.v1),
-                                                        theta*(center.v1 - xleft_mid.v1));
-                
-                xprims_l.v2 = xleft_mid.v2 + 0.5 *minmod(theta*(xleft_mid.v2 - xleft_most.v2),
-                                                        0.5*(center.v2 - xleft_most.v2),
-                                                        theta*(center.v2 - xleft_mid.v2));
-                
-                xprims_l.p = xleft_mid.p + 0.5 *minmod(theta*(xleft_mid.p - xleft_most.p),
-                                                        0.5*(center.p - xleft_most.p),
-                                                        theta*(center.p - xleft_mid.p));
-
-
-                // Right side Primitives in x
-                xprims_r.rho = center.rho - 0.5 *minmod(theta*(center.rho - xleft_mid.rho),
-                                                    0.5*(xright_mid.rho - xleft_mid.rho),
-                                                    theta*(xright_mid.rho - center.rho));
-
-                xprims_r.v1 = center.v1 - 0.5 *minmod(theta*(center.v1 - xleft_mid.v1),
-                                                    0.5*(xright_mid.v1 - xleft_mid.v1),
-                                                    theta*(xright_mid.v1 - center.v1));
-
-                xprims_r.v2 = center.v2 - 0.5 *minmod(theta*(center.v2 - xleft_mid.v2),
-                                                    0.5*(xright_mid.v2 - xleft_mid.v2),
-                                                    theta*(xright_mid.v2 - center.v2));
-
-                xprims_r.p = center.p - 0.5 *minmod(theta*(center.p - xleft_mid.p),
-                                                    0.5*(xright_mid.p - xleft_mid.p),
-                                                    theta*(xright_mid.p - center.p));
-
-
-                // Left side Primitives in y
-                yprims_l.rho = yleft_mid.rho + 0.5 *minmod(theta*(yleft_mid.rho - yleft_most.rho),
-                                                        0.5*(center.rho - yleft_most.rho),
-                                                        theta*(center.rho - yleft_mid.rho));
-
-                yprims_l.v1 = yleft_mid.v1 + 0.5 *minmod(theta*(yleft_mid.v1 - yleft_most.v1),
-                                                        0.5*(center.v1 -yleft_most.v1),
-                                                        theta*(center.v1 - yleft_mid.v1));
-                
-                yprims_l.v2 = yleft_mid.v2 + 0.5 *minmod(theta*(yleft_mid.v2 - yleft_most.v2),
-                                                        0.5*(center.v2 - yleft_most.v2),
-                                                        theta*(center.v2 - yleft_mid.v2));
-                
-                yprims_l.p = yleft_mid.p + 0.5 *minmod(theta*(yleft_mid.p - yleft_most.p),
-                                                        0.5*(center.p - yleft_most.p),
-                                                        theta*(center.p - yleft_mid.p));
-
-                    
-                // Right side Primitives in y
-                yprims_r.rho = center.rho - 0.5 *minmod(theta*(center.rho - yleft_mid.rho),
-                                                    0.5*(yright_mid.rho - yleft_mid.rho),
-                                                    theta*(yright_mid.rho - center.rho));
-
-                yprims_r.v1 = center.v1 - 0.5 *minmod(theta*(center.v1 - yleft_mid.v1),
-                                                    0.5*(yright_mid.v1 - yleft_mid.v1),
-                                                    theta*(yright_mid.v1 - center.v1));
-
-                yprims_r.v2 = center.v2 - 0.5 *minmod(theta*(center.v2 - yleft_mid.v2),
-                                                    0.5*(yright_mid.v2 - yleft_mid.v2),
-                                                    theta*(yright_mid.v2 - center.v2));
-
-                yprims_r.p = center.p  - 0.5 *minmod(theta*(center.p - yleft_mid.p),
-                                                    0.5*(yright_mid.p - yleft_mid.p),
-                                                    theta*(yright_mid.p - center.p)); 
-                
-            
-
-                // Calculate the left and right states using the reconstructed PLM Primitives
-                ux_l = calc_stateSR2D(gamma,xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                ux_r = calc_stateSR2D(gamma,xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
-
-                uy_l = calc_stateSR2D(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
-                uy_r = calc_stateSR2D(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
-
-                f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
-
-                g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-                g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
-                
-                
-                if (hllc){
-                    f2 = calc_hllc_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                    g2 = calc_hllc_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                } else {
-                    f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r,xprims_l,xprims_r,  1);
-                    g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
-                }
-                
-                if (linspace){
-                    right_cell = x1[xcoordinate + 1];
-                    left_cell  = x1[xcoordinate - 1];
-                    upper_cell = x2[ycoordinate + 1];
-                    lower_cell = x2[ycoordinate - 1];
-                    
-                    // Outflow the left/right boundaries
-                    if (xcoordinate - 1 < 0){
-                        left_cell = x1[xcoordinate];
-
-                    } else if (xcoordinate == xphysical_grid - 1){
-                        right_cell = x1[xcoordinate];
-
-                    }
-
-                    if (ycoordinate - 1 < 0){
-                        lower_cell = x2[ycoordinate];
-                    }  else if(ycoordinate == yphysical_grid - 1){
-                        upper_cell = x2[ycoordinate];
-                    }
-
-                    
-                    r_right = 0.5*(right_cell + x1[xcoordinate]);
-                    r_left = 0.5*(x1[xcoordinate] + left_cell);
-
-                    theta_right = 0.5 * (upper_cell + x2[ycoordinate]);
-                    theta_left  = 0.5 * (lower_cell + x2[ycoordinate]);
-
-                } else {
-                    
-                    right_cell = x1[xcoordinate + 1];
-                    left_cell  = x1[xcoordinate - 1];
-
-                    upper_cell = x2[ycoordinate + 1];
-                    lower_cell = x2[ycoordinate - 1];
-                    
-                    if (xcoordinate - 1 < 0){
-                        left_cell = x1[xcoordinate];
-
-                    } else if (xcoordinate == xphysical_grid - 1){
-                        right_cell = x1[xcoordinate];
-                    }
-
-                    r_right = sqrt(right_cell * x1[xcoordinate]); //sqrt(right_cell * x1[xcoordinate]); //+ x1[xcoordinate]);
-                    r_left  = sqrt(left_cell  * x1[xcoordinate]); //sqrt(left_cell  * x1[xcoordinate]); // + left_cell);
-
-                    // Outflow the left/right boundaries
-                    if (ycoordinate - 1 < 0){
-                        lower_cell = x2[ycoordinate];
-
-                    } else if(ycoordinate == yphysical_grid - 1){
-                        upper_cell = x2[ycoordinate];
-                    }
-
-                    theta_right = 0.5 * (upper_cell + x2[ycoordinate]);
-                    theta_left  = 0.5 * (lower_cell + x2[ycoordinate]);
-
-                }   
-
-                dr   = r_right - r_left;
-                rhoc = center.rho;
-                pc   = center.p;
-                uc   = center.v1;
-                vc   = center.v2;
-
-                ang_avg = 0.5 *(theta_right + theta_left); //atan2(sin(theta_right) + sin(theta_left), cos(theta_right) + cos(theta_left) );
-
-                // Compute the surface areas
-                right_rsurface = r_right * r_right ;
-                left_rsurface  = r_left  * r_left  ;
-                upper_tsurface = sin(theta_right); //0.5*(r_right*r_right - r_left*r_left)*sin(theta_right);
-                lower_tsurface = sin(theta_left) ; //0.5*(r_right*r_right - r_left*r_left)*sin(theta_left);
-                volAvg = 0.75*( (r_right * r_right * r_right * r_right - r_left * r_left * r_left * r_left) / 
-                                        (r_right * r_right * r_right -  r_left * r_left * r_left) );
-
-                deltaV1 = volAvg * volAvg * dr;
-                deltaV2 = volAvg * sin(ang_avg)*(theta_right - theta_left); 
-
-
-                L.D.emplace_back(- (f1.D*right_rsurface - f2.D*left_rsurface)/deltaV1
-                                                    - (g1.D*upper_tsurface - g2.D*lower_tsurface)/deltaV2 + sourceD[xcoordinate + xphysical_grid*ycoordinate]);
-
-                L.S1.emplace_back( - (f1.S1*right_rsurface - f2.S1*left_rsurface)/deltaV1
-                                                    - (g1.S1*upper_tsurface - g2.S1*lower_tsurface)/deltaV2 
-                                                    + rhoc*vc*vc/volAvg + 2*pc/volAvg + source_S1[xcoordinate + xphysical_grid*ycoordinate]);
-
-                L.S2.emplace_back( - (f1.S2*right_rsurface - f2.S2*left_rsurface)/deltaV1
-                                                    - (g1.S2*upper_tsurface - g2.S2*lower_tsurface)/deltaV2
-                                                    -(rhoc*uc*vc/volAvg - pc*cos(ang_avg)/(volAvg*sin(ang_avg))) + source_S2[xcoordinate + xphysical_grid*ycoordinate] );
-
-                L.tau.emplace_back(- (f1.tau*right_rsurface - f2.tau*left_rsurface)/deltaV1
-                                                    - (g1.tau*upper_tsurface - g2.tau*lower_tsurface)/deltaV2 + source_tau[xcoordinate + xphysical_grid*ycoordinate] );
 
             }
-                    }
-                }
-
-        }
 
         return L;
 
@@ -1874,15 +1864,15 @@ Conserved UstateSR2D::u_dot(unsigned int ii, unsigned int jj)
             yprims_r.v2  = prims.v2 [ii + (jj + 1.) * NX];
             yprims_r.p   = prims.p  [ii + (jj + 1.) * NX];
 
-            f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-            f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+            f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+            f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-            g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-            g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+            g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+            g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
             // Calc HLL Flux at i+1/2 interface
-            f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-            g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+            f1 = calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+            g1 = calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
 
             // Set up the left and right state interfaces for i-1/2
 
@@ -1928,15 +1918,15 @@ Conserved UstateSR2D::u_dot(unsigned int ii, unsigned int jj)
             yprims_r.v2  = prims.v2 [ii + jj * NX];
             yprims_r.p   = prims.p  [ii + jj * NX];
 
-            f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-            f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+            f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+            f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-            g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-            g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+            g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+            g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
             // Calc HLL Flux at i+1/2 interface
-            f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-            g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+            f2 = calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+            g2 = calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             
 
             L.D   = - (f1.D - f2.D)/dx - (g1.D - g2.D)/dy;
@@ -2085,21 +2075,21 @@ Conserved UstateSR2D::u_dot(unsigned int ii, unsigned int jj)
             
                 
                 // Calculate the left and right states using the reconstructed PLM Primitives
-                ux_l = calc_stateSR2D(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                ux_r = calc_stateSR2D(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                ux_l = calc_stateSR2D(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                ux_r = calc_stateSR2D(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                uy_l = calc_stateSR2D(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
-                uy_r = calc_stateSR2D(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
+                uy_l = calc_stateSR2D(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
+                uy_r = calc_stateSR2D(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
 
-                f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-                g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+                g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+                g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
 
-                f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r,yprims_l, yprims_r,  2);
+                f1 = calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g1 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r,  2);
                 
 
 
@@ -2179,21 +2169,21 @@ Conserved UstateSR2D::u_dot(unsigned int ii, unsigned int jj)
             
 
                 // Calculate the left and right states using the reconstructed PLM Primitives
-                ux_l = calc_stateSR2D(gamma,xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                ux_r = calc_stateSR2D(gamma,xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                ux_l = calc_stateSR2D(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                ux_r = calc_stateSR2D(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                uy_l = calc_stateSR2D(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
-                uy_r = calc_stateSR2D(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
+                uy_l = calc_stateSR2D(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
+                uy_r = calc_stateSR2D(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
 
-                f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-                f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+                f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+                f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-                g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-                g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+                g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+                g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
 
-                f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
-                g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
+                f2 = calc_hll_flux(ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
+                g2 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
                 
                 L.D   = - (f1.D - f2.D)/dx - (g1.D - g2.D)/dy;
                 L.S1  = - (f1.S1 - f2.S1)/dx - (g1.S1 - g2.S1)/dy;
@@ -2271,19 +2261,19 @@ Conserved UstateSR2D::u_dot(unsigned int ii, unsigned int jj)
             uc   = xprims_l.v1;
             vc   = xprims_l.v2;
             
-            f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-            f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+            f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+            f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-            g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-            g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+            g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+            g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
             // Calc HLLE/C Flux at i+1/2 interface
             if (hllc){
-                f1 = calc_hllc_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g1 = calc_hllc_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                f1 = calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g1 = calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             } else {
-                f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                f1 = calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g1 = calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             }
             
             // Set up the left and right state interfaces for i-1/2
@@ -2330,19 +2320,19 @@ Conserved UstateSR2D::u_dot(unsigned int ii, unsigned int jj)
             yprims_r.v2  = prims.v2 [ii + jj * NX];
             yprims_r.p   = prims.p  [ii + jj * NX];
 
-            f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-            f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+            f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+            f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-            g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-            g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+            g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+            g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
             // Calc HLL Flux at i+1/2 interface
             if (hllc){
-                f2 = calc_hllc_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g2 = calc_hllc_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                f2 = calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g2 = calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             } else {
-                f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                f2 = calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g2 = calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             }
             
  
@@ -2578,24 +2568,24 @@ Conserved UstateSR2D::u_dot(unsigned int ii, unsigned int jj)
                                                 theta*(yright_most.p - yright_mid.p));
             
             // Calculate the left and right states using the reconstructed PLM Primitives
-            ux_l = calc_stateSR2D(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-            ux_r = calc_stateSR2D(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+            ux_l = calc_stateSR2D(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+            ux_r = calc_stateSR2D(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-            uy_l = calc_stateSR2D(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
-            uy_r = calc_stateSR2D(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
+            uy_l = calc_stateSR2D(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
+            uy_r = calc_stateSR2D(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
 
-            f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-            f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+            f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+            f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-            g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-            g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+            g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+            g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
 
             if (hllc){
-                f1 = calc_hllc_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g1 = calc_hllc_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                f1 = calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g1 = calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             } else {
-                f1 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
-                g1 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
+                f1 = calc_hll_flux(ux_l, ux_r, f_l, f_r,xprims_l, xprims_r, 1);
+                g1 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
             }
             
             // Do the same thing, but for the left side interface [i - 1/2]
@@ -2674,25 +2664,25 @@ Conserved UstateSR2D::u_dot(unsigned int ii, unsigned int jj)
         
 
             // Calculate the left and right states using the reconstructed PLM Primitives
-            ux_l = calc_stateSR2D(gamma,xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-            ux_r = calc_stateSR2D(gamma,xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+            ux_l = calc_stateSR2D(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+            ux_r = calc_stateSR2D(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-            uy_l = calc_stateSR2D(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
-            uy_r = calc_stateSR2D(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
+            uy_l = calc_stateSR2D(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p);
+            uy_r = calc_stateSR2D(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p);
 
-            f_l = calc_Flux(gamma, xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
-            f_r = calc_Flux(gamma, xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
+            f_l = calc_Flux(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
+            f_r = calc_Flux(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
 
-            g_l = calc_Flux(gamma, yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
-            g_r = calc_Flux(gamma, yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
+            g_l = calc_Flux(yprims_l.rho, yprims_l.v1, yprims_l.v2, yprims_l.p, false);
+            g_r = calc_Flux(yprims_r.rho, yprims_r.v1, yprims_r.v2, yprims_r.p, false);
             
             
             if (hllc){
-                f2 = calc_hllc_flux(gamma, ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g2 = calc_hllc_flux(gamma, uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                f2 = calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g2 = calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             } else {
-                f2 = calc_hll_flux(gamma, ux_l, ux_r, f_l, f_r,xprims_l,xprims_r,  1);
-                g2 = calc_hll_flux(gamma, uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
+                f2 = calc_hll_flux(ux_l, ux_r, f_l, f_r,xprims_l,xprims_r,  1);
+                g2 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
             }
             
             if (linspace){
@@ -2916,10 +2906,11 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
     n = 0;
 
     int j2, i2, i, j; 
-    block_size = 128;
+    block_size = 4;
 
     // Initialize the primitives for the initial conditions
     prims = cons2prim2D(u, lorentz_gamma);
+    n++;
     if (first_order){
         while (t < tend){
             /* Compute the loop execution time */
@@ -2928,23 +2919,18 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
             // u_state = u;
             udot = u_dot2D(u);
 
-            for (int jj = 0; jj < yphysical_grid; jj += block_size){
-                for (int ii = 0; ii < xphysical_grid; ii += block_size){
-                    for (j2=jj; j2 < min(jj + block_size, yphysical_grid); j2++){
-                        for(i2 = ii; i2 < min(ii + block_size, xphysical_grid); i2 ++){
-                                i_real = i2 + 1; j_real = j2 + 1;
-                                // L = u_dot(i_real, j_real);
-                                u_p.D  [i_real + NX * j_real]   = u.D  [i_real + NX * j_real] + dt * udot.D[i2 + xphysical_grid * j2]; 
-                                u_p.S1 [i_real + NX * j_real]   = u.S1 [i_real + NX * j_real] + dt * udot.S1[i2 + xphysical_grid * j2]; 
-                                u_p.S2 [i_real + NX * j_real]   = u.S2 [i_real + NX * j_real] + dt * udot.S2[i2 + xphysical_grid * j2]; 
-                                u_p.tau[i_real + NX * j_real]   = u.tau[i_real + NX * j_real] + dt * udot.tau[i2 + xphysical_grid * j2]; 
-                                
-                        }
-                    }
-                    
+            for (int jj = 0; jj < yphysical_grid; jj ++){
+                for (int ii = 0; ii < xphysical_grid; ii ++){
+                        i_real = ii + 1; j_real = jj + 1;
+                        // L = u_dot(i_real, j_real);
+                        u_p.D  [i_real + NX * j_real]   = u.D  [i_real + NX * j_real] + dt * udot.D  [ii + xphysical_grid * jj]; 
+                        u_p.S1 [i_real + NX * j_real]   = u.S1 [i_real + NX * j_real] + dt * udot.S1 [ii + xphysical_grid * jj]; 
+                        u_p.S2 [i_real + NX * j_real]   = u.S2 [i_real + NX * j_real] + dt * udot.S2 [ii + xphysical_grid * jj]; 
+                        u_p.tau[i_real + NX * j_real]   = u.tau[i_real + NX * j_real] + dt * udot.tau[ii + xphysical_grid * jj]; 
+                        
+            
                 }
             }
-
 
             config_ghosts2D(u_p, NX, NY, true);
             prims = cons2prim2D(u_p, lorentz_gamma);
@@ -2989,20 +2975,14 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
                 // u_state = u;
                 udot = u_dot2D(u);
 
-                for (int jj = 0; jj < yphysical_grid; jj += block_size){
-                    for (int ii = 0; ii < xphysical_grid; ii += block_size){
-                        for (j2=jj; j2 < min(jj + block_size, yphysical_grid); j2++){
-                            for(i2 = ii; i2 < min(ii + block_size, xphysical_grid); i2 ++){
-                                i_real = i2 + 2; j_real = j2 + 2;
-                                // L = u_dot(i_real, j_real);
-                                u1.D  [i_real + NX * j_real]   = u.D  [i_real + NX * j_real]  + dt * udot.D  [i2 + xphysical_grid * j2]; 
-                                u1.S1 [i_real + NX * j_real]   = u.S1 [i_real + NX * j_real]  + dt * udot.S1 [i2 + xphysical_grid * j2]; 
-                                u1.S2 [i_real + NX * j_real]   = u.S2 [i_real + NX * j_real]  + dt * udot.S2 [i2 + xphysical_grid * j2]; 
-                                u1.tau[i_real + NX * j_real]   = u.tau[i_real + NX * j_real]  + dt * udot.tau[i2 + xphysical_grid * j2]; 
-                            
-                        }
-                    }
-                    
+                for (int jj = 0; jj < yphysical_grid; jj ++){
+                    for (int ii = 0; ii < xphysical_grid; ii ++){
+                        i_real = ii + 2; j_real = jj + 2;
+                        // L = u_dot(i_real, j_real);
+                        u1.D  [i_real + NX * j_real]   = u.D  [i_real + NX * j_real]  + dt * udot.D  [ii + xphysical_grid * jj]; 
+                        u1.S1 [i_real + NX * j_real]   = u.S1 [i_real + NX * j_real]  + dt * udot.S1 [ii + xphysical_grid * jj]; 
+                        u1.S2 [i_real + NX * j_real]   = u.S2 [i_real + NX * j_real]  + dt * udot.S2 [ii + xphysical_grid * jj]; 
+                        u1.tau[i_real + NX * j_real]   = u.tau[i_real + NX * j_real]  + dt * udot.tau[ii + xphysical_grid * jj]; 
                 }
             }
                 
@@ -3015,20 +2995,15 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
                 udot = u_dot2D(u1);
 
                 // u_state = u1;
-                for (int jj = 0; jj < yphysical_grid; jj += block_size){
-                    for (int ii = 0; ii < xphysical_grid; ii += block_size){
-                        for (j2=jj; j2 < min(jj + block_size, yphysical_grid); j2++){
-                            for(i2 = ii; i2 < min(ii + block_size, xphysical_grid); i2 ++){
-                                i_real = i2 + 2; j_real = j2 + 2;
-                                // L = u_dot(i_real, j_real);
-                                u2.D  [i_real + NX * j_real] = 0.5 * u.D  [i_real + NX * j_real] + 0.5 * u1.D  [i_real + NX * j_real] + 0.5 * dt*udot.D  [i2 + xphysical_grid * j2];
-                                u2.S1 [i_real + NX * j_real] = 0.5 * u.S1 [i_real + NX * j_real] + 0.5 * u1.S1 [i_real + NX * j_real] + 0.5 * dt*udot.S1 [i2 + xphysical_grid * j2];
-                                u2.S2 [i_real + NX * j_real] = 0.5 * u.S2 [i_real + NX * j_real] + 0.5 * u1.S2 [i_real + NX * j_real] + 0.5 * dt*udot.S2 [i2 + xphysical_grid * j2];
-                                u2.tau[i_real + NX * j_real] = 0.5 * u.tau[i_real + NX * j_real] + 0.5 * u1.tau[i_real + NX * j_real] + 0.5 * dt*udot.tau[i2 + xphysical_grid * j2];
-                                
-                            }
-                        }
-                        
+                for (int jj = 0; jj < yphysical_grid; jj ++){
+                    for (int ii = 0; ii < xphysical_grid; ii ++){
+                        i_real = ii + 2; j_real = jj + 2;
+                        // L = u_dot(i_real, j_real);
+                        u2.D  [i_real + NX * j_real] = 0.5 * u.D  [i_real + NX * j_real] + 0.5 * u1.D  [i_real + NX * j_real] + 0.5 * dt*udot.D  [ii + xphysical_grid * jj];
+                        u2.S1 [i_real + NX * j_real] = 0.5 * u.S1 [i_real + NX * j_real] + 0.5 * u1.S1 [i_real + NX * j_real] + 0.5 * dt*udot.S1 [ii + xphysical_grid * jj];
+                        u2.S2 [i_real + NX * j_real] = 0.5 * u.S2 [i_real + NX * j_real] + 0.5 * u1.S2 [i_real + NX * j_real] + 0.5 * dt*udot.S2 [ii + xphysical_grid * jj];
+                        u2.tau[i_real + NX * j_real] = 0.5 * u.tau[i_real + NX * j_real] + 0.5 * u1.tau[i_real + NX * j_real] + 0.5 * dt*udot.tau[ii + xphysical_grid * jj];
+                
                     }
                 }
             

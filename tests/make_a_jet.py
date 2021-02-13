@@ -121,7 +121,7 @@ rho[:] = rho_init
 vr = np.zeros((ynpts, xnpts), float)
 vt = np.zeros((ynpts, xnpts), float)
 
-tend = 0.5
+tend = 1.5
 
 dt = 0.4*min(ri - r[0], volavg*dtheta_face)
 
@@ -149,20 +149,13 @@ sol = Jet.simulate(tend=tend, first_order = False, dt=dt, coordinates=b"spherica
 
 print("The 2D Jet Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 
+
+#=========================================================================
 v = np.sqrt(sol[1]**2 + sol[2]**2)    
 W = 1/np.sqrt(1 - v**2)
 dens = sol[0]
 D = np.log10(W*dens)
 print("Max Velocity: {}".format(v.max()))
-
-# fig, axs = plt.subplots(2, 1, figsize=(10f, 15), sharex=True)
-
-
-# a = W_r[0]/np.max(W_r[0])
-# axs[0].loglog(r, W_r[0])
-# axs[1].semilogx(r, dens[0]/dens[0].max())
-# #axs[1].semilogx(r, source/source.max())
-# plt.show()
 
 
 norm = colors.LogNorm(vmin=dens.min(), vmax=dens.max())

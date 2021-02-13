@@ -193,7 +193,7 @@ namespace states {
                             double CFL, std::string coord_system);
         ~UstateSR2D();
 
-        Primitives cons2primSR(float gamma, Conserved  &u_state,
+        Primitives cons2primSR(Conserved  &u_state,
                                  double lorentz_gamma,
                                  std::tuple<int, int>(coordinates));
 
@@ -201,15 +201,14 @@ namespace states {
             const ConserveData &cons_state2D,
             const std::vector<double> &lorentz_gamma);
 
-        Eigenvals  calc_Eigenvals(float gamma, Primitives &prims_l,
+        Eigenvals  calc_Eigenvals(Primitives &prims_l,
                                       Primitives &prims_r,
                                       unsigned int nhat);
 
-        Conserved  calc_stateSR2D(float gamma, 
-                                    double rho, double vx,
-                                    double vy, double pressure);
+        Conserved  calc_stateSR2D(double rho, double vx,
+                                  double vy, double pressure);
 
-        Conserved    calc_hll_state(float gamma,
+        Conserved    calc_hll_state(
                                 Conserved  &left_state,
                                 Conserved  &right_state,
                                 Flux      &left_flux,
@@ -218,14 +217,14 @@ namespace states {
                                 Primitives    &right_prims,
                                 unsigned int nhat);
 
-        Conserved calc_intermed_statesSR2D(  Primitives &prims,
-                                        Conserved &state,
-                                        double a,
-                                        double aStar,
-                                        double pStar,
-                                        int nhat);
+        Conserved calc_intermed_statesSR2D( Primitives &prims,
+                                            Conserved &state,
+                                            double a,
+                                            double aStar,
+                                            double pStar,
+                                            int nhat);
 
-        Flux      calc_hllc_flux(float gamma,
+        Flux      calc_hllc_flux(
                                 Conserved &left_state,
                                 Conserved &right_state,
                                 Flux     &left_flux,
@@ -234,11 +233,11 @@ namespace states {
                                 Primitives   &right_prims,
                                 int nhat);
 
-        Flux calc_Flux(float gamma, double rho, double vx, 
-                                        double vy, double pressure, 
-                                        bool x_direction);
+        Flux calc_Flux(double rho, double vx, 
+                            double vy, double pressure, 
+                            bool x_direction);
 
-        Flux   calc_hll_flux(float gamma,
+        Flux   calc_hll_flux(
                         Conserved &left_state,
                         Conserved &right_state,
                         Flux     &left_flux,

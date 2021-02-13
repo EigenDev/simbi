@@ -29,6 +29,6 @@ setup(
     description="Cython module to solve hydrodynamic systems using a c++ backend",
     ext_modules=cythonize(extensions),
     packages=['simbi_py'],
-    install_requires=['numpy', 'matplotlib', 'cython'],
-    python_requires='>=3.6',
+    # install_requires=['numpy', 'matplotlib', 'cython'],
+    # python_requires='>=3.6',
 )

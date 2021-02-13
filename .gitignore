@@ -3,6 +3,9 @@ __pycache__/
 SIMBI_2D_Hydro_Code.egg-info/
 build/
 data/
+tests/
+test.cpp
+ustate
 *.h5
 *.pdf
 *.png
