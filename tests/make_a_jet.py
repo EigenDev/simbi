@@ -140,6 +140,11 @@ print("Jet Angle: {}".format(theta_0))
 print("Mass Load: {}".format(eta_0))
 
 zzz = input('Press Enter to Cotinue...')
+
+#=========================================================================
+#                           SIMULATE
+#=========================================================================
+
 Jet = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt), 
               Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4, regime="relativistic")
 

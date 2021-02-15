@@ -726,13 +726,14 @@ Flux UstateSR2D::calc_hllc_flux(
         S2star   = cofactor * (S2*(aR - v2) - pressure + pStar);
         Estar    = cofactor * (E*(aR - v2) + pStar*aStar - pressure*v2);
         tauStar  = Estar - Dstar;
-        tauStar  = Estar - Dstar;
-
+        
         interstate_right.D   = Dstar;
         interstate_right.S1  = S1star;
         interstate_right.S2  = S2star;
         interstate_right.tau = tauStar;
+
         break;
+
     }
 
     if (0.0 <= aL){
@@ -1442,9 +1443,13 @@ ConserveArray UstateSR2D::u_dot2D(const ConserveArray &u_state)
             MinMod fslope;
             PrimData prods;
             toWritePrim(&prims, &prods);
-            fslope.NX    = NX;
-            fslope.theta = theta;
-            fslope.prims = prods;
+            fslope.NX           = NX;
+            fslope.theta        = theta;
+            fslope.prims        = prods;
+            fslope.active_zones = active_zones;
+            fslope.j_bound      = j_bound;
+            fslope.i_bound      = i_bound;
+            // fslope.compute(1);
             for (int jj = j_start; jj < j_bound; jj++){
                 for (int ii = i_start; ii < i_bound; ii++){
                     if (periodic){
@@ -2905,7 +2910,6 @@ twoVec UstateSR2D::simulate2D(vector<double> lorentz_gamma,
     Conserved L;
     n = 0;
 
-    int j2, i2, i, j; 
     block_size = 4;
 
     // Initialize the primitives for the initial conditions

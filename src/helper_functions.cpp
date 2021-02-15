@@ -66,10 +66,123 @@ double minmod(double x, double y, double z){
 
 };
 
-void MinMod::compute(int face, int i, int j){
+void MinMod::compute(int face){
     double x, y, z;
 
-    switch (face)
+    rhoL.reserve(active_zones);
+    rhoR.reserve(active_zones);
+    rhoT.reserve(active_zones);
+    rhoB.reserve(active_zones);
+
+    v1L.reserve(active_zones);
+    v1R.reserve(active_zones);
+    v1T.reserve(active_zones);
+    v1B.reserve(active_zones);
+
+    v2L.reserve(active_zones);
+    v2R.reserve(active_zones);
+    v2T.reserve(active_zones);
+    v2B.reserve(active_zones);
+
+    pL.reserve(active_zones);
+    pR.reserve(active_zones);
+    pT.reserve(active_zones);
+    pB.reserve(active_zones);
+
+    for (int j = 2; j < j_bound; j++){
+        for (int i = 2; i < i_bound; i++){
+            x = theta * (prims.rho[i + NX * j] - prims.rho[(i - 1) + NX * j]);
+            y = 0.5 * (prims.rho[(i + 1) + NX * j] - prims.rho[(i - 1) + NX * j]);
+            z = theta * (prims.rho[(i + 1) + NX * j] + prims.rho[i + NX * j]);
+            rhoL.emplace_back ( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.v1[i + NX * j] - prims.v1[(i - 1) + NX * j]);
+            y = 0.5 * (prims.v1[(i + 1) + NX * j] - prims.v1[(i - 1) + NX * j]);
+            z = theta * (prims.v1[(i + 1) + NX * j] + prims.v1[i + NX * j]);
+            v1L.emplace_back ( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.v2[i + NX * j] - prims.v2[(i - 1) + NX * j]);
+            y = 0.5 * (prims.v2[(i + 1) + NX * j] - prims.v2[(i - 1) + NX * j]);
+            z = theta * (prims.v2[(i + 1) + NX * j] + prims.v2[i + NX * j]);
+            v2L.emplace_back ( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.p[i + NX * j] - prims.p[(i - 1) + NX * j]);
+            y = 0.5 * (prims.p[(i + 1) + NX * j] - prims.p[(i - 1) + NX * j]);
+            z = theta * (prims.p[(i + 1) + NX * j] + prims.p[i + NX * j]);
+            pL.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+
+
+            // -----------Right Cell Face X-Direction -------------------------
+            x = theta * (prims.rho[(i + 1) + NX * j] - prims.rho[i + NX * j]);
+            y = 0.5 * (prims.rho[(i + 2) + NX * j] - prims.rho[i + NX * j]);
+            z = theta * (prims.rho[(i + 2) + NX * j] + prims.rho[(i + 1) + NX * j]);
+            rhoR.emplace_back ( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.v1[(i + 1) + NX * j] - prims.v1[i + NX * j]);
+            y = 0.5 * (prims.v1[(i + 2) + NX * j] - prims.v1[i + NX * j]);
+            z = theta * (prims.v1[(i + 2) + NX * j] + prims.v1[(i + 1) + NX * j]);
+            v1R.emplace_back ( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.v2[(i + 1) + NX * j] - prims.v2[i + NX * j]);
+            y = 0.5 * (prims.v2[(i + 2) + NX * j] - prims.v2[i + NX * j]);
+            z = theta * (prims.v2[(i + 2) + NX * j] + prims.v2[(i + 1) + NX * j]);
+            v2R.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.p[(i + 1) + NX * j] - prims.p[i + NX * j]);
+            y = 0.5 * (prims.p[(i + 2) + NX * j] - prims.p[i + NX * j]);
+            z = theta * (prims.p[(i + 2) + NX * j] + prims.p[(i + 1) + NX * j]);
+            rhoR.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+
+
+            //------------- Upper Cell Face ---------------------------------
+            x = theta * (prims.rho[i + NX * j] - prims.rho[i + NX * (j - 1)]);
+            y = 0.5   * (prims.rho[i + NX * (j + 1)] - prims.rho[i + NX * (j - 1)]);
+            z = theta * (prims.rho[i + NX * (j + 1)] + prims.rho[i + NX * j]);
+            rhoT.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.v1[i + NX * j] - prims.v1[i + NX * (j - 1)]);
+            y = 0.5   * (prims.v1[i + NX * (j + 1)] - prims.v1[i + NX * (j - 1)]);
+            z = theta * (prims.v1[i + NX * (j + 1)] + prims.v1[i + NX * j]);
+            v1T.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.v2[i + NX * j] - prims.v2[i + NX * (j - 1)]);
+            y = 0.5   * (prims.v2[i + NX * (j + 1)] - prims.v2[i + NX * (j - 1)]);
+            z = theta * (prims.v2[i + NX * (j + 1)] + prims.v2[i + NX * j]);
+            v2T.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.p[i + NX * j] - prims.p[i + NX * (j - 1)]);
+            y = 0.5   * (prims.p[i + NX * (j + 1)] - prims.p[i + NX * (j - 1)]);
+            z = theta * (prims.p[i + NX * (j + 1)] + prims.p[i + NX * j]);
+            pT.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+
+
+            //---------------Lower Face--------------------------------------
+            x = theta * (prims.rho[i + NX * (j + 1)] - prims.rho[i + NX * j]);
+            y = 0.5   * (prims.rho[i + NX * (j + 2)] - prims.rho[i + NX * j]);
+            z = theta * (prims.rho[i + NX * (j + 2)] + prims.rho[i + NX * (j + 1)]);
+            rhoB.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.v1[i + NX * (j + 1)] - prims.v1[i + NX * j]);
+            y = 0.5   * (prims.v1[i + NX * (j + 2)] - prims.v1[i + NX * j]);
+            z = theta * (prims.v1[i + NX * (j + 2)] + prims.v1[i + NX * (j + 1)]);
+            v1B.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.v2[i + NX * (j + 1)] - prims.v2[i + NX * j]);
+            y = 0.5   * (prims.v2[i + NX * (j + 2)] - prims.v2[i + NX * j]);
+            z = theta * (prims.v2[i + NX * (j + 2)] + prims.v2[i + NX * (j + 1)]);
+            v2B.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+
+            x = theta * (prims.p[i + NX * (j + 1)] - prims.p[i + NX * j]);
+            y = 0.5   * (prims.p[i + NX * (j + 2)] - prims.p[i + NX * j]);
+            z = theta * (prims.p[i + NX * (j + 2)] + prims.p[i + NX * (j + 1)]);
+            pB.emplace_back( 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z)) );
+        }
+    }
+    /**
+    switch (face)   
     {
     // Compute flux limit at i,j+1/2 interface
     case 1:
@@ -77,22 +190,22 @@ void MinMod::compute(int face, int i, int j){
         x = theta * (prims.rho[i + NX * j] - prims.rho[(i - 1) + NX * j]);
         y = 0.5 * (prims.rho[(i + 1) + NX * j] - prims.rho[(i - 1) + NX * j]);
         z = theta * (prims.rho[(i + 1) + NX * j] + prims.rho[i + NX * j]);
-        this->rhoL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        rhoL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v1[i + NX * j] - prims.v1[(i - 1) + NX * j]);
         y = 0.5 * (prims.v1[(i + 1) + NX * j] - prims.v1[(i - 1) + NX * j]);
         z = theta * (prims.v1[(i + 1) + NX * j] + prims.v1[i + NX * j]);
-        this->v1L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v1L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v2[i + NX * j] - prims.v2[(i - 1) + NX * j]);
         y = 0.5 * (prims.v2[(i + 1) + NX * j] - prims.v2[(i - 1) + NX * j]);
         z = theta * (prims.v2[(i + 1) + NX * j] + prims.v2[i + NX * j]);
-        this->v2L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v2L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.p[i + NX * j] - prims.p[(i - 1) + NX * j]);
         y = 0.5 * (prims.p[(i + 1) + NX * j] - prims.p[(i - 1) + NX * j]);
         z = theta * (prims.p[(i + 1) + NX * j] + prims.p[i + NX * j]);
-        this->pL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        pL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
 
 
@@ -100,22 +213,22 @@ void MinMod::compute(int face, int i, int j){
         x = theta * (prims.rho[(i + 1) + NX * j] - prims.rho[i + NX * j]);
         y = 0.5 * (prims.rho[(i + 2) + NX * j] - prims.rho[i + NX * j]);
         z = theta * (prims.rho[(i + 2) + NX * j] + prims.rho[(i + 1) + NX * j]);
-        this->rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v1[(i + 1) + NX * j] - prims.v1[i + NX * j]);
         y = 0.5 * (prims.v1[(i + 2) + NX * j] - prims.v1[i + NX * j]);
         z = theta * (prims.v1[(i + 2) + NX * j] + prims.v1[(i + 1) + NX * j]);
-        this->v1R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v1R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v2[(i + 1) + NX * j] - prims.v2[i + NX * j]);
         y = 0.5 * (prims.v2[(i + 2) + NX * j] - prims.v2[i + NX * j]);
         z = theta * (prims.v2[(i + 2) + NX * j] + prims.v2[(i + 1) + NX * j]);
-        this->v2R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v2R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.p[(i + 1) + NX * j] - prims.p[i + NX * j]);
         y = 0.5 * (prims.p[(i + 2) + NX * j] - prims.p[i + NX * j]);
         z = theta * (prims.p[(i + 2) + NX * j] + prims.p[(i + 1) + NX * j]);
-        this->rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
 
 
@@ -123,22 +236,22 @@ void MinMod::compute(int face, int i, int j){
         x = theta * (prims.rho[i + NX * j] - prims.rho[i + NX * (j - 1)]);
         y = 0.5   * (prims.rho[i + NX * (j + 1)] - prims.rho[i + NX * (j - 1)]);
         z = theta * (prims.rho[i + NX * (j + 1)] + prims.rho[i + NX * j]);
-        this->rhoT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        rhoT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v1[i + NX * j] - prims.v1[i + NX * (j - 1)]);
         y = 0.5   * (prims.v1[i + NX * (j + 1)] - prims.v1[i + NX * (j - 1)]);
         z = theta * (prims.v1[i + NX * (j + 1)] + prims.v1[i + NX * j]);
-        this->v1T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v1T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v2[i + NX * j] - prims.v2[i + NX * (j - 1)]);
         y = 0.5   * (prims.v2[i + NX * (j + 1)] - prims.v2[i + NX * (j - 1)]);
         z = theta * (prims.v2[i + NX * (j + 1)] + prims.v2[i + NX * j]);
-        this->v2T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v2T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.p[i + NX * j] - prims.p[i + NX * (j - 1)]);
         y = 0.5   * (prims.p[i + NX * (j + 1)] - prims.p[i + NX * (j - 1)]);
         z = theta * (prims.p[i + NX * (j + 1)] + prims.p[i + NX * j]);
-        this->pT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        pT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
 
 
@@ -146,22 +259,22 @@ void MinMod::compute(int face, int i, int j){
         x = theta * (prims.rho[i + NX * (j + 1)] - prims.rho[i + NX * j]);
         y = 0.5   * (prims.rho[i + NX * (j + 2)] - prims.rho[i + NX * j]);
         z = theta * (prims.rho[i + NX * (j + 2)] + prims.rho[i + NX * (j + 1)]);
-        this->rhoB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        rhoB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v1[i + NX * (j + 1)] - prims.v1[i + NX * j]);
         y = 0.5   * (prims.v1[i + NX * (j + 2)] - prims.v1[i + NX * j]);
         z = theta * (prims.v1[i + NX * (j + 2)] + prims.v1[i + NX * (j + 1)]);
-        this->v1B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v1B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v2[i + NX * (j + 1)] - prims.v2[i + NX * j]);
         y = 0.5   * (prims.v2[i + NX * (j + 2)] - prims.v2[i + NX * j]);
         z = theta * (prims.v2[i + NX * (j + 2)] + prims.v2[i + NX * (j + 1)]);
-        this->v2B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v2B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.p[i + NX * (j + 1)] - prims.p[i + NX * j]);
         y = 0.5   * (prims.p[i + NX * (j + 2)] - prims.p[i + NX * j]);
         z = theta * (prims.p[i + NX * (j + 2)] + prims.p[i + NX * (j + 1)]);
-        this->pB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        pB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         break;
         
@@ -171,22 +284,22 @@ void MinMod::compute(int face, int i, int j){
         x = theta * (prims.rho[(i - 1) + NX * j] - prims.rho[(i - 2) + NX * j]);
         y = 0.5 * (prims.rho[i + NX * j] - prims.rho[(i - 2) + NX * j]);
         z = theta * (prims.rho[i + NX * j] + prims.rho[(i - 1) + NX * j]);
-        this->rhoL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        rhoL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v1[(i - 1) + NX * j] - prims.v1[(i - 2) + NX * j]);
         y = 0.5 * (prims.v1[i + NX * j] - prims.v1[(i - 2) + NX * j]);
         z = theta * (prims.v1[i + NX * j] + prims.v1[(i - 1) + NX * j]);
-        this->v1L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v1L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v2[(i - 1) + NX * j] - prims.v2[(i - 2) + NX * j]);
         y = 0.5 * (prims.v2[i + NX * j] - prims.v2[(i - 2) + NX * j]);
         z = theta * (prims.v2[i + NX * j] + prims.v2[(i - 1) + NX * j]);
-        this->v2L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v2L = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.p[(i - 1) + NX * j] - prims.p[(i - 2) + NX * j]);
         y = 0.5 * (prims.p[i + NX * j] - prims.p[(i - 2) + NX * j]);
         z = theta * (prims.p[i + NX * j] + prims.p[(i - 1) + NX * j]);
-        this->pL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        pL = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
 
 
@@ -194,22 +307,22 @@ void MinMod::compute(int face, int i, int j){
         x = theta * (prims.rho[i  + NX * j] - prims.rho[(i  - 1) + NX * j]);
         y = 0.5 * (prims.rho[(i + 1) + NX * j] - prims.rho[(i - 1) + NX * j]);
         z = theta * (prims.rho[(i + 1) + NX * j] + prims.rho[i + NX * j]);
-        this->rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v1[i + NX * j] - prims.v1[(i - 1) + NX * j]);
         y = 0.5 * (prims.v1[(i + 1) + NX * j] - prims.v1[(i - 1) + NX * j]);
         z = theta * (prims.v1[(i + 1) + NX * j] + prims.v1[i + NX * j]);
-        this->v1R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v1R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v2[i + NX * j] - prims.v2[(i - 1) + NX * j]);
         y = 0.5 * (prims.v2[(i + 1) + NX * j] - prims.v2[(i - 1) + NX * j]);
         z = theta * (prims.v2[(i + 1) + NX * j] + prims.v2[i + NX * j]);
-        this->v2R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v2R = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.p[i + NX * j] - prims.p[(i - 1) + NX * j]);
         y = 0.5   * (prims.p[(i + 1) + NX * j] - prims.p[(i - 1) + NX * j]);
         z = theta * (prims.p[(i + 1) + NX * j] + prims.p[i + NX * j]);
-        this->rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        rhoR = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
 
 
@@ -217,22 +330,22 @@ void MinMod::compute(int face, int i, int j){
         x = theta * (prims.rho[i + NX * (j - 1)] - prims.rho[i + NX * (j - 2)]);
         y = 0.5   * (prims.rho[i + NX * j] - prims.rho[i + NX * (j - 2)]);
         z = theta * (prims.rho[i + NX * j] + prims.rho[i + NX * (j - 1)]);
-        this->rhoT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        rhoT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v1[i + NX * (j - 1)] - prims.v1[i + NX * (j - 2)]);
         y = 0.5   * (prims.v1[i + NX * j] - prims.v1[i + NX * (j - 2)]);
         z = theta * (prims.v1[i + NX * j] + prims.v1[i + NX * (j - 1)]);
-        this->v1T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v1T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v2[i + NX * (j - 1)] - prims.v2[i + NX * (j - 2)]);
         y = 0.5   * (prims.v2[i + NX * j] - prims.v2[i + NX * (j - 2)]);
         z = theta * (prims.v2[i + NX * j] + prims.v2[i + NX * (j - 1)]);
-        this->v2T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v2T = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.p[i + NX * (j - 1)] - prims.p[i + NX * (j - 2)]);
         y = 0.5   * (prims.p[i + NX * j] - prims.p[i + NX * (j - 2)]);
         z = theta * (prims.p[i + NX * j] + prims.p[i + NX * (j - 1)]);
-        this->pT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        pT = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
 
 
@@ -240,25 +353,26 @@ void MinMod::compute(int face, int i, int j){
         x = theta * (prims.rho[i + NX * j] - prims.rho[i + NX * (j - 1)]);
         y = 0.5   * (prims.rho[i + NX * (j + 1)] - prims.rho[i + NX * (j - 1)]);
         z = theta * (prims.rho[i + NX * (j + 1)] + prims.rho[i + NX * j]);
-        this->rhoB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        rhoB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v1[i + NX * j] - prims.v1[i + NX * (j - 1)]);
         y = 0.5   * (prims.v1[i + NX * (j + 1)] - prims.v1[i + NX * (j - 1)]);
         z = theta * (prims.v1[i + NX * (j + 1)] + prims.v1[i + NX * j]);
-        this->v1B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v1B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.v2[i + NX * j] - prims.v2[i + NX * (j - 1)]);
         y = 0.5   * (prims.v2[i + NX * (j + 1)] - prims.v2[i + NX * (j - 1)]);
         z = theta * (prims.v2[i + NX * (j + 1)] + prims.v2[i + NX * j]);
-        this->v2B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        v2B = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         x = theta * (prims.p[i + NX * j] - prims.p[i + NX * (j - 1)]);
         y = 0.5   * (prims.p[i + NX * (j + 1)] - prims.p[i + NX * (j - 1)]);
         z = theta * (prims.p[i + NX * (j + 1)] + prims.p[i + NX * j]);
-        this->pB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
+        pB = 0.25 * abs(sign(x) + sign(y))*(sign(x) + sign(z))*min(min(abs(x), abs(y)), abs(z));
 
         break;
     }
+    */
 
 }
 
@@ -341,17 +455,17 @@ void write_hdf5(string filename, PrimData prims, DataWriteMembers setup)
     h5::fd_t fd = h5::create(filePath + filename, H5F_ACC_TRUNC, h5::default_fcpl,
                     h5::libver_bounds({H5F_LIBVER_V18, H5F_LIBVER_V18}) );
 
-    h5::ds_t ds = h5::write(fd,"rho", prims.rho);
-                  h5::write(fd,"v1",  prims.v1);
-                  h5::write(fd,"v2",  prims.v2);
-                  h5::write(fd,"p",   prims.p);
-                  
-    // Datset objects
-    ds["rho"] = prims.rho;
-    ds["v1"]  = prims.v1;
-    ds["v2"]  = prims.v2;
-    ds["p"]   = prims.p;
+    // Write the Primitives 
+    h5::write(fd,"rho", prims.rho);
+    h5::write(fd,"v1",  prims.v1);
+    h5::write(fd,"v2",  prims.v2);
+    h5::write(fd,"p",   prims.p);
 
+    // Generate Dataset Object to Write Attributes
+    vector<int> sim_data(10, 0);
+    auto ds = h5::write(fd, "sim_info", sim_data);
+
+    // Write Datset Attributes
     ds["current_time"]   = setup.t;
     ds["time_step"]      = setup.dt;
     ds["NX"]             = setup.NX;
@@ -362,19 +476,6 @@ void write_hdf5(string filename, PrimData prims, DataWriteMembers setup)
     ds["ymin"]           = setup.ymin;
     ds["xactive_zones"]  = setup.xactive_zones;
     ds["yactive_zones"]  = setup.yactive_zones;
-
-    // Write the Current Simulation Conditions in a File
-    // h5::write( filename, "rho",  prims.rho);
-    // h5::write( filename, "v1",   prims.v1 );
-    // h5::write( filename, "v2",   prims.v2 );
-    // h5::write( filename, "p",    prims.p  );
-
-
-    // h5::write( filename, "t" , t );
-    // h5::write( filename, "dt", dt );
-    // h5::write( filename, "NX", NX );
-    // h5::write( filename, "NY", NY );
-    
     
 }
 
@@ -476,15 +577,16 @@ double calc_rel_sound_speed(double pressure, double D, double tau, double lorent
 //------------------------------------------------------------------------------------------------------------
 double pressure_func(double pressure, double D, double tau, double lorentz_gamma, float gamma, double S){
 
-    double rho = rho_rel(D, lorentz_gamma, 1);
+    double rho = D/lorentz_gamma; 
     double epsilon = epsilon_rel(pressure, D, tau, lorentz_gamma);
 
     return (gamma - 1)*rho*epsilon - pressure;
 }
 
 double dfdp(double pressure, double D, double tau, double lorentz_gamma, float gamma, double S){
-
-    double cs = calc_rel_sound_speed(pressure, D, tau, lorentz_gamma, gamma);
+    double rho = D/lorentz_gamma;
+    double h = 1 + pressure*gamma/(rho*(gamma - 1.));
+    double cs = sqrt(gamma*pressure/(h*rho) );//  (calc_rel_sound_speed(pressure, D, tau, lorentz_gamma, gamma);
     double v = S/(tau + D + pressure);
 
     return v*v*cs*cs - 1.;

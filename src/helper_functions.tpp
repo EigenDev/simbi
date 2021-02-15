@@ -55,20 +55,28 @@ double newton_raphson(T x1, T (*f)(T, Args... args),  T (*g)(T, Args... args),
     */
 
     
-    double x, h;
+    double x,xstar,xp, h;
     int ii = 0;
     int maximum_iteration = 100;
     do {
+        xp = x;
         x = x1;
-        h = (*f)(x, args...)/(*g)(x, args...);
+        if (ii > 0){
+            xstar = x - (*f)(x, args...)/(*g)(0.5*(xp + xstar), args...);
+        } else {
+            xstar = x1;
+        }
+
+        h = (*f)(x, args...)/(*g)(0.5*(x + xstar), args...);
 
         x1 = x - h;
+        
 
         ii++;
 
         
         // if (ii > maximum_iteration){
-        //     std::cout << "\n Not Convergent" << std::endl;
+        //     std::cout << "\n Cons2Prim Not Convergent" << std::endl;
         //     exit(EXIT_FAILURE);
         // }
         
@@ -76,8 +84,10 @@ double newton_raphson(T x1, T (*f)(T, Args... args),  T (*g)(T, Args... args),
     } while(std::abs(x1 - x) >= epsilon);
     
     
+    // if (ii > 10){
+    //     std::cout << "Newton Raphson took: " << ii << " iterations" << std::endl;
+    // }
     
-    // std::cout << "Newton Raphson took: " << ii << " iterations" << std::endl;
 
     return x1; 
 };

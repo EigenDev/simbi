@@ -29,14 +29,15 @@ struct PrimData
 struct MinMod
 {
     PrimData prims;
-
-    double rhoL,rhoR, rhoT, rhoB;
-    double v1L,v1R, v1T, v1B;
-    double v2L,v2R, v2T, v2B;
-    double pL,pR, pT, pB;
     double theta, NX;
+    int active_zones, i_bound, j_bound;
 
-    void compute(int face, int i, int j);
+    std::vector<double> rhoL,rhoR, rhoT, rhoB;
+    std::vector<double> v1L,v1R, v1T, v1B;
+    std::vector<double> v2L,v2R, v2T, v2B;
+    std::vector<double> pL,pR, pT, pB;
+
+    void compute(int face);
 };
 
 struct DataWriteMembers
