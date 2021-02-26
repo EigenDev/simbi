@@ -74,13 +74,16 @@ void toWritePrim(T *from, PrimData *to, int ndim = 1);
 template <typename ...Args>
 std::string string_format(const std::string& format, Args ...args );
 
+template <typename T> int sgn(T val) ;
 
 double findMax(double, double, double);
 double findMin(double a, double b, double c);
 double calc_sound_speed(float, double, double);
 int sign(double);
 MinMod minmod(PrimData &prims, double theta, int face, int i, int j, int NX);
-double minmod(double, double, double);
+inline double minmod(const double &x, const double &y , const double &z){
+    return 0.25*std::abs(sgn(x) + sgn(y))*(sgn(x) + sgn(z))*std::min(std::min(std::abs(x), std::abs(y)), std::abs(z));
+};
 std::vector<double> rollVector(const std::vector<double>&, unsigned int);
 double roll(std::vector<double>&, unsigned int);
 double roll(std::vector<std::vector<double>>&, unsigned int xpos, unsigned int ypos);

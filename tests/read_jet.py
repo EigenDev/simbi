@@ -4,6 +4,7 @@
 
 import numpy as np 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as tkr
 import time
 import scipy.ndimage
 import matplotlib.colors as colors
@@ -31,10 +32,10 @@ def main():
                         help='The name of the primitive variable you\'d like to plot',
                         choices=prim_choices, default="rho")
     
-    parser.add_argument('--cbar_range', dest = "cbar", metavar='Range of Color Bar', nargs=2,
-                        default = [None, None], help='The colorbar range you\'d like to plot')
+    parser.add_argument('--cbar_range', dest = "cbar", metavar='Range of Color Bar',
+                        default ='None, None', help='The colorbar range you\'d like to plot')
     
-    parser.add_argument('--cmap', dest = "cmap", metavar='Color Bar Colarmap', nargs=1,
+    parser.add_argument('--cmap', dest = "cmap", metavar='Color Bar Colarmap',
                         default = 'magma', help='The colorbar cmap you\'d like to plot')
     
     parser.add_argument('--log', dest='log', action='store_true',
@@ -43,21 +44,24 @@ def main():
     
     parser.add_argument('--first_order', dest='forder', action='store_true',
                         default=False,
-                        help='True if this is a grid using RK1 accuracy')
+                        help='True if this is a grid using RK1')
+    
+    parser.add_argument('--rev_cmap', dest='rcmap', action='store_true',
+                        default=False,
+                        help='True if you want the colormap to be reversed')
 
    
     args = parser.parse_args()
-    vmin, vmax = args.cbar
+    vmin, vmax = eval(args.cbar)
     prim_dict = {}
     with h5py.File(args.filename[0], 'r+') as hf:
-        kek = [key for key in hf.keys()]
-        # attr = [at for at in hf[kek[0]].keys() ]
-        ds = hf[kek[0]]
         
-        rho         = ds.attrs["rho"] 
-        v1          = ds.attrs["v1"] 
-        v2          = ds.attrs["v2"]  
-        p           = ds.attrs["p"] 
+        ds = hf.get("sim_info")
+        
+        rho         = hf.get("rho")[:]
+        v1          = hf.get("v1")[:]
+        v2          = hf.get("v2")[:]
+        p           = hf.get("p")[:]
         nx          = ds.attrs["NX"]
         ny          = ds.attrs["NY"]
         t           = ds.attrs["current_time"]
@@ -126,8 +130,10 @@ def main():
     enorm = colors.LogNorm(vmin = 1, vmax = 9e1)
     snorm = colors.LogNorm(vmin=1.e-5, vmax=1e2)
     
-    color_map = plt.cm.get_cmap(args.cmap[0])
-    reversed_color_map = color_map.reversed()
+    if args.rcmap:
+        color_map = (plt.cm.get_cmap(args.cmap)).reversed()
+    else:
+        color_map = plt.cm.get_cmap(args.cmap)
     
     fig, ax= plt.subplots(1, 1, figsize=(8,10), subplot_kw=dict(projection='polar'), constrained_layout=True)
 
@@ -138,7 +144,11 @@ def main():
     fig.suptitle('SIMBI: {} at t = {:.2f} s'.format(args.setup[0], t), fontsize=20)
 
     cbaxes = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
-    cbar = fig.colorbar(c2, orientation='horizontal', cax=cbaxes)
+    if args.log:
+        logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+        cbar = fig.colorbar(c2, orientation='horizontal', cax=cbaxes, format=logfmt)
+    else:
+        cbar = fig.colorbar(c2, orientation='horizontal', cax=cbaxes)
     ax.set_position( [0.1, -0.18, 0.8, 1.43])
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
@@ -147,7 +157,7 @@ def main():
     ax.tick_params(axis='both', labelsize=20)
     cbaxes.tick_params(axis='x', labelsize=20)
     ax.axes.xaxis.set_ticklabels([])
-    # ax.set_rmax(0.3)
+    ax.set_rmax(0.1)
     # ax.set_rmin(r.min())
     ax.set_thetamin(-90)
     ax.set_thetamax(90)

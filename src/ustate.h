@@ -120,15 +120,11 @@ namespace states {
             double S1;
             double S2;
             double tau;
-            Conserved() : S1(0) {}
+            Conserved() {}
             ~Conserved() {}
             double momentum(int nhat)
             {
-                if (nhat == 1.){
-                    return S1;
-                } else {
-                    return S2;
-                }
+                return (nhat == 1 ? S1 : S2);
             }
         };
 
@@ -143,11 +139,7 @@ namespace states {
             ~Flux() {}
             double momentum(int nhat)
             {
-                if (nhat == 1.){
-                    return S1;
-                } else {
-                    return S2;
-                }
+                return (nhat == 1 ? S1 : S2);
             }
         };
 
@@ -197,69 +189,69 @@ namespace states {
                                  double lorentz_gamma,
                                  std::tuple<int, int>(coordinates));
 
-        PrimitiveData cons2prim2D(
-            const ConserveData &cons_state2D,
-            const std::vector<double> &lorentz_gamma);
+        PrimitiveData cons2prim2D( const ConserveData &cons_state2D,
+                                   const std::vector<double> &lorentz_gamma);
 
-        Eigenvals  calc_Eigenvals(Primitives &prims_l,
-                                      Primitives &prims_r,
-                                      unsigned int nhat);
+        Eigenvals  calc_Eigenvals(const Primitives &prims_l,
+                                  const Primitives &prims_r,
+                                  const unsigned int nhat);
 
         Conserved  calc_stateSR2D(double rho, double vx,
                                   double vy, double pressure);
 
         Conserved    calc_hll_state(
-                                Conserved  &left_state,
-                                Conserved  &right_state,
-                                Flux      &left_flux,
-                                Flux      &right_flux,
-                                Primitives    &left_prims,
-                                Primitives    &right_prims,
+                                const Conserved   &left_state,
+                                const Conserved   &right_state,
+                                const Flux        &left_flux,
+                                const Flux        &right_flux,
+                                const Primitives  &left_prims,
+                                const Primitives  &right_prims,
                                 unsigned int nhat);
 
-        Conserved calc_intermed_statesSR2D( Primitives &prims,
-                                            Conserved &state,
+        Conserved calc_intermed_statesSR2D( const Primitives &prims,
+                                            const Conserved &state,
                                             double a,
                                             double aStar,
                                             double pStar,
                                             int nhat);
 
         Flux      calc_hllc_flux(
-                                Conserved &left_state,
-                                Conserved &right_state,
-                                Flux     &left_flux,
-                                Flux     &right_flux,
-                                Primitives   &left_prims,
-                                Primitives   &right_prims,
-                                int nhat);
+                                const Conserved    &left_state,
+                                const Conserved    &right_state,
+                                const Flux         &left_flux,
+                                const Flux         &right_flux,
+                                const Primitives   &left_prims,
+                                const Primitives   &right_prims,
+                                const unsigned int nhat);
 
         Flux calc_Flux(double rho, double vx, 
                             double vy, double pressure, 
                             bool x_direction);
 
         Flux   calc_hll_flux(
-                        Conserved &left_state,
-                        Conserved &right_state,
-                        Flux     &left_flux,
-                        Flux     &right_flux,
-                        Primitives   &left_prims,
-                        Primitives   &right_prims,
-                        unsigned int nhat);
+                        const Conserved    &left_state,
+                        const Conserved    &right_state,
+                        const Flux         &left_flux,
+                        const Flux         &right_flux,
+                        const Primitives   &left_prims,
+                        const Primitives   &right_prims,
+                        const unsigned int nhat);
 
         Conserved  u_dot(unsigned int ii, unsigned int jj);
 
         ConserveData  u_dot2D(const ConserveData  &cons_state);
 
 
-        double adapt_dt(const PrimitiveData &prims,
-                                   bool linspace, bool first_order);
+        double adapt_dt(const PrimitiveData &prims);
 
-        std::vector<std::vector<double> >   simulate2D(const std::vector<double> lorentz_gamma,
-                              const std::vector<std::vector<double> > sources,
-                              float tend,bool first_order,  bool periodic,  
-                              bool linspace,
-                              bool hllc,
-                              double dt);
+        std::vector<std::vector<double> >   simulate2D( const std::vector<double> lorentz_gamma,
+                                                        const std::vector<std::vector<double> > sources,
+                                                        float tend, 
+                                                        bool first_order,  
+                                                        bool periodic,  
+                                                        bool linspace,
+                                                        bool hllc,
+                                                        double dt);
                                                                 
     };
 }

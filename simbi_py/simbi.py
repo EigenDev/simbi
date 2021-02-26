@@ -50,15 +50,15 @@ class Hydro:
             print('Initializing the 1D Discontinuity...')
             
             discontinuity = True
-            left_state = initial_state[0]
+            left_state  = initial_state[0]
             right_state = initial_state[1]
             
-            self.left_state = left_state
+            self.left_state  = left_state
             self.right_state = right_state 
             
             if len(left_state) != len(right_state):
                 print("ERROR: The left and right states must have the same number of variables")
-                print('Left State:', left_state)
+                print('Left State:',   left_state)
                 print('Right State:', right_state)
                 sys.exit()
                 
@@ -83,13 +83,13 @@ class Hydro:
         if discontinuity:
             # Primitive Variables on LHS
             rho_l = self.left_state[0]
-            p_l = self.left_state[1]
-            v_l = self.left_state[2]
+            p_l   = self.left_state[1]
+            v_l   = self.left_state[2]
             
             # Primitive Variables on RHS
             rho_r = self.right_state[0]
-            p_r = self.right_state[1]
-            v_r = self.right_state[2]
+            p_r   = self.right_state[1]
+            v_r   = self.right_state[2]
         
             if self.regime == "classical":
                 # Calculate Energy Density on LHS
@@ -116,12 +116,9 @@ class Hydro:
             # Initialize conserved u-tensor and flux tensors (defaulting to 2 ghost cells)
             self.u = np.empty(shape = (3, self.Npts + 2), dtype=float)
 
-            left_bound = self.geometry[0]
+            left_bound  = self.geometry[0]
             right_bound = self.geometry[1]
-            midpoint = self.geometry[2]
-            
-            lx = right_bound - left_bound
-            self.dx = lx/self.Npts
+            midpoint    = self.geometry[2]
             
             size = abs(right_bound - left_bound)
             breakpoint = size/midpoint                                              # Define the fluid breakpoint
@@ -182,13 +179,7 @@ class Hydro:
             left_x, right_x = geometry[0]
             left_y, right_y = geometry[1]
             
-            lx = right_x - left_x
-            ly = right_y - left_y
-            
             self.xNpts, self.yNpts = Npts 
-            
-            # self.dx = lx/self.Npts
-            # self.dy = ly/self.Npts
             
             self.n_vars = n_vars 
             
@@ -225,6 +216,22 @@ class Hydro:
             
             self.u = None 
     
+    def _cleanup(self, state, first_order=True):
+        """
+        Cleanup the ghost cells from the final simulation
+        results
+        """
+        if first_order:
+            if self.dimensions == 1:
+                return state[:, 1: -1]
+            else:
+                return state[:, 1:-1, 1:-1]
+        else:
+            if self.dimensions == 1:
+                return state[:, 2: -2]
+            else:
+                return state[:, 2:-2, 2:-2]
+        
     # TODO: Make this more Pythomic
     def _initialize_simulation(self):
         """
@@ -376,10 +383,7 @@ class Hydro:
                             
                             self.W = np.insert(self.W, -1, right_gamma, axis=0)
                             self.W = np.insert(self.W, 0, left_gamma)
-                    
-                        
-                        
-                        #zzz = input('')
+                            
             else:
                 if not self.u.any():
                     if periodic:

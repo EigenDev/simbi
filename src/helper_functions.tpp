@@ -84,8 +84,9 @@ double newton_raphson(T x1, T (*f)(T, Args... args),  T (*g)(T, Args... args),
     } while(std::abs(x1 - x) >= epsilon);
     
     
-    // if (ii > 10){
+    // if (ii > maximum_iteration){
     //     std::cout << "Newton Raphson took: " << ii << " iterations" << std::endl;
+    //     std::cin.get();
     // }
     
 
@@ -250,6 +251,10 @@ void config_ghosts2D(T &u_state,
 
     }
 };
+
+template <typename T> int sgn(T val) {
+    return (T(0) < val) - (val < T(0));
+}
 
 template <typename T>
 void toWritePrim(T *from, PrimData *to, int ndim)
