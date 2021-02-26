@@ -6,6 +6,7 @@ data/
 tests/
 test.cpp
 ustate
+.vscode/
 *.h5
 *.pdf
 *.png
