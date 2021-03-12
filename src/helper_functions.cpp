@@ -13,7 +13,7 @@
 
 
 using namespace std;
-using namespace states;
+using namespace hydro;
 
 // =========================================================================================================
 //        HELPER FUNCTIONS FOR COMPUTATION
@@ -86,6 +86,24 @@ vector<vector<double> > transpose(vector<vector<double> > &mat){
 
     return trans_vec;
 };
+
+std::map<std::string, simulation::coord_system> geometry;
+std::map<bool, simulation::accuracy> order_acc;
+void config_system() {
+    geometry["cartesian"] = simulation::CARTESIAN;
+    geometry["spherical"] = simulation::SPHERICAL;
+    order_acc[true]       = simulation::FIRST_ORDER;
+    order_acc[false]      = simulation::SECOND_ORDER;
+}
+
+std::map<bool, waves::wave_loc> wave_loc;
+void get_spacetime_wave(double aL, double aR, double aStar){
+    wave_loc[0.0 <= aL]                     = waves::LEFT_WAVE;
+    wave_loc[(0.0 - aL) <= (aStar - aL)]    = waves::LEFT_STAR;
+    wave_loc[(0.0 - aStar) <= (aR - aStar)] = waves::RIGHT_STAR;
+    wave_loc[aR <= 0.0]                     = waves::RIGHT_WAVE;
+}
+
 
 //====================================================================================================
 //                                  WRITE DATA TO FILE
@@ -247,17 +265,22 @@ double calc_rel_sound_speed(double pressure, double D, double tau, double lorent
 //------------------------------------------------------------------------------------------------------------
 double pressure_func(double pressure, double D, double tau, double lorentz_gamma, float gamma, double S){
 
-    double rho = D/lorentz_gamma; 
-    double epsilon = epsilon_rel(pressure, D, tau, lorentz_gamma);
+    double v       = S / (tau + pressure + D);
+    double W_s     = 1.0 / sqrt(1.0 - v * v);
+    double rho     = D / W_s; 
+    double epsilon = ( tau + D*(1. - W_s) + (1. - W_s*W_s)*pressure )/(D * W_s);
 
     return (gamma - 1.)*rho*epsilon - pressure;
 }
 
 double dfdp(double pressure, double D, double tau, double lorentz_gamma, float gamma, double S){
-    double rho = D/lorentz_gamma;
-    double h = 1 + pressure*gamma/(rho*(gamma - 1.));
-    double cs = sqrt(gamma*pressure/(h*rho) );
-    double v = S/(tau + D + pressure);
 
-    return v*v*cs*cs - 1.;
+    double v       = S/(tau + D + pressure);
+    double W_s     = 1.0 / sqrt(1.0 - v*v);
+    double rho     = D / W_s; 
+    double h       = 1 + pressure*gamma/(rho*(gamma - 1.));
+    double c2      = gamma*pressure/(h*rho);
+    
+
+    return v*v*c2 - 1.;
 }

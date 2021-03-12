@@ -11,7 +11,12 @@ from Cython.Build import cythonize
 with open("README.md", "r", encoding = "utf-8") as fh:
     description = fh.read()
     
-sourcefiles = ['src/state.pyx', 'src/simbi_1d.cpp', 'src/relativistic1D.cpp', 'src/helper_functions.cpp', 'src/simbi_2d.cpp', 'src/relativistic2D.cpp']
+sourcefiles = ['src/state.pyx', 
+               'src/simbi_1d.cpp', 
+               'src/relativistic1D.cpp', 
+               'src/helper_functions.cpp', 
+               'src/simbi_2d.cpp', 
+               'src/relativistic2D.cpp']
 
 extensions = [Extension("state", sourcefiles, 
                         include_dirs=[numpy.get_include()],

@@ -13,12 +13,10 @@
 #include <array>
 #include <iostream>
 #include <tuple>
+#include "hydro_structs.h"
 
-#define _NX 0
-#define _NY 0
-
-namespace states {
-    class Ustate {
+namespace hydro {
+    class Newtonian1D {
         public: 
             std::vector< std::vector<double> > state, cons_state; 
             std::vector<double> r;
@@ -26,10 +24,10 @@ namespace states {
             bool first_order, periodic, linspace;
             double CFL;
             std::string coord_system;
-            Ustate();
-            Ustate(std:: vector <std::vector <double> > state, float gamma, double CFL,
+            Newtonian1D();
+            Newtonian1D(std:: vector <std::vector <double> > state, float gamma, double CFL,
                     std::vector<double> r, std::string coord_system);
-            ~Ustate();
+            ~Newtonian1D();
             std::vector < std::vector<double > > cons2prim1D(
                 std::vector < std::vector<double > > cons_state);
 
@@ -44,38 +42,80 @@ namespace states {
 
     };
 
-    class UstateSR {
+    class SRHD {
         public: 
-            std::vector< std::vector<double> > state, cons_state; 
-            std::vector<double> r;
-            float theta, gamma, tend, dt;
-            bool first_order, periodic, linspace;
-            double CFL;
+            double gamma, CFL;
             std::string coord_system;
-            UstateSR();
-            UstateSR(std:: vector <std::vector <double> > state, float gamma, double CFL,
-                    std::vector<double> r, std::string coord_system);
-            ~UstateSR();
-            std::vector < std::vector<double > > cons2prim1D(
-                std::vector < std::vector<double > > &cons_state, std::vector<double> &lorentz_gamma);
+            std::vector<double> r; 
+            std::vector< std::vector<double> > state;
 
-            std::vector<std::vector<double> > u_dot1D(std::vector<std::vector<double> > &cons_state,
-                                                        std::vector<double> &lorentz_gamma, 
-                                                        std::vector<std::vector<double> > &sources,
-                                                        bool first_order,
-                                                        bool periodic, float theta, bool linspace, bool hllc);
+            SRHD();
+            SRHD(std:: vector <std::vector <double> > state, double gamma, double CFL,
+                    std::vector<double> r, std::string coord_system);
+            ~SRHD();
+
+
+            hydro1d::ConservedArray cons_state; 
+            hydro1d::PrimitiveArray prims;
+
+            int Nx, n, pgrid_size, idx_shift;
+            float tend, dt;
+            double theta;
+            bool first_order, periodic, linspace, hllc;
+            
+            std::vector<double> lorentz_gamma, sourceD, sourceS, source0, pressure_guess;
+
+            hydro1d::PrimitiveArray cons2prim1D(const hydro1d::ConservedArray &cons_state, std::vector<double> &lorentz_gamma);
+
+            hydro1d::Eigenvals calc_eigenvals(const hydro1d::Primitive &prims_l, const hydro1d::Primitive &prims_r);
+
+            double adapt_dt(hydro1d::PrimitiveArray &prims);
+
+            hydro1d::Conserved calc_state(double rho, double v, double pressure);
+
+            hydro1d::Conserved calc_hll_state(
+                                    const hydro1d::Conserved &left_state,
+                                    const hydro1d::Conserved &right_state,
+                                    const hydro1d::Flux &left_flux,
+                                    const hydro1d::Flux &right_flux,
+                                    const hydro1d::Primitive &left_prims,
+                                    const hydro1d::Primitive &right_prims);
+
+            hydro1d::Conserved calc_intermed_state(const hydro1d::Primitive &prims,
+                                    const hydro1d::Conserved &state,
+                                    const double a,
+                                    const double aStar,
+                                    const double pStar);
+
+            hydro1d::Flux calc_flux(double rho, double v, double pressure);
+
+            hydro1d::Flux calc_hll_flux(const hydro1d::Primitive &left_prims, 
+                                        const hydro1d::Primitive &right_prims,
+                                        const hydro1d::Conserved &left_state,
+                                        const hydro1d::Conserved &right_state,
+                                        const hydro1d::Flux &left_flux,
+                                        const hydro1d::Flux &right_flux);
+
+            hydro1d::Flux  calc_hllc_flux(  const hydro1d::Conserved &left_state,
+                                            const hydro1d::Conserved &right_state,
+                                            const hydro1d::Flux &left_flux,
+                                            const hydro1d::Flux &right_flux,
+                                            const hydro1d::Primitive &left_prims,
+                                            const hydro1d::Primitive &right_prims);
+
+            hydro1d::ConservedArray u_dot1D(hydro1d::ConservedArray &u_state);
 
             std::vector<std::vector<double> > simulate1D(std::vector<double> &lorentz_gamma, 
                                                             std::vector<std::vector<double> > &sources,
-                                                            float tend, float dt, float theta, 
+                                                            float tend, float dt, double theta, 
                                                             bool first_order, bool periodic, bool linspace, bool hllc);
-            double adapt_dt(std::vector<std::vector<double> > &prims, 
-                                     bool linspace, bool first_order, bool periodic);
+
+            
             
 
     };
 
-    class Ustate2D {
+    class Newtonian2D {
         public:
         std::vector<std::vector<std::vector<double> > > state2D, cons_state2D;
         float theta, gamma, tend;
@@ -83,10 +123,10 @@ namespace states {
         double CFL, dt;
         std::string coord_system;
         std::vector<double> x1, x2;
-        Ustate2D();
-        Ustate2D(std::vector< std::vector< std::vector<double> > > state2D, float gamma, std::vector<double> x1,
+        Newtonian2D();
+        Newtonian2D(std::vector< std::vector< std::vector<double> > > state2D, float gamma, std::vector<double> x1,
                             std::vector<double> x2, double CFL, std::string coord_system);
-        ~Ustate2D();
+        ~Newtonian2D();
         std::vector <std::vector < std::vector<double > > > cons2prim2D(
             std::vector<std::vector<std::vector<double> > > &cons_state2D);
 
@@ -110,7 +150,7 @@ namespace states {
                                     float tend, bool periodic, double dt, bool linspace, bool hllc);
     };
 
-    class UstateSR2D {
+    class SRHD2D {
         public:
 
         /* Define Data Structures for the Fluid Properties. */
@@ -169,7 +209,8 @@ namespace states {
         PrimitiveData prims; 
         ConserveData u_state; 
         std::vector<std::vector<double> > state2D, sources;
-        float theta, gamma, tend;
+        float tend, tstart;
+        double theta, gamma;
         bool first_order, periodic, hllc, linspace;
         double CFL, dt;
         int NX, NY, nzones, n, block_size, xphysical_grid, yphysical_grid;
@@ -179,18 +220,18 @@ namespace states {
         std::vector<double> lorentz_gamma;
 
         /* Methods */
-        UstateSR2D();
-        UstateSR2D(std::vector<std::vector<double> > state2D, int NX, int NY, float gamma, std::vector<double> x1,
+        SRHD2D();
+        SRHD2D(std::vector<std::vector<double> > state2D, int NX, int NY, double gamma, std::vector<double> x1,
                             std::vector<double> x2,
                             double CFL, std::string coord_system);
-        ~UstateSR2D();
+        ~SRHD2D();
 
         Primitives cons2primSR(Conserved  &u_state,
                                  double lorentz_gamma,
                                  std::tuple<int, int>(coordinates));
 
         PrimitiveData cons2prim2D( const ConserveData &cons_state2D,
-                                   const std::vector<double> &lorentz_gamma);
+                                   std::vector<double> &lorentz_gamma);
 
         Eigenvals  calc_Eigenvals(const Primitives &prims_l,
                                   const Primitives &prims_r,
@@ -246,12 +287,16 @@ namespace states {
 
         std::vector<std::vector<double> >   simulate2D( const std::vector<double> lorentz_gamma,
                                                         const std::vector<std::vector<double> > sources,
+                                                        float tstart,
                                                         float tend, 
+                                                        double dt,
+                                                        double theta,
+                                                        double chkpt_interval,
                                                         bool first_order,  
                                                         bool periodic,  
                                                         bool linspace,
-                                                        bool hllc,
-                                                        double dt);
+                                                        bool hllc
+                                                        );
                                                                 
     };
 }

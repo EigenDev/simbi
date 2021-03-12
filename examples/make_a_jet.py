@@ -19,8 +19,8 @@ from datetime import datetime
 c        = const.c.to(u.cm/u.s)       # Speed of light converted to cm/s
 m_0      = 2e33*u.g                   # solar radius
 R_0      = 7e10*u.cm                  # Characteristic Length Scale
-rho_c    = 3e7*  m_0/R_0**3           # Central Density
-R_1      = 0.0017*R_0                 # First Break Radius
+rho_c    = 3e7 * m_0/R_0**3           # Central Density
+R_1      = 0.0017 * R_0                 # First Break Radius
 R_2      = 0.0125 * R_0               # Second Break Radius
 R_3      = 0.65 * R_0                 # Outer Radius
 k1       = 3.24                       # First Break Slope
@@ -58,7 +58,7 @@ N_0 = 4*np.pi*(r_0/R_0)**3 * (1. - np.exp(-2./(theta_0**2)))*theta_0**2
 
 # The angular zones are the terms that resolve 
 # the KH instability
-ynpts = 64
+ynpts = 32
 
 rmin = 0.01 #((r_0/R_0)/1e3).value
 rmax = 0.5
@@ -106,7 +106,7 @@ g = (rr*R_0/r_0)* np.exp(-(rr*R_0/r_0)**2 / 2) * np.exp( (np.cos(tt) - 1) / thet
 
 L_norm = ( (m_0*c**3)/(R_0) ).to(u.erg/u.s)
 L = L_0/L_norm
-scale = 1.
+scale = 0.0
 S_0 =  L*g*scale
 S_r = S_0*np.sqrt(1 - 1/gamma_0**2)
 S_D = S_0/eta_0
@@ -144,13 +144,12 @@ zzz = input('Press Enter to Cotinue...')
 #=========================================================================
 #                           SIMULATE
 #=========================================================================
-
 Jet = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt), 
               Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4, regime="relativistic")
 
 t1 = (time.time()*u.s).to(u.min)
 sol = Jet.simulate(tend=tend, first_order = False, dt=dt, coordinates=b"spherical", sources=(S_D, S_r,S_theta ,S_0),
-                   linspace=False, CFL=0.4, hllc = True)
+                   linspace = False, CFL= 0.4, hllc = True, chkpt=None, chkpt_interval=0.01,)
 
 print("The 2D Jet Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 
@@ -163,7 +162,7 @@ D = np.log10(W*dens)
 print("Max Velocity: {}".format(v.max()))
 
 
-norm = colors.LogNorm(vmin=dens.min(), vmax=dens.max())
+norm  = colors.LogNorm(vmin=dens.min(), vmax=dens.max())
 norm2 = colors.LogNorm(vmin=W.min(), vmax=W.max())
 
 fig, ax= plt.subplots(1, 1, figsize=(8,10), subplot_kw=dict(projection='polar'), constrained_layout=False)
@@ -174,14 +173,8 @@ c2 = ax.pcolormesh(t2[::-1], rr, D,  cmap='gist_rainbow', shading='auto', edgeco
 
 fig.suptitle('SIMBI: Jet Propagation at t={} s on {} x {} grid.'.format(tend, xnpts, ynpts), fontsize=20)
 
-
-#divider = make_axes_locatable(ax)
-#cax = divider.append_axes("bottom", size="5%", pad=0.05)
-
-
 cbaxes = fig.add_axes([0.2, 0.1, 0.6, 0.02]) 
 cbar = fig.colorbar(c2, orientation='horizontal', cax=cbaxes)
-# cbar2 = fig.colorbar(c1)
 
 ax.set_position( [0.1, -0.18, 0.8, 1.43])
 ax.set_theta_zero_location("N")
@@ -190,35 +183,13 @@ ax.yaxis.grid(True, alpha=0.3)
 ax.xaxis.grid(True, alpha=0.3)
 ax.tick_params(axis='both', labelsize=10)
 cbaxes.tick_params(axis='x', labelsize=10)
-# ax.axes.xaxis.set_ticklabels([])
-#ax.set_rmin(rmin)
 ax.set_thetamin(-90)
 ax.set_thetamax(90)
 
-
-
-#np.savetxt('blandford_mckee_test.txt', sol)
 cbar.ax.set_xlabel('Log Density', fontsize=20)
-#plt.tight_layout()
-# plt.tight_layout()
+
 
 plt.show()
-
-zzz = input('Save Data?: y/n ')
-
-now = datetime.today().strftime("%Y-%m-%d_%H%M%S")
-if zzz == "y":
-    print("Writing Data to File....")
-    with h5py.File('data/jet/jet_output_{}_grid_{}_by_{}_on_{}.h5'.format(tend,ynpts, xnpts, now), 'w') as hf:
-        hf.create_dataset('rho_' , data=sol[0])
-        hf.create_dataset('vr' , data=sol[1])
-        hf.create_dataset('vt' , data=sol[2])
-        hf.create_dataset('p' , data=sol[3])
-        hf.create_dataset('r', data=r)
-        hf.create_dataset('t', data=theta)
-        
-    fig.savefig('plots/2D/SR/sr_jet_hllc_{}_by_{}_at_{}.pdf'.format(xnpts, ynpts, now), pad_inches = 0)
-
   
 del Jet
 del sol 

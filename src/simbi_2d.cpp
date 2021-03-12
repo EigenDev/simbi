@@ -15,14 +15,14 @@
 #include <chrono>
 
 using namespace std;
-using namespace states;
+using namespace hydro;
 using namespace chrono;
 
 // Default Constructor 
-Ustate2D::Ustate2D () {}
+Newtonian2D::Newtonian2D () {}
 
 // Overloaded Constructor
-Ustate2D::Ustate2D(vector<vector< vector<double> > > u_state2D, float Gamma, vector<double> X1, 
+Newtonian2D::Newtonian2D(vector<vector< vector<double> > > u_state2D, float Gamma, vector<double> X1, 
                     vector<double> X2, double cfl, string Coord_system = "cartesian")
 {
     state2D = u_state2D;
@@ -34,7 +34,7 @@ Ustate2D::Ustate2D(vector<vector< vector<double> > > u_state2D, float Gamma, vec
 }
 
 // Destructor 
-Ustate2D::~Ustate2D() {}
+Newtonian2D::~Newtonian2D() {}
 
 
 //-----------------------------------------------------------------------------------------
@@ -73,7 +73,7 @@ vector<double>  cons2prim(float gamma, vector<double>  &u_state, string directio
     return prims;
 };
 
-vector<vector< vector<double> > > Ustate2D::cons2prim2D(vector<vector< vector<double> > > &u_state2D){
+vector<vector< vector<double> > > Newtonian2D::cons2prim2D(vector<vector< vector<double> > > &u_state2D){
     /**
      * Return a 1 + 2D matrix containing the primitive
      * variables density (rho), pressure, and
@@ -119,7 +119,7 @@ vector<vector< vector<double> > > Ustate2D::cons2prim2D(vector<vector< vector<do
     return prims;
 };
 
-vector<vector< vector<double> > > Ustate2D::cons2prim2D(vector<vector< vector<double> > > &u_state2D,
+vector<vector< vector<double> > > Newtonian2D::cons2prim2D(vector<vector< vector<double> > > &u_state2D,
                                                         int xcoord, int ycoord){
     /**
      * Return a 1 + 2D subspace matrix containing the primitive
@@ -449,7 +449,7 @@ vector<double> calc_hll_state2D(float gamma,
 
 
 // Adapt the CFL conditonal timestep
-double Ustate2D::adapt_dt(vector<vector<vector<double> > > &u_state,
+double Newtonian2D::adapt_dt(vector<vector<vector<double> > > &u_state,
                         bool linspace=true){
 
     double r_left, r_right, left_cell, right_cell, upper_cell, lower_cell;
@@ -726,7 +726,7 @@ vector<double> calc_hllc_flux2D(float gamma,
 //                                            UDOT CALCULATIONS
 //-----------------------------------------------------------------------------------------------------------
 
-vector<double> Ustate2D::u_dot2D1(float gamma, 
+vector<double> Newtonian2D::u_dot2D1(float gamma, 
                                         vector<vector<vector<double> > > &u_state,
                                         vector<vector<vector<double> > > &sources, 
                                         int ii,
@@ -1618,7 +1618,7 @@ vector<double> Ustate2D::u_dot2D1(float gamma,
 
 };
 
-vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma, 
+vector<vector<vector<double> > > Newtonian2D::u_dot2D(float gamma, 
                                         vector<vector<vector<double> > > &u_state,
                                         vector<vector<vector<double> > > &sources, 
                                         bool periodic = false, float theta = 1.5, bool  linspace=true,
@@ -2614,7 +2614,7 @@ vector<vector<vector<double> > > Ustate2D::u_dot2D(float gamma,
 //-----------------------------------------------------------------------------------------------------------
 //                                            SIMULATE 
 //-----------------------------------------------------------------------------------------------------------
-vector<vector<vector<double> > > Ustate2D::simulate2D(vector<vector<vector<double> > > &sources, 
+vector<vector<vector<double> > > Newtonian2D::simulate2D(vector<vector<vector<double> > > &sources, 
                                                         float tend = 0.1, bool periodic = false, 
                                                         double dt = 1.e-4, bool linspace=true,
                                                         bool hllc = false){

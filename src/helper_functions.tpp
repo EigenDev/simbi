@@ -75,10 +75,10 @@ double newton_raphson(T x1, T (*f)(T, Args... args),  T (*g)(T, Args... args),
         ii++;
 
         
-        // if (ii > maximum_iteration){
-        //     std::cout << "\n Cons2Prim Not Convergent" << std::endl;
-        //     exit(EXIT_FAILURE);
-        // }
+        if (ii > maximum_iteration){
+            std::cout << "\n Cons2Prim Not Convergent" << std::endl;
+            exit(EXIT_FAILURE);
+        }
         
 
     } while(std::abs(x1 - x) >= epsilon);
@@ -110,12 +110,11 @@ template<typename T>
 std::vector<double>  calc_lorentz_gamma(T &v1, T &v2, int nx, int ny){
     int xgrid_size = nx;
     int ygrid_size = ny;
-    double vtot;
     std::vector<double> W; 
     W.reserve(ygrid_size * xgrid_size);
 
     std::transform(v1.begin(), v1.end(), v2.begin(), back_inserter(W), [&](const double& vx, const double& vy){
-        return 1./sqrt(1 - vx*vx + vy*vy);
+        return 1.0/sqrt(1.0 - (vx*vx + vy*vy));
     });
     // for (int jj=0; jj < ygrid_size; jj++){
     //     for (int ii=0; ii < xgrid_size; ii++){
@@ -131,29 +130,29 @@ std::vector<double>  calc_lorentz_gamma(T &v1, T &v2, int nx, int ny){
 template <typename T>
 void config_ghosts1D(T &u_state, int grid_size, bool first_order){
     if (first_order){
-        u_state[0][0] = u_state[0][1];
-        u_state[0][grid_size - 1] = u_state[0][grid_size - 2];
+        u_state.D[0] = u_state.D[1];
+        u_state.D[grid_size - 1] = u_state.D[grid_size - 2];
 
-        u_state[1][0] = u_state[1][1];
-        u_state[1][grid_size - 1] = u_state[1][grid_size - 2];
+        u_state.S[0] = u_state.S[1];
+        u_state.S[grid_size - 1] = u_state.S[grid_size - 2];
 
-        u_state[2][0] = u_state[2][1];
-        u_state[2][grid_size - 1] = u_state[2][grid_size - 2];
+        u_state.tau[0] = u_state.tau[1];
+        u_state.tau[grid_size - 1] = u_state.tau[grid_size - 2];
     } else {
-        u_state[0][0] = u_state[0][2];
-        u_state[0][1] = u_state[0][2];
-        u_state[0][grid_size - 1] = u_state[0][grid_size - 3];
-        u_state[0][grid_size - 2] = u_state[0][grid_size - 3];
+        u_state.D[0] = u_state.D[2];
+        u_state.D[1] = u_state.D[2];
+        u_state.D[grid_size - 1] = u_state.D[grid_size - 3];
+        u_state.D[grid_size - 2] = u_state.D[grid_size - 3];
 
-        u_state[1][0] = u_state[1][2];
-        u_state[1][1] = u_state[1][2];
-        u_state[1][grid_size - 1] = u_state[1][grid_size - 3];
-        u_state[1][grid_size - 2] = u_state[1][grid_size - 3];
+        u_state.S[0] = u_state.S[2];
+        u_state.S[1] = u_state.S[2];
+        u_state.S[grid_size - 1] = u_state.S[grid_size - 3];
+        u_state.S[grid_size - 2] = u_state.S[grid_size - 3];
 
-        u_state[2][0] = u_state[2][2];
-        u_state[2][1] = u_state[2][2];
-        u_state[2][grid_size - 1] = u_state[2][grid_size - 3];
-        u_state[2][grid_size - 2] = u_state[2][grid_size - 3];
+        u_state.tau[0] = u_state.tau[2];
+        u_state.tau[1] = u_state.tau[2];
+        u_state.tau[grid_size - 1] = u_state.tau[grid_size - 3];
+        u_state.tau[grid_size - 2] = u_state.tau[grid_size - 3];
     }
 };
 

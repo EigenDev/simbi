@@ -250,10 +250,10 @@ class Hydro:
         )
     
 
-    def simulate(self, tend=0.1, dt = 1.e-4, 
+    def simulate(self, tstart = 0, tend=0.1, dt = 1.e-4, theta = 1.5,
                  first_order=True, periodic=False, linspace=True,
                  coordinates=b"cartesian", CFL=0.4, sources = None, hllc=False,
-                 chkpt=None):
+                 chkpt=None, chkpt_interval = 0.1):
         """
         Simulate the Hydro Setup
         
@@ -275,6 +275,7 @@ class Hydro:
         # Initialize conserved u-tensor
         
         self.u = np.asarray(self.u)
+        t = 0
         
         if not chkpt:
              
@@ -363,10 +364,6 @@ class Hydro:
                                 
                                 self.W = np.insert(self.W, -1, (right_gamma, right_gamma))
                                 self.W = np.insert(self.W, 0, (left_gamma, left_gamma))
-                                
-                                print(self.W)
-                                print("present")
-                                zzz = input('')
                                 
                         
                 else:
@@ -540,14 +537,41 @@ class Hydro:
                         self.W = np.insert(self.W, 0, right_W_ghost)
         else:
             # TODO: Read in H5 file and create the necessary Simulation Checkpoint
-            pass
+            with h5py.File(chkpt, 'r+') as hf:
+                t = 0
+                ds = hf.get("sim_info")
+                
+                rho         = hf.get("rho")[:]
+                v1          = hf.get("v1")[:]
+                v2          = hf.get("v2")[:]
+                p           = hf.get("p")[:]
+                nx          = ds.attrs["NX"]
+                ny          = ds.attrs["NY"]
+                t           = ds.attrs["current_time"]
+                xmax        = ds.attrs["xmax"]
+                xmin        = ds.attrs["xmin"]
+                ymax        = ds.attrs["ymax"]
+                ymin        = ds.attrs["ymin"]
+                
+                
+                rho = rho.reshape(ny, nx)
+                v1  = v1.reshape(ny, nx)
+                v2  = v2.reshape(ny, nx)
+                p   = p.reshape(ny, nx)
+                
+                h = 1. + (4./3.)*p/(rho*(1./3.))
+                
+                self.W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
+                self.D   = rho * self.W 
+                self.S1  = self.W*self.W*rho*h*v1 
+                self.S2  = self.W*self.W*rho*h*v2 
+                self.tau = self.W*self.W*rho*h - p - rho*self.W
+                
+                self.u = np.array([self.D, self.S1, self.S2, self.tau])
+            
             
         u = self.u 
-        
-        # Copy state tensor
-        cons_p = u.copy()
-
-        t = 0
+        start_time = tstart if t == 0 else t
         if self.dimensions == 1:
             if first_order:
                 print("Computing First Order...")
@@ -627,8 +651,8 @@ class Hydro:
                     self.W = self.W.flatten()
                     sources = sources.reshape(sources.shape[0], -1)
                     b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tend, dt=dt, first_order=False, lorentz_gamma = self.W, 
-                                    linspace=linspace, hllc = hllc, sources=sources)
+                    u = b.simulate(tstart=start_time, tend = tend, dt=dt, first_order=False, lorentz_gamma = self.W, 
+                                    linspace=linspace, hllc = hllc, sources=sources, chkpt_interval = chkpt_interval, theta=theta)
             
         
         # Return the final state tensor, purging the ghost cells

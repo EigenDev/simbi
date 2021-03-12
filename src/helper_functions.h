@@ -15,12 +15,14 @@
 #include <iostream>
 #include <cmath>
 #include <h5cpp/all>
-#include "ustate.h"
 #include <algorithm>
+#include <map>
+#include "hydro_structs.h"
 
 //---------------------------------------------------------------------------------------------------------
-//  HELPER-TEMPLATES 
+//  HELPER-GLOBAL-STRUCTS 
 //---------------------------------------------------------------------------------------------------------
+
 struct PrimData
 {
     std::vector<double> rho, v1, v2, p, v;
@@ -48,6 +50,37 @@ struct DataWriteMembers
 
 };
 
+namespace waves {
+    enum wave_loc {
+        LEFT_WAVE  = 1, 
+        LEFT_STAR  = 2, 
+        RIGHT_STAR = 3, 
+        RIGHT_WAVE = 4
+    };
+};
+
+namespace simulation {
+    enum coord_system {
+        CARTESIAN,
+        SPHERICAL,
+    };
+
+    enum accuracy {
+        FIRST_ORDER,
+        SECOND_ORDER,
+    };
+};
+
+extern std::map<std::string, simulation::coord_system> geometry;
+extern std::map<bool, simulation::accuracy> order_acc;
+extern std::map<bool, waves::wave_loc> wave_loc;
+void config_system();
+void get_spacetime_wave(double aL, double aR, double aStar);
+
+//---------------------------------------------------------------------------------------------------------
+//  HELPER-TEMPLATES 
+//---------------------------------------------------------------------------------------------------------
+//-------------Define Function Templates-------------------------
 template <typename T, size_t N>
 constexpr size_t array_size(T (&)[N]);
 
@@ -76,22 +109,23 @@ std::string string_format(const std::string& format, Args ...args );
 
 template <typename T> int sgn(T val) ;
 
+
+//---------------------------------------------------------------------------------------------------------
+//  HELPER-METHODS 
+//---------------------------------------------------------------------------------------------------------
+
+//----------------Define Methods-------------------------
 double findMax(double, double, double);
 double findMin(double a, double b, double c);
 double calc_sound_speed(float, double, double);
 int sign(double);
 MinMod minmod(PrimData &prims, double theta, int face, int i, int j, int NX);
-inline double minmod(const double &x, const double &y , const double &z){
-    return 0.25*std::abs(sgn(x) + sgn(y))*(sgn(x) + sgn(z))*std::min(std::min(std::abs(x), std::abs(y)), std::abs(z));
-};
 std::vector<double> rollVector(const std::vector<double>&, unsigned int);
 double roll(std::vector<double>&, unsigned int);
 double roll(std::vector<std::vector<double>>&, unsigned int xpos, unsigned int ypos);
 std::vector<std::vector<double> > transpose(std::vector<std::vector<double> > &);
 std::string create_step_str(double t_interval, std::string &tnow);
-void write_hdf5(std::string filename, PrimData prims, DataWriteMembers setup);
-// void config_ghosts1D(std::vector<std::vector<double> > &, int, bool=true);
-// void config_ghosts2D(std::vector<std::vector< std::vector< double> > > &, int, int, bool=true, char kind='outflow');
+void write_hdf5(std::string filename, PrimData prims, DataWriteMembers system);
 void write_data(std::vector<std::vector<double> > &sim_data,double time, std::string sim_type );
 double calc_pressure(float, double, double, double);
 double calc_energy(float, double, double, double);
@@ -103,12 +137,14 @@ double calc_intermed_wave(double, double, double, double);
 double calc_intermed_pressure(double, double, double, double, double, double);
 int kronecker(int, int);
 double calc_lorentz_gamma(double v);
-// std::vector<double> calc_lorentz_gamma(std::vector<double> &v);
-// std::vector<std::vector<double> > calc_lorentz_gamma(std::vector<std::vector<double> > &v1,
-//                                          std::vector<std::vector<double> > &v2);
 double calc_rel_sound_speed(double, double, double, double, float);
 double pressure_func(double, double , double , double, float, double);
 double dfdp(double, double, double, double, float, double);
+
+//-------------------Inline for Speed--------------------------------------
+inline double minmod(const double &x, const double &y , const double &z){
+    return 0.25*std::abs(sgn(x) + sgn(y))*(sgn(x) + sgn(z))*std::min(std::min(std::abs(x), std::abs(y)), std::abs(z));
+};
 
 #include "helper_functions.tpp"
 #endif 

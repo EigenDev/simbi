@@ -80,7 +80,7 @@ vy = np.zeros((ntheta ,nr), np.double)
 
 
 
-tend = 0.1
+tend = 0.5
 dt = 1.e-8
 # with PackageResource() as bm:
 #     bm.Hydro()

@@ -14,14 +14,14 @@
 #include <algorithm>
 
 using namespace std;
-using namespace states;
+using namespace hydro;
 
 
 // Default Constructor 
-Ustate::Ustate () {}
+Newtonian1D::Newtonian1D () {}
 
 // Overloaded Constructor
-Ustate::Ustate(vector< vector<double> > u_state, float Gamma, double cfl, vector<double> R = {0},
+Newtonian1D::Newtonian1D(vector< vector<double> > u_state, float Gamma, double cfl, vector<double> R = {0},
                 string Coord_system = "cartesian")
 {
     state = u_state;
@@ -33,7 +33,7 @@ Ustate::Ustate(vector< vector<double> > u_state, float Gamma, double cfl, vector
 }
 
 // Destructor 
-Ustate::~Ustate() {}
+Newtonian1D::~Newtonian1D() {}
 
 //--------------------------------------------------------------------------------------------------
 //                          GET THE PRIMITIVE VECTORS
@@ -68,7 +68,7 @@ vector<double>  cons2prim(float gamma, vector<double>  u_state){
     
 };
 
-vector<vector<double> > Ustate::cons2prim1D(vector<vector<double> > u_state){
+vector<vector<double> > Newtonian1D::cons2prim1D(vector<vector<double> > u_state){
     /**
      * Return a vector containing the primitive
      * variables density (rho), pressure, and
@@ -185,7 +185,7 @@ map<string, map<string, double > > calc_eigenvals(float gamma, vector<double> le
 };
 
 // Adapt the CFL conditonal timestep
-double Ustate::adapt_dt(vector<vector<double> > &u_state, vector<double> &r, bool linspace=true, bool first_order=true){
+double Newtonian1D::adapt_dt(vector<vector<double> > &u_state, vector<double> &r, bool linspace=true, bool first_order=true){
 
     double r_left, r_right, left_cell, right_cell, dr, cs;
     long double delta_logr, log_rLeft, log_rRight, min_dt, cfl_dt;
@@ -518,7 +518,7 @@ vector<double> calc_hllc_flux1D(float gamma,
 //                                  UDOT CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 
-vector<vector<double> > Ustate::u_dot1D(vector<vector<double> > &u_state, bool first_order=true, bool periodic = false, float theta = 1.5,
+vector<vector<double> > Newtonian1D::u_dot1D(vector<vector<double> > &u_state, bool first_order=true, bool periodic = false, float theta = 1.5,
                                         bool linspace = true, bool hllc=false){
     int i_start, i_bound, coordinate;
     int grid_size = u_state[0].size();
@@ -1128,7 +1128,7 @@ vector<vector<double> > Ustate::u_dot1D(vector<vector<double> > &u_state, bool f
 };
 
 
- vector<vector<double> > Ustate::simulate1D(float tend = 0.1, float dt = 1.e-4, float theta=1.5,
+ vector<vector<double> > Newtonian1D::simulate1D(float tend = 0.1, float dt = 1.e-4, float theta=1.5,
                                             bool first_order = true, bool periodic = false, bool linspace = true,
                                             bool hllc=false){
 
@@ -1178,9 +1178,9 @@ vector<vector<double> > Ustate::u_dot1D(vector<vector<double> > &u_state, bool f
             }
 
             // Readjust the ghost cells at i-1,i+1 if not periodic
-            if (periodic == false){
-                config_ghosts1D(u_p, physical_grid);
-            }
+            // if (periodic == false){
+            //     config_ghosts1D(u_p, physical_grid);
+            // }
             
 
             // Adjust the timestep 
@@ -1236,9 +1236,9 @@ vector<vector<double> > Ustate::u_dot1D(vector<vector<double> > &u_state, bool f
             }
             
             // Readjust the ghost cells at i-2,i-1,i+1,i+2
-            if (periodic == false){
-                config_ghosts1D(u1, physical_grid, false);
-            }
+            // if (periodic == false){
+            //     config_ghosts1D(u1, physical_grid, false);
+            // }
             
             udot1 = u_dot1D(u1, false, periodic, theta, linspace, hllc);
 
@@ -1256,9 +1256,9 @@ vector<vector<double> > Ustate::u_dot1D(vector<vector<double> > &u_state, bool f
             }
 
             
-            if (periodic == false){
-                config_ghosts1D(u2, physical_grid, false);
-            }
+            // if (periodic == false){
+            //     config_ghosts1D(u2, physical_grid, false);
+            // }
             
             udot2 = u_dot1D(u2, false, periodic, theta, linspace, hllc);
 
@@ -1277,9 +1277,9 @@ vector<vector<double> > Ustate::u_dot1D(vector<vector<double> > &u_state, bool f
 
 
             // Readjust the ghost cells at i-2,i-1,i+1,i+2
-            if (periodic == false){
-                config_ghosts1D(u_p, physical_grid, false);
-            }
+            // if (periodic == false){
+            //     config_ghosts1D(u_p, physical_grid, false);
+            // }
             
 
             // Adjust the timestep 
