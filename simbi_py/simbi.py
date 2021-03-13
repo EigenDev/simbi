@@ -253,7 +253,7 @@ class Hydro:
     def simulate(self, tstart = 0, tend=0.1, dt = 1.e-4, theta = 1.5,
                  first_order=True, periodic=False, linspace=True,
                  coordinates=b"cartesian", CFL=0.4, sources = None, hllc=False,
-                 chkpt=None, chkpt_interval = 0.1):
+                 chkpt=None, chkpt_interval = 0.1, data_directory = b"data/"):
         """
         Simulate the Hydro Setup
         
@@ -587,12 +587,11 @@ class Hydro:
                     u = a.simulate(tend=tend, dt=dt, linspace=linspace, periodic=periodic, hllc=hllc)
                 else:
                     a = PyStateSR(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
-                    u = a.simulate(tend=tend, dt=dt, linspace=linspace, sources=sources, periodic=periodic, lorentz_gamma=self.W, hllc=hllc)   
+                    u = a.simulate(tend=tend, dt=dt, linspace=linspace, sources=sources, 
+                                   periodic=periodic, lorentz_gamma=self.W, hllc=hllc)   
                 
             else:
-                ########################## 
-                # RK3 ORDER IN TIME
-                ##########################
+                
                 print('Computing Higher Order...')
                 r_min = self.geometry[0]
                 r_max = self.geometry[1]
@@ -606,7 +605,10 @@ class Hydro:
                     u = a.simulate(tend=tend, first_order=False,  dt=dt, linspace=linspace, periodic=periodic, hllc=hllc)
                 else:
                     a = PyStateSR(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
-                    u = a.simulate(tend=tend, first_order=False, sources=sources, dt=dt, linspace=linspace, periodic=periodic, lorentz_gamma=self.W, hllc=hllc)
+                    u = a.simulate(tend=tend, first_order=False, 
+                                   sources=sources, dt=dt, linspace=linspace, 
+                                   periodic=periodic, lorentz_gamma=self.W, hllc=hllc,
+                                   chkpt_interval=chkpt_interval, data_directory=data_directory)
                 
                 
                 
@@ -652,7 +654,9 @@ class Hydro:
                     sources = sources.reshape(sources.shape[0], -1)
                     b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
                     u = b.simulate(tstart=start_time, tend = tend, dt=dt, first_order=False, lorentz_gamma = self.W, 
-                                    linspace=linspace, hllc = hllc, sources=sources, chkpt_interval = chkpt_interval, theta=theta)
+                                    linspace=linspace, hllc = hllc, 
+                                    sources=sources, chkpt_interval = chkpt_interval, 
+                                    theta=theta, data_directory=data_directory)
             
         
         # Return the final state tensor, purging the ghost cells

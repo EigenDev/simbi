@@ -76,7 +76,9 @@ cdef extern from "ustate.h" namespace "hydro":
         vector[double] r
         vector[vector[double]] state
         vector[vector [double]] cons2prim1D(vector[vector[double]], vector[double])
-        vector[vector [double]] simulate1D(vector[double], vector[vector[double]], float, float, float, bool, bool, bool, bool)
+        vector[vector [double]] simulate1D(vector[double], vector[vector[double]], float, 
+                                            float, float, double ,double, double, string,
+                                            bool, bool, bool, bool)
 
     cdef cppclass Newtonian2D:
         Newtonian2D() except +
@@ -100,7 +102,7 @@ cdef extern from "ustate.h" namespace "hydro":
         vector[vector[double]] simulate2D(vector[double],
                                 vector[vector[double]], float, float,
                                 double, double, double,
-                                bool, bool, bool, bool)
+                                string, bool, bool, bool, bool)
 
 
 # Creating the cython wrapper class
@@ -129,18 +131,23 @@ cdef class PyStateSR:
         self.c_state = SRHD(state, gamma,CFL, r, coord_system)
         
 
-    def simulate(self, float tend=0.1, float dt=1.e-4, float theta = 1.5, 
+    def simulate(self, float tstart = 0, float tend=0.1, float dt=1.e-4, double theta = 1.5, 
+                        double engine_duration = 10, double chkpt_interval = 0.1, string data_directory = "data/",
                         bool first_order=True, bool periodic = False, bool linspace = True,
                         vector[double] lorentz_gamma=[1], sources = None, bool hllc=False):
         if not sources:
             source_terms = np.zeros((3, lorentz_gamma.size()), dtype=np.double)
-            result = np.array(self.c_state.simulate1D(lorentz_gamma, source_terms, tend, dt, theta, first_order, periodic, linspace, hllc))
+            result = np.array(self.c_state.simulate1D(lorentz_gamma, source_terms, tstart, tend, dt, theta, 
+                                                        engine_duration, chkpt_interval, data_directory, 
+                                                        first_order, periodic, linspace, hllc))
         
             return result
 
         else:
             source_terms = np.array(sources, dtype=np.double)
-            result = np.array(self.c_state.simulate1D(lorentz_gamma, source_terms, tend, dt, theta, first_order, periodic, linspace, hllc))
+            result = np.array(self.c_state.simulate1D(lorentz_gamma, source_terms, tstart, tend, dt, theta,
+                                                        engine_duration, chkpt_interval,
+                                                        data_directory, first_order, periodic, linspace, hllc))
             
             return result
 
@@ -187,6 +194,7 @@ cdef class PyStateSR2D:
                        double dt = 1.e-4,
                        double theta = 1.5,
                        double chkpt_interval = 0.1, 
+                       string data_directory = "data/",
                        bool linspace=True,
                        vector[double] lorentz_gamma = [1.0], 
                        first_order=True, 
@@ -203,6 +211,7 @@ cdef class PyStateSR2D:
                                                      tstart, tend, 
                                                      dt, theta, 
                                                      chkpt_interval,
+                                                     data_directory,
                                                      first_order,
                                                      periodic, linspace, 
                                                      hllc) )
