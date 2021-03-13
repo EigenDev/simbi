@@ -228,18 +228,20 @@ def main():
         update,
         # Frame information (here just frame number)
         np.arange(frame_count),
+        #blit = True,
         # Extra arguments to the animate function
         fargs=[args.field,
                 args.setup[0], cbaxes, vmin,
                 vmax, args.log, args.forder,
                 args.rcmap, args.cmap, args.rmax],
+        # repeat=False,
         # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
-        interval= 1000/25
+        interval= 1000 / 25
     )
 
-    plt.show()
+    # plt.show()
     # Try to set the DPI to the actual number of pixels you're plotting
-    # animation.save("setup.mp4", dpi=600)
+    animation.save("jet_in_star.mp4")
     
     
 if __name__ == "__main__":
