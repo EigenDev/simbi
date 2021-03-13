@@ -364,9 +364,9 @@ double SRHD2D::adapt_dt(const PrimitiveArray &prims){
 
             // Find the left and right cell centers in one direction
             left_cell  = (ii - 1 < 0 ) ? x1[ii] : x1[ii - 1];
-            right_cell = (ii + 1 > xphysical_grid - 1) ? x1[ii] : x1[ii + 1];
+            right_cell = (ii == xphysical_grid - 1) ? x1[ii] : x1[ii + 1];
             upper_cell = (jj - 1 < 0 ) ? x2[jj] : x2[jj - 1];
-            lower_cell = (jj + 1 > yphysical_grid - 1) ? x2[jj] : x2[jj + 1];
+            lower_cell = (jj == yphysical_grid - 1) ? x2[jj] : x2[jj + 1];
             
 
             // Check if using linearly-spaced grid or logspace
@@ -1692,6 +1692,7 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
                                     double dt = 1.e-4,
                                     double theta = 1.5,
                                     double chkpt_interval = 0.1,
+                                    string data_directory = "data/",
                                     bool first_order = true, 
                                     bool periodic = false,
                                     bool linspace=true, 
@@ -1923,12 +1924,12 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
 
                 /* Write to a File every tenth of a second */
                 if (t >= t_interval){
-                    toWritePrim(&prims, &prods);
+                    toWritePrim(&prims, &prods, 2);
                     tnow  = create_step_str(t_interval, tchunk);
                     filename = string_format("%d.chkpt." + tnow + ".h5", NY);
                     setup.t  = t;
                     setup.dt = dt;
-                    write_hdf5(filename, prods, setup);
+                    write_hdf5(data_directory, filename, prods, setup, 2);
                     t_interval += chkpt_interval;
  
                 }

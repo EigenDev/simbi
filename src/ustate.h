@@ -60,7 +60,7 @@ namespace hydro {
 
             int Nx, n, pgrid_size, idx_shift;
             float tend, dt;
-            double theta;
+            double theta, engine_duration, t, decay_constant;
             bool first_order, periodic, linspace, hllc;
             
             std::vector<double> lorentz_gamma, sourceD, sourceS, source0, pressure_guess;
@@ -107,7 +107,13 @@ namespace hydro {
 
             std::vector<std::vector<double> > simulate1D(std::vector<double> &lorentz_gamma, 
                                                             std::vector<std::vector<double> > &sources,
-                                                            float tend, float dt, double theta, 
+                                                            float tstart,
+                                                            float tend, 
+                                                            float dt, 
+                                                            double theta, 
+                                                            double engine_duraction,
+                                                            double chkpt_interval,
+                                                            std::string data_directory,
                                                             bool first_order, bool periodic, bool linspace, bool hllc);
 
             
@@ -292,6 +298,7 @@ namespace hydro {
                                                         double dt,
                                                         double theta,
                                                         double chkpt_interval,
+                                                        std::string data_directory,
                                                         bool first_order,  
                                                         bool periodic,  
                                                         bool linspace,

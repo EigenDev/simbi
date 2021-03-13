@@ -132,24 +132,24 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l, const Primitive &prims_
     cs_r  = sqrt(gamma * p_r /(rho_r * h_r));
 
     // Compute waves based on Schneider et al. 1993 Eq(31 - 33)
-    // vbar = 0.5 * (v_l + v_r);
-    // cbar = 0.5 * (cs_r + cs_l);
-    // double br = (vbar + cbar)/(1 + vbar*cbar);
-    // double bl = (vbar - cbar)/(1 - vbar*cbar);
+    vbar = 0.5 * (v_l + v_r);
+    cbar = 0.5 * (cs_r + cs_l);
+    double br = (vbar + cbar)/(1 + vbar*cbar);
+    double bl = (vbar - cbar)/(1 - vbar*cbar);
 
     // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-    sL          = cs_l*cs_l/(gamma*gamma*(1 - cs_l*cs_l));
-    sR          = cs_r*cs_r/(gamma*gamma*(1 - cs_r*cs_r));
-    minlam_l    = (v_l - sqrt(sL*(1 - v_l*v_l + sL)))/(1 + sL);
-    minlam_r    = (v_r - sqrt(sR*(1 - v_r*v_r + sR)))/(1 + sR);
-    pluslam_l   = (v_l + sqrt(sL*(1 - v_l*v_l + sL)))/(1 + sL);
-    pluslam_r   = (v_r + sqrt(sR*(1 - v_r*v_r + sR)))/(1 + sR);
+    // sL          = cs_l*cs_l/(gamma*gamma*(1 - cs_l*cs_l));
+    // sR          = cs_r*cs_r/(gamma*gamma*(1 - cs_r*cs_r));
+    // minlam_l    = (v_l - sqrt(sL*(1 - v_l*v_l + sL)))/(1 + sL);
+    // minlam_r    = (v_r - sqrt(sR*(1 - v_r*v_r + sR)))/(1 + sR);
+    // pluslam_l   = (v_l + sqrt(sL*(1 - v_l*v_l + sL)))/(1 + sL);
+    // pluslam_r   = (v_r + sqrt(sR*(1 - v_r*v_r + sR)))/(1 + sR);
 
-    lambda.aL = (minlam_l < minlam_r)   ? minlam_l : minlam_r;
-    lambda.aR = (pluslam_l > pluslam_r) ? pluslam_l : pluslam_r;
+    // lambda.aL = (minlam_l < minlam_r)   ? minlam_l : minlam_r;
+    // lambda.aR = (pluslam_l > pluslam_r) ? pluslam_l : pluslam_r;
 
-    // lambda.aL = min(bl, (v_l - cs_l)/(1 - v_l*cs_l));
-    // lambda.aR = max(br, (v_r + cs_r)/(1 + v_l*cs_l));
+    lambda.aL = min(bl, (v_l - cs_l)/(1 - v_l*cs_l));
+    lambda.aR = max(br, (v_r + cs_r)/(1 + v_l*cs_l));
 
     return lambda;
 };
@@ -945,9 +945,9 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state){
                 dr = r_right - r_left;
 
 
-                L.D  [coordinate] = - (r_right*r_right*f1.D - r_left*r_left*f2.D )/(volAvg*volAvg*dr) + sourceD[coordinate];
-                L.S  [coordinate] = - (r_right*r_right*f1.S - r_left*r_left*f2.S )/(volAvg*volAvg*dr) + 2*pc/volAvg + sourceS[coordinate];
-                L.tau[coordinate] = - (r_right*r_right*f1.tau - r_left*r_left*f2.tau )/(volAvg*volAvg*dr) + source0[coordinate];
+                L.D  [coordinate] = - (r_right*r_right*f1.D - r_left*r_left*f2.D )/(volAvg*volAvg*dr) + sourceD[coordinate] * decay_constant;
+                L.S  [coordinate] = - (r_right*r_right*f1.S - r_left*r_left*f2.S )/(volAvg*volAvg*dr) + 2*pc/volAvg + sourceS[coordinate] * decay_constant;
+                L.tau[coordinate] = - (r_right*r_right*f1.tau - r_left*r_left*f2.tau )/(volAvg*volAvg*dr) + source0[coordinate] * decay_constant;
 
             }
         
@@ -960,8 +960,16 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state){
 
 
  vector<vector<double> > SRHD::simulate1D(vector<double> &lorentz_gamma, vector<vector<double> > &sources,
-                                            float tend = 0.1, float dt = 1.e-4, double theta=1.5,
-                                            bool first_order = true, bool periodic = false, bool linspace = true,
+                                            float tstart = 0.0,
+                                            float tend = 0.1, 
+                                            float dt = 1.e-4, 
+                                            double theta=1.5,
+                                            double engine_duration = 10,
+                                            double chkpt_interval  = 0.1,
+                                            string data_directory = "data/",
+                                            bool first_order = true, 
+                                            bool periodic = false, 
+                                            bool linspace = true,
                                             bool hllc = false){
 
     
@@ -974,7 +982,8 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state){
     this->sourceS = sources[1];
     this->source0 = sources[2];
     this->hllc    = hllc;
-    
+    this->engine_duration = engine_duration;
+    this->t = tstart;
     // Define the swap vector for the integrated state
     this->Nx = lorentz_gamma.size();
 
@@ -995,7 +1004,20 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state){
     int i_real;
     n = 0;
     ConservedArray u_p, u, u1, u2, udot;
-    float t = 0;
+
+    // Write some info about the setup for writeup later
+    string filename, tnow, tchunk;
+    PrimData prods;
+    double round_place = 1/chkpt_interval;
+    double t_interval = t == 0 ? 
+                        floor(tstart * round_place + 0.5)/round_place : 
+                        floor(tstart * round_place + 0.5)/round_place + chkpt_interval;
+    DataWriteMembers setup;
+    setup.xmax = r[pgrid_size - 1];
+    setup.xmin = r[0];
+    setup.xactive_zones = pgrid_size;
+    setup.NX   = Nx;
+    
 
     // Copy the state array into real & profile variables
     u.D   = state[0];
@@ -1067,6 +1089,7 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state){
         }   
 
     } else {
+        tchunk = "0000000";
 
         u1 = u;
         u2 = u;
@@ -1125,8 +1148,11 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state){
             u.tau.swap(u2.tau);
 
             
-            cout << "\r" << "dt: " << dt << " " << "t: " << t << flush;
             t += dt;
+
+            //--- Decay the source terms 
+            this->decay_constant = exp(-t/engine_duration);
+
 
             /* Compute the loop execution time */
             high_resolution_clock::time_point t2 = high_resolution_clock::now();
@@ -1137,6 +1163,18 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state){
             << "\t" << "t: " << setw(5) << t 
             << "\t" << "Zones per sec: " << Nx/time_span.count()
             << flush;
+
+            /* Write to a File every tenth of a second */
+            if (t >= t_interval){
+                toWritePrim(&prims, &prods, 1);
+                tnow  = create_step_str(t_interval, tchunk);
+                filename = string_format("%d.chkpt." + tnow + ".h5", pgrid_size);
+                setup.t  = t;
+                setup.dt = dt;
+                write_hdf5(data_directory, filename, prods, setup, 1);
+                t_interval += chkpt_interval;
+
+            }
 
             n++;
 
