@@ -4,6 +4,7 @@ SIMBI_2D_Hydro_Code.egg-info/
 build/
 data/
 tests/
+science/
 test.cpp
 ustate
 .vscode/
@@ -14,3 +15,4 @@ ustate
 *.so
 *.deb
 *.out
+*.pyc
