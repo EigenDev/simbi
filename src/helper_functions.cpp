@@ -108,7 +108,13 @@ void get_spacetime_wave(double aL, double aR, double aStar){
 //====================================================================================================
 //                                  WRITE DATA TO FILE
 //====================================================================================================
+void toWritePrim(hydro1d::PrimitiveArray *from, PrimData *to, int ndim)
+{
+    to->rho  = from->rho;
+    to->v    = from->v;
+    to->p    = from->p;
 
+}
 string create_step_str(double t_interval, string &tnow){
 
     // Convert the time interval into an int with 2 decimal displacements
@@ -117,7 +123,7 @@ string create_step_str(double t_interval, string &tnow){
 
     string s = to_string(t_interval_int);
 
-    // Pad the file string if size less than 6
+    // Pad the file string if size less than tnow_size
     if (s.size() < tnow.size()) {
 
         int num_zeros = tnow.size() - s.size();
@@ -126,7 +132,7 @@ string create_step_str(double t_interval, string &tnow){
 
     }
 
-    for (int i = 0; i < 6; i++){
+    for (int i = 0; i < 7; i++){
         a = tnow[i] - '0';
         b = s[i] - '0';
         s[i] = a + b + '0';
@@ -136,34 +142,55 @@ string create_step_str(double t_interval, string &tnow){
 
 
 }
-void write_hdf5(string filename, PrimData prims, DataWriteMembers setup)
+void write_hdf5(string data_directory, string filename, PrimData prims, DataWriteMembers setup, int dim = 2)
 {
-    string filePath = "data/sr/";
+    string filePath = data_directory;
     cout << "\n" <<  "Writing File...: " << filePath + filename << endl;
     h5::fd_t fd = h5::create(filePath + filename, H5F_ACC_TRUNC, h5::default_fcpl,
                     h5::libver_bounds({H5F_LIBVER_V18, H5F_LIBVER_V18}) );
 
-    // Write the Primitives 
-    h5::write(fd,"rho", prims.rho);
-    h5::write(fd,"v1",  prims.v1);
-    h5::write(fd,"v2",  prims.v2);
-    h5::write(fd,"p",   prims.p);
-
     // Generate Dataset Object to Write Attributes
     vector<int> sim_data(10, 0);
     auto ds = h5::write(fd, "sim_info", sim_data);
+    
+    switch (dim)
+    {
+    case 2:
+        // Write the Primitives 
+        h5::write(fd,"rho", prims.rho);
+        h5::write(fd,"v1",  prims.v1);
+        h5::write(fd,"v2",  prims.v2);
+        h5::write(fd,"p",   prims.p);
 
-    // Write Datset Attributes
-    ds["current_time"]   = setup.t;
-    ds["time_step"]      = setup.dt;
-    ds["NX"]             = setup.NX;
-    ds["NY"]             = setup.NY;
-    ds["xmax"]           = setup.xmax;
-    ds["xmin"]           = setup.xmin;
-    ds["ymax"]           = setup.ymax;
-    ds["ymin"]           = setup.ymin;
-    ds["xactive_zones"]  = setup.xactive_zones;
-    ds["yactive_zones"]  = setup.yactive_zones;
+        // Write Datset Attributes
+        ds["current_time"]   = setup.t;
+        ds["time_step"]      = setup.dt;
+        ds["NX"]             = setup.NX;
+        ds["NY"]             = setup.NY;
+        ds["xmax"]           = setup.xmax;
+        ds["xmin"]           = setup.xmin;
+        ds["ymax"]           = setup.ymax;
+        ds["ymin"]           = setup.ymin;
+        ds["xactive_zones"]  = setup.xactive_zones;
+        ds["yactive_zones"]  = setup.yactive_zones;
+        break;
+    
+    case 1:
+        // Write the Primitives 
+        h5::write(fd,"rho", prims.rho);
+        h5::write(fd,"v",   prims.v);
+        h5::write(fd,"p",   prims.p);
+
+
+        // Write Datset Attributes
+        ds["current_time"]   = setup.t;
+        ds["time_step"]      = setup.dt;
+        ds["Nx"]             = setup.NX;
+        ds["xmax"]           = setup.xmax;
+        ds["xmin"]           = setup.xmin;
+        ds["xactive_zones"]  = setup.xactive_zones;
+        break;
+    }
     
 }
 

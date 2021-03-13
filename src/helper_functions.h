@@ -69,6 +69,11 @@ namespace simulation {
         FIRST_ORDER,
         SECOND_ORDER,
     };
+
+    enum dimensions {
+        ONE_D,
+        TWO_D,
+    };
 };
 
 extern std::map<std::string, simulation::coord_system> geometry;
@@ -124,8 +129,9 @@ std::vector<double> rollVector(const std::vector<double>&, unsigned int);
 double roll(std::vector<double>&, unsigned int);
 double roll(std::vector<std::vector<double>>&, unsigned int xpos, unsigned int ypos);
 std::vector<std::vector<double> > transpose(std::vector<std::vector<double> > &);
+void toWritePrim(hydro1d::PrimitiveArray *from, PrimData *to, int ndim);
 std::string create_step_str(double t_interval, std::string &tnow);
-void write_hdf5(std::string filename, PrimData prims, DataWriteMembers system);
+void write_hdf5(std::string data_directory, std::string filename, PrimData prims, DataWriteMembers system, int dim);
 void write_data(std::vector<std::vector<double> > &sim_data,double time, std::string sim_type );
 double calc_pressure(float, double, double, double);
 double calc_energy(float, double, double, double);

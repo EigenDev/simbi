@@ -139,17 +139,17 @@ void config_ghosts1D(T &u_state, int grid_size, bool first_order){
         u_state.tau[0] = u_state.tau[1];
         u_state.tau[grid_size - 1] = u_state.tau[grid_size - 2];
     } else {
-        u_state.D[0] = u_state.D[2];
+        u_state.D[0] = u_state.D[3];
         u_state.D[1] = u_state.D[2];
         u_state.D[grid_size - 1] = u_state.D[grid_size - 3];
         u_state.D[grid_size - 2] = u_state.D[grid_size - 3];
 
-        u_state.S[0] = u_state.S[2];
-        u_state.S[1] = u_state.S[2];
+        u_state.S[0] = - u_state.S[3];
+        u_state.S[1] = - u_state.S[2];
         u_state.S[grid_size - 1] = u_state.S[grid_size - 3];
         u_state.S[grid_size - 2] = u_state.S[grid_size - 3];
 
-        u_state.tau[0] = u_state.tau[2];
+        u_state.tau[0] = u_state.tau[3];
         u_state.tau[1] = u_state.tau[2];
         u_state.tau[grid_size - 1] = u_state.tau[grid_size - 3];
         u_state.tau[grid_size - 2] = u_state.tau[grid_size - 3];
@@ -258,25 +258,9 @@ template <typename T> int sgn(T val) {
 template <typename T>
 void toWritePrim(T *from, PrimData *to, int ndim)
 {
-    /**
-    switch (ndim)
-    {
-    case 1:
-        from->rho = to->rho;
-        from->v   = to->v;
-        from->p   = to->p;
-        break;
-    
-    default:
-        from->rho  = to->rho;
-        from->v1   = to->v1;
-        from->v2   = to->v2;
-        from->p    = to->p;
-        break;
-    }
-    */
     to->rho  = from->rho;
     to->v1   = from->v1;
     to->v2   = from->v2;
     to->p    = from->p;
+
 }
