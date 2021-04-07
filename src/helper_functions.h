@@ -74,6 +74,11 @@ namespace simulation {
         ONE_D,
         TWO_D,
     };
+
+    enum solver {
+        HLLC,
+        HLLE,
+    };
 };
 
 extern std::map<std::string, simulation::coord_system> geometry;
