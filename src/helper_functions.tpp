@@ -217,35 +217,36 @@ void config_ghosts2D(T &u_state,
             u_state.tau[jj * x1grid_size + x1grid_size - 2] = u_state.tau[jj * x1grid_size + x1grid_size - 3];
 
             // Fix the ghost zones at the angular boundaries
-            for (int ii = 0; ii < x1grid_size; ii++){
-                if (jj < 2){
-                    if (jj == 0){
-                        u_state.D[jj * x1grid_size + ii] =   u_state.D[3 * x1grid_size + ii];
-                        u_state.S1[jj * x1grid_size + ii] =   u_state.S1[3 * x1grid_size + ii];
-                        u_state.S2[jj * x1grid_size + ii] = - u_state.S2[3 * x1grid_size + ii];
+            if (jj < 2){
+                for (int ii = 0; ii < x1grid_size; ii++){
+                     if (jj == 0){
+                        u_state.D  [jj * x1grid_size + ii] =   u_state.D  [3 * x1grid_size + ii];
+                        u_state.S1 [jj * x1grid_size + ii] =   u_state.S1 [3 * x1grid_size + ii];
+                        u_state.S2 [jj * x1grid_size + ii] = - u_state.S2 [3 * x1grid_size + ii];
                         u_state.tau[jj * x1grid_size + ii] =   u_state.tau[3 * x1grid_size + ii];
                     } else {
-                        u_state.D[jj * x1grid_size + ii] =   u_state.D[2 * x1grid_size + ii];
-                        u_state.S1[jj * x1grid_size + ii] =   u_state.S1[2 * x1grid_size + ii];
-                        u_state.S2[jj * x1grid_size + ii] = - u_state.S2[2 * x1grid_size + ii];
+                        u_state.D  [jj * x1grid_size + ii] =   u_state.D  [2 * x1grid_size + ii];
+                        u_state.S1 [jj * x1grid_size + ii] =   u_state.S1 [2 * x1grid_size + ii];
+                        u_state.S2 [jj * x1grid_size + ii] = - u_state.S2 [2 * x1grid_size + ii];
                         u_state.tau[jj * x1grid_size + ii] =   u_state.tau[2 * x1grid_size + ii];
                     }
-                    
-                } else if (jj > x2grid_size - 3) {
+                }
+            } else if (jj > x2grid_size - 3) {
+                for (int ii = 0; ii < x1grid_size; ii++){
                     if (jj == x2grid_size - 1){
                         u_state.D[jj * x1grid_size + ii] =   u_state.D[(x2grid_size - 4) * x1grid_size + ii];
                         u_state.S1[jj * x1grid_size + ii] =   u_state.S1[(x2grid_size - 4) * x1grid_size + ii];
                         u_state.S2[jj * x1grid_size + ii] = - u_state.S2[(x2grid_size - 4) * x1grid_size + ii];
                         u_state.tau[jj * x1grid_size + ii] =   u_state.tau[(x2grid_size - 4) * x1grid_size + ii];
                     } else {
-                        u_state.D[jj * x1grid_size + ii] =   u_state.D[(x2grid_size - 3) * x1grid_size + ii];
-                        u_state.S1[jj * x1grid_size + ii] =   u_state.S1[(x2grid_size - 3) * x1grid_size + ii];
-                        u_state.S2[jj * x1grid_size + ii] = - u_state.S2[(x2grid_size - 3) * x1grid_size + ii];
+                        u_state.D  [jj * x1grid_size + ii] =   u_state.D[(x2grid_size - 3) * x1grid_size + ii];
+                        u_state.S1 [jj * x1grid_size + ii] =   u_state.S1[(x2grid_size - 3) * x1grid_size + ii];
+                        u_state.S2 [jj * x1grid_size + ii] = - u_state.S2[(x2grid_size - 3) * x1grid_size + ii];
                         u_state.tau[jj * x1grid_size + ii] =   u_state.tau[(x2grid_size - 3) * x1grid_size + ii];
                     }
-
                 }
             }
+            
         }
 
     }
