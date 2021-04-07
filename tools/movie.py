@@ -236,12 +236,16 @@ def main():
                 args.rcmap, args.cmap, args.rmax],
         # repeat=False,
         # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
-        interval= 1000 / 25
+        interval= 1000 / 20
     )
 
+    if args.save:
+        animation.save("{}.mp4".format(args.setup[0]), bitrate=500, extra_args=['-vcodec', 'libx264'])
+    else:
+        plt.show()
     # plt.show()
     # Try to set the DPI to the actual number of pixels you're plotting
-    animation.save("jet_in_star.mp4")
+    
     
     
 if __name__ == "__main__":

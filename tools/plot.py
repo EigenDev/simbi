@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
 import time
-import scipy.ndimage
+import scipy.special as spc
 import matplotlib.colors as colors
 import argparse 
 import h5py 
@@ -15,7 +15,7 @@ import astropy.constants as const
 from datetime import datetime
 import os
 
-field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature']
+field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'line_profile']
 def main():
     parser = argparse.ArgumentParser(
         description='Plot a 2D Figure From a File (H5).',
@@ -96,15 +96,15 @@ def main():
             xactive = nx - 4
             yactive = ny - 4
             
-        W    = 1/np.sqrt(1 - v1**2 + v2**2)
+        W    = 1/np.sqrt(1 -(v1**2 + v2**2))
         beta = np.sqrt(v1**2 + v2**2)
         
         e = 3*p/rho 
         c = const.c.cgs.value
         a = (4 * const.sigma_sb.cgs.value / c)
+        k = const.k_B.cgs
         m = const.m_p.cgs.value
         T = (3 * p * c ** 2  / a)**(1./4.)
-        
         
         field_dict["rho"]         = rho
         field_dict["v1"]          = v1 
@@ -130,8 +130,6 @@ def main():
     
     rr, tt = np.meshgrid(r, theta)
     rr, t2 = np.meshgrid(r, theta_mirror)
-    
-    W = 1/np.sqrt(1- v1**2 + v2**2)
     
     ad_gamma = 4/3
     D = rho * W 
