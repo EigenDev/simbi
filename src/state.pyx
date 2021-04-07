@@ -101,7 +101,7 @@ cdef extern from "ustate.h" namespace "hydro":
 
         vector[vector[double]] simulate2D(vector[double],
                                 vector[vector[double]], float, float,
-                                double, double, double,
+                                double, double, double,double,
                                 string, bool, bool, bool, bool)
 
 
@@ -193,6 +193,7 @@ cdef class PyStateSR2D:
                        bool periodic=False, 
                        double dt = 1.e-4,
                        double theta = 1.5,
+                       double engine_duration = 10,
                        double chkpt_interval = 0.1, 
                        string data_directory = "data/",
                        bool linspace=True,
@@ -210,6 +211,7 @@ cdef class PyStateSR2D:
                                                      source_terms, 
                                                      tstart, tend, 
                                                      dt, theta, 
+                                                     engine_duration,
                                                      chkpt_interval,
                                                      data_directory,
                                                      first_order,

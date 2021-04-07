@@ -252,8 +252,9 @@ class Hydro:
 
     def simulate(self, tstart = 0, tend=0.1, dt = 1.e-4, theta = 1.5,
                  first_order=True, periodic=False, linspace=True,
-                 coordinates=b"cartesian", CFL=0.4, sources = None, hllc=False,
-                 chkpt=None, chkpt_interval = 0.1, data_directory = b"data/"):
+                 coordinates="cartesian", CFL=0.4, sources = None, hllc=False,
+                 chkpt=None, chkpt_interval = 0.1, data_directory = "data/",
+                 engine_duration=10):
         """
         Simulate the Hydro Setup
         
@@ -272,6 +273,10 @@ class Hydro:
         Returns:
             u (array): The conserved/primitive variable array
         """
+        
+        #Convert strings to byte arrays
+        data_directory = data_directory.encode('utf-8')
+        coordinates    = coordinates.encode('utf-8')
         # Initialize conserved u-tensor
         
         self.u = np.asarray(self.u)
@@ -632,7 +637,7 @@ class Hydro:
                 else:
                     self.W = self.W.flatten()
                     b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tend, dt=dt, first_order=first_order, 
+                    u = b.simulate(tstart=start_time, tend = tend, dt=dt, first_order=first_order, 
                                    lorentz_gamma = self.W, linspace=linspace,
                                    sources=sources)
             
@@ -656,7 +661,8 @@ class Hydro:
                     u = b.simulate(tstart=start_time, tend = tend, dt=dt, first_order=False, lorentz_gamma = self.W, 
                                     linspace=linspace, hllc = hllc, 
                                     sources=sources, chkpt_interval = chkpt_interval, 
-                                    theta=theta, data_directory=data_directory)
+                                    theta=theta, data_directory=data_directory,
+                                    engine_duration=engine_duration)
             
         
         # Return the final state tensor, purging the ghost cells

@@ -162,12 +162,17 @@ namespace hydro {
         /* Define Data Structures for the Fluid Properties. */
         struct Conserved
         {
-            double D;
-            double S1;
-            double S2;
-            double tau;
             Conserved() {}
             ~Conserved() {}
+            double D, S1, S2, tau;
+
+            Conserved(double D, double S1, double S2, double tau) : D(D), S1(S1), S2(S2), tau(tau) {}  
+            Conserved(const Conserved &u) : D(u.D), S1(u.S1), S2(u.S2), tau(u.tau)    {}  
+            Conserved operator + (const Conserved &p)  const { return Conserved(D+p.D, S1+p.S1, S2+p.S2, tau+p.tau); }  
+            Conserved operator - (const Conserved &p)  const { return Conserved(D-p.D, S1-p.S1, S2-p.S2, tau-p.tau); }  
+            Conserved operator * (const double c)      const { return Conserved(D*c, S1*c, S2*c, tau*c ); }
+            Conserved operator / (const double c)      const { return Conserved(D/c, S1/c, S2/c, tau/c ); }
+
             double momentum(int nhat)
             {
                 return (nhat == 1 ? S1 : S2);
@@ -176,13 +181,16 @@ namespace hydro {
 
         struct Flux
         {
-            double D;
-            double S1;
-            double S2;
-            double tau;
-
             Flux() {}
             ~Flux() {}
+            double D, S1, S2, tau;
+
+            Flux(double D, double S1, double S2, double tau) : D(D), S1(S1), S2(S2), tau(tau) {}  
+            Flux(const Flux &u) : D(u.D), S1(u.S1), S2(u.S2), tau(u.tau)    {}  
+            Flux operator + (const Flux &p)  const { return Flux(D+p.D, S1+p.S1, S2+p.S2, tau+p.tau); }  
+            Flux operator - (const Flux &p)  const { return Flux(D-p.D, S1-p.S1, S2+p.S2, tau+p.tau); }  
+            Flux operator * (double c)       const { return Flux(D*c,   S1*c, S2*c, tau*c  ); }
+
             double momentum(int nhat)
             {
                 return (nhat == 1 ? S1 : S2);
@@ -202,7 +210,22 @@ namespace hydro {
         };
         struct ConserveData
         {
+            ConserveData() {}
+            ~ConserveData() {}
             std::vector<double> D, S1, S2, tau;
+
+            ConserveData(std::vector<double>  &D,  std::vector<double>  &S1, 
+                          std::vector<double>  &S2, std::vector<double>  &tau) : D(D), S1(S1), S2(S2), tau(tau) {} 
+
+            ConserveData(const ConserveData &u) : D(u.D), S1(u.S1), S2(u.S2), tau(u.tau){} 
+            Conserved operator[] (int i) const {return Conserved(D[i], S1[i], S2[i], tau[i]); }
+
+            void swap( ConserveData &c) {
+                this->D.swap(c.D); 
+                this->S1.swap(c.S1);
+                this->S2.swap(c.S2); 
+                this->tau.swap(c.tau); 
+                };
         };
 
         struct PrimitiveData
@@ -218,7 +241,7 @@ namespace hydro {
         float tend, tstart;
         double theta, gamma;
         bool first_order, periodic, hllc, linspace;
-        double CFL, dt;
+        double CFL, dt, decay_const;
         int NX, NY, nzones, n, block_size, xphysical_grid, yphysical_grid;
         int active_zones, idx_active, x_bound, y_bound; 
         std::string coord_system;
@@ -249,8 +272,8 @@ namespace hydro {
         Conserved    calc_hll_state(
                                 const Conserved   &left_state,
                                 const Conserved   &right_state,
-                                const Flux        &left_flux,
-                                const Flux        &right_flux,
+                                const Conserved   &left_flux,
+                                const Conserved   &right_flux,
                                 const Primitives  &left_prims,
                                 const Primitives  &right_prims,
                                 unsigned int nhat);
@@ -262,24 +285,24 @@ namespace hydro {
                                             double pStar,
                                             int nhat);
 
-        Flux      calc_hllc_flux(
+        Conserved      calc_hllc_flux(
                                 const Conserved    &left_state,
                                 const Conserved    &right_state,
-                                const Flux         &left_flux,
-                                const Flux         &right_flux,
+                                const Conserved         &left_flux,
+                                const Conserved         &right_flux,
                                 const Primitives   &left_prims,
                                 const Primitives   &right_prims,
                                 const unsigned int nhat);
 
-        Flux calc_Flux(double rho, double vx, 
+        Conserved calc_Flux(double rho, double vx, 
                             double vy, double pressure, 
-                            bool x_direction);
+                            unsigned int nhat);
 
-        Flux   calc_hll_flux(
+        Conserved   calc_hll_flux(
                         const Conserved    &left_state,
                         const Conserved    &right_state,
-                        const Flux         &left_flux,
-                        const Flux         &right_flux,
+                        const Conserved    &left_flux,
+                        const Conserved    &right_flux,
                         const Primitives   &left_prims,
                         const Primitives   &right_prims,
                         const unsigned int nhat);
@@ -287,7 +310,6 @@ namespace hydro {
         Conserved  u_dot(unsigned int ii, unsigned int jj);
 
         ConserveData  u_dot2D(const ConserveData  &cons_state);
-
 
         double adapt_dt(const PrimitiveData &prims);
 
@@ -297,6 +319,7 @@ namespace hydro {
                                                         float tend, 
                                                         double dt,
                                                         double theta,
+                                                        double engine_duration,
                                                         double chkpt_interval,
                                                         std::string data_directory,
                                                         bool first_order,  

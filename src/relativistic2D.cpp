@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <chrono>
+#include <omp.h>
 
 using namespace std;
 using namespace hydro;
@@ -61,9 +62,9 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
      * three-velocity 
      */
 
-    double rho, S1, S2, S, D, tau, pmin, tol;
-    double pressure, W;
-    double v1, v2, vtot;
+    double S1, S2, S, D, tau, tol;
+    double W;
+    double v1, v2;
 
     PrimitiveArray prims;
     prims.rho.reserve(nzones);
@@ -73,8 +74,8 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
 
     // Define Newton-Raphson Vars
     double ps, pb, h, den;
-    double v, c2, f, g, p, peq;       
-    double Ws, W2, rhos, eps;
+    double c2, f, g, p, peq;       
+    double Ws, rhos, eps;
 
     int iter = 0;
     int maximum_iteration = 50;
@@ -95,11 +96,9 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
             //--------- Iteratively Solve for Pressure using Newton-Raphson
             // Note: The NR scheme as been modified based on: 
             // https://www.sciencedirect.com/science/article/pii/S0893965913002930 
-            ps = peq;
             p  = peq;
             iter = 0;
             do {
-                pb = p;
                 p  = peq;
 
                 den     = tau + p + D;
@@ -109,21 +108,11 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
                 
                 eps     = (tau + D * (1. - Ws) + (1. - Ws*Ws) * p )/(D * Ws);
                 f       = (gamma - 1.0) * rhos * eps - p;
-                
-                h   = 1.0 + eps + 0.5 * (ps + p) / rhos;
-                c2  = gamma * 0.5 * (ps + p) / (rhos * h);
+            
+                c2  = (gamma - 1.0) * eps / (1 + gamma * eps);
                 g   = c2 * v2 - 1.0;
-
                 peq = p - f/g;
-
-                eps = (tau + D * (1. - Ws) + (1. - Ws*Ws) * 0.5 * (pb + ps) )/(D * Ws);
-                h   = 1.0 + eps + 0.5 * (pb + ps) / rhos;
-                c2  = gamma * 0.5 * (ps + pb) / (rhos * h);
-                g   = c2 * v2 - 1.0;
-
-                ps = p - f/g;
                 
-
                 iter++;
                 
 
@@ -152,7 +141,7 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
 
             Ws = 1.0/sqrt(1.0 - (v1*v1 + v2*v2));
             
-            // Update the Gamma factor
+            // Update the Gamma array
             lorentz_gamma[ii + NX * jj] = Ws;
 
             prims.rho.emplace_back(D/Ws);
@@ -179,52 +168,68 @@ Eigenvals SRHD2D::calc_Eigenvals( const Primitives &prims_l,
     // Separate the left and right Primitives
     double rho_l = prims_l.rho;
     double p_l   = prims_l.p;
-    double v1_l  = prims_l.v1;
-    double v2_l  = prims_l.v2;
     double h_l   = 1. + gamma*p_l/(rho_l*(gamma - 1));
 
     double rho_r = prims_r.rho;
     double p_r   = prims_r.p;
-    double v1_r  = prims_r.v1;
-    double v2_r  = prims_r.v2;
     double h_r   = 1. + gamma*p_r/(rho_r*(gamma - 1));
-
 
     double cs_r = sqrt(gamma * p_r/(h_r*rho_r)); 
     double cs_l = sqrt(gamma * p_l/(h_l*rho_l)); 
  
     switch (nhat){
         case 1:{
-            // Calc the wave speeds based on Mignone and Bodo (2005)
-            double sL    = cs_l*cs_l/(gamma*gamma*(1 - cs_l*cs_l));
-            double sR    = cs_r*cs_r/(gamma*gamma*(1 - cs_r*cs_r));
-            double lamLm = (v1_l - sqrt(sL*(1 - v1_l*v1_l + sL)))/(1 + sL);
-            double lamRm = (v1_r - sqrt(sR*(1 - v1_r*v1_r + sR)))/(1 + sR);
-            double lamRp = (v1_l + sqrt(sL*(1 - v1_l*v1_l + sL)))/(1 + sL);
-            double lamLp = (v1_r + sqrt(sR*(1 - v1_r*v1_r + sR)))/(1 + sR);
+            double v1_l  = prims_l.v1;
+            double v1_r  = prims_r.v1;
 
-            lambda.aL = lamLm < lamRm ? lamLm : lamRm;
-            lambda.aR = lamLp > lamRp ? lamLp : lamRp; 
+            //-----------Calculate wave speeds based on Shneider et al. 1992
+            double vbar  = 0.5 * (v1_l + v1_r);
+            double cbar  = 0.5 * (cs_l + cs_r);
+            double bl    = (vbar - cbar)/(1. - cbar*vbar);
+            double br    = (vbar + cbar)/(1. + cbar*vbar);
+            lambda.aL = min(bl, (v1_l - cs_l)/(1. - v1_l*cs_l));
+            lambda.aR = max(br, (v1_r + cs_r)/(1. + v1_r*cs_r));
 
-            break;
+            //--------Calc the wave speeds based on Mignone and Bodo (2005)
+            // double sL    = cs_l*cs_l * (1./ (gamma*gamma*(1 - cs_l*cs_l)) );
+            // double sR    = cs_r*cs_r * (1./ (gamma*gamma*(1 - cs_r*cs_r)) );
+            // double lamLm = (v1_l - sqrt(sL*(1 - v1_l*v1_l + sL))) * (1./(1 + sL) );
+            // double lamRm = (v1_r - sqrt(sR*(1 - v1_r*v1_r + sR))) * (1./(1 + sR) );
+            // double lamRp = (v1_l + sqrt(sL*(1 - v1_l*v1_l + sL))) * (1./(1 + sL) );
+            // double lamLp = (v1_r + sqrt(sR*(1 - v1_r*v1_r + sR))) * (1./(1 + sR) );
+            // lambda.aL = lamLm < lamRm ? lamLm : lamRm;
+            // lambda.aR = lamLp > lamRp ? lamLp : lamRp;
+
+            return lambda;
         }
         case 2:
+            double v2_r  = prims_r.v2;
+            double v2_l  = prims_l.v2;
+
+            //-----------Calculate wave speeds based on Shneider et al. 1992
+            double vbar  = 0.5 * (v2_l + v2_r);
+            double cbar  = 0.5 * (cs_l + cs_r);
+            double bl    = (vbar - cbar)/(1. - cbar*vbar);
+            double br    = (vbar + cbar)/(1. + cbar*vbar);
+            lambda.aL = min(bl, (v2_l - cs_l)/(1. - v2_l*cs_l));
+            lambda.aR = max(br, (v2_r + cs_r)/(1. + v2_r*cs_r));
+
+            
             // Calc the wave speeds based on Mignone and Bodo (2005)
-            double sL    = cs_l*cs_l/(gamma*gamma*(1 - cs_l*cs_l));
-            double sR    = cs_r*cs_r/(gamma*gamma*(1 - cs_r*cs_r));
-            double lamLm = (v2_l - sqrt(sL*(1 - v2_l*v2_l + sL)))/(1 + sL);
-            double lamRm = (v2_r - sqrt(sR*(1 - v2_r*v2_r + sR)))/(1 + sR);
-            double lamRp = (v2_l + sqrt(sL*(1 - v2_l*v2_l + sL)))/(1 + sL);
-            double lamLp = (v2_r + sqrt(sR*(1 - v2_r*v2_r + sR)))/(1 + sR);
+            // double sL    = cs_l*cs_l * (1.0/(gamma*gamma*(1 - cs_l*cs_l)) );
+            // double sR    = cs_r*cs_r * (1.0/(gamma*gamma*(1 - cs_r*cs_r)) );
+            // double lamLm = (v2_l - sqrt(sL*(1 - v2_l*v2_l + sL))) * (1.0 /(1 + sL) );
+            // double lamRm = (v2_r - sqrt(sR*(1 - v2_r*v2_r + sR))) * (1.0 /(1 + sR) );
+            // double lamRp = (v2_l + sqrt(sL*(1 - v2_l*v2_l + sL))) * (1.0 /(1 + sL) );
+            // double lamLp = (v2_r + sqrt(sR*(1 - v2_r*v2_r + sR))) * (1.0 /(1 + sR) );
+            // lambda.aL = lamLm < lamRm ? lamLm : lamRm;
+            // lambda.aR = lamLp > lamRp ? lamLp : lamRp;
 
-            lambda.aL = lamLm < lamRm ? lamLm : lamRm;
-            lambda.aR = lamLp > lamRp ? lamLp : lamRp; 
-
-            break; 
+            return lambda;
 
     }
         
-    return lambda;
+    // return lambda;
 
     
     
@@ -256,8 +261,8 @@ Conserved SRHD2D::calc_stateSR2D(double rho, double vx,
 Conserved SRHD2D::calc_hll_state(
                                 const Conserved     &left_state,
                                 const Conserved     &right_state,
-                                const Flux          &left_flux,
-                                const Flux          &right_flux,
+                                const Conserved     &left_flux,
+                                const Conserved     &right_flux,
                                 const Primitives    &left_prims,
                                 const Primitives    &right_prims,
                                 unsigned int nhat)
@@ -293,21 +298,18 @@ Conserved SRHD2D::calc_intermed_statesSR2D( const Primitives &prims,
                                                 double pStar,
                                                 int nhat = 1)
 {
-    double rho, pressure, v1, v2, cofactor;
-    double D, S1, S2, tau;
-    double Dstar, S1star, S2star, tauStar, Estar, E;
+    double Dstar, S1star, S2star, tauStar, Estar, cofactor;
     Conserved starStates;
 
-    rho      = prims.rho;
-    pressure = prims.p;
-    v1       = prims.v1;
-    v2       = prims.v2;
+    double pressure = prims.p;
+    double v1       = prims.v1;
+    double v2       = prims.v2;
 
-    D   = state.D;
-    S1  = state.S1;
-    S2  = state.S2;
-    tau = state.tau;
-    E   = tau + D;
+    double D   = state.D;
+    double S1  = state.S1;
+    double S2  = state.S2;
+    double tau = state.tau;
+    double E   = tau + D;
 
     
     switch (nhat){
@@ -319,7 +321,9 @@ Conserved SRHD2D::calc_intermed_statesSR2D( const Primitives &prims,
             Estar    = cofactor * (E*(a - v1) + pStar*aStar - pressure*v1);
             tauStar  = Estar - Dstar;
 
-            break;
+            starStates = Conserved(Dstar, S1star, S2star, tauStar);
+
+            return starStates;
         case 2:
             cofactor = 1./(a - aStar); 
             Dstar    = cofactor * (a - v2) * D;
@@ -328,14 +332,13 @@ Conserved SRHD2D::calc_intermed_statesSR2D( const Primitives &prims,
             Estar    = cofactor * (E*(a - v2) + pStar*aStar - pressure*v2);
             tauStar  = Estar - Dstar;
 
-            break;
+            starStates = Conserved(Dstar, S1star, S2star, tauStar);
+
+            return starStates;
         
     }
     
-    starStates.D   = Dstar;
-    starStates.S1  = S1star;
-    starStates.S2  = S2star;
-    starStates.tau = tauStar;
+    
 
     return starStates;
 }
@@ -350,7 +353,7 @@ double SRHD2D::adapt_dt(const PrimitiveArray &prims){
 
     double r_left, r_right, left_cell, right_cell, lower_cell, upper_cell;
     double dx1, cs, dx2, x2_right, x2_left, rho, pressure, v1, v2, volAvg, h;
-    double delta_logr, min_dt, cfl_dt, D, tau, W;
+    double min_dt, cfl_dt;
     int shift_i, shift_j;
     double plus_v1, plus_v2, minus_v1, minus_v2;
 
@@ -358,15 +361,14 @@ double SRHD2D::adapt_dt(const PrimitiveArray &prims){
     // Compute the minimum timestep given CFL
     for (int jj = 0; jj < yphysical_grid; jj ++){
         shift_j = jj + idx_active;
+        upper_cell = (jj == 0 ) ? x2[jj] : x2[jj - 1];
+        lower_cell = (jj == yphysical_grid - 1) ? x2[jj] : x2[jj + 1];
         for (int ii = 0; ii < xphysical_grid; ii++){
-           
             shift_i = ii + idx_active;
 
             // Find the left and right cell centers in one direction
-            left_cell  = (ii - 1 < 0 ) ? x1[ii] : x1[ii - 1];
+            left_cell  = (ii == 0) ? x1[ii] : x1[ii - 1];
             right_cell = (ii == xphysical_grid - 1) ? x1[ii] : x1[ii + 1];
-            upper_cell = (jj - 1 < 0 ) ? x2[jj] : x2[jj - 1];
-            lower_cell = (jj == yphysical_grid - 1) ? x2[jj] : x2[jj + 1];
             
 
             // Check if using linearly-spaced grid or logspace
@@ -432,12 +434,11 @@ double SRHD2D::adapt_dt(const PrimitiveArray &prims){
 //-----------------------------------------------------------------------------------------------------------
 
 // Get the 2D Flux array (4,1). Either return F or G depending on directional flag
-Flux SRHD2D::calc_Flux(double rho, double vx, 
+Conserved SRHD2D::calc_Flux(double rho, double vx, 
                                 double vy, double pressure, 
-                                bool x_direction=true){
+                                unsigned int nhat=1){
     
-    // The Flux Tensor
-    Flux flux;
+    Conserved flux;
 
      // The Flux components
     double mom1, mom2, energy_dens, zeta, convect_12;
@@ -451,47 +452,49 @@ Flux SRHD2D::calc_Flux(double rho, double vx,
     double tau = rho*h*lorentz_gamma*lorentz_gamma - pressure - rho*lorentz_gamma;
 
     
-    // Check if we're calculating the x-direction flux. If not, calculate the y-direction
-    if (x_direction){
-        mom1        = D * vx;
-        convect_12  = S2 * vx;
-        energy_dens = S1 * vx + pressure;
-        zeta        = (tau + pressure) * vx;
+    // Check if we're calculating the x-direction flux. 
+    // If not, calculate the y-direction flux.
+    switch (nhat){
+        case 1:
+            mom1        = D * vx;
+            convect_12  = S2 * vx;
+            energy_dens = S1 * vx + pressure;
+            zeta        = (tau + pressure) * vx;
 
-        flux.D   = mom1;
-        flux.S1  = energy_dens;
-        flux.S2  = convect_12;
-        flux.tau = zeta;
-           
-        return flux;
+            flux.D   = mom1;
+            flux.S1  = energy_dens;
+            flux.S2  = convect_12;
+            flux.tau = zeta;
+            
+            return flux;
 
-    } else {
-        mom2 = D*vy;
-        convect_12 = S1*vy;
-        energy_dens = S2*vy + pressure;
-        zeta = (tau + pressure)*vy;
+        default:
+            mom2        = D*vy;
+            convect_12  = S1*vy;
+            energy_dens = S2*vy + pressure;
+            zeta        = (tau + pressure)*vy;
 
-        flux.D   = mom2;
-        flux.S1  = convect_12;
-        flux.S2  = energy_dens;
-        flux.tau = zeta;
-           
-        return flux;
+            flux.D   = mom2;
+            flux.S1  = convect_12;
+            flux.S2  = energy_dens;
+            flux.tau = zeta;
+            
+            return flux;
     }
     
 };
 
 
-Flux SRHD2D::calc_hll_flux(
+Conserved SRHD2D::calc_hll_flux(
                         const Conserved &left_state,
                         const Conserved &right_state,
-                        const Flux     &left_flux,
-                        const Flux     &right_flux,
+                        const Conserved     &left_flux,
+                        const Conserved     &right_flux,
                         const Primitives   &left_prims,
                         const Primitives   &right_prims,
                         unsigned int nhat)
 {
-    Flux  hll_flux;
+    Conserved  hll_flux;
     
     Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
 
@@ -503,36 +506,24 @@ Flux SRHD2D::calc_hll_flux(
     double aRplus  = aR > 0.0 ? aR : 0.0;
 
     // Compute the HLL Flux component-wise
-    hll_flux.D = ( aRplus*left_flux.D - aLminus*right_flux.D
-                            + aRplus*aLminus*(right_state.D - left_state.D ) )  /
-                            (aRplus - aLminus);
-
-    hll_flux.S1 = ( aRplus*left_flux.S1 - aLminus*right_flux.S1
-                            + aRplus*aLminus*(right_state.S1 - left_state.S1 ) )  /
-                            (aRplus - aLminus);
-
-    hll_flux.S2 = ( aRplus*left_flux.S2 - aLminus*right_flux.S2
-                            + aRplus*aLminus*(right_state.S2 - left_state.S2) )  /
-                            (aRplus - aLminus);
-
-    hll_flux.tau = ( aRplus*left_flux.tau - aLminus*right_flux.tau
-                            + aRplus*aLminus*(right_state.tau - left_state.tau) )  /
+    hll_flux = ( left_flux * aRplus - right_flux * aLminus
+                 + (right_state - left_state )*aRplus*aLminus )  /
                             (aRplus - aLminus);
 
     return hll_flux;
 };
 
 
-Flux SRHD2D::calc_hllc_flux(
-                                const Conserved &left_state,
-                                const Conserved &right_state,
-                                const Flux     &left_flux,
-                                const Flux     &right_flux,
-                                const Primitives   &left_prims,
-                                const Primitives   &right_prims,
-                                const unsigned int nhat = 1)
+Conserved SRHD2D::calc_hllc_flux(
+                            const Conserved &left_state,
+                            const Conserved &right_state,
+                            const Conserved     &left_flux,
+                            const Conserved     &right_flux,
+                            const Primitives   &left_prims,
+                            const Primitives   &right_prims,
+                            const unsigned int nhat = 1)
 {
-    Flux hllc_flux, hll_flux;
+    Conserved hllc_flux, hll_flux;
     Conserved hll_state;
 
     Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
@@ -551,34 +542,12 @@ Flux SRHD2D::calc_hllc_flux(
     double aRplus  = aR > 0.0 ? aR : 0.0;
 
     //-------------------Calculate the HLL Intermediate State
-    hll_state.D = ( aR*right_state.D - aL*left_state.D 
-                        - right_flux.D + left_flux.D)/(aR - aL);
-
-    hll_state.S1 = ( aR*right_state.S1 - aL*left_state.S1 
-                        - right_flux.S1 + left_flux.S1)/(aR - aL);
-
-    hll_state.S2 = ( aR*right_state.S2 - aL*left_state.S2
-                        - right_flux.S2 + left_flux.S2)/(aR - aL);
-
-    hll_state.tau = ( aR*right_state.tau - aL*left_state.tau
-                        - right_flux.tau + left_flux.tau)/(aR - aL);
-
+    hll_state = ( right_state * aR - left_state * aL 
+                        - right_flux + left_flux)/(aR - aL);
 
     //------------------Calculate the RHLLE Flux---------------
-    hll_flux.D = ( aRplus*left_flux.D - aLminus*right_flux.D
-                            + aRplus*aLminus*(right_state.D - left_state.D ) )  /
-                            (aRplus - aLminus);
-
-    hll_flux.S1 = ( aRplus*left_flux.S1 - aLminus*right_flux.S1
-                            + aRplus*aLminus*(right_state.S1 - left_state.S1 ) )  /
-                            (aRplus - aLminus);
-
-    hll_flux.S2 = ( aRplus*left_flux.S2 - aLminus*right_flux.S2
-                            + aRplus*aLminus*(right_state.S2 - left_state.S2) )  /
-                            (aRplus - aLminus);
-
-    hll_flux.tau = ( aRplus*left_flux.tau - aLminus*right_flux.tau
-                            + aRplus*aLminus*(right_state.tau - left_state.tau) )  /
+    hll_flux = ( left_flux * aRplus - right_flux * aLminus
+                            + (right_state - left_state ) *aRplus*aLminus )  /
                             (aRplus - aLminus);
 
     //------ Mignone & Bodo subtract off the rest mass density
@@ -588,18 +557,10 @@ Flux SRHD2D::calc_hllc_flux(
     double fs = hll_flux.momentum(nhat);
 
     //------Calculate the contact wave velocity and pressure
-    double a = fe;
-    double b = -(fs + e);
-    double c = s;
-    double quad = -0.5*(b + sgn(b)*sqrt(b*b - 4*a*c));
-    double aStar = c/quad;
+    double aStar = calc_intermed_wave(e, s, fs, fe);
     double pStar = -fe * aStar + fs;
 
-    
-
     if ( -aL <= (aStar - aL)){
-        Flux interflux_left;
-        Conserved interstate_left;
         double pressure = left_prims.p;
         double v1       = left_prims.v1;
         double v2       = left_prims.v2;
@@ -621,11 +582,10 @@ Flux SRHD2D::calc_hllc_flux(
                 double Estar    = cofactor * (E*(aL - v1) + pStar*aStar - pressure*v1);
                 double tauStar  = Estar - Dstar;
 
-                interstate_left.D   = Dstar;
-                interstate_left.S1  = S1star;
-                interstate_left.S2  = S2star;
-                interstate_left.tau = tauStar;
-                break;
+                auto interstate_left = Conserved(Dstar, S1star, S2star, tauStar);
+
+                //---------Compute the L Star Flux
+                return left_flux + (interstate_left - left_state )*aL;
             }
             
             case 2: 
@@ -637,25 +597,16 @@ Flux SRHD2D::calc_hllc_flux(
                 double Estar    = cofactor * (E*(aL - v2) + pStar*aStar - pressure*v2);
                 double tauStar  = Estar - Dstar;
 
-                interstate_left.D   = Dstar;
-                interstate_left.S1  = S1star;
-                interstate_left.S2  = S2star;
-                interstate_left.tau = tauStar;
-                break;
+                auto interstate_left = Conserved(Dstar, S1star, S2star, tauStar);
+
+                //---------Compute the L Star Flux
+                return left_flux + (interstate_left - left_state )*aL;
 
         }
 
-        //---------Compute the L Star Flux
-        interflux_left.D    = left_flux.D   + aL*(interstate_left.D   - left_state.D   );
-        interflux_left.S1   = left_flux.S1  + aL*(interstate_left.S1  - left_state.S1  );
-        interflux_left.S2   = left_flux.S2  + aL*(interstate_left.S2  - left_state.S2  );
-        interflux_left.tau  = left_flux.tau + aL*(interstate_left.tau - left_state.tau );
+        
 
-        return interflux_left;
-
-    } else if ( -aStar <= (aR - aStar)){
-        Flux      interflux_right;
-        Conserved interstate_right;
+    } else {
         // Left Star State in x-direction of coordinate lattice
         double pressure = right_prims.p;
         double v1       = right_prims.v1;
@@ -677,11 +628,12 @@ Flux SRHD2D::calc_hllc_flux(
                 double Estar    = cofactor * (E*(aR - v1) + pStar*aStar - pressure*v1);
                 double tauStar  = Estar - Dstar;
 
-                interstate_right.D   = Dstar;
-                interstate_right.S1  = S1star;
-                interstate_right.S2  = S2star;
-                interstate_right.tau = tauStar;
-                break;
+                auto interstate_right = Conserved(Dstar, S1star, S2star, tauStar);
+
+                // Compute the intermediate right flux
+                return right_flux + (interstate_right - right_state ) * aR;
+
+                // break;
             }
             
             case 2: 
@@ -693,21 +645,14 @@ Flux SRHD2D::calc_hllc_flux(
                 double Estar    = cofactor * (E*(aR - v2) + pStar*aStar - pressure*v2);
                 double tauStar  = Estar - Dstar;
 
-                interstate_right.D   = Dstar;
-                interstate_right.S1  = S1star;
-                interstate_right.S2  = S2star;
-                interstate_right.tau = tauStar;
-                break;
+                auto interstate_right = Conserved(Dstar, S1star, S2star, tauStar);
+
+                // Compute the intermediate right flux
+                return right_flux + (interstate_right - right_state ) * aR;
+
+                // break;
 
         }
-        // Compute the intermediate right flux
-        interflux_right.D   = right_flux.D   + aR*(interstate_right.D   - right_state.D   );
-        interflux_right.S1  = right_flux.S1  + aR*(interstate_right.S1  - right_state.S1  );
-        interflux_right.S2  = right_flux.S2  + aR*(interstate_right.S2  - right_state.S2  );
-        interflux_right.tau = right_flux.tau + aR*(interstate_right.tau - right_state.tau );
-
-    
-        return interflux_right;
     }
     
 };
@@ -729,14 +674,9 @@ ConserveArray SRHD2D::u_dot2D(const ConserveArray &u_state)
     L.S2.reserve(active_zones);
     L.tau.reserve(active_zones);
 
-    // L.D.resize(active_zones);
-    // L.S1.resize(active_zones);
-    // L.S2.resize(active_zones);
-    // L.tau.resize(active_zones);
-
-    Conserved ux_l, ux_r, uy_l, uy_r; 
-    Flux     f_l, f_r, f1, f2, g1, g2, g_l, g_r;
-    Primitives   xprims_l, xprims_r, yprims_l, yprims_r;
+    Conserved   ux_l, ux_r, uy_l, uy_r; 
+    Conserved   f_l, f_r, f1, f2, g1, g2, g_l, g_r;
+    Primitives  xprims_l, xprims_r, yprims_l, yprims_r;
 
     Primitives xleft_most, xleft_mid, xright_mid, xright_most;
     Primitives yleft_most, yleft_mid, yright_mid, yright_most;
@@ -1302,7 +1242,7 @@ ConserveArray SRHD2D::u_dot2D(const ConserveArray &u_state)
                             r_left  = 0.5*(x1[xcoordinate] + left_cell);
 
                             theta_right = 0.5*(lower_cell + x2[ycoordinate]);
-                            theta_left = 0.5*(upper_cell + x2[ycoordinate]);
+                            theta_left  = 0.5*(upper_cell + x2[ycoordinate]);
 
                     } else {
 
@@ -1349,19 +1289,19 @@ ConserveArray SRHD2D::u_dot2D(const ConserveArray &u_state)
                     deltaV1 = volAvg * volAvg * dr;
                     deltaV2 = volAvg * sin(ang_avg)*(theta_right - theta_left); //deltaV1*(cos(theta_left) - cos(theta_right)); 
                         
-                    L.D[xcoordinate + xphysical_grid*ycoordinate] = - (right_rsurface*f1.D - left_rsurface*f2.D)/deltaV1 
-                                                        - (upper_tsurface*g1.D - lower_tsurface*g2.D)/deltaV2 + sourceD[xcoordinate + xphysical_grid*ycoordinate];
+                    L.D.emplace_back(- (f1.D*right_rsurface - f2.D*left_rsurface)/deltaV1
+                                                            - (g1.D*upper_tsurface - g2.D*lower_tsurface)/deltaV2 + sourceD[xcoordinate + xphysical_grid*ycoordinate] * decay_const) ;
 
-                    L.S1[xcoordinate + xphysical_grid*ycoordinate] = - (right_rsurface*f1.S1 - left_rsurface*f2.S1)/deltaV1 
-                                                        - (upper_tsurface*g1.S1 - lower_tsurface*g2.S1)/deltaV2 
-                                                        + rhoc*vc*vc/volAvg + 2*pc/volAvg + source_S1[xcoordinate + xphysical_grid*ycoordinate];
+                    L.S1.emplace_back( - (f1.S1*right_rsurface - f2.S1*left_rsurface)/deltaV1
+                                                            - (g1.S1*upper_tsurface - g2.S1*lower_tsurface)/deltaV2 
+                                                            + rhoc*vc*vc/volAvg + 2*pc/volAvg + source_S1[xcoordinate + xphysical_grid*ycoordinate] * decay_const) ;
 
-                    L.S2[xcoordinate + xphysical_grid*ycoordinate] = - (right_rsurface*f1.S2 - left_rsurface*f2.S2)/deltaV1 
-                                                        - (upper_tsurface*g1.S2 - lower_tsurface*g2.S2)/deltaV2
-                                                        -(rhoc*vc*uc/volAvg - pc*cos(ang_avg)/(volAvg*sin(ang_avg) ) ) + source_S2[xcoordinate + xphysical_grid*ycoordinate];
+                    L.S2.emplace_back( - (f1.S2*right_rsurface - f2.S2*left_rsurface)/deltaV1
+                                                            - (g1.S2*upper_tsurface - g2.S2*lower_tsurface)/deltaV2
+                                                            -(rhoc*uc*vc/volAvg - pc*cos(ang_avg)/(volAvg*sin(ang_avg))) + source_S2[xcoordinate + xphysical_grid*ycoordinate] * decay_const );
 
-                    L.tau[xcoordinate + xphysical_grid*ycoordinate] = - (right_rsurface*f1.tau - left_rsurface*f2.tau)/deltaV1 
-                                                        - (upper_tsurface*g1.tau - lower_tsurface*g2.tau)/deltaV2 + source_tau[xcoordinate + xphysical_grid*ycoordinate];
+                    L.tau.emplace_back(- (f1.tau*right_rsurface - f2.tau*left_rsurface)/deltaV1
+                                                            - (g1.tau*upper_tsurface - g2.tau*lower_tsurface)/deltaV2 + source_tau[xcoordinate + xphysical_grid*ycoordinate] * decay_const );
 
                 
 
@@ -1373,12 +1313,17 @@ ConserveArray SRHD2D::u_dot2D(const ConserveArray &u_state)
             } else {
 
                 for (int jj = j_start; jj < j_bound; jj++){
+                    ycoordinate = jj - 2;
+                    lower_cell = (ycoordinate == yphysical_grid - 1) ? x2[ycoordinate] : x2[ycoordinate + 1];
+                    upper_cell = ycoordinate == 0 ? x2[ycoordinate] : x2[ycoordinate - 1];
+                    theta_right = 0.5 * (lower_cell + x2[ycoordinate]);
+                    theta_left  = 0.5 * (upper_cell + x2[ycoordinate]);
+
                     for (int ii = i_start; ii < i_bound; ii++){
                         if (!periodic){
                             // Adjust for beginning input of L vector
                             xcoordinate = ii - 2;
-                            ycoordinate = jj - 2;
-
+                            
                             // Coordinate X
                             xleft_most.rho  = prims.rho[(ii - 2) + NX * jj];
                             xleft_mid.rho   = prims.rho[(ii - 1) + NX * jj];
@@ -1599,8 +1544,6 @@ ConserveArray SRHD2D::u_dot2D(const ConserveArray &u_state)
                                                             0.5*(yright_mid.p - yleft_mid.p),
                                                             theta*(yright_mid.p - center.p)); 
                         
-                    
-
                         // Calculate the left and right states using the reconstructed PLM Primitives
                         ux_l = calc_stateSR2D(xprims_l.rho, xprims_l.v1, xprims_l.v2, xprims_l.p);
                         ux_r = calc_stateSR2D(xprims_r.rho, xprims_r.v1, xprims_r.v2, xprims_r.p);
@@ -1624,13 +1567,7 @@ ConserveArray SRHD2D::u_dot2D(const ConserveArray &u_state)
                         }
                         
                         right_cell = (xcoordinate == xphysical_grid - 1) ? x1[xcoordinate] : x1[xcoordinate + 1];
-                        left_cell  = (xcoordinate - 1 < 0) ? x1[xcoordinate]: x1[xcoordinate - 1];
-
-                        lower_cell = (ycoordinate == yphysical_grid - 1) ? x2[ycoordinate] : x2[ycoordinate + 1];
-                        upper_cell = (ycoordinate - 1 < 0) ? x2[ycoordinate] : x2[ycoordinate - 1];
-
-                        theta_right = 0.5 * (lower_cell + x2[ycoordinate]);
-                        theta_left  = 0.5 * (upper_cell + x2[ycoordinate]);
+                        left_cell  = (xcoordinate == 0.0) ? x1[xcoordinate]: x1[xcoordinate - 1];
 
                         r_right = (linspace) ? 0.5*(right_cell + x1[xcoordinate]) : sqrt(right_cell * x1[xcoordinate]); 
                         r_left  = (linspace) ? 0.5*(left_cell  + x1[xcoordinate]) : sqrt(left_cell  * x1[xcoordinate]); 
@@ -1656,18 +1593,18 @@ ConserveArray SRHD2D::u_dot2D(const ConserveArray &u_state)
 
 
                         L.D.emplace_back(- (f1.D*right_rsurface - f2.D*left_rsurface)/deltaV1
-                                                            - (g1.D*upper_tsurface - g2.D*lower_tsurface)/deltaV2 + sourceD[xcoordinate + xphysical_grid*ycoordinate]);
+                                                            - (g1.D*upper_tsurface - g2.D*lower_tsurface)/deltaV2 + sourceD[xcoordinate + xphysical_grid*ycoordinate] * decay_const) ;
 
                         L.S1.emplace_back( - (f1.S1*right_rsurface - f2.S1*left_rsurface)/deltaV1
                                                             - (g1.S1*upper_tsurface - g2.S1*lower_tsurface)/deltaV2 
-                                                            + rhoc*vc*vc/volAvg + 2*pc/volAvg + source_S1[xcoordinate + xphysical_grid*ycoordinate]);
+                                                            + rhoc*vc*vc/volAvg + 2*pc/volAvg + source_S1[xcoordinate + xphysical_grid*ycoordinate] * decay_const) ;
 
                         L.S2.emplace_back( - (f1.S2*right_rsurface - f2.S2*left_rsurface)/deltaV1
                                                             - (g1.S2*upper_tsurface - g2.S2*lower_tsurface)/deltaV2
-                                                            -(rhoc*uc*vc/volAvg - pc*cos(ang_avg)/(volAvg*sin(ang_avg))) + source_S2[xcoordinate + xphysical_grid*ycoordinate] );
+                                                            -(rhoc*uc*vc/volAvg - pc*cos(ang_avg)/(volAvg*sin(ang_avg))) + source_S2[xcoordinate + xphysical_grid*ycoordinate] * decay_const );
 
                         L.tau.emplace_back(- (f1.tau*right_rsurface - f2.tau*left_rsurface)/deltaV1
-                                                            - (g1.tau*upper_tsurface - g2.tau*lower_tsurface)/deltaV2 + source_tau[xcoordinate + xphysical_grid*ycoordinate] );
+                                                            - (g1.tau*upper_tsurface - g2.tau*lower_tsurface)/deltaV2 + source_tau[xcoordinate + xphysical_grid*ycoordinate] * decay_const );
 
                     }
 
@@ -1691,6 +1628,7 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
                                     float tend = 0.1, 
                                     double dt = 1.e-4,
                                     double theta = 1.5,
+                                    double engine_duration=10,
                                     double chkpt_interval = 0.1,
                                     string data_directory = "data/",
                                     bool first_order = true, 
@@ -1774,10 +1712,10 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
     u_p.S2.reserve(nzones);
     u_p.tau.reserve(nzones);
 
-    prims.rho.resize(nzones);
-    prims.v1.resize(nzones);
-    prims.v2.resize(nzones);
-    prims.p.resize(nzones);
+    prims.rho.reserve(nzones);
+    prims.v1.reserve(nzones);
+    prims.v2.reserve(nzones);
+    prims.p.reserve(nzones);
 
     // Define the source terms
     sourceD    = sources[0];
@@ -1800,6 +1738,9 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
 
     block_size = 4;
 
+    // Using a sigmoid decay function to represent when the source terms turn off.
+    decay_const = 1.0 / (1.0 + exp(10.0 * (tstart - engine_duration )) );
+
     // Set the primitives from the initial conditions and set the initial pressure guesses
     prims = cons2prim2D(u, lorentz_gamma);
     n++;
@@ -1816,27 +1757,22 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
 
             udot = u_dot2D(u);
 
-            for (int jj = 0; jj < yphysical_grid; jj ++){
-                for (int ii = 0; ii < xphysical_grid; ii ++){
-                        i_real = ii + 1; j_real = jj + 1;
-
+            // #pragma omp parallel for
+            for (int jj = 0; jj < yphysical_grid; jj++){
+                j_real = jj + 1;
+                for (int ii = 0; ii < xphysical_grid; ii++){
+                        i_real = ii + 1; 
                         u_p.D  [i_real + NX * j_real]   = u.D  [i_real + NX * j_real] + dt * udot.D  [ii + xphysical_grid * jj]; 
                         u_p.S1 [i_real + NX * j_real]   = u.S1 [i_real + NX * j_real] + dt * udot.S1 [ii + xphysical_grid * jj]; 
                         u_p.S2 [i_real + NX * j_real]   = u.S2 [i_real + NX * j_real] + dt * udot.S2 [ii + xphysical_grid * jj]; 
                         u_p.tau[i_real + NX * j_real]   = u.tau[i_real + NX * j_real] + dt * udot.tau[ii + xphysical_grid * jj]; 
-                        
-            
                 }
             }
 
             config_ghosts2D(u_p, NX, NY, true);
             prims = cons2prim2D(u_p, lorentz_gamma);
-            lorentz_gamma = calc_lorentz_gamma(prims.v1, prims.v2, NX, NY);
 
-            u.D.swap(u_p.D  );
-            u.S1.swap(u_p.S1);
-            u.S2.swap(u_p.S2);
-            u.tau.swap(u_p.tau);
+            u.swap(u_p);
             
             t += dt;
             dt = adapt_dt(prims);
@@ -1852,6 +1788,7 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
             << "\t" << "Zones per sec: " << total_zones/time_span.count()
             << flush;
 
+            // cout << n << endl;
             n++;
             pressure_guess = prims.p;
 
@@ -1876,7 +1813,6 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
                     }
                 }
                 
-                
                 config_ghosts2D(u1, NX, NY, false);
                 prims = cons2prim2D(u1, lorentz_gamma);
 
@@ -1897,15 +1833,7 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
                 config_ghosts2D(u2, NX, NY, false);
                 prims = cons2prim2D(u2, lorentz_gamma);
                 
-
-                if (isnan(dt)){
-                    break;
-                }
-                
-                u.D.swap(u2.D  );
-                u.S1.swap(u2.S1);
-                u.S2.swap(u2.S2);
-                u.tau.swap(u2.tau);
+                u.swap(u2);
                 
                 t += dt;
                 dt = adapt_dt(prims);
@@ -1921,12 +1849,13 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
 
                 n++;
                 pressure_guess = prims.p;
+                decay_const = 1.0 / (1.0 + exp(10.0 * ( t - engine_duration )) );
 
-                /* Write to a File every tenth of a second */
+                /* Write to a File every nth of a second */
                 if (t >= t_interval){
                     toWritePrim(&prims, &prods, 2);
                     tnow  = create_step_str(t_interval, tchunk);
-                    filename = string_format("%d.chkpt." + tnow + ".h5", NY);
+                    filename = string_format("%d.chkpt." + tnow + ".h5", yphysical_grid);
                     setup.t  = t;
                     setup.dt = dt;
                     write_hdf5(data_directory, filename, prods, setup, 2);
