@@ -21,7 +21,7 @@ sourcefiles = ['src/state.pyx',
 extensions = [Extension("state", sourcefiles, 
                         include_dirs=[numpy.get_include()],
                         libraries=['hdf5', 'hdf5_hl'],
-                        extra_compile_args = ['-std=c++11', '-march=native', '-fno-wrapv', '-O3'] )]
+                        extra_compile_args = ['-std=c++11', '-march=native', '-fno-wrapv', '-fopenmp', '-O3'] )]
 
 os.environ["CC"] = ("clang++ -o -DNDEBUG -g -Wall -Wstrict-prototypes " +
                     "-fno-strict-aliasing -Wdate-time -D_FORTIFY_SOURCE=2 -g -fstack-protector-strong " +
