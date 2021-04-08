@@ -73,8 +73,8 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
     prims.p.reserve(nzones);
 
     // Define Newton-Raphson Vars
-    double ps, pb, h, den;
-    double c2, f, g, p, peq;       
+    double etotal;
+    double c2, f, g, p;       
     double Ws, rhos, eps;
 
     int iter = 0;
@@ -89,20 +89,17 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
 
             S = sqrt(S1*S1 + S2*S2);
 
-            peq = n != 0.0 ? pressure_guess[ii + NX * jj] : abs(S - D - tau);
+            p = (n != 0.0 )? pressure_guess[ii + NX * jj] : abs(S - D - tau);
 
             tol = D*1.e-12;
 
             //--------- Iteratively Solve for Pressure using Newton-Raphson
             // Note: The NR scheme as been modified based on: 
             // https://www.sciencedirect.com/science/article/pii/S0893965913002930 
-            p  = peq;
             iter = 0;
             do {
-                p  = peq;
-
-                den     = tau + p + D;
-                v2      = S * S / (den * den);
+                etotal  = tau + p + D;
+                v2      = S * S / (etotal * etotal);
                 Ws      = 1.0 / sqrt(1.0 - v2);
                 rhos    = D / Ws; 
                 
@@ -111,7 +108,7 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
             
                 c2  = (gamma - 1.0) * eps / (1 + gamma * eps);
                 g   = c2 * v2 - 1.0;
-                peq = p - f/g;
+                p   -=  f/g;
                 
                 iter++;
                 
@@ -123,7 +120,7 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
                     cout << "S: " << S << endl;
                     cout << "tau: " << tau << endl;
                     cout << "D: " << D << endl;
-                    cout << "et: " << den << endl;
+                    cout << "et: " << etotal << endl;
                     cout << "Ws: " << Ws << endl;
                     cout << "v2: " << v2 << endl;
                     cout << "W: " << W << endl;
@@ -133,11 +130,11 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
                 }
                 
 
-            } while(abs(peq - p) >= tol);
+            } while(abs(f/g) >= tol);
 
-            v1 = S1/(tau + D + peq);
+            v1 = S1/(tau + D + p);
 
-            v2 = S2/(tau + D + peq);
+            v2 = S2/(tau + D + p);
 
             Ws = 1.0/sqrt(1.0 - (v1*v1 + v2*v2));
             
@@ -147,7 +144,7 @@ PrimitiveArray SRHD2D::cons2prim2D(const ConserveArray &u_state2D, vector<double
             prims.rho.emplace_back(D/Ws);
             prims.v1.emplace_back(v1);
             prims.v2.emplace_back(v2);
-            prims.p.emplace_back(peq);
+            prims.p.emplace_back(p);
             
                 
         }
@@ -570,6 +567,7 @@ Conserved SRHD2D::calc_hllc_flux(
         double S2  = left_state.S2;
         double tau = left_state.tau;
         double E   = tau + D;
+
 
         //--------------Compute the L Star State----------
         switch (nhat) {
@@ -1815,7 +1813,6 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
                 
                 config_ghosts2D(u1, NX, NY, false);
                 prims = cons2prim2D(u1, lorentz_gamma);
-
                 udot = u_dot2D(u1);
 
                 for (int jj = 0; jj < yphysical_grid; jj ++){
@@ -1832,7 +1829,6 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
             
                 config_ghosts2D(u2, NX, NY, false);
                 prims = cons2prim2D(u2, lorentz_gamma);
-                
                 u.swap(u2);
                 
                 t += dt;
