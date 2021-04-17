@@ -240,11 +240,9 @@ def main():
     )
 
     if args.save:
-        animation.save("{}.mp4".format(args.setup[0]), bitrate=500, extra_args=['-vcodec', 'libx264'])
+        animation.save("{}.mp4".format(args.setup[0]))
     else:
         plt.show()
-    # plt.show()
-    # Try to set the DPI to the actual number of pixels you're plotting
     
     
     

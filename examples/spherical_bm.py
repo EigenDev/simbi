@@ -91,7 +91,7 @@ bm = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy),
 
 t1 = (time.time()*u.s).to(u.min)
 sol = bm.simulate(tend=tend, first_order= False, dt=dt,
-                  coordinates=b"spherical", CFL=0.4, 
+                  coordinates="spherical", CFL=0.4, 
                   hllc=False, linspace=False)
 
 print("The 2D BM Simulation for N = {} took {:.3f}".format(ntheta, (time.time()*u.s).to(u.min) - t1))

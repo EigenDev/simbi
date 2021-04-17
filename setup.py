@@ -23,9 +23,7 @@ extensions = [Extension("state", sourcefiles,
                         libraries=['hdf5', 'hdf5_hl'],
                         extra_compile_args = ['-std=c++11', '-march=native', '-fno-wrapv', '-O3'] )]
 
-os.environ["CC"] = ("clang++ -o -DNDEBUG -g -Wall -Wstrict-prototypes " +
-                    "-fno-strict-aliasing -Wdate-time -D_FORTIFY_SOURCE=2 -g -fstack-protector-strong " +
-                    "-Wformat -Werror=format-security -fPIC -ftrapv")
+os.environ["CC"] = ("clang++")
 setup(
     name="SIMBI 2D Hydro Code",
     version="0.0.1",

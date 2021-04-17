@@ -19,6 +19,24 @@ using namespace hydro;
 //        HELPER FUNCTIONS FOR COMPUTATION
 // =========================================================================================================
 
+// Convert a vector of structs into a struct of vectors for easy post processsing
+hydro2d::PrimitiveData vecs2struct(vector<hydro2d::Primitives> &p){
+    hydro2d::PrimitiveData sprims;
+    size_t nzones = p.size();
+    sprims.rho.reserve(nzones);
+    sprims.v1.reserve(nzones);
+    sprims.v2.reserve(nzones);
+    sprims.p.reserve(nzones);
+    for (size_t i = 0; i < nzones; i++)
+    {
+        sprims.rho.push_back(p[i].rho);
+        sprims.v1.push_back(p[i].v1);
+        sprims.v2.push_back(p[i].v2);
+        sprims.p.push_back(p[i].p);
+    }
+    
+    return sprims;
+}
 
 // Find the max element
 double findMax(double a, double b, double c ){
@@ -87,6 +105,18 @@ vector<vector<double> > transpose(vector<vector<double> > &mat){
     return trans_vec;
 };
 
+void compute_vertices(vector<double> &cz, 
+                      vector<double> &xv, 
+                      int lx, 
+                      bool linspace){
+    xv[0]  = cz[0];
+    xv[lx] = cz[lx-1];
+    for (size_t i = 1; i < lx; i++)
+    {
+        xv[i] = linspace ? 0.5 * (cz[i] + cz[i-1]) : sqrt(cz[i] * cz[i-1]);
+    };
+}
+
 std::map<std::string, simulation::coord_system> geometry;
 std::map<bool, simulation::accuracy> order_acc;
 void config_system() {
@@ -103,7 +133,6 @@ void get_spacetime_wave(double aL, double aR, double aStar){
     wave_loc[(0.0 - aStar) <= (aR - aStar)] = waves::RIGHT_STAR;
     wave_loc[aR <= 0.0]                     = waves::RIGHT_WAVE;
 }
-
 
 //====================================================================================================
 //                                  WRITE DATA TO FILE
@@ -195,7 +224,7 @@ void write_hdf5(string data_directory, string filename, PrimData prims, DataWrit
 }
 
 
-
+//=======================================================================================================
 //                                      NEWTONIAN HYDRO
 //=======================================================================================================
 
@@ -259,11 +288,8 @@ double calc_intermed_wave(double energy_density, double momentum_density,
     double b = - (energy_density + flux_momentum_density);
     double c = momentum_density;
     double disc = sqrt( b*b - 4*a*c);
-  
     double quad = -0.5*(b + sgn(b)*disc);
     return c/quad;
-    
-    
 }
 
 
