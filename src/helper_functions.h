@@ -79,6 +79,11 @@ namespace simulation {
         HLLC,
         HLLE,
     };
+
+    enum wave_speeds {
+        SCHNEIDER_ET_AL_93,
+        MIGNONE_AND_BODO_05,
+    };
 };
 
 extern std::map<std::string, simulation::coord_system> geometry;
@@ -128,8 +133,8 @@ template <typename T> int sgn(T val) ;
 double findMax(double, double, double);
 double findMin(double a, double b, double c);
 double calc_sound_speed(float, double, double);
-int sign(double);
-MinMod minmod(PrimData &prims, double theta, int face, int i, int j, int NX);
+hydro2d::PrimitiveData vecs2struct(std::vector<hydro2d::Primitives> &p);
+void compute_vertices(std::vector<double> &cz, std::vector<double> &xv, int lx, bool linspace=true);
 std::vector<double> rollVector(const std::vector<double>&, unsigned int);
 double roll(std::vector<double>&, unsigned int);
 double roll(std::vector<std::vector<double>>&, unsigned int xpos, unsigned int ypos);
@@ -154,7 +159,7 @@ double dfdp(double, double, double, double, float, double);
 
 //-------------------Inline for Speed--------------------------------------
 inline double minmod(const double &x, const double &y , const double &z){
-    return 0.25*std::abs(sgn(x) + sgn(y))*(sgn(x) + sgn(z))*std::min(std::min(std::abs(x), std::abs(y)), std::abs(z));
+    return 0.25*std::abs(sgn(x) + sgn(y))*(sgn(x) + sgn(z))*std::min({std::abs(x), std::abs(y), std::abs(z)});
 };
 
 #include "helper_functions.tpp"
