@@ -159,84 +159,10 @@ namespace hydro {
     class SRHD2D {
         public:
 
-        /* Define Data Structures for the Fluid Properties. */
-        struct Conserved
-        {
-            Conserved() {}
-            ~Conserved() {}
-            double D, S1, S2, tau;
-
-            Conserved(double D, double S1, double S2, double tau) : D(D), S1(S1), S2(S2), tau(tau) {}  
-            Conserved(const Conserved &u) : D(u.D), S1(u.S1), S2(u.S2), tau(u.tau)    {}  
-            Conserved operator + (const Conserved &p)  const { return Conserved(D+p.D, S1+p.S1, S2+p.S2, tau+p.tau); }  
-            Conserved operator - (const Conserved &p)  const { return Conserved(D-p.D, S1-p.S1, S2-p.S2, tau-p.tau); }  
-            Conserved operator * (const double c)      const { return Conserved(D*c, S1*c, S2*c, tau*c ); }
-            Conserved operator / (const double c)      const { return Conserved(D/c, S1/c, S2/c, tau/c ); }
-
-            double momentum(int nhat)
-            {
-                return (nhat == 1 ? S1 : S2);
-            }
-        };
-
-        struct Flux
-        {
-            Flux() {}
-            ~Flux() {}
-            double D, S1, S2, tau;
-
-            Flux(double D, double S1, double S2, double tau) : D(D), S1(S1), S2(S2), tau(tau) {}  
-            Flux(const Flux &u) : D(u.D), S1(u.S1), S2(u.S2), tau(u.tau)    {}  
-            Flux operator + (const Flux &p)  const { return Flux(D+p.D, S1+p.S1, S2+p.S2, tau+p.tau); }  
-            Flux operator - (const Flux &p)  const { return Flux(D-p.D, S1-p.S1, S2+p.S2, tau+p.tau); }  
-            Flux operator * (double c)       const { return Flux(D*c,   S1*c, S2*c, tau*c  ); }
-
-            double momentum(int nhat)
-            {
-                return (nhat == 1 ? S1 : S2);
-            }
-        };
-
-        struct Primitives {
-            double rho;
-            double v1;
-            double v2;
-            double p;
-        };
-
-        struct Eigenvals{
-            double aL;
-            double aR;
-        };
-        struct ConserveData
-        {
-            ConserveData() {}
-            ~ConserveData() {}
-            std::vector<double> D, S1, S2, tau;
-
-            ConserveData(std::vector<double>  &D,  std::vector<double>  &S1, 
-                          std::vector<double>  &S2, std::vector<double>  &tau) : D(D), S1(S1), S2(S2), tau(tau) {} 
-
-            ConserveData(const ConserveData &u) : D(u.D), S1(u.S1), S2(u.S2), tau(u.tau){} 
-            Conserved operator[] (int i) const {return Conserved(D[i], S1[i], S2[i], tau[i]); }
-
-            void swap( ConserveData &c) {
-                this->D.swap(c.D); 
-                this->S1.swap(c.S1);
-                this->S2.swap(c.S2); 
-                this->tau.swap(c.tau); 
-                };
-        };
-
-        struct PrimitiveData
-        {
-            std::vector<double> rho, v1, v2, p;
-        };
-
         /* Shared Data Members */
-        Eigenvals lambda;
-        PrimitiveData prims; 
-        ConserveData u_state; 
+        hydro2d::Eigenvals lambda;
+        std::vector<hydro2d::Primitives> prims; 
+        hydro2d::ConserveData u_state; 
         std::vector<std::vector<double> > state2D, sources;
         float tend, tstart;
         double theta, gamma;
@@ -246,7 +172,7 @@ namespace hydro {
         int active_zones, idx_active, x_bound, y_bound; 
         std::string coord_system;
         std::vector<double> x1, x2, sourceD, source_S1, source_S2, source_tau, pressure_guess;
-        std::vector<double> lorentz_gamma;
+        std::vector<double> lorentz_gamma, xvertices, yvertices;
 
         /* Methods */
         SRHD2D();
@@ -255,63 +181,60 @@ namespace hydro {
                             double CFL, std::string coord_system);
         ~SRHD2D();
 
-        Primitives cons2primSR(Conserved  &u_state,
+        hydro2d::Primitives cons2primSR(hydro2d::Conserved  &u_state,
                                  double lorentz_gamma,
                                  std::tuple<int, int>(coordinates));
 
-        PrimitiveData cons2prim2D( const ConserveData &cons_state2D,
-                                   std::vector<double> &lorentz_gamma);
+        std::vector<hydro2d::Primitives> cons2prim2D(const std::vector<hydro2d::Conserved> &cons_state2D,
+                                           std::vector<double> &lorentz_gamma);
 
-        Eigenvals  calc_Eigenvals(const Primitives &prims_l,
-                                  const Primitives &prims_r,
-                                  const unsigned int nhat);
+        hydro2d::Eigenvals  calc_Eigenvals(const hydro2d::Primitives &prims_l,
+                                           const hydro2d::Primitives &prims_r,
+                                           const unsigned int nhat);
 
-        Conserved  calc_stateSR2D(double rho, double vx,
-                                  double vy, double pressure);
+        hydro2d::Conserved  calc_stateSR2D(const hydro2d::Primitives &prims);
 
-        Conserved    calc_hll_state(
-                                const Conserved   &left_state,
-                                const Conserved   &right_state,
-                                const Conserved   &left_flux,
-                                const Conserved   &right_flux,
-                                const Primitives  &left_prims,
-                                const Primitives  &right_prims,
+        hydro2d::Conserved    calc_hll_state(
+                                const hydro2d::Conserved   &left_state,
+                                const hydro2d::Conserved   &right_state,
+                                const hydro2d::Conserved   &left_flux,
+                                const hydro2d::Conserved   &right_flux,
+                                const hydro2d::Primitives  &left_prims,
+                                const hydro2d::Primitives  &right_prims,
                                 unsigned int nhat);
 
-        Conserved calc_intermed_statesSR2D( const Primitives &prims,
-                                            const Conserved &state,
-                                            double a,
-                                            double aStar,
-                                            double pStar,
-                                            int nhat);
+        hydro2d::Conserved calc_intermed_statesSR2D( const hydro2d::Primitives &prims,
+                                                     const hydro2d::Conserved &state,
+                                                     double a,
+                                                     double aStar,
+                                                     double pStar,
+                                                     int nhat);
 
-        Conserved      calc_hllc_flux(
-                                const Conserved    &left_state,
-                                const Conserved    &right_state,
-                                const Conserved         &left_flux,
-                                const Conserved         &right_flux,
-                                const Primitives   &left_prims,
-                                const Primitives   &right_prims,
+        hydro2d::Conserved      calc_hllc_flux(
+                                const hydro2d::Conserved    &left_state,
+                                const hydro2d::Conserved    &right_state,
+                                const hydro2d::Conserved         &left_flux,
+                                const hydro2d::Conserved         &right_flux,
+                                const hydro2d::Primitives   &left_prims,
+                                const hydro2d::Primitives   &right_prims,
                                 const unsigned int nhat);
 
-        Conserved calc_Flux(double rho, double vx, 
-                            double vy, double pressure, 
-                            unsigned int nhat);
+        hydro2d::Conserved calc_Flux(const hydro2d::Primitives &prims, unsigned int nhat);
 
-        Conserved   calc_hll_flux(
-                        const Conserved    &left_state,
-                        const Conserved    &right_state,
-                        const Conserved    &left_flux,
-                        const Conserved    &right_flux,
-                        const Primitives   &left_prims,
-                        const Primitives   &right_prims,
+        hydro2d::Conserved   calc_hll_flux(
+                        const hydro2d::Conserved    &left_state,
+                        const hydro2d::Conserved    &right_state,
+                        const hydro2d::Conserved    &left_flux,
+                        const hydro2d::Conserved    &right_flux,
+                        const hydro2d::Primitives   &left_prims,
+                        const hydro2d::Primitives   &right_prims,
                         const unsigned int nhat);
 
-        Conserved  u_dot(unsigned int ii, unsigned int jj);
+        hydro2d::Conserved  u_dot(unsigned int ii, unsigned int jj);
 
-        ConserveData  u_dot2D(const ConserveData  &cons_state);
+        std::vector<hydro2d::Conserved>  u_dot2D(const std::vector<hydro2d::Conserved>  &cons_state);
 
-        double adapt_dt(const PrimitiveData &prims);
+        double adapt_dt(const std::vector<hydro2d::Primitives> &prims);
 
         std::vector<std::vector<double> >   simulate2D( const std::vector<double> lorentz_gamma,
                                                         const std::vector<std::vector<double> > sources,
