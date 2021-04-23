@@ -13,48 +13,8 @@ from libcpp cimport bool
 from libcpp.string cimport string
 from cpython cimport array 
 
-# c++ interface to cython 
-cdef extern from "<array>" namespace "std" nogil :
-    ctypedef butt "std::array<double, 2>"
-
-    cdef cppclass total "total_zones":
-        pass 
-
-    cdef cppclass three "3":
-        pass
-
-    cdef cppclass nzones "_NX*_NY":
-        pass
-    cdef cppclass array2 "std::array<double, 2>":
-        array2() except+
-        double& operator[](size_t)
-
-    
-    cdef cppclass array[T, U]:
-        ctypedef T value_type
-        cppclass iterator:
-            T& operator*()
-            iterator operator++()
-            iterator operator--()
-            iterator operator+(size_t)
-            iterator operator-(size_t)
-        bint operator==(iterator)
-        bint operator!=(iterator)
-        bint operator<(iterator)
-        bint operator>(iterator)
-        bint operator<=(iterator)
-        bint operator>=(iterator)
-        T& operator[](size_t)
-        array() except +
-        array(array&) except +
-
-cdef extern from "ustate.h" namespace "hydro":
-    cdef int NX "_NX"
-    cdef int NY "_NY"
+cdef extern from "classical_1d.h" namespace "simbi":
     cdef int total_zones "total_zones"
-    # cdef double[:] mem
-    # cdef array2 *arr = <array2 *>(&mem[0])
-    ctypedef array[double, nzones] hello
 
     cdef cppclass Newtonian1D:
         Newtonian1D() except +
@@ -67,6 +27,19 @@ cdef extern from "ustate.h" namespace "hydro":
         vector[vector [double]] cons2prim1D(vector[vector[double]])
         vector[vector [double]] simulate1D(float, float, float, bool, bool, bool, bool)
 
+cdef extern from "classical_2d.h" namespace "simbi":
+    cdef cppclass Newtonian2D:
+        Newtonian2D() except +
+        Newtonian2D(vector[vector[vector[double]]], float, vector[double], vector[double],
+                    double, string) except + 
+        float theta, gamma
+        bool first_order, periodic
+        vector[vector[vector[double]]] state
+        vector[vector[vector[double]]] cons2prim2D(vector[vector[vector[double]]])
+        vector[vector[vector[double]]] simulate2D(vector[vector[vector[double]]], float, bool, double, bool, bool)
+
+
+cdef extern from "srhd_1d.h" namespace "simbi":
     cdef cppclass SRHD:
         SRHD() except +
         SRHD(vector[vector[double]], float, float, vector[double], string) except + 
@@ -80,16 +53,7 @@ cdef extern from "ustate.h" namespace "hydro":
                                             float, float, double ,double, double, string,
                                             bool, bool, bool, bool)
 
-    cdef cppclass Newtonian2D:
-        Newtonian2D() except +
-        Newtonian2D(vector[vector[vector[double]]], float, vector[double], vector[double],
-                    double, string) except + 
-        float theta, gamma
-        bool first_order, periodic
-        vector[vector[vector[double]]] state
-        vector[vector[vector[double]]] cons2prim2D(vector[vector[vector[double]]])
-        vector[vector[vector[double]]] simulate2D(vector[vector[vector[double]]], float, bool, double, bool, bool)
-
+cdef extern from "srhd_2d.h" namespace "simbi":
     cdef cppclass SRHD2D:
         SRHD2D() except +
         SRHD2D(vector[vector[double]], int, int, float, vector[double], vector[double],
@@ -121,6 +85,7 @@ cdef class PyState:
                         bool first_order=True, bool periodic = False, bool linspace = True,
                         bool hllc = False):
         return np.array(self.c_state.simulate1D(tend, dt, theta, first_order, periodic, linspace, hllc))
+
 
 # Relativisitc 1D Class
 cdef class PyStateSR:
