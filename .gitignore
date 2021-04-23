@@ -5,6 +5,7 @@ build/
 data/
 tests/
 science/
+src/ustate.h
 test.cpp
 ustate
 .vscode/
