@@ -5,7 +5,7 @@
 *
 * Marcus DuPont
 * New York University
-* 09/04/2020
+* 04/09/2020
 */
 
 #ifndef HELPER_FUNCTIONS_H
