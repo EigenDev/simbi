@@ -12,6 +12,7 @@ import argparse
 import h5py 
 import astropy.constants as const
 
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from datetime import datetime
 import os
 
@@ -126,7 +127,7 @@ def main():
     # r = np.logspace(np.log10(0.01), np.log10(0.5), xnpts)
     theta = np.linspace(ymin, ymax, yactive)
     theta_mirror = - theta[::-1]
-    theta_mirror[-1] *= -1.
+    # theta_mirror[-1] *= -1.
     
     rr, tt = np.meshgrid(r, theta)
     rr, t2 = np.meshgrid(r, theta_mirror)
@@ -150,7 +151,7 @@ def main():
     else:
         color_map = plt.cm.get_cmap(args.cmap)
     
-    fig, ax= plt.subplots(1, 1, figsize=(15,8), subplot_kw=dict(projection='polar'), constrained_layout=True)
+    fig, ax= plt.subplots(1, 1, figsize=(15,8), subplot_kw=dict(projection='polar'), constrained_layout=False)
 
     tend = t
     c1 = ax.pcolormesh(tt, rr, field_dict[args.field], cmap=color_map, shading='auto', norm = norm)
@@ -158,23 +159,40 @@ def main():
 
     fig.suptitle('SIMBI: {} at t = {:.2f} s'.format(args.setup[0], t), fontsize=20, y=0.95)
 
-    cbaxes = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
+    # divider = make_axes_locatable(ax)
+    # cbaxes  = divider.append_axes('right', size='5%', pad=0.1)
+    # cbar    = fig.colorbar(c2, orientation='vertical')
+    # cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
+    
+    if ymax < np.pi:
+        ax.set_position( [0.1, -0.18, 0.8, 1.43])
+        cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
+        cbar_orientation = "horizontal"
+    else:
+        cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
+        cbar_orientation = "vertical"
+        
     if args.log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        cbar = fig.colorbar(c2, orientation='horizontal', cax=cbaxes, format=logfmt)
+        cbar = fig.colorbar(c2, orientation=cbar_orientation, cax=cbaxes, format=logfmt)
     else:
         cbar = fig.colorbar(c2, orientation='horizontal', cax=cbaxes)
-    ax.set_position( [0.1, -0.18, 0.8, 1.43])
+        
+    
+        
+    # ax.set_position( [0.1, -0.18, 0.8, 1.43])
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
     ax.yaxis.grid(True, alpha=0.1)
     ax.xaxis.grid(True, alpha=0.1)
     ax.tick_params(axis='both', labelsize=10)
-    cbaxes.tick_params(axis='x', labelsize=10)
+    # cbaxes.tick_params(axis='x', labelsize=10)
     ax.axes.xaxis.set_ticklabels([])
     ax.set_rmax(xmax) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
-    ax.set_thetamin(-90)
-    ax.set_thetamax(90)
+    
+    ymd = int( np.ceil(ymax * 180/np.pi) )
+    ax.set_thetamin(-ymd)
+    ax.set_thetamax(ymd)
 
     # Change the format of the field
     if args.field == "rho":
@@ -192,7 +210,7 @@ def main():
     plt.show()
     
     if args.save:
-        fig.savefig("plots/2D/SR/{}.png".format(args.setup[0]), dpi=1200)
+        fig.savefig("plots/2D/SR/{}.png".format(args.setup[0].replace(" ", "_")), dpi=300)
     
 if __name__ == "__main__":
     main()

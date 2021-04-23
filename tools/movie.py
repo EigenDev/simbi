@@ -112,13 +112,13 @@ def create_mesh(fig, ax, filepath, filename, field, setup, cbaxes, vmin = None, 
 
     if log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        cbar = fig.colorbar(c2, orientation='horizontal', cax=cbaxes, format=logfmt)
+        cbar = fig.colorbar(c2, orientation='vertical', cax=cbaxes, format=logfmt)
     else:
         cbar = fig.colorbar(c2, orientation='horizontal', cax=cbaxes)
         
     fig.suptitle('SIMBI: {} at t = {:.2f} s'.format(setup, t), fontsize=20, y=0.95)
     
-    ax.set_position( [0.1, -0.18, 0.8, 1.43])
+    # ax.set_position( [0.1, -0.18, 0.8, 1.43])
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
     ax.yaxis.grid(True, alpha=0.1)
@@ -127,8 +127,10 @@ def create_mesh(fig, ax, filepath, filename, field, setup, cbaxes, vmin = None, 
     cbaxes.tick_params(axis='x', labelsize=10)
     ax.axes.xaxis.set_ticklabels([])
     ax.set_rmax(xmax) if rmax == 0.0 else ax.set_rmax(rmax)
-    ax.set_thetamin(-90)
-    ax.set_thetamax(90)
+    
+    ymd = int( np.ceil(ymax * 180/np.pi) )
+    ax.set_thetamin(-ymd)
+    ax.set_thetamax(ymd)
 
     # Change the format of the field
     if   field == "rho":
@@ -186,14 +188,25 @@ def main():
     parser.add_argument('--save', dest='save', action='store_true',
                         default=False,
                         help='True if you want save the fig')
+    
+    parser.add_argument('--half', dest='half', action='store_true',
+                        default=False,
+                        help='True if you want half a polar plot')
 
    
     args = parser.parse_args()
     vmin, vmax = eval(args.cbar)
     
-    fig = plt.figure(figsize=(15,8), constrained_layout=True)
+    fig = plt.figure(figsize=(15,8), constrained_layout=False)
     ax  = fig.add_subplot(111, projection='polar')
-    cbaxes = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
+    if args.half:
+        ax.set_position( [0.1, -0.18, 0.8, 1.43])
+        cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
+        cbar_orientation = "horizontal"
+    else:
+        cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
+        cbar_orientation = "vertical"
+    # cbaxes = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
     
     frame_count, flist = get_frames(args.data_dir[0])
     
@@ -240,7 +253,7 @@ def main():
     )
 
     if args.save:
-        animation.save("{}.mp4".format(args.setup[0]))
+        animation.save("{}.mp4".format(args.setup[0]).replace(" ", "_"), bitrate=400)
     else:
         plt.show()
     

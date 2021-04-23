@@ -6,17 +6,15 @@
 * Compressible Hydro Simulation
 */
 
-#include "ustate.h" 
-#include "helper_functions.h"
 #include <cmath>
-#include <map>
 #include <algorithm>
 #include <iomanip>
 #include <chrono>
-#include <omp.h>
+#include "srhd_2d.h" 
+#include "helper_functions.h"
 
 using namespace std;
-using namespace hydro;
+using namespace simbi;
 using namespace chrono;
 
 // Default Constructor 
@@ -147,8 +145,8 @@ vector<Primitives> SRHD2D::cons2prim2D(const vector<Conserved> &u_state2D, vecto
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 Eigenvals SRHD2D::calc_Eigenvals( const Primitives &prims_l,
-                                      const Primitives &prims_r,
-                                      unsigned int nhat = 1)
+                                  const Primitives &prims_r,
+                                  unsigned int nhat = 1)
 {
     Eigenvals lambda;
 
@@ -359,13 +357,13 @@ double SRHD2D::adapt_dt(const vector<Primitives> &prims){
     // Compute the minimum timestep given CFL
     for (int jj = 0; jj < yphysical_grid; jj++){
         shift_j = jj + idx_active;
-        x2_right = yvertices[jj + 1];
-        x2_left  = yvertices[jj];
+        x2_right = coord_lattice.x2vertices[jj + 1];
+        x2_left  = coord_lattice.x2vertices[jj];
         for (int ii = 0; ii < xphysical_grid; ii++){
             shift_i = ii + idx_active;
 
-            r_right = xvertices[ii + 1];
-            r_left  = xvertices[ii];
+            r_right = coord_lattice.x1vertices[ii + 1];
+            r_left  = coord_lattice.x1vertices[ii];
 
             dx1      = r_right - r_left;
             dx2      = x2_right - x2_left;
@@ -377,10 +375,10 @@ double SRHD2D::adapt_dt(const vector<Primitives> &prims){
             h    = 1. + gamma*pressure/(rho*(gamma - 1.));
             cs   = sqrt(gamma * pressure/(rho * h));
 
-            plus_v1 =  (v1 + cs)/(1 + v1*cs);
-            plus_v2 =  (v2 + cs)/(1 + v2*cs);
-            minus_v1 = (v1 - cs)/(1 - v1*cs);
-            minus_v2 = (v2 - cs)/(1 - v2*cs);
+            plus_v1 =  (v1 + cs)/(1. + v1*cs);
+            plus_v2 =  (v2 + cs)/(1. + v2*cs);
+            minus_v1 = (v1 - cs)/(1. - v1*cs);
+            minus_v2 = (v2 - cs)/(1. - v2*cs);
 
             if (coord_system == "cartesian"){
                 
@@ -388,9 +386,7 @@ double SRHD2D::adapt_dt(const vector<Primitives> &prims){
 
             } else {
                 // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                volAvg = 0.75*( ( r_right * r_right * r_right * r_right - r_left * r_left * r_left * r_left ) / 
-                                    ( r_right * r_right * r_right - r_left * r_left * r_left) );
-
+                volAvg = coord_lattice.x1mean[ii];
                 cfl_dt = min( dx1/(max(abs(plus_v1), abs(minus_v1))), volAvg*dx2/(max(abs(plus_v2), abs(minus_v2))) );
 
             }
@@ -629,8 +625,7 @@ vector<Conserved> SRHD2D::u_dot2D(const vector<Conserved> &u_state)
     
     // The periodic BC doesn't require ghost cells. Shift the index
     // to the beginning.
-    int i_start = idx_active; 
-    int j_start = idx_active;
+    int i_start = idx_active, j_start = idx_active;
     int i_bound = x_bound;
     int j_bound = y_bound;
     
@@ -1106,14 +1101,8 @@ vector<Conserved> SRHD2D::u_dot2D(const vector<Conserved> &u_state)
             } else {
                 for (int jj = j_start; jj < j_bound; jj++){
                     ycoordinate = jj - 2;
-                    theta_right = yvertices[ycoordinate + 1];
-                    theta_left  = yvertices[ycoordinate];
-                    upper_tsurface = sin(theta_right);
-                    lower_tsurface = sin(theta_left);
-                    ang_avg = 0.5 *(theta_right + theta_left);
-                    dtheta_bar = sin(ang_avg)*(theta_right - theta_left);
-                    cost       = cos(ang_avg);
-                    sint       = sin(ang_avg);
+                    upper_tsurface = coord_lattice.x2_face_areas[ycoordinate + 1];
+                    lower_tsurface = coord_lattice.x2_face_areas[ycoordinate];
                     for (int ii = i_start; ii < i_bound; ii++){
                         if (!periodic){
                             // Adjust for beginning input of L vector
@@ -1324,24 +1313,17 @@ vector<Conserved> SRHD2D::u_dot2D(const vector<Conserved> &u_state)
                             g2 = calc_hll_flux(uy_l, uy_r, g_l, g_r,yprims_l, yprims_r, 2);
                         }
                         
-                        r_right = xvertices[xcoordinate + 1]; 
-                        r_left  = xvertices[xcoordinate]; 
-
-                        dr   = r_right - r_left;
                         rhoc = center.rho;
                         pc   = center.p;
                         uc   = center.v1;
                         vc   = center.v2;
 
                         // Compute the surface areas
-                        right_rsurface = r_right * r_right ;
-                        left_rsurface  = r_left  * r_left  ;
-                        volAvg = 0.75*( (r_right * r_right * r_right * r_right - r_left * r_left * r_left * r_left) / 
-                                                (r_right * r_right * r_right -  r_left * r_left * r_left) );
-
-                        deltaV1 = volAvg * volAvg * dr;
-                        deltaV2 = volAvg * dtheta_bar; 
-
+                        right_rsurface = coord_lattice.x1_face_areas[xcoordinate + 1];
+                        left_rsurface  = coord_lattice.x1_face_areas[xcoordinate];
+                        volAvg         = coord_lattice.x1mean[xcoordinate];
+                        deltaV1        = coord_lattice.dV1[xcoordinate];
+                        deltaV2        = volAvg * coord_lattice.dV2[ycoordinate]; 
 
                         L.push_back(Conserved{ 
                             // L(D)
@@ -1356,7 +1338,7 @@ vector<Conserved> SRHD2D::u_dot2D(const vector<Conserved> &u_state)
                             // L(S2)
                             - (f1.S2*right_rsurface - f2.S2*left_rsurface)/deltaV1
                             - (g1.S2*upper_tsurface - g2.S2*lower_tsurface)/deltaV2
-                            -(rhoc*uc*vc/volAvg - pc*cost/(volAvg*sint)) + source_S2[xcoordinate + xphysical_grid*ycoordinate] * decay_const,
+                            -(rhoc*uc*vc/volAvg - pc*coord_lattice.cot[ycoordinate]/volAvg  ) + source_S2[xcoordinate + xphysical_grid*ycoordinate] * decay_const,
 
                             // L(tau)
                             - (f1.tau*right_rsurface - f2.tau*left_rsurface)/deltaV1
@@ -1429,14 +1411,25 @@ twoVec SRHD2D::simulate2D(vector<double> lorentz_gamma,
     }
 
     this->active_zones = xphysical_grid * yphysical_grid;
+    this->xvertices.resize(x1.size() + 1);
+    this->yvertices.resize(x2.size() + 1);
 
     //--------Config the System Enums
     config_system();
-    // vector<double> xvertices, yvertices;
-    this->xvertices.resize(x1.size() + 1);
-    this->yvertices.resize(x2.size() + 1);
-    compute_vertices(x1, xvertices, xphysical_grid, linspace);
-    compute_vertices(x2, yvertices, yphysical_grid, true);
+    if ( (coord_system == "spherical") && (linspace) )
+    {
+        this->coord_lattice = CLattice(x1, x2, simbi::GEOMETRY::SPHERICAL);
+        coord_lattice.config_lattice(simbi::CELLSPACING::LINSPACE, simbi::CELLSPACING::LINSPACE);
+    } else if ((coord_system == "spherical") && (!linspace) )
+    {   
+        this->coord_lattice = CLattice(x1, x2, simbi::GEOMETRY::SPHERICAL);
+        coord_lattice.config_lattice(simbi::CELLSPACING::LOGSPACE, simbi::CELLSPACING::LINSPACE);
+    }
+    else 
+    {
+        this->coord_lattice = CLattice(x1, x2, simbi::GEOMETRY::SPHERICAL);
+        coord_lattice.config_lattice(simbi::CELLSPACING::LINSPACE, simbi::CELLSPACING::LINSPACE);
+    }
 
     // Write some info about the setup for writeup later
     DataWriteMembers setup;

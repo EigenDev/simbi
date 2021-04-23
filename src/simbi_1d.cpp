@@ -7,14 +7,14 @@
 * Compressible Hydro Simulation
 */
 
-#include "ustate.h" 
+#include "classical_1d.h" 
 #include "helper_functions.h"
 #include <cmath>
 #include <map>
 #include <algorithm>
 
 using namespace std;
-using namespace hydro;
+using namespace simbi;
 
 
 // Default Constructor 

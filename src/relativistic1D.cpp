@@ -7,7 +7,7 @@
 * Compressible Hydro Simulation
 */
 
-#include "ustate.h" 
+#include "srhd_1d.h" 
 #include "helper_functions.h"
 #include <cmath>
 #include <map>
@@ -16,8 +16,7 @@
 #include <chrono>
 
 using namespace std;
-using namespace hydro;
-using namespace hydro1d;
+using namespace simbi;
 using namespace chrono;
 
 
@@ -43,6 +42,12 @@ SRHD::~SRHD() {}
 //              DATA STRUCTURES
 //================================================
 
+typedef hydro1d::PrimitiveArray PrimitiveArray;
+typedef hydro1d::ConservedArray ConservedArray;
+typedef hydro1d::Conserved Conserved;
+typedef hydro1d::Primitive Primitive;
+typedef hydro1d::Eigenvals Eigenvals;
+typedef hydro1d::Flux Flux;
 //--------------------------------------------------------------------------------------------------
 //                          GET THE PRIMITIVE VECTORS
 //--------------------------------------------------------------------------------------------------
