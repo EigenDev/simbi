@@ -16,12 +16,13 @@ sourcefiles = ['src/state.pyx',
                'src/relativistic1D.cpp', 
                'src/helper_functions.cpp', 
                'src/simbi_2d.cpp', 
-               'src/relativistic2D.cpp']
+               'src/relativistic2D.cpp',
+               'src/clattice.cpp']
 
 extensions = [Extension("state", sourcefiles, 
                         include_dirs=[numpy.get_include()],
                         libraries=['hdf5', 'hdf5_hl'],
-                        extra_compile_args = ['-std=c++11', '-march=native', '-fno-wrapv', '-O3'] )]
+                        extra_compile_args = ['-std=c++17', '-march=native', '-fno-wrapv', '-O3'] )]
 
 os.environ["CC"] = ("clang++")
 setup(
