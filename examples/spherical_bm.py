@@ -49,7 +49,7 @@ nr = int(1 + np.log10(rmax/rmin)/dtheta_face )
 
 r = np.logspace(np.log10(rmin), np.log10(rmax), nr) 
 
-r_right = 0.5*(r[1:nr] + r[0:nr-1])
+r_right = np.sqrt(r[1:nr] * r[0:nr-1])
 dr = r_right[N_exp]
 
 
