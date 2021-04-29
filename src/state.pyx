@@ -24,19 +24,18 @@ cdef extern from "classical_1d.h" namespace "simbi":
         string coord_system
         vector[double] r
         vector[vector[double]] state
-        vector[vector [double]] cons2prim1D(vector[vector[double]])
         vector[vector [double]] simulate1D(float, float, float, bool, bool, bool, bool)
 
 cdef extern from "classical_2d.h" namespace "simbi":
     cdef cppclass Newtonian2D:
         Newtonian2D() except +
-        Newtonian2D(vector[vector[vector[double]]], float, vector[double], vector[double],
+        Newtonian2D(vector[vector[double]], int NX, int NY, float, vector[double], vector[double],
                     double, string) except + 
-        float theta, gamma
+        double theta, gamma
         bool first_order, periodic
-        vector[vector[vector[double]]] state
-        vector[vector[vector[double]]] cons2prim2D(vector[vector[vector[double]]])
-        vector[vector[vector[double]]] simulate2D(vector[vector[vector[double]]], float, bool, double, bool, bool)
+        int NX, NY
+        vector[vector[double]] state
+        vector[vector[double]] simulate2D(vector[vector[double]], double, bool, double, bool, bool, double theta)
 
 
 cdef extern from "srhd_1d.h" namespace "simbi":
@@ -48,7 +47,6 @@ cdef extern from "srhd_1d.h" namespace "simbi":
         string coord_system
         vector[double] r
         vector[vector[double]] state
-        vector[vector [double]] cons2prim1D(vector[vector[double]], vector[double])
         vector[vector [double]] simulate1D(vector[double], vector[vector[double]], float, 
                                             float, float, double ,double, double, string,
                                             bool, bool, bool, bool)
@@ -77,13 +75,10 @@ cdef class PyState:
                     vector[double] r = [0], string coord_system = "cartesian"):
         self.c_state = Newtonian1D(state, gamma,CFL, r, coord_system)
 
-    def cons2prim1D(self, vector[vector[double]] u_state):
-
-        return np.array(self.c_state.cons2prim1D(u_state))
-
     def simulate(self, float tend=0.1, float dt=1.e-4, float theta = 1.5, 
                         bool first_order=True, bool periodic = False, bool linspace = True,
                         bool hllc = False):
+                        
         return np.array(self.c_state.simulate1D(tend, dt, theta, first_order, periodic, linspace, hllc))
 
 
@@ -120,23 +115,25 @@ cdef class PyStateSR:
 cdef class PyState2D:
     cdef Newtonian2D c_state             # hold a c++ instance that we're wrapping           
 
-    def __cinit__(self, vector[vector[vector[double]]] state, float gamma,
+    def __cinit__(self, np.ndarray[np.float64_t, ndim=3] state, float gamma,
                      vector[double] x1, vector[double] x2,
                     double cfl=0.4, string coord_system = "cartesian"):
 
-        self.c_state =  Newtonian2D(state, gamma, x1, x2, cfl, coord_system)
-
-    def cons2prim2D(self, vector[vector[vector[double]]] u_state):
-
-        return np.array(self.c_state.cons2prim2D(u_state))
+        ny, nx = state[0].shape
+        state_contig = state.reshape(state.shape[0], -1)
+        self.c_state =  Newtonian2D(state_contig, nx, ny, gamma, x1, x2, cfl, coord_system)
     
-    def simulate(self, tend=0.1, bool periodic=False, double dt = 1.e-4, 
-                        bool linspace=True,
-                        bool hllc = False, vector[vector[vector[double]]] sources = [[[0.0]]]):
+    def simulate(self, 
+                    tend=0.1,  bool periodic=False, 
+                    double dt = 1.e-4, bool linspace=True, 
+                    bool hllc = False, double theta = 1.5,
+                    vector[vector[double]] sources = [[0.0]]):
 
         source_terms = np.asarray(sources, dtype = np.double)
 
-        result = np.array(self.c_state.simulate2D(source_terms, tend, periodic, dt, linspace, hllc))
+        result = np.array(self.c_state.simulate2D(source_terms, tend, periodic, dt, linspace, hllc, theta))
+        
+        result = result.reshape(4, self.c_state.NY, self.c_state.NX)
 
         return result
 
