@@ -253,7 +253,7 @@ def main():
     )
 
     if args.save:
-        animation.save("{}.mp4".format(args.setup[0]).replace(" ", "_"), bitrate=400)
+        animation.save("{}.mp4".format(args.setup[0]).replace(" ", "_"))
     else:
         plt.show()
     

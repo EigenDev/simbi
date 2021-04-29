@@ -47,10 +47,12 @@ p[np.where(np.abs(y) < 0.25)] = pR
 
 # Seed the KH instability with random velocities
 seed = np.random.seed(0)
-sin_arr = 0.1*np.sin(2*np.pi*x)
+sin_arr = 0.75*np.sin(2*np.pi*x)
 vx_rand = np.random.choice(sin_arr, size=vx.shape)
 vy_rand = np.random.choice(sin_arr, size=vy.shape)
 
+plt.plot(x, sin_arr)
+plt.show()
 vx += vx_rand
 vy += vy_rand
 
@@ -61,16 +63,13 @@ S = np.zeros(shape = rho.shape)
 xx, yy = np.meshgrid(x, y)
 
 fig, ax= plt.subplots(1, 1, figsize=(8,10), constrained_layout=False)
-# ax.pcolormesh(xx, yy, vx, cmap='gist_rainbow', edgecolors='none', shading ='auto')
-# plt.show()
-# fig.clf()
+
 # HLLC Simulation
 SodHLLC = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy), 
               Npts=(xnpts, ynpts), geometry=((xmin, xmax),(ymin, ymax)), n_vars=4)
 
 t1 = (time.time()*u.s).to(u.min)
 hllc_result = SodHLLC.simulate(tend=tend, first_order=False, dt=dt, 
-                               sources=(S, S, S, S),
                                linspace=True, CFL=0.8,
                                hllc=True, periodic = True)
 
@@ -111,7 +110,7 @@ cbar.ax.set_xlabel('Density', fontsize=20)
 #plt.tight_layout()
 # plt.tight_layout()
 plt.show()
-fig.savefig("plots/2D/Newtonian/kh_instability_{}_by_{}_at_{}.pdf".format(ynpts, xnpts, tend))
+# fig.savefig("plots/2D/Newtonian/kh_instability_{}_by_{}_at_{}.pdf".format(ynpts, xnpts, tend))
 
 
 
