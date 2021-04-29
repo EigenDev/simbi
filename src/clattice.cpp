@@ -8,7 +8,7 @@
 
 simbi::CLattice::CLattice () {}
 
-simbi::CLattice::CLattice(std::vector<double> &x1, std::vector<double> &x2, simbi::GEOMETRY geom)
+simbi::CLattice::CLattice(std::vector<double> &x1, std::vector<double> &x2, simbi::Geometry geom)
 {
     this->x1ccenters = x1;
     this->x2ccenters = x2;
@@ -27,21 +27,21 @@ void simbi::CLattice::set_nx2_zones()
     nx2zones = x2ccenters.size();
 }
 
-void simbi::CLattice::compute_x1_vertices(simbi::CELLSPACING spacing)
+void simbi::CLattice::compute_x1_vertices(simbi::Cellspacing spacing)
 {
     x1vertices.resize(nx1zones + 1);
     x1vertices[0]        = x1ccenters[0];
     x1vertices[nx1zones] = x1ccenters[nx1zones - 1];
     switch (spacing)
     {
-        case simbi::CELLSPACING::LOGSPACE:
+        case simbi::Cellspacing::LOGSPACE:
             for (size_t i = 1; i < x1ccenters.size(); i++)
             {
                 x1vertices[i] = std::sqrt(x1ccenters[i] * x1ccenters[i-1]);
             }
             break;
         
-        case simbi::CELLSPACING::LINSPACE:
+        case simbi::Cellspacing::LINSPACE:
             for (size_t i = 1; i < x1ccenters.size(); i++)
             {
                 x1vertices[i] = 0.5 * (x1ccenters[i] + x1ccenters[i-1]);
@@ -52,21 +52,21 @@ void simbi::CLattice::compute_x1_vertices(simbi::CELLSPACING spacing)
     
 }
 
-void simbi::CLattice::compute_x2_vertices(simbi::CELLSPACING spacing)
+void simbi::CLattice::compute_x2_vertices(simbi::Cellspacing spacing)
 {
     x2vertices.resize(nx2zones + 1);
     x2vertices[0]        = x2ccenters[0];
     x2vertices[nx2zones] = x2ccenters[nx2zones - 1];
     switch (spacing)
     {
-        case simbi::CELLSPACING::LOGSPACE:
+        case simbi::Cellspacing::LOGSPACE:
             for (size_t i = 1; i < x2ccenters.size(); i++)
             {
                 x2vertices[i] = std::sqrt(x2ccenters[i] * x2ccenters[i-1]);
             }
             break;
         
-        case simbi::CELLSPACING::LINSPACE:
+        case simbi::Cellspacing::LINSPACE:
             for (size_t i = 1; i < x2ccenters.size(); i++)
             {
                 x2vertices[i] = 0.5 * (x2ccenters[i] + x2ccenters[i-1]);
@@ -177,7 +177,7 @@ void simbi::CLattice::compute_x1mean()
     }
 }
 
-void simbi::CLattice::config_lattice(simbi::CELLSPACING xcellspacing, simbi::CELLSPACING ycellspacing)
+void simbi::CLattice::config_lattice(simbi::Cellspacing xcellspacing, simbi::Cellspacing ycellspacing)
 {
     set_nx1_zones();
 
