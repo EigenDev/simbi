@@ -15,7 +15,7 @@ theta_min = 0.
 theta_max = np.pi/2
 rmin = 0.1
 rmax = 1.1
-xnpts = 64 
+xnpts = 256 
 
 rhoL = 1.4
 vL = 0.0
@@ -65,7 +65,7 @@ p = np.zeros(shape=(ynpts, xnpts), dtype= float)
 p[:, np.where(r < 0.5)] = pL 
 p[:, np.where(r > 0.5)] = pR
 
-tend = 0.4
+tend = 0.1
 dtheta = theta_max/ynpts
 dt = 0.4*(rmin*dtheta)
 #dt = 0.1*(rmax/xnpts)
@@ -79,8 +79,8 @@ SodHLLE = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt),
               Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
 t1 = (time.time()*u.s).to(u.min)
-hlle_result = SodHLLE.simulate(tend=tend, first_order=False, dt=dt, coordinates=b"spherical", sources=(S, S, S, S),
-                   linspace=False, CFL=0.9, hllc=False)
+hlle_result = SodHLLE.simulate(tend=tend, first_order=False, dt=dt, coordinates="spherical",
+                   linspace=False, CFL=0.4, hllc=False)
 
 
 # HLLC Simulation
@@ -88,8 +88,8 @@ SodHLLC = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt),
               Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
 t1 = (time.time()*u.s).to(u.min)
-hllc_result = SodHLLC.simulate(tend=tend, first_order=False, dt=dt, coordinates=b"spherical", sources=(S, S, S, S),
-linspace=False, CFL=0.9, hllc=True)
+hllc_result = SodHLLC.simulate(tend=tend, first_order=False, dt=dt, coordinates="spherical",
+                    linspace=False, CFL=0.4, hllc=True)
 
 print("The 2D SOD Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 
@@ -98,16 +98,13 @@ rhoC = hllc_result[0]
 v_r = np.abs( rhoE[2])
 
 # Plot Radial Density at Theta = 0
-for idx, thta in enumerate(rhoE):
-    if idx == 0:
-        plt.plot(r, rhoE[idx], label='HLLE')
-        plt.plot(r, rhoC[idx], label='HLLC')
-    else:
-        plt.plot(r, rhoE[idx])
-        plt.plot(r, rhoC[idx])
+
+plt.plot(r, rhoE[0], label='HLLE')
+plt.plot(r, rhoC[0], label='HLLC')
+
         
 plt.xlabel('R')
 plt.ylabel('Density')
 plt.legend()
-plt.savefig('plots/2D/2D_sod_hllc_vs_hlle.pdf')
+# plt.savefig('plots/2D/2D_sod_hllc_vs_hlle.pdf')
 plt.show()

@@ -18,7 +18,7 @@ epsilon = 1.0
 p_c = (gamma - 1.)*(3*epsilon/((nu + 1)*np.pi*r_init**nu))
 rho_init = 1.
 v_init = 0.
-N = 128
+N = 256
 
 def circular_mask(h, w, center=None, radius=None):
     
@@ -37,7 +37,7 @@ def circular_mask(h, w, center=None, radius=None):
     
 
                
-p = np.zeros((N+1,N+1), np.double)
+p = np.zeros((N,N), np.double)
 w, h = p.shape
 p[:, :] = p_c
 
@@ -48,11 +48,11 @@ pr[~mask] = p_init
 # print(pr)
 # zzz = input('')
 
-rho = np.zeros((N+1,N+1), float)
+rho = np.zeros((N,N), float)
 rho[:, :] = rho_init 
 
-vx = np.zeros((N+1,N+1), np.double)
-vy = np.zeros((N+1,N+1), np.double)
+vx = np.zeros((N,N), np.double)
+vy = np.zeros((N,N), np.double)
 
 vx[:, :] = v_init
 vy[:, :] = v_init
@@ -60,22 +60,22 @@ vy[:, :] = v_init
 tend = 0.01
 
 sedov = Hydro(gamma = gamma, initial_state=(rho, pr, vx, vy), 
-              Npts=(N+1, N+1), geometry=((-1., 1.),(-1.,1.)), n_vars=4)
+              Npts=(N, N), geometry=((-1., 1.),(-1.,1.)), n_vars=4)
 
 t1 = (time.time()*u.s).to(u.min)
-sol = sedov.simulate(tend=tend, first_order=False, dt=1.e-5, hllc=False)
+sol = sedov.simulate(tend=tend, first_order=False, dt=1.e-5, hllc=True)
 print("The 2D Sedov Simulation for N = {} took {:.3f}".format(N, (time.time()*u.s).to(u.min) - t1))
 
-pressure = sedov.cons2prim(sol)[1]
+rho = sol[0]
 
-x = np.linspace(-1., 1, N + 1)
-y = np.linspace(-1.,1,  N + 1)
+x = np.linspace(-1., 1, N)
+y = np.linspace(-1.,1,  N)
 
 xx, yy = np.meshgrid(x, y)
 
 fig, ax= plt.subplots(1, 1, figsize=(15,10))
-c1 = ax.contourf(xx, yy, pressure, cmap='plasma')
-ax.set_title('Pressure at t={} s on {} x {} grid'.format(tend, N, N), fontsize=20)
+c1 = ax.pcolormesh(xx, yy, rho, cmap='plasma', shading='auto')
+ax.set_title('Density at t={} s on {} x {} grid'.format(tend, N, N), fontsize=20)
 cbar = fig.colorbar(c1)
 
 plt.gca().set_aspect('equal', adjustable='box')
