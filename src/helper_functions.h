@@ -14,7 +14,6 @@
 #include <vector>
 #include <iostream>
 #include <cmath>
-#include <h5cpp/all>
 #include "H5Cpp.h"
 #include <algorithm>
 #include <map>
