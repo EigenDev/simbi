@@ -15,6 +15,7 @@
 #include <iostream>
 #include <cmath>
 #include <h5cpp/all>
+#include "H5Cpp.h"
 #include <algorithm>
 #include <map>
 #include "hydro_structs.h"
@@ -98,7 +99,7 @@ std::vector<std::vector<double>> transpose(std::vector<std::vector<double>> &);
 void toWritePrim(sr1d::PrimitiveArray *from, PrimData *to);
 void toWritePrim(sr2d::PrimitiveData *from, PrimData *to);
 std::string create_step_str(double t_interval, std::string &tnow);
-void write_hdf5(std::string data_directory, std::string filename, PrimData prims, DataWriteMembers system, int dim);
+void write_hdf5(std::string data_directory, std::string filename, PrimData prims, DataWriteMembers system, const int dim, const int size);
 void write_data(std::vector<std::vector<double>> &sim_data, double time, std::string sim_type);
 double calc_pressure(float, double, double, double);
 double calc_energy(float, double, double, double);
@@ -124,7 +125,7 @@ void config_ghosts2D(
     int x1grid_size, 
     int x2grid_size, 
     bool first_order,
-    std::string kind = "outflow");
+    bool bipolar = true);
 
 //-------------------Inline for Speed--------------------------------------
 inline double minmod(const double x, const double y, const double z)

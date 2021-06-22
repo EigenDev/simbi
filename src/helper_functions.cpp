@@ -13,7 +13,7 @@
 
 
 using namespace std;
-
+using namespace H5;
 // =========================================================================================================
 //        HELPER FUNCTIONS FOR COMPUTATION
 // =========================================================================================================
@@ -184,6 +184,7 @@ void config_ghosts2D(
             u_state[jj * x1grid_size + x1grid_size - 2].e_dens  = u_state[jj * x1grid_size + x1grid_size - 3].e_dens;
 
             // Fix the ghost zones at the angular boundaries
+            /**
             if (jj < 2){
                 for (int ii = 0; ii < x1grid_size; ii++){
                      if (jj == 0){
@@ -213,6 +214,7 @@ void config_ghosts2D(
                     }
                 }
             }
+            */
             
         }
 
@@ -224,7 +226,7 @@ void config_ghosts2D(
     int x1grid_size, 
     int x2grid_size, 
     bool first_order,
-    std::string kind){
+    bool bipolar){
 
     if (first_order){
         for (int jj = 0; jj < x2grid_size; jj++){
@@ -276,23 +278,24 @@ void config_ghosts2D(
             u_state[jj * x1grid_size + x1grid_size - 1].S2 = u_state[jj * x1grid_size + x1grid_size - 3].S2;
             u_state[jj * x1grid_size + x1grid_size - 2].S2 = u_state[jj * x1grid_size + x1grid_size - 3].S2;
 
-            u_state[jj * x1grid_size + 0].tau               = u_state[jj * x1grid_size + 3].tau;
-            u_state[jj * x1grid_size + 1].tau               = u_state[jj * x1grid_size + 2].tau;
+            u_state[jj * x1grid_size + 0].tau                = u_state[jj * x1grid_size + 3].tau;
+            u_state[jj * x1grid_size + 1].tau                = u_state[jj * x1grid_size + 2].tau;
             u_state[jj * x1grid_size + x1grid_size - 1].tau  = u_state[jj * x1grid_size + x1grid_size - 3].tau;
             u_state[jj * x1grid_size + x1grid_size - 2].tau  = u_state[jj * x1grid_size + x1grid_size - 3].tau;
 
             // Fix the ghost zones at the angular boundaries
+            
             if (jj < 2){
                 for (int ii = 0; ii < x1grid_size; ii++){
                      if (jj == 0){
                         u_state[jj * x1grid_size + ii].D   =   u_state[3 * x1grid_size + ii].D;
                         u_state[jj * x1grid_size + ii].S1  =   u_state[3 * x1grid_size + ii].S1;
-                        u_state[jj * x1grid_size + ii].S2  = - u_state[3 * x1grid_size + ii].S2;
+                        u_state[jj * x1grid_size + ii].S2  =   u_state[3 * x1grid_size + ii].S2;
                         u_state[jj * x1grid_size + ii].tau =   u_state[3 * x1grid_size + ii].tau;
                     } else {
                         u_state[jj * x1grid_size + ii].D    =   u_state[2 * x1grid_size + ii].D;
                         u_state[jj * x1grid_size + ii].S1   =   u_state[2 * x1grid_size + ii].S1;
-                        u_state[jj * x1grid_size + ii].S2   = - u_state[2 * x1grid_size + ii].S2;
+                        u_state[jj * x1grid_size + ii].S2   =   u_state[2 * x1grid_size + ii].S2;
                         u_state[jj * x1grid_size + ii].tau  =   u_state[2 * x1grid_size + ii].tau;
                     }
                 }
@@ -301,12 +304,12 @@ void config_ghosts2D(
                     if (jj == x2grid_size - 1){
                         u_state[jj * x1grid_size + ii].D   =   u_state[(x2grid_size - 4) * x1grid_size + ii].D;
                         u_state[jj * x1grid_size + ii].S1  =   u_state[(x2grid_size - 4) * x1grid_size + ii].S1;
-                        u_state[jj * x1grid_size + ii].S2  = - u_state[(x2grid_size - 4) * x1grid_size + ii].S2;
+                        u_state[jj * x1grid_size + ii].S2  =   u_state[(x2grid_size - 4) * x1grid_size + ii].S2;
                         u_state[jj * x1grid_size + ii].tau =   u_state[(x2grid_size - 4) * x1grid_size + ii].tau;
                     } else {
                         u_state[jj * x1grid_size + ii].D   =   u_state[(x2grid_size - 3) * x1grid_size + ii].D;
                         u_state[jj * x1grid_size + ii].S1  =   u_state[(x2grid_size - 3) * x1grid_size + ii].S1;
-                        u_state[jj * x1grid_size + ii].S2  = - u_state[(x2grid_size - 3) * x1grid_size + ii].S2;
+                        u_state[jj * x1grid_size + ii].S2  =   u_state[(x2grid_size - 3) * x1grid_size + ii].S2;
                         u_state[jj * x1grid_size + ii].tau =   u_state[(x2grid_size - 3) * x1grid_size + ii].tau;
                     }
                 }
@@ -354,7 +357,8 @@ string create_step_str(double t_interval, string &tnow){
 
     }
 
-    for (int i = 0; i < 7; i++){
+    int label_size = tnow.size();
+    for (int i = 0; i < label_size; i++){
         a = tnow[i] - '0';
         b = s[i] - '0';
         s[i] = a + b + '0';
@@ -364,54 +368,181 @@ string create_step_str(double t_interval, string &tnow){
 
 
 }
-void write_hdf5(string data_directory, string filename, PrimData prims, DataWriteMembers setup, int dim = 2)
+void write_hdf5(
+    string data_directory, 
+    string filename, 
+    PrimData prims, 
+    DataWriteMembers setup, 
+    const int dim = 2,
+    const int size = 1)
 {
     string filePath = data_directory;
     cout << "\n" <<  "Writing File...: " << filePath + filename << endl;
-    h5::fd_t fd = h5::create(filePath + filename, H5F_ACC_TRUNC, h5::default_fcpl,
-                    h5::libver_bounds({H5F_LIBVER_V18, H5F_LIBVER_V18}) );
 
-    // Generate Dataset Object to Write Attributes
-    vector<int> sim_data(10, 0);
-    auto ds = h5::write(fd, "sim_info", sim_data);
-    
+    H5::H5File file(filePath + filename, H5F_ACC_TRUNC );
+
+    // Dataset dims
+    hsize_t dimsf[1];
+    dimsf[0] = size;               
+    int rank = 1;
+    H5::DataSpace dataspace(rank, dimsf);
+    H5::DataType  datatype(H5::PredType::NATIVE_DOUBLE);
+
     switch (dim)
     {
-    case 2:
-        // Write the Primitives 
-        h5::write(fd,"rho", prims.rho);
-        h5::write(fd,"v1",  prims.v1);
-        h5::write(fd,"v2",  prims.v2);
-        h5::write(fd,"p",   prims.p);
+        case 1:
+        {
+            double* rho = new double[size];
+            double* v   = new double[size];
+            double* p   = new double[size];
 
-        // Write Datset Attributes
-        ds["current_time"]   = setup.t;
-        ds["time_step"]      = setup.dt;
-        ds["NX"]             = setup.NX;
-        ds["NY"]             = setup.NY;
-        ds["xmax"]           = setup.xmax;
-        ds["xmin"]           = setup.xmin;
-        ds["ymax"]           = setup.ymax;
-        ds["ymin"]           = setup.ymin;
-        ds["xactive_zones"]  = setup.xactive_zones;
-        ds["yactive_zones"]  = setup.yactive_zones;
+            std::copy(prims.rho.begin(), prims.rho.begin() + size, rho);
+            std::copy(prims.v.begin(), prims.v.begin() + size, v);
+            std::copy(prims.p.begin(), prims.p.begin() + size, p);
+            H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
+
+            // Write the Primitives 
+            dataset.write(rho, H5::PredType::NATIVE_DOUBLE);
+            dataset.close();
+            
+            dataset = file.createDataSet("v", datatype, dataspace);
+            dataset.write(v, H5::PredType::NATIVE_DOUBLE);
+            dataset.close();
+
+            dataset = file.createDataSet("p", datatype, dataspace);
+            dataset.write(p, H5::PredType::NATIVE_DOUBLE);
+            dataset.close();
+
+            // Free the heap
+            delete(rho);
+            delete(v);
+            delete(p);
+
+            // Write Datset Attributes
+            H5::DataType double_type(H5::PredType::NATIVE_DOUBLE);
+            H5::DataType int_type(H5::PredType::NATIVE_INT);
+            H5::DataSpace att_space(H5S_SCALAR);
+
+            H5::DataSpace empty_dspace(1, dimsf);
+            H5::DataType  empty_dtype(H5::PredType::NATIVE_INT);
+            H5::DataSet   sim_info = file.createDataSet("sim_info", empty_dtype, empty_dspace);
+
+            H5::Attribute att = sim_info.createAttribute("current_time", double_type, att_space);
+            att.write(double_type, &setup.t);
+            att.close();
+
+            att = sim_info.createAttribute("time_step", double_type, att_space);
+            att.write(double_type, &setup.dt);
+            att.close();
+
+            att = sim_info.createAttribute("xmax", double_type, att_space);
+            att.write(double_type, &setup.xmax);
+            att.close();
+
+            att = sim_info.createAttribute("xmin", double_type, att_space);
+            att.write(double_type, &setup.xmin);
+            att.close();
+
+            att = sim_info.createAttribute("Nx", int_type, att_space);
+            att.write(int_type, &setup.NX);
+            att.close();
+
+            att = sim_info.createAttribute("xactive_zones", int_type, att_space);
+            att.write(int_type, &setup.xactive_zones);
+            att.close();
+
+            sim_info.close();
+            break;
+        }
+        case 2:
+            {
+            // Write the Primitives 
+            double* rho = new double[size];
+            double* v1  = new double[size];
+            double* v2  = new double[size];
+            double* p   = new double[size];
+
+            std::copy(prims.rho.begin(), prims.rho.begin() + size, rho);
+            std::copy(prims.v1.begin(), prims.v1.begin() + size, v1);
+            std::copy(prims.v2.begin(), prims.v2.begin() + size, v2);
+            std::copy(prims.p.begin(),  prims.p.begin() + size, p);
+            H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
+
+            // Write the Primitives 
+            dataset.write(rho, H5::PredType::NATIVE_DOUBLE);
+            dataset.close();
+            
+            dataset = file.createDataSet("v1", datatype, dataspace);
+            dataset.write(v1, H5::PredType::NATIVE_DOUBLE);
+            dataset.close();
+
+            dataset = file.createDataSet("v2", datatype, dataspace);
+            dataset.write(v2, H5::PredType::NATIVE_DOUBLE);
+            dataset.close();
+
+            dataset = file.createDataSet("p", datatype, dataspace);
+            dataset.write(p, H5::PredType::NATIVE_DOUBLE);
+            dataset.close();
+
+            // Free the heap
+            delete(rho);
+            delete(v1);
+            delete(v2);
+            delete(p);
+
+            // Write Datset Attributesauto double_type(H5::PredType::NATIVE_DOUBLE);
+            H5::DataType int_type(H5::PredType::NATIVE_INT);
+            H5::DataType double_type(H5::PredType::NATIVE_DOUBLE);
+            H5::DataSpace att_space(H5S_SCALAR);
+
+            H5::DataSpace empty_dspace(1, dimsf);
+            H5::DataType  empty_dtype(H5::PredType::NATIVE_INT);
+            H5::DataSet   sim_info = file.createDataSet("sim_info", empty_dtype, empty_dspace);
+            
+            H5::Attribute att = sim_info.createAttribute("current_time", double_type, att_space);
+            att.write(double_type, &setup.t);
+            att.close();
+
+            att = sim_info.createAttribute("time_step", double_type, att_space);
+            att.write(double_type, &setup.dt);
+            att.close();
+
+            att = sim_info.createAttribute("xmax", double_type, att_space);
+            att.write(double_type, &setup.xmax);
+            att.close();
+
+            att = sim_info.createAttribute("xmin", double_type, att_space);
+            att.write(double_type, &setup.xmin);
+            att.close();
+
+            att = sim_info.createAttribute("ymax", double_type, att_space);
+            att.write(double_type, &setup.ymax);
+            att.close();
+
+            att = sim_info.createAttribute("ymin", double_type, att_space);
+            att.write(double_type, &setup.ymin);
+            att.close();
+
+            att = sim_info.createAttribute("NX", int_type, att_space);
+            att.write(int_type, &setup.NX);
+            att.close();
+
+            att = sim_info.createAttribute("NY", int_type, att_space);
+            att.write(int_type, &setup.NY);
+            att.close();
+
+            att = sim_info.createAttribute("xactive_zones", int_type, att_space);
+            att.write(int_type, &setup.xactive_zones);
+            att.close();
+
+            att = sim_info.createAttribute("yactive_zones", int_type, att_space);
+            att.write(int_type, &setup.xactive_zones);
+            att.close();
+
+            sim_info.close();
         break;
+        }
     
-    case 1:
-        // Write the Primitives 
-        h5::write(fd,"rho", prims.rho);
-        h5::write(fd,"v",   prims.v);
-        h5::write(fd,"p",   prims.p);
-
-
-        // Write Datset Attributes
-        ds["current_time"]   = setup.t;
-        ds["time_step"]      = setup.dt;
-        ds["Nx"]             = setup.NX;
-        ds["xmax"]           = setup.xmax;
-        ds["xmin"]           = setup.xmin;
-        ds["xactive_zones"]  = setup.xactive_zones;
-        break;
     }
     
 }
