@@ -22,14 +22,14 @@ def rho0(n, theta):
 
 # Constants
 gamma = 4/3
-p_init = 1.e-10
-r_init = 0.05
+p_init = 1.e-6
+r_init = 0.01
 nu = 3.
 epsilon = 2.
 
 rho_init = rho0(0, np.pi)
 v_init = 0.
-ntheta = 200
+ntheta = 256
 rmin = 0.05
 rmax = 1
 N_exp = 20
@@ -45,7 +45,7 @@ theta_mirror = np.linspace(np.pi, 2*np.pi, ntheta)
 theta_rface = 0.5*(theta[0] + theta[1])
 dtheta_face = theta_rface - theta[0]
 dtheta = theta_max/ntheta
-nr = int(1 + np.log10(rmax/rmin)/dtheta_face )
+nr = int(np.ceil(np.log10(rmax/rmin)/dtheta_face ))
 
 r = np.logspace(np.log10(rmin), np.log10(rmax), nr) 
 
@@ -58,20 +58,19 @@ delta_r = dr - rmin
 p_zones = find_nearest(r, (rmin + dr))[0]
 p_zones = int(p_zones)
 
-p_c = 2*(gamma - 1.)*(3*epsilon/((nu + 1)*np.pi*dr**nu))
+p_c = (gamma - 1.)*(3*epsilon/((nu + 1)*np.pi*dr**nu))
 
 print("Central Pressure:", p_c)
-
-
-p = np.zeros((ntheta ,nr), np.double)
-p[:, :p_zones] = p_c 
-p[:, p_zones:] = p_init
-
+print("Dimensions: {} x {}".format(ntheta, nr))
 
 n = 2.0
+omega = 2.0
 rho = np.zeros((ntheta , nr), float)
-rho[:] = 1.0 #(rho0(n, theta)).reshape(ntheta, 1)
+rho[:] = 1.0 * r ** (-omega) #(rho0(n, theta)).reshape(ntheta, 1)
 
+p = rho * 1e-6
+p[:, :p_zones] = p_c 
+# p[:, p_zones:] = p_init
 
 # print(rho)
 # zzz = input()
@@ -80,7 +79,7 @@ vy = np.zeros((ntheta ,nr), np.double)
 
 
 
-tend = 0.5
+tend = 1.0
 dt = 1.e-8
 # with PackageResource() as bm:
 #     bm.Hydro()
@@ -89,10 +88,11 @@ bm = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy),
             geometry=((rmin, rmax),(theta_min, theta_max)), 
             n_vars=4, regime="relativistic")
 
+
 t1 = (time.time()*u.s).to(u.min)
 sol = bm.simulate(tend=tend, first_order= False, dt=dt,
                   coordinates="spherical", CFL=0.4, 
-                  hllc=False, linspace=False)
+                  hllc=True, linspace=False, theta=1.5)
 
 print("The 2D BM Simulation for N = {} took {:.3f}".format(ntheta, (time.time()*u.s).to(u.min) - t1))
 
@@ -104,10 +104,10 @@ rr, tt = np.meshgrid(r, theta)
 rr, t2 = np.meshgrid(r, theta_mirror)
 
 fig, ax= plt.subplots(1, 1, figsize=(8,10), subplot_kw=dict(projection='polar'), constrained_layout=True)
-c1 = ax.pcolormesh(tt, rr, W, cmap='inferno', shading = "gouraud")
-c2 = ax.pcolormesh(t2, rr, W, cmap='inferno', shading = "gouraud")
+c1 = ax.pcolormesh(tt, rr, sol[0], cmap='inferno', shading = "auto")
+c2 = ax.pcolormesh(t2, rr, sol[0], cmap='inferno', shading = "auto")
 
-fig.suptitle('Blandford-McKee Problem at t={} s on {} x {} grid'.format(tend, nr, ntheta), fontsize=15)
+fig.suptitle('Spherical Explosion at t={} s on {} x {} grid'.format(tend, nr, ntheta), fontsize=15)
 # ax.set_title(r'$\rho(\theta) = 1.0 - 0.95\cos(n \ \theta)$ with n = {}'.format(n), fontsize=10)
 cbar = fig.colorbar(c1)
 ax.set_theta_zero_location("N")
@@ -123,4 +123,4 @@ ax.set_thetamax(360)
 cbar.ax.set_ylabel('Lorentz Factor', fontsize=20)
 
 plt.show()
-fig.savefig('plots/2D/SR/2D_bm_0.1_.pdf', bbox_inches="tight")
+# fig.savefig('plots/2D/SR/2D_bm_0.1_.pdf', bbox_inches="tight")

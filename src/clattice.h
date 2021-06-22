@@ -23,9 +23,10 @@ namespace simbi {
             std::vector<double> x1vertices, x2vertices;       // X & Y cell vertices
             std::vector<double> x1ccenters, x2ccenters;       // X & Y cell centers
             std::vector<double> dx1, dx2;                     // Generalized x1 & x2 cell widths
-            std::vector<double> dV1, dV2;                     // Generalized effectivee cell "volumes"
+            std::vector<double> dV1, dV2, dVc;                     // Generalized effectivee cell "volumes"
             std::vector<double> x1mean, cot;                  // Cache some geometrical source term components
             int                 nx1zones, nx2zones    ;       // Number of zones in either direction
+            std::vector<double> s1_face_areas, s2_face_areas;
             simbi::Geometry _geom;
             simbi::Cellspacing _cell_space;
         
@@ -52,6 +53,9 @@ namespace simbi {
             // a non-Cartesian simulation geometry
             void compute_x2face_areas();
 
+            void compute_s1face_areas();
+            void compute_s2face_areas();
+
             // Compute the directional cell widths
             void compute_dx1();
 
@@ -61,6 +65,8 @@ namespace simbi {
             void compute_dV1();
 
             void compute_dV2();
+
+            void compute_dV();
 
             void compute_x1mean();
 

@@ -1201,7 +1201,7 @@ vector<vector<double>> SRHD::simulate1D(vector<double> &lorentz_gamma, vector<ve
                 filename = string_format("%d.chkpt." + tnow + ".h5", pgrid_size);
                 setup.t = t;
                 setup.dt = dt;
-                write_hdf5(data_directory, filename, prods, setup, 1);
+                write_hdf5(data_directory, filename, prods, setup, 1, Nx);
                 t_interval += chkpt_interval;
             }
 

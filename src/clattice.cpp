@@ -79,19 +79,53 @@ void simbi::CLattice::compute_x2_vertices(simbi::Cellspacing spacing)
 
 void simbi::CLattice::compute_x1face_areas()
 {
-    x1_face_areas.reserve(nx1zones + 1);
-    for(auto &vertex: x1vertices)
+    x1_face_areas.reserve((nx1zones + 1));
+    double tl, tr, dcos;
+    for(auto &xvertex: x1vertices)
     {
-        x1_face_areas.push_back(vertex * vertex);
+        x1_face_areas.push_back(xvertex * xvertex);
     }
 }
 
 void simbi::CLattice::compute_x2face_areas()
 {
-    x2_face_areas.reserve(nx2zones + 1);
-    for(auto &vertex: x2vertices)
+    x2_face_areas.reserve((nx2zones + 1));
+    double rl, rr, rdiff;
+    for(auto &yvertex: x2vertices)
     {
-        x2_face_areas.push_back(std::sin(vertex));
+        x2_face_areas.push_back(std::sin(yvertex));
+    }
+}
+
+void simbi::CLattice::compute_s1face_areas()
+{
+    s1_face_areas.reserve((nx1zones + 1)*nx2zones);
+    double tl, tr, dcos;
+    for (int jj = 1; jj < nx2zones + 1; jj++)
+    {
+        tl   = x2vertices[jj - 1];
+        tr   = x2vertices[jj];
+        dcos = std::cos(tl) - std::cos(tr);
+        for(auto &xvertex: x1vertices)
+        {
+            s1_face_areas.push_back(xvertex * xvertex * dcos);
+        }
+    }
+}
+
+void simbi::CLattice::compute_s2face_areas()
+{
+    s2_face_areas.reserve((nx2zones + 1)*nx1zones);
+    double rl, rr, rdiff;
+    for(auto &yvertex: x2vertices)
+    {
+        for (int ii = 1; ii < nx1zones + 1; ii++)
+        {
+            rl    = x1vertices[ii - 1];
+            rr    = x1vertices[ii];
+            rdiff = 0.5*(rr*rr - rl*rl);
+            s2_face_areas.push_back(std::sin(yvertex) * rdiff);
+        }
     }
 }
 
@@ -119,17 +153,19 @@ void simbi::CLattice::compute_dx2()
 
 void simbi::CLattice::compute_dV1()
 {
-    double rr, rl, rmean, dr;
+    double rr, rl, rmean, dr, dV;
     dV1.reserve(nx1zones);
-    size_t size = x1vertices.size();
-    for (size_t ii = 1; ii < size; ii++)
+    int nvx = nx1zones + 1;
+    for (int ii = 1; ii < nvx; ii++)
     {
         rr = x1vertices[ii];
         rl = x1vertices[ii - 1];
-        dr = rr - rl;
 
+        dr = rr - rl;
         rmean = 0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
-        dV1.push_back(rmean * rmean * dr);
+        dV = rmean * rmean * dr;
+        
+        dV1.push_back(dV);
     }
     
 }
@@ -143,23 +179,48 @@ void simbi::CLattice::compute_dV2()
     {
         x2r = x2vertices[jj];
         x2l = x2vertices[jj - 1];
-        x2mean = 0.5 *(x2r + x2l);
+        x2mean = 0.5*(x2r + x2l);
+        // x2mean = 
+        //     (std::sin(x2r) - x2r*std::cos(x2r) - std::sin(x2l) + x2l*std::cos(x2l))/(std::cos(x2l) - std::cos(x2r));
         dx2_bar = std::sin(x2mean)*(x2r - x2l);
         dV2.push_back(dx2_bar);
     }
     
 }
 
+void simbi::CLattice::compute_dV()
+{
+    double rr, rl, rmean, tl, tr, dV;
+    dVc.reserve(nx1zones*nx2zones);
+    int nvx = nx1zones + 1;
+    int nvy = nx2zones + 1;
+    for (int jj = 1; jj < nvy; jj++){
+        tl = x2vertices[jj - 1];
+        tr = x2vertices[jj];
+        for (int ii = 1; ii < nvx; ii++)
+        {
+            rr = x1vertices[ii];
+            rl = x1vertices[ii - 1];
+            dV = (1./3.) * (rr*rr*rr - rl*rl*rl)*(std::cos(tl) - std::cos(tr));
+            
+            dVc.push_back(dV);
+        }
+    }
+    
+}
+
 void simbi::CLattice::compute_cot()
 {
-    double x2mean, x2r, x2l, dx2_bar;
+    double x2mean, x2r, x2l;
     cot.reserve(nx2zones);
     size_t size = x2vertices.size();
     for (size_t jj = 1; jj < size; jj++)
     {
         x2r = x2vertices[jj];
         x2l = x2vertices[jj - 1];
-        x2mean = 0.5 *(x2r + x2l);
+        x2mean = 0.5 * (x2l + x2r);
+        // x2mean = 
+        //     (std::sin(x2r) - x2r*std::cos(x2r) - std::sin(x2l) + x2l*std::cos(x2l))/(std::cos(x2l) - std::cos(x2r));
         cot.push_back(std::cos(x2mean)/std::sin(x2mean));
     }
 }
@@ -191,6 +252,9 @@ void simbi::CLattice::config_lattice(simbi::Cellspacing xcellspacing, simbi::Cel
 
     compute_x2face_areas();
 
+    compute_s1face_areas();
+    compute_s2face_areas();
+
     compute_dx1();
 
     compute_dx2();
@@ -198,6 +262,8 @@ void simbi::CLattice::config_lattice(simbi::Cellspacing xcellspacing, simbi::Cel
     compute_dV1();
 
     compute_dV2();
+
+    compute_dV();
 
     compute_x1mean();
 
