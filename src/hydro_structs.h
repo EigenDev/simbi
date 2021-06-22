@@ -126,7 +126,7 @@ namespace sr2d {
         Conserved operator * (const double c)      const { return Conserved(D*c, S1*c, S2*c, tau*c ); }
         Conserved operator / (const double c)      const { return Conserved(D/c, S1/c, S2/c, tau/c ); }
 
-        constexpr double momentum(const int nhat) const {return (nhat == 1 ? S1 : S2); }
+        double momentum(const int nhat) const {return (nhat == 1 ? S1 : S2); }
     };
 
     struct Primitive {
