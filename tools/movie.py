@@ -12,14 +12,13 @@ import h5py
 import astropy.constants as const
 
 from matplotlib.animation import FuncAnimation
-
 import os, os.path
 
 def get_frames(dir):
-    # Get number of files in dir
-    total_frames = len([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
     frames       = sorted([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
-
+    total_frames = len(frames)
+    frames.sort(key=len, reverse=False) # sorts by ascending length
+    
     return total_frames, frames
 
 def create_mesh(fig, ax, filepath, filename, field, setup, cbaxes, vmin = None, vmax = None, 

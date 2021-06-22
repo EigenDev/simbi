@@ -140,9 +140,12 @@ cdef class PyState2D:
 cdef class PyStateSR2D:
     cdef SRHD2D c_state             # hold a c++ instance that we're wrapping           
 
-    def __cinit__(self,  np.ndarray[np.float64_t, ndim=3] state, double gamma=1.333, 
-                    vector[double] x1 = [0], vector[double] x2 = [0], 
-                    double cfl=0.4, string coord_system = "cartesian"):
+    def __cinit__(self,  np.ndarray[np.float64_t, ndim=3] state, 
+        double gamma=1.333, 
+        vector[double] x1 = [0], 
+        vector[double] x2 = [0], 
+        double cfl=0.4, 
+        string coord_system = "cartesian"):
 
         ny, nx = state[0].shape
         state_contig = state.reshape(state.shape[0], -1)

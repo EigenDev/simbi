@@ -9,20 +9,22 @@
 #include <string>
 #include "hydro_structs.h"
 #include "clattice.h"
+#include "viscous_diff.hpp"
+
 #ifndef SRHD_2D_H
 #define SRHD_2D_H
-
 namespace simbi
 {
     class SRHD2D
     {
     public:
         /* Shared Data Members */
+        simbi::ArtificialViscosity aVisc;
         sr2d::Eigenvals lambda;
         std::vector<sr2d::Primitive> prims;
         std::vector<std::vector<double>> state2D, sources;
         float tend, tstart;
-        double theta, gamma;
+        double theta, gamma, bipolar;
         bool first_order, periodic, hllc, linspace;
         double CFL, dt, decay_const;
         int NX, NY, nzones, n, block_size, xphysical_grid, yphysical_grid;

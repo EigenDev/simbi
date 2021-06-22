@@ -212,6 +212,7 @@ class Hydro:
                 
                 self.init_tau = (self.init_rho*self.init_h*(self.W)**2 - self.init_pressure
                                   - self.init_rho*(self.W))
+                
             
             
             self.u = None 
@@ -631,12 +632,12 @@ class Hydro:
                 sources = sources.reshape(sources.shape[0], -1)
                 
                 if self.regime == "classical":
-                    b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                    b = PyState2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
                     u = b.simulate(tend, dt=dt, linspace=linspace, hllc=hllc)
                     
                 else:
                     self.W = self.W.flatten()
-                    b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                    b = PyStateSR2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
                     u = b.simulate(tstart=start_time, tend = tend, dt=dt, first_order=first_order, 
                                    lorentz_gamma = self.W, linspace=linspace,
                                    sources=sources)
@@ -653,13 +654,13 @@ class Hydro:
                 sources = np.zeros((4, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
                 sources = sources.reshape(sources.shape[0], -1)
                 if self.regime == "classical":
-                    b = PyState2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                    b = PyState2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
                     u = b.simulate(tend=tend, dt=dt, linspace=linspace, hllc=hllc, sources=sources, theta=theta,
                                    periodic=periodic)
                     
                 else:
                     self.W = self.W.flatten()
-                    b = PyStateSR2D(u, self.gamma, x1=x1, x2=x2, coord_system=coordinates)
+                    b = PyStateSR2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
                     u = b.simulate(tstart=start_time, tend = tend, dt=dt, first_order=False, lorentz_gamma = self.W, 
                                     linspace=linspace, hllc = hllc, 
                                     sources=sources, chkpt_interval = chkpt_interval, 

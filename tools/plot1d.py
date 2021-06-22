@@ -153,7 +153,7 @@ def main():
     plt.show()
     
     if args.save:
-        fig.savefig("plots/{}.png".format(args.setup[0]), dpi=1200)
+        fig.savefig("plots/{}.png".format(args.setup[0]))
     
 if __name__ == "__main__":
     main()
