@@ -14,9 +14,10 @@
 #include <vector>
 #include <iostream>
 #include <cmath>
-#include "H5Cpp.h"
 #include <algorithm>
 #include <map>
+#include <memory>
+#include "H5Cpp.h"
 #include "hydro_structs.h"
 #include "config.h"
 
@@ -45,7 +46,7 @@ struct MinMod
 
 struct DataWriteMembers
 {
-    float t;
+    double t, ad_gamma;
     double xmin, xmax, ymin, ymax, dt;
     int NX, NY, xactive_zones, yactive_zones;
 };

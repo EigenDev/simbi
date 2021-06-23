@@ -435,6 +435,10 @@ void write_hdf5(
             att.write(double_type, &setup.dt);
             att.close();
 
+            att = sim_info.createAttribute("adiabatic_gamma", double_type, att_space);
+            att.write(double_type, &setup.ad_gamma);
+            att.close();
+
             att = sim_info.createAttribute("xmax", double_type, att_space);
             att.write(double_type, &setup.xmax);
             att.close();
@@ -450,6 +454,8 @@ void write_hdf5(
             att = sim_info.createAttribute("xactive_zones", int_type, att_space);
             att.write(int_type, &setup.xactive_zones);
             att.close();
+
+            
 
             sim_info.close();
             break;
@@ -521,6 +527,10 @@ void write_hdf5(
 
             att = sim_info.createAttribute("ymin", double_type, att_space);
             att.write(double_type, &setup.ymin);
+            att.close();
+
+            att = sim_info.createAttribute("adiabatic_gamma", double_type, att_space);
+            att.write(double_type, &setup.ad_gamma);
             att.close();
 
             att = sim_info.createAttribute("NX", int_type, att_space);
