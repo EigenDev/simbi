@@ -19,6 +19,7 @@ using namespace std;
 using namespace simbi;
 using namespace chrono;
 
+constexpr int MAX_ITER = 50;
 // Default Constructor
 SRHD::SRHD() {}
 
@@ -59,8 +60,9 @@ PrimitiveArray SRHD::cons2prim1D(const ConservedArray &u_state, vector<double> &
 {
 
     double rho, S, D, tau, pmin;
-    double v, W, tol, f, g, peq;
+    double v, W, tol, f, g, peq, h;
     double eps, rhos, p, v2, et, c2;
+    int iter = 0; 
 
     PrimitiveArray prims;
     prims.rho.resize(Nx);
@@ -87,12 +89,19 @@ PrimitiveArray SRHD::cons2prim1D(const ConservedArray &u_state, vector<double> &
 
             eps = (tau + (1.0 - W) * D + (1. - W * W) * p) / (D * W);
 
-            c2 = (gamma - 1.0) * eps / (1 + gamma * eps);
+            h  = 1. + eps + p / rho;
+            c2 = gamma * p / (h * rho);
 
             g = c2 * v2 - 1.0;
             f = (gamma - 1.0) * rho * eps - p;
 
             peq = p - f / g;
+            iter++;
+            if (iter >= MAX_ITER){
+                std::cout << "\n";
+                std::cout << "Cons2Prim cannot converge" << "\n";
+                exit(EXIT_FAILURE); 
+            }
 
         } while (abs(peq - p) >= tol);
 
@@ -105,6 +114,8 @@ PrimitiveArray SRHD::cons2prim1D(const ConservedArray &u_state, vector<double> &
         prims.rho[ii] = D / W;
         prims.v[ii] = v;
         prims.p[ii] = p;
+
+        iter = 0;
     }
 
     return prims;
@@ -142,6 +153,9 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l, const Primitive &prims_
     double br = (vbar + cbar) / (1 + vbar * cbar);
     double bl = (vbar - cbar) / (1 - vbar * cbar);
 
+    lambda.aL = min(bl, (v_l - cs_l) / (1 - v_l * cs_l));
+    lambda.aR = max(br, (v_r + cs_r) / (1 + v_l * cs_l));
+
     // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
     // sL          = cs_l*cs_l/(gamma*gamma*(1 - cs_l*cs_l));
     // sR          = cs_r*cs_r/(gamma*gamma*(1 - cs_r*cs_r));
@@ -153,9 +167,7 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l, const Primitive &prims_
     // lambda.aL = (minlam_l < minlam_r)   ? minlam_l : minlam_r;
     // lambda.aR = (pluslam_l > pluslam_r) ? pluslam_l : pluslam_r;
 
-    lambda.aL = min(bl, (v_l - cs_l) / (1 - v_l * cs_l));
-    lambda.aR = max(br, (v_r + cs_r) / (1 + v_l * cs_l));
-
+    
     return lambda;
 };
 
@@ -173,22 +185,15 @@ double SRHD::adapt_dt(PrimitiveArray &prims)
     for (int ii = 0; ii < pgrid_size; ii++)
     {
 
-        left_cell = (ii - 1 < 0) ? r[ii] : r[ii - 1];
-        right_cell = (ii + 1 > pgrid_size - 1) ? r[ii] : r[ii + 1];
-
-        // Check if using linearly-spaced grid or logspace
-        r_right = (linspace) ? 0.5 * (right_cell + r[ii]) : sqrt(right_cell * r[ii]);
-        r_left = (linspace) ? 0.5 * (left_cell + r[ii]) : sqrt(left_cell * r[ii]);
-
-        dr = r_right - r_left;
+        dr = coord_lattice.dx1[ii];
         rho = prims.rho[ii + idx_shift];
         p = prims.p[ii + idx_shift];
         v = prims.v[ii + idx_shift];
 
-        h = 1. + gamma * p / (rho * (gamma - 1.));
+        h  = 1. + gamma * p / (rho * (gamma - 1.));
         cs = sqrt(gamma * p / (rho * h));
 
-        vPLus = (v + cs) / (1 + v * cs);
+        vPLus  = (v + cs) / (1 + v * cs);
         vMinus = (v - cs) / (1 - v * cs);
 
         cfl_dt = dr / (max(abs(vPLus), abs(vMinus)));
@@ -346,12 +351,12 @@ Conserved SRHD::calc_hll_flux(const Primitive &left_prims,
 };
 
 Conserved SRHD::calc_hllc_flux(
+    const Primitive &left_prims,
+    const Primitive &right_prims,
     const Conserved &left_state,
     const Conserved &right_state,
     const Conserved &left_flux,
-    const Conserved &right_flux,
-    const Primitive &left_prims,
-    const Primitive &right_prims)
+    const Conserved &right_flux)
 {
 
     Conserved interflux_left;
@@ -499,7 +504,7 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state)
                 // Calc HLL Flux at i+1/2 interface
                 if (hllc)
                 {
-                    f1 = calc_hllc_flux(u_l, u_r, f_l, f_r, prims_l, prims_r);
+                    f1 = calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                 }
                 else
                 {
@@ -542,7 +547,7 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state)
                 // Calc HLL Flux at i-1/2 interface
                 if (hllc)
                 {
-                    f2 = calc_hllc_flux(u_l, u_r, f_l, f_r, prims_l, prims_r);
+                    f2 = calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                 }
                 else
                 {
@@ -774,7 +779,7 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state)
 
                 if (hllc)
                 {
-                    f1 = calc_hllc_flux(u_l, u_r, f_l, f_r, prims_l, prims_r);
+                    f1 = calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                 }
                 else
                 {
@@ -815,7 +820,7 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state)
 
                 if (hllc)
                 {
-                    f2 = calc_hllc_flux(u_l, u_r, f_l, f_r, prims_l, prims_r);
+                    f2 = calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                 }
                 else
                 {
@@ -832,12 +837,9 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state)
             //==============================================
             //                  RADIAL
             //==============================================
-            double r_left, r_right, volAvg, pc;
-            double log_rLeft, log_rRight;
+            double pc, rmean;
+            double sL, sR, dV;
 
-            double delta_logr = (log10(r[pgrid_size - 1]) - log10(r[0])) / pgrid_size;
-
-            double dr = 0;
             for (int ii = i_start; ii < i_bound; ii++)
             {
                 if (periodic)
@@ -920,7 +922,12 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state)
                 f_l = calc_flux(prims_l.rho, prims_l.v, prims_l.p);
                 f_r = calc_flux(prims_r.rho, prims_r.v, prims_r.p);
 
-                f1 = calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                if (hllc){
+                    f1 = calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                } else {
+                    f1 = calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+                
 
                 // Do the same thing, but for the right side interface [i - 1/2]
                 prims_l.rho = left_mid.rho + 0.5 * minmod(theta * (left_mid.rho - left_most.rho),
@@ -954,24 +961,24 @@ ConservedArray SRHD::u_dot1D(ConservedArray &u_state)
                 f_l = calc_flux(prims_l.rho, prims_l.v, prims_l.p);
                 f_r = calc_flux(prims_r.rho, prims_r.v, prims_r.p);
 
-                f2 = calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                if (hllc){
+                    f2 = calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                } else {
+                    f2 = calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
 
                 //Get Central Pressure
                 pc = center.p;
 
                 // Outflow the left/right boundaries
-                left_cell = (coordinate - 1 < 0) ? r[coordinate] : r[coordinate - 1];
-                right_cell = (coordinate == pgrid_size - 1) ? r[coordinate] : r[coordinate + 1];
+                sL    = coord_lattice.face_areas[coordinate];
+                sR    = coord_lattice.face_areas[coordinate + 1];
+                dV    = coord_lattice.dV[coordinate];
+                rmean = coord_lattice.x1mean[coordinate];
 
-                r_right = (linspace) ? 0.5 * (right_cell + r[coordinate]) : sqrt(right_cell * r[coordinate]);
-                r_left = (linspace) ? 0.5 * (left_cell + r[coordinate]) : sqrt(left_cell * r[coordinate]);
-
-                volAvg = 0.75 * ((pow(r_right, 4) - pow(r_left, 4)) / (pow(r_right, 3) - pow(r_left, 3)));
-                dr = r_right - r_left;
-
-                L.D[coordinate] = -(r_right * r_right * f1.D - r_left * r_left * f2.D) / (volAvg * volAvg * dr) + sourceD[coordinate] * decay_constant;
-                L.S[coordinate] = -(r_right * r_right * f1.S - r_left * r_left * f2.S) / (volAvg * volAvg * dr) + 2 * pc / volAvg + sourceS[coordinate] * decay_constant;
-                L.tau[coordinate] = -(r_right * r_right * f1.tau - r_left * r_left * f2.tau) / (volAvg * volAvg * dr) + source0[coordinate] * decay_constant;
+                L.D[coordinate] = -(sR* f1.D - sL * f2.D) / (dV) + sourceD[coordinate] * decay_constant;
+                L.S[coordinate] = -(sR* f1.S - sL * f2.S) / (dV) + 2 * pc / rmean + sourceS[coordinate] * decay_constant;
+                L.tau[coordinate] = -(sR* f1.tau - sL * f2.tau) / (dV) + source0[coordinate] * decay_constant;
             }
         }
 
@@ -1027,7 +1034,6 @@ vector<vector<double>> SRHD::simulate1D(vector<double> &lorentz_gamma, vector<ve
     int i_real;
     n = 0;
     ConservedArray u_p, u, u1, u2, udot;
-
     // Write some info about the setup for writeup later
     string filename, tnow, tchunk;
     PrimData prods;
@@ -1044,6 +1050,22 @@ vector<vector<double>> SRHD::simulate1D(vector<double> &lorentz_gamma, vector<ve
     u.S = state[1];
     u.tau = state[2];
     u_p = u;
+
+    if ((coord_system == "spherical") && (linspace))
+    {
+        this->coord_lattice = CLattice1D(r, simbi::Geometry::SPHERICAL);
+        coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE);
+    }
+    else if ((coord_system == "spherical") && (!linspace))
+    {
+        this->coord_lattice = CLattice1D(r, simbi::Geometry::SPHERICAL);
+        coord_lattice.config_lattice(simbi::Cellspacing::LOGSPACE);
+    }
+    else
+    {
+        this->coord_lattice = CLattice1D(r, simbi::Geometry::CARTESIAN);
+        coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE);
+    }
 
     prims = cons2prim1D(u, lorentz_gamma);
     pressure_guess = prims.p;

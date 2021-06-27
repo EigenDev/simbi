@@ -8,6 +8,7 @@
 #include <vector>
 #include <string>
 #include "hydro_structs.h"
+#include "clattice_1d.hpp"
 
 #ifndef SRHD_1D_H
 #define SRHD_1D_H
@@ -21,6 +22,7 @@ namespace simbi
         std::string coord_system;
         std::vector<double> r;
         std::vector<std::vector<double>> state;
+        CLattice1D coord_lattice;
 
         SRHD();
         SRHD(std::vector<std::vector<double>> state, double gamma, double CFL,
@@ -68,12 +70,13 @@ namespace simbi
                                       const sr1d::Conserved &left_flux,
                                       const sr1d::Conserved &right_flux);
 
-        sr1d::Conserved calc_hllc_flux(const sr1d::Conserved &left_state,
-                                       const sr1d::Conserved &right_state,
-                                       const sr1d::Conserved &left_flux,
-                                       const sr1d::Conserved &right_flux,
-                                       const sr1d::Primitive &left_prims,
-                                       const sr1d::Primitive &right_prims);
+        sr1d::Conserved calc_hllc_flux(
+            const sr1d::Primitive &left_prims,
+            const sr1d::Primitive &right_prims,
+            const sr1d::Conserved &left_state,
+            const sr1d::Conserved &right_state,
+            const sr1d::Conserved &left_flux,
+            const sr1d::Conserved &right_flux);
 
         sr1d::ConservedArray u_dot1D(sr1d::ConservedArray &u_state);
 
