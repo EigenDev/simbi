@@ -32,7 +32,7 @@ v_init = 0.
 ntheta = 256
 rmin = 0.05
 rmax = 1
-N_exp = 20
+N_exp = 5
 
 
 theta_min = 0
@@ -42,20 +42,16 @@ theta = np.linspace(theta_min, theta_max, ntheta)
 theta_mirror = np.linspace(np.pi, 2*np.pi, ntheta)
 
 # Choose xnpts carefully such that the grid zones remain roughly square
-theta_rface = 0.5*(theta[0] + theta[1])
-dtheta_face = theta_rface - theta[0]
 dtheta = theta_max/ntheta
-nr = int(np.ceil(np.log10(rmax/rmin)/dtheta_face ))
+nr = int(np.ceil(1 + np.log10(rmax/rmin)/dtheta ))
 
 r = np.logspace(np.log10(rmin), np.log10(rmax), nr) 
 
 r_right = np.sqrt(r[1:nr] * r[0:nr-1])
-dr = r_right[N_exp]
+dr = rmin * 1.5 
 
 
-
-delta_r = dr - rmin
-p_zones = find_nearest(r, (rmin + dr))[0]
+p_zones = find_nearest(r, dr)[0]
 p_zones = int(p_zones)
 
 p_c = (gamma - 1.)*(3*epsilon/((nu + 1)*np.pi*dr**nu))
