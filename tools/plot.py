@@ -11,6 +11,7 @@ import matplotlib.colors as colors
 import argparse 
 import h5py 
 import astropy.constants as const
+import astropy.units as u 
 
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from datetime import datetime
@@ -18,6 +19,47 @@ import os
 
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'line_profile', 'energy']
 
+ofield = {}
+with h5py.File('data/srhd/702.chkpt.0800000.h5', 'r+') as hf:
+        
+        ds = hf.get("sim_info")
+        
+        rho         = hf.get("rho")[:]
+        v           = hf.get("v")[:]
+        p           = hf.get("p")[:]
+        nx          = ds.attrs["Nx"]
+        t           = ds.attrs["current_time"]
+        xmax        = ds.attrs["xmax"]
+        xmin        = ds.attrs["xmin"]
+    
+        rho = rho[2:-2]
+        v   = v  [2:-2]
+        p   = p  [2:-2]
+        xactive = nx - 4
+            
+        W    = 1/np.sqrt(1 - v**2)
+        beta = v
+        
+        e = 3*p/rho 
+        c = const.c.cgs.value
+        a = (4 * const.sigma_sb.cgs.value / c)
+        k = const.k_B.cgs.value
+        m = const.m_p.cgs.value
+        me = const.m_e.cgs.value
+        T = (3 * p * c ** 2  / a)**(1./4.)
+        
+        h = 1.0 + 5/3 * p / (rho * (5/3 - 1))
+        
+        ofield["rho"]         = rho
+        ofield["v"]           = v
+        ofield["p"]           = p
+        ofield["W"]           = W
+        ofield["enthalpy"]    = h
+        ofield["gamma_beta"]  = W*beta
+        ofield["temperature"] = T
+        ofield["r"]           = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
+        
+R_0 = 7e10 * u.cm 
 def prims2cons(fields, cons):
     if cons == "D":
         return fields['rho'] * fields['W']
@@ -100,6 +142,46 @@ def plot_polar_plot(field_dict, args, mesh, ds):
         
     fig.suptitle('{} at t = {:.2f} s'.format(args.setup[0], tend), fontsize=20, y=0.95)
 
+def plot_1d_curve(field_dict, args, mesh, ds):
+    fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
+
+    r, theta = mesh['r'], mesh['th']
+    theta    = theta * 180 / np.pi 
+    
+    xmax        = ds[0]["xmax"]
+    xmin        = ds[0]["xmin"]
+    ymax        = ds[0]["ymax"]
+    ymin        = ds[0]["ymin"]
+    
+    vmin,vmax = eval(args.cbar)
+    
+    #1D test 
+    tend = ds[0]["time"]
+    for idx in range(len(theta)):
+        ax.loglog(r, field_dict[args.field][idx])
+    # ax.loglog(r, field_dict[args.field][args.tidx])
+    ax.loglog(ofield["r"], ofield[args.field], 'ro')
+        
+    # ax.set_position( [0.1, -0.18, 0.8, 1.43])
+    ax.set_xlim(xmin, xmax)
+    ax.set_xlabel(r'$r/R_\odot$', fontsize=20)
+    ax.tick_params(axis='both', labelsize=20)
+    # Change the format of the field
+    if args.field == "rho":
+        field_str = r'$\rho$'
+    elif args.field == "gamma_beta":
+        field_str = r"$\Gamma \ \beta$"
+    elif args.field == "temperature":
+        field_str = r"T [K]"
+    else:
+        field_str = args.field
+    
+    if args.log:
+        ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+    else:
+        ax.set_ylabel(r'$[{}]$'.format(args.field), fontsize=20)
+        
+    # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup[0],theta[args.tidx], tend), fontsize=20, y=0.95)
     
 def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     if not overplot:
@@ -120,14 +202,25 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     rvertices = np.insert(rvertices,  0, r[:, 0], axis=1)
     rvertices = np.insert(rvertices, rvertices.shape[1], r[:, -1], axis=1)
     dr = rvertices[:, 1:] - rvertices[:, :-1]
-    
+        
     theta_mean  = 0.5 * (tvertices[1:] + tvertices[:-1])
     dtheta      = tvertices[1:] - tvertices[:-1]
-    dV          =  r**2 * dr * dtheta * np.sin(theta_mean)
-
+    dcos        = np.cos(tvertices[:-1]) - np.cos(tvertices[1:])
+    dV          =  ( (2.0*np.pi/3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos )
+    
     etotal = edens_total * dV * e_scale
     mass   = dV * fields["W"] * fields["rho"]
-    e_k = (fields['W'] - 1.0) * mass * e_scale
+    e_k    = (fields['W'] - 1.0) * mass * e_scale
+    
+    #1D Check 
+    edens_1d = prims2cons(ofield, "energy")
+    dV_1d    = (4 * np.pi/3.) * (rvertices[0, 1:]**3 - rvertices[0, :-1]**3)
+    etotal_1d = edens_1d * dV_1d * e_scale
+    u1d      = ofield['gamma_beta']
+    w = np.diff(u1d).max()*1e-1
+    n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
+    gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
+    ets_1d = np.asarray([etotal_1d[np.where(u1d > gb)].sum() for gb in gbs_1d])
     
     u = fields['gamma_beta']
     w = np.diff(u).max()*1e-1
@@ -139,8 +232,13 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     bins    = np.arange(min(gbs), max(gbs) + w, w)
     logbins = np.logspace(np.log10(bins[0]),np.log10(bins[-1]), len(bins))
 
-    ax.hist(gbs, bins=gbs, weights=ets, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0)
-    # ax.hist(gbs, bins=gbs, weights=eks, alpha=0.8, label= r'$E_K$', histtype='step', linewidth=3.0)
+    if args.labels is None:
+        ax.hist(gbs, bins=gbs, weights=ets, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0)
+    else:
+        ax.hist(gbs, bins=gbs, weights=ets, label=r'$\{}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0)
+    
+    if case == 0:
+        ax.hist(gbs_1d, bins=gbs_1d, weights=ets_1d, alpha=0.8, label= r'1D Sphere', histtype='step', linewidth=3.0)
     
     sorted_energy = np.sort(ets)
     plt.xscale('log')
@@ -148,11 +246,11 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     #ax.set_ylim(sorted_energy[1], 1.5*ets.max())
     ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
     ax.set_ylabel(r'$E( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
-    ax.tick_params('both', labelsize=15)
+    ax.tick_params('both', labelsize=20)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     ax.set_title(r'Roche lobe overflow, t ={:.2f} s'.format(tend), fontsize=20)
-    ax.legend()
+    ax.legend(fontsize=15)
     if not overplot:
         return fig
     
@@ -194,6 +292,11 @@ def main():
     parser.add_argument('--ehist', dest='ehist', action='store_true',
                         default=False,
                         help='True if you want the plot the energy histogram')
+    parser.add_argument('--labels', dest='labels', nargs="+", default = None,
+                        help='Optionally give a list of labels for multi-file plotting')
+    
+    parser.add_argument('--tidx', dest='tidx', type=int, default = None,
+                        help='Set to a value if you wish to plot a 1D curve about some angle')
 
     parser.add_argument('--save', dest='save', action='store_true',
                         default=False,
@@ -222,6 +325,11 @@ def main():
             xmin        = ds.attrs["xmin"]
             ymax        = ds.attrs["ymax"]
             ymin        = ds.attrs["ymin"]
+            try:
+                gamma = ds.attrs["adiabatic_gamma"]
+            except:
+                gamma = 4./3.
+            
             
             setup_dict[idx]["xmax"] = xmax 
             setup_dict[idx]["xmin"] = xmin 
@@ -256,7 +364,7 @@ def main():
             W    = 1/np.sqrt(1 -(v1**2 + v2**2))
             beta = np.sqrt(v1**2 + v2**2)
             
-            gamma = 4./3.
+            
             e = 3*p/rho 
             c = const.c.cgs.value
             a = (4 * const.sigma_sb.cgs.value / c)
@@ -298,9 +406,12 @@ def main():
     mesh = {}
     mesh["theta"] = tt 
     mesh["rr"]    = rr
+    mesh["r"]     = r 
+    mesh["th"]     = theta
     
     if len(args.filename) > 1:
         fig, ax = plt.subplots(1, 1, figsize=(8,8))
+        case = 0
         for idx, file in enumerate(args.filename):
             if (args.log):
                 r = np.logspace(np.log10(setup_dict[idx]["xmin"]), np.log10(setup_dict[idx]["xmax"]), setup_dict[idx]["xactive"])
@@ -321,10 +432,13 @@ def main():
             mesh["theta"] = tt 
             mesh["rr"]    = rr
             if args.ehist:
-                plot_hist(field_dict[idx], args, mesh, setup_dict, True, ax)
+                plot_hist(field_dict[idx], args, mesh, setup_dict, True, ax, case)
+            case += 1
     else:
         if args.ehist:
             plot_hist(field_dict[0], args, mesh, setup_dict)
+        elif args.tidx != None:
+            plot_1d_curve(field_dict[0], args, mesh, setup_dict)
         else:
             mesh["t2"] = t2
             plot_polar_plot(field_dict[0], args, mesh, setup_dict)

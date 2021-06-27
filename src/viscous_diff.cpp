@@ -9,10 +9,10 @@
 #include <cmath>
 #include <iostream>
 
-constexpr double ADIABATIC_GAMMA = 4.0/3.0;
+constexpr double ADIABATIC_GAMMA = 5.0/3.0;
 constexpr double PRANDTL_NUMBER  = 3.0/4.0;
 constexpr double C_AV = 0.50;
-constexpr double C_TH = 0.05;
+constexpr double C_TH = 1.0 ;//0.05;
 
 simbi::ArtificialViscosity::ArtificialViscosity(){}
 simbi::ArtificialViscosity::~ArtificialViscosity() {};
@@ -37,7 +37,7 @@ void simbi::ArtificialViscosity::av_flux_at_face(
     double h_left, h_right, qx1, qx2, mu_av, inv_vol; 
     double si1, sj2, dv1_deta, dv2_deta, volAvg;
     double dv1_dxi, dv2_dxi; 
-    double v1f, v2f;
+    double u1f, u2f;
 
     // Some bounds checking 
     const int il = ii - 1;
@@ -67,10 +67,10 @@ void simbi::ArtificialViscosity::av_flux_at_face(
     const double s1l = coord_lattice.s1_face_areas[(nx + 1) * yc + (xc + 0)];
     const double s2r = coord_lattice.s2_face_areas[(yc + 1) * nx + (xc + 0)];
     const double s2l = coord_lattice.s2_face_areas[(yc + 0) * nx + (xc + 0)];
-    const double v1r = 0.5 * (prims[jj * nx + ir].v1 + prims[jj * nx + ii].v1 );
-    const double v1l = 0.5 * (prims[jj * nx + ii].v1 + prims[jj * nx + il].v1 );
-    const double v2r = 0.5 * (prims[jr * nx + ii].v2 + prims[jj * nx + ii].v2 );
-    const double v2l = 0.5 * (prims[jj * nx + ii].v2 + prims[jl * nx + il].v2 );
+    const double v1r = (prims[jj * nx + ir].v1 - prims[jj * nx + ii].v1 );
+    const double v1l = (prims[jj * nx + ii].v1 - prims[jj * nx + il].v1 );
+    const double v2r = (prims[jr * nx + ii].v2 - prims[jj * nx + ii].v2 );
+    const double v2l = (prims[jj * nx + ii].v2 - prims[jl * nx + il].v2 );
 
     const double div_uvec  = 1/(dVc) * ( (v1r * s1r - v1l * s1r)  
                                        + (v2r * s2r - v2l * s2r) );
@@ -97,8 +97,8 @@ void simbi::ArtificialViscosity::av_flux_at_face(
     switch (cell_face)
     {
         case simbi::Face::RIGHT:
-                v1f     = 0.5 * (prims[jj * nx + ir].v1 + prims[jj * nx + ii].v1);
-                v2f     = 0.5 * (prims[jj * nx + ir].v2 + prims[jj * nx + ii].v2);
+                u1f     = 0.5 * (prims[jj * nx + ir].v1 + prims[jj * nx + ii].v1);
+                u2f     = 0.5 * (prims[jj * nx + ir].v2 + prims[jj * nx + ii].v2);
                 volAvg  = 0.5 * (coord_lattice.dVc[yc * nx + xc] + coord_lattice.dVc[yc * nx + xr]);
                 inv_vol = 1.0 / volAvg; 
 
@@ -135,20 +135,21 @@ void simbi::ArtificialViscosity::av_flux_at_face(
                 h_left   = 1.0 + ADIABATIC_GAMMA * prims[jj * nx + ii].p/(prims[jj*nx + ii].rho * (ADIABATIC_GAMMA - 1.0));
                 h_right  = 1.0 + ADIABATIC_GAMMA * prims[jj * nx + ir].p/(prims[jj*nx + ir].rho * (ADIABATIC_GAMMA - 1.0));
                 dh_dx1  = inv_vol * (si1 * (h_right - h_left));
-
+                meh     = (prims[jj * nx + ir].p + prims[jj * nx + ii].p)/(prims[jj * nx + ir].rho + prims[jj * nx + ii].rho);
                 mu_av  = C_AV * rhoc * h_mesh * h_mesh * std::sqrt(div_uvec * div_uvec - cterm * cterm );
-                tau_11 = mu_av * (2.0 * du1_dx1 - (2.0/3.0) * div_uvec);
-                tau_21 = mu_av * (du2_dx1 + du1_dx2);
-                qx1    = mu_av/ PRANDTL_NUMBER * (dh_dx1 - (v1f * du1_dx1 + v2f * du2_dx1));
-                flux   = {0.0, tau_11, tau_21, qx1 + tau_11 * v1f + tau_21 * v2f};
+                tau_11 = mu_av * (2.0 * du1_dx1 - 2.0 * (u1f*u1f*du1_dx1 + u1f * u2f * du1_dx2) - (2.0/3.0) * (div_uvec) * (1. - u1f*u1f));
+                tau_21 = mu_av * ((du2_dx1 + du1_dx2) - (u2f*u1f*du1_dx1 + u2f * u2f * du1_dx2)
+                            - (u1f * u1f * du2_dx1 + u1f * u2f * du2_dx2) - (2.0/3.0) * (div_uvec) * (- u1f*u2f));
+                qx1    = mu_av/ PRANDTL_NUMBER * dh_dx1 * (1.0 - 4*meh);
+                flux   = {0.0, tau_11, tau_21, qx1 + tau_11 * u1f + tau_21 * u2f};
                 
 
 
             break;
         
         case simbi::Face::LEFT:
-                v1f     = 0.5 * (prims[jj * nx + ii].v1 + prims[jj * nx + il].v1);
-                v2f     = 0.5 * (prims[jj * nx + ii].v2 + prims[jj * nx + il].v2);
+                u1f     = 0.5 * (prims[jj * nx + ii].v1 + prims[jj * nx + il].v1);
+                u2f     = 0.5 * (prims[jj * nx + ii].v2 + prims[jj * nx + il].v2);
                 volAvg  = 0.5 * (coord_lattice.dVc[yc * nx + xc] + coord_lattice.dVc[yc * nx + xl]);
                 inv_vol = 1.0 / volAvg; 
 
@@ -182,22 +183,17 @@ void simbi::ArtificialViscosity::av_flux_at_face(
                 h_left   = 1.0 + ADIABATIC_GAMMA * prims[jj * nx + il].p/(prims[jj*nx + il].rho * (ADIABATIC_GAMMA - 1.0));
                 h_right  = 1.0 + ADIABATIC_GAMMA * prims[jj * nx + ii].p/(prims[jj*nx + ii].rho * (ADIABATIC_GAMMA - 1.0));
                 dh_dx1  = inv_vol * (si1 * (h_right - h_left));
-
+                meh     = (prims[jj * nx + ii].p + prims[jj * nx + il].p)/(prims[jj * nx + ii].rho + prims[jj * nx + il].rho);
                 mu_av  = C_AV * rhoc * h_mesh * h_mesh * std::sqrt(div_uvec * div_uvec - cterm * cterm );
-                tau_11 = mu_av * (2.0 * du1_dx1 - 2.0 * (v1f*v1f*du1_dx1 + v1f * v2f * du1_dx2) - (2.0/3.0) * div_uvec * (1 - v1f*v1f));
-                tau_21 = mu_av * (du2_dx1 + du1_dx2);
-                qx1    = mu_av/ PRANDTL_NUMBER * (dh_dx1 - (v1f * du1_dx1 + v2f * du2_dx1));
+                tau_11 = - mu_av * (2.0 * du1_dx1 + 2.0 * (u1f*u1f*du1_dx1 + u1f * u2f * du1_dx2) - (2.0/3.0) * (div_uvec) * (1 - u1f*u1f));
+                tau_21 = - mu_av * ((du2_dx1 + du1_dx2) + (u2f*u1f*du1_dx1 + u2f * u2f * du1_dx2)
+                            + (u1f * u1f * du2_dx1 + u1f * u2f * du2_dx2) - (2.0/3.0) * (div_uvec) * (- u2f*u1f));
+                qx1    = - mu_av/ PRANDTL_NUMBER * dh_dx1 * (1.0 - 4 * meh);
 
-                bite = true;
+                // bite = true;
                 std::cout << "div_u: " << div_uvec << "\n";
                 std::cout << "old div_u: " << du1_dx1 + du2_dx2 << "\n";
                 std::cout << "sound cs: " << cs << "\n";
-                std::cout << v1r << "\n";
-                std::cout << v1l << "\n";
-                std::cout << v2r << "\n";
-                std::cout << v2r << "\n";
-                std::cout << s2l << "\n";
-                std::cout << s2r << "\n";
                 std::cout << "hmesh: " << h_mesh << "\n";
                 std::cout << "yc: " << yc << "\n";
                 std::cout << "xc: " << xc << "\n";
@@ -208,14 +204,18 @@ void simbi::ArtificialViscosity::av_flux_at_face(
                 std::cout << "c_av:  " << cterm << "\n";
                 std::cout << "New tau11: " << tau_11 << "\n";
                 std::cout << "Old tau11: " << mu_av * (2.0 * du1_dx1 - (2.0/3.0) * div_uvec) << "\n";
-                std::cout << qx1 << "\n";
+                std::cout << "heat flux: " << qx1 << "\n";
+                std::cout << "tau 21: " << tau_21 << "\n";
+                std::cout << "u1: " << u1f << "\n";
+                std::cout << "u2: " << u2f << "\n";
+                std::cout << "dh: " << dh_dx1 << "\n";
                 std::cin.get();
-                flux   = {0.0, tau_11, tau_21, qx1 + tau_11 * v1f + tau_21 * v2f};
+                flux   = {0.0, tau_11, tau_21, qx1 + tau_11 * u1f + tau_21 * u2f};
             break;
     
         case simbi::Face::UPPER:
-                v1f     = 0.5 * (prims[jr * nx + ii].v1 + prims[jj * nx + ii].v1);
-                v2f     = 0.5 * (prims[jr * nx + ii].v2 + prims[jj * nx + ii].v2);
+                u1f     = 0.5 * (prims[jr * nx + ii].v1 + prims[jj * nx + ii].v1);
+                u2f     = 0.5 * (prims[jr * nx + ii].v2 + prims[jj * nx + ii].v2);
                 volAvg  = 0.5 * (coord_lattice.dVc[yc * nx + xc] + coord_lattice.dVc[yr * nx + xc]);
                 inv_vol = 1.0 / volAvg; 
 
@@ -250,18 +250,19 @@ void simbi::ArtificialViscosity::av_flux_at_face(
                 h_left   = 1.0 + ADIABATIC_GAMMA * prims[jj * nx + ii].p/(prims[jj*nx + ii].rho * (ADIABATIC_GAMMA - 1.0));
                 h_right  = 1.0 + ADIABATIC_GAMMA * prims[jr * nx + ii].p/(prims[jr*nx + ii].rho * (ADIABATIC_GAMMA - 1.0));
                 dh_dx2  = inv_vol * (sj2 * (h_right - h_left));
-
+                meh     = (prims[jr * nx + ii].p + prims[jj * nx + ii].p)/(prims[jr * nx + ii].rho + prims[jj * nx + ii].rho);
                 mu_av = C_AV * rhoc * h_mesh * h_mesh * std::sqrt(div_uvec * div_uvec - cterm * cterm );
-                tau_22 = mu_av * (2.0 * du2_dx2 - (2.0/3.0) * div_uvec);
-                tau_12 = mu_av * (du1_dx2 + du2_dx1);
-                qx2    = mu_av/ PRANDTL_NUMBER * (dh_dx2 - (v1f * du1_dx2 + v2f * du2_dx2));
-                flux   = {0.0, tau_12, tau_22, qx2 + tau_12 * v1f + tau_22 * v2f};
+                tau_22 = mu_av * (2.0 * du2_dx2 - 2.0 * (u2f*u1f*du2_dx1 + u2f * u2f * du2_dx2) - (2.0/3.0) * (div_uvec) * (1.0 - u2f*u2f));
+                tau_12 = mu_av * ((du2_dx1 + du1_dx2) - (u1f*u1f*du2_dx1 + u1f * u2f * du2_dx2)
+                            - u2f * u1f * du1_dx1 - u2f * u2f * du1_dx2 - (2.0/3.0) * (div_uvec) * (- u1f*u2f));
+                qx2    = mu_av/ PRANDTL_NUMBER * dh_dx2 * (1.0 - 4 * meh);
+                flux   = {0.0, tau_12, tau_22, qx2 + tau_12 * u1f + tau_22 * u2f};
 
             break;
         
         case simbi::Face::LOWER:
-                v1f     = 0.5 * (prims[jj * nx + ii].v1 + prims[jl * nx + ii].v1);
-                v2f     = 0.5 * (prims[jj * nx + ii].v2 + prims[jl * nx + ii].v2);
+                u1f     = 0.5 * (prims[jj * nx + ii].v1 + prims[jl * nx + ii].v1);
+                u2f     = 0.5 * (prims[jj * nx + ii].v2 + prims[jl * nx + ii].v2);
                 volAvg  = 0.5 * (coord_lattice.dVc[yl * nx + xc] + coord_lattice.dVc[yc * nx + xc]);
                 inv_vol = 1.0 / volAvg; 
 
@@ -294,12 +295,13 @@ void simbi::ArtificialViscosity::av_flux_at_face(
                 h_left   = 1.0 + ADIABATIC_GAMMA * prims[jl * nx + ii].p/(prims[jl*nx + ii].rho * (ADIABATIC_GAMMA - 1.0));
                 h_right  = 1.0 + ADIABATIC_GAMMA * prims[jj * nx + ii].p/(prims[jj*nx + ii].rho * (ADIABATIC_GAMMA - 1.0));
                 dh_dx2  = inv_vol * (sj2 * (h_right - h_left));
-
+                meh     = (prims[jj * nx + ii].p + prims[jl * nx + ii].p)/(prims[jj * nx + ii].rho + prims[jl * nx + ii].rho);
                 mu_av  = C_AV * rhoc * h_mesh * h_mesh * std::sqrt(div_uvec * div_uvec - cterm * cterm );
-                tau_22 = mu_av * (2.0 * du2_dx2 - (2.0/3.0) * div_uvec);
-                tau_12 = mu_av * (du1_dx2 + du2_dx1);
-                qx2    = mu_av/ PRANDTL_NUMBER * (dh_dx2 - (v1f * du1_dx2 + v2f * du2_dx2));
-                flux   = {0.0, tau_12, tau_22, qx2 + tau_12 * v1f + tau_22 * v2f};
+                tau_22 = mu_av * (2.0 * du2_dx2 - 2.0 * (u2f*u1f*du2_dx1 + u2f * u2f * du2_dx2) - (2.0/3.0) * (div_uvec) * (1.0 - u2f*u2f));
+                tau_12 = mu_av * ( (du2_dx1 + du1_dx2) - (u1f*u1f*du2_dx1 + u1f * u2f * du2_dx2)
+                            - u2f * u1f * du1_dx1 - u2f * u2f * du1_dx2 - (2.0/3.0) * (div_uvec) * (- u1f*u2f) );
+                qx2    = mu_av/ PRANDTL_NUMBER * dh_dx2 * (1.0 - 4 * meh);
+                flux   = {0.0, tau_12, tau_22, qx2 + tau_12 * u1f + tau_22 * u2f};
             break;
     }
 }
@@ -372,6 +374,7 @@ void simbi::ArtificialViscosity::calc_artificial_visc(
             // std::cout << "Flux in S1: "  << avFlux[yc * nx + xc].S1 << "\n";
             // std::cout << "Flux in S2: "  << avFlux[yc * nx + xc].S2 << "\n";
             // std::cout << "Flux in tau: " << avFlux[yc * nx + xc].tau << "\n";
+            // std::cout << "\n";
             // std::cin.get();
         }
         
