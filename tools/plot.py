@@ -20,7 +20,7 @@ import os
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'line_profile', 'energy']
 
 ofield = {}
-with h5py.File('data/srhd/702.chkpt.0800000.h5', 'r+') as hf:
+with h5py.File('data/srhd/702.chkpt.0100000.h5', 'r+') as hf:
         
         ds = hf.get("sim_info")
         
@@ -213,14 +213,14 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     e_k    = (fields['W'] - 1.0) * mass * e_scale
     
     #1D Check 
-    edens_1d = prims2cons(ofield, "energy")
-    dV_1d    = (4 * np.pi/3.) * (rvertices[0, 1:]**3 - rvertices[0, :-1]**3)
-    etotal_1d = edens_1d * dV_1d * e_scale
-    u1d      = ofield['gamma_beta']
-    w = np.diff(u1d).max()*1e-1
-    n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
-    gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
-    ets_1d = np.asarray([etotal_1d[np.where(u1d > gb)].sum() for gb in gbs_1d])
+    # edens_1d = prims2cons(ofield, "energy")
+    # dV_1d    = (4 * np.pi/3.) * (rvertices[0, 1:]**3 - rvertices[0, :-1]**3)
+    # etotal_1d = edens_1d * dV_1d * e_scale
+    # u1d       = ofield['gamma_beta']
+    # w = np.diff(u1d).max()*1e-1
+    # n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
+    # gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
+    # ets_1d = np.asarray([etotal_1d[np.where(u1d > gb)].sum() for gb in gbs_1d])
     
     u = fields['gamma_beta']
     w = np.diff(u).max()*1e-1
@@ -237,8 +237,8 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     else:
         ax.hist(gbs, bins=gbs, weights=ets, label=r'$\{}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0)
     
-    if case == 0:
-        ax.hist(gbs_1d, bins=gbs_1d, weights=ets_1d, alpha=0.8, label= r'1D Sphere', histtype='step', linewidth=3.0)
+    # if case == 0:
+    #     ax.hist(gbs_1d, bins=gbs_1d, weights=ets_1d, alpha=0.8, label= r'1D Sphere', histtype='step', linewidth=3.0)
     
     sorted_energy = np.sort(ets)
     plt.xscale('log')
