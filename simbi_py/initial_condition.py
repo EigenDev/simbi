@@ -15,7 +15,7 @@ def load_checkpoint(model, filename, dim):
             v           = hf.get("v")[:]
             p           = hf.get("p")[:]
             nx          = ds.attrs["NX"]
-            t           = ds.attrs["current_time"]
+            model.t     = ds.attrs["current_time"]
             xmax        = ds.attrs["xmax"]
             xmin        = ds.attrs["xmin"]
             try:
@@ -40,7 +40,7 @@ def load_checkpoint(model, filename, dim):
             p           = hf.get("p")[:]
             nx          = ds.attrs["NX"]
             ny          = ds.attrs["NY"]
-            t           = ds.attrs["current_time"]
+            model.t     = ds.attrs["current_time"]
             xmax        = ds.attrs["xmax"]
             xmin        = ds.attrs["xmin"]
             ymax        = ds.attrs["ymax"]
