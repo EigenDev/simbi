@@ -282,7 +282,7 @@ class Hydro:
         # Initialize conserved u-tensor
         
         self.u = np.asarray(self.u)
-        t = 0
+        self.t = 0
         
         if not chkpt:
             simbi_ic.initializeModel(self, first_order, periodic)
@@ -290,7 +290,7 @@ class Hydro:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensions)
             
         u = self.u 
-        start_time = tstart if t == 0 else t
+        start_time = tstart if self.t == 0 else self.t
         if self.dimensions == 1:
             if first_order:
                 print("Computing First Order...")
