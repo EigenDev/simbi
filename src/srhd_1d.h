@@ -32,7 +32,7 @@ public:
   std::vector<sr1d::Conserved> cons_state;
   std::vector<sr1d::Primitive> prims;
 
-  int Nx, n, pgrid_size, idx_shift;
+  int Nx, n, pgrid_size, idx_shift, i_start, i_bound;
   float tend, dt;
   double theta, engine_duration, t, decay_constant;
   bool first_order, periodic, linspace, hllc;
