@@ -377,7 +377,7 @@ vector<Conserved> Newtonian1D::u_dot(vector<Conserved> &u_state)
             //==============================================
             //                  RADIAL
             //==============================================
-            double r_left, r_right, volAvg, pc;
+            double sL, sR, rmean, pc, dV;
             double log_rLeft, log_rRight;
 
             double delta_logr = (log(r[active_zones - 1]) - log(r[0]))/active_zones;
@@ -433,20 +433,19 @@ vector<Conserved> Newtonian1D::u_dot(vector<Conserved> &u_state)
                 // Calc HLL Flux at i-1/2 interface
                 f2 = calc_hll_flux(u_l, u_r, f_l, f_r, prims_l, prims_r);
 
-                r_right = xvertices[ii + 1];
-                r_left  = xvertices[ii];
-                dr = r_right - r_left;
-                volAvg = 0.75*( ( pow(r_right, 4) - pow(r_left, 4) )/ ( pow(r_right, 3) - pow(r_left, 3) ) );
+                sR  = coord_lattice.face_areas[coordinate + 1];
+                sL  = coord_lattice.face_areas[coordinate];
+                dr  = coord_lattice.dx1[coordinate];
 
                 L.push_back(Conserved{
                         // L(rho)
-                        - (r_right*r_right*f1.rho - r_left*r_left*f2.rho)/(volAvg*volAvg*dr),
+                        - (sR*f1.rho - sL*f2.rho)/dV,
 
                         // L(rho * v)
-                        - (r_right*r_right*f1.m - r_left*r_left*f2.m )/(volAvg*volAvg*dr) + 2*pc/volAvg,
+                        - (sR*f1.m - sL * f2.m )/ dV + 2*pc/rmean,
 
                         // L(E)
-                        - (r_right*r_right*f1.e_dens - r_left*r_left*f2.e_dens )/(volAvg*volAvg*dr)
+                        - (sR*f1.e_dens - sL*f2.e_dens )/ dV
 
                 }) ;
             }
@@ -584,7 +583,7 @@ vector<Conserved> Newtonian1D::u_dot(vector<Conserved> &u_state)
             //==============================================
             //                  RADIAL
             //==============================================
-            double r_left, r_right, volAvg, pc;
+            double sL, sR, rmean, pc, dV;
             double log_rLeft, log_rRight;
 
             double delta_logr = (log(r[active_zones - 1]) - log(r[0]))/active_zones;
@@ -687,20 +686,19 @@ vector<Conserved> Newtonian1D::u_dot(vector<Conserved> &u_state)
                 //Get Central Pressure
                 pc = center.p;
 
-                r_right = xvertices[ii + 1];
-                r_left  = xvertices[ii];
-                volAvg = 0.75*( ( pow(r_right, 4) - pow(r_left, 4) )/ ( pow(r_right, 3) - pow(r_left, 3) ) );
-                dr = r_right - r_left;
+                sR  = coord_lattice.face_areas[coordinate + 1];
+                sL  = coord_lattice.face_areas[coordinate];
+                dr  = coord_lattice.dx1[coordinate];
 
                 L.push_back(Conserved{
                         // L(rho)
-                        - (r_right*r_right*f1.rho - r_left*r_left*f2.rho)/(volAvg*volAvg*dr),
+                        - (sR*f1.rho - sL*f2.rho)/dV,
 
                         // L(rho * v)
-                        - (r_right*r_right*f1.m - r_left*r_left*f2.m )/(volAvg*volAvg*dr) + 2*pc/volAvg,
+                        - (sR*f1.m - sL * f2.m )/ dV + 2*pc/rmean,
 
                         // L(E)
-                        - (r_right*r_right*f1.e_dens - r_left*r_left*f2.e_dens )/(volAvg*volAvg*dr)
+                        - (sR*f1.e_dens - sL*f2.e_dens )/ dV
 
                 }) ;
             }
@@ -757,8 +755,21 @@ vector<Conserved> Newtonian1D::u_dot(vector<Conserved> &u_state)
     {
         u.push_back(Conserved{init_state[0][ii], init_state[1][ii], init_state[2][ii]});
     }
-    this->xvertices.resize(r.size() + 1);
-    compute_vertices(r, xvertices, r.size(), linspace);
+    if ((coord_system == "spherical") && (linspace))
+    {
+        this->coord_lattice = CLattice1D(r, simbi::Geometry::SPHERICAL);
+        coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE);
+    }
+    else if ((coord_system == "spherical") && (!linspace))
+    {
+        this->coord_lattice = CLattice1D(r, simbi::Geometry::SPHERICAL);
+        coord_lattice.config_lattice(simbi::Cellspacing::LOGSPACE);
+    }
+    else
+    {
+        this->coord_lattice = CLattice1D(r, simbi::Geometry::CARTESIAN);
+        coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE);
+    }
 
     u_p = u;
     int i_real; 
