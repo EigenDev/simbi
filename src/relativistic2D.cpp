@@ -1655,9 +1655,7 @@ vector<vector<double>> SRHD2D::simulate2D(
                 // the hundreds place set by the tchunk string
                 time_order_of_mag = std::floor(std::log10(t));
                 if (time_order_of_mag > tchunk_order_of_mag){
-                    num_zeros = time_order_of_mag - 2;
-                    string pad_zeros = string(num_zeros, '0');
-                    tchunk.insert(0, pad_zeros);
+                    tchunk.insert(0, "0");
                     tchunk_order_of_mag += 1;
                 }
                 
