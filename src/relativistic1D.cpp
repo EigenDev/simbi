@@ -62,9 +62,9 @@ void SRHD::cons2prim1D(const std::vector<Conserved> &u_state)
 
     for (int ii = 0; ii < Nx; ii++)
     {
-        D = u_state.D[ii];
-        S = u_state.S[ii];
-        tau = u_state.tau[ii];
+        D   = u_state[ii].D;
+        S   = u_state[ii].S;
+        tau = u_state[ii].tau;
 
         peq = n != 0 ? pressure_guess[ii] : abs(abs(S) - tau - D);
 
@@ -102,13 +102,9 @@ void SRHD::cons2prim1D(const std::vector<Conserved> &u_state)
         v = S / (tau + D + peq);
 
         W = 1. / sqrt(1 - v * v);
-
-        lorentz_gamma[ii] = W;
-
+        pressure_guess[ii] = peq;
         prims[ii] = Primitive{D / W, v, peq};
     }
-
-    return prims;
 };
 
 //----------------------------------------------------------------------------------------------------------
@@ -162,7 +158,7 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
 };
 
 // Adapt the CFL conditonal timestep
-double SRHD::adapt_dt(std::vector<Primitive> &prims)
+double SRHD::adapt_dt(const std::vector<Primitive> &prims)
 {
 
     double r_left, r_right, left_cell, right_cell, dr, cs;
@@ -174,16 +170,15 @@ double SRHD::adapt_dt(std::vector<Primitive> &prims)
     // Compute the minimum timestep given CFL
     for (int ii = 0; ii < pgrid_size; ii++)
     {
-
-        dr = coord_lattice.dx1[ii];
+        dr  = coord_lattice.dx1[ii];
         rho = prims[ii + idx_shift].rho;
-        p = prims[ii + idx_shift].p;
-        v = prims[ii + idx_shift].v;
+        p   = prims[ii + idx_shift].p;
+        v   = prims[ii + idx_shift].v;
 
         h = 1. + gamma * p / (rho * (gamma - 1.));
         cs = sqrt(gamma * p / (rho * h));
 
-        vPLus = (v + cs) / (1 + v * cs);
+        vPLus  = (v + cs) / (1 + v * cs);
         vMinus = (v - cs) / (1 - v * cs);
 
         cfl_dt = dr / (max(abs(vPLus), abs(vMinus)));
@@ -331,8 +326,7 @@ SRHD::calc_hll_flux(const Primitive &left_prims, const Primitive &right_prims,
 
     // Compute the HLL Flux component-wise
   return  (left_flux * aRp -  right_flux * aLm +
-            (right_state.D - left_state.D) * aLm * aRp) /
-            (aRp - aLm) );
+            (right_state - left_state) * aLm * aRp ) / (aRp - aLm) ;
 };
 
 Conserved
@@ -394,59 +388,55 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
     //                                  UDOT CALCULATIONS
     //----------------------------------------------------------------------------------------------------------
 
-    std::vector<Conserved> SRHD::u_dot1D(std::vector<Consrved> & u_state)
+    std::vector<Conserved> SRHD::u_dot1D(std::vector<Conserved> & u_state)
     {
 
-        int i_start, i_bound, coordinate;
-        string default_coordinates = "cartesian";
-        double left_cell, right_cell;
-
+        int coordinate;
         Conserved u_l, u_r;
         Conserved f_l, f_r, f1, f2;
         Primitive prims_l, prims_r;
-        std::vector<Conserved> L;
+        std::vector<Conserved> L(Nx);
 
         switch (geometry[coord_system])
         {
-        case simbi::Geometry::CARTESIAN
-            {
+        case simbi::Geometry::CARTESIAN:
+            {   
+                double dx;
                 if (first_order)
                 {
-                    double rho_l, rho_r, v_l, v_r, p_l, p_r, W_l, W_r;
+                    double rho_l, rho_r, v_l, v_r, p_l, p_r;
                     for (int ii = i_start; ii < i_bound; ii++)
                     {
                         if (periodic)
                         {
                             coordinate = ii;
                             // Set up the left and right state interfaces for i+1/2
-                            u_l.D = u_state.D[ii];
-                            u_l.S = u_state.S[ii];
-                            u_l.D = u_state.tau[ii];
+                            u_l.D   = u_state[ii].D;
+                            u_l.S   = u_state[ii].D;
+                            u_l.tau = u_state[ii].tau;
 
-                            u_r.D = roll(u_state.D, ii + 1);
-                            u_r.S = roll(u_state.S, ii + 1);
-                            u_r.tau = roll(u_state.tau, ii + 1);
+                            u_r = roll(u_state, ii + 1);
                         }
                         else
                         {
                             coordinate = ii - 1;
                             // Set up the left and right state interfaces for i+1/2
-                            u_l.D = u_state.D[ii];
-                            u_l.S = u_state.S[ii];
-                            u_l.tau = u_state.tau[ii];
+                            u_l.D   = u_state[ii].D;
+                            u_l.S   = u_state[ii].S;
+                            u_l.tau = u_state[ii].tau;
 
-                            u_r.D = u_state.D[ii + 1];
-                            u_r.S = u_state.S[ii + 1];
-                            u_r.tau = u_state.tau[ii + 1];
+                            u_r.D   = u_state[ii + 1].D;
+                            u_r.S   = u_state[ii + 1].S;
+                            u_r.tau = u_state[ii + 1].tau;
                         }
 
-                        prims_l.rho = prims.rho[ii];
-                        prims_l.v = prims.v[ii];
-                        prims_l.p = prims.p[ii];
+                        prims_l.rho = prims[ii].rho;
+                        prims_l.v   = prims[ii].v;
+                        prims_l.p   = prims[ii].p;
 
-                        prims_r.rho = prims.rho[ii + 1];
-                        prims_r.v = prims.v[ii + 1];
-                        prims_r.p = prims.p[ii + 1];
+                        prims_r.rho = prims[ii + 1].rho;
+                        prims_r.v   = prims[ii + 1].v;
+                        prims_r.p   = prims[ii + 1].p;
 
                         f_l = calc_flux(prims_l.rho, prims_l.v, prims_l.p);
                         f_r = calc_flux(prims_r.rho, prims_r.v, prims_r.p);
@@ -464,32 +454,30 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                         // Set up the left and right state interfaces for i-1/2
                         if (periodic)
                         {
-                            u_l.D = roll(u_state.D, ii - 1);
-                            u_l.S = roll(u_state.S, ii - 1);
-                            u_l.tau = roll(u_state.tau, ii - 1);
+                            u_l = roll(u_state, ii - 1);
 
-                            u_r.D = u_state.D[ii];
-                            u_r.S = u_state.S[ii];
-                            u_r.tau = u_state.tau[ii];
+                            u_r.D   = u_state[ii].D;
+                            u_r.S   = u_state[ii].S;
+                            u_r.tau = u_state[ii].tau;
                         }
                         else
                         {
-                            u_l.D = u_state.D[ii - 1];
-                            u_l.S = u_state.S[ii - 1];
-                            u_l.tau = u_state.tau[ii - 1];
+                            u_l.D   = u_state[ii - 1].D;
+                            u_l.S   = u_state[ii - 1].S;
+                            u_l.tau = u_state[ii - 1].tau;
 
-                            u_r.D = u_state.D[ii];
-                            u_r.S = u_state.S[ii];
-                            u_r.tau = u_state.tau[ii];
+                            u_r.D   = u_state[ii].D;
+                            u_r.S   = u_state[ii].S;
+                            u_r.tau = u_state[ii].tau;
                         }
 
-                        prims_l.rho = prims.rho[ii - 1];
-                        prims_l.v = prims.v[ii - 1];
-                        prims_l.p = prims.p[ii - 1];
+                        prims_l.rho = prims[ii - 1].rho;
+                        prims_l.v   = prims[ii - 1].v;
+                        prims_l.p   = prims[ii - 1].p;
 
-                        prims_r.rho = prims.rho[ii];
-                        prims_r.v = prims.v[ii];
-                        prims_r.p = prims.p[ii];
+                        prims_r.rho = prims[ii].rho;
+                        prims_r.v   = prims[ii].v;
+                        prims_r.p   = prims[ii].p;
 
                         f_l = calc_flux(prims_l.rho, prims_l.v, prims_l.p);
                         f_r = calc_flux(prims_r.rho, prims_r.v, prims_r.p);
@@ -504,57 +492,35 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                             f2 = calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                         }
 
-                        L[coordinate].D   = -(f1.D - f2.D) / dx     + sourceD[coordinate];
-                        L[coordinate].S   = -(f1.S - f2.S) / dx     + sourceS[coordinate];
+                        dx = coord_lattice.dx1[coordinate];
+                        L[coordinate].D   = -(f1.D - f2.D)     / dx + sourceD[coordinate];
+                        L[coordinate].S   = -(f1.S - f2.S)     / dx + sourceS[coordinate];
                         L[coordinate].tau = -(f1.tau - f2.tau) / dx + source0[coordinate];
                     }
                     return L;
 
                 } else {
+                    Primitive left_most, right_most, left_mid, right_mid, center;
                     for (int ii = i_start; ii < i_bound; ii++)
                     {
                         if (periodic)
                         {
                             // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
                             coordinate = ii;
-                            left_most.rho  = roll(prims.rho, ii - 2);
-                            left_mid.rho   = roll(prims.rho, ii - 1);
-                            center.rho     = prims.rho[ii];
-                            right_mid.rho  = roll(prims.rho, ii + 1);
-                            right_most.rho = roll(prims.rho, ii + 2);
-
-                            left_most.v  = roll(prims.v, ii - 2);
-                            left_mid.v   = roll(prims.v, ii - 1);
-                            center.v     = prims.v[ii];
-                            right_mid.v  = roll(prims.v, ii + 1);
-                            right_most.v = roll(prims.v, ii + 2);
-
-                            left_most.p  = roll(prims.p, ii - 2);
-                            left_mid.p   = roll(prims.p, ii - 1);
-                            center.p     = prims.p[ii];
-                            right_mid.p  = roll(prims.p, ii + 1);
-                            right_most.p = roll(prims.p, ii + 2);
+                            left_most  = roll(prims, ii - 2);
+                            left_mid   = roll(prims, ii - 1);
+                            center     = prims[ii];
+                            right_mid  = roll(prims, ii + 1);
+                            right_most = roll(prims, ii + 2);
                         }
                         else
                         {
                             coordinate = ii - 2;
-                            left_most.rho  = prims.rho[ii - 2];
-                            left_mid.rho   = prims.rho[ii - 1];
-                            center.rho     = prims.rho[ii];
-                            right_mid.rho  = prims.rho[ii + 1];
-                            right_most.rho = prims.rho[ii + 2];
-
-                            left_most.v   = prims.v[ii - 2];
-                            left_mid.v    = prims.v[ii - 1];
-                            center.v      = prims.v[ii];
-                            right_mid.v   = prims.v[ii + 1];
-                            right_most.v  = prims.v[ii + 2];
-
-                            left_most.p   = prims.p[ii - 2];
-                            left_mid.p    = prims.p[ii - 1];
-                            center.p      = prims.p[ii];
-                            right_mid.p   = prims.p[ii + 1];
-                            right_most.p  = prims.p[ii + 2];
+                            left_most  = prims[ii - 2];
+                            left_mid   = prims[ii - 1];
+                            center     = prims[ii];
+                            right_mid  = prims[ii + 1];
+                            right_most = prims[ii + 2];
                         }
 
                         // Compute the reconstructed primitives at the i+1/2 interface
@@ -652,6 +618,8 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                             f2 = calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                         }
 
+                        dx = coord_lattice.dx1[coordinate];
+
                         L[coordinate].D   = -(f1.D - f2.D)     / dx  + sourceD[coordinate];
                         L[coordinate].S   = -(f1.S - f2.S)     / dx  + sourceS[coordinate];
                         L[coordinate].tau = -(f1.tau - f2.tau) / dx  + source0[coordinate];
@@ -661,6 +629,7 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
             }
         case simbi::Geometry::SPHERICAL:
             {
+                double rmean, dV, sL, sR, pc;
                 if (first_order)
                 {
                     for (int ii = i_start; ii < i_bound; ii++)
@@ -669,35 +638,20 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                         {
                             coordinate = ii;
                             // Set up the left and right state interfaces for i+1/2
-                            u_l.D = u_state.D[ii];
-                            u_l.S = u_state.S[ii];
-                            u_l.tau = u_state.tau[ii];
-
-                            u_r.D = roll(u_state.D, ii + 1);
-                            u_r.S = roll(u_state.S, ii + 1);
-                            u_r.tau = roll(u_state.tau, ii + 1);
+                            u_l = u_state[ii];
+                            u_r = roll(u_state, ii + 1);
                         }
                         else
                         {
                             // Shift the index for C++ [0] indexing
                             coordinate = ii - 1;
-
-                            u_l.D = u_state.D[ii];
-                            u_l.S = u_state.S[ii];
-                            u_l.tau = u_state.tau[ii];
-
-                            u_r.D = u_state.D[ii + 1];
-                            u_r.S = u_state.S[ii + 1];
-                            u_r.tau = u_state.tau[ii + 1];
+                            u_l = u_state[ii];
+                            u_r = u_state[ii + 1];
                         }
 
-                        prims_l.rho = prims.rho[ii];
-                        prims_l.v = prims.v[ii];
-                        prims_l.p = prims.p[ii];
+                        prims_l = prims[ii];
+                        prims_r = prims[ii + 1];
 
-                        prims_r.rho = prims.rho[ii + 1];
-                        prims_r.v = prims.v[ii + 1];
-                        prims_r.p = prims.p[ii + 1];
 
                         f_l = calc_flux(prims_l.rho, prims_l.p, prims_l.v);
                         f_r = calc_flux(prims_r.rho, prims_r.p, prims_r.v);
@@ -711,32 +665,17 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                         // Set up the left and right state interfaces for i-1/2
                         if (periodic)
                         {
-                            u_l.D = roll(u_state.D, ii - 1);
-                            u_l.S = roll(u_state.S, ii - 1);
-                            u_l.tau = roll(u_state.tau, ii - 1);
-
-                            u_r.D = u_state.D[ii];
-                            u_r.S = u_state.S[ii];
-                            u_r.tau = u_state.tau[ii];
+                            u_l = roll(u_state, ii - 1);
+                            u_r = u_state[ii];
                         }
                         else
                         {
-                            u_l.D = u_state.D[ii - 1];
-                            u_l.S = u_state.S[ii - 1];
-                            u_l.tau = u_state.tau[ii - 1];
-
-                            u_r.D = u_state.D[ii];
-                            u_r.S = u_state.S[ii];
-                            u_r.tau = u_state.tau[ii];
+                            u_l = u_state[ii - 1];
+                            u_r = u_state[ii];
                         }
 
-                        prims_l.rho = prims.rho[ii - 1];
-                        prims_l.v = prims.v[ii - 1];
-                        prims_l.p = prims.p[ii - 1];
-
-                        prims_r.rho = prims.rho[ii];
-                        prims_r.v = prims.v[ii];
-                        prims_r.p = prims.p[ii];
+                        prims_l = prims[ii - 1];
+                        prims_r = prims[ii];
 
                         f_l = calc_flux(prims_l.rho, prims_l.p, prims_l.v);
                         f_r = calc_flux(prims_r.rho, prims_r.p, prims_r.v);
@@ -746,61 +685,39 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
 
                         // Outflow the left/right boundaries
                         sL    = coord_lattice.face_areas[coordinate + 0];
-                        sR    = coord_lattice.face-areas[coordinate + 1];
+                        sR    = coord_lattice.face_areas[coordinate + 1];
                         dV    = coord_lattice.dV[coordinate];
                         rmean = coord_lattice.dx1[coordinate];
 
-                        L.D[coordinate]   = -(sR * f1.D   - sL * f2.D)   / dV + sourceD[coordinate];
-                        L.S[coordinate]   = -(sR * f1.S   - sL * f2.S)   / dV +  2 * pc / rmean + sourceS[coordinate];
-                        L.tau[coordinate] = -(sR * f1.tau - sL * f2.tau) / dV + source0[coordinate];
+                        L[coordinate].D   = -(sR * f1.D   - sL * f2.D)   / dV + sourceD[coordinate];
+                        L[coordinate].S   = -(sR * f1.S   - sL * f2.S)   / dV +  2 * pc / rmean + sourceS[coordinate];
+                        L[coordinate].tau = -(sR * f1.tau - sL * f2.tau) / dV + source0[coordinate];
                     }
                     return L;
                 } else {
+                    Primitive left_most, right_most, left_mid, right_mid, center;
                     for (int ii = i_start; ii < i_bound; ii++)
                     {
                         if (periodic)
                         {
                             coordinate = ii;
                             // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
-                            left_most.rho = roll(prims.rho, ii - 2);
-                            left_mid.rho = roll(prims.rho, ii - 1);
-                            center.rho = prims.rho[ii];
-                            right_mid.rho = roll(prims.rho, ii + 1);
-                            right_most.rho = roll(prims.rho, ii + 2);
+                            left_most  = roll(prims, ii - 2);
+                            left_mid   = roll(prims, ii - 1);
+                            center     = prims[ii];
+                            right_mid  = roll(prims, ii + 1);
+                            right_most = roll(prims, ii + 2);
 
-                            left_most.v = roll(prims.v, ii - 2);
-                            left_mid.v = roll(prims.v, ii - 1);
-                            center.v = prims.v[ii];
-                            right_mid.v = roll(prims.v, ii + 1);
-                            right_most.v = roll(prims.v, ii + 2);
-
-                            left_most.p = roll(prims.p, ii - 2);
-                            left_mid.p = roll(prims.p, ii - 1);
-                            center.p = prims.p[ii];
-                            right_mid.p = roll(prims.p, ii + 1);
-                            right_most.p = roll(prims.p, ii + 2);
                         }
                         else
                         {
                             // Adjust for beginning input of L vector
                             coordinate = ii - 2;
-                            left_most.rho = prims.rho[ii - 2];
-                            left_mid.rho = prims.rho[ii - 1];
-                            center.rho = prims.rho[ii];
-                            right_mid.rho = prims.rho[ii + 1];
-                            right_most.rho = prims.rho[ii + 2];
-
-                            left_most.v = prims.v[ii - 2];
-                            left_mid.v = prims.v[ii - 1];
-                            center.v = prims.v[ii];
-                            right_mid.v = prims.v[ii + 1];
-                            right_most.v = prims.v[ii + 2];
-
-                            left_most.p = prims.p[ii - 2];
-                            left_mid.p = prims.p[ii - 1];
-                            center.p = prims.p[ii];
-                            right_mid.p = prims.p[ii + 1];
-                            right_most.p = prims.p[ii + 2];
+                            left_most  = prims[ii - 2];
+                            left_mid   = prims[ii - 1];
+                            center     = prims[ii];
+                            right_mid  = prims[ii + 1];
+                            right_most = prims[ii + 2];
                         }
 
                         // Compute the reconstructed primitives at the i+1/2 interface
@@ -902,16 +819,18 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                         pc = center.p;
 
                         // Outflow the left/right boundaries
-                        sL = coord_lattice.face_areas[coordinate];
-                        sR = coord_lattice.face_areas[coordinate + 1];
-                        dV = coord_lattice.dV[coordinate];
+                        sL    = coord_lattice.face_areas[coordinate];
+                        sR    = coord_lattice.face_areas[coordinate + 1];
+                        dV    = coord_lattice.dV[coordinate];
                         rmean = coord_lattice.x1mean[coordinate];
 
-                        L.D[coordinate] = -(sR * f1.D - sL * f2.D) / (dV) +
+                        L[coordinate].D  = -(sR * f1.D - sL * f2.D) / dV +
                                         sourceD[coordinate] * decay_constant;
-                        L.S[coordinate] = -(sR * f1.S - sL * f2.S) / (dV) + 2 * pc / rmean +
-                                        sourceS[coordinate] * decay_constant;
-                        L.tau[coordinate] = -(sR * f1.tau - sL * f2.tau) / (dV) +
+
+                        L[coordinate].S  = -(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean +
+                                         sourceS[coordinate] * decay_constant;
+
+                        L[coordinate].tau = -(sR * f1.tau - sL * f2.tau) / dV +
                                             source0[coordinate] * decay_constant;
                     }
 
@@ -947,24 +866,30 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
         if (periodic)
         {
             this->idx_shift = 0;
+            this->i_start   = 0;
+            this->i_bound   = Nx;
         }
         else
         {
             if (first_order)
             {
-                this->idx_shift = 1;
+                this->idx_shift  = 1;
                 this->pgrid_size = Nx - 2;
+                this->i_start    = 1;
+                this->i_bound    = Nx - 1;
             }
             else
             {
-                this->idx_shift = 2;
+                this->idx_shift  = 2;
                 this->pgrid_size = Nx - 4;
+                this->i_start    = 2;
+                this->i_bound    = Nx - 2;
             }
         }
         config_system();
         int i_real;
         n = 0;
-        ConservedArray u_p, u, u1, u2, udot;
+        std::vector<Conserved> u_p, u, u1, u2, udot;
         // Write some info about the setup for writeup later
         string filename, tnow, tchunk;
         PrimData prods;
@@ -978,11 +903,20 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
         setup.xactive_zones = pgrid_size;
         setup.NX = Nx;
 
+        // Create Structure of Vectors (SoV) for trabsferring 
+        // data to files once ready
+        sr1d::PrimitiveArray transfer_prims; 
+
+        u.resize(Nx);
+        prims.resize(Nx);
+        pressure_guess.resize(Nx);
         // Copy the state array into real & profile variables
-        u.D = state[0];
-        u.S = state[1];
-        u.tau = state[2];
-        u_p = u;
+        for (size_t ii = 0; ii < Nx; ii++)
+        {
+            u[ii] = Conserved{state[0][ii],
+                              state[1][ii],
+                              state[2][ii]};
+        }
 
         if ((coord_system == "spherical") && (linspace))
         {
@@ -1000,12 +934,13 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
             coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE);
         }
 
-        prims = cons2prim1D(u, lorentz_gamma);
-        pressure_guess = prims.p;
+        cons2prim1D(u);
+
         n++;
 
         if (first_order)
         {
+            u_p = u;
             while (t < tend)
             {
                 /* Compute the loop execution time */
@@ -1021,9 +956,7 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                 for (int ii = 0; ii < pgrid_size; ii++)
                 {
                     i_real = ii + idx_shift;
-                    u_p.D[i_real] = u.D[i_real] + dt * udot.D[ii];
-                    u_p.S[i_real] = u.S[i_real] + dt * udot.S[ii];
-                    u_p.tau[i_real] = u.tau[i_real] + dt * udot.tau[ii];
+                    u_p[i_real] = u[i_real] + udot[ii] * dt;
                 }
 
                 // Readjust the ghost cells at i-1,i+1 if not periodic
@@ -1032,24 +965,16 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                     config_ghosts1D(u_p, Nx);
                 }
 
-                prims = cons2prim1D(u_p, lorentz_gamma);
-                pressure_guess = prims.p;
+                cons2prim1D(u_p);
 
                 // Adjust the timestep
                 if (t > 0)
                 {
                     dt = adapt_dt(prims);
                 }
-                if (isnan(dt))
-                {
-                    break;
-                }
 
                 // Swap the arrays
-                u.D.swap(u_p.D);
-                u.S.swap(u_p.S);
-                u.tau.swap(u_p.tau);
-
+                u.swap(u_p);
                 t += dt;
 
                 /* Compute the loop execution time */
@@ -1065,7 +990,9 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
         }
         else
         {
-            tchunk = "0000000";
+            tchunk = "000000";
+            int tchunk_order_of_mag = 2;
+            int time_order_of_mag, num_zeros;
 
             u1 = u;
             u2 = u;
@@ -1084,9 +1011,7 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                 for (int ii = 0; ii < pgrid_size; ii++)
                 {
                     i_real = ii + idx_shift;
-                    u1.D[i_real] = u.D[i_real] + dt * udot.D[ii];
-                    u1.S[i_real] = u.S[i_real] + dt * udot.S[ii];
-                    u1.tau[i_real] = u.tau[i_real] + dt * udot.tau[ii];
+                    u1[i_real] = u[i_real] + udot[ii] * dt;
                 }
 
                 // Readjust the ghost cells at i-2,i-1,i+1,i+2
@@ -1095,24 +1020,16 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                     config_ghosts1D(u1, Nx, false);
                 }
 
-                prims = cons2prim1D(u1, lorentz_gamma);
-                pressure_guess = prims.p;
-
-                // udot = u_dot1D(u1);
+                cons2prim1D(u1);
+                udot = u_dot1D(u1);
 
                 for (int ii = 0; ii < pgrid_size; ii++)
                 {
                     i_real = ii + idx_shift;
-                    u2.D[i_real] =
-                        0.5 * u.D[i_real] + 0.5 * u1.D[i_real] + 0.5 * dt * udot.D[ii];
-                    u2.S[i_real] =
-                        0.5 * u.S[i_real] + 0.5 * u1.S[i_real] + 0.5 * dt * udot.S[ii];
-                    u2.tau[i_real] = 0.5 * u.tau[i_real] + 0.5 * u1.tau[i_real] +
-                                     0.5 * dt * udot.tau[ii];
+                    u2[i_real] = u[i_real] * 0.5 + u1[i_real] * 0.5 + udot[ii] * dt * 0.5;
                 }
 
-                prims = cons2prim1D(u2, lorentz_gamma);
-                pressure_guess = prims.p;
+                cons2prim1D(u2);
 
                 if (periodic == false)
                 {
@@ -1126,9 +1043,7 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                 }
 
                 // Swap the arrays
-                u.D.swap(u2.D);
-                u.S.swap(u2.S);
-                u.tau.swap(u2.tau);
+                u.swap(u2);
 
                 t += dt;
 
@@ -1148,7 +1063,13 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
                 /* Write to a File every tenth of a second */
                 if (t >= t_interval)
                 {
-                    toWritePrim(&prims, &prods);
+                    time_order_of_mag = std::floor(std::log10(t));
+                    if (time_order_of_mag > tchunk_order_of_mag){
+                        tchunk.insert(0, "0");
+                        tchunk_order_of_mag += 1;
+                    }
+                    transfer_prims = vec2struct<sr1d::PrimitiveArray, Primitive>(prims);
+                    writeToProd<sr1d::PrimitiveArray, Primitive>(&transfer_prims, &prods);
                     tnow = create_step_str(t_interval, tchunk);
                     filename = string_format("%d.chkpt." + tnow + ".h5", pgrid_size);
                     setup.t = t;
@@ -1161,11 +1082,16 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
             }
         }
         cout << "\n";
-        prims = cons2prim1D(u, lorentz_gamma);
+        cons2prim1D(u);
         vector<vector<double>> final_prims(3, vector<double>(Nx, 0));
-        final_prims[0] = prims.rho;
-        final_prims[1] = prims.v;
-        final_prims[2] = prims.p;
+        for (size_t ii = 0; ii < Nx; ii++)
+        {
+            final_prims[0][ii] = prims[ii].rho;
+            final_prims[1][ii] = prims[ii].v;
+            final_prims[2][ii] = prims[ii].p;
+        }
+        
+        
 
         return final_prims;
     };
