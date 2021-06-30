@@ -20,6 +20,7 @@
 #include "H5Cpp.h"
 #include "hydro_structs.h"
 #include "config.h"
+#include "traits.h"
 
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-GLOBAL-STRUCTS
@@ -73,6 +74,22 @@ std::vector<double> calc_lorentz_gamma(T &v);
 template <typename T>
 void toWritePrim(T *from, PrimData *to, int ndim = 1);
 
+template<typename T, typename N>
+typename std::enable_if<is_2D_primitive<N>::value>::type
+writeToProd(T *from, PrimData *to);
+
+template<typename T, typename N>
+typename std::enable_if<is_1D_primitive<N>::value>::type
+writeToProd(T *from, PrimData *to);
+
+template<typename T , typename N>
+typename std::enable_if<is_2D_primitive<N>::value, T>::type
+vec2struct(const std::vector<N> &p);
+
+template<typename T , typename N>
+typename std::enable_if<is_1D_primitive<N>::value, T>::type
+vec2struct(const std::vector<N> &p);
+
 template <typename... Args>
 std::string string_format(const std::string &format, Args... args);
 
@@ -87,31 +104,24 @@ constexpr T roll(const std::vector<T>  &v, unsigned int n) { return v[n % v.size
 //---------------------------------------------------------------------------------------------------------
 
 //----------------Define Methods-------------------------
-double findMax(double, double, double);
-double findMin(double a, double b, double c);
-double calc_sound_speed(float, double, double);
 sr2d::PrimitiveData vecs2struct(const std::vector<sr2d::Primitive> &p);
-void compute_vertices(std::vector<double> &cz, std::vector<double> &xv, int lx, bool linspace = true);
 std::vector<double> rollVector(const std::vector<double> &, unsigned int);
 double roll(std::vector<double> &, unsigned int);
 double roll(std::vector<std::vector<double>> &, unsigned int xpos, unsigned int ypos);
-std::vector<std::vector<double>> transpose(std::vector<std::vector<double>> &);
 void toWritePrim(sr1d::PrimitiveArray *from, PrimData *to);
 void toWritePrim(sr2d::PrimitiveData *from, PrimData *to);
 std::string create_step_str(double t_interval, std::string &tnow);
-void write_hdf5(std::string data_directory, std::string filename, PrimData prims, DataWriteMembers system, const int dim, const int size);
+void write_hdf5(
+    const std::string data_directory, 
+    const std::string filename, 
+    const PrimData prims, 
+    const DataWriteMembers system, 
+    const int dim, 
+    const int size);
+
 void write_data(std::vector<std::vector<double>> &sim_data, double time, std::string sim_type);
-double calc_pressure(float, double, double, double);
-double calc_energy(float, double, double, double);
-double calc_enthalpy(float, double, double);
-double epsilon_rel(double, double, double, double);
-double central_difference(double, double (*f)(double), double);
-double calc_velocity(double, double, double, double, double = 1);
 double calc_intermed_wave(double, double, double, double);
 double calc_intermed_pressure(double, double, double, double, double, double);
-int kronecker(int, int);
-double calc_lorentz_gamma(double v);
-double calc_rel_sound_speed(double, double, double, double, float);
 double pressure_func(double, double, double, double, float, double);
 double dfdp(double, double, double, double, float, double);
 void config_ghosts2D(

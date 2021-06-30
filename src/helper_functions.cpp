@@ -11,7 +11,6 @@
 #include <algorithm>
 #include <cstdarg>
 
-
 using namespace std;
 using namespace H5;
 // =========================================================================================================
@@ -37,25 +36,6 @@ sr2d::PrimitiveData vecs2struct(const vector<sr2d::Primitive> &p){
     return sprims;
 }
 
-// Find the max element
-double findMax(double a, double b, double c ){
-    //Find max b/w a & b first
-    double inter_max = max(a, b);
-
-    double max_val = max(inter_max, c);
-
-    return max_val;
-};
-
-double findMin(double a, double b, double c ){
-    //Find max b/w a & b first
-    double inter_min = min(a, b);
-
-    double min_val = min(inter_min, c);
-
-    return min_val;
-};
-
 // Sound Speed Function
 double calc_sound_speed(float gamma, double rho, double pressure){
     double c = sqrt(gamma*pressure/rho);
@@ -80,41 +60,6 @@ double roll(vector<double>  &v, unsigned int n) {
 double roll(vector<vector<double>>  &v, unsigned int xpos, unsigned int ypos) {
    return v[ypos % v.size()][xpos % v[0].size()];
 };
-vector<vector<double> > transpose(vector<vector<double> > &mat){
-
-    vector<vector<double> > trans_vec(mat[0].size(), vector<double>());
-
-    int y_size = mat.size();
-    int x_size = mat[0].size(); 
-
-    for (int i = 0; i < x_size; i++)
-    {
-        for (int j = 0; j < y_size; j++)
-        {
-            if (trans_vec[j].size() != mat.size()){
-
-                trans_vec[j].resize(mat.size());
-
-            }
-            
-            trans_vec[j][i] = mat[i][j];
-        }
-    }
-
-    return trans_vec;
-};
-
-void compute_vertices(vector<double> &cz, 
-                      vector<double> &xv, 
-                      int lx, 
-                      bool linspace){
-    xv[0]  = cz[0];
-    xv[lx] = cz[lx-1];
-    for (size_t i = 1; i < lx; i++)
-    {
-        xv[i] = linspace ? 0.5 * (cz[i] + cz[i-1]) : sqrt(cz[i] * cz[i-1]);
-    };
-}
 
 std::map<std::string, simbi::Geometry> geometry;
 void config_system() {
@@ -354,8 +299,10 @@ string create_step_str(double t_interval, string &tnow){
         int num_zeros = tnow.size() - s.size();
         string pad_zeros = string(num_zeros, '0');
         s.insert(0, pad_zeros);
-
     }
+
+    // insert underscore to signify decimal placement
+    s.insert(s.length() - 3, "_");
 
     int label_size = tnow.size();
     for (int i = 0; i < label_size; i++){
@@ -369,10 +316,10 @@ string create_step_str(double t_interval, string &tnow){
 
 }
 void write_hdf5(
-    string data_directory, 
-    string filename, 
-    PrimData prims, 
-    DataWriteMembers setup, 
+    const string data_directory, 
+    const string filename, 
+    const PrimData prims, 
+    const DataWriteMembers setup, 
     const int dim = 2,
     const int size = 1)
 {
@@ -414,9 +361,9 @@ void write_hdf5(
             dataset.close();
 
             // Free the heap
-            delete(rho);
-            delete(v);
-            delete(p);
+            delete[]rho;
+            delete[]v;
+            delete[]p;
 
             // Write Datset Attributes
             H5::DataType double_type(H5::PredType::NATIVE_DOUBLE);
@@ -491,10 +438,10 @@ void write_hdf5(
             dataset.close();
 
             // Free the heap
-            delete(rho);
-            delete(v1);
-            delete(v2);
-            delete(p);
+            delete[] rho;
+            delete[] v1;
+            delete[] v2;
+            delete[] p;
 
             // Write Datset Attributesauto double_type(H5::PredType::NATIVE_DOUBLE);
             H5::DataType int_type(H5::PredType::NATIVE_INT);
@@ -556,64 +503,9 @@ void write_hdf5(
     }
     
 }
-
-
-//=======================================================================================================
-//                                      NEWTONIAN HYDRO
-//=======================================================================================================
-
-//----------------------------------------------------------------------------------------------------------
-//  PRESSURE CALCULATIONS
-//---------------------------------------------------------------------------------------------------------
-
-double calc_pressure(float gamma, double rho, double energy, double v){
-    double pressure = (gamma - 1.)*(energy - 0.5*rho*v*v);
-    return pressure;
-};
-
-//------------------------------------------------------------------------------------------------------------
-//  ENERGY CALCULATIONS
-//------------------------------------------------------------------------------------------------------------
-
-double calc_energy(float gamma, double rho, double pressure, double v){
-        return pressure/(gamma-1.) + 0.5*rho*v*v;
-};
-
-
 //=======================================================================================================
 //                                      RELATIVISITC HYDRO
 //=======================================================================================================
-int kronecker(int i, int j){
-    if (i == j){
-        return 1;
-    } else{
-        return 0;
-    }
-}
-
-
-//------------------------------------------------------------------------------------------------------------
-//  SPECIFIC ENTHALPY CALCULATIONS
-//------------------------------------------------------------------------------------------------------------
-double calc_enthalpy(float gamma, double rho, double pressure){
-        return 1 + gamma*pressure/(rho*(gamma - 1));
-};
-
-double epsilon_rel(double pressure, double D, double tau, double lorentz_gamma){
-    return ( tau + D*(1. - lorentz_gamma) + (1. - lorentz_gamma*lorentz_gamma)*pressure )/(D*lorentz_gamma);
-}
-
-double rho_rel(double D, double lorentz_gamma, double root_g){
-    return D/(lorentz_gamma*root_g);
-}
-//------------------------------------------------------------------------------------------------------------
-//  VELOCITY CALCULATION
-//------------------------------------------------------------------------------------------------------------
-double calc_velocity(double s, double tau, double pressure, double D, double root_g){
-    // Compute the 3-velocity given relaitivistic quanrities
-    return s/(tau + root_g*pressure + D);
-}
-
 double calc_intermed_wave(double energy_density, double momentum_density, 
                             double flux_momentum_density, 
                             double flux_energy_density)
@@ -635,17 +527,6 @@ double calc_intermed_pressure(double a,double aStar, double energy, double norm_
     g = 1 + a*aStar;
 
     return (e - f)/g;
-}
-//------------------------------------------------------------------------------------------------------------
-//  LORENTZ FACTOR CALCULATION
-//------------------------------------------------------------------------------------------------------------
-
-
-
-double calc_rel_sound_speed(double pressure, double D, double tau, double lorentz_gamma, float gamma){
-    double epsilon = epsilon_rel(pressure, D, tau, lorentz_gamma);
-
-    return sqrt((gamma - 1)*gamma*epsilon/(1 + gamma*epsilon));
 }
 //------------------------------------------------------------------------------------------------------------
 //  F-FUNCTION FOR ROOT FINDING: F(P)
