@@ -6,6 +6,7 @@ data/
 tests/
 science/
 src/ustate.h
+src/state.cpp
 test.cpp
 ustate
 .vscode/
