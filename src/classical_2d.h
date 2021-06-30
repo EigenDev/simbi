@@ -4,14 +4,16 @@
 * computing the HLL derivative of the state vector
 * given the state itself.
 */
+#ifndef CLASSICAL_2D_H
+#define CLASSICAL_2D_H
+
 #include <vector>
 #include <string>
 #include "hydro_structs.h"
 #include "clattice.h"
 #include "config.h"
 
-#ifndef CLASSICAL_2D_H
-#define CLASSICAL_2D_H
+
 
 namespace simbi {
     class Newtonian2D {

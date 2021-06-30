@@ -4,13 +4,13 @@
 * computing the HLL derivative of the state vector
 * given the state itself.
 */
+#ifndef CLASSICAL_1D_H
+#define CLASSICAL_1D_H
 
 #include <vector>
 #include <string>
 #include <hydro_structs.h>
-
-#ifndef CLASSICAL_1D_H
-#define CLASSICAL_1D_H
+#include "clattice_1d.hpp"
 
 namespace simbi {
     enum class SOLVER{HLLE, HLLC};
@@ -25,6 +25,7 @@ namespace simbi {
             int nzones, active_zones, idx_shift;
             std::string coord_system;
             simbi::SOLVER sim_solver;
+            CLattice1D coord_lattice;
 
             std::vector<hydro1d::Primitive> prims;
             Newtonian1D();
