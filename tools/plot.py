@@ -20,7 +20,7 @@ import os
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'line_profile', 'energy']
 
 ofield = {}
-with h5py.File('data/srhd/702.chkpt.0100000.h5', 'r+') as hf:
+with h5py.File('data/srhd/409.chkpt.100_000.h5', 'r+') as hf:
         
         ds = hf.get("sim_info")
         
@@ -246,7 +246,7 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     #ax.set_ylim(sorted_energy[1], 1.5*ets.max())
     ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
     ax.set_ylabel(r'$E( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
-    ax.tick_params('both', labelsize=20)
+    ax.tick_params('both', labelsize=15)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     ax.set_title(r'Roche lobe overflow, t ={:.2f} s'.format(tend), fontsize=20)
