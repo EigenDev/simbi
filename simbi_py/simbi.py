@@ -299,8 +299,8 @@ class Hydro:
                 if linspace:
                     r_arr = np.linspace(r_min, r_max, self.Npts)
                 else:
-                    r_arr = np.logspace(np.log(r_min), np.log(r_max), self.Npts, base=np.exp(1))
-                    
+                    r_arr = np.logspace(np.log10(r_min), np.log10(r_max), self.Npts)
+                
                 if self.regime == "classical":
                     a = PyState(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
                     u = a.simulate(tend=tend, dt=dt, linspace=linspace, periodic=periodic, hllc=hllc)
@@ -318,7 +318,7 @@ class Hydro:
                     r_arr = np.linspace(r_min, r_max, self.Npts)
                 else:
                     r_arr = np.logspace(np.log10(r_min), np.log10(r_max), self.Npts)
-                    
+                
                 if self.regime == "classical":
                     a = PyState(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
                     u = a.simulate(tend=tend, first_order=False,  dt=dt, linspace=linspace, periodic=periodic, hllc=hllc)

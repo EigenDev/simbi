@@ -38,7 +38,7 @@ void config_ghosts1D(T &u_state, int grid_size, bool first_order){
         u_state[0].D = u_state[1].D;
         u_state[grid_size - 1].D = u_state[grid_size - 2].D;
 
-        u_state[0].S = u_state[1].S;
+        u_state[0].S = - u_state[1].S;
         u_state[grid_size - 1].S = u_state[grid_size - 2].S;
 
         u_state[0].tau = u_state[1].tau;

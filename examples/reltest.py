@@ -23,8 +23,8 @@ hydro = Hydro(gamma=gamma, initial_state = ((10.0,13.33,0.0),(1.0,1.e-10,0.0)),
 
 
 
-h = hydro2.simulate(tend=tend, first_order=False, CFL=0.4, hllc=True)
-u = hydro.simulate(tend=tend, first_order=False, CFL=0.4, hllc=False)
+h = hydro2.simulate(tend=tend, first_order=False,  CFL=0.4, hllc=True )
+u = hydro.simulate(tend=tend,  first_order=False,  CFL=0.4, hllc=False)
 
 
 x = np.linspace(0, 1, N)

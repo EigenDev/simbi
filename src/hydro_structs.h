@@ -30,10 +30,22 @@ namespace hydro1d {
         Conserved(double rho, double m, double e_dens) : rho(rho), m(m), e_dens(e_dens) {}
         Conserved(const Conserved &cons) : rho(cons.rho), m(cons.m), e_dens(cons.e_dens) {}
 
-        Conserved operator +(const Conserved &cons) const {return Conserved(rho + cons.rho, m + cons.m, e_dens + cons.e_dens); }
-        Conserved operator -(const Conserved &cons) const {return Conserved(rho - cons.rho, m - cons.m, e_dens - cons.e_dens); }
-        Conserved operator /(const double c) const {return Conserved(rho/c, m/c, e_dens/c); }
-        Conserved operator *(const double c)  const {return Conserved(rho*c, m*c, e_dens*c); }
+        Conserved operator   + (const Conserved &cons) const {return Conserved(rho + cons.rho, m + cons.m, e_dens + cons.e_dens); }
+        Conserved operator   - (const Conserved &cons) const {return Conserved(rho - cons.rho, m - cons.m, e_dens - cons.e_dens); }
+        Conserved operator   / (const double c) const {return Conserved(rho/c, m/c, e_dens/c); }
+        Conserved operator   * (const double c)  const {return Conserved(rho*c, m*c, e_dens*c); }
+        Conserved & operator +=(const Conserved &cons) {
+            rho    += cons.rho;
+            m      += cons.m;
+            e_dens += cons.e_dens;
+            return *this;
+        }
+        Conserved & operator -=(const Conserved &cons) {
+            rho    -= cons.rho;
+            m      -= cons.m;
+            e_dens -= cons.e_dens;
+            return *this;
+        }
 
     };
 
@@ -59,55 +71,64 @@ namespace hydro1d {
 namespace sr1d {
     struct Primitive {
         double rho, v, p;
-        Primitive ();
-        ~Primitive ();
-        Primitive(double rho, double v, double pre);
-        Primitive(const Primitive &prim);
+        Primitive () {}
+        ~Primitive () {}
+        Primitive(double rho, double v, double p) : rho(rho), v(v), p(p) {}
+        Primitive(const Primitive &prim) : rho(prim.rho), v(prim.v), p(prim.p) {}
+        Primitive operator +(const Primitive &prim) const {return Primitive(rho + prim.rho, v + prim.v, p + prim.p); }
 
-        Primitive operator +(const Primitive &prim) const;
+        Primitive operator -(const Primitive &prim) const {return Primitive(rho - prim.rho, v - prim.v, p - prim.p); }
 
-        Primitive operator -(const Primitive &prim) const;
+        Primitive operator /(const double c) const {return Primitive(rho/c, v/c, p/c); }
 
-        Primitive operator /(const double c) const;
-
-        Primitive operator *(const double c) const;
+        Primitive operator *(const double c) const {return Primitive(rho*c, v*c, p*c); }
     };
 
     struct Conserved {
         double D, S, tau;
-        Conserved();
-        ~Conserved();
-        Conserved(double D, double S, double tau);
-        Conserved(const Conserved &cons);
+        Conserved() {}
+        ~Conserved() {}
+        
+        Conserved(double D, double S, double tau) : D(D), S(S), tau(tau) {}
+        Conserved(const Conserved &cons) : D(cons.D), S(cons.S), tau(cons.tau) {}
 
-        Conserved operator +(const Conserved &cons) const;
+        Conserved operator +(const Conserved &cons) const {return Conserved(D + cons.D, S + cons.S, tau + cons.tau); }
 
-        Conserved operator -(const Conserved &cons) const;
+        Conserved operator -(const Conserved &cons) const {return Conserved(D - cons.D, S - cons.S, tau - cons.tau); }
 
-        Conserved operator /(const double c) const;
+        Conserved operator /(const double c) const {return Conserved(D/c, S/c, tau/c); }
 
-        Conserved operator *(const double c) const;
+        Conserved operator *(const double c) const {return Conserved(D*c, S*c, tau*c); }
+
+        Conserved & operator +=(const Conserved &cons) {
+            D      += cons.D;
+            S      += cons.S;
+            tau    += cons.tau;
+            return *this;
+        }
+        Conserved & operator -=(const Conserved &cons) {
+            D      -= cons.D;
+            S      -= cons.S;
+            tau    -= cons.tau;
+            return *this;
+        }
     };
 
-    Conserved operator *(const double c, const Conserved &cons);
-
-    Conserved operator -(const Conserved &cons);
-
     struct PrimitiveArray {
-        PrimitiveArray();
-        ~PrimitiveArray();
+        PrimitiveArray() {}
+        ~PrimitiveArray() {}
         std::vector<double> rho, v, p;
     };
 
     struct ConservedArray {
-        ConservedArray();
-        ~ConservedArray();
+        ConservedArray() {}
+        ~ConservedArray() {}
         std::vector<double> D, S, tau;
     };
     struct Eigenvals {
         double aL, aR;
-        Eigenvals();
-        ~Eigenvals();
+        Eigenvals() {}
+        ~Eigenvals() {}
     };
 
 }

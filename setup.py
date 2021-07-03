@@ -54,6 +54,7 @@ def extensions():
         'extra_compile_args': compiler_args,
         'extra_link_args': linker_args,
         'libraries': libraries,
+        'depends': headers,
         'language': 'c++'
     }
 
