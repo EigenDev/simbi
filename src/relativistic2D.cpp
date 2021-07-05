@@ -1406,7 +1406,7 @@ vector<vector<double>> SRHD2D::simulate2D(
     int i_real, j_real;
     string tnow, tchunk, tstep;
     int total_zones = NX * NY;
-
+    
     double round_place = 1 / chkpt_interval;
     double t = tstart;
     double t_interval =
@@ -1477,12 +1477,11 @@ vector<vector<double>> SRHD2D::simulate2D(
     setup.NX = NX;
     setup.NY = NY;
 
-    vector<Conserved> u, udot, u1, u2, u_p;
+    vector<Conserved> u, u1, udot, udot1;
     u.resize(nzones);
     u1.resize(nzones);
-    u2.resize(nzones);
     udot.reserve(active_zones);
-    u_p.resize(nzones);
+    udot1.resize(nzones);
     prims.reserve(nzones);
 
     // Define the source terms
@@ -1528,9 +1527,7 @@ vector<vector<double>> SRHD2D::simulate2D(
         config_ghosts2D(u, NX, NY, false);
     }
 
-    u_p = u;
     u1  = u;
-    u2  = u;
 
     if (first_order)
     {
@@ -1547,15 +1544,12 @@ vector<vector<double>> SRHD2D::simulate2D(
                 for (int ii = 0; ii < xphysical_grid; ii++)
                 {
                     i_real = ii + 1;
-                    u_p[i_real + NX * j_real] =
-                        u[i_real + NX * j_real] + udot[ii + xphysical_grid * jj] * dt;
+                    u[i_real + NX * j_real] += udot[ii + xphysical_grid * jj] * dt;
                 }
             }
 
-            config_ghosts2D(u_p, NX, NY, true);
-            prims = cons2prim2D(u_p);
-
-            u.swap(u_p);
+            config_ghosts2D(u, NX, NY, true);
+            prims = cons2prim2D(u);
 
             t += dt;
             dt = adapt_dt(prims);
@@ -1594,8 +1588,7 @@ vector<vector<double>> SRHD2D::simulate2D(
                         j_real = y + 2;
                         for(int x = ii; x < std::min(ii + block_size, xphysical_grid); x++){
                             i_real = x + 2;
-                            u1[i_real + NX * j_real] 
-                                = u[i_real + NX * j_real] + udot[x + xphysical_grid * y] * dt;
+                            u1[i_real + NX * j_real] += udot[x + xphysical_grid * y] * dt;
                         }
                     }
                 }
@@ -1603,7 +1596,7 @@ vector<vector<double>> SRHD2D::simulate2D(
 
             config_ghosts2D(u1, NX, NY, false);
             prims = cons2prim2D(u1);
-            udot  = u_dot2D(u1);
+            udot1  = u_dot2D(u1);
 
             for (int jj = 0; jj < yphysical_grid; jj+= block_size)
             {
@@ -1614,20 +1607,17 @@ vector<vector<double>> SRHD2D::simulate2D(
                         j_real = y + 2;
                         for(int x = ii; x < std::min(ii + block_size, xphysical_grid); x++){
                             i_real = x + 2;
-                            // i_real = ii + 2;
-                            u2[i_real + NX * j_real] =  u [i_real + NX * j_real] * 0.5 +
-                                                        u1[i_real + NX * j_real] * 0.5 +
-                                                        udot[x + xphysical_grid * y] * 0.5 * dt;
+                            u[i_real + NX * j_real] +=  udot [x + xphysical_grid * y] * 0.5 * dt + 
+                                                        udot1[x + xphysical_grid * y] * 0.5 * dt;
                         }
                     }
                     
                 }
             }
 
-            config_ghosts2D(u2, NX, NY, false);
-            prims = cons2prim2D(u2);
-            // aVisc.calc_artificial_visc(prims, coord_lattice);
-            u.swap(u2);
+            config_ghosts2D(u, NX, NY, false);
+            prims = cons2prim2D(u);
+            u1 = u;
 
             t += dt;
             dt = adapt_dt(prims);

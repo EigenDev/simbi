@@ -147,6 +147,21 @@ namespace sr2d {
         Conserved operator * (const double c)      const { return Conserved(D*c, S1*c, S2*c, tau*c ); }
         Conserved operator / (const double c)      const { return Conserved(D/c, S1/c, S2/c, tau/c ); }
 
+        Conserved & operator +=(const Conserved &cons) {
+            D      += cons.D;
+            S1     += cons.S1;
+            S2     += cons.S2;
+            tau    += cons.tau;
+            return *this;
+        }
+        Conserved & operator -=(const Conserved &cons) {
+            D      += cons.D;
+            S1     += cons.S1;
+            S2     += cons.S2;
+            tau    += cons.tau;
+            return *this;
+        }
+
         double momentum(const int nhat) const {return (nhat == 1 ? S1 : S2); }
     };
 
@@ -190,6 +205,20 @@ namespace hydro2d {
         Conserved operator - (const Conserved &p)  const { return Conserved(rho-p.rho, m1-p.m1, m2-p.m2, e_dens-p.e_dens); }  
         Conserved operator * (const double c)      const { return Conserved(rho*c, m1*c, m2*c, e_dens*c ); }
         Conserved operator / (const double c)      const { return Conserved(rho/c, m1/c, m2/c, e_dens/c ); }
+        Conserved & operator +=(const Conserved &cons) {
+            rho       += cons.rho;
+            m1        += cons.m1;
+            m2        += cons.m2;
+            e_dens    += cons.e_dens;
+            return *this;
+        }
+        Conserved & operator -=(const Conserved &cons) {
+            rho       += cons.rho;
+            m1        += cons.m1;
+            m2        += cons.m2;
+            e_dens    += cons.e_dens;
+            return *this;
+        }
 
         double momentum(const int nhat) const { return (nhat == 1 ? m1 : m2); }
     };
@@ -205,6 +234,7 @@ namespace hydro2d {
         Primitive operator - (const Primitive &e)  const { return Primitive(rho-e.rho, v1-e.v1, v2-e.v2, p-e.p); }  
         Primitive operator * (const double c)      const { return Primitive(rho*c, v1*c, v2*c, p*c ); }
         Primitive operator / (const double c)      const { return Primitive(rho/c, v1/c, v2/c, p/c ); }
+
     };
     
     struct Eigenvals{
