@@ -314,6 +314,7 @@ class Hydro:
                 print('Computing Higher Order...')
                 r_min = self.geometry[0]
                 r_max = self.geometry[1]
+                self.W = np.zeros(self.u[0].size)
                 if linspace:
                     r_arr = np.linspace(r_min, r_max, self.Npts)
                 else:
@@ -324,7 +325,7 @@ class Hydro:
                     u = a.simulate(tend=tend, first_order=False,  dt=dt, linspace=linspace, periodic=periodic, hllc=hllc)
                 else:
                     a = PyStateSR(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
-                    u = a.simulate(tend=tend, first_order=False,  theta=theta,
+                    u = a.simulate(tstart=start_time, tend=tend, first_order=False,  theta=theta,
                                    sources=sources, dt=dt, linspace=linspace, 
                                    periodic=periodic, lorentz_gamma=self.W, hllc=hllc,
                                    chkpt_interval=chkpt_interval, data_directory=data_directory)

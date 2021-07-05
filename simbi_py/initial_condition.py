@@ -14,7 +14,7 @@ def load_checkpoint(model, filename, dim):
             rho         = hf.get("rho")[:]
             v           = hf.get("v")[:]
             p           = hf.get("p")[:]
-            nx          = ds.attrs["NX"]
+            nx          = ds.attrs["Nx"]
             model.t     = ds.attrs["current_time"]
             xmax        = ds.attrs["xmax"]
             xmin        = ds.attrs["xmin"]
@@ -27,7 +27,7 @@ def load_checkpoint(model, filename, dim):
             h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
             
             W   = 1./np.sqrt(1. - v ** 2)
-            model.D   = rho * model.W 
+            model.D   = rho * W 
             model.S   = W**2 * rho*h*v
             model.tau = W**2 * rho*h - p - rho*W
             
