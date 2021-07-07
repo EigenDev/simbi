@@ -11,11 +11,23 @@ import matplotlib.colors as colors
 import argparse 
 import h5py 
 import astropy.constants as const
-
-from datetime import datetime
+import astropy.units as u 
 import os
 
+from datetime import datetime
+
+
 field_choices = ['rho', 'v', 'p', 'gamma_beta', 'temperature', 'vpdf']
+
+R_0 = const.R_sun.cgs 
+c   = const.c.cgs
+m   = const.M_sun.cgs
+ 
+rho_scale  = m / (4./3. * np.pi * R_0 ** 3) 
+e_scale    = m * const.c.cgs.value**2
+pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
+vel_scale  = c 
+time_scale = R_0 / c
 
 def prims2cons(fields, cons):
     if cons == "D":
@@ -43,15 +55,18 @@ def plot_profile(args, field_dict, ax = None, overplot = False, case = 0):
             ax.plot(r, field_dict[args.field], label = args.labels[case])
         
     
-    ax.set_title('{} at t = {:.2f} s'.format(args.setup[0], field_dict["t"]), fontsize=20)
+    ax.set_title('{} at t = {:.2f}'.format(args.setup[0], field_dict["t"]), fontsize=20)
 
 
     ax.tick_params(axis='both', labelsize=20)
     
     
     ax.set_xlabel('$r/R_\odot$', fontsize=20)
-    ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
-
+    if args.xlim is None:
+        ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
+    else:
+        xmin, xmax = eval(args.xlim)
+        ax.set_xlim(xmin, xmax)
     # Change the format of the field
     if args.field == "rho":
         field_str = r'$\rho$'
@@ -71,7 +86,6 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
         ax = fig.add_subplot(1, 1, 1)
 
     tend = fields["t"]
-    e_scale = 2e33 * const.c.cgs.value**2
     
     edens_total = prims2cons(fields, "energy")
     r           = fields["r"]
@@ -83,9 +97,9 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
         
     dV          =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
     
-    etotal = edens_total * (4 * np.pi * dV) * e_scale
+    etotal = edens_total * (4 * np.pi * dV) * e_scale.value
     mass   = dV * fields["W"] * fields["rho"]
-    e_k    = (fields['W'] - 1.0) * mass * e_scale
+    e_k    = (fields['W'] - 1.0) * mass * e_scale.value
     
     u = fields['gamma_beta']
     w = np.diff(u).max()*1e-1
@@ -94,6 +108,12 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
     eks = np.asarray([e_k[np.where(u > gb)].sum() for gb in gbs])
     ets = np.asarray([etotal[np.where(u > gb)].sum() for gb in gbs])
     
+    E_seg_rat  = ets[1:]/ets[:-1]
+    gb_seg_rat = gbs[1:]/gbs[:-1]
+    E_seg_rat[E_seg_rat == 0] = 1
+    alpha = np.average(np.log10(E_seg_rat) / np.log10(gb_seg_rat))
+    
+    print("Avg power law index: {:.2f}".format(alpha))
     bins    = np.arange(min(gbs), max(gbs) + w, w)
     logbins = np.logspace(np.log10(bins[0]),np.log10(bins[-1]), len(bins))
 
@@ -114,7 +134,7 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
     ax.tick_params('both', labelsize=15)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
-    ax.set_title(r'setup: {}, t ={:.2f} s'.format(args.setup[0], tend), fontsize=20)
+    ax.set_title(r'setup: {}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
     ax.legend(fontsize=15)
     if not overplot:
         return fig
@@ -136,6 +156,9 @@ def main():
     
     parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',
                         default = 0.0, help='The domain range')
+    
+    parser.add_argument('--xlim', dest = "xlim", metavar='Domain',
+                        default = None, help='The domain range')
     
     parser.add_argument('--log', dest='log', action='store_true',
                         default=False,
@@ -167,9 +190,9 @@ def main():
             
             rho         = hf.get("rho")[:]
             v           = hf.get("v")[:]
-            p           = hf.get("p")[:]
+            p           = hf.get("p")[:]   
             nx          = ds.attrs["Nx"]
-            t           = ds.attrs["current_time"]
+            t           = ds.attrs["current_time"] * time_scale
             xmax        = ds.attrs["xmax"]
             xmin        = ds.attrs["xmin"]
             try:
@@ -206,6 +229,12 @@ def main():
                 r = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
             else:
                 r = np.linspace(xmin, xmax, xactive)
+                
+            # post process the time into days, weeks, 
+            if (t.value > u.day.to(u.s)):
+                t = t.to(u.day)
+            elif (t.value > u.week.to(u.s)):
+                t = t.to(u.week)
             
             field_dict[idx]["rho"]         = rho
             field_dict[idx]["v"]           = v

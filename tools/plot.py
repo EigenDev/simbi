@@ -157,9 +157,9 @@ def plot_1d_curve(field_dict, args, mesh, ds):
     
     #1D test 
     tend = ds[0]["time"]
-    for idx in range(len(theta)):
-        ax.loglog(r, field_dict[args.field][idx])
-    # ax.loglog(r, field_dict[args.field][args.tidx])
+    # for idx in range(len(theta)):
+    #     ax.loglog(r, field_dict[args.field][idx])
+    ax.loglog(r, field_dict[args.field][args.tidx])
     ax.loglog(ofield["r"], ofield[args.field], 'ro')
         
     # ax.set_position( [0.1, -0.18, 0.8, 1.43])
