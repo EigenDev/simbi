@@ -21,6 +21,20 @@ namespace hydro1d {
         Primitive operator - (const Primitive &prim) const {return Primitive(rho - prim.rho, v - prim.v, p - prim.p); }
         Primitive operator / (const double c)        const {return Primitive(rho/c, v/c, p/c); }
         Primitive operator * (const double c)        const {return Primitive(rho*c, v*c, p*c); }
+
+        Primitive & operator +=(const Primitive &prims) {
+            rho    += prims.rho;
+            v      += prims.v;
+            p      += prims.p;
+            return *this;
+        }
+
+        Primitive & operator -=(const Primitive &prims) {
+            rho    += prims.rho;
+            v      += prims.v;
+            p      += prims.p;
+            return *this;
+        }
     };
 
     struct Conserved {
@@ -82,6 +96,20 @@ namespace sr1d {
         Primitive operator /(const double c) const {return Primitive(rho/c, v/c, p/c); }
 
         Primitive operator *(const double c) const {return Primitive(rho*c, v*c, p*c); }
+
+        Primitive & operator +=(const Primitive &prims) {
+            rho    += prims.rho;
+            v      += prims.v;
+            p      += prims.p;
+            return *this;
+        }
+
+        Primitive & operator -=(const Primitive &prims) {
+            rho    += prims.rho;
+            v      += prims.v;
+            p      += prims.p;
+            return *this;
+        }
     };
 
     struct Conserved {
@@ -176,6 +204,22 @@ namespace sr2d {
         Primitive operator - (const Primitive &e)  const { return Primitive(rho-e.rho, v1-e.v1, v2-e.v2, p-e.p); }  
         Primitive operator * (const double c)      const { return Primitive(rho*c, v1*c, v2*c, p*c ); }
         Primitive operator / (const double c)      const { return Primitive(rho/c, v1/c, v2/c, p/c ); }
+
+        Primitive & operator +=(const Primitive &prims) {
+            rho    += prims.rho;
+            v1     += prims.v1;
+            v2     += prims.v2;
+            p      += prims.p;
+            return *this;
+        }
+
+        Primitive & operator -=(const Primitive &prims) {
+            rho    += prims.rho;
+            v1     += prims.v1;
+            v2     += prims.v2;
+            p      += prims.p;
+            return *this;
+        }
     };
 
     struct PrimitiveData {
@@ -234,6 +278,22 @@ namespace hydro2d {
         Primitive operator - (const Primitive &e)  const { return Primitive(rho-e.rho, v1-e.v1, v2-e.v2, p-e.p); }  
         Primitive operator * (const double c)      const { return Primitive(rho*c, v1*c, v2*c, p*c ); }
         Primitive operator / (const double c)      const { return Primitive(rho/c, v1/c, v2/c, p/c ); }
+
+        Primitive & operator +=(const Primitive &prims) {
+            rho    += prims.rho;
+            v1     += prims.v1;
+            v2     += prims.v2;
+            p      += prims.p;
+            return *this;
+        }
+
+        Primitive & operator -=(const Primitive &prims) {
+            rho    += prims.rho;
+            v1     += prims.v1;
+            v2     += prims.v2;
+            p      += prims.p;
+            return *this;
+        }
 
     };
     
