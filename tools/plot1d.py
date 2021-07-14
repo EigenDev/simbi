@@ -29,6 +29,10 @@ pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
 vel_scale  = c 
 time_scale = R_0 / c
 
+def find_nearest(arr, val):
+    idx = np.argmin(np.abs(arr - val))
+    return idx, arr[idx]
+ 
 def prims2cons(fields, cons):
     if cons == "D":
         return fields['rho'] * fields['W']
@@ -86,7 +90,6 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
         ax = fig.add_subplot(1, 1, 1)
 
     tend = fields["t"]
-    
     edens_total = prims2cons(fields, "energy")
     r           = fields["r"]
     
@@ -100,43 +103,59 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
     etotal = edens_total * (4 * np.pi * dV) * e_scale.value
     mass   = dV * fields["W"] * fields["rho"]
     e_k    = (fields['W'] - 1.0) * mass * e_scale.value
-    
+
     u = fields['gamma_beta']
     w = np.diff(u).max()*1e-1
     n = int(np.ceil( (u.max() - u.min() ) / w ) )
     gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), n)
-    eks = np.asarray([e_k[np.where(u > gb)].sum() for gb in gbs])
-    ets = np.asarray([etotal[np.where(u > gb)].sum() for gb in gbs])
+    eks = np.asarray([e_k[u > gb].sum() for gb in gbs])
+    ets = np.asarray([etotal[u > gb].sum() for gb in gbs])
     
     E_seg_rat  = ets[1:]/ets[:-1]
     gb_seg_rat = gbs[1:]/gbs[:-1]
     E_seg_rat[E_seg_rat == 0] = 1
-    alpha = np.average(np.log10(E_seg_rat) / np.log10(gb_seg_rat))
+    
+    slope = (ets[1:] - ets[:-1])/(gbs[1:] - gbs[:-1])
+    power_law_region = np.argmin(slope)
+    up_min           = find_nearest(gbs, 2 * gbs[power_law_region: ][0])[0]
+    upower           = gbs[up_min: ]
+    
+    # Fix the power law segment, ignoring the sharp dip at the tail of the CDF
+    epower_law_seg   = E_seg_rat [up_min: np.argmin(E_seg_rat > 0.8)]
+    gbpower_law_seg  = gb_seg_rat[up_min: np.argmin(E_seg_rat > 0.8)]
+    segments         = np.log10(epower_law_seg) / np.log10(gbpower_law_seg)
+    alpha            = 1.0 - np.mean(segments)
     
     print("Avg power law index: {:.2f}".format(alpha))
     bins    = np.arange(min(gbs), max(gbs) + w, w)
     logbins = np.logspace(np.log10(bins[0]),np.log10(bins[-1]), len(bins))
-
-    if args.labels is None:
-        ax.hist(gbs, bins=gbs, weights=ets, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0)
-    else:
-        ax.hist(gbs, bins=gbs, weights=ets, label=r'${}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0)
     
+    E_0 = ets[up_min] * upower[0] ** (alpha - 1)
+    if args.labels is None:
+        hist = ax.hist(gbs, bins=gbs, weights=ets, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0)
+        # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
+    else:
+        hist = ax.hist(gbs, bins=gbs, weights=ets, label=r'${}$, t={:.2f}'.format(args.labels[case], tend), histtype='step', rwidth=1.0, linewidth=3.0)
+        # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--', label = r'${}$ fit'.format(args.labels[case]))
+    
+   
     # if case == 0:
     #     ax.hist(gbs_1d, bins=gbs_1d, weights=ets_1d, alpha=0.8, label= r'1D Sphere', histtype='step', linewidth=3.0)
     
     sorted_energy = np.sort(ets)
     plt.xscale('log')
     plt.yscale('log')
-    #ax.set_ylim(sorted_energy[1], 1.5*ets.max())
+    # ax.set_ylim(sorted_energy[1], 1.5*ets.max())
     ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
     ax.set_ylabel(r'$E( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
     ax.tick_params('both', labelsize=15)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
-    ax.set_title(r'setup: {}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
+    
+    ax.set_title(r'setup: {}'.format(args.setup[0]), fontsize=20)
     ax.legend(fontsize=15)
     if not overplot:
+        ax.set_title(r'setup: {}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
         return fig
 
 def main():
