@@ -97,8 +97,6 @@ void SRHD_DualSpace::copyStateToGPU(
 
     //--------Allocate the memory for pointer objects-------------------------
     hipMalloc((void **)&host_u0,              cbytes);
-    hipMalloc((void **)&host_u1,              cbytes);
-    hipMalloc((void **)&host_dudt,            cbytes);
     hipMalloc((void **)&host_prims,           pbytes);
     hipMalloc((void **)&host_pressure_guess,  rbytes);
     hipMalloc((void **)&host_dx1,             rrbytes);
@@ -116,12 +114,6 @@ void SRHD_DualSpace::copyStateToGPU(
     //--------Copy the host resources to pointer variables on host
     hipMemcpy(host_u0,    host.sys_state.data(), cbytes, hipMemcpyHostToDevice);
     hipCheckErrors("Memcpy failed at transferring host.sys_state to host_u0");
-
-    hipMemcpy(host_u1,    host.un.data()       , cbytes, hipMemcpyHostToDevice);
-    hipCheckErrors("Memcpy failed at transferring host.u1 to host_u1");
-
-    hipMemcpy(host_dudt,  host.du_dt.data()    , cbytes, hipMemcpyHostToDevice);
-    hipCheckErrors("Memcpy failed at transferring host.du_dt to host_dudt");
 
     hipMemcpy(host_prims, host.prims.data()    , pbytes, hipMemcpyHostToDevice);
     hipCheckErrors("Memcpy failed at transferring host.prims to host_prims");
@@ -476,7 +468,7 @@ __global__ void adapt_dtGPU(SRHD *s, int nBlocks, real *host_dt)
         }
         if(threadIdx.x == 0)
         {
-            s->dt_min[blockIdx.x] = dt_buff[threadIdx.x]; // dt_min[0] == minimum
+            s->dt = dt_buff[threadIdx.x]; // dt_min[0] == minimum
             // *host_dt = dt_buff[threadIdx.x];
         }
         
@@ -968,7 +960,6 @@ std::vector<Conserved> SRHD::u_dot1D(std::vector<Conserved> &u_state)
 //=====================================================================
 //                          KERNEL CALLS
 //=====================================================================
-constexpr int RADIUS        = 2;
 __global__ void simbi::shared_gpu_cons2prim(SRHD *s, int n){
     __shared__ Conserved  conserved_buff[BLOCK_SIZE];
     __shared__ Primitive  primitive_buff[BLOCK_SIZE];
@@ -1026,306 +1017,610 @@ __global__ void simbi::shared_gpu_cons2prim(SRHD *s, int n){
 
 __global__ void simbi::gpu_advance(
     SRHD *s,  
-    int n, 
-    simbi::Geometry geometry)
+    const int n, 
+    const simbi::Geometry geometry)
 {
     int ii = blockDim.x * blockIdx.x + threadIdx.x;
+
+    const int ibound                = s->i_bound;
+    const int istart                = s->i_start;
+    const real decay_constant       = s->decay_constant;
+    const CLattice1D *coord_lattice = &(s->coord_lattice);
+    const Primitive  *prims         = s->gpu_prims;
+    const real dt                   = s->dt;
+    const real plm_theta            = s->theta;
+
     int coordinate;
     Conserved u_l, u_r;
     Conserved f_l, f_r, f1, f2;
     Primitive prims_l, prims_r;
     real rmean, dV, sL, sR, pc, dx;
-    int ibound                = s->i_bound;
-    int istart                = s->i_start;
-    real decay_constant       = s->decay_constant;
-    CLattice1D *coord_lattice = &(s->coord_lattice);
-    Primitive  *prims         = s->gpu_prims;
-    real dt                   = s->dt;
 
     
     Conserved *u_state = s->gpu_sys_state;
-    if (s->first_order)
+    if (ii < s-> Nx)
     {
-        if ( (unsigned)(ii - istart) < (ibound - istart))
+        if (s->first_order)
         {
-            if (s->periodic)
+            if ( (unsigned)(ii - istart) < (ibound - istart))
             {
-                coordinate = ii;
-                // Set up the left and right state interfaces for i+1/2
-                u_l.D   = u_state[ii].D;
-                u_l.S   = u_state[ii].S;
-                u_l.tau = u_state[ii].tau;
+                if (s->periodic)
+                {
+                    coordinate = ii;
+                    // Set up the left and right state interfaces for i+1/2
+                    u_l.D   = u_state[ii].D;
+                    u_l.S   = u_state[ii].S;
+                    u_l.tau = u_state[ii].tau;
 
-                u_r = roll(u_state, ii + 1, n);
-            }
-            else
-            {
-                coordinate = ii - 1;
-                // Set up the left and right state interfaces for i+1/2
-                u_l.D   = u_state[ii].D;
-                u_l.S   = u_state[ii].S;
-                u_l.tau = u_state[ii].tau;
+                    u_r = roll(u_state, ii + 1, n);
+                }
+                else
+                {
+                    coordinate = ii - 1;
+                    // Set up the left and right state interfaces for i+1/2
+                    u_l.D   = u_state[ii].D;
+                    u_l.S   = u_state[ii].S;
+                    u_l.tau = u_state[ii].tau;
 
-                u_r.D   = u_state[ii + 1].D;
-                u_r.S   = u_state[ii + 1].S;
-                u_r.tau = u_state[ii + 1].tau;
-            }
+                    u_r.D   = u_state[ii + 1].D;
+                    u_r.S   = u_state[ii + 1].S;
+                    u_r.tau = u_state[ii + 1].tau;
+                }
 
-            prims_l.rho = s->gpu_prims[ii].rho;
-            prims_l.v   = s->gpu_prims[ii].v;
-            prims_l.p   = s->gpu_prims[ii].p;
+                prims_l.rho = s->gpu_prims[ii].rho;
+                prims_l.v   = s->gpu_prims[ii].v;
+                prims_l.p   = s->gpu_prims[ii].p;
 
-            prims_r.rho = s->gpu_prims[ii + 1].rho;
-            prims_r.v   = s->gpu_prims[ii + 1].v;
-            prims_r.p   = s->gpu_prims[ii + 1].p;
+                prims_r.rho = s->gpu_prims[ii + 1].rho;
+                prims_r.v   = s->gpu_prims[ii + 1].v;
+                prims_r.p   = s->gpu_prims[ii + 1].p;
 
-            f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
-            f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
+                f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
+                f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
 
-            // Calc HLL Flux at i+1/2 interface
-            if (s->hllc)
-            {
-                f1 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-            }
-            else
-            {
-                f1 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-            }
+                // Calc HLL Flux at i+1/2 interface
+                if (s->hllc)
+                {
+                    f1 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+                else
+                {
+                    f1 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
 
-            // Set up the left and right state interfaces for i-1/2
-            if (s->periodic)
-            {
-                u_l = roll(u_state, ii - 1, n);
+                // Set up the left and right state interfaces for i-1/2
+                if (s->periodic)
+                {
+                    u_l = roll(u_state, ii - 1, n);
 
-                u_r.D   = u_state[ii].D;
-                u_r.S   = u_state[ii].S;
-                u_r.tau = u_state[ii].tau;
-            }
-            else
-            {
-                u_l.D   = u_state[ii - 1].D;
-                u_l.S   = u_state[ii - 1].S;
-                u_l.tau = u_state[ii - 1].tau;
+                    u_r.D   = u_state[ii].D;
+                    u_r.S   = u_state[ii].S;
+                    u_r.tau = u_state[ii].tau;
+                }
+                else
+                {
+                    u_l.D   = u_state[ii - 1].D;
+                    u_l.S   = u_state[ii - 1].S;
+                    u_l.tau = u_state[ii - 1].tau;
 
-                u_r.D   = u_state[ii].D;
-                u_r.S   = u_state[ii].S;
-                u_r.tau = u_state[ii].tau;
-            }
+                    u_r.D   = u_state[ii].D;
+                    u_r.S   = u_state[ii].S;
+                    u_r.tau = u_state[ii].tau;
+                }
 
-            prims_l.rho = s->gpu_prims[ii - 1].rho;
-            prims_l.v   = s->gpu_prims[ii - 1].v;
-            prims_l.p   = s->gpu_prims[ii - 1].p;
+                prims_l.rho = s->gpu_prims[ii - 1].rho;
+                prims_l.v   = s->gpu_prims[ii - 1].v;
+                prims_l.p   = s->gpu_prims[ii - 1].p;
 
-            prims_r.rho = s->gpu_prims[ii].rho;
-            prims_r.v   = s->gpu_prims[ii].v;
-            prims_r.p   = s->gpu_prims[ii].p;
+                prims_r.rho = s->gpu_prims[ii].rho;
+                prims_r.v   = s->gpu_prims[ii].v;
+                prims_r.p   = s->gpu_prims[ii].p;
 
-            f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
-            f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
+                f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
+                f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
 
-            // Calc HLL Flux at i-1/2 interface
-            if (s->hllc)
-            {
-                f2 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-            }
-            else
-            {
-                f2 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-            }
+                // Calc HLL Flux at i-1/2 interface
+                if (s->hllc)
+                {
+                    f2 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+                else
+                {
+                    f2 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
 
-            switch (geometry)
-            {
-            case simbi::Geometry::CARTESIAN:
-                dx = coord_lattice->gpu_dx1[coordinate];
-                s->gpu_sys_state[ii].D   += s->dt * -(f1.D - f2.D)     / dx + s->gpu_sourceD[coordinate];
-                s->gpu_sys_state[ii].S   += s->dt * -(f1.S - f2.S)     / dx + s->gpu_sourceS[coordinate];
-                s->gpu_sys_state[ii].tau += s->dt * -(f1.tau - f2.tau) / dx + s->gpu_source0[coordinate];
+                switch (geometry)
+                {
+                case simbi::Geometry::CARTESIAN:
+                    dx = coord_lattice->gpu_dx1[coordinate];
+                    s->gpu_sys_state[ii].D   += dt * -(f1.D - f2.D)     / dx + s->gpu_sourceD[coordinate];
+                    s->gpu_sys_state[ii].S   += dt * -(f1.S - f2.S)     / dx + s->gpu_sourceS[coordinate];
+                    s->gpu_sys_state[ii].tau += dt * -(f1.tau - f2.tau) / dx + s->gpu_source0[coordinate];
 
-                break;
-            
-            case simbi::Geometry::SPHERICAL:
-                pc = s->gpu_prims[ii].p;
-                sL = coord_lattice->gpu_face_areas[coordinate + 0];
-                sR = coord_lattice->gpu_face_areas[coordinate + 1];
-                dV = coord_lattice->gpu_dV[coordinate];
-                rmean = coord_lattice->gpu_x1mean[coordinate];
+                    break;
+                
+                case simbi::Geometry::SPHERICAL:
+                    pc = s->gpu_prims[ii].p;
+                    sL = coord_lattice->gpu_face_areas[coordinate + 0];
+                    sR = coord_lattice->gpu_face_areas[coordinate + 1];
+                    dV = coord_lattice->gpu_dV[coordinate];
+                    rmean = coord_lattice->gpu_x1mean[coordinate];
 
-                s->gpu_sys_state[ii].D += s-> dt * ( 
-                    -(sR * f1.D - sL * f2.D) / dV +
-                    s->gpu_sourceD[coordinate] * decay_constant
-                );
+                    s->gpu_sys_state[ii].D += dt * ( 
+                        -(sR * f1.D - sL * f2.D) / dV +
+                        s->gpu_sourceD[coordinate] * decay_constant
+                    );
 
-                s->gpu_sys_state[ii].S += s-> dt * (
-                    -(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean +
-                    s->gpu_sourceS[coordinate] * decay_constant
-                );
+                    s->gpu_sys_state[ii].S += dt * (
+                        -(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean +
+                        s->gpu_sourceS[coordinate] * decay_constant
+                    );
 
-                s->gpu_sys_state[ii].tau += s-> dt *(
-                    -(sR * f1.tau - sL * f2.tau) / dV +
-                    s->gpu_source0[coordinate] * decay_constant
-                );
-                break;
-            }
-            
-        }
-    }
-    else
-    {
-        Primitive left_most, right_most, left_mid, right_mid, center;
-        if ( (unsigned)(ii - istart) < (ibound - istart))
-        {
-            //=================================================
-            //                  FIRST ORDER IN TIME
-            //=================================================
-            if (s->periodic)
-            {
-                // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
-                coordinate = ii;
-                left_most  = roll(prims, ii - 2, n);
-                left_mid   = roll(prims, ii - 1, n);
-                center     = s->gpu_prims[ii];
-                right_mid  = roll(prims, ii + 1, n);
-                right_most = roll(prims, ii + 2, n);
-            }
-            else
-            {
-                coordinate = ii - 2;
-                left_most  = s->gpu_prims[ii - 2];
-                left_mid   = s->gpu_prims[ii - 1];
-                center     = s->gpu_prims[ii];
-                right_mid  = s->gpu_prims[ii + 1];
-                right_most = s->gpu_prims[ii + 2];
-            }
-
-            // Compute the reconstructed primitives at the i+1/2 interface
-
-            // Reconstructed left primitives vector
-            prims_l.rho =
-                center.rho + 0.5 * minmod(s->theta * (center.rho - left_mid.rho),
-                                            0.5 * (right_mid.rho - left_mid.rho),
-                                            s->theta * (right_mid.rho - center.rho));
-
-            prims_l.v = center.v + 0.5 * minmod(s->theta * (center.v - left_mid.v),
-                                                0.5 * (right_mid.v - left_mid.v),
-                                                s->theta * (right_mid.v - center.v));
-
-            prims_l.p = center.p + 0.5 * minmod(s->theta * (center.p - left_mid.p),
-                                                0.5 * (right_mid.p - left_mid.p),
-                                                s->theta * (right_mid.p - center.p));
-
-            // Reconstructed right primitives vector
-            prims_r.rho = right_mid.rho -
-                            0.5 * minmod(s->theta * (right_mid.rho - center.rho),
-                                        0.5 * (right_most.rho - center.rho),
-                                        s->theta * (right_most.rho - right_mid.rho));
-
-            prims_r.v =
-                right_mid.v - 0.5 * minmod(s->theta * (right_mid.v - center.v),
-                                            0.5 * (right_most.v - center.v),
-                                            s->theta * (right_most.v - right_mid.v));
-
-            prims_r.p =
-                right_mid.p - 0.5 * minmod(s->theta * (right_mid.p - center.p),
-                                            0.5 * (right_most.p - center.p),
-                                            s->theta * (right_most.p - right_mid.p));
-
-            // Calculate the left and right states using the reconstructed PLM
-            // primitives
-            u_l = s->calc_state(prims_l.rho, prims_l.v, prims_l.p);
-            u_r = s->calc_state(prims_r.rho, prims_r.v, prims_r.p);
-
-            f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
-            f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
-
-            if (s->hllc)
-            {
-                f1 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-            }
-            else
-            {
-                f1 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-            }
-
-            // Do the same thing, but for the right side interface [i - 1/2]
-            prims_l.rho =
-                left_mid.rho + 0.5 * minmod(s->theta * (left_mid.rho - left_most.rho),
-                                            0.5 * (center.rho - left_most.rho),
-                                            s->theta * (center.rho - left_mid.rho));
-
-            prims_l.v =
-                left_mid.v + 0.5 * minmod(s->theta * (left_mid.v - left_most.v),
-                                            0.5 * (center.v - left_most.v),
-                                            s->theta * (center.v - left_mid.v));
-
-            prims_l.p =
-                left_mid.p + 0.5 * minmod(s->theta * (left_mid.p - left_most.p),
-                                            0.5 * (center.p - left_most.p),
-                                            s->theta * (center.p - left_mid.p));
-
-            prims_r.rho =
-                center.rho - 0.5 * minmod(s->theta * (center.rho - left_mid.rho),
-                                            0.5 * (right_mid.rho - left_mid.rho),
-                                            s->theta * (right_mid.rho - center.rho));
-
-            prims_r.v = center.v - 0.5 * minmod(s->theta * (center.v - left_mid.v),
-                                                0.5 * (right_mid.v - left_mid.v),
-                                                s->theta * (right_mid.v - center.v));
-
-            prims_r.p = center.p - 0.5 * minmod(s->theta * (center.p - left_mid.p),
-                                                0.5 * (right_mid.p - left_mid.p),
-                                                s->theta * (right_mid.p - center.p));
-
-            // Calculate the left and right states using the reconstructed PLM
-            // primitives
-            u_l = s->calc_state(prims_l.rho, prims_l.v, prims_l.p);
-            u_r = s->calc_state(prims_r.rho, prims_r.v, prims_r.p);
-
-            f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
-            f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
-
-            if (s->hllc)
-            {
-                f2 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-            }
-            else
-            {
-                f2 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-            }
-
-            switch (geometry)
-            {
-            case simbi::Geometry::CARTESIAN:
-                dx = coord_lattice->gpu_dx1[coordinate];
-                s->gpu_sys_state[ii].D   += 0.5 * s->dt * ( -(f1.D - f2.D)     / dx +  s->gpu_sourceD[coordinate] );
-                s->gpu_sys_state[ii].S   += 0.5 * s->dt * ( -(f1.S - f2.S)     / dx +  s->gpu_sourceS[coordinate] );
-                s->gpu_sys_state[ii].tau += 0.5 * s->dt * ( -(f1.tau - f2.tau) / dx  + s->gpu_source0[coordinate] );
-                break;
-            
-            case simbi::Geometry::SPHERICAL:
-                pc = s->gpu_prims[ii].p;
-                sL = coord_lattice->gpu_face_areas[coordinate + 0];
-                sR = coord_lattice->gpu_face_areas[coordinate + 1];
-                dV = coord_lattice->gpu_dV[coordinate];
-                rmean = coord_lattice->gpu_x1mean[coordinate];
-
-                s->gpu_sys_state[ii].D += 0.5 * s->dt * (
-                     -(sR * f1.D - sL * f2.D) / dV +
-                    s->gpu_sourceD[coordinate] * decay_constant
-                );
-
-                s->gpu_sys_state[ii].S += 0.5 * s->dt * (
-                     -(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean +
-                    s->gpu_sourceS[coordinate] * decay_constant
-                );
-
-                s->gpu_sys_state[ii].tau +=  0.5 * s->dt * (
-                    -(sR * f1.tau - sL * f2.tau) / dV +
-                    s->gpu_source0[coordinate] * decay_constant
-                );
-                break;
+                    s->gpu_sys_state[ii].tau += dt *(
+                        -(sR * f1.tau - sL * f2.tau) / dV +
+                        s->gpu_source0[coordinate] * decay_constant
+                    );
+                    break;
+                }
+                
             }
         }
+        else
+        {
+            Primitive left_most, right_most, left_mid, right_mid, center;
+            if ( (unsigned)(ii - istart) < (ibound - istart))
+            {
+                if (s->periodic)
+                {
+                    // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
+                    coordinate = ii;
+                    left_most  = roll(prims, ii - 2, n);
+                    left_mid   = roll(prims, ii - 1, n);
+                    center     = s->gpu_prims[ii];
+                    right_mid  = roll(prims, ii + 1, n);
+                    right_most = roll(prims, ii + 2, n);
+                }
+                else
+                {
+                    coordinate = ii - 2;
+                    left_most  = s->gpu_prims[ii - 2];
+                    left_mid   = s->gpu_prims[ii - 1];
+                    center     = s->gpu_prims[ii];
+                    right_mid  = s->gpu_prims[ii + 1];
+                    right_most = s->gpu_prims[ii + 2];
+                }
+
+                // Compute the reconstructed primitives at the i+1/2 interface
+
+                // Reconstructed left primitives vector
+                prims_l.rho =
+                    center.rho + 0.5 * minmod(s->theta * (center.rho - left_mid.rho),
+                                                0.5 * (right_mid.rho - left_mid.rho),
+                                                s->theta * (right_mid.rho - center.rho));
+
+                prims_l.v = center.v + 0.5 * minmod(s->theta * (center.v - left_mid.v),
+                                                    0.5 * (right_mid.v - left_mid.v),
+                                                    s->theta * (right_mid.v - center.v));
+
+                prims_l.p = center.p + 0.5 * minmod(s->theta * (center.p - left_mid.p),
+                                                    0.5 * (right_mid.p - left_mid.p),
+                                                    s->theta * (right_mid.p - center.p));
+
+                // Reconstructed right primitives vector
+                prims_r.rho = right_mid.rho -
+                                0.5 * minmod(s->theta * (right_mid.rho - center.rho),
+                                            0.5 * (right_most.rho - center.rho),
+                                            s->theta * (right_most.rho - right_mid.rho));
+
+                prims_r.v =
+                    right_mid.v - 0.5 * minmod(s->theta * (right_mid.v - center.v),
+                                                0.5 * (right_most.v - center.v),
+                                                s->theta * (right_most.v - right_mid.v));
+
+                prims_r.p =
+                    right_mid.p - 0.5 * minmod(s->theta * (right_mid.p - center.p),
+                                                0.5 * (right_most.p - center.p),
+                                                s->theta * (right_most.p - right_mid.p));
+
+                // Calculate the left and right states using the reconstructed PLM
+                // primitives
+                u_l = s->calc_state(prims_l.rho, prims_l.v, prims_l.p);
+                u_r = s->calc_state(prims_r.rho, prims_r.v, prims_r.p);
+
+                f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
+                f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
+
+                if (s->hllc)
+                {
+                    f1 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+                else
+                {
+                    f1 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+
+                // Do the same thing, but for the right side interface [i - 1/2]
+                prims_l.rho =
+                    left_mid.rho + 0.5 * minmod(s->theta * (left_mid.rho - left_most.rho),
+                                                0.5 * (center.rho - left_most.rho),
+                                                s->theta * (center.rho - left_mid.rho));
+
+                prims_l.v =
+                    left_mid.v + 0.5 * minmod(s->theta * (left_mid.v - left_most.v),
+                                                0.5 * (center.v - left_most.v),
+                                                s->theta * (center.v - left_mid.v));
+
+                prims_l.p =
+                    left_mid.p + 0.5 * minmod(s->theta * (left_mid.p - left_most.p),
+                                                0.5 * (center.p - left_most.p),
+                                                s->theta * (center.p - left_mid.p));
+
+                prims_r.rho =
+                    center.rho - 0.5 * minmod(s->theta * (center.rho - left_mid.rho),
+                                                0.5 * (right_mid.rho - left_mid.rho),
+                                                s->theta * (right_mid.rho - center.rho));
+
+                prims_r.v = center.v - 0.5 * minmod(s->theta * (center.v - left_mid.v),
+                                                    0.5 * (right_mid.v - left_mid.v),
+                                                    s->theta * (right_mid.v - center.v));
+
+                prims_r.p = center.p - 0.5 * minmod(s->theta * (center.p - left_mid.p),
+                                                    0.5 * (right_mid.p - left_mid.p),
+                                                    s->theta * (right_mid.p - center.p));
+
+                // Calculate the left and right states using the reconstructed PLM
+                // primitives
+                u_l = s->calc_state(prims_l.rho, prims_l.v, prims_l.p);
+                u_r = s->calc_state(prims_r.rho, prims_r.v, prims_r.p);
+
+                f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
+                f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
+
+                if (s->hllc)
+                {
+                    f2 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+                else
+                {
+                    f2 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+
+                switch (geometry)
+                {
+                case simbi::Geometry::CARTESIAN:
+                    dx = coord_lattice->gpu_dx1[coordinate];
+                    s->gpu_sys_state[ii].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx +  s->gpu_sourceD[coordinate] );
+                    s->gpu_sys_state[ii].S   += 0.5 * dt * ( -(f1.S - f2.S)     / dx +  s->gpu_sourceS[coordinate] );
+                    s->gpu_sys_state[ii].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx  + s->gpu_source0[coordinate] );
+                    break;
+                
+                case simbi::Geometry::SPHERICAL:
+                    pc = s->gpu_prims[ii].p;
+                    sL = coord_lattice->gpu_face_areas[coordinate + 0];
+                    sR = coord_lattice->gpu_face_areas[coordinate + 1];
+                    dV = coord_lattice->gpu_dV[coordinate];
+                    rmean = coord_lattice->gpu_x1mean[coordinate];
+
+                    s->gpu_sys_state[ii].D += 0.5 * dt * (
+                        -(sR * f1.D - sL * f2.D) / dV +
+                        s->gpu_sourceD[coordinate] * decay_constant
+                    );
+
+                    s->gpu_sys_state[ii].S += 0.5 * dt * (
+                        -(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean +
+                        s->gpu_sourceS[coordinate] * decay_constant
+                    );
+
+                    s->gpu_sys_state[ii].tau +=  0.5 * dt * (
+                        -(sR * f1.tau - sL * f2.tau) / dV +
+                        s->gpu_source0[coordinate] * decay_constant
+                    );
+                    break;
+                }
+            }
+        }
+
     }
+    
+}
+
+
+__global__ void simbi::shared_gpu_advance(
+    SRHD *s,  
+    const int sh_block_size,
+    const int radius, 
+    const simbi::Geometry geometry)
+{
+    int ii  = blockDim.x * blockIdx.x + threadIdx.x;
+    int txa = threadIdx.x + radius;
+    int nx  = s->Nx;
+
+    extern __shared__ Conserved smem_buff[];
+    Conserved *cons_buff = smem_buff;
+    Primitive *prim_buff = (Primitive *)&cons_buff[sh_block_size];
+
+    const int ibound                = s->i_bound;
+    const int istart                = s->i_start;
+    const real decay_constant       = s->decay_constant;
+    const CLattice1D *coord_lattice = &(s->coord_lattice);
+    const Primitive  *prims         = s->gpu_prims;
+    const real dt                   = s->dt;
+    const real plm_theta            = s->theta;
+
+    int coordinate;
+    Conserved u_l, u_r;
+    Conserved f_l, f_r, f1, f2;
+    Primitive prims_l, prims_r;
+    real rmean, dV, sL, sR, pc, dx;
+
+    if (ii < s-> Nx)
+    {
+        cons_buff[txa] = s->gpu_sys_state[ii];
+        prim_buff[txa] = s->gpu_prims[ii];
+        if (threadIdx.x < radius)
+        {
+            cons_buff[txa - radius]     = s->gpu_sys_state[ii - radius];
+            cons_buff[txa + BLOCK_SIZE] = s->gpu_sys_state[ii + BLOCK_SIZE];
+            prim_buff[txa - radius]     = s->gpu_prims[ii - radius];
+            prim_buff[txa + BLOCK_SIZE] = s->gpu_prims[ii + BLOCK_SIZE];  
+        }
+        __syncthreads();
+        if (s->first_order)
+        {
+            if ( (unsigned)(ii - istart) < (ibound - istart))
+            {
+                if (s->periodic)
+                {
+                    coordinate = ii;
+                    // Set up the left and right state interfaces for i+1/2
+                    u_l   = cons_buff[txa];
+                    u_r   = roll(cons_buff, txa + 1, sh_block_size);
+                }
+                else
+                {
+                    coordinate = ii - 1;
+                    // Set up the left and right state interfaces for i+1/2
+                    u_l = cons_buff[txa];
+                    u_r = cons_buff[txa + 1];
+                }
+
+                prims_l = prim_buff[txa];
+                prims_r = prim_buff[txa + 1];
+
+                f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
+                f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
+
+                // Calc HLL Flux at i+1/2 interface
+                if (s->hllc)
+                {
+                    f1 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+                else
+                {
+                    f1 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+
+                // Set up the left and right state interfaces for i-1/2
+                if (s->periodic)
+                {
+                    u_l = roll(cons_buff, txa - 1, sh_block_size);
+                    u_r = cons_buff[txa];
+                }
+                else
+                {
+                    u_l   = cons_buff[txa - 1];
+                    u_r   = cons_buff[txa];
+                }
+
+                prims_l = prim_buff[txa - 1];
+                prims_r = prim_buff[txa];
+
+                f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
+                f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
+
+                // Calc HLL Flux at i-1/2 interface
+                if (s->hllc)
+                {
+                    f2 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+                else
+                {
+                    f2 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+
+                switch (geometry)
+                {
+                case simbi::Geometry::CARTESIAN:
+                    dx = coord_lattice->gpu_dx1[coordinate];
+                    s->gpu_sys_state[ii].D   += dt * -(f1.D - f2.D)     / dx + s->gpu_sourceD[coordinate];
+                    s->gpu_sys_state[ii].S   += dt * -(f1.S - f2.S)     / dx + s->gpu_sourceS[coordinate];
+                    s->gpu_sys_state[ii].tau += dt * -(f1.tau - f2.tau) / dx + s->gpu_source0[coordinate];
+
+                    break;
+                
+                case simbi::Geometry::SPHERICAL:
+                    pc = prim_buff[txa].p;
+                    sL = coord_lattice->gpu_face_areas[coordinate + 0];
+                    sR = coord_lattice->gpu_face_areas[coordinate + 1];
+                    dV = coord_lattice->gpu_dV[coordinate];
+                    rmean = coord_lattice->gpu_x1mean[coordinate];
+
+                    s->gpu_sys_state[ii].D += dt * ( 
+                        -(sR * f1.D - sL * f2.D) / dV +
+                        s->gpu_sourceD[coordinate] * decay_constant
+                    );
+
+                    s->gpu_sys_state[ii].S += dt * (
+                        -(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean +
+                        s->gpu_sourceS[coordinate] * decay_constant
+                    );
+
+                    s->gpu_sys_state[ii].tau += dt *(
+                        -(sR * f1.tau - sL * f2.tau) / dV +
+                        s->gpu_source0[coordinate] * decay_constant
+                    );
+                    break;
+                }
+                
+            }
+        }
+        else
+        {
+            Primitive left_most, right_most, left_mid, right_mid, center;
+            if ( (unsigned)(ii - istart) < (ibound - istart))
+            {
+                if (s->periodic)
+                {
+                    // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
+                    coordinate = ii;
+                    left_most  = roll(prim_buff, txa - 2, sh_block_size);
+                    left_mid   = roll(prim_buff, txa - 1, sh_block_size);
+                    center     = prim_buff[txa];
+                    right_mid  = roll(prim_buff, txa + 1, sh_block_size);
+                    right_most = roll(prim_buff, txa + 2, sh_block_size);
+                }
+                else
+                {
+                    coordinate = ii - 2;
+                    left_most  = prim_buff[txa - 2];
+                    left_mid   = prim_buff[txa - 1];
+                    center     = prim_buff[txa];
+                    right_mid  = prim_buff[txa + 1];
+                    right_most = prim_buff[txa + 2];
+                }
+
+                // Compute the reconstructed primitives at the i+1/2 interface
+
+                // Reconstructed left primitives vector
+                prims_l.rho =
+                    center.rho + 0.5 * minmod(s->theta * (center.rho - left_mid.rho),
+                                                0.5 * (right_mid.rho - left_mid.rho),
+                                                s->theta * (right_mid.rho - center.rho));
+
+                prims_l.v = center.v + 0.5 * minmod(s->theta * (center.v - left_mid.v),
+                                                    0.5 * (right_mid.v - left_mid.v),
+                                                    s->theta * (right_mid.v - center.v));
+
+                prims_l.p = center.p + 0.5 * minmod(s->theta * (center.p - left_mid.p),
+                                                    0.5 * (right_mid.p - left_mid.p),
+                                                    s->theta * (right_mid.p - center.p));
+
+                // Reconstructed right primitives vector
+                prims_r.rho = right_mid.rho -
+                                0.5 * minmod(s->theta * (right_mid.rho - center.rho),
+                                            0.5 * (right_most.rho - center.rho),
+                                            s->theta * (right_most.rho - right_mid.rho));
+
+                prims_r.v =
+                    right_mid.v - 0.5 * minmod(s->theta * (right_mid.v - center.v),
+                                                0.5 * (right_most.v - center.v),
+                                                s->theta * (right_most.v - right_mid.v));
+
+                prims_r.p =
+                    right_mid.p - 0.5 * minmod(s->theta * (right_mid.p - center.p),
+                                                0.5 * (right_most.p - center.p),
+                                                s->theta * (right_most.p - right_mid.p));
+
+                // Calculate the left and right states using the reconstructed PLM
+                // primitives
+                u_l = s->calc_state(prims_l.rho, prims_l.v, prims_l.p);
+                u_r = s->calc_state(prims_r.rho, prims_r.v, prims_r.p);
+
+                f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
+                f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
+
+                if (s->hllc)
+                {
+                    f1 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+                else
+                {
+                    f1 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+
+                // Do the same thing, but for the right side interface [i - 1/2]
+                prims_l.rho =
+                    left_mid.rho + 0.5 * minmod(s->theta * (left_mid.rho - left_most.rho),
+                                                0.5 * (center.rho - left_most.rho),
+                                                s->theta * (center.rho - left_mid.rho));
+
+                prims_l.v =
+                    left_mid.v + 0.5 * minmod(s->theta * (left_mid.v - left_most.v),
+                                                0.5 * (center.v - left_most.v),
+                                                s->theta * (center.v - left_mid.v));
+
+                prims_l.p =
+                    left_mid.p + 0.5 * minmod(s->theta * (left_mid.p - left_most.p),
+                                                0.5 * (center.p - left_most.p),
+                                                s->theta * (center.p - left_mid.p));
+
+                prims_r.rho =
+                    center.rho - 0.5 * minmod(s->theta * (center.rho - left_mid.rho),
+                                                0.5 * (right_mid.rho - left_mid.rho),
+                                                s->theta * (right_mid.rho - center.rho));
+
+                prims_r.v = center.v - 0.5 * minmod(s->theta * (center.v - left_mid.v),
+                                                    0.5 * (right_mid.v - left_mid.v),
+                                                    s->theta * (right_mid.v - center.v));
+
+                prims_r.p = center.p - 0.5 * minmod(s->theta * (center.p - left_mid.p),
+                                                    0.5 * (right_mid.p - left_mid.p),
+                                                    s->theta * (right_mid.p - center.p));
+
+                // Calculate the left and right states using the reconstructed PLM
+                // primitives
+                u_l = s->calc_state(prims_l.rho, prims_l.v, prims_l.p);
+                u_r = s->calc_state(prims_r.rho, prims_r.v, prims_r.p);
+
+                f_l = s->calc_flux(prims_l.rho, prims_l.v, prims_l.p);
+                f_r = s->calc_flux(prims_r.rho, prims_r.v, prims_r.p);
+
+                if (s->hllc)
+                {
+                    f2 = s->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+                else
+                {
+                    f2 = s->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                }
+
+                switch (geometry)
+                {
+                case simbi::Geometry::CARTESIAN:
+                    dx = coord_lattice->gpu_dx1[coordinate];
+                    s->gpu_sys_state[ii].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx +  s->gpu_sourceD[coordinate] );
+                    s->gpu_sys_state[ii].S   += 0.5 * dt * ( -(f1.S - f2.S)     / dx +  s->gpu_sourceS[coordinate] );
+                    s->gpu_sys_state[ii].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx  + s->gpu_source0[coordinate] );
+                    break;
+                
+                case simbi::Geometry::SPHERICAL:
+                    pc = s->gpu_prims[ii].p;
+                    sL = coord_lattice->gpu_face_areas[coordinate + 0];
+                    sR = coord_lattice->gpu_face_areas[coordinate + 1];
+                    dV = coord_lattice->gpu_dV[coordinate];
+                    rmean = coord_lattice->gpu_x1mean[coordinate];
+
+                    s->gpu_sys_state[ii].D += 0.5 * dt * (
+                        -(sR * f1.D - sL * f2.D) / dV +
+                        s->gpu_sourceD[coordinate] * decay_constant
+                    );
+
+                    s->gpu_sys_state[ii].S += 0.5 * dt * (
+                        -(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean +
+                        s->gpu_sourceS[coordinate] * decay_constant
+                    );
+
+                    s->gpu_sys_state[ii].tau +=  0.5 * dt * (
+                        -(sR * f1.tau - sL * f2.tau) / dV +
+                        s->gpu_source0[coordinate] * decay_constant
+                    );
+                    break;
+                }
+            }
+        }
+
+    }
+    
 }
 
 std::vector<std::vector<real>>
@@ -1445,22 +1740,27 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
     int time_order_of_mag, num_zeros;
 
     // Setup the system
-    int nBlocks = (this->Nx + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    int physical_nBlocks = (this->pgrid_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    const int nBlocks = (this->Nx + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    const int physical_nBlocks = (this->pgrid_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
 
     // Simulate :)
     if (first_order)
-    {
+    {  
+        const int radius = 1;
+        const int shBlockSize  = BLOCK_SIZE + 2 * radius;
+        const unsigned shBlockBytes = shBlockSize * sizeof(Conserved) + shBlockSize * sizeof(Primitive);
         while (t < tend)
         {
             high_resolution_clock::time_point t1 = high_resolution_clock::now();
             hipLaunchKernelGGL(shared_gpu_cons2prim, dim3(nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, this->Nx);
-            hipLaunchKernelGGL(gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, this->Nx, geometry[this->coord_system]);
+            // hipLaunchKernelGGL(gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, this->Nx, geometry[this->coord_system]);
+            hipLaunchKernelGGL(shared_gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), shBlockBytes, 0, device_self, shBlockSize, radius, geometry[this->coord_system]);
             hipLaunchKernelGGL(config_ghosts1DGPU, dim3(1), dim3(1), 0, 0, device_self, Nx, first_order);
             t += dt; 
             hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
             hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+            hipCheckErrors("\n Kernel call failed.\n");
             // hipDeviceSynchronize();
 
             high_resolution_clock::time_point t2 = high_resolution_clock::now();
@@ -1493,22 +1793,28 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
             }
         }
     } else {
+        const int radius = 2;
+        const int shBlockSize  = BLOCK_SIZE + 2 * radius;
+        const unsigned shBlockBytes = shBlockSize * sizeof(Conserved) + shBlockSize * sizeof(Primitive);
         while (t < tend)
         {
             high_resolution_clock::time_point t1 = high_resolution_clock::now();
             // First Half Step
             hipLaunchKernelGGL(shared_gpu_cons2prim, dim3(nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, this->Nx);
-            hipLaunchKernelGGL(gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, this->Nx, geometry[this->coord_system]);
+            hipLaunchKernelGGL(shared_gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), shBlockBytes, 0, device_self, shBlockSize, radius, geometry[this->coord_system]);
+            // hipLaunchKernelGGL(gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, this->Nx, geometry[this->coord_system]);
             hipLaunchKernelGGL(config_ghosts1DGPU, dim3(1), dim3(1), 0, 0, device_self, Nx, first_order);
 
             // Final Half Step
             hipLaunchKernelGGL(shared_gpu_cons2prim, dim3(nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, this->Nx);
-            hipLaunchKernelGGL(gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, this->Nx, geometry[this->coord_system]);
+            hipLaunchKernelGGL(shared_gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), shBlockBytes, 0, device_self, shBlockSize, radius, geometry[this->coord_system]);
+            // hipLaunchKernelGGL(gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, this->Nx, geometry[this->coord_system]);
             hipLaunchKernelGGL(config_ghosts1DGPU, dim3(1), dim3(1), 0, 0, device_self, Nx, first_order);
 
             t += dt; 
             hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
             hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+            hipCheckErrors("\n Kernel call failed.\n");
             // hipDeviceSynchronize();
 
             high_resolution_clock::time_point t2 = high_resolution_clock::now();
@@ -1545,8 +1851,7 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
     
 
     hipFree(device_self);
-
-    hipCheckErrors("\n Kernel call failed.\n");
+    
 
     std::cout << "\n";
     cons2prim1D(sys_state);

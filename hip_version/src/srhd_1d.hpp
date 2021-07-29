@@ -160,7 +160,8 @@ namespace simbi
           void cleanUp();
      };
 
-     __global__ void gpu_advance(SRHD *s, int n, simbi::Geometry geometry);
+     __global__ void gpu_advance(SRHD *s, const int n, const simbi::Geometry geometry);
+     __global__ void shared_gpu_advance(SRHD *s, const int sh_block_size, const int radius, const simbi::Geometry geometry);
      __global__ void shared_gpu_cons2prim(SRHD *s, int n);
 } // namespace simbi
 
