@@ -6,11 +6,9 @@ import matplotlib.pyplot as plt
 
 from gpu_simbi_py import Hydro
 
-from state import PyStateSR
-
 gamma = 5/3 
 tend = 0.4249
-N = 264
+N = 2048
 dt = 1.e-4
 data_dir = "../data/"
 
@@ -24,8 +22,8 @@ hydro = Hydro(gamma=gamma, initial_state = ((10.0,13.33,0.0),(1.0,1.e-10,0.0)),
 
 
 
-h = hydro2.simulate(tend=tend, first_order=True,  CFL=0.4, hllc=True , data_directory=data_dir)
-u = hydro.simulate(tend=tend,  first_order=True,  CFL=0.4, hllc=False, data_directory=data_dir)
+h = hydro2.simulate(tend=tend, first_order=False,  CFL=0.4, hllc=True , data_directory=data_dir)
+u = hydro.simulate(tend=tend,  first_order=False,  CFL=0.4, hllc=False, data_directory=data_dir)
 
 
 x = np.linspace(0, 1, N)
