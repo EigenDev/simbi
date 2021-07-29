@@ -4,8 +4,8 @@
 * for all N-Dim hydro calculations
 */
 
-#include "helper_functions.h" 
-#include "hydro_structs.h"
+#include "helper_functions.hpp" 
+#include "hydro_structs.hpp"
 #include <cmath>
 #include <map>
 #include <algorithm>
@@ -16,7 +16,6 @@ using namespace H5;
 // =========================================================================================================
 //        HELPER FUNCTIONS FOR COMPUTATION
 // =========================================================================================================
-
 // Convert a vector of structs into a struct of vectors for easy post processsing
 sr2d::PrimitiveData vecs2struct(const vector<sr2d::Primitive> &p){
     sr2d::PrimitiveData sprims;
@@ -36,30 +35,23 @@ sr2d::PrimitiveData vecs2struct(const vector<sr2d::Primitive> &p){
     return sprims;
 }
 
-// Sound Speed Function
-double calc_sound_speed(float gamma, double rho, double pressure){
-    double c = sqrt(gamma*pressure/rho);
-    return c;
-
-};
-
 // Roll a vector for use with periodic boundary conditions
-vector<double> rollVector(const vector<double>& v, unsigned int n){
+vector<real> rollVector(const vector<real>& v, unsigned int n){
     auto b = v.begin() + (n % v.size());
-    vector<double> ret(b, v.end());
+    vector<real> ret(b, v.end());
     ret.insert(ret.end(), v.begin(), b);
     return ret;
 };
 
 // Roll a single vector index
-double roll(vector<double>  &v, unsigned int n) {
+real roll(vector<real>  &v, unsigned int n) {
    return v[n % v.size()];
 };
 
 // Roll a single vector index in y-direction of lattice
-double roll(vector<vector<double>>  &v, unsigned int xpos, unsigned int ypos) {
-   return v[ypos % v.size()][xpos % v[0].size()];
-};
+// real roll(vector<vector<real>>  &v, unsigned int xpos, unsigned int ypos) {
+//    return v[ypos % v.size()][xpos % v[0].size()];
+// };
 
 std::map<std::string, simbi::Geometry> geometry;
 void config_system() {
@@ -285,7 +277,7 @@ void toWritePrim(sr2d::PrimitiveData *from, PrimData *to)
     to->p    = from->p;
 }
 
-string create_step_str(double t_interval, string &tnow){
+string create_step_str(real t_interval, string &tnow){
 
     // Convert the time interval into an int with 2 decimal displacements
     int t_interval_int = round( 1.e3 * t_interval );
@@ -339,9 +331,9 @@ void write_hdf5(
     {
         case 1:
         {
-            double* rho = new double[size];
-            double* v   = new double[size];
-            double* p   = new double[size];
+            real* rho = new real[size];
+            real* v   = new real[size];
+            real* p   = new real[size];
 
             std::copy(prims.rho.begin(), prims.rho.begin() + size, rho);
             std::copy(prims.v.begin(), prims.v.begin() + size, v);
@@ -366,7 +358,7 @@ void write_hdf5(
             delete[]p;
 
             // Write Datset Attributes
-            H5::DataType double_type(H5::PredType::NATIVE_DOUBLE);
+            H5::DataType real_type(H5::PredType::NATIVE_DOUBLE);
             H5::DataType int_type(H5::PredType::NATIVE_INT);
             H5::DataSpace att_space(H5S_SCALAR);
 
@@ -374,24 +366,24 @@ void write_hdf5(
             H5::DataType  empty_dtype(H5::PredType::NATIVE_INT);
             H5::DataSet   sim_info = file.createDataSet("sim_info", empty_dtype, empty_dspace);
 
-            H5::Attribute att = sim_info.createAttribute("current_time", double_type, att_space);
-            att.write(double_type, &setup.t);
+            H5::Attribute att = sim_info.createAttribute("current_time", real_type, att_space);
+            att.write(real_type, &setup.t);
             att.close();
 
-            att = sim_info.createAttribute("time_step", double_type, att_space);
-            att.write(double_type, &setup.dt);
+            att = sim_info.createAttribute("time_step", real_type, att_space);
+            att.write(real_type, &setup.dt);
             att.close();
 
-            att = sim_info.createAttribute("adiabatic_gamma", double_type, att_space);
-            att.write(double_type, &setup.ad_gamma);
+            att = sim_info.createAttribute("adiabatic_gamma", real_type, att_space);
+            att.write(real_type, &setup.ad_gamma);
             att.close();
 
-            att = sim_info.createAttribute("xmax", double_type, att_space);
-            att.write(double_type, &setup.xmax);
+            att = sim_info.createAttribute("xmax", real_type, att_space);
+            att.write(real_type, &setup.xmax);
             att.close();
 
-            att = sim_info.createAttribute("xmin", double_type, att_space);
-            att.write(double_type, &setup.xmin);
+            att = sim_info.createAttribute("xmin", real_type, att_space);
+            att.write(real_type, &setup.xmin);
             att.close();
 
             att = sim_info.createAttribute("Nx", int_type, att_space);
@@ -410,10 +402,10 @@ void write_hdf5(
         case 2:
             {
             // Write the Primitives 
-            double* rho = new double[size];
-            double* v1  = new double[size];
-            double* v2  = new double[size];
-            double* p   = new double[size];
+            real* rho = new real[size];
+            real* v1  = new real[size];
+            real* v2  = new real[size];
+            real* p   = new real[size];
 
             std::copy(prims.rho.begin(), prims.rho.begin() + size, rho);
             std::copy(prims.v1.begin(), prims.v1.begin() + size, v1);
@@ -443,41 +435,41 @@ void write_hdf5(
             delete[] v2;
             delete[] p;
 
-            // Write Datset Attributesauto double_type(H5::PredType::NATIVE_DOUBLE);
+            // Write Datset Attributesauto real_type(H5::PredType::NATIVE_DOUBLE);
             H5::DataType int_type(H5::PredType::NATIVE_INT);
-            H5::DataType double_type(H5::PredType::NATIVE_DOUBLE);
+            H5::DataType real_type(H5::PredType::NATIVE_DOUBLE);
             H5::DataSpace att_space(H5S_SCALAR);
 
             H5::DataSpace empty_dspace(1, dimsf);
             H5::DataType  empty_dtype(H5::PredType::NATIVE_INT);
             H5::DataSet   sim_info = file.createDataSet("sim_info", empty_dtype, empty_dspace);
             
-            H5::Attribute att = sim_info.createAttribute("current_time", double_type, att_space);
-            att.write(double_type, &setup.t);
+            H5::Attribute att = sim_info.createAttribute("current_time", real_type, att_space);
+            att.write(real_type, &setup.t);
             att.close();
 
-            att = sim_info.createAttribute("time_step", double_type, att_space);
-            att.write(double_type, &setup.dt);
+            att = sim_info.createAttribute("time_step", real_type, att_space);
+            att.write(real_type, &setup.dt);
             att.close();
 
-            att = sim_info.createAttribute("xmax", double_type, att_space);
-            att.write(double_type, &setup.xmax);
+            att = sim_info.createAttribute("xmax", real_type, att_space);
+            att.write(real_type, &setup.xmax);
             att.close();
 
-            att = sim_info.createAttribute("xmin", double_type, att_space);
-            att.write(double_type, &setup.xmin);
+            att = sim_info.createAttribute("xmin", real_type, att_space);
+            att.write(real_type, &setup.xmin);
             att.close();
 
-            att = sim_info.createAttribute("ymax", double_type, att_space);
-            att.write(double_type, &setup.ymax);
+            att = sim_info.createAttribute("ymax", real_type, att_space);
+            att.write(real_type, &setup.ymax);
             att.close();
 
-            att = sim_info.createAttribute("ymin", double_type, att_space);
-            att.write(double_type, &setup.ymin);
+            att = sim_info.createAttribute("ymin", real_type, att_space);
+            att.write(real_type, &setup.ymin);
             att.close();
 
-            att = sim_info.createAttribute("adiabatic_gamma", double_type, att_space);
-            att.write(double_type, &setup.ad_gamma);
+            att = sim_info.createAttribute("adiabatic_gamma", real_type, att_space);
+            att.write(real_type, &setup.ad_gamma);
             att.close();
 
             att = sim_info.createAttribute("NX", int_type, att_space);
@@ -506,22 +498,23 @@ void write_hdf5(
 //=======================================================================================================
 //                                      RELATIVISITC HYDRO
 //=======================================================================================================
-double calc_intermed_wave(double energy_density, double momentum_density, 
-                            double flux_momentum_density, 
-                            double flux_energy_density)
+GPU_CALLABLE_MEMBER
+real calc_intermed_wave(real energy_density, real momentum_density, 
+                            real flux_momentum_density, 
+                            real flux_energy_density)
 {
-    double a = flux_energy_density;
-    double b = - (energy_density + flux_momentum_density);
-    double c = momentum_density;
-    double disc = sqrt( b*b - 4*a*c);
-    double quad = -0.5*(b + sgn(b)*disc);
+    real a = flux_energy_density;
+    real b = - (energy_density + flux_momentum_density);
+    real c = momentum_density;
+    real disc = sqrt( b*b - 4*a*c);
+    real quad = -0.5*(b + sgn(b)*disc);
     return c/quad;
 }
 
+GPU_CALLABLE_MEMBER
+real calc_intermed_pressure(real a,real aStar, real energy, real norm_mom, real u, real p){
 
-double calc_intermed_pressure(double a,double aStar, double energy, double norm_mom, double u, double p){
-
-    double e, f, g;
+    real e, f, g;
     e = (a*energy - norm_mom)*aStar;
     f = norm_mom*(a - u) - p;
     g = 1 + a*aStar;
@@ -531,23 +524,23 @@ double calc_intermed_pressure(double a,double aStar, double energy, double norm_
 //------------------------------------------------------------------------------------------------------------
 //  F-FUNCTION FOR ROOT FINDING: F(P)
 //------------------------------------------------------------------------------------------------------------
-double pressure_func(double pressure, double D, double tau, double lorentz_gamma, float gamma, double S){
+real pressure_func(real pressure, real D, real tau, real lorentz_gamma, float gamma, real S){
 
-    double v       = S / (tau + pressure + D);
-    double W_s     = 1.0 / sqrt(1.0 - v * v);
-    double rho     = D / W_s; 
-    double epsilon = ( tau + D*(1. - W_s) + (1. - W_s*W_s)*pressure )/(D * W_s);
+    real v       = S / (tau + pressure + D);
+    real W_s     = 1.0 / sqrt(1.0 - v * v);
+    real rho     = D / W_s; 
+    real epsilon = ( tau + D*(1. - W_s) + (1. - W_s*W_s)*pressure )/(D * W_s);
 
     return (gamma - 1.)*rho*epsilon - pressure;
 }
 
-double dfdp(double pressure, double D, double tau, double lorentz_gamma, float gamma, double S){
+real dfdp(real pressure, real D, real tau, real lorentz_gamma, float gamma, real S){
 
-    double v       = S/(tau + D + pressure);
-    double W_s     = 1.0 / sqrt(1.0 - v*v);
-    double rho     = D / W_s; 
-    double h       = 1 + pressure*gamma/(rho*(gamma - 1.));
-    double c2      = gamma*pressure/(h*rho);
+    real v       = S/(tau + D + pressure);
+    real W_s     = 1.0 / sqrt(1.0 - v*v);
+    real rho     = D / W_s; 
+    real h       = 1 + pressure*gamma/(rho*(gamma - 1.));
+    real c2      = gamma*pressure/(h*rho);
     
 
     return v*v*c2 - 1.;

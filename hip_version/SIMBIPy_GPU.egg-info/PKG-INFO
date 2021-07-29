@@ -1,0 +1,10 @@
+Metadata-Version: 2.1
+Name: SIMBIPy-GPU
+Version: 0.0.1
+Summary: Cython module to solve hydrodynamic systems using a hip/c++ backend
+Home-page: UNKNOWN
+Author: Marcus DuPont
+Author-email: md4469@nyu.edu
+License: UNKNOWN
+Description: UNKNOWN
+Platform: UNKNOWN

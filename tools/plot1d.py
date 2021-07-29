@@ -43,27 +43,30 @@ def prims2cons(fields, cons):
 def plot_profile(args, field_dict, ax = None, overplot = False, case = 0):
     
     r = field_dict["r"]
-    
+    tend = field_dict['t']
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,8))
     
+    unit_scale = 1.0
+    if args.field == "rho":
+        unit_scale = rho_scale
+    elif args.field == "p":
+        unit_scale = pre_scale
+        
     if args.labels is None:
-        if (args.log):
-            ax.loglog(r, field_dict[args.field])
-        else:
-            ax.plot(r, field_dict[args.field])
+        ax.plot(r, field_dict[args.field] * unit_scale)
     else:
-        if (args.log):
-            ax.loglog(r, field_dict[args.field], label = args.labels[case])
-        else:
-            ax.plot(r, field_dict[args.field], label = args.labels[case])
+        ax.plot(r, field_dict[args.field] * unit_scale, label=r'${}$, t={:.2f}'.format(args.labels[case], tend))
         
     
     ax.set_title('{} at t = {:.2f}'.format(args.setup[0], field_dict["t"]), fontsize=20)
 
 
-    ax.tick_params(axis='both', labelsize=20)
+    ax.tick_params(axis='both', labelsize=15)
     
+    if (args.log):
+        ax.set_xscale('log')
+        ax.set_yscale('log')
     
     ax.set_xlabel('$r/R_\odot$', fontsize=20)
     if args.xlim is None:
@@ -73,7 +76,7 @@ def plot_profile(args, field_dict, ax = None, overplot = False, case = 0):
         ax.set_xlim(xmin, xmax)
     # Change the format of the field
     if args.field == "rho":
-        field_str = r'$\rho$'
+        field_str = r'$\rho$ [g cm$^{-3}$]'
     elif args.field == "gamma_beta":
         field_str = r"$\Gamma \ \beta$"
     elif args.field == "vpdf":
@@ -81,8 +84,10 @@ def plot_profile(args, field_dict, ax = None, overplot = False, case = 0):
     else:
         field_str = args.field
         
-    
     ax.set_ylabel('{}'.format(field_str), fontsize=20)
+    
+    if not overplot:
+        return fig
     
 def plot_hist(args, fields, overplot=False, ax=None, case=0):
     if not overplot:
@@ -214,10 +219,18 @@ def main():
             t           = ds.attrs["current_time"] * time_scale
             xmax        = ds.attrs["xmax"]
             xmin        = ds.attrs["xmin"]
+            
+            # added these attributes after some time, so fallbacks included
             try:
                 ad_gamma = ds.attrs["adbiatic_gamma"]
             except:
                 ad_gamma = 4./3.
+                
+            
+            try:
+                is_linspace = ds.attrs["linspace"]
+            except:
+                is_linspace = False
 
             
             if args.forder:
@@ -244,12 +257,14 @@ def main():
             
             h = 1.0 + ad_gamma * p / (rho * (ad_gamma - 1.0))
             
-            if (args.log):
-                r = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
-            else:
+            if (is_linspace):
                 r = np.linspace(xmin, xmax, xactive)
+            else:
+                r = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
                 
             # post process the time into days, weeks, 
+            if (t.value > u.hour.to(u.s)):
+                t = t.to(u.hour)
             if (t.value > u.day.to(u.s)):
                 t = t.to(u.day)
             elif (t.value > u.week.to(u.s)):
@@ -276,18 +291,20 @@ def main():
             else:
                 plot_profile(args, field_dict[idx], ax = ax, overplot=True, case = idx)
         if args.labels != None:
-            ax.legend()
+            ax.legend(fonstize = 15)
             
     else:
         if args.ehist:
-            plot_hist(args, field_dict[0])
+            fig = plot_hist(args, field_dict[0])
         else:
-            plot_profile(args, field_dict[0])
+            fig = plot_profile(args, field_dict[0])
         
-    plt.show()
+    
     
     if args.save:
-        fig.savefig("plots/{}.png".format(args.setup[0]))
+        fig.savefig("plots/{}.png".format(args.setup[0]), bbox_inches='tight')
+    else:
+        plt.show()
     
 if __name__ == "__main__":
     main()

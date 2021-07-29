@@ -918,7 +918,7 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
         setup.xmin = r[0];
         setup.xactive_zones = pgrid_size;
         setup.NX = Nx;
-
+        setup.linspace = linspace;
         // Create Structure of Vectors (SoV) for trabsferring 
         // data to files once ready
         sr1d::PrimitiveArray transfer_prims; 
