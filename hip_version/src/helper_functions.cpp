@@ -316,7 +316,7 @@ void write_hdf5(
     const int size = 1)
 {
     string filePath = data_directory;
-    cout << "\n" <<  "Writing File...: " << filePath + filename << endl;
+    cout << "\n" <<  "[Writing File...: " << filePath + filename << "]" << "\n";
 
     H5::H5File file(filePath + filename, H5F_ACC_TRUNC );
 
