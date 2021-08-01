@@ -171,25 +171,25 @@ namespace sr1d {
 namespace sr2d {
     struct Conserved
     {
-        Conserved() {}
-        ~Conserved() {}
+        GPU_CALLABLE_MEMBER Conserved() {}
+        GPU_CALLABLE_MEMBER ~Conserved() {}
         real D, S1, S2, tau;
 
-        Conserved(real D, real S1, real S2, real tau) :  D(D), S1(S1), S2(S2), tau(tau) {}
-        Conserved(const Conserved &u) : D(u.D), S1(u.S1), S2(u.S2), tau(u.tau) {}
-        Conserved operator + (const Conserved &p)  const { return Conserved(D+p.D, S1+p.S1, S2+p.S2, tau+p.tau); }  
-        Conserved operator - (const Conserved &p)  const { return Conserved(D-p.D, S1-p.S1, S2-p.S2, tau-p.tau); }  
-        Conserved operator * (const real c)      const { return Conserved(D*c, S1*c, S2*c, tau*c ); }
-        Conserved operator / (const real c)      const { return Conserved(D/c, S1/c, S2/c, tau/c ); }
+        GPU_CALLABLE_MEMBER Conserved(real D, real S1, real S2, real tau) :  D(D), S1(S1), S2(S2), tau(tau) {}
+        GPU_CALLABLE_MEMBER Conserved(const Conserved &u) : D(u.D), S1(u.S1), S2(u.S2), tau(u.tau) {}
+        GPU_CALLABLE_MEMBER Conserved operator + (const Conserved &p)  const { return Conserved(D+p.D, S1+p.S1, S2+p.S2, tau+p.tau); }  
+        GPU_CALLABLE_MEMBER Conserved operator - (const Conserved &p)  const { return Conserved(D-p.D, S1-p.S1, S2-p.S2, tau-p.tau); }  
+        GPU_CALLABLE_MEMBER Conserved operator * (const real c)      const { return Conserved(D*c, S1*c, S2*c, tau*c ); }
+        GPU_CALLABLE_MEMBER Conserved operator / (const real c)      const { return Conserved(D/c, S1/c, S2/c, tau/c ); }
 
-        Conserved & operator +=(const Conserved &cons) {
+        GPU_CALLABLE_MEMBER Conserved & operator +=(const Conserved &cons) {
             D      += cons.D;
             S1     += cons.S1;
             S2     += cons.S2;
             tau    += cons.tau;
             return *this;
         }
-        Conserved & operator -=(const Conserved &cons) {
+        GPU_CALLABLE_MEMBER Conserved & operator -=(const Conserved &cons) {
             D      += cons.D;
             S1     += cons.S1;
             S2     += cons.S2;
@@ -197,22 +197,22 @@ namespace sr2d {
             return *this;
         }
 
-        real momentum(const int nhat) const {return (nhat == 1 ? S1 : S2); }
+        GPU_CALLABLE_MEMBER real momentum(const int nhat) const {return (nhat == 1 ? S1 : S2); }
     };
 
     struct Primitive {
-        Primitive() {}
-        ~Primitive() {}
+        GPU_CALLABLE_MEMBER Primitive() {}
+        GPU_CALLABLE_MEMBER ~Primitive() {}
         real rho, v1, v2, p;
 
-        Primitive(real rho, real v1, real v2, real p) : rho(rho), v1(v1), v2(v2), p(p) {}
-        Primitive(const Primitive &c) : rho(c.rho), v1(c.v1), v2(c.v2), p(c.p) {}
-        Primitive operator + (const Primitive &e)  const { return Primitive(rho+e.rho, v1+e.v1, v2+e.v2, p+e.p); }  
-        Primitive operator - (const Primitive &e)  const { return Primitive(rho-e.rho, v1-e.v1, v2-e.v2, p-e.p); }  
-        Primitive operator * (const real c)      const { return Primitive(rho*c, v1*c, v2*c, p*c ); }
-        Primitive operator / (const real c)      const { return Primitive(rho/c, v1/c, v2/c, p/c ); }
+        GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p) : rho(rho), v1(v1), v2(v2), p(p) {}
+        GPU_CALLABLE_MEMBER Primitive(const Primitive &c) : rho(c.rho), v1(c.v1), v2(c.v2), p(c.p) {}
+        GPU_CALLABLE_MEMBER Primitive operator + (const Primitive &e)  const { return Primitive(rho+e.rho, v1+e.v1, v2+e.v2, p+e.p); }  
+        GPU_CALLABLE_MEMBER Primitive operator - (const Primitive &e)  const { return Primitive(rho-e.rho, v1-e.v1, v2-e.v2, p-e.p); }  
+        GPU_CALLABLE_MEMBER Primitive operator * (const real c)      const { return Primitive(rho*c, v1*c, v2*c, p*c ); }
+        GPU_CALLABLE_MEMBER Primitive operator / (const real c)      const { return Primitive(rho/c, v1/c, v2/c, p/c ); }
 
-        Primitive & operator +=(const Primitive &prims) {
+        GPU_CALLABLE_MEMBER Primitive & operator +=(const Primitive &prims) {
             rho    += prims.rho;
             v1     += prims.v1;
             v2     += prims.v2;
@@ -220,7 +220,7 @@ namespace sr2d {
             return *this;
         }
 
-        Primitive & operator -=(const Primitive &prims) {
+        GPU_CALLABLE_MEMBER Primitive & operator -=(const Primitive &prims) {
             rho    += prims.rho;
             v1     += prims.v1;
             v2     += prims.v2;
