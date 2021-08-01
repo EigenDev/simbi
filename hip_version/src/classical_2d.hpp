@@ -28,7 +28,7 @@ namespace simbi {
         std::vector<real> x1, x2;
         int nzones, NY, NX, idx_shift, active_zones;
         int xphysical_grid, yphysical_grid, x_bound, y_bound;
-        CLattice coord_lattice;
+        CLattice2D coord_lattice;
         simbi::Solver solver;
 
         Newtonian2D();
