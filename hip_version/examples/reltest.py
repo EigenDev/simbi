@@ -4,12 +4,12 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt 
 
-from gpu_simbi_py import Hydro
+from pysimbi_gpu import Hydro
 
-gamma = 5/3 
+gamma = 4/3 
 tend = 0.4249
-N = 2048
-dt = 1.e-4
+N = 2**12
+dt = 1.e-6
 data_dir = "../data/"
 
 fig, axs = plt.subplots(3, 1, figsize=(15,30), sharex=True)
