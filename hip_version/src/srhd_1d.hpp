@@ -140,8 +140,6 @@ namespace simbi
 
           sr1d::Primitive *host_prims;
           sr1d::Conserved *host_u0;
-          sr1d::Conserved *host_u1;
-          sr1d::Conserved *host_dudt;
           real            *host_pressure_guess;
           real            *host_source0;
           real            *host_sourceD;
