@@ -86,7 +86,7 @@ bm = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy),
 
 
 t1 = (time.time()*u.s).to(u.min)
-sol = bm.simulate(tend=tend, first_order= False, dt=dt,
+sol = bm.simulate(tend=tend, first_order= True, dt=dt,
                   coordinates="spherical", CFL=0.4, 
                   hllc=True, linspace=False, theta=1.5)
 
