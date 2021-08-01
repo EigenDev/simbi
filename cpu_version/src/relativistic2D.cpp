@@ -924,7 +924,7 @@ vector<Conserved> SRHD2D::u_dot2D(const vector<Conserved> &u_state)
         //=======================================================================================================================================================
         double right_cell, left_cell, lower_cell, upper_cell, ang_avg;
         double r_left, r_right, volAvg, pc, rhoc, vc, uc, deltaV1, deltaV2;
-        double theta_right, theta_left, ycoordinate, xcoordinate;
+        double theta_right, theta_left, ycoordinate, xcoordinate, hc, wc2;
         double upper_tsurface, lower_tsurface, right_rsurface, left_rsurface;
 
         if (first_order)
@@ -1013,6 +1013,9 @@ vector<Conserved> SRHD2D::u_dot2D(const vector<Conserved> &u_state)
                     volAvg         = coord_lattice.x1mean[xcoordinate];
                     deltaV1        = coord_lattice.dV1[xcoordinate];
                     deltaV2        = volAvg * coord_lattice.dV2[ycoordinate];
+                    hc             = 1.0 + gamma * pc /(rhoc * (gamma - 1.0));
+                    wc2            = 1.0/(1.0 - (uc * uc + vc * vc));
+
 
                     L.push_back(Conserved{
                         // L(D)
@@ -1023,13 +1026,13 @@ vector<Conserved> SRHD2D::u_dot2D(const vector<Conserved> &u_state)
                         // L(S1)
                         -(f1.S1 * right_rsurface - f2.S1 * left_rsurface) / deltaV1 
                             - (g1.S1 * upper_tsurface - g2.S1 * lower_tsurface) / deltaV2 
-                                + rhoc * vc * vc / volAvg + 2 * pc / volAvg +
+                                + rhoc * hc * wc2 * vc * vc / volAvg + 2 * pc / volAvg +
                                      source_S1[xcoordinate + xphysical_grid * ycoordinate] * decay_const,
 
                         // L(S2)
                         -(f1.S2 * right_rsurface - f2.S2 * left_rsurface) / deltaV1
                              - (g1.S2 * upper_tsurface - g2.S2 * lower_tsurface) / deltaV2 
-                                - (rhoc * uc * vc / volAvg - pc * coord_lattice.cot[ycoordinate] / (volAvg)) 
+                                - (rhoc * hc * wc2 * uc * vc / volAvg - pc * coord_lattice.cot[ycoordinate] / (volAvg)) 
                                     + source_S2[xcoordinate + xphysical_grid * ycoordinate] * decay_const,
 
                         // L(tau)
@@ -1351,6 +1354,9 @@ vector<Conserved> SRHD2D::u_dot2D(const vector<Conserved> &u_state)
                     deltaV1        = coord_lattice.dV1[xcoordinate];
                     deltaV2        = volAvg * coord_lattice.dV2[ycoordinate];
 
+                    hc             = 1.0 + gamma * pc /(rhoc * (gamma - 1.0));
+                    wc2            = 1.0/(1.0 - (uc * uc + vc * vc));
+
                     L.push_back(Conserved{
                         // L(D)
                         -(f1.D * right_rsurface - f2.D * left_rsurface) / deltaV1 
@@ -1360,13 +1366,13 @@ vector<Conserved> SRHD2D::u_dot2D(const vector<Conserved> &u_state)
                         // L(S1)
                         -(f1.S1 * right_rsurface - f2.S1 * left_rsurface) / deltaV1 
                             - (g1.S1 * upper_tsurface - g2.S1 * lower_tsurface) / deltaV2 
-                                + rhoc * vc * vc / volAvg + 2.0 * pc / volAvg 
+                                + rhoc * hc * wc2 * vc * vc / volAvg + 2.0 * pc / volAvg 
                                     + source_S1[xcoordinate + xphysical_grid * ycoordinate] * decay_const,
 
                         // L(S2)
                         -(f1.S2 * right_rsurface - f2.S2 * left_rsurface) / deltaV1 
                             - (g1.S2 * upper_tsurface - g2.S2 * lower_tsurface) / deltaV2
-                                -(rhoc * uc * vc / volAvg - pc * coord_lattice.cot[ycoordinate] / volAvg) 
+                                -(rhoc * uc * hc * wc2 * vc / volAvg - pc * coord_lattice.cot[ycoordinate] / volAvg) 
                                     + source_S2[xcoordinate + xphysical_grid * ycoordinate] * decay_const,
 
                         // L(tau)
