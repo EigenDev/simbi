@@ -99,6 +99,9 @@ def plot_polar_plot(field_dict, args, mesh, ds):
         ax.set_position( [0.1, -0.18, 0.8, 1.43])
         cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
         cbar_orientation = "horizontal"
+        ymd = int( np.ceil(ymax * 180/np.pi) )
+        ax.set_thetamin(-ymd)
+        ax.set_thetamax(ymd)
     else:
         cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
         cbar_orientation = "vertical"
@@ -121,9 +124,7 @@ def plot_polar_plot(field_dict, args, mesh, ds):
     ax.axes.xaxis.set_ticklabels([])
     ax.set_rmax(xmax) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
     
-    ymd = int( np.ceil(ymax * 180/np.pi) )
-    ax.set_thetamin(-ymd)
-    ax.set_thetamax(ymd)
+    
 
     # Change the format of the field
     if args.field == "rho":
