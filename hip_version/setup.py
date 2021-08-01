@@ -107,13 +107,13 @@ HIP  = locate_hip()
 compilerArguments = {
             'clang++': ['-std=c++17','-march=native', '-fno-wrapv', '-O3'],
             'hipcc': [
-                '-arch=sm_50', '-c',
-                '--compiler-options', "-fPIC"
                 ]
             }
 if HIP["platform"] == "nvidia":
-    compilerArguments["hipcc"] += ['--ptxas-options=-v']
-
+    compilerArguments["hipcc"] += ['-arch=sm_50', '-c', '--ptxas-options=-v', '--compiler-options', "-fPIC"]
+else:
+    compilerArguments["hipcc"] += compilerArguments["clang++"]
+    
 compiler_args = ['-march=native', '-fno-wrapv', '-O3']
 linker_args   = ['-lhdf5', '-lhdf5_cpp']
 libraries     = ['hdf5', 'hdf5_cpp'] 
