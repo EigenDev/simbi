@@ -23,7 +23,7 @@
 #include "config.hpp"
 #include "traits.hpp"
 #include "gpu_error_check.h"
-
+#include "srhd_2d.hpp"
 
 
 //---------------------------------------------------------------------------------------------------------
@@ -75,7 +75,6 @@ __global__ void config_ghosts1DGPU(T *dev_sim, int, bool = true);
 
 template <typename T>
 void config_ghosts2D(T &v, int, int, bool = false);
-
 
 template <typename T>
 std::vector<real> calc_lorentz_gamma(T &v);
@@ -136,23 +135,32 @@ void write_hdf5(
     const DataWriteMembers system, 
     const int dim, 
     const int size);
+
+__global__ void config_ghosts2DGPU(
+    simbi::SRHD2D *d_sim, 
+    int x1grid_size, 
+    int x2grid_size, 
+    bool first_order,
+    bool bipolar = true);
     
 GPU_CALLABLE_MEMBER real calc_intermed_wave(real, real, real, real);
 GPU_CALLABLE_MEMBER real calc_intermed_pressure(real, real, real, real, real, real);
 GPU_CALLABLE_MEMBER real pressure_func(real, real, real, real, float, real);
 GPU_CALLABLE_MEMBER real dfdp(real, real, real, real, float, real);
-GPU_CALLABLE_MEMBER void config_ghosts2D(
+void config_ghosts2D(
     std::vector<hydro2d::Conserved> &u_state, 
     int x1grid_size, 
     int x2grid_size, 
     bool first_order);
 
-GPU_CALLABLE_MEMBER void config_ghosts2D(
+void config_ghosts2D(
     std::vector<sr2d::Conserved> &u_state, 
     int x1grid_size, 
     int x2grid_size, 
     bool first_order,
     bool bipolar = true);
+
+
 
 //-------------------Inline for Speed--------------------------------------
 GPU_CALLABLE_MEMBER inline real minmod(const real x, const real y, const real z)
