@@ -12,7 +12,9 @@ typedef float real;
 typedef double real;
 #endif 
 
-constexpr int BLOCK_SIZE = 64;
+constexpr int BLOCK_SIZE   = 64;
+constexpr int BLOCK_SIZE2D = 16;
+constexpr int MAX_ITER     = 50;
 
 namespace simbi{
     enum class Cellspacing

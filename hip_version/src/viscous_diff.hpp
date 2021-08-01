@@ -32,7 +32,7 @@ namespace simbi
         void av_flux_at_face(
             sr2d::Conserved &flux,
             const std::vector<sr2d::Primitive> &prims,
-            const CLattice &coord_lattice,
+            const CLattice2D &coord_lattice,
             const int ii, 
             const int jj,
             const simbi::Face cell_face
@@ -40,7 +40,7 @@ namespace simbi
         void calc_four_velocity(std::vector<sr2d::Primitive> &prims);
         void calc_artificial_visc(
             const std::vector<sr2d::Primitive> &prims,
-            const simbi::CLattice &coord_lattice
+            const simbi::CLattice2D &coord_lattice
         );
     };
     

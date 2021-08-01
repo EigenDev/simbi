@@ -6,28 +6,28 @@
 #include <cmath>
 #include <iostream>
 
-simbi::CLattice::CLattice () {}
+simbi::CLattice2D::CLattice2D () {}
 
-simbi::CLattice::CLattice(std::vector<real> &x1, std::vector<real> &x2, simbi::Geometry geom)
+simbi::CLattice2D::CLattice2D(std::vector<real> &x1, std::vector<real> &x2, simbi::Geometry geom)
 {
     this->x1ccenters = x1;
     this->x2ccenters = x2;
     this->_geom      = geom;
 }
 
-simbi::CLattice::~CLattice () {}
+simbi::CLattice2D::~CLattice2D () {}
 
-void simbi::CLattice::set_nx1_zones()
+void simbi::CLattice2D::set_nx1_zones()
 {
     nx1zones = x1ccenters.size();
 }
 
-void simbi::CLattice::set_nx2_zones()
+void simbi::CLattice2D::set_nx2_zones()
 {
     nx2zones = x2ccenters.size();
 }
 
-void simbi::CLattice::compute_x1_vertices(simbi::Cellspacing spacing)
+void simbi::CLattice2D::compute_x1_vertices(simbi::Cellspacing spacing)
 {
     x1vertices.resize(nx1zones + 1);
     x1vertices[0]        = x1ccenters[0];
@@ -52,7 +52,7 @@ void simbi::CLattice::compute_x1_vertices(simbi::Cellspacing spacing)
     
 }
 
-void simbi::CLattice::compute_x2_vertices(simbi::Cellspacing spacing)
+void simbi::CLattice2D::compute_x2_vertices(simbi::Cellspacing spacing)
 {
     x2vertices.resize(nx2zones + 1);
     x2vertices[0]        = x2ccenters[0];
@@ -77,7 +77,7 @@ void simbi::CLattice::compute_x2_vertices(simbi::Cellspacing spacing)
     
 }
 
-void simbi::CLattice::compute_x1face_areas()
+void simbi::CLattice2D::compute_x1face_areas()
 {
     x1_face_areas.reserve((nx1zones + 1));
     real tl, tr, dcos;
@@ -87,7 +87,7 @@ void simbi::CLattice::compute_x1face_areas()
     }
 }
 
-void simbi::CLattice::compute_x2face_areas()
+void simbi::CLattice2D::compute_x2face_areas()
 {
     x2_face_areas.reserve((nx2zones + 1));
     real rl, rr, rdiff;
@@ -97,7 +97,7 @@ void simbi::CLattice::compute_x2face_areas()
     }
 }
 
-void simbi::CLattice::compute_s1face_areas()
+void simbi::CLattice2D::compute_s1face_areas()
 {
     s1_face_areas.reserve((nx1zones + 1)*nx2zones);
     real tl, tr, dcos;
@@ -113,7 +113,7 @@ void simbi::CLattice::compute_s1face_areas()
     }
 }
 
-void simbi::CLattice::compute_s2face_areas()
+void simbi::CLattice2D::compute_s2face_areas()
 {
     s2_face_areas.reserve((nx2zones + 1)*nx1zones);
     real rl, rr, rdiff;
@@ -129,7 +129,7 @@ void simbi::CLattice::compute_s2face_areas()
     }
 }
 
-void simbi::CLattice::compute_dx1()
+void simbi::CLattice2D::compute_dx1()
 {
     dx1.reserve(nx1zones);
     size_t size = x1vertices.size();
@@ -140,7 +140,7 @@ void simbi::CLattice::compute_dx1()
     
 }
 
-void simbi::CLattice::compute_dx2()
+void simbi::CLattice2D::compute_dx2()
 {
     dx2.reserve(nx2zones);
     size_t size = x2vertices.size();
@@ -151,7 +151,7 @@ void simbi::CLattice::compute_dx2()
     
 }
 
-void simbi::CLattice::compute_dV1()
+void simbi::CLattice2D::compute_dV1()
 {
     real rr, rl, rmean, dr, dV;
     dV1.reserve(nx1zones);
@@ -170,7 +170,7 @@ void simbi::CLattice::compute_dV1()
     
 }
 
-void simbi::CLattice::compute_dV2()
+void simbi::CLattice2D::compute_dV2()
 {
     real x2mean, x2r, x2l, dx2_bar;
     dV2.reserve(nx2zones);
@@ -188,7 +188,7 @@ void simbi::CLattice::compute_dV2()
     
 }
 
-void simbi::CLattice::compute_dV()
+void simbi::CLattice2D::compute_dV()
 {
     real rr, rl, rmean, tl, tr, dV;
     dVc.reserve(nx1zones*nx2zones);
@@ -209,7 +209,7 @@ void simbi::CLattice::compute_dV()
     
 }
 
-void simbi::CLattice::compute_cot()
+void simbi::CLattice2D::compute_cot()
 {
     real x2mean, x2r, x2l;
     cot.reserve(nx2zones);
@@ -225,7 +225,7 @@ void simbi::CLattice::compute_cot()
     }
 }
 
-void simbi::CLattice::compute_x1mean()
+void simbi::CLattice2D::compute_x1mean()
 {
     real xr, xl;
     x1mean.reserve(nx1zones);
@@ -238,7 +238,7 @@ void simbi::CLattice::compute_x1mean()
     }
 }
 
-void simbi::CLattice::config_lattice(simbi::Cellspacing xcellspacing, simbi::Cellspacing ycellspacing)
+void simbi::CLattice2D::config_lattice(simbi::Cellspacing xcellspacing, simbi::Cellspacing ycellspacing)
 {
     set_nx1_zones();
 

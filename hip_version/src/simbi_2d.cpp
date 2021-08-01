@@ -1121,19 +1121,19 @@ vector<vector<real> > Newtonian2D::simulate2D(
     this->active_zones = xphysical_grid * yphysical_grid;
     if ((coord_system == "spherical") && (linspace))
     {
-        this->coord_lattice = CLattice(x1, x2, simbi::Geometry::SPHERICAL);
+        this->coord_lattice = CLattice2D(x1, x2, simbi::Geometry::SPHERICAL);
         coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE,
                                      simbi::Cellspacing::LINSPACE);
     }
     else if ((coord_system == "spherical") && (!linspace))
     {
-        this->coord_lattice = CLattice(x1, x2, simbi::Geometry::SPHERICAL);
+        this->coord_lattice = CLattice2D(x1, x2, simbi::Geometry::SPHERICAL);
         coord_lattice.config_lattice(simbi::Cellspacing::LOGSPACE,
                                      simbi::Cellspacing::LINSPACE);
     }
     else
     {
-        this->coord_lattice = CLattice(x1, x2, simbi::Geometry::CARTESIAN);
+        this->coord_lattice = CLattice2D(x1, x2, simbi::Geometry::CARTESIAN);
         coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE,
                                      simbi::Cellspacing::LINSPACE);
     }

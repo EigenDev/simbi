@@ -23,7 +23,7 @@ simbi::ArtificialViscosity::~ArtificialViscosity() {};
 void simbi::ArtificialViscosity::av_flux_at_face(
     sr2d::Conserved &flux,
     const std::vector<sr2d::Primitive> &prims,
-    const CLattice &coord_lattice,
+    const CLattice2D &coord_lattice,
     const int ii, 
     const int jj,
     const simbi::Face cell_face
@@ -321,7 +321,7 @@ void simbi::ArtificialViscosity::calc_four_velocity(
 }
 void simbi::ArtificialViscosity::calc_artificial_visc(
     const std::vector<sr2d::Primitive> &prims,
-    const CLattice &coord_lattice
+    const CLattice2D &coord_lattice
 )
 {
     const int nx = coord_lattice.nx1zones;
