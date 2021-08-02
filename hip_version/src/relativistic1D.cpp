@@ -1812,8 +1812,8 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
             }
             n++;
             // Adapt the timestep
-            // hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
-            // hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
+            hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
         }
     } else {
         const int radius = 2;
@@ -1873,8 +1873,8 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
             }
             n++;
             //Adapt the timestep
-            // hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
-            // hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
+            hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
         }
 
     }
