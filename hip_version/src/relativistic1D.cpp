@@ -207,6 +207,69 @@ void SRHD_DualSpace::copyGPUStateToHost(
     
 }
 
+//--------------------------------------------------------------------------------------------------
+//                          GET THE PRIMITIVE VECTORS
+//--------------------------------------------------------------------------------------------------
+
+/**
+ * Return a vector containing the primitive
+ * variables density (rho), pressure, and
+ * velocity (v)
+ */
+void SRHD::cons2prim1D(const std::vector<Conserved> &u_state)
+{
+    real rho, S, D, tau, pmin;
+    real v, W, tol, f, g, peq, h;
+    real eps, rhos, p, v2, et, c2;
+    int iter = 0;
+
+    for (int ii = 0; ii < Nx; ii++)
+    {
+        D = u_state[ii].D;
+        S = u_state[ii].S;
+        tau = u_state[ii].tau;
+
+        peq = n != 0 ? pressure_guess[ii] : abs(abs(S) - tau - D);
+
+        tol = D * 1.e-12;
+
+        iter = 0;
+        do
+        {
+            p = peq;
+            et = tau + D + p;
+            v2 = S * S / (et * et);
+            W = 1.0 / sqrt(1.0 - v2);
+            rho = D / W;
+
+            eps = (tau + (1.0 - W) * D + (1. - W * W) * p) / (D * W);
+
+            h = 1. + eps + p / rho;
+            c2 = gamma * p / (h * rho);
+
+            g = c2 * v2 - 1.0;
+            f = (gamma - 1.0) * rho * eps - p;
+
+            peq = p - f / g;
+            iter++;
+            if (iter >= MAX_ITER)
+            {
+                std::cout << "\n";
+                std::cout << "Cons2Prim cannot converge"
+                          << "\n";
+                exit(EXIT_FAILURE);
+            }
+
+        } while (abs(peq - p) >= tol);
+
+        v = S / (tau + D + peq);
+
+        W = 1. / sqrt(1 - v * v);
+        pressure_guess[ii] = peq;
+        prims[ii] = Primitive{D / W, v, peq};
+    }
+};
+
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------

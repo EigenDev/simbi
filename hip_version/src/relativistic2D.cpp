@@ -280,6 +280,100 @@ void SRHD2D_DualSpace::copyGPUStateToHost(
     hipCheckErrors("Memcpy failed at transferring device prims to host");
     
 }
+//-----------------------------------------------------------------------------------------
+//                          GET THE Primitive
+//-----------------------------------------------------------------------------------------
+
+std::vector<Primitive> SRHD2D::cons2prim2D(const std::vector<Conserved> &u_state2D)
+{
+    /**
+   * Return a 2D matrix containing the primitive
+   * variables density , pressure, and
+   * three-velocity
+   */
+
+    real S1, S2, S, D, tau, tol;
+    real W, v1, v2;
+
+    std::vector<Primitive> prims;
+    prims.reserve(nzones);
+
+    // Define Newton-Raphson Vars
+    real etotal, c2, f, g, p, peq;
+    real Ws, rhos, eps, h;
+
+    int iter = 0;
+    int maximum_iteration = 50;
+    for (int jj = 0; jj < NY; jj++)
+    {
+        for (int ii = 0; ii < NX; ii++)
+        {
+            D   = u_state2D [ii + NX * jj].D;     // Relativistic Mass Density
+            S1  = u_state2D [ii + NX * jj].S1;   // X1-Momentum Denity
+            S2  = u_state2D [ii + NX * jj].S2;   // X2-Momentum Density
+            tau = u_state2D [ii + NX * jj].tau; // Energy Density
+            S = sqrt(S1 * S1 + S2 * S2);
+
+            peq = (n != 0.0) ? pressure_guess[ii + NX * jj] : abs(S - D - tau);
+
+            tol = D * 1.e-12;
+
+            //--------- Iteratively Solve for Pressure using Newton-Raphson
+            // Note: The NR scheme can be modified based on:
+            // https://www.sciencedirect.com/science/article/pii/S0893965913002930
+            iter = 0;
+            do
+            {
+                p = peq;
+                etotal = tau + p + D;
+                v2 = S * S / (etotal * etotal);
+                Ws = 1.0 / sqrt(1.0 - v2);
+                rhos = D / Ws;
+                eps = (tau + D * (1. - Ws) + (1. - Ws * Ws) * p) / (D * Ws);
+                f = (gamma - 1.0) * rhos * eps - p;
+
+                h = 1. + eps + p / rhos;
+                c2 = gamma * p / (h * rhos);
+                g = c2 * v2 - 1.0;
+                peq = p - f / g;
+                iter++;
+
+                if (iter > maximum_iteration)
+                {
+                    std::cout << "\n";
+                    std::cout << "p: " << p       << "\n";
+                    std::cout << "S: " << S       << "\n";
+                    std::cout << "tau: " << tau   << "\n";
+                    std::cout << "D: " << D       << "\n";
+                    std::cout << "et: " << etotal << "\n";
+                    std::cout << "Ws: " << Ws     << "\n";
+                    std::cout << "v2: " << v2     << "\n";
+                    std::cout << "W: " << W       << "\n";
+                    std::cout << "n: " << n       << "\n";
+                    std::cout << "\n Cons2Prim Cannot Converge" << "\n";
+                    exit(EXIT_FAILURE);
+                }
+
+            } while (abs(peq - p) >= tol);
+        
+
+            v1 = S1 / (tau + D + peq);
+            v2 = S2 / (tau + D + peq);
+            Ws = 1.0 / sqrt(1.0 - (v1 * v1 + v2 * v2));
+
+            // Update the Gamma array
+            // lorentz_gamma[ii + NX * jj] = Ws;
+
+            // Update the pressure guess for the next time step
+            pressure_guess[ii + NX * jj] = peq;
+
+            prims.push_back(Primitive(D / Ws, v1, v2, peq));
+        }
+    }
+
+    return prims;
+};
+
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
