@@ -14,23 +14,22 @@
 #include <iomanip>
 #include <chrono>
 
-using namespace std;
 using namespace simbi;
-using namespace chrono;
+using namespace std::chrono;
 
 // Default Constructor 
 Newtonian2D::Newtonian2D () {}
 
 // Overloaded Constructor
 Newtonian2D::Newtonian2D(
-    vector<vector<real> > init_state, 
+    std::vector<std::vector<real>> init_state, 
     int NX,
     int NY,
     real gamma, 
-    vector<real> x1, 
-    vector<real> x2, 
+    std::vector<real> x1, 
+    std::vector<real> x2, 
     real CFL, 
-    string coord_system = "cartesian")
+    std::string coord_system = "cartesian")
 :
     init_state(init_state),
     NX(NX),
@@ -59,12 +58,12 @@ typedef hydro2d::Eigenvals Eigenvals;
  * variables density (rho), pressure, and
  * velocity (v)
  */
-vector<Primitive> Newtonian2D::cons2prim(const vector<Conserved> &u_state)
+std::vector<Primitive> Newtonian2D::cons2prim(const std::vector<Conserved> &u_state)
 {
     real rho, energy, momx, momy;
     real vx,vy, pressure;
 
-    vector<Primitive> prims;
+    std::vector<Primitive> prims;
     prims.reserve(nzones);
 
     for(auto &u: u_state)
@@ -108,8 +107,8 @@ Eigenvals Newtonian2D::calc_eigenvals(
             const real rho_l = left_prims.rho;
             const real rho_r = right_prims.rho;
 
-            const real cs_r = sqrt(gamma * p_r/rho_r);
-            const real cs_l = sqrt(gamma * p_l/rho_l);
+            const real cs_r = std::sqrt(gamma * p_r/rho_r);
+            const real cs_l = std::sqrt(gamma * p_l/rho_l);
 
             switch (ehat)
             {
@@ -125,10 +124,10 @@ Eigenvals Newtonian2D::calc_eigenvals(
                         const real pStar  = pow(p_term, (1./z));
 
                         const real qL = 
-                            (pStar <= p_l) ? 1. : sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_l - 1.));
+                            (pStar <= p_l) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_l - 1.));
 
                         const real qR = 
-                            (pStar <= p_r) ? 1. : sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_r - 1.));
+                            (pStar <= p_r) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_r - 1.));
 
                         const real aL = vx_l - qL*cs_l;
                         const real aR = vx_r + qR*cs_r;
@@ -151,10 +150,10 @@ Eigenvals Newtonian2D::calc_eigenvals(
                         const real pStar  = pow(p_term, (1./z));
 
                         const real qL =
-                            (pStar <= p_l) ? 1. : sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_l - 1.));
+                            (pStar <= p_l) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_l - 1.));
 
                         const real qR = 
-                            (pStar <= p_r) ? 1. : sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_r - 1.));
+                            (pStar <= p_r) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_r - 1.));
 
                         const real aL = vy_l - qL*cs_l;
                         const real aR = vy_r + qR*cs_r;
@@ -178,8 +177,8 @@ Eigenvals Newtonian2D::calc_eigenvals(
                     const real p_l   = left_prims.p;
                     const real rho_l = left_prims.rho;
                     const real rho_r = right_prims.rho;
-                    const real cs_r = sqrt(gamma * p_r/rho_r);
-                    const real cs_l = sqrt(gamma * p_l/rho_l);
+                    const real cs_r = std::sqrt(gamma * p_r/rho_r);
+                    const real cs_l = std::sqrt(gamma * p_l/rho_l);
 
                     const real aL = std::min({(real)0.0, vx_l - cs_l, vx_r - cs_r});
                     const real aR = std::max({(real)0.0, vx_l + cs_l, vx_r + cs_r});
@@ -195,8 +194,8 @@ Eigenvals Newtonian2D::calc_eigenvals(
                     const real p_l   = left_prims.p;
                     const real rho_l = left_prims.rho;
                     const real rho_r = right_prims.rho;
-                    const real cs_r = sqrt(gamma * p_r/rho_r);
-                    const real cs_l = sqrt(gamma * p_l/rho_l);
+                    const real cs_r = std::sqrt(gamma * p_r/rho_r);
+                    const real cs_l = std::sqrt(gamma * p_l/rho_l);
 
                     const real aL = std::min({(real)0.0, vy_l - cs_l, vy_r - cs_r});
                     const real aR = std::max({(real)0.0, vy_l + cs_l, vy_r + cs_r});
@@ -231,7 +230,7 @@ Conserved Newtonian2D::prims2cons(const Primitive &prims)
 
 
 // Adapt the CFL conditonal timestep
-real Newtonian2D::adapt_dt(const vector<Primitive > &prims)
+real Newtonian2D::adapt_dt(const std::vector<Primitive > &prims)
 {
     real dx1, cs, dx2, rho, pressure, v1, v2, volAvg;
     real min_dt, cfl_dt;
@@ -256,18 +255,18 @@ real Newtonian2D::adapt_dt(const vector<Primitive > &prims)
             if (coord_system == "cartesian"){
                 
                 cfl_dt = 
-                    min( dx1/(max(abs(v1 + cs), abs(v1 - cs))), dx2/(max(abs(v2 + cs), abs(v2 - cs))) );
+                    std::min( dx1/(std::max(std::abs(v1 + cs), std::abs(v1 - cs))), dx2/(std::max(std::abs(v2 + cs), std::abs(v2 - cs))) );
 
             } else {
                 volAvg = coord_lattice.x1mean[ii];
                 cfl_dt = 
-                    min( dx1/(max(abs(v1 + cs), abs(v1 - cs))), volAvg*dx2/(max(abs(v2 + cs), abs(v2 - cs))) );
+                    std::min( dx1/(std::max(std::abs(v1 + cs), std::abs(v1 - cs))), volAvg*dx2/(std::max(std::abs(v2 + cs), std::abs(v2 - cs))) );
 
             }
 
             
             if ((ii > 0) | (jj > 0) ){
-                min_dt = min(min_dt, cfl_dt);
+                min_dt = std::min(min_dt, cfl_dt);
             }
             else {
                 min_dt = cfl_dt;
@@ -438,13 +437,13 @@ Conserved Newtonian2D::calc_hllc_flux(
 //                                            UDOT CALCULATIONS
 //-----------------------------------------------------------------------------------------------------------
 
-vector<Conserved> Newtonian2D::u_dot(const vector<Conserved> &u_state)
+std::vector<Conserved> Newtonian2D::u_dot(const std::vector<Conserved> &u_state)
 {
 
     int xcoordinate, ycoordinate;
-    string default_coordinates = "cartesian";
+    std::string default_coordinates = "cartesian";
 
-    vector<Conserved> L;
+    std::vector<Conserved> L;
     L.reserve(active_zones);
 
     Conserved  ux_l, ux_r, uy_l, uy_r, f_l, f_r; 
@@ -1082,8 +1081,8 @@ vector<Conserved> Newtonian2D::u_dot(const vector<Conserved> &u_state)
 //-----------------------------------------------------------------------------------------------------------
 //                                            SIMULATE 
 //-----------------------------------------------------------------------------------------------------------
-vector<vector<real> > Newtonian2D::simulate2D(
-    const vector<vector<real> > &sources, 
+std::vector<std::vector<real> > Newtonian2D::simulate2D(
+    const std::vector<std::vector<real> > &sources, 
     real tend = 0.1,
     bool periodic = false, 
     real dt = 1.e-4, 
@@ -1145,7 +1144,7 @@ vector<vector<real> > Newtonian2D::simulate2D(
     }
 
 
-    vector<Conserved> u, u1, u2, udot, u_p;
+    std::vector<Conserved> u, u1, u2, udot, u_p;
     u1.reserve(nzones);
     u2.reserve(nzones);
     u.reserve(nzones);
@@ -1225,16 +1224,16 @@ vector<vector<real> > Newtonian2D::simulate2D(
         high_resolution_clock::time_point t2 = high_resolution_clock::now();
         duration<real> time_span = duration_cast<duration<real>>(t2 - t1);
 
-        cout << fixed << setprecision(3) << std::scientific;
-        cout << "\r" << "dt: " << setw(5) << dt 
-             << "\t" << "t: " << setw(5) << t 
+        std::cout << std::fixed     << std::setprecision(3) << std::scientific;
+        std::cout << "\r" << "dt: " << std::setw(5) << dt 
+             << "\t" << "t: "       << std::setw(5) << t 
              << "\t" <<  "Zones per sec: " << nzones/time_span.count()
-             << flush;
+             << std::flush;
 
     }
 
-    cout << "\n " << endl;
-    std::vector<std::vector<real> > solution(4, vector<real>(nzones));
+    std::cout << "\n ";
+    std::vector<std::vector<real> > solution(4, std::vector<real>(nzones));
     for (size_t ii = 0; ii < nzones; ii++)
     {
         solution[0][ii] = u[ii].rho;

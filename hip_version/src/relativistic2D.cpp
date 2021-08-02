@@ -13,9 +13,8 @@
 #include <cmath>
 #include <iomanip>
 
-using namespace std;
 using namespace simbi;
-using namespace chrono;
+using namespace std::chrono;
 
 // Calculate a static PI
 constexpr real pi() { return std::atan(1)*4; }
@@ -30,9 +29,9 @@ bool simbi::strong_shock(real pl, real pr){
 SRHD2D::SRHD2D() {}
 
 // Overloaded Constructor
-SRHD2D::SRHD2D(vector<vector<real>> state2D, int nx, int ny, real gamma,
-               vector<real> x1, vector<real> x2, real Cfl,
-               string coord_system = "cartesian")
+SRHD2D::SRHD2D(std::vector<std::vector<real>> state2D, int nx, int ny, real gamma,
+               std::vector<real> x1, std::vector<real> x2, real Cfl,
+               std::string coord_system = "cartesian")
 {
     auto nzones = state2D[0].size();
 
@@ -285,7 +284,7 @@ void SRHD2D_DualSpace::copyGPUStateToHost(
 //                          GET THE Primitive
 //-----------------------------------------------------------------------------------------
 
-vector<Primitive> SRHD2D::cons2prim2D(const vector<Conserved> &u_state2D)
+std::vector<Primitive> SRHD2D::cons2prim2D(const std::vector<Conserved> &u_state2D)
 {
     /**
    * Return a 2D matrix containing the primitive
@@ -296,7 +295,7 @@ vector<Primitive> SRHD2D::cons2prim2D(const vector<Conserved> &u_state2D)
     real S1, S2, S, D, tau, tol;
     real W, v1, v2;
 
-    vector<Primitive> prims;
+    std::vector<Primitive> prims;
     prims.reserve(nzones);
 
     // Define Newton-Raphson Vars
@@ -341,17 +340,17 @@ vector<Primitive> SRHD2D::cons2prim2D(const vector<Conserved> &u_state2D)
 
                 if (iter > maximum_iteration)
                 {
-                    cout << "\n";
-                    cout << "p: " << p << endl;
-                    cout << "S: " << S << endl;
-                    cout << "tau: " << tau << endl;
-                    cout << "D: " << D << endl;
-                    cout << "et: " << etotal << endl;
-                    cout << "Ws: " << Ws << endl;
-                    cout << "v2: " << v2 << endl;
-                    cout << "W: " << W << endl;
-                    cout << "n: " << n << endl;
-                    cout << "\n Cons2Prim Cannot Converge" << endl;
+                    std::cout << "\n";
+                    std::cout << "p: " << p       << "\n";
+                    std::cout << "S: " << S       << "\n";
+                    std::cout << "tau: " << tau   << "\n";
+                    std::cout << "D: " << D       << "\n";
+                    std::cout << "et: " << etotal << "\n";
+                    std::cout << "Ws: " << Ws     << "\n";
+                    std::cout << "v2: " << v2     << "\n";
+                    std::cout << "W: " << W       << "\n";
+                    std::cout << "n: " << n       << "\n";
+                    std::cout << "\n Cons2Prim Cannot Converge" << "\n";
                     exit(EXIT_FAILURE);
                 }
 
@@ -539,7 +538,7 @@ Conserved SRHD2D::calc_intermed_statesSR2D(const Primitive &prims,
 //---------------------------------------------------------------------
 
 // Adapt the CFL conditonal timestep
-real SRHD2D::adapt_dt(const vector<Primitive> &prims)
+real SRHD2D::adapt_dt(const std::vector<Primitive> &prims)
 {
 
     real r_left, r_right, left_cell, right_cell, lower_cell, upper_cell;
@@ -907,11 +906,11 @@ Conserved SRHD2D::calc_hllc_flux(
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 
-vector<Conserved> SRHD2D::u_dot2D(const vector<Conserved> &u_state)
+std::vector<Conserved> SRHD2D::u_dot2D(const std::vector<Conserved> &u_state)
 {
     int xcoordinate, ycoordinate;
 
-    vector<Conserved> L;
+    std::vector<Conserved> L;
     L.reserve(active_zones);
 
     Conserved ux_l, ux_r, uy_l, uy_r;
@@ -2350,16 +2349,16 @@ __global__ void simbi::shared_gpu_advance(
 //===================================================================================================================
 //                                            SIMULATE
 //===================================================================================================================
-vector<vector<real>> SRHD2D::simulate2D(
-    vector<real> lorentz_gamma, 
-    const vector<vector<real>> sources,
+std::vector<std::vector<real>> SRHD2D::simulate2D(
+    std::vector<real> lorentz_gamma, 
+    const std::vector<std::vector<real>> sources,
     float tstart = 0., 
     float tend = 0.1, 
     real dt = 1.e-4, 
     real theta = 1.5,
     real engine_duration = 10, 
     real chkpt_interval = 0.1,
-    string data_directory = "data/", 
+    std::string data_directory = "data/", 
     bool first_order = true,
     bool periodic = false, 
     bool linspace = true, 
@@ -2367,7 +2366,7 @@ vector<vector<real>> SRHD2D::simulate2D(
 {
 
     int i_real, j_real;
-    string tnow, tchunk, tstep;
+    std::string tnow, tchunk, tstep;
     int total_zones = NX * NY;
     
     real round_place = 1 / chkpt_interval;
@@ -2376,7 +2375,7 @@ vector<vector<real>> SRHD2D::simulate2D(
         t == 0 ? floor(tstart * round_place + 0.5) / round_place
                : floor(tstart * round_place + 0.5) / round_place + chkpt_interval;
 
-    string filename;
+    std::string filename;
 
     this->sources = sources;
     this->first_order = first_order;
@@ -2445,7 +2444,7 @@ vector<vector<real>> SRHD2D::simulate2D(
     setup.NX = NX;
     setup.NY = NY;
 
-    vector<Conserved> u, u1, udot, udot1;
+    std::vector<Conserved> u, u1, udot, udot1;
     u.resize(nzones);
     u1.resize(nzones);
     udot.reserve(active_zones);
@@ -2648,7 +2647,7 @@ vector<vector<real>> SRHD2D::simulate2D(
     prims = cons2prim2D(u0);
     transfer_prims = vecs2struct(prims);
 
-    vector<vector<real>> solution(4, vector<real>(nzones));
+    std::vector<std::vector<real>> solution(4, std::vector<real>(nzones));
 
     solution[0] = transfer_prims.rho;
     solution[1] = transfer_prims.v1;

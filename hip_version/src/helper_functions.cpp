@@ -11,13 +11,12 @@
 #include <algorithm>
 #include <cstdarg>
 
-using namespace std;
 using namespace H5;
 // =========================================================================================================
 //        HELPER FUNCTIONS FOR COMPUTATION
 // =========================================================================================================
 // Convert a vector of structs into a struct of vectors for easy post processsing
-sr2d::PrimitiveData vecs2struct(const vector<sr2d::Primitive> &p){
+sr2d::PrimitiveData vecs2struct(const std::vector<sr2d::Primitive> &p){
     sr2d::PrimitiveData sprims;
     size_t nzones = p.size();
     sprims.rho.reserve(nzones);
@@ -36,20 +35,20 @@ sr2d::PrimitiveData vecs2struct(const vector<sr2d::Primitive> &p){
 }
 
 // Roll a vector for use with periodic boundary conditions
-vector<real> rollVector(const vector<real>& v, unsigned int n){
+std::vector<real> rollVector(const std::vector<real>& v, unsigned int n){
     auto b = v.begin() + (n % v.size());
-    vector<real> ret(b, v.end());
+    std::vector<real> ret(b, v.end());
     ret.insert(ret.end(), v.begin(), b);
     return ret;
 };
 
 // Roll a single vector index
-real roll(vector<real>  &v, unsigned int n) {
+real roll(std::vector<real>  &v, unsigned int n) {
    return v[n % v.size()];
 };
 
 // Roll a single vector index in y-direction of lattice
-// real roll(vector<vector<real>>  &v, unsigned int xpos, unsigned int ypos) {
+// real roll(std::vector<std::vector<real>>  &v, unsigned int xpos, unsigned int ypos) {
 //    return v[ypos % v.size()][xpos % v[0].size()];
 // };
 
@@ -380,19 +379,19 @@ void toWritePrim(sr2d::PrimitiveData *from, PrimData *to)
     to->p    = from->p;
 }
 
-string create_step_str(real t_interval, string &tnow){
+std::string create_step_str(real t_interval, std::string &tnow){
 
     // Convert the time interval into an int with 2 decimal displacements
     int t_interval_int = round( 1.e3 * t_interval );
     int a, b;
 
-    string s = to_string(t_interval_int);
+    std::string s = std::to_string(t_interval_int);
 
     // Pad the file string if size less than tnow_size
     if (s.size() < tnow.size()) {
 
         int num_zeros = tnow.size() - s.size();
-        string pad_zeros = string(num_zeros, '0');
+        std::string pad_zeros = std::string(num_zeros, '0');
         s.insert(0, pad_zeros);
     }
 
@@ -411,15 +410,15 @@ string create_step_str(real t_interval, string &tnow){
 
 }
 void write_hdf5(
-    const string data_directory, 
-    const string filename, 
+    const std::string data_directory, 
+    const std::string filename, 
     const PrimData prims, 
     const DataWriteMembers setup, 
     const int dim = 2,
     const int size = 1)
 {
-    string filePath = data_directory;
-    cout << "\n" <<  "[Writing File...: " << filePath + filename << "]" << "\n";
+    std::string filePath = data_directory;
+    std::cout << "\n" <<  "[Writing File...: " << filePath + filename << "]" << "\n";
 
     H5::H5File file(filePath + filename, H5F_ACC_TRUNC );
 
