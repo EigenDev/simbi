@@ -82,8 +82,8 @@ namespace hydro1d {
     };
 
     struct Eigenvals {
-        GPU_CALLABLE_MEMBER Eigenvals() {}
-        GPU_CALLABLE_MEMBER ~Eigenvals() {}
+        Eigenvals() {}
+        ~Eigenvals() {}
         real aL, aR;
         real aStar, pStar;
     };
@@ -162,8 +162,8 @@ namespace sr1d {
     };
     struct Eigenvals {
         real aL, aR;
-        Eigenvals() {}
-        ~Eigenvals() {}
+        GPU_CALLABLE_MEMBER Eigenvals() {}
+        GPU_CALLABLE_MEMBER ~Eigenvals() {}
     };
 
 }

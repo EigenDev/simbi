@@ -476,6 +476,7 @@ Conserved SRHD::calc_state(real rho, real v, real pressure)
     return state;
 };
 
+GPU_CALLABLE_MEMBER
 Conserved SRHD::calc_hll_state(const Conserved &left_state,
                                const Conserved &right_state,
                                const Conserved &left_flux,
@@ -637,19 +638,47 @@ SRHD::calc_hllc_flux(const Primitive &left_prims, const Primitive &right_prims,
     aStar = c/quad;
     pStar = -fe * aStar + fs;
 
-    if (aL < 0.0 && 0.0 <= aStar)
+    if (-aL <= (aStar - aL))
     {
-        starState =
-            calc_intermed_state(left_prims, left_state, aL, aStar, pStar);
+        const real pressure = left_prims.p;
+        const real D = left_state.D;
+        const real S = left_state.S;
+        const real tau = left_state.tau;
+        const real E = tau + D;
+        const real cofactor = 1. / (aL - aStar);
+        //--------------Compute the L Star State----------
+        const real v = left_prims.v;
+        // Left Star State in x-direction of coordinate lattice
+        const real Dstar    = cofactor * (aL - v) * D;
+        const real Sstar   = cofactor * (S * (aL - v) - pressure + pStar);
+        const real Estar    = cofactor * (E * (aL - v) + pStar * aStar - pressure * v);
+        const real tauStar  = Estar - Dstar;
 
-        return left_flux + (starState - left_state) * aL;
+        const auto interstate_left = Conserved(Dstar, Sstar, tauStar);
+
+        //---------Compute the L Star Flux
+        return left_flux + (interstate_left - left_state) * aL;
     }
     else
     {
-        starState =
-            calc_intermed_state(right_prims, right_state, aR, aStar, pStar);
+        const real pressure = right_prims.p;
+        const real D = right_state.D;
+        const real S = right_state.S;
+        const real tau = right_state.tau;
+        const real E = tau + D;
+        const real cofactor = 1. / (aR - aStar);
+        //--------------Compute the L Star State----------
+        const real v = left_prims.v;
+        // Left Star State in x-direction of coordinate lattice
+        const real Dstar    = cofactor * (aR - v) * D;
+        const real Sstar   = cofactor * (S * (aR - v) - pressure + pStar);
+        const real Estar    = cofactor * (E * (aR - v) + pStar * aStar - pressure * v);
+        const real tauStar  = Estar - Dstar;
 
-        return right_flux + (starState - right_state) * aR;
+        const auto interstate_right = Conserved(Dstar, Sstar, tauStar);
+
+        //---------Compute the R Star Flux
+        return right_flux + (interstate_right - right_state) * aR;
     }
 };
 

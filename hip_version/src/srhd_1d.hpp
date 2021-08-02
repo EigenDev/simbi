@@ -86,7 +86,7 @@ namespace simbi
           GPU_CALLABLE_MEMBER
           sr1d::Conserved calc_state(real rho, real v, real pressure);
 
-          
+          GPU_CALLABLE_MEMBER
           sr1d::Conserved calc_hll_state(
                const sr1d::Conserved &left_state,
                const sr1d::Conserved &right_state,
