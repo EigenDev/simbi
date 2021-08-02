@@ -377,6 +377,7 @@ std::vector<Primitive> SRHD2D::cons2prim2D(const std::vector<Conserved> &u_state
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
+GPU_CALLABLE_MEMBER
 Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
                                  const Primitive &prims_r,
                                  const unsigned int nhat = 1)
@@ -470,7 +471,7 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
 //-----------------------------------------------------------------------------------------
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
-
+GPU_CALLABLE_MEMBER
 Conserved SRHD2D::calc_stateSR2D(const Primitive &prims)
 {
     const real rho = prims.rho;
@@ -715,6 +716,7 @@ __global__ void adapt_dtGPU(
 
 // Get the 2D Flux array (4,1). Either return F or G depending on directional
 // flag
+GPU_CALLABLE_MEMBER
 Conserved SRHD2D::calc_Flux(const Primitive &prims, unsigned int nhat = 1)
 {
 
@@ -737,6 +739,7 @@ Conserved SRHD2D::calc_Flux(const Primitive &prims, unsigned int nhat = 1)
                                    (tau + pressure) * vy);
 };
 
+GPU_CALLABLE_MEMBER
 Conserved SRHD2D::calc_hll_flux(
     const Conserved &left_state, 
     const Conserved &right_state,
@@ -761,6 +764,7 @@ Conserved SRHD2D::calc_hll_flux(
                     (aRplus - aLminus);
 };
 
+GPU_CALLABLE_MEMBER
 Conserved SRHD2D::calc_hllc_flux(
     const Conserved &left_state,
     const Conserved &right_state,
@@ -958,8 +962,8 @@ std::vector<Conserved> SRHD2D::u_dot2D(const std::vector<Conserved> &u_state)
 
                     yprims_r = prims[ii + (jj + 1) * NX];
 
-                    f_l = calc_Flux(xprims_l);
-                    f_r = calc_Flux(xprims_r);
+                    f_l = calc_Flux(xprims_l, 1);
+                    f_r = calc_Flux(xprims_r, 1);
 
                     g_l = calc_Flux(yprims_l, 2);
                     g_r = calc_Flux(yprims_r, 2);
@@ -984,8 +988,8 @@ std::vector<Conserved> SRHD2D::u_dot2D(const std::vector<Conserved> &u_state)
                     yprims_l = prims[ii + (jj - 1) * NX];
                     yprims_r = prims[ii + jj * NX];
 
-                    f_l = calc_Flux(xprims_l);
-                    f_r = calc_Flux(xprims_r);
+                    f_l = calc_Flux(xprims_l, 1);
+                    f_r = calc_Flux(xprims_r, 1);
 
                     g_l = calc_Flux(yprims_l, 2);
                     g_r = calc_Flux(yprims_r, 2);
@@ -1127,8 +1131,8 @@ std::vector<Conserved> SRHD2D::u_dot2D(const std::vector<Conserved> &u_state)
                     uy_l = calc_stateSR2D(yprims_l);
                     uy_r = calc_stateSR2D(yprims_r);
 
-                    f_l = calc_Flux(xprims_l);
-                    f_r = calc_Flux(xprims_r);
+                    f_l = calc_Flux(xprims_l, 1);
+                    f_r = calc_Flux(xprims_r, 1);
 
                     g_l = calc_Flux(yprims_l, 2);
                     g_r = calc_Flux(yprims_r, 2);
@@ -1228,8 +1232,8 @@ std::vector<Conserved> SRHD2D::u_dot2D(const std::vector<Conserved> &u_state)
                     uy_l = calc_stateSR2D(yprims_l);
                     uy_r = calc_stateSR2D(yprims_r);
 
-                    f_l = calc_Flux(xprims_l);
-                    f_r = calc_Flux(xprims_r);
+                    f_l = calc_Flux(xprims_l, 1);
+                    f_r = calc_Flux(xprims_r, 1);
 
                     g_l = calc_Flux(yprims_l, 2);
                     g_r = calc_Flux(yprims_r, 2);
@@ -1284,8 +1288,8 @@ std::vector<Conserved> SRHD2D::u_dot2D(const std::vector<Conserved> &u_state)
                     uc   = xprims_l.v1;
                     vc   = xprims_l.v2;
 
-                    f_l = calc_Flux(xprims_l);
-                    f_r = calc_Flux(xprims_r);
+                    f_l = calc_Flux(xprims_l, 1);
+                    f_r = calc_Flux(xprims_r, 1);
 
                     g_l = calc_Flux(yprims_l, 2);
                     g_r = calc_Flux(yprims_r, 2);
@@ -1317,8 +1321,8 @@ std::vector<Conserved> SRHD2D::u_dot2D(const std::vector<Conserved> &u_state)
                     yprims_l = prims[ii + (jj - 1) * NX];
                     yprims_r = prims[ii + jj * NX];
 
-                    f_l = calc_Flux(xprims_l);
-                    f_r = calc_Flux(xprims_r);
+                    f_l = calc_Flux(xprims_l, 1);
+                    f_r = calc_Flux(xprims_r, 1);
                     g_l = calc_Flux(yprims_l, 2);
                     g_r = calc_Flux(yprims_r, 2);
 
@@ -1507,8 +1511,8 @@ std::vector<Conserved> SRHD2D::u_dot2D(const std::vector<Conserved> &u_state)
                     uy_l = calc_stateSR2D(yprims_l);
                     uy_r = calc_stateSR2D(yprims_r);
 
-                    f_l = calc_Flux(xprims_l);
-                    f_r = calc_Flux(xprims_r);
+                    f_l = calc_Flux(xprims_l, 1);
+                    f_r = calc_Flux(xprims_r, 1);
 
                     g_l = calc_Flux(yprims_l, 2);
                     g_r = calc_Flux(yprims_r, 2);
@@ -1630,8 +1634,8 @@ std::vector<Conserved> SRHD2D::u_dot2D(const std::vector<Conserved> &u_state)
                     uy_l = calc_stateSR2D(yprims_l);
                     uy_r = calc_stateSR2D(yprims_r);
 
-                    f_l = calc_Flux(xprims_l);
-                    f_r = calc_Flux(xprims_r);
+                    f_l = calc_Flux(xprims_l, 1);
+                    f_r = calc_Flux(xprims_r, 1);
                     g_l = calc_Flux(yprims_l, 2);
                     g_r = calc_Flux(yprims_r, 2);
 
@@ -1864,8 +1868,8 @@ __global__ void simbi::shared_gpu_advance(
                     yprims_r = prim_buff[(tya + 1) * bs + txa];
                 }
                 
-                f_l = s->calc_Flux(xprims_l);
-                f_r = s->calc_Flux(xprims_r);
+                f_l = s->calc_Flux(xprims_l, 1);
+                f_r = s->calc_Flux(xprims_r, 1);
 
                 g_l = s->calc_Flux(yprims_l, 2);
                 g_r = s->calc_Flux(yprims_r, 2);
@@ -1902,8 +1906,8 @@ __global__ void simbi::shared_gpu_advance(
                     yprims_r = prim_buff[(tya + 0) * bs + txa]; 
                 }
 
-                f_l = s->calc_Flux(xprims_l);
-                f_r = s->calc_Flux(xprims_r);
+                f_l = s->calc_Flux(xprims_l, 1);
+                f_r = s->calc_Flux(xprims_r, 1);
 
                 g_l = s->calc_Flux(yprims_l, 2);
                 g_r = s->calc_Flux(yprims_r, 2);
@@ -2124,8 +2128,8 @@ __global__ void simbi::shared_gpu_advance(
                     uy_l = s->calc_stateSR2D(yprims_l);
                     uy_r = s->calc_stateSR2D(yprims_r);
 
-                    f_l = s->calc_Flux(xprims_l);
-                    f_r = s->calc_Flux(xprims_r);
+                    f_l = s->calc_Flux(xprims_l, 1);
+                    f_r = s->calc_Flux(xprims_r, 1);
 
                     g_l = s->calc_Flux(yprims_l, 2);
                     g_r = s->calc_Flux(yprims_r, 2);
@@ -2247,8 +2251,8 @@ __global__ void simbi::shared_gpu_advance(
                     uy_l = s->calc_stateSR2D(yprims_l);
                     uy_r = s->calc_stateSR2D(yprims_r);
 
-                    f_l = s->calc_Flux(xprims_l);
-                    f_r = s->calc_Flux(xprims_r);
+                    f_l = s->calc_Flux(xprims_l, 1);
+                    f_r = s->calc_Flux(xprims_r, 1);
                     g_l = s->calc_Flux(yprims_l, 2);
                     g_r = s->calc_Flux(yprims_r, 2);
 
