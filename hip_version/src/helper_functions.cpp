@@ -600,7 +600,6 @@ void write_hdf5(
 //=======================================================================================================
 //                                      RELATIVISITC HYDRO
 //=======================================================================================================
-GPU_CALLABLE_MEMBER
 real calc_intermed_wave(real energy_density, real momentum_density, 
                             real flux_momentum_density, 
                             real flux_energy_density)
@@ -613,7 +612,6 @@ real calc_intermed_wave(real energy_density, real momentum_density,
     return c/quad;
 }
 
-GPU_CALLABLE_MEMBER
 real calc_intermed_pressure(real a,real aStar, real energy, real norm_mom, real u, real p){
 
     real e, f, g;

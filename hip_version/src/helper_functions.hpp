@@ -143,10 +143,10 @@ __global__ void config_ghosts2DGPU(
     bool first_order,
     bool bipolar = true);
     
-GPU_CALLABLE_MEMBER real calc_intermed_wave(real, real, real, real);
-GPU_CALLABLE_MEMBER real calc_intermed_pressure(real, real, real, real, real, real);
-GPU_CALLABLE_MEMBER real pressure_func(real, real, real, real, float, real);
-GPU_CALLABLE_MEMBER real dfdp(real, real, real, real, float, real);
+real calc_intermed_wave(real, real, real, real);
+real calc_intermed_pressure(real, real, real, real, real, real);
+real pressure_func(real, real, real, real, float, real);
+real dfdp(real, real, real, real, float, real);
 void config_ghosts2D(
     std::vector<hydro2d::Conserved> &u_state, 
     int x1grid_size, 
