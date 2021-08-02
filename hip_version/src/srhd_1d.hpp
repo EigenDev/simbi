@@ -80,13 +80,13 @@ namespace simbi
 
           real adapt_dt(const std::vector<sr1d::Primitive> &prims);
 
-          GPU_CALLABLE_MEMBER
+          
           real adapt_dt(const sr1d::Primitive* prims);
 
           GPU_CALLABLE_MEMBER
           sr1d::Conserved calc_state(real rho, real v, real pressure);
 
-          GPU_CALLABLE_MEMBER
+          
           sr1d::Conserved calc_hll_state(
                const sr1d::Conserved &left_state,
                const sr1d::Conserved &right_state,
@@ -95,7 +95,7 @@ namespace simbi
                const sr1d::Primitive &left_prims,
                const sr1d::Primitive &right_prims);
 
-          GPU_CALLABLE_MEMBER
+          
           sr1d::Conserved calc_intermed_state(
                const sr1d::Primitive &prims,
                const sr1d::Conserved &state,
