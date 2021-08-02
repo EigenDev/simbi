@@ -17,7 +17,7 @@ using namespace simbi;
 using namespace std::chrono;
 
 // Calculate a static PI
-constexpr real pi() { return std::atan(1)*4; }
+real pi() { return std::atan(1)*4; }
 constexpr real K = 0.0;
 constexpr real a = 1e-3;
 
