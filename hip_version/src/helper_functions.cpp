@@ -544,7 +544,14 @@ void write_hdf5(
 
             // Write Datset Attributesauto real_type(H5::PredType::NATIVE_DOUBLE);
             H5::DataType int_type(H5::PredType::NATIVE_INT);
-            H5::DataType real_type(H5::PredType::NATIVE_DOUBLE);
+            H5::DataType real_type;
+            if (typeid(real) == typeid(double))
+            {
+                real_type = H5::PredType::NATIVE_DOUBLE;
+            } else {
+                real_type = H5::PredType::NATIVE_FLOAT;
+            }
+            
             H5::DataType bool_type(H5::PredType::NATIVE_HBOOL);
             H5::DataSpace att_space(H5S_SCALAR);
 

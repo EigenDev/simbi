@@ -48,10 +48,11 @@ def plot_profile(args, field_dict, ax = None, overplot = False, case = 0):
         fig, ax= plt.subplots(1, 1, figsize=(10,8))
     
     unit_scale = 1.0
-    if args.field == "rho":
-        unit_scale = rho_scale
-    elif args.field == "p":
-        unit_scale = pre_scale
+    if (args.units):
+        if args.field == "rho":
+            unit_scale = rho_scale
+        elif args.field == "p":
+            unit_scale = pre_scale
         
     if args.labels is None:
         ax.plot(r, field_dict[args.field] * unit_scale)
@@ -76,7 +77,10 @@ def plot_profile(args, field_dict, ax = None, overplot = False, case = 0):
         ax.set_xlim(xmin, xmax)
     # Change the format of the field
     if args.field == "rho":
-        field_str = r'$\rho$ [g cm$^{-3}$]'
+        if args.units:
+            field_str = r'$\rho$ [g cm$^{-3}$]'
+        else:
+            field_str = r'$\rho$'
     elif args.field == "gamma_beta":
         field_str = r"$\Gamma \ \beta$"
     elif args.field == "vpdf":
@@ -102,7 +106,6 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
     rvertices = np.insert(rvertices,  0, r[0])
     rvertices = np.insert(rvertices, rvertices.shape[0], r[-1])
     dr = rvertices[1:] - rvertices[:-1]
-        
     dV          =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
     
     etotal = edens_total * (4 * np.pi * dV) * e_scale.value
@@ -202,6 +205,10 @@ def main():
     parser.add_argument('--first_order', dest='forder', action='store_true',
                         default=False,
                         help='True if this is a grid using RK1')
+    
+    parser.add_argument('--units', dest='units', action='store_true',
+                        default=False,
+                        help='True if you would like units scale (default is solar units)')
 
    
     args = parser.parse_args()

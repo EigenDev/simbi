@@ -1694,6 +1694,7 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
     setup.xmin = r[0];
     setup.xactive_zones = pgrid_size;
     setup.NX = Nx;
+    setup.linspace = linspace;
 
     // Create Structure of Vectors (SoV) for trabsferring
     // data to files once ready
@@ -1727,7 +1728,6 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
     }
 
     cons2prim1D(u);
-    n++;
 
     sys_state = u;
 
@@ -1772,7 +1772,6 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
             hipLaunchKernelGGL(shared_gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), shBlockBytes, 0, device_self, shBlockSize, radius, geometry[this->coord_system]);
             hipLaunchKernelGGL(config_ghosts1DGPU, dim3(1), dim3(1), 0, 0, device_self, Nx, first_order);
             t += dt; 
-            n++;
             hipDeviceSynchronize();
 
             if (n >= nfold){
@@ -1811,10 +1810,10 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
                 write_hdf5(data_directory, filename, prods, setup, 1, Nx);
                 t_interval += chkpt_interval;
             }
-
+            n++;
             // Adapt the timestep
-            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
-            hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+            // hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
+            // hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
         }
     } else {
         const int radius = 2;
@@ -1834,7 +1833,6 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
             hipLaunchKernelGGL(config_ghosts1DGPU, dim3(1), dim3(1), 0, 0, device_self, Nx, first_order);
 
             t += dt; 
-            n++;
             hipDeviceSynchronize();
 
             if (n >= nfold){
@@ -1873,10 +1871,10 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
                 write_hdf5(data_directory, filename, prods, setup, 1, Nx);
                 t_interval += chkpt_interval;
             }
-
+            n++;
             //Adapt the timestep
-            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
-            hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+            // hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
+            // hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
         }
 
     }
