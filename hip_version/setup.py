@@ -105,14 +105,14 @@ HIP  = locate_hip()
 
 
 compilerArguments = {
-            'clang++': ['-std=c++17','-march=native', '-fno-wrapv', '-O3'],
+            'g++': ['-std=c++17','-march=native', '-fno-wrapv', '-O3'],
             'hipcc': [
                 ]
             }
 if HIP["platform"] == "nvidia":
     compilerArguments["hipcc"] += ['-arch=sm_50', '-c', '--ptxas-options=-v', '--compiler-options', "-fPIC"]
 else:
-    compilerArguments["hipcc"] += compilerArguments["clang++"]
+    compilerArguments["hipcc"] += compilerArguments["g++"]
     
 compiler_args = ['-march=native', '-fno-wrapv', '-O3']
 linker_args   = ['-lhdf5', '-lhdf5_cpp']
@@ -172,12 +172,12 @@ def extensions():
     sysconfig.get_config_vars()['OPT'] = ''
     sysconfig.get_config_vars()['PY_CFLAGS'] = ''
     sysconfig.get_config_vars()['PY_CORE_CFLAGS'] = ''
-    sysconfig.get_config_vars()['CC'] = 'clang++'
-    sysconfig.get_config_vars()['CXX'] = 'clang++'
+    sysconfig.get_config_vars()['CC'] = 'gcc'
+    sysconfig.get_config_vars()['CXX'] = 'g++'
     sysconfig.get_config_vars()['BASECFLAGS'] = ''
     sysconfig.get_config_vars()['CCSHARED'] = '-fPIC'
-    sysconfig.get_config_vars()['LDSHARED'] = 'clang++ -shared'
-    sysconfig.get_config_vars()['CPP'] = 'clang++'
+    sysconfig.get_config_vars()['LDSHARED'] = 'g++ -shared'
+    sysconfig.get_config_vars()['CPP'] = 'g++'
     sysconfig.get_config_vars()['CPPFLAGS'] = ''
     sysconfig.get_config_vars()['BLDSHARED'] = ''
     sysconfig.get_config_vars()['CONFIGURE_LDFLAGS'] = ''
@@ -217,7 +217,7 @@ def customize_compiler_for_hipcc(self):
             # translated from the extra_compile_args in the Extension class
             postargs = extra_postargs['hipcc']
         else:
-            postargs = extra_postargs['clang++']
+            postargs = extra_postargs['g++']
 
         super(obj, src, ext, cc_args, postargs, pp_opts)
         # Reset the default compiler_so, which we might have changed for cuda

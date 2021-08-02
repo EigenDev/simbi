@@ -9,8 +9,8 @@ ifeq (,$(HIP_PATH))
 	HIP_PATH=../../..
 endif
 
-CC =clang
-CXX=clang++ #${HIPCC}
+CC =gcc
+CXX=g++ #${HIPCC}
 CXXFLAGS = -I.
 LDFLAGS = -lhdf5 -lhdf5_cpp -shared
 LD_LIBRARY_PATH := 
