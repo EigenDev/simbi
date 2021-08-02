@@ -462,6 +462,7 @@ void write_hdf5(
             // Write Datset Attributes
             H5::DataType real_type(H5::PredType::NATIVE_DOUBLE);
             H5::DataType int_type(H5::PredType::NATIVE_INT);
+            H5::DataType bool_type(H5::PredType::NATIVE_HBOOL);
             H5::DataSpace att_space(H5S_SCALAR);
 
             H5::DataSpace empty_dspace(1, dimsf);
@@ -474,6 +475,10 @@ void write_hdf5(
 
             att = sim_info.createAttribute("time_step", real_type, att_space);
             att.write(real_type, &setup.dt);
+            att.close();
+
+            att = sim_info.createAttribute("linspace", bool_type, att_space);
+            att.write(bool_type, &setup.linspace);
             att.close();
 
             att = sim_info.createAttribute("adiabatic_gamma", real_type, att_space);
@@ -540,6 +545,7 @@ void write_hdf5(
             // Write Datset Attributesauto real_type(H5::PredType::NATIVE_DOUBLE);
             H5::DataType int_type(H5::PredType::NATIVE_INT);
             H5::DataType real_type(H5::PredType::NATIVE_DOUBLE);
+            H5::DataType bool_type(H5::PredType::NATIVE_HBOOL);
             H5::DataSpace att_space(H5S_SCALAR);
 
             H5::DataSpace empty_dspace(1, dimsf);
@@ -554,6 +560,10 @@ void write_hdf5(
             att.write(real_type, &setup.dt);
             att.close();
 
+            att = sim_info.createAttribute("linspace", bool_type, att_space);
+            att.write(bool_type, &setup.linspace);
+            att.close();
+            
             att = sim_info.createAttribute("xmax", real_type, att_space);
             att.write(real_type, &setup.xmax);
             att.close();

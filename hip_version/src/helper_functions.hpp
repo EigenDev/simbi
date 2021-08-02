@@ -54,6 +54,7 @@ struct DataWriteMembers
     real t, ad_gamma;
     real xmin, xmax, ymin, ymax, dt;
     int NX, NY, xactive_zones, yactive_zones;
+    bool linspace;
 };
 
 
