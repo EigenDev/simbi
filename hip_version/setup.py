@@ -118,6 +118,7 @@ compiler_args = ['-march=native', '-fno-wrapv', '-O3']
 linker_args   = ['-lhdf5', '-lhdf5_cpp']
 libraries     = ['hdf5', 'hdf5_cpp'] 
 library_dirs  = [HIP["lib"]]
+extraIncludes = []
 language = "c++"
 if HIP["platform"] == "nvidia":
     defineMacros      = [("__HIP_PLATFORM_NVIDIA__", "1")]
@@ -157,7 +158,7 @@ def extensions():
 
     extensionArguments = {
         'include_dirs':
-        lstIncludes + [HIP['include']],
+        lstIncludes + [HIP['include']] + extraIncludes,
         'library_dirs': library_dirs,
         'extra_compile_args': compilerArguments,
         'extra_link_args': linker_args,
