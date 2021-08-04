@@ -1,5 +1,5 @@
-CC=clang
-CXX=clang++
+CC=gcc
+CXX=g++
 
 SOURCES = $(filter-out src/state.cpp, $(wildcard src/*.cpp))
 HEADERS = $(wildcard src/*.hpp)
