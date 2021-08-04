@@ -1,5 +1,6 @@
 CC=gcc
 CXX=g++
+OMP_NUM_THREADS=2
 
 SOURCES = $(filter-out src/state.cpp, $(wildcard src/*.cpp))
 HEADERS = $(wildcard src/*.hpp)
