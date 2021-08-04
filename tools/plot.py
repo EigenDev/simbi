@@ -99,7 +99,7 @@ def plot_polar_plot(field_dict, args, mesh, ds):
         ax.set_position( [0.1, -0.18, 0.8, 1.43])
         cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
         cbar_orientation = "horizontal"
-        ymd = int( np.ceil(ymax * 180/np.pi) )
+        ymd = int( np.floor(ymax * 180/np.pi) )
         ax.set_thetamin(-ymd)
         ax.set_thetamax(ymd)
     else:
@@ -137,9 +137,15 @@ def plot_polar_plot(field_dict, args, mesh, ds):
         field_str = args.field
     
     if args.log:
-        cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+        if ymax >= np.pi:
+            cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+        else:
+            cbar.ax.set_xlabel(r'$\log$[{}]'.format(field_str), fontsize=20)
     else:
-        cbar.ax.set_ylabel(r'$[{}]$'.format(args.field), fontsize=20)
+        if ymax >= np.pi:
+            cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
+        else:
+            cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
         
     fig.suptitle('{} at t = {:.2f} s'.format(args.setup[0], tend), fontsize=20, y=0.95)
 
@@ -147,7 +153,7 @@ def plot_1d_curve(field_dict, args, mesh, ds):
     fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
     r, theta = mesh['r'], mesh['th']
-    theta    = theta * 180 / np.pi 
+    theta    = plm_theta * 180 / np.pi 
     
     xmax        = ds[0]["xmax"]
     xmin        = ds[0]["xmin"]

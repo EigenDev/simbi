@@ -298,7 +298,7 @@ def main():
             else:
                 plot_profile(args, field_dict[idx], ax = ax, overplot=True, case = idx)
         if args.labels != None:
-            ax.legend(fonstize = 15)
+            ax.legend(fontsize = 15)
             
     else:
         if args.ehist:
