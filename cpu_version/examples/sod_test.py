@@ -4,12 +4,12 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt 
 
-from simbi_py import Hydro
+from pysimbi import Hydro
 
 from state import PyState, PyState2D
 
 gamma = 1.4 
-tend = 4.0
+tend = 0.01
 N = 200
 dt = 1.e-4
 
@@ -18,18 +18,18 @@ stationary = ((1.4, 1.0, 0.0), (1.0, 1.0, 0.0))
 sod = ((1.0,1.0,0.0),(0.1,0.125,0.0))
 fig, axs = plt.subplots(1, 2, figsize=(20,10), sharex=True)
 
-hydro = Hydro(gamma=1.4, initial_state = stationary,
+hydro = Hydro(gamma=1.4, initial_state = sod,
         Npts=N, geometry=(0.0,1.0,0.5), n_vars=3)
 
-hydro2 = Hydro(gamma=1.4, initial_state = stationary,
+hydro2 = Hydro(gamma=1.4, initial_state = sod,
         Npts=N, geometry=(0.0,1.0,0.5), n_vars=3)
 
 t1 = time.time()
-poll = hydro.simulate(tend=tend, dt=dt, first_order=False, hllc=False)
+poll = hydro.simulate(tend=tend, dt=dt, first_order=True, hllc=False)
 print("Time for HLLE Simulation: {} sec".format(time.time() - t1))
 
 t2 = time.time()
-bar = hydro2.simulate(tend=tend, dt=dt, first_order=False, hllc=True)
+bar = hydro2.simulate(tend=tend, dt=dt, first_order=True, hllc=True)
 print("Time for HLLC Simulation: {} sec".format(time.time() - t2))
 
 u = bar[1]/bar[0]

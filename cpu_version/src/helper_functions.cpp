@@ -68,6 +68,34 @@ void config_system() {
 }
 
 
+void config_ghosts1D(std::vector<hydro1d::Conserved> &u_state, int grid_size, bool first_order){
+    if (first_order){
+        u_state[0].rho = u_state[1].rho;
+        u_state[grid_size - 1].rho = u_state[grid_size - 2].rho;
+
+        u_state[0].m = - u_state[1].m;
+        u_state[grid_size - 1].m = u_state[grid_size - 2].m;
+
+        u_state[0].e_dens = u_state[1].e_dens;
+        u_state[grid_size - 1].e_dens = u_state[grid_size - 2].e_dens;
+    } else {
+        u_state[0].rho = u_state[3].rho;
+        u_state[1].rho = u_state[2].rho;
+        u_state[grid_size - 1].rho = u_state[grid_size - 3].rho;
+        u_state[grid_size - 2].rho = u_state[grid_size - 3].rho;
+
+        u_state[0].m = - u_state[3].m;
+        u_state[1].m = - u_state[2].m;
+        u_state[grid_size - 1].m = u_state[grid_size - 3].m;
+        u_state[grid_size - 2].m = u_state[grid_size - 3].m;
+
+        u_state[0].e_dens = u_state[3].e_dens;
+        u_state[1].e_dens = u_state[2].e_dens;
+        u_state[grid_size - 1].e_dens = u_state[grid_size - 3].e_dens;
+        u_state[grid_size - 2].e_dens = u_state[grid_size - 3].e_dens;
+    }
+};
+
 void config_ghosts2D(
     std::vector<hydro2d::Conserved> &u_state, 
     int x1grid_size, 

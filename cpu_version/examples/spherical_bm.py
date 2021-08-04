@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 from state import PyStateSR2D
-from simbi_py import Hydro 
+from pysimbi import Hydro 
 
 from astropy import units as u
 
@@ -88,7 +88,7 @@ bm = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy),
 t1 = (time.time()*u.s).to(u.min)
 sol = bm.simulate(tend=tend, first_order= True, dt=dt,
                   coordinates="spherical", CFL=0.4, 
-                  hllc=True, linspace=False, theta=1.5)
+                  hllc=True, linspace=False, plm_theta=1.5)
 
 print("The 2D BM Simulation for N = {} took {:.3f}".format(ntheta, (time.time()*u.s).to(u.min) - t1))
 

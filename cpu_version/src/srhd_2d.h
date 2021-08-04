@@ -4,6 +4,8 @@
 * computing the HLL derivative of the state vector
 * given the state itself.
 */
+#ifndef SRHD_2D_H
+#define SRHD_2D_H
 
 #include <vector>
 #include <string>
@@ -11,8 +13,7 @@
 #include "clattice.h"
 #include "viscous_diff.hpp"
 
-#ifndef SRHD_2D_H
-#define SRHD_2D_H
+
 namespace simbi
 {
     class SRHD2D
@@ -22,9 +23,10 @@ namespace simbi
         simbi::ArtificialViscosity aVisc;
         sr2d::Eigenvals lambda;
         std::vector<sr2d::Primitive> prims;
+        std::vector<sr2d::Conserved> cons, cons_n;
         std::vector<std::vector<double>> state2D, sources;
-        float tend, tstart;
-        double theta, gamma, bipolar;
+        double tend, tstart;
+        double plm_theta, gamma, bipolar;
         bool first_order, periodic, hllc, linspace;
         double CFL, dt, decay_const;
         int NX, NY, nzones, n, block_size, xphysical_grid, yphysical_grid;
@@ -41,14 +43,14 @@ namespace simbi
                double CFL, std::string coord_system);
         ~SRHD2D();
 
-        std::vector<sr2d::Primitive> cons2prim2D(const std::vector<sr2d::Conserved> &cons_state2D);
+        void cons2prim2D();
 
         sr2d::Eigenvals calc_Eigenvals(
             const sr2d::Primitive &prims_l,
             const sr2d::Primitive &prims_r,
             const unsigned int nhat);
 
-        sr2d::Conserved calc_stateSR2D(const sr2d::Primitive &prims);
+        sr2d::Conserved prims2cons(const sr2d::Primitive &prims);
 
         sr2d::Conserved calc_hll_state(
             const sr2d::Conserved &left_state,
@@ -88,24 +90,23 @@ namespace simbi
 
         sr2d::Conserved u_dot(unsigned int ii, unsigned int jj);
 
-        std::vector<sr2d::Conserved> u_dot2D(const std::vector<sr2d::Conserved> &cons_state);
+        void evolve();
 
-        double adapt_dt(const std::vector<sr2d::Primitive> &prims);
+        void adapt_dt();
 
         std::vector<std::vector<double>> simulate2D(
-            const std::vector<double> lorentz_gamma,
             const std::vector<std::vector<double>> sources,
-            float tstart,
-            float tend,
-            double dt,
-            double theta,
-            double engine_duration,
-            double chkpt_interval,
-            std::string data_directory,
-            bool first_order,
-            bool periodic,
-            bool linspace,
-            bool hllc);
+            double tstart = 0., 
+            double tend = 0.1, 
+            double init_dt = 1.e-4, 
+            double plm_theta = 1.5,
+            double engine_duration = 10, 
+            double chkpt_interval = 0.1,
+            std::string data_directory = "data/", 
+            bool first_order = true,
+            bool periodic = false, 
+            bool linspace = true, 
+            bool hllc = false);
     };
 }
 

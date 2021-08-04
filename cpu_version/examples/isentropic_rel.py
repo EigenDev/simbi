@@ -4,7 +4,7 @@
 
 import numpy as np 
 import matplotlib.pyplot as  plt
-from simbi_py import Hydro
+from pysimbi import Hydro
 
 # Define Constants 
 gamma = 5/3

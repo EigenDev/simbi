@@ -21,7 +21,6 @@ namespace hydro1d {
         Primitive operator - (const Primitive &prim) const {return Primitive(rho - prim.rho, v - prim.v, p - prim.p); }
         Primitive operator / (const double c)        const {return Primitive(rho/c, v/c, p/c); }
         Primitive operator * (const double c)        const {return Primitive(rho*c, v*c, p*c); }
-
         Primitive & operator +=(const Primitive &prims) {
             rho    += prims.rho;
             v      += prims.v;
@@ -295,6 +294,12 @@ namespace hydro2d {
             return *this;
         }
 
+    };
+
+    struct PrimitiveData {
+        PrimitiveData() {}
+        ~PrimitiveData() {}
+        std::vector<double> rho, v1, v2, p;
     };
     
     struct Eigenvals{

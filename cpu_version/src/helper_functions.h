@@ -34,7 +34,7 @@ struct PrimData
 struct MinMod
 {
     PrimData prims;
-    double theta, NX;
+    double plm_theta, NX;
     int active_zones, i_bound, j_bound;
 
     std::vector<double> rhoL, rhoR, rhoT, rhoB;
@@ -50,7 +50,7 @@ struct DataWriteMembers
     double t, ad_gamma;
     double xmin, xmax, ymin, ymax, dt;
     int NX, NY, xactive_zones, yactive_zones;
-    bool linspace;
+    bool linspace, first_order;
     
 };
 
@@ -126,6 +126,8 @@ double calc_intermed_wave(double, double, double, double);
 double calc_intermed_pressure(double, double, double, double, double, double);
 double pressure_func(double, double, double, double, float, double);
 double dfdp(double, double, double, double, float, double);
+
+void config_ghosts1D(std::vector<hydro1d::Conserved> &u, int grid_size, bool first_order);
 void config_ghosts2D(
     std::vector<hydro2d::Conserved> &u_state, 
     int x1grid_size, 

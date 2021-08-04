@@ -58,11 +58,11 @@ def load_checkpoint(model, filename, dim):
             
             h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
             
-            model.W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
-            model.D   = rho * model.W 
-            model.S1  = model.W*model.W*rho*h*v1 
-            model.S2  = model.W*model.W*rho*h*v2 
-            model.tau = model.W*model.W*rho*h - p - rho*model.W
+            W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
+            model.D   = rho * W 
+            model.S1  = W*W*rho*h*v1 
+            model.S2  = W*W*rho*h*v2 
+            model.tau = W*W*rho*h - p - rho*W
             
             model.u = np.array([model.D, model.S1, model.S2, model.tau])
             
@@ -107,14 +107,9 @@ def initializeModel(model, first_order = False, periodic = False):
                         right_ghost = model.u[:, -1]
                         left_ghost = model.u[:, 0]
                         
-                        right_gamma = model.W[-1]
-                        left_gamma = model.W[0]
-                        
                         model.u = np.insert(model.u, model.u.shape[-1], right_ghost , axis=1)
                         model.u = np.insert(model.u, 0, left_ghost , axis=1)
                         
-                        model.W = np.insert(model.W, model.W.shape[-1], right_gamma)
-                        model.W = np.insert(model.W, 0, left_gamma)
                         
                     
                 else:
@@ -148,13 +143,6 @@ def initializeModel(model, first_order = False, periodic = False):
                         model.u = np.insert(model.u, 0,
                                         (left_ghost, left_ghost) , axis=1)
                         
-                        right_gamma = model.W[-1]
-                        left_gamma = model.W[0]
-                        
-                        
-                        model.W = np.insert(model.W, -1, (right_gamma, right_gamma))
-                        model.W = np.insert(model.W, 0, (left_gamma, left_gamma))
-                        
                 
         else:
             if not first_order:
@@ -164,12 +152,6 @@ def initializeModel(model, first_order = False, periodic = False):
                 model.u = np.insert(model.u, model.u.shape[-1], right_ghost , axis=1)
                 model.u = np.insert(model.u, 0, left_ghost , axis=1)
                 
-                if model.regime != "classical":
-                    right_gamma = model.W[-1]
-                    left_gamma = model.W[0]
-                    
-                    model.W = np.insert(model.W, -1, right_gamma, axis=0)
-                    model.W = np.insert(model.W, 0, left_gamma)
                     
     else:
         if not model.u.any():
@@ -183,9 +165,8 @@ def initializeModel(model, first_order = False, periodic = False):
                 if first_order:
                     if model.regime == "classical":
                         model.u = np.empty(shape = (model.n_vars, model.yNpts, model.xNpts), dtype=float)
-                        model.u[:, :, :] = np.array([model.init_rho, 
-                                                     model.init_rho*model.init_v, 
-                                                     model.init_energy])
+                        model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,
+                                                    model.init_rho*model.init_vy, model.init_energy])
                         
                         # Add boundary ghosts
                         right_ghost = model.u[:, :, -1]
@@ -208,26 +189,16 @@ def initializeModel(model, first_order = False, periodic = False):
                         bottom_ghost = model.u[:, -1]
                         upper_ghost = model.u[:, 0]
                         
-                        bottom_gamma = model.W[-1]
-                        upper_gamma = model.W[0]
-                        
                         model.u = np.insert(model.u, model.u.shape[1], 
                                         bottom_ghost , axis=1)
                         
                         model.u = np.insert(model.u, 0,
                                         upper_ghost , axis=1)
                         
-                        model.W = np.insert(model.W, model.W.shape[0], 
-                                        bottom_gamma , axis=0)
-                        
-                        model.W = np.insert(model.W, 0,
-                                        upper_gamma , axis=0)
                         
                         left_ghost = model.u[:, :, 0]
                         right_ghost = model.u[:, :, -1]
                         
-                        left_gamma = model.W[ :, 0]
-                        right_gamma = model.W[ :,  -1]
                         
                         
                         model.u = np.insert(model.u, 0, 
@@ -235,12 +206,6 @@ def initializeModel(model, first_order = False, periodic = False):
                         
                         model.u = np.insert(model.u, model.u.shape[2],
                                         right_ghost , axis=2)
-                        
-                        model.W = np.insert(model.W, 0, 
-                                        left_gamma , axis=1)
-                        
-                        model.W = np.insert(model.W, model.W.shape[1],
-                                        right_gamma, axis=1)
                         
                     
                 else:
@@ -277,8 +242,8 @@ def initializeModel(model, first_order = False, periodic = False):
                         bottom_ghost = model.u[:, -1]
                         upper_ghost = model.u[:, 0]
                         
-                        bottom_gamma = model.W[-1]
-                        upper_gamma = model.W[0]
+                        bottom_gamma = W[-1]
+                        upper_gamma = W[0]
                         
                         model.u = np.insert(model.u, model.u.shape[1], 
                                         (bottom_ghost, bottom_ghost) , axis=1)
@@ -286,30 +251,14 @@ def initializeModel(model, first_order = False, periodic = False):
                         model.u = np.insert(model.u, 0,
                                         (upper_ghost, upper_ghost) , axis=1)
                         
-                        model.W = np.insert(model.W, model.W.shape[0], 
-                                        (bottom_gamma, bottom_gamma) , axis=0)
-                        
-                        model.W = np.insert(model.W, 0,
-                                        (upper_gamma, upper_gamma) , axis=0)
-                        
                         left_ghost = model.u[:, :, 0]
                         right_ghost = model.u[:, :, -1]
-                        
-                        left_gamma = model.W[ :, 0]
-                        right_gamma = model.W[ :,  -1]
-                        
                         
                         model.u = np.insert(model.u, 0, 
                                         (left_ghost, left_ghost) , axis=2)
                         
                         model.u = np.insert(model.u, model.u.shape[2],
                                         (right_ghost, right_ghost) , axis=2)
-                        
-                        model.W = np.insert(model.W, 0, 
-                                        (left_gamma, left_gamma) , axis=1)
-                        
-                        model.W = np.insert(model.W, model.W.shape[1],
-                                        (right_gamma, right_gamma) , axis=1)
                         
                 
         else:
@@ -318,12 +267,6 @@ def initializeModel(model, first_order = False, periodic = False):
                 right_ghost = model.u[:, :, -1]
                 left_ghost = model.u[:, :, 0]
                 
-                right_W_ghost = model.W[-1]
-                left_W_ghost = model.W[0]
-                
                 model.u = np.insert(model.u, model.u.shape[-1], right_ghost , axis=2)
                 model.u = np.insert(model.u, 0, left_ghost , axis=2)
-                
-                model.W = np.insert(model.W, model.W.shape[-1], right_W_ghost)
-                model.W = np.insert(model.W, 0, right_W_ghost)
                 

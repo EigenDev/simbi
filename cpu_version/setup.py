@@ -4,7 +4,7 @@
 
 import os
 import numpy
-from distutils.core import setup
+from setuptools import setup
 from distutils.extension import Extension
 from distutils import sysconfig
 
@@ -13,8 +13,8 @@ from Cython.Build import cythonize
 with open("README.md", "r", encoding = "utf-8") as fh:
     description = fh.read()
 
-compiler_args = ['-std=c++17', '-march=native', '-fno-wrapv', '-O3']
-linker_args   = ['-lhdf5', '-lhdf5_cpp']
+compiler_args = ['-std=c++17', '-march=native', '-fno-wrapv', '-O3', '-fopenmp', '-pthread']
+linker_args   = ['-lhdf5', '-lhdf5_cpp', '-fopenmp']
 libraries     = ['hdf5', 'hdf5_cpp']
 library_dirs  = []
 language = "c++"
@@ -81,37 +81,15 @@ def extensions():
         [Extension("state", sources, **extensionArguments)]
     )
     
-# set the compiler
-os.environ["CC"]  = "clang++"
-os.environ["CXX"] = "clang++"
+ext = extensions()
 setup(
     name="SIMBI 2D Hydro Code",
-    version="0.0.1",
+    version="0.1.0",
     author="M. DuPont",
     author_email="md4469@nyu.edu",
     description="Cython module to solve hydrodynamic systems using a c++ backend",
-    ext_modules=extensions(),
-    packages=['simbi_py'],
-    # install_requires=['numpy', 'cython'],
-    # python_requires='>=3.6',
+    ext_modules=ext,
+    packages=['pysimbi'],
+    install_requires=['numpy', 'cython'],
+    python_requires='>=3.6',
 )
-
-# Below is the old way of how I setup the compiler
-# It was not portable initially
-
-# headerfile = ['helper_functions.h']
-
-# sourcefiles = ['src/state.pyx', 
-#                'src/simbi_1d.cpp', 
-#                'src/relativistic1D.cpp', 
-#                'src/helper_functions.cpp', 
-#                'src/simbi_2d.cpp', 
-#                'src/relativistic2D.cpp',
-#                'src/clattice.cpp',
-#                'src/hydro_structs.cpp',
-#                'src/viscous_diff.cpp',
-#                'src/clattice_1d.cpp']
-# lextensions = [Extension("state", sourcefiles, 
-#                         include_dirs=[numpy.get_include(), "helper_functions.h"],
-#                         libraries=['hdf5', 'hdf5_hl', 'hdf5_cpp'],
-#                         extra_compile_args = ['-std=c++11', '-march=native', '-fno-wrapv', '-O3'] )]

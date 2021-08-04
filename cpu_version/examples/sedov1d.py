@@ -4,16 +4,16 @@
 
 import numpy as np
 import matplotlib.pyplot as plt 
-from simbi_py import Hydro 
+from pysimbi import Hydro 
 
 rmin = 0.1
 rmax = 1
 gamma = 5/3
 n = 1000
-energy = 2
+energy = 1
 p_amb = 1.e-6 
-omega = 3
-tend = 3.0
+omega = 0
+tend = 1.0
 r   = np.logspace(np.log10(rmin), np.log10(rmax), n)
 
 n_exp = 2

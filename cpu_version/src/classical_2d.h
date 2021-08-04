@@ -19,17 +19,18 @@ namespace simbi {
     class Newtonian2D {
         public:
         std::vector<std::vector<double> > init_state, sources;
-        std::vector<hydro2d::Conserved> cons_state2D;
+        std::vector<hydro2d::Conserved> cons, cons_n;
         std::vector<hydro2d::Primitive> prims;
         std::vector<double> sourceRho, sourceM1, sourceM2, sourceE;
-        double theta, gamma, tend, CFL, dt;
+        double plm_theta, gamma, tend, CFL, dt, decay_const;
         bool first_order, periodic, hllc, linspace;
         std::string coord_system;
         std::vector<double> x1, x2;
-        int nzones, NY, NX, idx_shift, active_zones;
+        int nzones, NY, NX, active_zones, idx_active, n;
         int xphysical_grid, yphysical_grid, x_bound, y_bound;
         CLattice coord_lattice;
         simbi::Solver solver;
+
 
         Newtonian2D();
         Newtonian2D(std::vector< std::vector<double> > init_state, 
@@ -43,7 +44,7 @@ namespace simbi {
 
         ~Newtonian2D();
 
-        std::vector<hydro2d::Primitive> cons2prim(const std::vector<hydro2d::Conserved > &cons_state2D);
+        void cons2prim();
 
         hydro2d::Eigenvals calc_eigenvals(
             const hydro2d::Primitive &left_state, 
@@ -72,18 +73,22 @@ namespace simbi {
             const hydro2d::Primitive &right_prims,
             const int ehat = 1);
 
-        std::vector<hydro2d::Conserved> u_dot(const std::vector<hydro2d::Conserved> &cons_state);
-
-        double adapt_dt(const std::vector<hydro2d::Primitive>  &prims);
+        void evolve();
+        void adapt_dt();
 
         std::vector<std::vector<double> > simulate2D(
-            const std::vector<std::vector<double> >  &sources,
-            double tend, 
-            bool periodic, 
-            double dt, 
-            bool linspace, 
-            bool hllc,
-            double theta = 1.5);
+            const std::vector<std::vector<double>> sources,
+            double tstart = 0., 
+            double tend = 0.1, 
+            double init_dt = 1.e-4, 
+            double plm_theta = 1.5,
+            double engine_duration = 10, 
+            double chkpt_interval = 0.1,
+            std::string data_directory = "data/", 
+            bool first_order = true,
+            bool periodic = false, 
+            bool linspace = true, 
+            bool hllc = false);
         
     };
 }

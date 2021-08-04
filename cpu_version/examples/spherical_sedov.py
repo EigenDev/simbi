@@ -5,7 +5,7 @@
 import numpy as np 
 import matplotlib.pyplot as plt
 import time
-from simbi_py import Hydro 
+from pysimbi import Hydro 
 from state import PyState2D
 from astropy import units as u
 
@@ -82,10 +82,10 @@ sedov = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy),
               Npts=(N+1, N+1), geometry=((rmin, rmax),(0.,np.pi)), n_vars=4)
 
 t1 = (time.time()*u.s).to(u.min)
-sol = sedov.simulate(tend=tend, first_order=False, dt=dt, coordinates=b"spherical", hllc=True)
+sol = sedov.simulate(tend=tend, first_order=False, dt=dt, coordinates="spherical", hllc=True)
 print("The 2D Sedov Simulation for N = {} took {:.3f}".format(N, (time.time()*u.s).to(u.min) - t1))
 
-density = sedov.cons2prim(sol)[0]
+density = sol[0]
 
 rr, tt = np.meshgrid(r, theta)
 rr, t2 = np.meshgrid(r, theta_mirror)

@@ -6,7 +6,7 @@ import time
 import scipy.ndimage
 import matplotlib.colors as colors
 
-from simbi_py import Hydro 
+from pysimbi import Hydro 
 from astropy import units as u, constants as const
 
 
@@ -51,8 +51,6 @@ sin_arr = 0.75*np.sin(2*np.pi*x)
 vx_rand = np.random.choice(sin_arr, size=vx.shape)
 vy_rand = np.random.choice(sin_arr, size=vy.shape)
 
-plt.plot(x, sin_arr)
-plt.show()
 vx += vx_rand
 vy += vy_rand
 
@@ -70,7 +68,7 @@ SodHLLC = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy),
 
 t1 = (time.time()*u.s).to(u.min)
 hllc_result = SodHLLC.simulate(tend=tend, first_order=False, dt=dt, 
-                               linspace=True, CFL=0.8,
+                               linspace=True, CFL=0.4,
                                hllc=True, periodic = True)
 
 print("The 2D KH Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))

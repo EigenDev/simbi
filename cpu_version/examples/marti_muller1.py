@@ -4,9 +4,7 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt 
 
-from simbi_py import Hydro
-
-from state import PyStateSR
+from pysimbi import Hydro
 
 gamma = 5/3 
 tend = 0.4249
@@ -58,7 +56,5 @@ fig.subplots_adjust(hspace=0.01)
 axs[0].set_xlim(0.0, 1.0)
 axs[0].legend(fontsize=15)
 
-del hydro 
-del hydro2
 plt.show()
 #fig.savefig('plots/relativisitc_blast_wave_test_p1.pdf')
