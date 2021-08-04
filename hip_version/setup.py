@@ -249,15 +249,3 @@ setup(
     packages=['pysimbi_gpu'],
     # Since the package has c code, the egg cannot be zipped
     zip_safe = False)
-
-# setup(
-#     name="SIMBI GPUs",
-#     version="0.0.1",
-#     author="M. DuPont",
-#     author_email="md4469@nyu.edu",
-#     description="Cython module to solve hydrodynamic systems using a hip/c++ backend",
-#     ext_modules=extensions(),
-#     packages=['gpu_simbi_py'],
-#     # install_requires=['numpy', 'cython'],
-#     # python_requires='>=3.6',
-# )

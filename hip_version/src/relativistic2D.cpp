@@ -23,7 +23,7 @@ constexpr real a = 1e-3;
 
 GPU_CALLABLE_MEMBER
 bool simbi::strong_shock(real pl, real pr){
-    return abs(pr - pl) / min(pl, pr) > a;
+    return abs(pr - pl) / my_min(pl, pr) > a;
 }
 // Default Constructor
 SRHD2D::SRHD2D() {}
@@ -408,8 +408,8 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         const real cbar  = 0.5 * (cs_l + cs_r);
         const real bl    = (vbar - cbar)/(1. - cbar*vbar);
         const real br    = (vbar + cbar)/(1. + cbar*vbar);
-        const real aL = min(bl, (v1_l - cs_l)/(1. - v1_l*cs_l));
-        const real aR = max(br, (v1_r + cs_r)/(1. + v1_r*cs_r));
+        const real aL    = my_min(bl, (v1_l - cs_l)/(1. - v1_l*cs_l));
+        const real aR    = my_max(br, (v1_r + cs_r)/(1. + v1_r*cs_r));
 
         return Eigenvals(aL, aR);
 
@@ -417,16 +417,16 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         // const real sL = cs_l * cs_l * (1. / (gamma * gamma * (1 - cs_l * cs_l)));
         // const real sR = cs_r * cs_r * (1. / (gamma * gamma * (1 - cs_r * cs_r)));
 
-        // Define temporaries to save computational cycles
+        // // Define temporaries to save computational cycles
         // const real qfL = 1. / (1. + sL);
         // const real qfR = 1. / (1. + sR);
-        // const real sqrtR = sqrt(sL * (1 - v1_l * v1_l + sL));
-        // const real sqrtL = sqrt(sR * (1 - v1_r * v1_r + sL));
+        // const real sqrtR = sqrt(sR * (1 - v1_r * v1_r + sR));
+        // const real sqrtL = sqrt(sL * (1 - v1_l * v1_l + sL));
 
         // const real lamLm = (v1_l - sqrtL) * qfL;
         // const real lamRm = (v1_r - sqrtR) * qfR;
-        // const real lamRp = (v1_l + sqrtL) * qfL;
-        // const real lamLp = (v1_r + sqrtR) * qfR;
+        // const real lamLp = (v1_l + sqrtL) * qfL;
+        // const real lamRp = (v1_r + sqrtR) * qfR;
 
         // const real aL = lamLm < lamRm ? lamLm : lamRm;
         // const real aR = lamLp > lamRp ? lamLp : lamRp;
@@ -442,8 +442,8 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         const real cbar  = 0.5 * (cs_l + cs_r);
         const real bl    = (vbar - cbar)/(1. - cbar*vbar);
         const real br    = (vbar + cbar)/(1. + cbar*vbar);
-        const real aL = min(bl, (v2_l - cs_l)/(1. - v2_l*cs_l));
-        const real aR = max(br, (v2_r + cs_r)/(1. + v2_r*cs_r));
+        const real aL    = my_min(bl, (v2_l - cs_l)/(1. - v2_l*cs_l));
+        const real aR    = my_max(br, (v2_r + cs_r)/(1. + v2_r*cs_r));
 
         return Eigenvals(aL, aR);
 
@@ -454,13 +454,13 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         // Define some temporaries to save a few cycles
         // const real qfL = 1. / (1. + sL);
         // const real qfR = 1. / (1. + sR);
-        // const real sqrtR = sqrt(sL * (1 - v2_l * v2_l + sL));
-        // const real sqrtL = sqrt(sR * (1 - v2_r * v2_r + sL));
+        // const real sqrtR = sqrt(sR * (1 - v2_r * v2_r + sR));
+        // const real sqrtL = sqrt(sL * (1 - v2_l * v2_l + sL));
 
         // const real lamLm = (v2_l - sqrtL) * qfL;
         // const real lamRm = (v2_r - sqrtR) * qfR;
-        // const real lamRp = (v2_l + sqrtL) * qfL;
-        // const real lamLp = (v2_r + sqrtR) * qfR;
+        // const real lamLp = (v2_l + sqrtL) * qfL;
+        // const real lamRp = (v2_r + sqrtR) * qfR;
         // const real aL = lamLm < lamRm ? lamLm : lamRm;
         // const real aR = lamLp > lamRp ? lamLp : lamRp;
 
@@ -581,8 +581,8 @@ real SRHD2D::adapt_dt(const std::vector<Primitive> &prims)
             if (coord_system == "cartesian")
             {
 
-                cfl_dt = min(dx1 / (max(abs(plus_v1), abs(minus_v1))),
-                             dx2 / (max(abs(plus_v2), abs(minus_v2))));
+                cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
+                             dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
             }
             else
             {
@@ -593,8 +593,8 @@ real SRHD2D::adapt_dt(const std::vector<Primitive> &prims)
                 // std::cout << dx2 << "\n";
                 // std::cout << volAvg * dx2 << "\n";
                 // std::cin.get();
-                cfl_dt = min(dx1 / (max(abs(plus_v1), abs(minus_v1))),
-                             volAvg * dx2 / (max(abs(plus_v2), abs(minus_v2))));
+                cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
+                             volAvg * dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
             }
 
             if ((ii > 0) || (jj > 0))
@@ -677,15 +677,15 @@ __global__ void adapt_dtGPU(
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
-            cfl_dt = min(dx1 / (max(abs(plus_v1), abs(minus_v1))),
-                            dx2 / (max(abs(plus_v2), abs(minus_v2))));
+            cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
+                            dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
             break;
         
         case simbi::Geometry::SPHERICAL:
             // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
             rmean = coord_lattice->gpu_x1mean[neighbor_tx];
-            cfl_dt = min(dx1 / (max(abs(plus_v1), abs(minus_v1))),
-                        rmean * dx2 / (max(abs(plus_v2), abs(minus_v2))));
+            cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
+                        rmean * dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
             break;
         }
 
@@ -699,7 +699,7 @@ __global__ void adapt_dtGPU(
 
         // if ((threadIdx.x < BLOCK_SIZE2D / 2) && (threadIdx.y < BLOCK_SIZE2D / 2))
         // {
-        //     warp_reduce_min(dt_buff);
+        //     warp_reduce_my_min(dt_buff);
         // }
         // if((threadIdx.x == 0) && (threadIdx.y == 0) )
         // {

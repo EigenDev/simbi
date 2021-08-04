@@ -12,6 +12,21 @@ typedef float real;
 typedef double real;
 #endif 
 
+#define my_max(a,b)             \
+({                           \
+    __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+    _a > _b ? _a : _b;       \
+})
+
+#define my_min(a,b)             \
+({                           \
+    __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+    _a < _b ? _a : _b;       \
+})
+
+
 constexpr int BLOCK_SIZE   = 64;
 constexpr int BLOCK_SIZE2D = 16;
 constexpr int MAX_ITER     = 50;

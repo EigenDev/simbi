@@ -588,74 +588,74 @@ std::vector<Conserved> Newtonian2D::u_dot(const std::vector<Conserved> &u_state)
                 }
 
                 // Reconstructed left X primitives vector at the i+1/2 interface
-                xprims_l.rho = center.rho + 0.5*minmod(theta*(center.rho - xleft_mid.rho),
+                xprims_l.rho = center.rho + 0.5*minmod(plm_theta*(center.rho - xleft_mid.rho),
                                                     0.5*(xright_mid.rho - xleft_mid.rho),
-                                                    theta*(xright_mid.rho - center.rho));
+                                                    plm_theta*(xright_mid.rho - center.rho));
 
                 
-                xprims_l.v1 = center.v1 + 0.5*minmod(theta*(center.v1 - xleft_mid.v1),
+                xprims_l.v1 = center.v1 + 0.5*minmod(plm_theta*(center.v1 - xleft_mid.v1),
                                                     0.5*(xright_mid.v1 - xleft_mid.v1),
-                                                    theta*(xright_mid.v1 - center.v1));
+                                                    plm_theta*(xright_mid.v1 - center.v1));
 
-                xprims_l.v2 = center.v2 + 0.5*minmod(theta*(center.v2 - xleft_mid.v2),
+                xprims_l.v2 = center.v2 + 0.5*minmod(plm_theta*(center.v2 - xleft_mid.v2),
                                                     0.5*(xright_mid.v2 - xleft_mid.v2),
-                                                    theta*(xright_mid.v2 - center.v2));
+                                                    plm_theta*(xright_mid.v2 - center.v2));
 
-                xprims_l.p = center.p + 0.5*minmod(theta*(center.p - xleft_mid.p),
+                xprims_l.p = center.p + 0.5*minmod(plm_theta*(center.p - xleft_mid.p),
                                                     0.5*(xright_mid.p - xleft_mid.p),
-                                                    theta*(xright_mid.p - center.p));
+                                                    plm_theta*(xright_mid.p - center.p));
 
                 // Reconstructed right primitives vector in x
-                xprims_r.rho = xright_mid.rho - 0.5*minmod(theta*(xright_mid.rho - center.rho),
+                xprims_r.rho = xright_mid.rho - 0.5*minmod(plm_theta*(xright_mid.rho - center.rho),
                                                     0.5*(xright_most.rho - center.rho),
-                                                    theta*(xright_most.rho - xright_mid.rho));
+                                                    plm_theta*(xright_most.rho - xright_mid.rho));
 
-                xprims_r.v1 = xright_mid.v1 - 0.5*minmod(theta*(xright_mid.v1 - center.v1),
+                xprims_r.v1 = xright_mid.v1 - 0.5*minmod(plm_theta*(xright_mid.v1 - center.v1),
                                                     0.5*(xright_most.v1 - center.v1),
-                                                    theta*(xright_most.v1 - xright_mid.v1));
+                                                    plm_theta*(xright_most.v1 - xright_mid.v1));
 
-                xprims_r.v2 = xright_mid.v2 - 0.5*minmod(theta*(xright_mid.v2 - center.v2),
+                xprims_r.v2 = xright_mid.v2 - 0.5*minmod(plm_theta*(xright_mid.v2 - center.v2),
                                                     0.5*(xright_most.v2 - center.v2),
-                                                    theta*(xright_most.v2 - xright_mid.v2));
+                                                    plm_theta*(xright_most.v2 - xright_mid.v2));
 
-                xprims_r.p = xright_mid.p - 0.5*minmod(theta*(xright_mid.p - center.p),
+                xprims_r.p = xright_mid.p - 0.5*minmod(plm_theta*(xright_mid.p - center.p),
                                                     0.5*(xright_most.p - center.p),
-                                                    theta*(xright_most.p - xright_mid.p));
+                                                    plm_theta*(xright_most.p - xright_mid.p));
 
                 
                 // Reconstructed right primitives vector in y-direction at j+1/2 interfce
-                yprims_l.rho = center.rho + 0.5*minmod(theta*(center.rho - yleft_mid.rho),
+                yprims_l.rho = center.rho + 0.5*minmod(plm_theta*(center.rho - yleft_mid.rho),
                                                     0.5*(yright_mid.rho - yleft_mid.rho),
-                                                    theta*(yright_mid.rho - center.rho));
+                                                    plm_theta*(yright_mid.rho - center.rho));
 
-                yprims_l.v1 = center.v1 + 0.5*minmod(theta*(center.v1 - yleft_mid.v1),
+                yprims_l.v1 = center.v1 + 0.5*minmod(plm_theta*(center.v1 - yleft_mid.v1),
                                                     0.5*(yright_mid.v1 - yleft_mid.v1),
-                                                    theta*(yright_mid.v1 - center.v1));
+                                                    plm_theta*(yright_mid.v1 - center.v1));
 
-                yprims_l.v2 = center.v2 + 0.5*minmod(theta*(center.v2 - yleft_mid.v2),
+                yprims_l.v2 = center.v2 + 0.5*minmod(plm_theta*(center.v2 - yleft_mid.v2),
                                                     0.5*(yright_mid.v2 - yleft_mid.v2),
-                                                    theta*(yright_mid.v2 - center.v2));
+                                                    plm_theta*(yright_mid.v2 - center.v2));
 
-                yprims_l.p = center.p + 0.5*minmod(theta*(center.p - yleft_mid.p),
+                yprims_l.p = center.p + 0.5*minmod(plm_theta*(center.p - yleft_mid.p),
                                                     0.5*(yright_mid.p - yleft_mid.p),
-                                                    theta*(yright_mid.p - center.p));
+                                                    plm_theta*(yright_mid.p - center.p));
                 
 
-                yprims_r.rho = yright_mid.rho - 0.5*minmod(theta*(yright_mid.rho - center.rho),
+                yprims_r.rho = yright_mid.rho - 0.5*minmod(plm_theta*(yright_mid.rho - center.rho),
                                                     0.5*(yright_most.rho - center.rho),
-                                                    theta*(yright_most.rho - yright_mid.rho));
+                                                    plm_theta*(yright_most.rho - yright_mid.rho));
 
-                yprims_r.v1 = yright_mid.v1 - 0.5*minmod(theta*(yright_mid.v1 - center.v1),
+                yprims_r.v1 = yright_mid.v1 - 0.5*minmod(plm_theta*(yright_mid.v1 - center.v1),
                                                     0.5*(yright_most.v1 - center.v1),
-                                                    theta*(yright_most.v1 - yright_mid.v1));
+                                                    plm_theta*(yright_most.v1 - yright_mid.v1));
 
-                yprims_r.v2 = yright_mid.v2 - 0.5*minmod(theta*(yright_mid.v2 - center.v2),
+                yprims_r.v2 = yright_mid.v2 - 0.5*minmod(plm_theta*(yright_mid.v2 - center.v2),
                                                     0.5*(yright_most.v2 - center.v2),
-                                                    theta*(yright_most.v2 - yright_mid.v2));
+                                                    plm_theta*(yright_most.v2 - yright_mid.v2));
 
-                yprims_r.p = yright_mid.p - 0.5*minmod(theta*(yright_mid.p - center.p),
+                yprims_r.p = yright_mid.p - 0.5*minmod(plm_theta*(yright_mid.p - center.p),
                                                     0.5*(yright_most.p - center.p),
-                                                    theta*(yright_most.p - yright_mid.p));
+                                                    plm_theta*(yright_most.p - yright_mid.p));
                 
                 // Calculate the left and right states using the reconstructed PLM primitives
                 ux_l = prims2cons(xprims_l);
@@ -680,75 +680,75 @@ std::vector<Conserved> Newtonian2D::u_dot(const std::vector<Conserved> &u_state)
 
                 // Do the same thing, but for the left side interface [i - 1/2]
                 // Left side primitives in x
-                xprims_l.rho = xleft_mid.rho + 0.5 *minmod(theta*(xleft_mid.rho - xleft_most.rho),
+                xprims_l.rho = xleft_mid.rho + 0.5 *minmod(plm_theta*(xleft_mid.rho - xleft_most.rho),
                                                         0.5*(center.rho - xleft_most.rho),
-                                                        theta*(center.rho - xleft_mid.rho));
+                                                        plm_theta*(center.rho - xleft_mid.rho));
 
-                xprims_l.v1 = xleft_mid.v1 + 0.5 *minmod(theta*(xleft_mid.v1 - xleft_most.v1),
+                xprims_l.v1 = xleft_mid.v1 + 0.5 *minmod(plm_theta*(xleft_mid.v1 - xleft_most.v1),
                                                         0.5*(center.v1 -xleft_most.v1),
-                                                        theta*(center.v1 - xleft_mid.v1));
+                                                        plm_theta*(center.v1 - xleft_mid.v1));
                 
-                xprims_l.v2 = xleft_mid.v2 + 0.5 *minmod(theta*(xleft_mid.v2 - xleft_most.v2),
+                xprims_l.v2 = xleft_mid.v2 + 0.5 *minmod(plm_theta*(xleft_mid.v2 - xleft_most.v2),
                                                         0.5*(center.v2 - xleft_most.v2),
-                                                        theta*(center.v2 - xleft_mid.v2));
+                                                        plm_theta*(center.v2 - xleft_mid.v2));
                 
-                xprims_l.p = xleft_mid.p + 0.5 *minmod(theta*(xleft_mid.p - xleft_most.p),
+                xprims_l.p = xleft_mid.p + 0.5 *minmod(plm_theta*(xleft_mid.p - xleft_most.p),
                                                         0.5*(center.p - xleft_most.p),
-                                                        theta*(center.p - xleft_mid.p));
+                                                        plm_theta*(center.p - xleft_mid.p));
 
                     
                 // Right side primitives in x
-                xprims_r.rho = center.rho - 0.5 *minmod(theta*(center.rho - xleft_mid.rho),
+                xprims_r.rho = center.rho - 0.5 *minmod(plm_theta*(center.rho - xleft_mid.rho),
                                                     0.5*(xright_mid.rho - xleft_mid.rho),
-                                                    theta*(xright_mid.rho - center.rho));
+                                                    plm_theta*(xright_mid.rho - center.rho));
 
-                xprims_r.v1 = center.v1 - 0.5 *minmod(theta*(center.v1 - xleft_mid.v1),
+                xprims_r.v1 = center.v1 - 0.5 *minmod(plm_theta*(center.v1 - xleft_mid.v1),
                                                     0.5*(xright_mid.v1 - xleft_mid.v1),
-                                                    theta*(xright_mid.v1 - center.v1));
+                                                    plm_theta*(xright_mid.v1 - center.v1));
 
-                xprims_r.v2 = center.v2 - 0.5 *minmod(theta*(center.v2 - xleft_mid.v2),
+                xprims_r.v2 = center.v2 - 0.5 *minmod(plm_theta*(center.v2 - xleft_mid.v2),
                                                     0.5*(xright_mid.v2 - xleft_mid.v2),
-                                                    theta*(xright_mid.v2 - center.v2));
+                                                    plm_theta*(xright_mid.v2 - center.v2));
 
-                xprims_r.p = center.p - 0.5 *minmod(theta*(center.p - xleft_mid.p),
+                xprims_r.p = center.p - 0.5 *minmod(plm_theta*(center.p - xleft_mid.p),
                                                     0.5*(xright_mid.p - xleft_mid.p),
-                                                    theta*(xright_mid.p - center.p));
+                                                    plm_theta*(xright_mid.p - center.p));
 
 
                 // Left side primitives in y
-                yprims_l.rho = yleft_mid.rho + 0.5 *minmod(theta*(yleft_mid.rho - yleft_most.rho),
+                yprims_l.rho = yleft_mid.rho + 0.5 *minmod(plm_theta*(yleft_mid.rho - yleft_most.rho),
                                                         0.5*(center.rho - yleft_most.rho),
-                                                        theta*(center.rho - yleft_mid.rho));
+                                                        plm_theta*(center.rho - yleft_mid.rho));
 
-                yprims_l.v1 = yleft_mid.v1 + 0.5 *minmod(theta*(yleft_mid.v1 - yleft_most.v1),
+                yprims_l.v1 = yleft_mid.v1 + 0.5 *minmod(plm_theta*(yleft_mid.v1 - yleft_most.v1),
                                                         0.5*(center.v1 -yleft_most.v1),
-                                                        theta*(center.v1 - yleft_mid.v1));
+                                                        plm_theta*(center.v1 - yleft_mid.v1));
                 
-                yprims_l.v2 = yleft_mid.v2 + 0.5 *minmod(theta*(yleft_mid.v2 - yleft_most.v2),
+                yprims_l.v2 = yleft_mid.v2 + 0.5 *minmod(plm_theta*(yleft_mid.v2 - yleft_most.v2),
                                                         0.5*(center.v2 - yleft_most.v2),
-                                                        theta*(center.v2 - yleft_mid.v2));
+                                                        plm_theta*(center.v2 - yleft_mid.v2));
                 
-                yprims_l.p = yleft_mid.p + 0.5 *minmod(theta*(yleft_mid.p - yleft_most.p),
+                yprims_l.p = yleft_mid.p + 0.5 *minmod(plm_theta*(yleft_mid.p - yleft_most.p),
                                                         0.5*(center.p - yleft_most.p),
-                                                        theta*(center.p - yleft_mid.p));
+                                                        plm_theta*(center.p - yleft_mid.p));
 
                     
                 // Right side primitives in y
-                yprims_r.rho = center.rho - 0.5 *minmod(theta*(center.rho - yleft_mid.rho),
+                yprims_r.rho = center.rho - 0.5 *minmod(plm_theta*(center.rho - yleft_mid.rho),
                                                     0.5*(yright_mid.rho - yleft_mid.rho),
-                                                    theta*(yright_mid.rho - center.rho));
+                                                    plm_theta*(yright_mid.rho - center.rho));
 
-                yprims_r.v1 = center.v1 - 0.5 *minmod(theta*(center.v1 - yleft_mid.v1),
+                yprims_r.v1 = center.v1 - 0.5 *minmod(plm_theta*(center.v1 - yleft_mid.v1),
                                                     0.5*(yright_mid.v1 - yleft_mid.v1),
-                                                    theta*(yright_mid.v1 - center.v1));
+                                                    plm_theta*(yright_mid.v1 - center.v1));
 
-                yprims_r.v2 = center.v2 - 0.5 *minmod(theta*(center.v2 - yleft_mid.v2),
+                yprims_r.v2 = center.v2 - 0.5 *minmod(plm_theta*(center.v2 - yleft_mid.v2),
                                                     0.5*(yright_mid.v2 - yleft_mid.v2),
-                                                    theta*(yright_mid.v2 - center.v2));
+                                                    plm_theta*(yright_mid.v2 - center.v2));
 
-                yprims_r.p = center.p  - 0.5 *minmod(theta*(center.p - yleft_mid.p),
+                yprims_r.p = center.p  - 0.5 *minmod(plm_theta*(center.p - yleft_mid.p),
                                                     0.5*(yright_mid.p - yleft_mid.p),
-                                                    theta*(yright_mid.p - center.p)); 
+                                                    plm_theta*(yright_mid.p - center.p)); 
                 
                 // Calculate the left and right states using the reconstructed PLM primitives
                 ux_l = prims2cons(xprims_l);
@@ -797,7 +797,7 @@ std::vector<Conserved> Newtonian2D::u_dot(const std::vector<Conserved> &u_state)
         //==============================================================================================
         real r_left, r_right, volAvg, pc, rhoc, vc, uc, deltaV1, deltaV2;
         real tcoordinate, rcoordinate;
-        real upper_tsurface, lower_tsurface, right_rsurface, left_rsurface, dtheta;
+        real upper_tsurface, lower_tsurface, right_rsurface, left_rsurface, dplm_theta;
 
         real pi = 2*acos(0.0);
 
@@ -843,74 +843,74 @@ std::vector<Conserved> Newtonian2D::u_dot(const std::vector<Conserved> &u_state)
                 }
                 
                 // Reconstructed left X primitives vector at the i+1/2 interface
-                xprims_l.rho = center.rho + 0.5*minmod(theta*(center.rho - xleft_mid.rho),
+                xprims_l.rho = center.rho + 0.5*minmod(plm_theta*(center.rho - xleft_mid.rho),
                                                     0.5*(xright_mid.rho - xleft_mid.rho),
-                                                    theta*(xright_mid.rho - center.rho));
+                                                    plm_theta*(xright_mid.rho - center.rho));
 
                 
-                xprims_l.v1 = center.v1 + 0.5*minmod(theta*(center.v1 - xleft_mid.v1),
+                xprims_l.v1 = center.v1 + 0.5*minmod(plm_theta*(center.v1 - xleft_mid.v1),
                                                     0.5*(xright_mid.v1 - xleft_mid.v1),
-                                                    theta*(xright_mid.v1 - center.v1));
+                                                    plm_theta*(xright_mid.v1 - center.v1));
 
-                xprims_l.v2 = center.v2 + 0.5*minmod(theta*(center.v2 - xleft_mid.v2),
+                xprims_l.v2 = center.v2 + 0.5*minmod(plm_theta*(center.v2 - xleft_mid.v2),
                                                     0.5*(xright_mid.v2 - xleft_mid.v2),
-                                                    theta*(xright_mid.v2 - center.v2));
+                                                    plm_theta*(xright_mid.v2 - center.v2));
 
-                xprims_l.p = center.p + 0.5*minmod(theta*(center.p - xleft_mid.p),
+                xprims_l.p = center.p + 0.5*minmod(plm_theta*(center.p - xleft_mid.p),
                                                     0.5*(xright_mid.p - xleft_mid.p),
-                                                    theta*(xright_mid.p - center.p));
+                                                    plm_theta*(xright_mid.p - center.p));
 
                 // Reconstructed right primitives vector in x
-                xprims_r.rho = xright_mid.rho - 0.5*minmod(theta*(xright_mid.rho - center.rho),
+                xprims_r.rho = xright_mid.rho - 0.5*minmod(plm_theta*(xright_mid.rho - center.rho),
                                                     0.5*(xright_most.rho - center.rho),
-                                                    theta*(xright_most.rho - xright_mid.rho));
+                                                    plm_theta*(xright_most.rho - xright_mid.rho));
 
-                xprims_r.v1 = xright_mid.v1 - 0.5*minmod(theta*(xright_mid.v1 - center.v1),
+                xprims_r.v1 = xright_mid.v1 - 0.5*minmod(plm_theta*(xright_mid.v1 - center.v1),
                                                     0.5*(xright_most.v1 - center.v1),
-                                                    theta*(xright_most.v1 - xright_mid.v1));
+                                                    plm_theta*(xright_most.v1 - xright_mid.v1));
 
-                xprims_r.v2 = xright_mid.v2 - 0.5*minmod(theta*(xright_mid.v2 - center.v2),
+                xprims_r.v2 = xright_mid.v2 - 0.5*minmod(plm_theta*(xright_mid.v2 - center.v2),
                                                     0.5*(xright_most.v2 - center.v2),
-                                                    theta*(xright_most.v2 - xright_mid.v2));
+                                                    plm_theta*(xright_most.v2 - xright_mid.v2));
 
-                xprims_r.p = xright_mid.p - 0.5*minmod(theta*(xright_mid.p - center.p),
+                xprims_r.p = xright_mid.p - 0.5*minmod(plm_theta*(xright_mid.p - center.p),
                                                     0.5*(xright_most.p - center.p),
-                                                    theta*(xright_most.p - xright_mid.p));
+                                                    plm_theta*(xright_most.p - xright_mid.p));
 
                 
                 // Reconstructed right primitives vector in y-direction at j+1/2 interfce
-                yprims_l.rho = center.rho + 0.5*minmod(theta*(center.rho - yleft_mid.rho),
+                yprims_l.rho = center.rho + 0.5*minmod(plm_theta*(center.rho - yleft_mid.rho),
                                                     0.5*(yright_mid.rho - yleft_mid.rho),
-                                                    theta*(yright_mid.rho - center.rho));
+                                                    plm_theta*(yright_mid.rho - center.rho));
 
-                yprims_l.v1 = center.v1 + 0.5*minmod(theta*(center.v1 - yleft_mid.v1),
+                yprims_l.v1 = center.v1 + 0.5*minmod(plm_theta*(center.v1 - yleft_mid.v1),
                                                     0.5*(yright_mid.v1 - yleft_mid.v1),
-                                                    theta*(yright_mid.v1 - center.v1));
+                                                    plm_theta*(yright_mid.v1 - center.v1));
 
-                yprims_l.v2 = center.v2 + 0.5*minmod(theta*(center.v2 - yleft_mid.v2),
+                yprims_l.v2 = center.v2 + 0.5*minmod(plm_theta*(center.v2 - yleft_mid.v2),
                                                     0.5*(yright_mid.v2 - yleft_mid.v2),
-                                                    theta*(yright_mid.v2 - center.v2));
+                                                    plm_theta*(yright_mid.v2 - center.v2));
 
-                yprims_l.p = center.p + 0.5*minmod(theta*(center.p - yleft_mid.p),
+                yprims_l.p = center.p + 0.5*minmod(plm_theta*(center.p - yleft_mid.p),
                                                     0.5*(yright_mid.p - yleft_mid.p),
-                                                    theta*(yright_mid.p - center.p));
+                                                    plm_theta*(yright_mid.p - center.p));
                 
 
-                yprims_r.rho = yright_mid.rho - 0.5*minmod(theta*(yright_mid.rho - center.rho),
+                yprims_r.rho = yright_mid.rho - 0.5*minmod(plm_theta*(yright_mid.rho - center.rho),
                                                     0.5*(yright_most.rho - center.rho),
-                                                    theta*(yright_most.rho - yright_mid.rho));
+                                                    plm_theta*(yright_most.rho - yright_mid.rho));
 
-                yprims_r.v1 = yright_mid.v1 - 0.5*minmod(theta*(yright_mid.v1 - center.v1),
+                yprims_r.v1 = yright_mid.v1 - 0.5*minmod(plm_theta*(yright_mid.v1 - center.v1),
                                                     0.5*(yright_most.v1 - center.v1),
-                                                    theta*(yright_most.v1 - yright_mid.v1));
+                                                    plm_theta*(yright_most.v1 - yright_mid.v1));
 
-                yprims_r.v2 = yright_mid.v2 - 0.5*minmod(theta*(yright_mid.v2 - center.v2),
+                yprims_r.v2 = yright_mid.v2 - 0.5*minmod(plm_theta*(yright_mid.v2 - center.v2),
                                                     0.5*(yright_most.v2 - center.v2),
-                                                    theta*(yright_most.v2 - yright_mid.v2));
+                                                    plm_theta*(yright_most.v2 - yright_mid.v2));
 
-                yprims_r.p = yright_mid.p - 0.5*minmod(theta*(yright_mid.p - center.p),
+                yprims_r.p = yright_mid.p - 0.5*minmod(plm_theta*(yright_mid.p - center.p),
                                                     0.5*(yright_most.p - center.p),
-                                                    theta*(yright_most.p - yright_mid.p));
+                                                    plm_theta*(yright_most.p - yright_mid.p));
 
                 // Calculate the left and right states using the reconstructed PLM primitives
                 ux_l = prims2cons(xprims_l);
@@ -936,75 +936,75 @@ std::vector<Conserved> Newtonian2D::u_dot(const std::vector<Conserved> &u_state)
                 // Do the same thing, but for the left side interface [i - 1/2]
 
                 // Left side primitives in x
-                xprims_l.rho = xleft_mid.rho + 0.5 *minmod(theta*(xleft_mid.rho - xleft_most.rho),
+                xprims_l.rho = xleft_mid.rho + 0.5 *minmod(plm_theta*(xleft_mid.rho - xleft_most.rho),
                                                         0.5*(center.rho - xleft_most.rho),
-                                                        theta*(center.rho - xleft_mid.rho));
+                                                        plm_theta*(center.rho - xleft_mid.rho));
 
-                xprims_l.v1 = xleft_mid.v1 + 0.5 *minmod(theta*(xleft_mid.v1 - xleft_most.v1),
+                xprims_l.v1 = xleft_mid.v1 + 0.5 *minmod(plm_theta*(xleft_mid.v1 - xleft_most.v1),
                                                         0.5*(center.v1 -xleft_most.v1),
-                                                        theta*(center.v1 - xleft_mid.v1));
+                                                        plm_theta*(center.v1 - xleft_mid.v1));
                 
-                xprims_l.v2 = xleft_mid.v2 + 0.5 *minmod(theta*(xleft_mid.v2 - xleft_most.v2),
+                xprims_l.v2 = xleft_mid.v2 + 0.5 *minmod(plm_theta*(xleft_mid.v2 - xleft_most.v2),
                                                         0.5*(center.v2 - xleft_most.v2),
-                                                        theta*(center.v2 - xleft_mid.v2));
+                                                        plm_theta*(center.v2 - xleft_mid.v2));
                 
-                xprims_l.p = xleft_mid.p + 0.5 *minmod(theta*(xleft_mid.p - xleft_most.p),
+                xprims_l.p = xleft_mid.p + 0.5 *minmod(plm_theta*(xleft_mid.p - xleft_most.p),
                                                         0.5*(center.p - xleft_most.p),
-                                                        theta*(center.p - xleft_mid.p));
+                                                        plm_theta*(center.p - xleft_mid.p));
 
                     
                 // Right side primitives in x
-                xprims_r.rho = center.rho - 0.5 *minmod(theta*(center.rho - xleft_mid.rho),
+                xprims_r.rho = center.rho - 0.5 *minmod(plm_theta*(center.rho - xleft_mid.rho),
                                                     0.5*(xright_mid.rho - xleft_mid.rho),
-                                                    theta*(xright_mid.rho - center.rho));
+                                                    plm_theta*(xright_mid.rho - center.rho));
 
-                xprims_r.v1 = center.v1 - 0.5 *minmod(theta*(center.v1 - xleft_mid.v1),
+                xprims_r.v1 = center.v1 - 0.5 *minmod(plm_theta*(center.v1 - xleft_mid.v1),
                                                     0.5*(xright_mid.v1 - xleft_mid.v1),
-                                                    theta*(xright_mid.v1 - center.v1));
+                                                    plm_theta*(xright_mid.v1 - center.v1));
 
-                xprims_r.v2 = center.v2 - 0.5 *minmod(theta*(center.v2 - xleft_mid.v2),
+                xprims_r.v2 = center.v2 - 0.5 *minmod(plm_theta*(center.v2 - xleft_mid.v2),
                                                     0.5*(xright_mid.v2 - xleft_mid.v2),
-                                                    theta*(xright_mid.v2 - center.v2));
+                                                    plm_theta*(xright_mid.v2 - center.v2));
 
-                xprims_r.p = center.p - 0.5 *minmod(theta*(center.p - xleft_mid.p),
+                xprims_r.p = center.p - 0.5 *minmod(plm_theta*(center.p - xleft_mid.p),
                                                     0.5*(xright_mid.p - xleft_mid.p),
-                                                    theta*(xright_mid.p - center.p));
+                                                    plm_theta*(xright_mid.p - center.p));
 
 
                 // Left side primitives in y
-                yprims_l.rho = yleft_mid.rho + 0.5 *minmod(theta*(yleft_mid.rho - yleft_most.rho),
+                yprims_l.rho = yleft_mid.rho + 0.5 *minmod(plm_theta*(yleft_mid.rho - yleft_most.rho),
                                                         0.5*(center.rho - yleft_most.rho),
-                                                        theta*(center.rho - yleft_mid.rho));
+                                                        plm_theta*(center.rho - yleft_mid.rho));
 
-                yprims_l.v1 = yleft_mid.v1 + 0.5 *minmod(theta*(yleft_mid.v1 - yleft_most.v1),
+                yprims_l.v1 = yleft_mid.v1 + 0.5 *minmod(plm_theta*(yleft_mid.v1 - yleft_most.v1),
                                                         0.5*(center.v1 -yleft_most.v1),
-                                                        theta*(center.v1 - yleft_mid.v1));
+                                                        plm_theta*(center.v1 - yleft_mid.v1));
                 
-                yprims_l.v2 = yleft_mid.v2 + 0.5 *minmod(theta*(yleft_mid.v2 - yleft_most.v2),
+                yprims_l.v2 = yleft_mid.v2 + 0.5 *minmod(plm_theta*(yleft_mid.v2 - yleft_most.v2),
                                                         0.5*(center.v2 - yleft_most.v2),
-                                                        theta*(center.v2 - yleft_mid.v2));
+                                                        plm_theta*(center.v2 - yleft_mid.v2));
                 
-                yprims_l.p = yleft_mid.p + 0.5 *minmod(theta*(yleft_mid.p - yleft_most.p),
+                yprims_l.p = yleft_mid.p + 0.5 *minmod(plm_theta*(yleft_mid.p - yleft_most.p),
                                                         0.5*(center.p - yleft_most.p),
-                                                        theta*(center.p - yleft_mid.p));
+                                                        plm_theta*(center.p - yleft_mid.p));
 
                     
                 // Right side primitives in y
-                yprims_r.rho = center.rho - 0.5 *minmod(theta*(center.rho - yleft_mid.rho),
+                yprims_r.rho = center.rho - 0.5 *minmod(plm_theta*(center.rho - yleft_mid.rho),
                                                     0.5*(yright_mid.rho - yleft_mid.rho),
-                                                    theta*(yright_mid.rho - center.rho));
+                                                    plm_theta*(yright_mid.rho - center.rho));
 
-                yprims_r.v1 = center.v1 - 0.5 *minmod(theta*(center.v1 - yleft_mid.v1),
+                yprims_r.v1 = center.v1 - 0.5 *minmod(plm_theta*(center.v1 - yleft_mid.v1),
                                                     0.5*(yright_mid.v1 - yleft_mid.v1),
-                                                    theta*(yright_mid.v1 - center.v1));
+                                                    plm_theta*(yright_mid.v1 - center.v1));
 
-                yprims_r.v2 = center.v2 - 0.5 *minmod(theta*(center.v2 - yleft_mid.v2),
+                yprims_r.v2 = center.v2 - 0.5 *minmod(plm_theta*(center.v2 - yleft_mid.v2),
                                                     0.5*(yright_mid.v2 - yleft_mid.v2),
-                                                    theta*(yright_mid.v2 - center.v2));
+                                                    plm_theta*(yright_mid.v2 - center.v2));
 
-                yprims_r.p = center.p  - 0.5 *minmod(theta*(center.p - yleft_mid.p),
+                yprims_r.p = center.p  - 0.5 *minmod(plm_theta*(center.p - yleft_mid.p),
                                                     0.5*(yright_mid.p - yleft_mid.p),
-                                                    theta*(yright_mid.p - center.p)); 
+                                                    plm_theta*(yright_mid.p - center.p)); 
                 
             
 
@@ -1088,7 +1088,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     real dt = 1.e-4, 
     bool linspace=true,
     bool hllc = false,
-    real theta)
+    real plm_theta)
 {
 
     // Define the swap vector for the integrated state
@@ -1101,7 +1101,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->periodic    = periodic;
     this->hllc        = hllc;
     this->linspace    = linspace;
-    this->theta       = theta;
+    this->plm_theta       = plm_theta;
 
     if (periodic){
         this->xphysical_grid = NX;

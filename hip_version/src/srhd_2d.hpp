@@ -25,7 +25,7 @@ namespace simbi
         std::vector<sr2d::Conserved> u0;
         std::vector<std::vector<real>> state2D, sources;
         float tend, tstart;
-        real theta, gamma, bipolar;
+        real plm_theta, gamma, bipolar;
         bool first_order, periodic, hllc, linspace;
         real CFL, dt, decay_const;
         int NX, NY, nzones, n, block_size, xphysical_grid, yphysical_grid;
@@ -111,7 +111,7 @@ namespace simbi
             float tstart,
             float tend,
             real dt,
-            real theta,
+            real plm_theta,
             real engine_duration,
             real chkpt_interval,
             std::string data_directory,

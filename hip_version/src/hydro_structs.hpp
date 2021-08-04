@@ -164,6 +164,7 @@ namespace sr1d {
         real aL, aR;
         GPU_CALLABLE_MEMBER Eigenvals() {}
         GPU_CALLABLE_MEMBER ~Eigenvals() {}
+        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
     };
 
 }

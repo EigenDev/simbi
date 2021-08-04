@@ -258,7 +258,7 @@ class Hydro:
     
 
     def simulate(self, tstart: float = 0, tend: float =0.1, dt:float  = 1.e-4, 
-                 theta:float = 1.5,
+                 plm_theta:float = 1.5,
                  first_order: bool = True, periodic: bool = False, linspace: bool = True,
                  coordinates:str = "cartesian", CFL: float =0.4, sources: np.ndarray = None, 
                  hllc:bool = False,
@@ -335,7 +335,7 @@ class Hydro:
                     u = a.simulate(tend=tend, first_order=False,  dt=dt, linspace=linspace, periodic=periodic, hllc=hllc)
                 else:
                     a = PyStateSR(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
-                    u = a.simulate(tstart=start_time, tend=tend, first_order=False,  theta=theta,
+                    u = a.simulate(tstart=start_time, tend=tend, first_order=False,  plm_theta=plm_theta,
                                    sources=sources, dt=dt, linspace=linspace, 
                                    periodic=periodic, lorentz_gamma=self.W, hllc=hllc,
                                    chkpt_interval=chkpt_interval, data_directory=data_directory)
@@ -379,7 +379,7 @@ class Hydro:
                 sources = sources.reshape(sources.shape[0], -1)
                 if self.regime == "classical":
                     b = PyState2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tend=tend, dt=dt, linspace=linspace, hllc=hllc, sources=sources, theta=theta,
+                    u = b.simulate(tend=tend, dt=dt, linspace=linspace, hllc=hllc, sources=sources, plm_theta=plm_theta,
                                    periodic=periodic)
                     
                 else:
@@ -388,7 +388,7 @@ class Hydro:
                     u = b.simulate(tstart=start_time, tend = tend, dt=dt, first_order=False, lorentz_gamma = self.W, 
                                     linspace=linspace, hllc = hllc, 
                                     sources=sources, chkpt_interval = chkpt_interval, 
-                                    theta=theta, data_directory=data_directory,
+                                    plm_theta=plm_theta, data_directory=data_directory,
                                     engine_duration=engine_duration)
             
         

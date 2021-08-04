@@ -22,7 +22,7 @@ namespace simbi {
         std::vector<hydro2d::Conserved> cons_state2D;
         std::vector<hydro2d::Primitive> prims;
         std::vector<real> sourceRho, sourceM1, sourceM2, sourceE;
-        real theta, gamma, tend, CFL, dt;
+        real plm_theta, gamma, tend, CFL, dt;
         bool first_order, periodic, hllc, linspace;
         std::string coord_system;
         std::vector<real> x1, x2;
@@ -83,7 +83,7 @@ namespace simbi {
             real dt, 
             bool linspace, 
             bool hllc,
-            real theta = 1.5);
+            real plm_theta = 1.5);
         
     };
 }

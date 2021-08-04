@@ -28,7 +28,7 @@ HEADERS=$(wildcard src/*.hpp)
 
 all: pySimbi
 
-pySimbi: setup.py $(OBJECTS)
+pySimbi: setup.py $(SOURCES) $(HEADERS)
 	python setup.py build_ext --inplace $(PRECISION) && rm -f src/gpu_state.cpp && rm -Rf build
 
 clean:

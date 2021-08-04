@@ -20,7 +20,7 @@ namespace simbi {
             std::vector<std::vector<real>> init_state;
             std::vector<hydro1d::Conserved> cons_state; 
             std::vector<real> r, xvertices;
-            real theta, gamma, tend, dt, CFL;
+            real plm_theta, gamma, tend, dt, CFL;
             bool first_order, periodic, linspace, hllc;
             int nzones, active_zones, idx_shift;
             std::string coord_system;
@@ -65,7 +65,7 @@ namespace simbi {
             std::vector<std::vector<real> > simulate1D(
                                                         float tend, 
                                                         float dt, 
-                                                        float theta, 
+                                                        float plm_theta, 
                                                         bool first_order, 
                                                         bool periodic, 
                                                         bool linspace, 

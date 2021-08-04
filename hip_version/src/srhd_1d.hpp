@@ -42,7 +42,7 @@ namespace simbi
 
           int Nx, n, pgrid_size, idx_shift, i_start, i_bound;
           real tend;
-          real theta, engine_duration, t, decay_constant;
+          real plm_theta, engine_duration, t, decay_constant;
           bool first_order, periodic, linspace, hllc;
 
           std::vector<real> lorentz_gamma, sourceD, sourceS, source0, pressure_guess;
@@ -63,7 +63,7 @@ namespace simbi
               real tstart = 0.0,
               real tend = 0.1,
               real dt = 1.e-4,
-              real theta = 1.5,
+              real plm_theta = 1.5,
               real engine_duration = 10,
               real chkpt_interval = 0.1,
               std::string data_directory = "data/",
@@ -128,7 +128,7 @@ namespace simbi
           std::vector<std::vector<real>>
           simulate1D(std::vector<real> &lorentz_gamma,
                      std::vector<std::vector<real>> &sources, real tstart,
-                     real tend, real dt, real theta, real engine_duraction,
+                     real tend, real dt, real plm_theta, real engine_duraction,
                      real chkpt_interval, std::string data_directory,
                      bool first_order, bool periodic, bool linspace, bool hllc);
      };
