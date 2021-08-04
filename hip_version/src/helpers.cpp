@@ -1,10 +1,10 @@
 
 /*
-* helper_functions.cpp is where all of the universal functions that can be used
+* helpers.cpp is where all of the universal functions that can be used
 * for all N-Dim hydro calculations
 */
 
-#include "helper_functions.hpp" 
+#include "helpers.hpp" 
 #include "hydro_structs.hpp"
 #include <cmath>
 #include <map>

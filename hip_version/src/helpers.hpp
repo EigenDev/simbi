@@ -8,8 +8,8 @@
 * 04/09/2020
 */
 
-#ifndef HELPER_FUNCTIONS_HPP
-#define HELPER_FUNCTIONS_HPP
+#ifndef HELPERS_HPP
+#define HELPERS_HPP
 
 #include <vector>
 #include <iostream>
@@ -23,7 +23,7 @@
 #include "config.hpp"
 #include "traits.hpp"
 #include "gpu_error_check.h"
-#include "srhd_2d.hpp"
+#include "srhydro2D.hpp"
 
 
 //---------------------------------------------------------------------------------------------------------

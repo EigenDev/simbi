@@ -4,13 +4,13 @@
 * computing the HLL derivative of the state vector
 * given the state itself.
 */
-#ifndef CLASSICAL_1D_H
-#define CLASSICAL_1D_H
+#ifndef EULER1D_H
+#define EULER1D_H
 
 #include <vector>
 #include <string>
-#include <hydro_structs.h>
-#include "clattice_1d.hpp"
+#include "hydro_structs.hpp"
+#include "clattice1D.hpp"
 
 namespace simbi {
     enum class SOLVER{HLLE, HLLC};

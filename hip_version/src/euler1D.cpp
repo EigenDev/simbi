@@ -7,8 +7,8 @@
 * Compressible Hydro Simulation
 */
 
-#include "classical_1d.hpp" 
-#include "helper_functions.hpp"
+#include "euler1D.hpp" 
+#include "helpers.hpp"
 #include <cmath>
 #include <algorithm>
 

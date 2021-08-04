@@ -6,8 +6,8 @@
  * Compressible Hydro Simulation
  */
 
-#include "helper_functions.hpp"
-#include "srhd_2d.hpp"
+#include "helpers.hpp"
+#include "srhydro2D.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -18,7 +18,6 @@ using namespace std::chrono;
 
 // Calculate a static PI
 real pi() { return std::atan(1)*4; }
-constexpr real K = 0.0;
 constexpr real a = 1e-3;
 
 GPU_CALLABLE_MEMBER
@@ -248,7 +247,7 @@ void SRHD2D_DualSpace::copyStateToGPU(
     hipCheckErrors("Memcpy failed at transferring x2 face areas");
 
     hipMemcpy(&(device->dt),          &host.dt      ,  sizeof(real), hipMemcpyHostToDevice);
-    hipMemcpy(&(device->theta),       &host.theta   ,  sizeof(real), hipMemcpyHostToDevice);
+    hipMemcpy(&(device->plm_theta),       &host.plm_theta   ,  sizeof(real), hipMemcpyHostToDevice);
     hipMemcpy(&(device->gamma),       &host.gamma   ,  sizeof(real), hipMemcpyHostToDevice);
     hipMemcpy(&(device->CFL)  ,       &host.CFL     ,  sizeof(real), hipMemcpyHostToDevice);
     hipMemcpy(&(device->NX),          &host.NX      ,  sizeof(int),  hipMemcpyHostToDevice);
@@ -539,76 +538,74 @@ Conserved SRHD2D::calc_intermed_statesSR2D(const Primitive &prims,
 //---------------------------------------------------------------------
 
 // Adapt the CFL conditonal timestep
-real SRHD2D::adapt_dt(const std::vector<Primitive> &prims)
-{
+// real SRHD2D::adapt_dt(const std::vector<Primitive> &prims)
+// {
+//     real dx1, cs, dx2, x2_right, x2_left, rho, pressure, v1, v2, volAvg, h;
+//     real min_dt, cfl_dt;
+//     int shift_i, shift_j;
+//     real plus_v1, plus_v2, minus_v1, minus_v2;
 
-    real r_left, r_right, left_cell, right_cell, lower_cell, upper_cell;
-    real dx1, cs, dx2, x2_right, x2_left, rho, pressure, v1, v2, volAvg, h;
-    real min_dt, cfl_dt;
-    int shift_i, shift_j;
-    real plus_v1, plus_v2, minus_v1, minus_v2;
-
-    min_dt = 0;
-    // Compute the minimum timestep given CFL
-    for (int jj = 0; jj < yphysical_grid; jj++)
-    {
-        shift_j  = jj + idx_active;
-        x2_right = coord_lattice.x2vertices[jj + 1];
-        x2_left  = coord_lattice.x2vertices[jj];
-        dx2 = x2_right - x2_left;
-        for (int ii = 0; ii < xphysical_grid; ii++)
-        {
+//     min_dt = 0;
+//     // Compute the minimum timestep given CFL
+//     for (int jj = 0; jj < yphysical_grid; jj++)
+//     {
+//         shift_j  = jj + idx_active;
+//         x2_right = coord_lattice.x2vertices[jj + 1];
+//         x2_left  = coord_lattice.x2vertices[jj];
+//         dx2 = x2_right - x2_left;
+//         for (int ii = 0; ii < xphysical_grid; ii++)
+//         {
             
-            shift_i = ii + idx_active;
+//             shift_i = ii + idx_active;
 
-            r_right = coord_lattice.x1vertices[ii + 1];
-            r_left = coord_lattice.x1vertices[ii];
+//             r_right = coord_lattice.x1vertices[ii + 1];
+//             r_left = coord_lattice.x1vertices[ii];
 
-            dx1 = r_right - r_left;
-            rho = prims[shift_i + NX * shift_j].rho;
-            v1  = prims[shift_i + NX * shift_j].v1;
-            v2  = prims[shift_i + NX * shift_j].v2;
-            pressure = prims[shift_i + NX * shift_j].p;
+//             dx1 = r_right - r_left;
+//             rho = prims[shift_i + NX * shift_j].rho;
+//             v1  = prims[shift_i + NX * shift_j].v1;
+//             v2  = prims[shift_i + NX * shift_j].v2;
+//             pressure = prims[shift_i + NX * shift_j].p;
 
-            h = 1. + gamma * pressure / (rho * (gamma - 1.));
-            cs = sqrt(gamma * pressure / (rho * h));
+//             h = 1. + gamma * pressure / (rho * (gamma - 1.));
+//             cs = sqrt(gamma * pressure / (rho * h));
 
-            plus_v1 = (v1 + cs) / (1. + v1 * cs);
-            plus_v2 = (v2 + cs) / (1. + v2 * cs);
-            minus_v1 = (v1 - cs) / (1. - v1 * cs);
-            minus_v2 = (v2 - cs) / (1. - v2 * cs);
+//             plus_v1 = (v1 + cs) / (1. + v1 * cs);
+//             plus_v2 = (v2 + cs) / (1. + v2 * cs);
+//             minus_v1 = (v1 - cs) / (1. - v1 * cs);
+//             minus_v2 = (v2 - cs) / (1. - v2 * cs);
 
-            if (coord_system == "cartesian")
-            {
+//             if (coord_system == "cartesian")
+//             {
 
-                cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
-                             dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
-            }
-            else
-            {
-                // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                volAvg = coord_lattice.x1mean[ii];
-                // std::cout << volAvg << "\n";
-                // std::cout << dx1 << "\n";
-                // std::cout << dx2 << "\n";
-                // std::cout << volAvg * dx2 << "\n";
-                // std::cin.get();
-                cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
-                             volAvg * dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
-            }
+//                 cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
+//                              dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
+//             }
+//             else
+//             {
+//                 // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
+//                 volAvg = coord_lattice.x1mean[ii];
+//                 // std::cout << volAvg << "\n";
+//                 // std::cout << dx1 << "\n";
+//                 // std::cout << dx2 << "\n";
+//                 // std::cout << volAvg * dx2 << "\n";
+//                 // std::cin.get();
+//                 cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
+//                              volAvg * dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
+//             }
 
-            if ((ii > 0) || (jj > 0))
-            {
-                min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
-            }
-            else
-            {
-                min_dt = cfl_dt;
-            }
-        }
-    }
-    return CFL * min_dt;
-};
+//             if ((ii > 0) || (jj > 0))
+//             {
+//                 min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
+//             }
+//             else
+//             {
+//                 min_dt = cfl_dt;
+//             }
+//         }
+//     }
+//     return CFL * min_dt;
+// };
 
 __device__ void warp_reduce_min(volatile real smem[BLOCK_SIZE2D][BLOCK_SIZE2D])
 {
@@ -630,7 +627,7 @@ __global__ void adapt_dtGPU(
     SRHD2D *s, 
     const simbi::Geometry geometry)
 {
-    real r_left, r_right, left_cell, right_cell, dr, cs;
+    real cs;
     real cfl_dt;
     real h, rho, p, v1, v2, dx1, dx2, rmean;
     real plus_v1 , plus_v2 , minus_v1, minus_v2;
@@ -995,7 +992,7 @@ __global__ void simbi::shared_gpu_advance(
     const real decay_constant       = s->decay_const;
     const CLattice2D *coord_lattice = &(s->coord_lattice);
     const real dt                   = s->dt;
-    const real plm_theta            = s->theta;
+    const real plm_theta            = s->plm_theta;
     const real gamma                = s->gamma;
 
 
@@ -1555,7 +1552,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     float tstart = 0., 
     float tend = 0.1, 
     real dt = 1.e-4, 
-    real theta = 1.5,
+    real plm_theta = 1.5,
     real engine_duration = 10, 
     real chkpt_interval = 0.1,
     std::string data_directory = "data/", 
@@ -1564,8 +1561,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     bool linspace = true, 
     bool hllc = false)
 {
-
-    int i_real, j_real;
     std::string tnow, tchunk, tstep;
     int total_zones = NX * NY;
     
@@ -1583,7 +1578,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->hllc = hllc;
     this->linspace = linspace;
     this->lorentz_gamma = lorentz_gamma;
-    this->theta = theta;
+    this->plm_theta = plm_theta;
     this->dt    = dt;
 
     if (first_order)
@@ -1697,7 +1692,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // formatting 
     tchunk = "000000";
     int tchunk_order_of_mag = 2;
-    int time_order_of_mag, num_zeros;
+    int time_order_of_mag;
 
     // Setup the system
     const int nxBlocks = (NX + BLOCK_SIZE2D - 1) / BLOCK_SIZE2D;
@@ -1706,7 +1701,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const int physical_nyBlocks = (yphysical_grid + BLOCK_SIZE2D - 1) / BLOCK_SIZE2D;
 
     // Some benchmarking tools 
-    real avg_dt  = 0;
     int  nfold   = 0;
     int  ncheck  = 0;
     double zu_avg = 0;

@@ -2,27 +2,19 @@
  * Implementation for the 2D coordinate lattice 
  * header file
 */
-#include "clattice_1d.hpp"
+#include "clattice1D.hpp"
 #include <cmath>
 #include <iostream>
 
 simbi::CLattice1D::CLattice1D () {}
 
-simbi::CLattice1D::CLattice1D(std::vector<real> &x1, simbi::Geometry geom)
+simbi::CLattice1D::CLattice1D(std::vector<double> &x1, simbi::Geometry geom)
 {
     this->x1ccenters = x1;
     this->_geom      = geom;
 }
 
-simbi::CLattice1D::~CLattice1D () 
-{
-    // free(gpu_dV);
-    // free(gpu_dx1);
-    // free(gpu_x1ccenters);
-    // free(gpu_x1mean);
-    // free(gpu_x1vertices);
-    // free(gpu_face_areas);
-}
+simbi::CLattice1D::~CLattice1D () {}
 
 void simbi::CLattice1D::set_nzones()
 {
@@ -76,7 +68,7 @@ void simbi::CLattice1D::compute_dx1()
 
 void simbi::CLattice1D::compute_dV()
 {
-    real rr, rl, rmean, dr;
+    double rr, rl, rmean, dr;
     dV.reserve(nzones);
     int nvx = nzones + 1;
     for (int ii = 1; ii < nvx; ii++)
@@ -94,7 +86,7 @@ void simbi::CLattice1D::compute_dV()
 
 void simbi::CLattice1D::compute_x1mean()
 {
-    real xr, xl;
+    double xr, xl;
     x1mean.reserve(nzones);
     size_t size = x1vertices.size();
     for (size_t ii = 1; ii < size; ii++)

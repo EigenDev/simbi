@@ -2,6 +2,9 @@
  * Where all of the type traits will live
  * 
 */
+#ifndef TRAITS_HPP
+#define TRAITS_HPP
+
 #include "hydro_structs.hpp"
 
 
@@ -41,3 +44,5 @@ struct is_2D_primitive<sr2d::Primitive>
 {
     static constexpr bool value = true;
 };
+
+#endif

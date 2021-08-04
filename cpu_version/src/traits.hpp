@@ -2,7 +2,7 @@
  * Where all of the type traits will live
  * 
 */
-#include "hydro_structs.h"
+#include "hydro_structs.hpp"
 
 
 //==========================================================================

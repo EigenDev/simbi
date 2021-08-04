@@ -8,11 +8,11 @@
 #include <vector>
 #include <string>
 #include "hydro_structs.hpp"
-#include "clattice.hpp"
+#include "clattice2D.hpp"
 #include "viscous_diff.hpp"
 
-#ifndef SRHD_2D_HPP
-#define SRHD_2D_HPP
+#ifndef SRHYDRO2D_HPP
+#define SRHYDRO2D_HPP
 namespace simbi
 {
     class SRHD2D

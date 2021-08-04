@@ -4,8 +4,8 @@
 * to ensure inlining by the compiler.
 */
 
-#ifndef STRUCTS1D_H
-#define STRUCTS1D_H 
+#ifndef HYDRO_STRUCTS_HPP
+#define HYDRO_STRUCTS_HPP 
 
 #include <vector>
 

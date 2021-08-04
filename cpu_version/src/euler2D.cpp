@@ -6,13 +6,15 @@
 * Compressible Hydro Simulation
 */
 
-#include "classical_2d.h" 
-#include "helper_functions.h"
+#include "euler2D.hpp" 
+#include "helpers.hpp"
 #include <cmath>
-#include <map>
+#include <omp.h>
 #include <algorithm>
 #include <iomanip>
 #include <chrono>
+
+
 
 using namespace simbi;
 using namespace std::chrono;
@@ -64,12 +66,12 @@ void Newtonian2D::cons2prim()
     double v1,v2, pre;
     int gid;
 
-    // #pragma omp parallel for
+    #pragma omp parallel for schedule(static)
     for (int jj = 0; jj < NY; jj++)
     {  
         for (int ii = 0; ii < NX; ii++)
         {   
-            int gid = jj * NX + ii;
+            gid = jj * NX + ii;
             rho     = cons[gid].rho;
             v1      = cons[gid].m1/rho;
             v2      = cons[gid].m2/rho;
@@ -463,7 +465,7 @@ void Newtonian2D::evolve()
 
     if (first_order)
     {
-        #pragma omp parallel for
+        // #pragma omp parallel for
         for (int jj = j_start; jj < j_bound; jj++)
         {
             ycoordinate = jj - 1;
@@ -591,13 +593,18 @@ void Newtonian2D::evolve()
     }
     else
     {
-        for (int jj = j_start; jj < j_bound; jj++)
+        #pragma omp parallel 
+        {
+        int ii, jj;
+        for (jj = j_start; jj < j_bound; jj++)
         {
             ycoordinate = jj - 2;
             s2L         = coord_lattice.x2_face_areas[ycoordinate];
             s2R         = coord_lattice.x2_face_areas[ycoordinate + 1];
-            for (int ii = i_start; ii < i_bound; ii++)
+            #pragma omp for nowait
+            for (ii = i_start; ii < i_bound; ii++)
             {
+                // printf("i = %d, j= %d, threadId = %d \n", ii, jj, omp_get_thread_num());
                 aid = jj * NX + ii;
                 if (periodic)
                 {
@@ -874,7 +881,8 @@ void Newtonian2D::evolve()
                     rhoc = prims[aid].rho, 
                     uc   = prims[aid].v1;
                     vc   = prims[aid].v2;
-
+                    
+                    // #pragma omp atomic
                     cons_n[aid] += Conserved{
                         // L(D)
                         -(f1.rho * s1R - f2.rho * s1L) / dV1 
@@ -901,6 +909,7 @@ void Newtonian2D::evolve()
                     break;
                 }
             }
+        }
         }
     }
 };

@@ -14,7 +14,7 @@
 #define VISCOUS_DIFF_HPP
 
 #include "hydro_structs.hpp"
-#include "clattice.hpp"
+#include "clattice2D.hpp"
 
 namespace simbi
 {

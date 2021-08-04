@@ -3,9 +3,10 @@
  * 
 */
 
-#ifndef CONFIG_H
-#define CONFIG_H
+#ifndef CONFIG_HPP
+#define CONFIG_HPP
 
+constexpr int BLOCK_SIZE = 4;
 namespace simbi{
     enum class Cellspacing
     {

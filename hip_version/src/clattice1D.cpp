@@ -2,19 +2,27 @@
  * Implementation for the 2D coordinate lattice 
  * header file
 */
-#include "clattice_1d.hpp"
+#include "clattice1D.hpp"
 #include <cmath>
 #include <iostream>
 
 simbi::CLattice1D::CLattice1D () {}
 
-simbi::CLattice1D::CLattice1D(std::vector<double> &x1, simbi::Geometry geom)
+simbi::CLattice1D::CLattice1D(std::vector<real> &x1, simbi::Geometry geom)
 {
     this->x1ccenters = x1;
     this->_geom      = geom;
 }
 
-simbi::CLattice1D::~CLattice1D () {}
+simbi::CLattice1D::~CLattice1D () 
+{
+    // free(gpu_dV);
+    // free(gpu_dx1);
+    // free(gpu_x1ccenters);
+    // free(gpu_x1mean);
+    // free(gpu_x1vertices);
+    // free(gpu_face_areas);
+}
 
 void simbi::CLattice1D::set_nzones()
 {
@@ -25,7 +33,7 @@ void simbi::CLattice1D::compute_x1_vertices(simbi::Cellspacing spacing)
 {
     x1vertices.resize(nzones + 1);
     x1vertices[0]        = x1ccenters[0];
-    x1vertices[nzones] = x1ccenters[nzones - 1];
+    x1vertices[nzones]   = x1ccenters[nzones - 1];
     switch (spacing)
     {
         case simbi::Cellspacing::LOGSPACE:
@@ -68,7 +76,7 @@ void simbi::CLattice1D::compute_dx1()
 
 void simbi::CLattice1D::compute_dV()
 {
-    double rr, rl, rmean, dr;
+    real rr, rl, rmean, dr;
     dV.reserve(nzones);
     int nvx = nzones + 1;
     for (int ii = 1; ii < nvx; ii++)
@@ -86,7 +94,7 @@ void simbi::CLattice1D::compute_dV()
 
 void simbi::CLattice1D::compute_x1mean()
 {
-    double xr, xl;
+    real xr, xl;
     x1mean.reserve(nzones);
     size_t size = x1vertices.size();
     for (size_t ii = 1; ii < size; ii++)

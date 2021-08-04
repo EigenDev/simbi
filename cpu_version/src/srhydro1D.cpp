@@ -7,8 +7,8 @@
  * Compressible Hydro Simulation
  */
 
-#include "helper_functions.h"
-#include "srhd_1d.h"
+#include "helpers.hpp"
+#include "srhydro1D.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>

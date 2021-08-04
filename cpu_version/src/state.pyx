@@ -13,7 +13,7 @@ from libcpp cimport bool
 from libcpp.string cimport string
 from cpython cimport array 
 
-cdef extern from "classical_1d.h" namespace "simbi":
+cdef extern from "euler1D.hpp" namespace "simbi":
     cdef int total_zones "total_zones"
 
     cdef cppclass Newtonian1D:
@@ -38,7 +38,7 @@ cdef extern from "classical_1d.h" namespace "simbi":
             bool linspace,
             bool hllc)
 
-cdef extern from "classical_2d.h" namespace "simbi":
+cdef extern from "euler2D.hpp" namespace "simbi":
     cdef cppclass Newtonian2D:
         Newtonian2D() except +
         Newtonian2D(vector[vector[double]], int NX, int NY, double, vector[double], vector[double],
@@ -62,7 +62,7 @@ cdef extern from "classical_2d.h" namespace "simbi":
             bool hllc)
 
 
-cdef extern from "srhd_1d.h" namespace "simbi":
+cdef extern from "srhydro1D.hpp" namespace "simbi":
     cdef cppclass SRHD:
         SRHD() except +
         SRHD(vector[vector[double]], double, double, vector[double], string) except + 
@@ -85,7 +85,7 @@ cdef extern from "srhd_1d.h" namespace "simbi":
             bool linspace, 
             bool hllc)
 
-cdef extern from "srhd_2d.h" namespace "simbi":
+cdef extern from "srhydro2D.hpp" namespace "simbi":
     cdef cppclass SRHD2D:
         SRHD2D() except +
         SRHD2D(vector[vector[double]], int, int, double, vector[double], vector[double],

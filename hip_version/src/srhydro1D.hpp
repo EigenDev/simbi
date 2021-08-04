@@ -5,14 +5,14 @@
  * given the state itself.
  */
 
-#ifndef SRHD_1D_HPP
-#define SRHD_1D_HPP
+#ifndef SRHYDRO1D_HPP
+#define SRHYDRO1D_HPP
 
 #include <string>
 #include <vector>
-#include "clattice_1d.hpp"
+#include "clattice1D.hpp"
 #include "hydro_structs.hpp"
-#include "helper_functions.hpp"
+#include "helpers.hpp"
 #include "gpu_vector.hpp"
 
 namespace simbi

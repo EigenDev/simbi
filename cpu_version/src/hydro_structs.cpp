@@ -3,7 +3,7 @@
 * for ease of access and organization
 */
 
-#include "hydro_structs.h"
+#include "hydro_structs.hpp"
 
 namespace hydro1d
 {

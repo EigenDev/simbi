@@ -9,8 +9,8 @@
 
 #include <vector>
 #include <string>
-#include "hydro_structs.h"
-#include "clattice.h"
+#include "hydro_structs.hpp"
+#include "clattice2D.hpp"
 #include "viscous_diff.hpp"
 
 

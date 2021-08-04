@@ -10,8 +10,8 @@
  * 25/06/2021
 */
 
-#ifndef CLATTICE_1D_HPP
-#define CLATTICE_1D_HPP
+#ifndef CLATTICE1D_HPP
+#define CLATTICE1D_HPP
 
 #include <vector> 
 #include "config.hpp"

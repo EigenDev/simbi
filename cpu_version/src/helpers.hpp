@@ -8,8 +8,8 @@
 * 04/09/2020
 */
 
-#ifndef HELPER_FUNCTIONS_H
-#define HELPER_FUNCTIONS_H
+#ifndef HELPERS_HPP
+#define HELPERS_HPP
 
 #include <vector>
 #include <iostream>
@@ -18,9 +18,9 @@
 #include <map>
 #include <memory>
 #include "H5Cpp.h"
-#include "hydro_structs.h"
-#include "config.h"
-#include "traits.h"
+#include "hydro_structs.hpp"
+#include "config.hpp"
+#include "traits.hpp"
 
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-GLOBAL-STRUCTS

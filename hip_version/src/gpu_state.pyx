@@ -29,36 +29,36 @@ cdef extern from "config.hpp":
 # else:
 #     ctypedef double real
 
-cdef extern from "classical_1d.hpp" namespace "simbi":
+cdef extern from "euler1D.hpp" namespace "simbi":
     cdef int total_zones "total_zones"
 
     cdef cppclass Newtonian1D:
         Newtonian1D() except +
         Newtonian1D(vector[vector[real]], float, float, vector[real], string) except + 
-        float theta, gamma, tend, dt, CFL
+        float plm_theta, gamma, tend, dt, CFL
         bool first_order, periodic, linspace
         string coord_system
         vector[real] r
         vector[vector[real]] state
         vector[vector [real]] simulate1D(float, float, float, bool, bool, bool, bool)
 
-cdef extern from "classical_2d.hpp" namespace "simbi":
+cdef extern from "euler2D.hpp" namespace "simbi":
     cdef cppclass Newtonian2D:
         Newtonian2D() except +
         Newtonian2D(vector[vector[real]], int NX, int NY, float, vector[real], vector[real],
                     real, string) except + 
-        real theta, gamma
+        real plm_theta, gamma
         bool first_order, periodic
         int NX, NY
         vector[vector[real]] state
-        vector[vector[real]] simulate2D(vector[vector[real]], real, bool, real, bool, bool, real theta)
+        vector[vector[real]] simulate2D(vector[vector[real]], real, bool, real, bool, bool, real plm_theta)
 
 
-cdef extern from "srhd_1d.hpp" namespace "simbi":
+cdef extern from "srhydro1D.hpp" namespace "simbi":
     cdef cppclass SRHD:
         SRHD() except +
         SRHD(vector[vector[real]], float, float, vector[real], string) except + 
-        float theta, gamma, tend, dt, CFL
+        float plm_theta, gamma, tend, dt, CFL
         bool first_order, periodic, linspace
         string coord_system
         vector[real] r
@@ -67,12 +67,12 @@ cdef extern from "srhd_1d.hpp" namespace "simbi":
                                             float, float, real ,real, real, string,
                                             bool, bool, bool, bool)
 
-cdef extern from "srhd_2d.hpp" namespace "simbi":
+cdef extern from "srhydro2D.hpp" namespace "simbi":
     cdef cppclass SRHD2D:
         SRHD2D() except +
         SRHD2D(vector[vector[real]], int, int, float, vector[real], vector[real],
                     real, string) except + 
-        float theta, gamma
+        float plm_theta, gamma
         int NX, NY
         bool first_order, periodic
         vector[vector[real]] state 
@@ -91,11 +91,11 @@ cdef class PyState:
                     vector[real] r = [0], string coord_system = "cartesian"):
         self.c_state = Newtonian1D(state, gamma,CFL, r, coord_system)
 
-    def simulate(self, float tend=0.1, float dt=1.e-4, float theta = 1.5, 
+    def simulate(self, float tend=0.1, float dt=1.e-4, float plm_theta = 1.5, 
                         bool first_order=True, bool periodic = False, bool linspace = True,
                         bool hllc = False):
                         
-        return np.array(self.c_state.simulate1D(tend, dt, theta, first_order, periodic, linspace, hllc))
+        return np.array(self.c_state.simulate1D(tend, dt, plm_theta, first_order, periodic, linspace, hllc))
 
 
 # Relativisitc 1D Class
@@ -107,13 +107,13 @@ cdef class PyStateSR:
         self.c_state = SRHD(state, gamma,CFL, r, coord_system)
         
 
-    def simulate(self, float tstart = 0, float tend=0.1, float dt=1.e-4, real theta = 1.5, 
+    def simulate(self, float tstart = 0, float tend=0.1, float dt=1.e-4, real plm_theta = 1.5, 
                         real engine_duration = 10, real chkpt_interval = 0.1, string data_directory = "data/",
                         bool first_order=True, bool periodic = False, bool linspace = True,
                         vector[real] lorentz_gamma=[1], sources = None, bool hllc=False):
         if not sources:
             source_terms = np.zeros((3, lorentz_gamma.size()), dtype=float)
-            result = np.array(self.c_state.simulate1D(lorentz_gamma, source_terms, tstart, tend, dt, theta, 
+            result = np.array(self.c_state.simulate1D(lorentz_gamma, source_terms, tstart, tend, dt, plm_theta, 
                                                         engine_duration, chkpt_interval, data_directory, 
                                                         first_order, periodic, linspace, hllc))
         
@@ -121,7 +121,7 @@ cdef class PyStateSR:
 
         else:
             source_terms = np.array(sources, dtype=float)
-            result = np.array(self.c_state.simulate1D(lorentz_gamma, source_terms, tstart, tend, dt, theta,
+            result = np.array(self.c_state.simulate1D(lorentz_gamma, source_terms, tstart, tend, dt, plm_theta,
                                                         engine_duration, chkpt_interval,
                                                         data_directory, first_order, periodic, linspace, hllc))
             
@@ -142,12 +142,12 @@ cdef class PyState2D:
     def simulate(self, 
                     tend=0.1,  bool periodic=False, 
                     real dt = 1.e-4, bool linspace=True, 
-                    bool hllc = False, real theta = 1.5,
+                    bool hllc = False, real plm_theta = 1.5,
                     vector[vector[real]] sources = [[0.0]]):
 
         source_terms = np.asarray(sources, dtype = float)
 
-        result = np.array(self.c_state.simulate2D(source_terms, tend, periodic, dt, linspace, hllc, theta))
+        result = np.array(self.c_state.simulate2D(source_terms, tend, periodic, dt, linspace, hllc, plm_theta))
         
         result = result.reshape(4, self.c_state.NY, self.c_state.NX)
 
@@ -173,7 +173,7 @@ cdef class PyStateSR2D:
                        float tend=0.1, 
                        bool periodic=False, 
                        real dt = 1.e-4,
-                       real theta = 1.5,
+                       real plm_theta = 1.5,
                        real engine_duration = 10,
                        real chkpt_interval = 0.1, 
                        string data_directory = "data/",
@@ -191,7 +191,7 @@ cdef class PyStateSR2D:
         result = np.asarray( self.c_state.simulate2D(lorentz_gamma, 
                                                      source_terms, 
                                                      tstart, tend, 
-                                                     dt, theta, 
+                                                     dt, plm_theta, 
                                                      engine_duration,
                                                      chkpt_interval,
                                                      data_directory,
