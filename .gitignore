@@ -1,8 +1,8 @@
 plots/
-simbi_py/__pycache__/
+pysimbi/__pycache__/
 SIMBI_2D_Hydro_Code.egg-info/
 build/
-data/
+data/*
 tests/
 science/
 src/state.cpp
