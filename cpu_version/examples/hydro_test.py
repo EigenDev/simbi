@@ -34,8 +34,8 @@ def find_nearest(array, value):
     return idx, array[idx]
 
 ns = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
-sims = {}
-results = {}
+rk2 = {}
+rk1 = {}
 sod = ((1.0,1.0,0.0),(0.1,0.125,0.0))
 for npts in ns:
     x = np.linspace(0, 1, npts, dtype=float)
@@ -52,58 +52,29 @@ for npts in ns:
     
     tend = 0.1
     
-    #print('End Time:', tend)
     first_o = Hydro(gamma, initial_state=(r,p,v), Npts=npts, geometry=(0, 1.0))
     second_o = Hydro(gamma, initial_state=(r,p,v), Npts=npts, geometry=(0, 1.0))
     
-    results[npts] = first_o.simulate(tend=tend,dt=dt, periodic=True)
-    sims[npts] = second_o.simulate(tend=tend,dt=dt, first_order=False, periodic=True)
-    
-    f_p = first_o.cons2prim(results[npts])
-    s_p = second_o.cons2prim(sims[npts])
-    
-    # h = 1/npts
-    # print(f_p[1][3])
-    # print(p[3])
-    # l1 = h*np.sum(np.absolute(s_p[1]/(s_p[0]**gamma) - 1.))
-    # print(l1)
-    # zzz = input('')
-    fig, ax = plt.subplots(1,1, figsize=(15,11))
-    
-    ax.plot(x, results[npts][0],'rs',fillstyle='none', label='First Order')
-    ax.plot(x, sims[npts][0], 'b-', label='Higher Order' )
-    # ax.plot(x, p/(r**gamma), '.')
-    # ax.plot(x, r, 'g--', label='Initial')
-    ax.set_xlim(x[0], x[-1])
-    ax.set_xlabel('X', fontsize=15)
-    ax.set_ylabel('Density', fontsize=15)
-    ax.legend()
-    plt.show()
-    
-    pause = input('Save Figure? (y/n)')
-    if pause == 'y':
-        fig.savefig('density_{}.pdf'.format(npts))
-    #plt.clf()
+    rk1[npts] = first_o.simulate(tend=tend,dt=dt, periodic=True)
+    rk2[npts] = second_o.simulate(tend=tend,dt=dt, first_order=False, periodic=True)
+
     
 epsilon = []
 beta = []
 
-r_sol = results[ns[-1]][0]
-s_sol = sims[ns[-1]][0]
+r_sol = rk1[ns[-1]][0]
+s_sol = rk2[ns[-1]][0]
 
 
-for idx, key in enumerate(sims.keys()):
-    r_1 = results[key][0]
-    p_1 = first_o.cons2prim(results[key])[1]
+for idx, key in enumerate(rk2.keys()):
+    r_1 = rk1[key][0]
+    p_1 = rk1[key][2]
     
-    # p_1 = pressure(gamma, r_1)
-    
-    r_2 = sims[key][0]
-    p_2 = second_o.cons2prim(sims[key])[1]
-    # p_2 = pressure(gamma, r_2)
-    
-    exp = results[key][0]
-    exp2 = sims[key][0]
+    r_2 = rk2[key][0]
+    p_2 = rk2[key][2]
+
+    exp  = rk1[key][0]
+    exp2 = rk2[key][0]
     
     # Slice points to divvy up solution
     # arrays to match length of N < N_max values
@@ -113,21 +84,17 @@ for idx, key in enumerate(sims.keys()):
     # True Solutions Divided up evenly
     r_ref = r_sol[::s_1]
     s_ref = s_sol[::s_2]
+
+    
     
     
     # epsilons for the first/higher order methods
-    first_eps = np.sum(np.absolute(p_1/r_1**gamma - 1.))
-    high_eps = np.sum(np.absolute(p_2/r_2**gamma - 1.))
-    
-    
+    first_eps = np.sum(np.absolute(p_1 * r_1**(-gamma) - 1.))
+    high_eps = np.sum(np.absolute(p_2 * r_2**(-gamma) - 1.))
     
     # Divide by the reference Npts
     first_ratio = first_eps/ns[idx]
     high_ratio = high_eps/ns[idx]
-    
-    # print('First Order Eps: {}'.format(first_ratio))
-    # print('Second Order Eps: {}'.format(high_ratio))
-    # zzz = input('')
     
     epsilon.append(first_ratio)
     beta.append(high_ratio)
@@ -146,6 +113,5 @@ ax.set_title('T = {} s'.format(tend))
 ax.set_ylabel(r'$\sum 1/N|P/\rho^\gamma - 1|$', fontsize=15)
 ax.set_xlabel('N', fontsize=15)
 ax.legend()
-plt.savefig('converge_2.pdf')
 plt.show()
               

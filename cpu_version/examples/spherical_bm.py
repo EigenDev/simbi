@@ -91,9 +91,6 @@ sol = bm.simulate(tend=tend, first_order= True, dt=dt,
                   hllc=True, linspace=False, plm_theta=1.5)
 
 print("The 2D BM Simulation for N = {} took {:.3f}".format(ntheta, (time.time()*u.s).to(u.min) - t1))
-
-#density = b.cons2prim(sol)[0]
-
 W = 1/np.sqrt(1 - sol[1]**2 + sol[2]**2)
 print(sol[1].max())
 rr, tt = np.meshgrid(r, theta)
@@ -104,7 +101,6 @@ c1 = ax.pcolormesh(tt, rr, sol[0], cmap='inferno', shading = "auto")
 c2 = ax.pcolormesh(t2, rr, sol[0], cmap='inferno', shading = "auto")
 
 fig.suptitle('Spherical Explosion at t={} s on {} x {} grid'.format(tend, nr, ntheta), fontsize=15)
-# ax.set_title(r'$\rho(\theta) = 1.0 - 0.95\cos(n \ \theta)$ with n = {}'.format(n), fontsize=10)
 cbar = fig.colorbar(c1)
 ax.set_theta_zero_location("N")
 ax.set_theta_direction(-1)
@@ -119,4 +115,3 @@ ax.set_thetamax(360)
 cbar.ax.set_ylabel('Lorentz Factor', fontsize=20)
 
 plt.show()
-# fig.savefig('plots/2D/SR/2D_bm_0.1_.pdf', bbox_inches="tight")

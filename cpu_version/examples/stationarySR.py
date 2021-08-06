@@ -49,6 +49,4 @@ ax.legend(fontsize=15)
 del hydro 
 del hydro2
 plt.show()
-#fig.savefig('plots/relativisitc_blast_wave_test_p1.pdf')
-
 

@@ -57,4 +57,3 @@ axs[0].set_xlim(0.0, 1.0)
 axs[0].legend(fontsize=15)
 
 plt.show()
-#fig.savefig('plots/relativisitc_blast_wave_test_p1.pdf')

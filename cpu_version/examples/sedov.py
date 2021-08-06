@@ -79,12 +79,4 @@ ax.set_title('Density at t={} s on {} x {} grid'.format(tend, N, N), fontsize=20
 cbar = fig.colorbar(c1)
 
 plt.gca().set_aspect('equal', adjustable='box')
-#c2 = axes[1].contourf(xx, yy, sol[0], cmap='plasma')
-#axes[1].set_xlim(-0.1, 0.1)
-#axes[1].set_ylim(-0.1, 0.1)
-#axes[1].set_title('Density at t={} s and N = {}'.format(tend, N), fontsize=20)
-#cbar2 = fig.colorbar(c2)
-
-#cbar.ax.set_ylabel('Pressure', fontsize=15)
 plt.show()
-# fig.savefig('plots/2D_sedov_pressure.pdf')
