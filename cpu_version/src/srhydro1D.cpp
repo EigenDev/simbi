@@ -411,6 +411,8 @@ void SRHD::advance()
                     // Set up the left and right state interfaces for i+1/2
                     prims_l = prims[ii];
                     prims_r = roll(prims, ii + 1);
+                    u_l     = cons[ii];
+                    u_r     = roll(cons, ii + 1);
                 }
                 else
                 {
@@ -418,11 +420,10 @@ void SRHD::advance()
                     // Set up the left and right state interfaces for i+1/2
                     prims_l = prims[ii];
                     prims_r = prims[ii + 1];
+                    u_l     = cons[ii];
+                    u_r     = cons[ii + 1];
                 }
 
-                
-                u_l = calc_state(prims_l);
-                u_r = calc_state(prims_r);
                 f_l = calc_flux(prims_l.rho, prims_l.v, prims_l.p);
                 f_r = calc_flux(prims_r.rho, prims_r.v, prims_r.p);
 
@@ -441,15 +442,16 @@ void SRHD::advance()
                 {
                     prims_l = roll(prims, ii - 1);
                     prims_r = prims[ii];
+                    u_l     = roll(cons, ii - 1);
+                    u_r     = cons[ii];
                 }
                 else
                 {
                     prims_l = prims[ii - 1];
-                    prims_r = prims[ii];
+                    prims_r = prims[ii + 0];
+                    u_l     = cons[ii - 1];
+                    u_r     = cons[ii + 0];
                 }
-
-                u_l = calc_state(prims_l);
-                u_r = calc_state(prims_r);
                 f_l = calc_flux(prims_l.rho, prims_l.v, prims_l.p);
                 f_r = calc_flux(prims_r.rho, prims_r.v, prims_r.p);
 
