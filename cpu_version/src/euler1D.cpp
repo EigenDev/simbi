@@ -304,19 +304,20 @@ void Newtonian1D::evolve()
                 {
                     coordinate = ii;
                     // Set up the left and right state interfaces for i+1/2
-                    u_l = cons[ii];
-                    u_r = roll(cons, ii + 1);
+                    u_l     = cons[ii];
+                    u_r     = roll(cons, ii + 1);
+                    prims_l = prims[ii];
+                    prims_r = roll(prims, ii + 1);
                 }
                 else
                 {
                     coordinate = ii - 1;
                     // Set up the left and right state interfaces for i+1/2
-                    u_l = cons[ii];
-                    u_r = cons[ii + 1];
+                    u_l     = cons[ii];
+                    u_r     = cons[ii + 1];
+                    prims_l = prims[ii];
+                    prims_r = prims[ii + 1];
                 }
-
-                prims_l = prims[ii];
-                prims_r = prims[ii + 1];
 
                 f_l = calc_flux(prims_l);
                 f_r = calc_flux(prims_r);
@@ -334,17 +335,18 @@ void Newtonian1D::evolve()
                 // Set up the left and right state interfaces for i-1/2
                 if (periodic)
                 {
-                    u_l = roll(cons, ii - 1);
-                    u_r = cons[ii];
+                    u_l     = roll(cons, ii - 1);
+                    u_r     = cons[ii];
+                    prims_l = roll(prims, ii - 1);
+                    prims_r = prims[ii];
                 }
                 else
                 {
-                    u_l = cons[ii - 1];
-                    u_r = cons[ii];
+                    u_l     = cons[ii - 1];
+                    u_r     = cons[ii];
+                    prims_l = prims[ii - 1];
+                    prims_r = prims[ii];
                 }
-
-                prims_l = prims[ii - 1];
-                prims_r = prims[ii];
 
                 f_l = calc_flux(prims_l);
                 f_r = calc_flux(prims_r);
@@ -445,7 +447,7 @@ void Newtonian1D::evolve()
                 // Calculate the left and right states using the reconstructed PLM
                 // primitives
                 u_l = prims2cons(prims_l);
-                u_r = prims2cons(prims_l);
+                u_r = prims2cons(prims_r);
 
                 f_l = calc_flux(prims_l);
                 f_r = calc_flux(prims_r);
@@ -539,7 +541,7 @@ void Newtonian1D::evolve()
     std::vector<std::vector<double>> &sources,
     double tstart,
     double tend,
-    double dt,
+    double init_dt,
     double plm_theta,
     double engine_duration,
     double chkpt_interval,
@@ -559,7 +561,7 @@ void Newtonian1D::evolve()
     this->hllc            = hllc;
     this->engine_duration = engine_duration;
     this->t               = tstart;
-    this->dt              = dt;
+    this->dt              = init_dt;
     // Define the swap vector for the integrated state
     this->NX = init_state[0].size();
 
@@ -646,7 +648,7 @@ void Newtonian1D::evolve()
             evolve();
             if (periodic == false)
             {
-                config_ghosts1D(cons, NX, true);
+                config_ghosts1D(cons_n, NX, true);
             }
             cons = cons_n;
             t += dt;
@@ -660,7 +662,7 @@ void Newtonian1D::evolve()
                       << "dt: " << std::setw(5) << dt << "\t"
                       << "t: "  << std::setw(5) << t << "\t"
                       << "Zones per sec: " << NX / time_span.count() << std::flush;
-                        adapt_dt();
+            adapt_dt();
             n++;
         }
     }
@@ -675,7 +677,7 @@ void Newtonian1D::evolve()
             evolve();
             if (periodic == false)
             {
-                config_ghosts1D(cons, NX, false);
+                config_ghosts1D(cons_n, NX, false);
             }
             cons = cons_n;
             // Final Half Step
@@ -683,7 +685,7 @@ void Newtonian1D::evolve()
             evolve();
             if (periodic == false)
             {
-                config_ghosts1D(cons, NX, false);
+                config_ghosts1D(cons_n, NX, false);
             }
             cons = cons_n;
             t += dt;
@@ -723,13 +725,14 @@ void Newtonian1D::evolve()
             n++;
         }
     }
+    cons2prim();
     std::cout << "\n";
     std::vector<std::vector<double>> solution(3, std::vector<double>(NX));
     for (size_t ii = 0; ii < NX; ii++)
     {
-        solution[0][ii] = cons[ii].rho;
-        solution[1][ii] = cons[ii].m;
-        solution[2][ii] = cons[ii].e_dens;
+        solution[0][ii] = prims[ii].rho;
+        solution[1][ii] = prims[ii].v;
+        solution[2][ii] = prims[ii].p;
     }
     
     // write_data(u, tend, "sod");

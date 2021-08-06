@@ -70,7 +70,7 @@ namespace simbi {
                 std::vector<std::vector<double>> &sources,
                 double tstart = 0.0,
                 double tend = 0.1,
-                double dt = 1.e-4,
+                double init_dt = 1.e-4,
                 double plm_theta = 1.5,
                 double engine_duration = 10,
                 double chkpt_interval = 0.1,
