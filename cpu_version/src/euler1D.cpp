@@ -599,11 +599,12 @@ void Newtonian1D::evolve()
         t == 0 ? floor(tstart * round_place + 0.5) / round_place
                : floor(tstart * round_place + 0.5) / round_place + chkpt_interval;
     DataWriteMembers setup;
-    setup.xmax = r[active_zones - 1];
-    setup.xmin = r[0];
+    setup.xmax          = r[active_zones - 1];
+    setup.xmin          = r[0];
     setup.xactive_zones = active_zones;
-    setup.NX = NX;
-    setup.linspace = linspace;
+    setup.NX            = NX;
+    setup.linspace      = linspace;
+    setup.coord_system  = coord_system;
 
 
     cons.resize(NX);

@@ -1151,12 +1151,13 @@ std::vector<std::vector<double>> SRHD2D::simulate2D(
     }
     // Write some info about the setup for writeup later
     DataWriteMembers setup;
-    setup.xmax = x1[xphysical_grid - 1];
-    setup.xmin = x1[0];
-    setup.ymax = x2[yphysical_grid - 1];
-    setup.ymin = x2[0];
-    setup.NX = NX;
-    setup.NY = NY;
+    setup.xmax         = x1[xphysical_grid - 1];
+    setup.xmin         = x1[0];
+    setup.ymax         = x2[yphysical_grid - 1];
+    setup.ymin         = x2[0];
+    setup.NX           = NX;
+    setup.NY           = NY;
+    setup.coord_system = coord_system;
 
     cons.resize(nzones);
     prims.resize(nzones);

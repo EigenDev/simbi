@@ -51,6 +51,7 @@ struct DataWriteMembers
     double xmin, xmax, ymin, ymax, dt;
     int NX, NY, xactive_zones, yactive_zones;
     bool linspace, first_order;
+    std::string coord_system;
     
 };
 

@@ -710,12 +710,13 @@ SRHD::simulate1D(
         t == 0 ? floor(tstart * round_place + 0.5) / round_place
                : floor(tstart * round_place + 0.5) / round_place + chkpt_interval;
     DataWriteMembers setup;
-    setup.xmax = r[pgrid_size - 1];
-    setup.xmin = r[0];
+    setup.xmax          = r[pgrid_size - 1];
+    setup.xmin          = r[0];
     setup.xactive_zones = pgrid_size;
-    setup.NX = NX;
-    setup.linspace = linspace;
-    setup.first_order = first_order;
+    setup.NX            = NX;
+    setup.linspace      = linspace;
+    setup.first_order   = first_order;
+    setup.coord_system  = coord_system;
 
     // Create Structure of Vectors (SoV) for trabsferring
     // data to files once ready

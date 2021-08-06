@@ -394,9 +394,11 @@ void write_hdf5(
             delete[]p;
 
             // Write Datset Attributes
-            H5::DataType double_type(H5::PredType::NATIVE_DOUBLE);
-            H5::DataType int_type(H5::PredType::NATIVE_INT);
-            H5::DataType bool_type(H5::PredType::NATIVE_HBOOL);
+            H5::DataType  double_type(H5::PredType::NATIVE_DOUBLE);
+            H5::DataType  int_type(H5::PredType::NATIVE_INT);
+            H5::DataType  bool_type(H5::PredType::NATIVE_HBOOL);
+            H5::StrType   str_type(H5::PredType::C_S1, setup.coord_system.length());
+
             H5::DataSpace att_space(H5S_SCALAR);
 
             H5::DataSpace empty_dspace(1, dimsf);
@@ -413,6 +415,10 @@ void write_hdf5(
 
             att = sim_info.createAttribute("linspace", bool_type, att_space);
             att.write(bool_type, &setup.linspace);
+            att.close();
+
+            att = sim_info.createAttribute("geometry", str_type, att_space);
+            att.write(str_type, setup.coord_system);
             att.close();
 
             att = sim_info.createAttribute("adiabatic_gamma", double_type, att_space);
@@ -477,9 +483,11 @@ void write_hdf5(
             delete[] p;
 
             // Write Datset Attributesauto double_type(H5::PredType::NATIVE_DOUBLE);
-            H5::DataType int_type(H5::PredType::NATIVE_INT);
-            H5::DataType double_type(H5::PredType::NATIVE_DOUBLE);
+            H5::DataType  int_type(H5::PredType::NATIVE_INT);
+            H5::DataType  double_type(H5::PredType::NATIVE_DOUBLE);
             H5::DataSpace att_space(H5S_SCALAR);
+            H5::DataType  bool_type(H5::PredType::NATIVE_HBOOL);
+            H5::StrType   str_type(H5::PredType::C_S1, setup.coord_system.length());
 
             H5::DataSpace empty_dspace(1, dimsf);
             H5::DataType  empty_dtype(H5::PredType::NATIVE_INT);
@@ -491,6 +499,14 @@ void write_hdf5(
 
             att = sim_info.createAttribute("time_step", double_type, att_space);
             att.write(double_type, &setup.dt);
+            att.close();
+
+            att = sim_info.createAttribute("linspace", bool_type, att_space);
+            att.write(bool_type, &setup.linspace);
+            att.close();
+
+            att = sim_info.createAttribute("geometry", str_type, att_space);
+            att.write(str_type, setup.coord_system);
             att.close();
 
             att = sim_info.createAttribute("xmax", double_type, att_space);
