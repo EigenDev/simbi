@@ -149,11 +149,66 @@ def plot_polar_plot(field_dict, args, mesh, ds):
         
     fig.suptitle('{} at t = {:.2f} s'.format(args.setup[0], tend), fontsize=20, y=0.95)
 
+def plot_cartesian_plot(field_dict, args, mesh, ds):
+    fig, ax= plt.subplots(1, 1, figsize=(10,10), constrained_layout=False)
+
+    xx, yy = mesh['xx'], mesh['yy']
+    xmax        = ds[0]["xmax"]
+    xmin        = ds[0]["xmin"]
+    ymax        = ds[0]["ymax"]
+    ymin        = ds[0]["ymin"]
+    
+    vmin,vmax = eval(args.cbar)
+
+    if args.log:
+        kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
+    else:
+        kwargs = {'vmin': vmin, 'vmax': vmax}
+        
+    if args.rcmap:
+        color_map = (plt.cm.get_cmap(args.cmap)).reversed()
+    else:
+        color_map = plt.cm.get_cmap(args.cmap)
+        
+    tend = ds[0]["time"]
+    c = ax.pcolormesh(xx, yy, field_dict[args.field], cmap=color_map, shading='auto', **kwargs)
+    
+    divider = make_axes_locatable(ax)
+    cbaxes = divider.append_axes('right', size='5%', pad=0.05)
+    cbar_orientation = "vertical"
+        
+    if args.log:
+        logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+        cbar = fig.colorbar(c, orientation=cbar_orientation, cax=cbaxes, format=logfmt)
+    else:
+        cbar = fig.colorbar(c, orientation=cbar_orientation, cax=cbaxes)
+
+    ax.yaxis.grid(True, alpha=0.1)
+    ax.xaxis.grid(True, alpha=0.1)
+    ax.tick_params(axis='both', labelsize=10)
+    
+    # Change the format of the field
+    if args.field == "rho":
+        field_str = r'$\rho$'
+    elif args.field == "gamma_beta":
+        field_str = r"$\Gamma \ \beta$"
+    elif args.field == "temperature":
+        field_str = r"T [K]"
+    else:
+        field_str = args.field
+    
+    if args.log:
+        cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+    else:
+        cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
+        
+    fig.suptitle('{} at t = {:.2f} s'.format(args.setup[0], tend), fontsize=20, y=0.95)
+    
 def plot_1d_curve(field_dict, args, mesh, ds):
     fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
     r, theta = mesh['r'], mesh['th']
-    theta    = plm_theta * 180 / np.pi 
+    theta    = theta * 180 / np.pi 
     
     xmax        = ds[0]["xmax"]
     xmin        = ds[0]["xmin"]
@@ -309,7 +364,7 @@ def main():
                         default=False,
                         help='True if you want save the fig')
 
-   
+    is_cartesian = False
     args = parser.parse_args()
     vmin, vmax = eval(args.cbar)
     field_dict = {}
@@ -332,11 +387,23 @@ def main():
             xmin        = ds.attrs["xmin"]
             ymax        = ds.attrs["ymax"]
             ymin        = ds.attrs["ymin"]
+            
+            # New checkpoint files, so check if new attributes were
+            # implemented or not
             try:
                 gamma = ds.attrs["adiabatic_gamma"]
             except:
                 gamma = 4./3.
-            
+                
+            try:
+                coord_sysem = ds.attrs["geometry"].decode('utf-8')
+            except:
+                coord_sysem = "spherical"
+                
+            try:
+                is_linspace = ds.attrs["linspace"]
+            except:
+                is_linspace = False
             
             setup_dict[idx]["xmax"] = xmax 
             setup_dict[idx]["xmin"] = xmin 
@@ -367,7 +434,17 @@ def main():
                 yactive = ny - 4
                 setup_dict[idx]["xactive"] = xactive
                 setup_dict[idx]["yactive"] = yactive
-                
+            
+            if is_linspace:
+                setup_dict[idx]["x1"] = np.linspace(xmin, xmax, xactive)
+                setup_dict[idx]["x2"] = np.linspace(ymin, ymax, yactive)
+            else:
+                setup_dict[idx]["x1"] = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
+                setup_dict[idx]["x2"] = np.linspace(ymin, ymax, yactive)
+            
+            if coord_sysem == "cartesian":
+                is_cartesian = True
+            
             W    = 1/np.sqrt(1 -(v1**2 + v2**2))
             beta = np.sqrt(v1**2 + v2**2)
             
@@ -393,28 +470,20 @@ def main():
         
     ynpts, xnpts = rho.shape 
     cdict = {}
-
-    
-    if (args.log):
-        r = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
-        norm = colors.LogNorm(vmin=rho.min(), vmax=3.*rho.min())
-    else:
-        r = np.linspace(xmin, xmax, xactive)
-        # norm = colors.LinearNorm(vmin=None, vmax=None)
-        
-    # r = np.logspace(np.log10(0.01), np.log10(0.5), xnpts)
-    theta = np.linspace(ymin, ymax, yactive)
-    theta_mirror = - theta[::-1]
-    # theta_mirror[-1] *= -1.
-    
-    rr, tt = np.meshgrid(r, theta)
-    rr, t2 = np.meshgrid(r, theta_mirror)
     
     mesh = {}
-    mesh["theta"] = tt 
-    mesh["rr"]    = rr
-    mesh["r"]     = r 
-    mesh["th"]     = theta
+    if is_cartesian:
+        xx, yy = np.meshgrid(setup_dict[0]["x1"], setup_dict[0]["x2"])
+        mesh["xx"] = xx
+        mesh["yy"] = yy
+    else:      
+        rr, tt = np.meshgrid(setup_dict[0]["x1"], setup_dict[0]["x2"])
+        rr, t2 = np.meshgrid(setup_dict[0]["x1"], -setup_dict[0]["x2"][::-1])
+        mesh["theta"] = tt 
+        mesh["rr"]    = rr
+        mesh["r"]     = setup_dict[0]["x1"]
+        mesh["th"]    = setup_dict[0]["x2"]
+    
     
     if len(args.filename) > 1:
         fig, ax = plt.subplots(1, 1, figsize=(8,8))
@@ -447,25 +516,16 @@ def main():
         elif args.tidx != None:
             plot_1d_curve(field_dict[0], args, mesh, setup_dict)
         else:
-            mesh["t2"] = t2
-            plot_polar_plot(field_dict[0], args, mesh, setup_dict)
+            if is_cartesian:
+                plot_cartesian_plot(field_dict[0], args, mesh, setup_dict)
+            else:
+                mesh["t2"] = t2
+                plot_polar_plot(field_dict[0], args, mesh, setup_dict)
         
-        
-
-    
-    # divider = make_axes_locatable(ax)
-    # cbaxes  = divider.append_axes('right', size='5%', pad=0.1)
-    # cbar    = fig.colorbar(c2, orientation='vertical')
-    # cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
-    
-    
     if args.save:
         plt.savefig("plots/2D/SR/{}.png".format(args.setup[0].replace(" ", "_")), dpi=500)
     else:
-        plt.show()
-    
-    # if args.save:
-    #     
+        plt.show()  
     
 if __name__ == "__main__":
     main()
