@@ -7,6 +7,8 @@
 #define CONFIG_HPP
 
 constexpr int BLOCK_SIZE = 4;
+constexpr int MAX_IER = 50;
+
 namespace simbi{
     enum class Cellspacing
     {
