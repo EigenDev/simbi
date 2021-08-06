@@ -166,7 +166,6 @@ class Hydro:
             
             
         elif len(initial_state) == 4:
-            # TODO: Make this work
             self.dimensions = 2
             print('Initializing 2D Setup...')
             print('')
@@ -179,15 +178,15 @@ class Hydro:
             self.n_vars = n_vars 
             
             if self.regime == "classical":
-                self.init_rho = initial_state[0]
+                self.init_rho      = initial_state[0]
                 self.init_pressure = initial_state[1]
-                self.init_vx = initial_state[2]
-                self.init_vy = initial_state[3]
+                self.init_vx       = initial_state[2]
+                self.init_vy       = initial_state[3]
                 
-                total_v = np.sqrt(self.init_vx**2 + self.init_vy**2)
+                v2 = self.init_vx**2 + self.init_vy**2
                 
                 self.init_energy =  ( self.init_pressure/(self.gamma - 1.) + 
-                                    0.5*self.init_rho*total_v**2 )
+                                    0.5*self.init_rho*v2 )
                 
                 
             else:
