@@ -99,7 +99,7 @@ template <typename T>
 constexpr int sgn(T val) { return (T(0) < val) - (val < T(0)); }
 
 template<typename T>
-constexpr T roll(const std::vector<T>  &v, unsigned int n) { return v[n % v.size()];}
+constexpr inline T roll(const std::vector<T>  &v, unsigned int n) { return v[n % v.size()];}
 
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-METHODS
