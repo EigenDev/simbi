@@ -475,26 +475,46 @@ void Newtonian2D::evolve()
                 ycoordinate = jj - 1;
                 s2R = coord_lattice.x2_face_areas[ycoordinate + 1];
                 s2L = coord_lattice.x2_face_areas[ycoordinate];
+                dy  = coord_lattice.dx2[ycoordinate];
 
                 #pragma omp for nowait
                 for (int ii = i_start; ii < i_bound; ii++)
                 {
+                    if (!periodic)
+                    {
+                        xcoordinate = ii - 1;
+                        // i+1/2
+                        ux_l = cons[(ii + 0) + NX * jj];
+                        ux_r = cons[(ii + 1) + NX * jj];
+
+                        // j+1/2
+                        uy_l = cons[ii + NX * (jj + 0)];
+                        uy_r = cons[ii + NX * (jj + 1)];
+
+                        xprims_l = prims[ii + jj * NX];
+                        xprims_r = prims[(ii + 1) + jj * NX];
+
+                        yprims_l = prims[ii + jj * NX];
+                        yprims_r = prims[ii + (jj + 1) * NX];
+                    } else {
+                        xcoordinate = ii;
+                        ycoordinate = jj;
+                        // i+1/2
+                        ux_l = cons[(ii + 0) + NX * jj];
+                        ux_r = roll(cons, (ii + 1) + NX * jj);
+
+                        // j+1/2
+                        uy_l = cons[ii + NX * (jj + 0)];
+                        uy_r = roll(cons, ii + NX * (jj + 1));
+
+                        xprims_l = prims[ii + jj * NX];
+                        xprims_r = roll(prims, (ii + 1) + jj * NX);
+
+                        yprims_l = prims[ii + jj * NX];
+                        yprims_r = roll(prims, ii + (jj + 1) * NX);
+                    }
                     aid = jj * NX + ii;
-                    xcoordinate = ii - 1;
-
-                    // i+1/2
-                    ux_l = cons[ii + NX * jj];
-                    ux_r = cons[(ii + 1) + NX * jj];
-
-                    // j+1/2
-                    uy_l = cons[ii + NX * jj];
-                    uy_r = cons[ii + NX * (jj + 1)];
-
-                    xprims_l = prims[ii + jj * NX];
-                    xprims_r = prims[(ii + 1) + jj * NX];
-
-                    yprims_l = prims[ii + jj * NX];
-                    yprims_r = prims[ii + (jj + 1) * NX];
+                    
 
                     f_l = calc_flux(xprims_l, 1);
                     f_r = calc_flux(xprims_r, 1);
@@ -512,20 +532,36 @@ void Newtonian2D::evolve()
                         g1 = calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                     }
                     // Set up the left and right state interfaces for i-1/2
+                    if (!periodic)
+                    {
+                        // i-1/2
+                        ux_l = cons[(ii - 1) + NX * jj];
+                        ux_r = cons[(ii - 0) + NX * jj];
 
-                    // i-1/2
-                    ux_l = cons[(ii - 1) + NX * jj];
-                    ux_r = cons[ii + NX * jj];
+                        // j-1/2
+                        uy_l = cons[ii + NX * (jj - 1)];
+                        uy_r = cons[ii + NX * jj];
 
-                    // j-1/2
-                    uy_l = cons[ii + NX * (jj - 1)];
-                    uy_r = cons[ii + NX * jj];
+                        xprims_l = prims[(ii - 1) + jj * NX];
+                        xprims_r = prims[ii + jj * NX];
 
-                    xprims_l = prims[(ii - 1) + jj * NX];
-                    xprims_r = prims[ii + jj * NX];
+                        yprims_l = prims[ii + (jj - 1) * NX];
+                        yprims_r = prims[ii + jj * NX];
+                    } else {
+                        // i+1/2
+                        ux_l = roll(cons, (ii - 1) + NX * jj);
+                        ux_r = cons[(ii + 0) + NX * jj];
 
-                    yprims_l = prims[ii + (jj - 1) * NX];
-                    yprims_r = prims[ii + jj * NX];
+                        // j+1/2
+                        uy_l = roll(cons, ii + NX * (jj - 1));
+                        uy_r = cons[ii + NX * jj];
+
+                        xprims_l = roll(prims,  ii - 1 + jj * NX);
+                        xprims_r = prims[ii + jj * NX];
+
+                        yprims_l = roll(prims, ii + (jj - 1) * NX);
+                        yprims_r = prims[ii + jj * NX];
+                    }
 
                     f_l = calc_flux(xprims_l, 1);
                     f_r = calc_flux(xprims_r, 1);
@@ -548,7 +584,6 @@ void Newtonian2D::evolve()
                     {
                     case simbi::Geometry::CARTESIAN:
                         dx = coord_lattice.dx1[xcoordinate];
-                        dy = coord_lattice.dx2[ycoordinate];
                         cons_n[aid].rho    += dt * (- (f1.rho - f2.rho)       / dx - (g1.rho - g2.rho)       / dy + sourceRho[real_loc]);
                         cons_n[aid].m1     += dt * (- (f1.m1 - f2.m1)         / dx - (g1.m1 - g2.m1)         / dy + sourceM1[real_loc]);
                         cons_n[aid].m2     += dt * (- (f1.m2 - f2.m2)         / dx - (g1.m2 - g2.m2)         / dy + sourceM2[real_loc]);
@@ -590,8 +625,6 @@ void Newtonian2D::evolve()
                                 - (g1.e_dens * s2R - g2.e_dens * s2L) / dV2 
                                     + sourceE[real_loc] * decay_const
                         } * dt;
-                        break;
-                        // printf("\nCons after: %f, cons_n after: %f\n", cons[aid].m1, cons_n[aid].m1);
                         break;
                     }
                 }
@@ -938,15 +971,13 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
 {
 
     std::string tnow, tchunk, tstep, filename;
-    int nzones = NX * NY;
-
     double round_place = 1 / chkpt_interval;
     double t = tstart;
     double t_interval =
         t == 0 ? floor(tstart * round_place + 0.5) / round_place
                : floor(tstart * round_place + 0.5) / round_place + chkpt_interval;
 
-    this->nzones      = NX*NY;
+    this->nzones      = NX * NY;
     this->sources     = sources;
     this->first_order = first_order;
     this->periodic    = periodic;
@@ -1045,7 +1076,7 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
     PrimData prods;
     hydro2d::PrimitiveData transfer_prims;
 
-    if (t == 0)
+    if ((t == 0) && (!periodic))
     {
         config_ghosts2D(cons, NX, NY, first_order);
     }
@@ -1059,7 +1090,7 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
 
             cons2prim();
             evolve();
-            config_ghosts2D(cons_n, NX, NY, true);
+            if (!periodic) config_ghosts2D(cons_n, NX, NY, true);
             cons = cons_n;
             t += dt;
 
@@ -1087,13 +1118,13 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
             // First half step
             cons2prim();
             evolve();
-            config_ghosts2D(cons_n, NX, NY, false);
+            if (!periodic) config_ghosts2D(cons_n, NX, NY, false);
             cons = cons_n;
 
             // Final half step
             cons2prim();
             evolve();
-            config_ghosts2D(cons_n, NX, NY, false);
+            if (!periodic) config_ghosts2D(cons_n, NX, NY, false);
             cons = cons_n;
 
             t += dt;
@@ -1139,10 +1170,10 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
     std::vector<std::vector<double> > solution(4, std::vector<double>(nzones));
     for (size_t ii = 0; ii < nzones; ii++)
     {
-        solution[0][ii] = cons[ii].rho;
-        solution[1][ii] = cons[ii].m1;
-        solution[2][ii] = cons[ii].m2;
-        solution[3][ii] = cons[ii].e_dens;
+        solution[0][ii] = prims[ii].rho;
+        solution[1][ii] = prims[ii].v1;
+        solution[2][ii] = prims[ii].v2;
+        solution[3][ii] = prims[ii].p;
     }
 
     return solution;
