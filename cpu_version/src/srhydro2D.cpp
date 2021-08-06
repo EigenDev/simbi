@@ -110,7 +110,7 @@ void SRHD2D::cons2prim2D()
                     peq = p - f / g;
                     iter++;
 
-                    if (iter > MAX_IER)
+                    if (iter > MAX_ITER)
                     {
                         std::cout << "\n";
                         std::cout << "p: " << p << "\n";
