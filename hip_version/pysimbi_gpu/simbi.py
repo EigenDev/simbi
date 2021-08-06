@@ -223,7 +223,7 @@ class Hydro:
             
             self.u = None 
     
-    def _cleanup(self, state, first_order=True):
+    def cleanup(self, state: np.ndarray, first_order: bool = True):
         """
         Cleanup the ghost cells from the final simulation
         results
@@ -238,26 +238,9 @@ class Hydro:
                 return state[:, 2: -2]
             else:
                 return state[:, 2:-2, 2:-2]
-        
-    # TODO: Make this more Pythomic
-    def _initialize_simulation(self):
-        """
-        Initialize the hydro simulation based on 
-        init params
-        """
-        
-        self._results = Hydro(
-            gamma = self.gamma,
-            left_state = self.left_state,
-            right_state = self.right_state,
-            Npts = self.Npts,
-            geometry = self.geometry,
-            dt = self.dt, 
-            dimensions = self.dimensions
-        )
     
 
-    def simulate(self, tstart: float = 0, tend: float =0.1, dt:float  = 1.e-4, 
+    def simulate(self, tstart: float = 0, tend: float = 0.1, dt:float  = 1.e-4, 
                  plm_theta:float = 1.5,
                  first_order: bool = True, periodic: bool = False, linspace: bool = True,
                  coordinates:str = "cartesian", CFL: float =0.4, sources: np.ndarray = None, 
@@ -393,24 +376,6 @@ class Hydro:
             
         
         # Return the final state tensor, purging the ghost cells
-        if first_order:
-            if periodic:
-                return u
-            else:
-                if self.dimensions == 1:
-                    return u[:, 1: -1]
-                else:
-                    return u[:, 1:-1, 1:-1]
-        else:
-            if periodic:
-                return u
-            else:
-                if self.dimensions == 1:
-                    return u[:, 2: -2]
-                else:
-                    return u[:, 2:-2, 2:-2]
+        solution = self.cleanup(u, first_order)
         
-        
-        
-    def __del__(self):
-        print("Destroying Object")
+        return solution
