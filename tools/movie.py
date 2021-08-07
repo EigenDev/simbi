@@ -11,6 +11,7 @@ import argparse
 import h5py 
 import astropy.constants as const
 
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.animation import FuncAnimation
 import os, os.path
 
@@ -21,16 +22,12 @@ def get_frames(dir):
     
     return total_frames, frames
 
-def create_mesh(fig, ax, filepath, filename, field, setup, cbaxes, vmin = None, vmax = None, 
-                log=False, forder=False, rcmap = False, cmap='magma',
-                rmax= 0.0,
-                ):
-    
+def read_file(filepath, filename, args):
+    is_cartesian = False
     field_dict = {}
+    setup_dict = {}
     with h5py.File(filepath + filename, 'r+') as hf:
-        
         ds = hf.get("sim_info")
-        
         rho         = hf.get("rho")[:]
         v1          = hf.get("v1")[:]
         v2          = hf.get("v2")[:]
@@ -43,19 +40,43 @@ def create_mesh(fig, ax, filepath, filename, field, setup, cbaxes, vmin = None, 
         ymax        = ds.attrs["ymax"]
         ymin        = ds.attrs["ymin"]
         
+        # New checkpoint files, so check if new attributes were
+        # implemented or not
+        try:
+            gamma = ds.attrs["adiabatic_gamma"]
+        except:
+            gamma = 4./3.
+            
+        try:
+            coord_sysem = ds.attrs["geometry"].decode('utf-8')
+        except:
+            coord_sysem = "spherical"
+            
+        try:
+            is_linspace = ds.attrs["linspace"]
+        except:
+            is_linspace = False
+        
+        setup_dict["xmax"] = xmax 
+        setup_dict["xmin"] = xmin 
+        setup_dict["ymax"] = ymax 
+        setup_dict["ymin"] = ymin 
+        setup_dict["time"] = t
         
         rho = rho.reshape(ny, nx)
         v1  = v1.reshape(ny, nx)
         v2  = v2.reshape(ny, nx)
         p   = p.reshape(ny, nx)
         
-        if forder:
+        if args.forder:
             rho = rho[1:-1, 1: -1]
             v1  = v1 [1:-1, 1: -1]
             v2  = v2 [1:-1, 1: -1]
             p   = p  [1:-1, 1: -1]
             xactive = nx - 2
             yactive = ny - 2
+            setup_dict["xactive"] = xactive
+            setup_dict["yactive"] = yactive
         else:
             rho = rho[2:-2, 2: -2]
             v1  = v1 [2:-2, 2: -2]
@@ -63,16 +84,32 @@ def create_mesh(fig, ax, filepath, filename, field, setup, cbaxes, vmin = None, 
             p   = p  [2:-2, 2: -2]
             xactive = nx - 4
             yactive = ny - 4
-            
-        W    = 1/np.sqrt(1 - v1**2 + v2**2)
+            setup_dict["xactive"] = xactive
+            setup_dict["yactive"] = yactive
+        
+        if is_linspace:
+            setup_dict["x1"] = np.linspace(xmin, xmax, xactive)
+            setup_dict["x2"] = np.linspace(ymin, ymax, yactive)
+        else:
+            setup_dict["x1"] = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
+            setup_dict["x2"] = np.linspace(ymin, ymax, yactive)
+        
+        if coord_sysem == "cartesian":
+            is_cartesian = True
+        
+        setup_dict["is_cartesian"] = is_cartesian
+        setup_dict["dataset"] = ds
+        W    = 1/np.sqrt(1 -(v1**2 + v2**2))
         beta = np.sqrt(v1**2 + v2**2)
+        
         
         e = 3*p/rho 
         c = const.c.cgs.value
         a = (4 * const.sigma_sb.cgs.value / c)
+        k = const.k_B.cgs
         m = const.m_p.cgs.value
         T = (3 * p * c ** 2  / a)**(1./4.)
-        
+        h = 1. + gamma*p/(rho*(gamma - 1.))
         
         field_dict["rho"]         = rho
         field_dict["v1"]          = v1 
@@ -80,69 +117,158 @@ def create_mesh(fig, ax, filepath, filename, field, setup, cbaxes, vmin = None, 
         field_dict["p"]           = p
         field_dict["gamma_beta"]  = W*beta
         field_dict["temperature"] = T
+        field_dict["enthalpy"]    = h
+        field_dict["W"]           = W
+        field_dict["energy"]      = rho * h * W * W  - p - rho * W
         
-        
-    ynpts, xnpts = rho.shape 
+    return field_dict, setup_dict
 
-    if (log):
-        r = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
+def plot_polar_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
+    rr, tt = mesh['rr'], mesh['theta']
+    t2 = mesh['t2']
+    xmax        = ds["xmax"]
+    xmin        = ds["xmin"]
+    ymax        = ds["ymax"]
+    ymin        = ds["ymin"]
+    
+    vmin,vmax = eval(args.cbar)
+
+    if args.log:
+        kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
     else:
-        r = np.linspace(xmin, xmax, xactive)
+        kwargs = {'vmin': vmin, 'vmax': vmax}
         
-    # r = np.logspace(np.log10(0.01), np.log10(0.5), xnpts)
-    theta = np.linspace(ymin, ymax, yactive)
-    theta_mirror = - theta[::-1]
-    theta_mirror[-1] *= -1.
-    
-    rr, tt = np.meshgrid(r, theta)
-    rr, t2 = np.meshgrid(r, theta_mirror)
-    
-    norm  = colors.LogNorm(vmin = vmin, vmax = vmax)
-    
-    if rcmap:
-        color_map = (plt.cm.get_cmap(cmap)).reversed()
+    if args.rcmap:
+        color_map = (plt.cm.get_cmap(args.cmap)).reversed()
     else:
-        color_map = plt.cm.get_cmap(cmap)
-
-
-    c1 = ax.pcolormesh(tt, rr, field_dict[field], cmap=color_map, shading='auto', norm = norm)
-    c2 = ax.pcolormesh(t2[::-1], rr, field_dict[field],  cmap=color_map, shading='auto', norm = norm)
-
-
-    if log:
+        color_map = plt.cm.get_cmap(args.cmap)
+        
+    tend = ds["time"]
+    c1 = ax.pcolormesh(tt, rr, field_dict[args.field], cmap=color_map, shading='auto', **kwargs)
+    c2 = ax.pcolormesh(t2[::-1], rr, field_dict[args.field],  cmap=color_map, shading='auto', **kwargs)
+    
+    
+        
+    if ymax < np.pi:
+        cbar_orientation = "horizontal"
+        ymd = int( np.floor(ymax * 180/np.pi) )
+        ax.set_thetamin(-ymd)
+        ax.set_thetamax(ymd)
+    else:
+        cbar_orientation = "vertical"
+        
+    if args.log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        cbar = fig.colorbar(c2, orientation='vertical', cax=cbaxes, format=logfmt)
+        cbar = fig.colorbar(c2, orientation=cbar_orientation, cax=cbaxes, format=logfmt)
     else:
-        cbar = fig.colorbar(c2, orientation='horizontal', cax=cbaxes)
+        cbar = fig.colorbar(c2, orientation=cbar_orientation, cax=cbaxes)
         
-    fig.suptitle('SIMBI: {} at t = {:.2f} s'.format(setup, t), fontsize=20, y=0.95)
     
+        
     # ax.set_position( [0.1, -0.18, 0.8, 1.43])
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
     ax.yaxis.grid(True, alpha=0.1)
     ax.xaxis.grid(True, alpha=0.1)
     ax.tick_params(axis='both', labelsize=10)
-    cbaxes.tick_params(axis='x', labelsize=10)
     ax.axes.xaxis.set_ticklabels([])
-    ax.set_rmax(xmax) if rmax == 0.0 else ax.set_rmax(rmax)
-    
-    ymd = int( np.ceil(ymax * 180/np.pi) )
-    ax.set_thetamin(-ymd)
-    ax.set_thetamax(ymd)
+    ax.set_rmax(xmax) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
 
     # Change the format of the field
-    if   field == "rho":
+    if args.field == "rho":
         field_str = r'$\rho$'
-    elif field == "gamma_beta":
+    elif args.field == "gamma_beta":
         field_str = r"$\Gamma \ \beta$"
+    elif args.field == "temperature":
+        field_str = r"T [K]"
     else:
-        field_str = field
+        field_str = args.field
     
-    if log:
-        cbar.ax.set_xlabel('Log [{}]'.format(field_str), fontsize=20)
+    if args.log:
+        if ymax >= np.pi:
+            cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+        else:
+            cbar.ax.set_xlabel(r'$\log$[{}]'.format(field_str), fontsize=20)
     else:
-        cbar.ax.set_xlabel('[{}]'.format(field), fontsize=20)
+        if ymax >= np.pi:
+            cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
+        else:
+            cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
+        
+    fig.suptitle('{} at t = {:.2f} s'.format(args.setup[0], tend), fontsize=20, y=0.95)
+    
+def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
+    xx, yy = mesh['xx'], mesh['yy']
+    xmax        = ds["xmax"]
+    xmin        = ds["xmin"]
+    ymax        = ds["ymax"]
+    ymin        = ds["ymin"]
+    
+    vmin,vmax = eval(args.cbar)
+
+    if args.log:
+        kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
+    else:
+        kwargs = {'vmin': vmin, 'vmax': vmax}
+        
+    if args.rcmap:
+        color_map = (plt.cm.get_cmap(args.cmap)).reversed()
+    else:
+        color_map = plt.cm.get_cmap(args.cmap)
+        
+    tend = ds["time"]
+    c = ax.pcolormesh(xx, yy, field_dict[args.field], cmap=color_map, shading='auto', **kwargs)
+
+        
+    if args.log:
+        logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+        cbar = fig.colorbar(c, orientation="vertical", cax=cbaxes, format=logfmt)
+    else:
+        cbar = fig.colorbar(c, orientation="vertical", cax=cbaxes)
+
+    ax.yaxis.grid(True, alpha=0.1)
+    ax.xaxis.grid(True, alpha=0.1)
+    ax.tick_params(axis='both', labelsize=10)
+    
+    # Change the format of the field
+    if args.field == "rho":
+        field_str = r'$\rho$'
+    elif args.field == "gamma_beta":
+        field_str = r"$\Gamma \ \beta$"
+    elif args.field == "temperature":
+        field_str = r"T [K]"
+    else:
+        field_str = args.field
+    
+    if args.log:
+        cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+    else:
+        cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
+        
+    fig.suptitle('{} at t = {:.2f} s'.format(args.setup[0], tend), fontsize=20, y=0.95)
+    
+def create_mesh(fig, ax, filepath, filename, cbaxes, args):
+    fields, setups = read_file(filepath, filename, args)
+    
+    ynpts, xnpts = fields["rho"].shape 
+
+    mesh = {}
+    if setups["is_cartesian"]:
+        xx, yy = np.meshgrid(setups["x1"], setups["x2"])
+        mesh["xx"] = xx
+        mesh["yy"] = yy
+        plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, setups)
+    else:      
+        rr, tt = np.meshgrid(setups["x1"],  setups["x2"])
+        rr, t2 = np.meshgrid(setups["x1"], -setups["x2"][::-1])
+        mesh["theta"] = tt 
+        mesh["rr"]    = rr
+        mesh["t2"]    = t2
+        mesh["r"]     = setups["x1"]
+        mesh["th"]    = setups["x2"]
+        plot_polar_plot(fig, ax, cbaxes, fields, args, mesh, setups)
+    
+    
         
     return ax
     
@@ -194,30 +320,32 @@ def main():
 
    
     args = parser.parse_args()
-    vmin, vmax = eval(args.cbar)
-    
-    fig = plt.figure(figsize=(15,8), constrained_layout=False)
-    ax  = fig.add_subplot(111, projection='polar')
-    if args.half:
-        ax.set_position( [0.1, -0.18, 0.8, 1.43])
-        cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
-        cbar_orientation = "horizontal"
-    else:
-        cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
-        cbar_orientation = "vertical"
-    # cbaxes = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
-    
     frame_count, flist = get_frames(args.data_dir[0])
     
+    # read the first file and infer the system configuration from it
+    init_setup = read_file(args.data_dir[0], flist[0], args)[1]
+    if init_setup["is_cartesian"]:
+        fig, ax = plt.subplots(1, 1, figsize=(10,10), constrained_layout=False)
+        divider = make_axes_locatable(ax)
+        cbaxes = divider.append_axes('right', size='5%', pad=0.05)
+        cbar_orientation = "vertical"
+    else:
+        fig = plt.figure(figsize=(15,8), constrained_layout=False)
+        ax  = fig.add_subplot(111, projection='polar')
+        if init_setup["ymax"] < np.pi:
+            ax.set_position( [0.1, -0.18, 0.8, 1.43])
+            cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
+            cbar_orientation = "horizontal"
+        else:
+            cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
+            cbar_orientation = "vertical"
+    
     def init_mesh(filename):
-        p = create_mesh(fig, ax, args.data_dir[0], filename, args.field,
-                        args.setup[0], cbaxes,  vmin,
-                        vmax, args.log, args.forder,
-                        args.rcmap, args.cmap, args.rmax)
+        p = create_mesh(fig, ax, args.data_dir[0], filename, cbaxes, args)
         
         return p
         
-    def update(frame, *fargs):
+    def update(frame, args):
         """
         Animation function. Takes the current frame number (to select the potion of
         data to plot) and a line object to update.
@@ -226,7 +354,7 @@ def main():
         ax.cla()
         # Not strictly neccessary, just so we know we are stealing these from
         # the global scope
-        pcolor_mesh = create_mesh(fig, ax, args.data_dir[0], flist[frame], *fargs)
+        pcolor_mesh = create_mesh(fig, ax, args.data_dir[0], flist[frame], cbaxes, args)
 
         return pcolor_mesh
 
@@ -242,10 +370,7 @@ def main():
         np.arange(frame_count),
         #blit = True,
         # Extra arguments to the animate function
-        fargs=[args.field,
-                args.setup[0], cbaxes, vmin,
-                vmax, args.log, args.forder,
-                args.rcmap, args.cmap, args.rmax],
+        fargs=[args],
         # repeat=False,
         # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
         interval= 1000 / 20

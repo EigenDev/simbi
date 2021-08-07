@@ -175,13 +175,12 @@ def plot_cartesian_plot(field_dict, args, mesh, ds):
     
     divider = make_axes_locatable(ax)
     cbaxes = divider.append_axes('right', size='5%', pad=0.05)
-    cbar_orientation = "vertical"
-        
+    
     if args.log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        cbar = fig.colorbar(c, orientation=cbar_orientation, cax=cbaxes, format=logfmt)
+        cbar = fig.colorbar(c, orientation="vertical", cax=cbaxes, format=logfmt)
     else:
-        cbar = fig.colorbar(c, orientation=cbar_orientation, cax=cbaxes)
+        cbar = fig.colorbar(c, orientation="vertical", cax=cbaxes)
 
     ax.yaxis.grid(True, alpha=0.1)
     ax.xaxis.grid(True, alpha=0.1)
