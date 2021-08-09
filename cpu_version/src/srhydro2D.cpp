@@ -592,21 +592,40 @@ void SRHD2D::evolve()
                 for (int ii = i_start; ii < i_bound; ii++)
                 {
                     aid = jj * NX + ii;
-                    xcoordinate = ii - 1;
+                    if(!periodic)
+                    {
+                        xcoordinate = ii - 1;
 
-                    // i+1/2
-                    ux_l = cons[(ii + 0) + NX * jj];
-                    ux_r = cons[(ii + 1) + NX * jj];
+                        // i+1/2
+                        ux_l = cons[(ii + 0) + NX * jj];
+                        ux_r = cons[(ii + 1) + NX * jj];
 
-                    // j+1/2
-                    uy_l = cons[ii + NX * (jj + 0)];
-                    uy_r = cons[ii + NX * (jj + 1)];
+                        // j+1/2
+                        uy_l = cons[ii + NX * (jj + 0)];
+                        uy_r = cons[ii + NX * (jj + 1)];
 
-                    xprims_l = prims[(ii + 0) + jj * NX];
-                    xprims_r = prims[(ii + 1) + jj * NX];
+                        xprims_l = prims[(ii + 0) + jj * NX];
+                        xprims_r = prims[(ii + 1) + jj * NX];
 
-                    yprims_l = prims[ii + (jj + 0) * NX];
-                    yprims_r = prims[ii + (jj + 1) * NX];
+                        yprims_l = prims[ii + (jj + 0) * NX];
+                        yprims_r = prims[ii + (jj + 1) * NX];
+                    } else {
+                        xcoordinate = ii;
+                        ycoordinate = jj;
+                        // i+1/2
+                        ux_l = cons[(ii + 0) + NX * jj];
+                        ux_r = roll(cons, (ii + 1) + NX * jj);
+
+                        // j+1/2
+                        uy_l = cons[ii + NX * (jj + 0)];
+                        uy_r = roll(cons, ii + NX * (jj + 1));
+
+                        xprims_l = prims[ii + jj * NX];
+                        xprims_r = roll(prims, (ii + 1) + jj * NX);
+
+                        yprims_l = prims[ii + jj * NX];
+                        yprims_r = roll(prims, ii + (jj + 1) * NX);
+                    }
 
                     f_l = calc_Flux(xprims_l, 1);
                     f_r = calc_Flux(xprims_r, 1);
@@ -634,20 +653,36 @@ void SRHD2D::evolve()
                     }
 
                     // Set up the left and right state interfaces for i-1/2
+                    if(!periodic)
+                    {
+                        // i-1/2
+                        ux_l = cons[(ii - 1) + NX * jj];
+                        ux_r = cons[(ii + 0) + NX * jj];
 
-                    // i-1/2
-                    ux_l = cons[(ii - 1) + NX * jj];
-                    ux_r = cons[(ii + 0) + NX * jj];
+                        // j-1/2
+                        uy_l = cons[ii + NX * (jj - 1)];
+                        uy_r = cons[ii + NX * (jj - 0)];
 
-                    // j-1/2
-                    uy_l = cons[ii + NX * (jj - 1)];
-                    uy_r = cons[ii + NX * (jj - 0)];
+                        xprims_l = prims[(ii - 1) + jj * NX];
+                        xprims_r = prims[(ii + 0) + jj * NX];
 
-                    xprims_l = prims[(ii - 1) + jj * NX];
-                    xprims_r = prims[(ii + 0) + jj * NX];
+                        yprims_l = prims[ii + (jj - 1) * NX];
+                        yprims_r = prims[ii + (jj + 0) * NX];
+                    } else {
+                        // i-1/2
+                        ux_l = roll(cons, (ii - 1) + NX * jj);
+                        ux_r = cons[(ii + 0) + NX * jj];
 
-                    yprims_l = prims[ii + (jj - 1) * NX];
-                    yprims_r = prims[ii + (jj + 0) * NX];
+                        // j-1/2
+                        uy_l = roll(cons, ii + NX * (jj - 1));
+                        uy_r = cons[ii + NX * jj];
+
+                        xprims_l = roll(prims,  ii - 1 + jj * NX);
+                        xprims_r = prims[ii + jj * NX];
+
+                        yprims_l = roll(prims, ii + (jj - 1) * NX);
+                        yprims_r = prims[ii + jj * NX];
+                    }
 
                     f_l = calc_Flux(xprims_l, 1);
                     f_r = calc_Flux(xprims_r, 1);
@@ -749,9 +784,17 @@ void SRHD2D::evolve()
                         xcoordinate = ii;
                         ycoordinate = jj;
 
-                        // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
+                        // X Coordinate
+                        xleft_most   = roll(prims, jj * NX + ii - 2);
+                        xleft_mid    = roll(prims, jj * NX + ii - 1);
+                        center       = prims[jj * NX + ii];
+                        xright_mid   = roll(prims, jj * NX + ii + 1);
+                        xright_most  = roll(prims, jj * NX + ii + 2);
 
-                        /* TODO: Poplate this later */
+                        yleft_most   = roll(prims, ii +  NX * (jj - 2) );
+                        yleft_mid    = roll(prims, ii +  NX * (jj - 1) );
+                        yright_mid   = roll(prims, ii +  NX * (jj + 1) );
+                        yright_most  = roll(prims, ii +  NX * (jj + 2) );
                     }
                     else
                     {
