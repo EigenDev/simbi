@@ -8,17 +8,17 @@ import sys
 import h5py 
 import pysimbi_gpu.initial_condition as simbi_ic 
 
-from gpu_state import PyState, PyState2D, PyStateSR, PyStateSR2D
+from gpu_state import *
 
 class Hydro:
     
     def __init__(self, 
-                 gamma: float, 
-                 initial_state: tuple, 
-                 Npts: int,
-                 geometry: tuple = None, 
-                 n_vars: int = 3, 
-                 coord_system: str = 'cartesian',
+                 gamma: float,
+                 initial_state: tuple,
+                 Npts: tuple,
+                 geometry: tuple=None,
+                 n_vars: int = 3,
+                 coord_system:str = 'cartesian',
                  regime: str = "classical"):
         """
         The initial conditions of the hydrodynamic system (1D for now)
@@ -77,11 +77,14 @@ class Hydro:
                 
             elif len(left_state) == 4 and len(right_state) == 4:
                 self.dimensions = 2
+                
+            elif len(left_state) == 5 and len(right_state) == 5:
+                self.dimensions = 3
         
-        self.gamma = gamma 
+        self.gamma    = gamma 
         self.geometry = geometry
-        self.Npts = Npts 
-        self.n_vars = n_vars
+        self.Npts     = Npts 
+        self.n_vars   = n_vars
                                         
         # Initial Conditions
         
@@ -133,13 +136,7 @@ class Hydro:
             if self.regime == "classical":
                 self.u[:, : slice_point] = np.array([rho_l, rho_l*v_l, energy_l]).reshape(3,1)              # Left State
                 self.u[:, slice_point: ] = np.array([rho_r, rho_r*v_r, energy_r]).reshape(3,1)              # Right State
-            else:
-                #Create the Lorentz factor array to account for each fluid cell and plit it accordingly
-                self.W = np.zeros(self.Npts + 2)
-                self.W[: slice_point] = W_l
-                self.W[slice_point: ] = W_r
-                
-                
+            else:                
                 self.u[:, : slice_point] = np.array([D_l, S_l, tau_l]).reshape(3,1)              # Left State
                 self.u[:, slice_point: ] = np.array([D_r, S_r, tau_r]).reshape(3,1)              # Right State
                 
@@ -177,7 +174,6 @@ class Hydro:
             
             
         elif len(initial_state) == 4:
-            # TODO: Make this work
             self.dimensions = 2
             print('Initializing 2D Setup...')
             print('')
@@ -190,15 +186,15 @@ class Hydro:
             self.n_vars = n_vars 
             
             if self.regime == "classical":
-                self.init_rho = initial_state[0]
+                self.init_rho      = initial_state[0]
                 self.init_pressure = initial_state[1]
-                self.init_vx = initial_state[2]
-                self.init_vy = initial_state[3]
+                self.init_vx       = initial_state[2]
+                self.init_vy       = initial_state[3]
                 
-                total_v = np.sqrt(self.init_vx**2 + self.init_vy**2)
+                v2 = self.init_vx**2 + self.init_vy**2
                 
                 self.init_energy =  ( self.init_pressure/(self.gamma - 1.) + 
-                                    0.5*self.init_rho*total_v**2 )
+                                    0.5*self.init_rho*v2 )
                 
                 
             else:
@@ -222,8 +218,58 @@ class Hydro:
             
             
             self.u = None 
+            
+        elif len(initial_state) == 5:
+            self.dimensions = 3
+            print('Initializing 3D Setup...')
+            print('')
+            
+            left_x, right_x = geometry[0]
+            left_y, right_y = geometry[1]
+            left_z, right_z = geometry[2]
+            
+            self.xNpts, self.yNpts, self.zNpts = Npts 
+            
+            self.n_vars = n_vars 
+            
+            if self.regime == "classical":
+                self.init_rho      = initial_state[0]
+                self.init_pressure = initial_state[1]
+                self.init_vx       = initial_state[2]
+                self.init_vy       = initial_state[3]
+                self.init_vz       = initial_state[4]
+                
+                v2 = self.init_vx**2 + self.init_vy**2 + self.init_xz**2
+                
+                self.init_energy =  ( self.init_pressure/(self.gamma - 1.) + 
+                                    0.5*self.init_rho*v2 )
+                
+                
+            else:
+                self.init_rho = initial_state[0]
+                self.init_pressure = initial_state[1]
+                self.init_v1 = initial_state[2]
+                self.init_v2 = initial_state[3]
+                self.init_v3 = initial_state[4]
+                total_v = np.sqrt(self.init_v1**2 + self.init_v2**2 + self.init_v3**2)
+                
+                self.W = np.asarray(1/np.sqrt(1 - total_v**2))
+                
+                self.init_h = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
+                
+                self.initD = self.init_rho*self.W
+                self.initS1 = self.init_h*self.init_rho*self.W**2*self.init_v1
+                self.initS2 = self.init_h*self.init_rho*self.W**2*self.init_v2 
+                self.initS3 = self.init_h*self.init_rho*self.W**2*self.init_v3 
+                
+                self.init_tau = (self.init_rho*self.init_h*(self.W)**2 - self.init_pressure
+                                  - self.init_rho*(self.W))
+                
+            
+            
+            self.u = None 
     
-    def cleanup(self, state: np.ndarray, first_order: bool = True):
+    def _cleanup(self, state, first_order=True):
         """
         Cleanup the ghost cells from the final simulation
         results
@@ -238,17 +284,41 @@ class Hydro:
                 return state[:, 2: -2]
             else:
                 return state[:, 2:-2, 2:-2]
+        
+    # TODO: Make this more Pythomic
+    def _initialize_simulation(self):
+        """
+        Initialize the hydro simulation based on 
+        init params
+        """
+        
+        self._results = Hydro(
+            gamma = self.gamma,
+            left_state = self.left_state,
+            right_state = self.right_state,
+            Npts = self.Npts,
+            geometry = self.geometry,
+            dt = self.dt, 
+            dimensions = self.dimensions
+        )
     
 
-    def simulate(self, tstart: float = 0, tend: float = 0.1, dt:float  = 1.e-4, 
-                 plm_theta:float = 1.5,
-                 first_order: bool = True, periodic: bool = False, linspace: bool = True,
-                 coordinates:str = "cartesian", CFL: float =0.4, sources: np.ndarray = None, 
-                 hllc:bool = False,
-                 chkpt: str = None, 
-                 chkpt_interval:float = 0.1, 
+    def simulate(self, 
+                 tstart: float = 0,
+                 tend: float = 0.1,
+                 dt: float = 1.e-4,
+                 plm_theta: float = 1.5,
+                 first_order: bool = True,
+                 periodic: bool = False,
+                 linspace: bool = True,
+                 coordinates: str="cartesian",
+                 CFL: float = 0.4,
+                 sources: np.ndarray = None,
+                 hllc: bool =False,
+                 chkpt: str = None,
+                 chkpt_interval:float = 0.1,
                  data_directory:str = "data/",
-                 engine_duration:float = 10.0):
+                 engine_duration: float = 10.0):
         """
         Simulate the Hydro Setup
         
@@ -283,99 +353,131 @@ class Hydro:
             
         u = self.u 
         start_time = tstart if self.t == 0 else self.t
+        
+        
         if self.dimensions == 1:
-            if first_order:
-                print("Computing First Order...")
-                r_min = self.geometry[0]
-                r_max = self.geometry[1]
-                if linspace:
-                    r_arr = np.linspace(r_min, r_max, self.Npts)
-                else:
-                    r_arr = np.logspace(np.log10(r_min), np.log10(r_max), self.Npts)
-                
-                if self.regime == "classical":
-                    a = PyState(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
-                    u = a.simulate(tend=tend, dt=dt, linspace=linspace, periodic=periodic, hllc=hllc)
-                else:
-                    a = PyStateSR(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
-                    u = a.simulate(tend=tend, dt=dt, linspace=linspace, sources=sources, 
-                                   periodic=periodic, lorentz_gamma=self.W, hllc=hllc,
-                                   chkpt_interval=chkpt_interval, data_directory=data_directory)   
-                
+            if (linspace):
+                x1 = np.linspace(self.geometry[0], self.geometry[1], self.Npts)
             else:
-                
+                x1 = np.logspace(np.log10(self.geometry[0]), np.log10(self.geometry[1]), self.Npts)
+            sources = np.zeros((3, x1.size), dtype=float) if not sources else np.asarray(sources)
+            sources = sources.reshape(sources.shape[0], -1)
+            
+            if first_order:
+                print("Computing First Order...") 
+            else:
                 print('Computing Higher Order...')
-                r_min = self.geometry[0]
-                r_max = self.geometry[1]
-                self.W = np.zeros(self.u[0].size)
-                if linspace:
-                    r_arr = np.linspace(r_min, r_max, self.Npts)
-                else:
-                    r_arr = np.logspace(np.log10(r_min), np.log10(r_max), self.Npts)
+            if self.regime == "classical":
+                a = PyState(u, self.gamma, CFL, r = x1, coord_system = coordinates)
+            else:
+                a = PyStateSR(u, self.gamma, CFL, r = x1, coord_system = coordinates)
+    
+            u = a.simulate(sources = sources,
+                tstart = tstart,
+                tend = tend,
+                dt = dt,
+                plm_theta = plm_theta,
+                engine_duration = engine_duration,
+                chkpt_interval = chkpt_interval,
+                data_directory = data_directory,
+                first_order = first_order,
+                periodic = periodic,
+                linspace = linspace,
+                hllc = hllc)  
                 
-                if self.regime == "classical":
-                    a = PyState(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
-                    u = a.simulate(tend=tend, first_order=False,  dt=dt, linspace=linspace, periodic=periodic, hllc=hllc)
-                else:
-                    a = PyStateSR(u, self.gamma, CFL, r = r_arr, coord_system = coordinates)
-                    u = a.simulate(tstart=start_time, tend=tend, first_order=False,  plm_theta=plm_theta,
-                                   sources=sources, dt=dt, linspace=linspace, 
-                                   periodic=periodic, lorentz_gamma=self.W, hllc=hllc,
-                                   chkpt_interval=chkpt_interval, data_directory=data_directory)
-                
-                
-                
-        else:
+        elif self.dimensions == 2:
+            if (linspace):
+                x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
+                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+            else:
+                x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
+                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+            
+            sources = np.zeros((4, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
+            sources = sources.reshape(sources.shape[0], -1)
+            
             if (first_order):
                 print("Computing First Order...")
-                if (linspace):
-                    x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
-                    x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-                else:
-                    x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
-                    x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-                    
-                sources = np.zeros((4, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
-                sources = sources.reshape(sources.shape[0], -1)
-                
-                if self.regime == "classical":
-                    b = PyState2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tend, dt=dt, linspace=linspace, hllc=hllc, data_directory=data_directory)
-                    
-                else:
-                    self.W = self.W.flatten()
-                    b = PyStateSR2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tstart=start_time, tend = tend, dt=dt, first_order=first_order, 
-                                   lorentz_gamma = self.W, linspace=linspace,
-                                   sources=sources, data_directory=data_directory)
             
             else:
                 print('Computing Higher Order...')
-                if (linspace):
-                    x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
-                    x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-                else:
-                    x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
-                    x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-                    
-                sources = np.zeros((4, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
-                sources = sources.reshape(sources.shape[0], -1)
-                if self.regime == "classical":
-                    b = PyState2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tend=tend, dt=dt, linspace=linspace, hllc=hllc, sources=sources, plm_theta=plm_theta,
-                                   periodic=periodic)
-                    
-                else:
-                    self.W = self.W.flatten()
-                    b = PyStateSR2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
-                    u = b.simulate(tstart=start_time, tend = tend, dt=dt, first_order=False, lorentz_gamma = self.W, 
-                                    linspace=linspace, hllc = hllc, 
-                                    sources=sources, chkpt_interval = chkpt_interval, 
-                                    plm_theta=plm_theta, data_directory=data_directory,
-                                    engine_duration=engine_duration)
+                
+            if self.regime == "classical":
+                b = PyState2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
+            else:
+                b = PyStateSR2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
+                   
+            u = b.simulate(sources = sources,
+                tstart = tstart,
+                tend = tend,
+                dt = dt,
+                plm_theta = plm_theta,
+                engine_duration = engine_duration,
+                chkpt_interval = chkpt_interval,
+                data_directory = data_directory,
+                first_order = first_order,
+                periodic = periodic,
+                linspace = linspace,
+                hllc = hllc)  
+
+        else:
+            if (linspace):
+                x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
+                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+                x3 = np.linspace(self.geometry[2][0], self.geometry[2][1], self.zNpts)
+            else:
+                x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
+                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+                x3 = np.linspace(self.geometry[2][0], self.geometry[2][1], self.zNpts)
             
+            sources = np.zeros((5, x3.size, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
+            sources = sources.reshape(sources.shape[0], -1)
+            
+            if (first_order):
+                print("Computing First Order...")
+            
+            else:
+                print('Computing Higher Order...')
+                
+            if self.regime == "classical":
+                pass
+                # b = PyState3D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
+            else:
+                b = PyStateSR3D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
+                   
+            u = b.simulate(sources = sources,
+                tstart = tstart,
+                tend = tend,
+                dt = dt,
+                plm_theta = plm_theta,
+                engine_duration = engine_duration,
+                chkpt_interval = chkpt_interval,
+                data_directory = data_directory,
+                first_order = first_order,
+                periodic = periodic,
+                linspace = linspace,
+                hllc = hllc)  
         
         # Return the final state tensor, purging the ghost cells
-        solution = self.cleanup(u, first_order)
+        if first_order:
+            if periodic:
+                return u
+            else:
+                if self.dimensions == 1:
+                    return u[:, 1: -1]
+                elif self.dimensions == 2:
+                    return u[:, 1:-1, 1:-1]
+                else:
+                    return u[:, 1:-1, 1:-1, 1:-1]
+        else:
+            if periodic:
+                return u
+            else:
+                if self.dimensions == 1:
+                    return u[:, 2: -2]
+                elif self.dimensions == 2:
+                    return u[:, 2:-2, 2:-2]
+                else:
+                    return u[:, 2:-2, 2:-2, 2:-2]
         
-        return solution
+    
