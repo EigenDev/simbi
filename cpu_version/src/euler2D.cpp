@@ -548,11 +548,11 @@ void Newtonian2D::evolve()
                         yprims_l = prims[ii + (jj - 1) * NX];
                         yprims_r = prims[ii + jj * NX];
                     } else {
-                        // i+1/2
+                        // i-1/2
                         ux_l = roll(cons, (ii - 1) + NX * jj);
                         ux_r = cons[(ii + 0) + NX * jj];
 
-                        // j+1/2
+                        // j-1/2
                         uy_l = roll(cons, ii + NX * (jj - 1));
                         uy_r = cons[ii + NX * jj];
 
