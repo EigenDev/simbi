@@ -132,6 +132,7 @@ if HIP["platform"] == "nvidia":
     libraries         += ['cudart']
 else:
     defineMacros      = [("__HIP_PLATFORM_AMD__", "1")]
+    libraries        += ['amdhip64']
     
 
 sources  = ["src/gpu_state.pyx"]
