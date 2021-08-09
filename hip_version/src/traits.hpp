@@ -45,4 +45,21 @@ struct is_2D_primitive<sr2d::Primitive>
     static constexpr bool value = true;
 };
 
+template<typename T>
+struct is_3D_primitive {
+    static const bool value = false;
+};
+
+template<>
+struct is_3D_primitive<hydro3d::Primitive>
+{
+    static constexpr bool value = true;
+};
+
+template<>
+struct is_3D_primitive<sr3d::Primitive>
+{
+    static constexpr bool value = true;
+};
+
 #endif
