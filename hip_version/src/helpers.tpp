@@ -93,6 +93,17 @@ __global__ void config_ghosts1DGPU(T *dev_sim, int grid_size, bool first_order){
 
 //Handle 2D primitive arrays whether SR or Newtonian
 template<typename T, typename N>
+typename std::enable_if<is_3D_primitive<N>::value>::type
+writeToProd(T *from, PrimData *to){
+    to->rho  = from->rho;
+    to->v1   = from->v1;
+    to->v2   = from->v2;
+    to->v3   = from->v3;
+    to->p    = from->p;
+}
+
+//Handle 2D primitive arrays whether SR or Newtonian
+template<typename T, typename N>
 typename std::enable_if<is_2D_primitive<N>::value>::type
 writeToProd(T *from, PrimData *to){
     to->rho  = from->rho;
@@ -107,6 +118,29 @@ writeToProd(T *from, PrimData *to){
     to->rho  = from->rho;
     to->v    = from->v;
     to->p    = from->p;
+}
+
+template<typename T , typename N>
+typename std::enable_if<is_3D_primitive<N>::value, T>::type
+vec2struct(const std::vector<N> &p){
+    T sprims;
+    size_t nzones = p.size();
+
+    sprims.rho.reserve(nzones);
+    sprims.v1.reserve(nzones);
+    sprims.v2.reserve(nzones);
+    sprims.v3.reserve(nzones);
+    sprims.p.reserve(nzones);
+    for (size_t i = 0; i < nzones; i++)
+    {
+        sprims.rho.push_back(p[i].rho);
+        sprims.v1.push_back(p[i].v1);
+        sprims.v2.push_back(p[i].v2);
+        sprims.v3.push_back(p[i].v3);
+        sprims.p.push_back(p[i].p);
+    }
+    
+    return sprims;
 }
 
 template<typename T , typename N>

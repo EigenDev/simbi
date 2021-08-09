@@ -47,6 +47,12 @@ real roll(std::vector<real>  &v, unsigned int n) {
    return v[n % v.size()];
 };
 
+
+GPU_CALLABLE_MEMBER
+bool strong_shock(real pl, real pr)
+{
+    return abs(pr - pl) / my_min(pl, pr) > a;
+}
 // Roll a single vector index in y-direction of lattice
 // real roll(std::vector<std::vector<real>>  &v, unsigned int xpos, unsigned int ypos) {
 //    return v[ypos % v.size()][xpos % v[0].size()];
@@ -57,6 +63,34 @@ void config_system() {
     geometry["cartesian"] = simbi::Geometry::CARTESIAN;
     geometry["spherical"] = simbi::Geometry::SPHERICAL;
 }
+
+void config_ghosts1D(std::vector<hydro1d::Conserved> &u_state, int grid_size, bool first_order){
+    if (first_order){
+        u_state[0].rho = u_state[1].rho;
+        u_state[grid_size - 1].rho = u_state[grid_size - 2].rho;
+
+        u_state[0].m = - u_state[1].m;
+        u_state[grid_size - 1].m = u_state[grid_size - 2].m;
+
+        u_state[0].e_dens = u_state[1].e_dens;
+        u_state[grid_size - 1].e_dens = u_state[grid_size - 2].e_dens;
+    } else {
+        u_state[0].rho = u_state[3].rho;
+        u_state[1].rho = u_state[2].rho;
+        u_state[grid_size - 1].rho = u_state[grid_size - 3].rho;
+        u_state[grid_size - 2].rho = u_state[grid_size - 3].rho;
+
+        u_state[0].m = - u_state[3].m;
+        u_state[1].m = - u_state[2].m;
+        u_state[grid_size - 1].m = u_state[grid_size - 3].m;
+        u_state[grid_size - 2].m = u_state[grid_size - 3].m;
+
+        u_state[0].e_dens = u_state[3].e_dens;
+        u_state[1].e_dens = u_state[2].e_dens;
+        u_state[grid_size - 1].e_dens = u_state[grid_size - 3].e_dens;
+        u_state[grid_size - 2].e_dens = u_state[grid_size - 3].e_dens;
+    }
+};
 
 
 void config_ghosts2D(
@@ -271,10 +305,10 @@ __global__ void config_ghosts2DGPU(
         if ((jj < x2grid_size) && (ii < x1grid_size))
         {
             if (jj < 1){
-                u_state[ii + x1grid_size * jj].D   =   u_state[ii + x1grid_size].D;
-                u_state[ii + x1grid_size * jj].S1  =   u_state[ii + x1grid_size].S1;
-                u_state[ii + x1grid_size * jj].S2  = - u_state[ii + x1grid_size].S2;
-                u_state[ii + x1grid_size * jj].tau =   u_state[ii + x1grid_size].tau;
+                u_state[ii + x1grid_size * jj].D   =   u_state[ii + x1grid_size * 1].D;
+                u_state[ii + x1grid_size * jj].S1  =   u_state[ii + x1grid_size * 1].S1;
+                u_state[ii + x1grid_size * jj].S2  = - u_state[ii + x1grid_size * 1].S2;
+                u_state[ii + x1grid_size * jj].tau =   u_state[ii + x1grid_size * 1].tau;
                 
             } else if (jj > x2grid_size - 2) {
                 u_state[ii + x1grid_size * jj].D    =   u_state[(x2grid_size - 2) * x1grid_size + ii].D;
@@ -350,6 +384,173 @@ __global__ void config_ghosts2DGPU(
                         u_state[jj * x1grid_size + ii].S1  =   u_state[(x2grid_size - 3) * x1grid_size + ii].S1;
                         u_state[jj * x1grid_size + ii].S2  =   u_state[(x2grid_size - 3) * x1grid_size + ii].S2;
                         u_state[jj * x1grid_size + ii].tau =   u_state[(x2grid_size - 3) * x1grid_size + ii].tau;
+                    }
+                }
+            }
+            
+        }
+
+    }
+};
+
+__global__ void config_ghosts3DGPU(
+    simbi::SRHD3D *dev_sim, 
+    int x1grid_size, 
+    int x2grid_size,
+    int x3grid_size, 
+    bool first_order,
+    bool bipolar)
+{
+    const int ii = blockDim.x * blockIdx.x + threadIdx.x;
+    const int jj = blockDim.y * blockIdx.y + threadIdx.y;
+    const int kk = blockDim.z * blockIdx.z + threadIdx.z;
+    sr3d::Conserved *u_state = dev_sim->gpu_state3D;
+    if (first_order){
+        if ((jj < x2grid_size) && (ii < x1grid_size) && (kk < x3grid_size))
+        {
+            if (jj < 1){
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].D   =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].D;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S1  =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].S1;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S2  =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].S2;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S3  =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].S3;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].tau;
+                
+            } else if (jj > x2grid_size - 2) {
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].D    =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].D;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S1   =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].S1;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S2   =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].S2;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S3   =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].S3;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau  =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].tau;
+
+            } 
+            if (kk < 1){
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].D   =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].D;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S1  =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].S1;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S2  =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].S2;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S3  =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].S3;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].tau;
+                
+            } else if (kk > x3grid_size - 2) {
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].D    =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].D;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S1   =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].S1;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S2   =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].S2;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S3   =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].S3;
+                u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau  =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].tau;
+
+            } else {
+                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].D               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].D;
+                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].D = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].D;
+
+                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S1               = - u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S1;
+                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S1 =   u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S1;
+
+                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S2                = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S2;
+                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S2  = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S2;
+
+                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S3                = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S3;
+                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S3  = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S3;
+
+                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].tau               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].tau;
+                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].tau = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].tau;
+            }
+        }
+
+    } else {
+        if((jj < x2grid_size) && (kk < x3grid_size))
+        {
+
+            // Fix the ghost zones at the radial boundaries
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  0].D               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  3].D;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  1].D               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  2].D;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 1].D = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 3].D;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 2].D = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 3].D;
+
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S1               = - u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].S1;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S1               = - u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].S1;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S1 =   u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S1;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S1 =   u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S1;
+
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S2               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].S2;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S2               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].S2;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S2 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S2;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S2 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S2;
+
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S3               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].S3;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S3               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].S3;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S3 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S3;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S3 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S3;
+
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].tau                = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].tau;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].tau                = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].tau;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].tau  = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].tau;
+            u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].tau  = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].tau;
+
+            // Fix the ghost zones at the angular boundaries
+            
+            if (jj < 2){
+                if (ii < x1grid_size){
+                     if (jj == 0){
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].D;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].S1;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].S2;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].S3;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].tau;
+                    } else {
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D    =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].D;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1   =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].S1;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2   =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].S2;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3   =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].S3;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau  =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].tau;
+                    }
+                }
+            } else if (jj > x2grid_size - 3) {
+                if (ii < x1grid_size){
+                    if (jj == x2grid_size - 1){
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].D;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].S1;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].S2;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].S3;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].tau;
+                    } else {
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].D;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].S1;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].S2;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].S3;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].tau;
+                    }
+                }
+            }
+
+            if (kk < 2){
+                if (ii < x1grid_size){
+                     if (jj == 0){
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].D;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
+                    } else {
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D    =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].D;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1   =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2   =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3   =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau  =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
+                    }
+                }
+            } else if (kk > x3grid_size - 3) {
+                if (ii < x1grid_size){
+                    if (kk == x3grid_size - 1){
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].D;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
+                    } else {
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].D;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
                     }
                 }
             }
@@ -605,6 +806,133 @@ void write_hdf5(
 
             att = sim_info.createAttribute("yactive_zones", int_type, att_space);
             att.write(int_type, &setup.xactive_zones);
+            att.close();
+
+            sim_info.close();
+        break;
+        }
+        case 3:
+            {
+            // Write the Primitives 
+            real* rho = new real[size];
+            real* v1  = new real[size];
+            real* v2  = new real[size];
+            real* v3  = new real[size];
+            real* p   = new real[size];
+
+            std::copy(prims.rho.begin(), prims.rho.begin() + size, rho);
+            std::copy(prims.v1.begin(), prims.v1.begin() + size, v1);
+            std::copy(prims.v2.begin(), prims.v2.begin() + size, v2);
+            std::copy(prims.v3.begin(), prims.v3.begin() + size, v3);
+            std::copy(prims.p.begin(),  prims.p.begin() + size, p);
+            H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
+
+            H5::DataType real_type;
+            if (typeid(real) == typeid(double))
+            {
+                real_type = H5::PredType::NATIVE_DOUBLE;
+            } else {
+                real_type = H5::PredType::NATIVE_FLOAT;
+            }
+
+            // Write the Primitives 
+            dataset.write(rho, real_type);
+            dataset.close();
+            
+            dataset = file.createDataSet("v1", datatype, dataspace);
+            dataset.write(v1, real_type);
+            dataset.close();
+
+            dataset = file.createDataSet("v2", datatype, dataspace);
+            dataset.write(v2, real_type);
+            dataset.close();
+
+            dataset = file.createDataSet("v3", datatype, dataspace);
+            dataset.write(v3, real_type);
+            dataset.close();
+
+            dataset = file.createDataSet("p", datatype, dataspace);
+            dataset.write(p, real_type);
+            dataset.close();
+
+            // Free the heap
+            delete[] rho;
+            delete[] v1;
+            delete[] v2;
+            delete[] p;
+
+            // Write Datset Attributesauto real_type(real_type);
+            H5::DataType int_type(H5::PredType::NATIVE_INT);
+            
+            H5::DataType bool_type(H5::PredType::NATIVE_HBOOL);
+            H5::DataSpace att_space(H5S_SCALAR);
+
+            H5::DataSpace empty_dspace(1, dimsf);
+            H5::DataType  empty_dtype(H5::PredType::NATIVE_INT);
+            H5::DataSet   sim_info = file.createDataSet("sim_info", empty_dtype, empty_dspace);
+            
+            H5::Attribute att = sim_info.createAttribute("current_time", real_type, att_space);
+            att.write(real_type, &setup.t);
+            att.close();
+
+            att = sim_info.createAttribute("time_step", real_type, att_space);
+            att.write(real_type, &setup.dt);
+            att.close();
+
+            att = sim_info.createAttribute("linspace", bool_type, att_space);
+            att.write(bool_type, &setup.linspace);
+            att.close();
+            
+            att = sim_info.createAttribute("xmax", real_type, att_space);
+            att.write(real_type, &setup.xmax);
+            att.close();
+
+            att = sim_info.createAttribute("xmin", real_type, att_space);
+            att.write(real_type, &setup.xmin);
+            att.close();
+
+            att = sim_info.createAttribute("ymax", real_type, att_space);
+            att.write(real_type, &setup.ymax);
+            att.close();
+
+            att = sim_info.createAttribute("ymin", real_type, att_space);
+            att.write(real_type, &setup.ymin);
+            att.close();
+
+            att = sim_info.createAttribute("zmax", real_type, att_space);
+            att.write(real_type, &setup.zmax);
+            att.close();
+
+            att = sim_info.createAttribute("zmin", real_type, att_space);
+            att.write(real_type, &setup.zmin);
+            att.close();
+
+            att = sim_info.createAttribute("adiabatic_gamma", real_type, att_space);
+            att.write(real_type, &setup.ad_gamma);
+            att.close();
+
+            att = sim_info.createAttribute("NX", int_type, att_space);
+            att.write(int_type, &setup.NX);
+            att.close();
+
+            att = sim_info.createAttribute("NY", int_type, att_space);
+            att.write(int_type, &setup.NY);
+            att.close();
+
+            att = sim_info.createAttribute("NZ", int_type, att_space);
+            att.write(int_type, &setup.NZ);
+            att.close();
+
+            att = sim_info.createAttribute("xactive_zones", int_type, att_space);
+            att.write(int_type, &setup.xactive_zones);
+            att.close();
+
+            att = sim_info.createAttribute("yactive_zones", int_type, att_space);
+            att.write(int_type, &setup.yactive_zones);
+            att.close();
+
+            att = sim_info.createAttribute("zactive_zones", int_type, att_space);
+            att.write(int_type, &setup.zactive_zones);
             att.close();
 
             sim_info.close();

@@ -24,7 +24,13 @@
 #include "traits.hpp"
 #include "gpu_error_check.h"
 #include "srhydro2D.hpp"
+#include "srhydro3D.hpp"
 
+
+// Some useful global constants
+constexpr real a = 1e-3;
+// Calculate a static PI
+constexpr double PI = 3.14159265358979323846;
 
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-GLOBAL-STRUCTS
@@ -32,7 +38,7 @@
 
 struct PrimData
 {
-    std::vector<real> rho, v1, v2, p, v;
+    std::vector<real> rho, v1, v2, v3, p, v;
 };
 
 struct MinMod
@@ -52,9 +58,10 @@ struct MinMod
 struct DataWriteMembers
 {
     real t, ad_gamma;
-    real xmin, xmax, ymin, ymax, dt;
-    int NX, NY, xactive_zones, yactive_zones;
+    real xmin, xmax, ymin, ymax, zmin, zmax, dt;
+    int NX, NY, NZ, xactive_zones, yactive_zones, zactive_zones;
     bool linspace;
+    std::string coord_system;
 };
 
 
@@ -143,6 +150,16 @@ __global__ void config_ghosts2DGPU(
     int x2grid_size, 
     bool first_order,
     bool bipolar = true);
+
+__global__ void config_ghosts3DGPU(
+    simbi::SRHD3D *d_sim, 
+    int x1grid_size, 
+    int x2grid_size,
+    int x3grid_size,  
+    bool first_order,
+    bool bipolar = true);
+
+void config_ghosts1D(std::vector<hydro1d::Conserved> &u_state, int grid_size, bool first_order);
     
 real calc_intermed_wave(real, real, real, real);
 real calc_intermed_pressure(real, real, real, real, real, real);
@@ -160,6 +177,11 @@ void config_ghosts2D(
     int x2grid_size, 
     bool first_order,
     bool bipolar = true);
+
+
+
+GPU_CALLABLE_MEMBER
+bool strong_shock(real pl, real pr);
 
 
 
