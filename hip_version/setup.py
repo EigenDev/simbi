@@ -119,7 +119,7 @@ compilerArguments = {
 if HIP["platform"] == "nvidia":
     compilerArguments["hipcc"] += ['-arch=sm_50', '-c', '--ptxas-options=-v', '--compiler-options', "-fPIC", "-O3"]
 else:
-    compilerArguments["hipcc"] += compilerArguments["g++"]
+    compilerArguments["hipcc"] += ['-std=c++17', '-fno-wrapv', '-O3', "-fPIC"]
     
 compiler_args = ['-march=native', '-fno-wrapv', '-O3']
 linker_args   = ['-lhdf5', '-lhdf5_cpp']
@@ -165,7 +165,7 @@ def extensions():
 
     extensionArguments = {
         'include_dirs':
-        lstIncludes + [HIP['include']] + extraIncludes,
+        lstIncludes + HIP['include'] + extraIncludes,
         'library_dirs': library_dirs,
         'extra_compile_args': compilerArguments,
         'extra_link_args': linker_args,
