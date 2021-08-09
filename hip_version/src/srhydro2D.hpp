@@ -23,7 +23,7 @@ namespace simbi
         sr2d::Eigenvals lambda;
         std::vector<sr2d::Primitive> prims;
         std::vector<sr2d::Conserved> u0;
-        std::vector<std::vector<real>> state2D, sources;
+        std::vector<std::vector<real>> state2D;
         float tend, tstart;
         real plm_theta, gamma, bipolar;
         bool first_order, periodic, hllc, linspace;
@@ -49,7 +49,7 @@ namespace simbi
                real CFL, std::string coord_system);
         ~SRHD2D();
 
-        std::vector<sr2d::Primitive> cons2prim2D(const std::vector<sr2d::Conserved> &cons_state2D);
+        void cons2prim2D();
 
         GPU_CALLABLE_MEMBER
         sr2d::Eigenvals calc_Eigenvals(
@@ -87,7 +87,7 @@ namespace simbi
             const unsigned int nhat);
 
         GPU_CALLABLE_MEMBER
-        sr2d::Conserved calc_Flux(const sr2d::Primitive &prims, unsigned int nhat);
+        sr2d::Conserved prims2flux(const sr2d::Primitive &prims, unsigned int nhat);
 
         GPU_CALLABLE_MEMBER
         sr2d::Conserved calc_hll_flux(
@@ -150,6 +150,8 @@ namespace simbi
      };
 
     __device__ bool quirk_strong_shock(real pl, real pr);
+    __device__ void warp_reduce_min(volatile real smem[BLOCK_SIZE2D][BLOCK_SIZE2D]);
+    __global__ void adapt_dtGPU(SRHD2D *s, const simbi::Geometry geometry);
     __global__ void gpu_advance(SRHD2D *s, const int n, const simbi::Geometry geometry);
     __global__ void shared_gpu_advance(SRHD2D *s, const int sh_block_size, const int sh_block_space, const int radius, const simbi::Geometry geometry);
     __global__ void shared_gpu_cons2prim(SRHD2D *s);
