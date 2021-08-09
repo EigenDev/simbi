@@ -110,7 +110,7 @@ compilerArguments = {
                 ]
             }
 if HIP["platform"] == "nvidia":
-    compilerArguments["hipcc"] += ['-arch=sm_50', '-c', '--ptxas-options=-v', '--compiler-options', "-fPIC"]
+    compilerArguments["hipcc"] += ['-arch=sm_50', '-c', '--ptxas-options=-v', '--compiler-options', "-fPIC", "-O3"]
 else:
     compilerArguments["hipcc"] += compilerArguments["g++"]
     
