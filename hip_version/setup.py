@@ -96,6 +96,13 @@ def locate_hip():
         elif not os.path.exists(v):
             raise EnvironmentError('The HIP %s path could not be '
                                    'located in %s' % (k, v))
+            
+    # turn the includes into a list 
+    if platform == "nvidia":
+        hipconfig["include"] = [hipconfig["include"], CUDA["include"]]
+    else:
+        hipconfig["include"] = [hipconfig["include"]]
+
     return hipconfig
 
 # CUDA = locate_cuda()
