@@ -281,37 +281,37 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     const real cs_r  = sqrt(gamma * p_r / (rho_r * h_r));
 
     // Compute waves based on Schneider et al. 1993 Eq(31 - 33)
-    const real vbar = 0.5 * (v_l + v_r);
-    const real cbar = 0.5 * (cs_r + cs_l);
-    const real br = (vbar + cbar) / (1 + vbar * cbar);
-    const real bl = (vbar - cbar) / (1 - vbar * cbar);
+    // const real vbar = 0.5 * (v_l + v_r);
+    // const real cbar = 0.5 * (cs_r + cs_l);
+    // const real br = (vbar + cbar) / (1 + vbar * cbar);
+    // const real bl = (vbar - cbar) / (1 - vbar * cbar);
 
-    const real aL = my_min(bl, (v_l - cs_l) / (1 - v_l * cs_l));
-    const real aR = my_max(br, (v_r + cs_r) / (1 + v_r * cs_r));
+    // const real aL = my_min(bl, (v_l - cs_l) / (1 - v_l * cs_l));
+    // const real aR = my_max(br, (v_r + cs_r) / (1 + v_r * cs_r));
 
 
     // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-    // const real sL = cs_l*cs_l/(gamma*gamma*(1.0 - cs_l*cs_l));
-    // const real sR = cs_r*cs_r/(gamma*gamma*(1.0 - cs_r*cs_r));
-    // // Define temporaries to save computational cycles
-    // const real qfL = 1. / (1. + sL);
-    // const real qfR = 1. / (1. + sR);
-    // const real sqrtR = sqrt(sR * (1.0 - v_r * v_r + sR));
-    // const real sqrtL = sqrt(sL * (1.0 - v_l * v_l + sL));
+    const real sL = cs_l*cs_l/(gamma*gamma*(1.0 - cs_l*cs_l));
+    const real sR = cs_r*cs_r/(gamma*gamma*(1.0 - cs_r*cs_r));
+    // Define temporaries to save computational cycles
+    const real qfL = 1. / (1. + sL);
+    const real qfR = 1. / (1. + sR);
+    const real sqrtR = sqrt(sR * (1.0 - v_r * v_r + sR));
+    const real sqrtL = sqrt(sL * (1.0 - v_l * v_l + sL));
 
-    // const real lamLm = (v_l - sqrtL) * qfL;
-    // const real lamRm = (v_r - sqrtR) * qfR;
-    // const real lamLp = (v_l + sqrtL) * qfL;
-    // const real lamRp = (v_r + sqrtR) * qfR;
+    const real lamLm = (v_l - sqrtL) * qfL;
+    const real lamRm = (v_r - sqrtR) * qfR;
+    const real lamLp = (v_l + sqrtL) * qfL;
+    const real lamRp = (v_r + sqrtR) * qfR;
 
-    // const real aL = lamLm < lamRm ? lamLm : lamRm;
-    // const real aR = lamLp > lamRp ? lamLp : lamRp;
+    const real aL = lamLm < lamRm ? lamLm : lamRm;
+    const real aR = lamLp > lamRp ? lamLp : lamRp;
 
     return Eigenvals(aL, aR);
 };
 
 // Adapt the CFL conditonal timestep
-__device__ void warp_reduce_min(volatile real smem[BLOCK_SIZE])
+__device__ void simbi::warp_reduce_min(volatile real smem[BLOCK_SIZE])
 {
 
     for (int stride = BLOCK_SIZE /2; stride >= 1; stride /=  2)
@@ -323,65 +323,34 @@ __device__ void warp_reduce_min(volatile real smem[BLOCK_SIZE])
 }
 
 // Adapt the CFL conditonal timestep
-__global__ void adapt_dtGPU(SRHD *s, int nBlocks, real *host_dt)
+__global__ void simbi::adapt_dtGPU(SRHD *s)
 {
-    real dr, cs;
-    real cfl_dt;
-    real h, rho, p, v, vPLus, vMinus;
-
     const real gamma     = s->gamma;
-    const int  idx_shift = s->idx_shift;
-    real min_dt = INFINITY;
-    int neighbor_tid;
-
     __shared__ volatile real dt_buff[BLOCK_SIZE];
     __shared__  Primitive prim_buff[BLOCK_SIZE];
 
     int tid = threadIdx.x;
     int gid = blockDim.x*blockIdx.x + threadIdx.x;
-
+    int aid = gid + s->idx_shift;
     if (gid < s->pgrid_size)
     {
-        prim_buff[tid] = s->gpu_prims[gid + s->idx_shift];
+        prim_buff[tid] = s->gpu_prims[aid];
+        __syncthreads();
+        
+        real dr  = s->coord_lattice.gpu_dx1[gid];
+        real rho = prim_buff[tid].rho;
+        real p   = prim_buff[tid].p;
+        real v   = prim_buff[tid].v;
 
-        // tail part
-        int mult = 0;
-        for(int ii=1; mult + tid < s->pgrid_size; ii++) 
-        {
-            neighbor_tid = tid + mult;
-            dr  = s->coord_lattice.gpu_dx1[neighbor_tid];
-            rho = s->gpu_prims[neighbor_tid + idx_shift].rho;
-            p   = s->gpu_prims[neighbor_tid + idx_shift].p;
-            v   = s->gpu_prims[neighbor_tid + idx_shift].v;
+        real h = 1. + gamma * p / (rho * (gamma - 1.));
+        real cs = sqrt(gamma * p / (rho * h));
 
-            h = 1. + gamma * p / (rho * (gamma - 1.));
-            cs = sqrt(gamma * p / (rho * h));
+        real vPLus  = (v + cs) / (1 + v * cs);
+        real vMinus = (v - cs) / (1 - v * cs);
 
-            vPLus  = (v + cs) / (1 + v * cs);
-            vMinus = (v - cs) / (1 - v * cs);
+        real cfl_dt = dr / (my_max(abs(vPLus), abs(vMinus)));
 
-            cfl_dt = dr / (my_max(abs(vPLus), abs(vMinus)));
-
-            min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
-
-            mult = ii * BLOCK_SIZE;
-        }
-
-        // previously reduced MIN part
-        // mult = 0;
-        // int ii;
-        // real val;
-        // for(ii = 1; mult+threadIdx.x < nBlocks; ii++)
-        // {
-        //     val = s->dt_min[threadIdx.x + mult];
-
-        //     min_dt = val < min_dt ? val : min_dt;
-        //     mult = ii * BLOCK_SIZE;
-        // }
-
-        min_dt *= s->CFL;
-
-        dt_buff[threadIdx.x] = min_dt;
+        dt_buff[threadIdx.x] = s->CFL * cfl_dt;
 
         __syncthreads();
 
@@ -391,8 +360,8 @@ __global__ void adapt_dtGPU(SRHD *s, int nBlocks, real *host_dt)
         }
         if(threadIdx.x == 0)
         {
-            s->dt = dt_buff[threadIdx.x]; // dt_min[0] == minimum
-            // *host_dt = dt_buff[threadIdx.x];
+            s->dt_min[blockIdx.x] = dt_buff[threadIdx.x]; // dt_min[0] == minimum
+            s->dt = s->dt_min[0];
         }
         
     }
@@ -1061,6 +1030,8 @@ SRHD::simulate1D(
                           state[1][ii],
                           state[2][ii]};
     }
+    // deallocate the init state vector now
+    std::vector<int> state;
 
     if ((coord_system == "spherical") && (linspace))
     {
@@ -1121,6 +1092,7 @@ SRHD::simulate1D(
             hipLaunchKernelGGL(shared_gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), shBlockBytes, 0, device_self, shBlockSize, radius, geometry[this->coord_system]);
             hipLaunchKernelGGL(config_ghosts1DGPU, dim3(1), dim3(1), 0, 0, device_self, Nx, first_order);
             t += dt; 
+            
             hipDeviceSynchronize();
 
             if (n >= nfold){
@@ -1161,7 +1133,7 @@ SRHD::simulate1D(
             }
             n++;
             // Adapt the timestep
-            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
+            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self);
             hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
         }
     } else {
@@ -1222,7 +1194,7 @@ SRHD::simulate1D(
             }
             n++;
             //Adapt the timestep
-            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self, nBlocks, &(dt));
+            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self);
             hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
         }
 
@@ -1236,6 +1208,7 @@ SRHD::simulate1D(
     hipFree(device_self);
     cons2prim1D(sys_state);
 
+    hipCheckErrors("Something went wrong at end of call");
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(Nx, 0));
     for (size_t ii = 0; ii < Nx; ii++)
     {

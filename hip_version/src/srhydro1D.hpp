@@ -159,6 +159,8 @@ namespace simbi
           void cleanUp();
      };
 
+     __device__ void warp_reduce_min(volatile real smem[BLOCK_SIZE]);
+     __global__ void adapt_dtGPU(SRHD *s);
      __global__ void gpu_advance(SRHD *s, const int n, const simbi::Geometry geometry);
      __global__ void shared_gpu_advance(SRHD *s, const int sh_block_size, const int radius, const simbi::Geometry geometry);
      __global__ void shared_gpu_cons2prim(SRHD *s, int n);
