@@ -16,12 +16,9 @@
 using namespace simbi;
 using namespace std::chrono;
 
-// Calculate a static PI
-real pi() { return std::atan(1)*4; }
-constexpr real a = 1e-3;
-
-GPU_CALLABLE_MEMBER
-bool simbi::strong_shock(real pl, real pr){
+__device__
+bool simbi::quirk_strong_shock(real pl, real pr)
+{
     return abs(pr - pl) / my_min(pl, pr) > a;
 }
 // Default Constructor
@@ -70,9 +67,7 @@ SRHD2D_DualSpace::~SRHD2D_DualSpace()
     hipFree(host_dx2);
     hipFree(host_fas1);
     hipFree(host_fas2);
-    hipFree(host_x1c);
     hipFree(host_x1m);
-    hipFree(host_x2c);
     hipFree(host_cot);
     hipFree(host_source0);
     hipFree(host_sourceD);
@@ -115,9 +110,7 @@ void SRHD2D_DualSpace::copyStateToGPU(
     hipMalloc((void **)&host_dx2,             r2bytes);
     hipMalloc((void **)&host_dV1,             r1bytes);
     hipMalloc((void **)&host_dV2,             r2bytes);
-    hipMalloc((void **)&host_x1c,             r1bytes);
     hipMalloc((void **)&host_x1m,             r1bytes);
-    hipMalloc((void **)&host_x2c,             r2bytes);
     hipMalloc((void **)&host_cot,             r2bytes);
     hipMalloc((void **)&host_fas1,            fa1bytes);
     hipMalloc((void **)&host_fas2,            fa2bytes);
@@ -203,12 +196,6 @@ void SRHD2D_DualSpace::copyStateToGPU(
     hipMemcpy(host_fas2, host.coord_lattice.x2_face_areas.data() , fa2bytes, hipMemcpyHostToDevice);
     hipCheckErrors("Memcpy failed at transferring x2 face areas");
 
-    hipMemcpy(host_x1c, host.coord_lattice.x1ccenters.data(), r1bytes, hipMemcpyHostToDevice);
-    hipCheckErrors("Memcpy failed at transferring x1centers");
-
-    hipMemcpy(host_x2c, host.coord_lattice.x2ccenters.data(), r2bytes, hipMemcpyHostToDevice);
-    hipCheckErrors("Memcpy failed at transferring x2centers");
-
     hipMemcpy(host_x1m, host.coord_lattice.x1mean.data(), r1bytes, hipMemcpyHostToDevice);
     hipCheckErrors("Memcpy failed at transferring x1mean");
 
@@ -233,12 +220,6 @@ void SRHD2D_DualSpace::copyStateToGPU(
 
     hipMemcpy(&(device->coord_lattice.gpu_cot),&host_cot, sizeof(real *), hipMemcpyHostToDevice);
     hipCheckErrors("Memcpy failed at transferring cot");
-
-    hipMemcpy(&(device->coord_lattice.gpu_x1ccenters), &host_x1c, sizeof(real *), hipMemcpyHostToDevice);
-    hipCheckErrors("Memcpy failed at transferring x1c");
-
-    hipMemcpy(&(device->coord_lattice.gpu_x2ccenters), &host_x2c, sizeof(real *), hipMemcpyHostToDevice);
-    hipCheckErrors("Memcpy failed at transferring x2c");
 
     hipMemcpy(&(device->coord_lattice.gpu_x1_face_areas), &host_fas1, sizeof(real *), hipMemcpyHostToDevice);
     hipCheckErrors("Memcpy failed at transferring x1 face areas");
@@ -1164,7 +1145,7 @@ __global__ void simbi::shared_gpu_advance(
                                             s->gpu_sourceS1[real_loc] * decay_constant,
 
                             // L(S2)
-                            -(f1.S2 * s1R - f2.S2 * s1R) / dV1
+                            -(f1.S2 * s1R - f2.S2 * s1L) / dV1
                                     - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
                                     - (rhoc *hc * wc2 * uc * vc / rmean - pc * coord_lattice->gpu_cot[ycoordinate] / (rmean)) 
                                         + s->gpu_sourceS2[real_loc] * decay_constant,
@@ -1331,13 +1312,13 @@ __global__ void simbi::shared_gpu_advance(
 
                     if (s->hllc)
                     {
-                        if (strong_shock(xprims_l.p, xprims_r.p) ){
+                        if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
                             f1 = s->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
                         } else {
                             f1 = s->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
                         }
                         
-                        if (strong_shock(yprims_l.p, yprims_r.p)){
+                        if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
                             g1 = s->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                         } else {
                             g1 = s->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
@@ -1453,13 +1434,13 @@ __global__ void simbi::shared_gpu_advance(
                     
                     if (s->hllc)
                     {
-                        if (strong_shock(xprims_l.p, xprims_r.p) ){
+                        if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
                             f2 = s->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
                         } else {
                             f2 = s->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
                         }
                         
-                        if (strong_shock(yprims_l.p, yprims_r.p)){
+                        if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
                             g2 = s->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                         } else {
                             g2 = s->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
@@ -1522,7 +1503,7 @@ __global__ void simbi::shared_gpu_advance(
                                             s->gpu_sourceS1[real_loc] * decay_constant,
 
                             // L(S2)
-                            -(f1.S2 * s1R - f2.S2 * s1R) / dV1
+                            -(f1.S2 * s1R - f2.S2 * s1L) / dV1
                                     - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
                                     - (rhoc * hc * wc2 * uc * vc / rmean - pc * coord_lattice->gpu_cot[ycoordinate] / (rmean)) 
                                         + s->gpu_sourceS2[real_loc] * decay_constant,
@@ -1547,19 +1528,18 @@ __global__ void simbi::shared_gpu_advance(
 //                                            SIMULATE
 //===================================================================================================================
 std::vector<std::vector<real>> SRHD2D::simulate2D(
-    std::vector<real> lorentz_gamma, 
-    const std::vector<std::vector<real>> sources,
-    float tstart = 0., 
-    float tend = 0.1, 
-    real dt = 1.e-4, 
-    real plm_theta = 1.5,
-    real engine_duration = 10, 
-    real chkpt_interval = 0.1,
-    std::string data_directory = "data/", 
-    bool first_order = true,
-    bool periodic = false, 
-    bool linspace = true, 
-    bool hllc = false)
+    std::vector<std::vector<double>> &sources,
+    double tstart,
+    double tend,
+    double init_dt,
+    double plm_theta,
+    double engine_duration,
+    double chkpt_interval,
+    std::string data_directory,
+    bool first_order,
+    bool periodic,
+    bool linspace,
+    bool hllc)
 {
     std::string tnow, tchunk, tstep;
     int total_zones = NX * NY;
@@ -1579,7 +1559,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->linspace = linspace;
     this->lorentz_gamma = lorentz_gamma;
     this->plm_theta = plm_theta;
-    this->dt    = dt;
+    this->dt    = init_dt;
 
     if (first_order)
     {
@@ -1627,7 +1607,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                                      simbi::Cellspacing::LINSPACE);
     }
 
-    if (coord_lattice.x2vertices[yphysical_grid] == pi()){
+    if (coord_lattice.x2vertices[yphysical_grid] == PI){
         bipolar = true;
     }
     // Write some info about the setup for writeup later
@@ -1739,7 +1719,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                         << "Time: " << std::setw(10) <<  t
                         << "\t"
                         << "Zones/sec: "<< total_zones / delta_t.count() << std::flush;
-                nfold += 1000;
+                nfold += 100;
             }
 
             /* Write to a File every tenth of a second */
@@ -1761,11 +1741,15 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 write_hdf5(data_directory, filename, prods, setup, 2, total_zones);
                 t_interval += chkpt_interval;
             }
-
+            
             n++;
             // Adapt the timestep
             hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nxBlocks, physical_nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, geometry[coord_system]);
             hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+
+            // Update decay constant
+            decay_const = 1.0 / (1.0 + exp(10.0 * (t - engine_duration)));
+            hipMemcpy(&decay_const, &(device_self->decay_const),  sizeof(real), hipMemcpyHostToDevice);
         }
     } else {
         const int radius = 2;
@@ -1802,7 +1786,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                         << "Time: " << std::setw(10) <<  t
                         << "\t"
                         << "Zones/sec: "<< NX * NY / delta_t.count() << std::flush;
-                nfold += 1000;
+                nfold += 100;
             }
             
             /* Write to a File every tenth of a second */
@@ -1828,6 +1812,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             //Adapt the timestep
             // hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nxBlocks, physical_nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, geometry[coord_system]);
             // hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+
+            // Update decay constant
+            decay_const = 1.0 / (1.0 + exp(10.0 * (t - engine_duration)));
+            hipMemcpy(&decay_const, &(device_self->decay_const),  sizeof(real), hipMemcpyHostToDevice);
         }
 
     }

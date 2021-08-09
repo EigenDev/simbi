@@ -57,7 +57,6 @@ SRHD_DualSpace::~SRHD_DualSpace()
     hipFree(host_dV);
     hipFree(host_dx1);
     hipFree(host_fas);
-    hipFree(host_x1c);
     hipFree(host_x1m);
     hipFree(host_source0);
     hipFree(host_sourceD);
@@ -81,15 +80,12 @@ void SRHD_DualSpace::copyStateToGPU(
     int rrbytes = nzreal * sizeof(real);
     int fabytes = host.coord_lattice.face_areas.size() * sizeof(real);
 
-    
-
     //--------Allocate the memory for pointer objects-------------------------
     hipMalloc((void **)&host_u0,              cbytes);
     hipMalloc((void **)&host_prims,           pbytes);
     hipMalloc((void **)&host_pressure_guess,  rbytes);
     hipMalloc((void **)&host_dx1,             rrbytes);
     hipMalloc((void **)&host_dV ,             rrbytes);
-    hipMalloc((void **)&host_x1c,             rrbytes);
     hipMalloc((void **)&host_x1m,             rrbytes);
     hipMalloc((void **)&host_fas,             fabytes);
     hipMalloc((void **)&host_source0,         rrbytes);
@@ -157,9 +153,6 @@ void SRHD_DualSpace::copyStateToGPU(
     hipMemcpy(host_fas, host.coord_lattice.face_areas.data() , fabytes, hipMemcpyHostToDevice);
     hipCheckErrors("Memcpy failed at transferring face areas");
 
-    hipMemcpy(host_x1c, host.coord_lattice.x1ccenters.data(), rrbytes, hipMemcpyHostToDevice);
-    hipCheckErrors("Memcpy failed at transferring x1centers");
-
     hipMemcpy(host_x1m, host.coord_lattice.x1mean.data(),     rrbytes, hipMemcpyHostToDevice);
     hipCheckErrors("Memcpy failed at transferring x1mean");
 
@@ -171,9 +164,6 @@ void SRHD_DualSpace::copyStateToGPU(
     hipCheckErrors("Memcpy failed at transferring dx1");
 
     hipMemcpy(&(device->coord_lattice.gpu_x1mean),&host_x1m, sizeof(real *), hipMemcpyHostToDevice);
-    hipCheckErrors("Memcpy failed at transferring dx1");
-
-    hipMemcpy(&(device->coord_lattice.gpu_x1ccenters), &host_x1c, sizeof(real *), hipMemcpyHostToDevice);
     hipCheckErrors("Memcpy failed at transferring dx1");
 
     hipMemcpy(&(device->coord_lattice.gpu_face_areas), &host_fas, sizeof(real *), hipMemcpyHostToDevice);
@@ -988,28 +978,34 @@ __global__ void simbi::shared_gpu_advance(
 }
 
 std::vector<std::vector<real>>
-SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>> &sources,
-                 real tstart = 0.0, real tend = 0.1, real dt = 1.e-4,
-                 real plm_theta = 1.5, real engine_duration = 10,
-                 real chkpt_interval = 0.1, std::string data_directory = "data/",
-                 bool first_order = true, bool periodic = false,
-                 bool linspace = true, bool hllc = false)
+SRHD::simulate1D(
+    std::vector<std::vector<double>> &sources,
+    double tstart,
+    double tend,
+    double init_dt,
+    double plm_theta,
+    double engine_duration,
+    double chkpt_interval,
+    std::string data_directory,
+    bool first_order,
+    bool periodic,
+    bool linspace,
+    bool hllc)
 {
     this->periodic = periodic;
     this->first_order = first_order;
     this->plm_theta = plm_theta;
     this->linspace = linspace;
-    this->lorentz_gamma = lorentz_gamma;
     this->sourceD = sources[0];
     this->sourceS = sources[1];
     this->source0 = sources[2];
     this->hllc = hllc;
     this->engine_duration = engine_duration;
     this->t    = tstart;
-    this->dt   = dt;
+    this->dt   = init_dt;
     this->tend = tend;
     // Define the swap vector for the integrated state
-    this->Nx = lorentz_gamma.size();
+    this->Nx = state[0].size();
 
     if (periodic)
     {
@@ -1111,7 +1107,6 @@ SRHD::simulate1D(std::vector<real> &lorentz_gamma, std::vector<std::vector<real>
     double zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<double> delta_t;
-
 
     // Simulate :)
     if (first_order)

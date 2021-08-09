@@ -106,14 +106,13 @@ namespace simbi
         real adapt_dt(const std::vector<sr2d::Primitive> &prims);
 
         std::vector<std::vector<real>> simulate2D(
-            const std::vector<real> lorentz_gamma,
-            const std::vector<std::vector<real>> sources,
-            float tstart,
-            float tend,
-            real dt,
-            real plm_theta,
-            real engine_duration,
-            real chkpt_interval,
+            std::vector<std::vector<double>> &sources,
+            double tstart,
+            double tend,
+            double init_dt,
+            double plm_theta,
+            double engine_duration,
+            double chkpt_interval,
             std::string data_directory,
             bool first_order,
             bool periodic,
@@ -150,7 +149,7 @@ namespace simbi
           void cleanUp();
      };
 
-    GPU_CALLABLE_MEMBER bool strong_shock(real pl, real pr);
+    __device__ bool quirk_strong_shock(real pl, real pr);
     __global__ void gpu_advance(SRHD2D *s, const int n, const simbi::Geometry geometry);
     __global__ void shared_gpu_advance(SRHD2D *s, const int sh_block_size, const int sh_block_space, const int radius, const simbi::Geometry geometry);
     __global__ void shared_gpu_cons2prim(SRHD2D *s);

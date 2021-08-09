@@ -126,11 +126,12 @@ namespace simbi
           std::vector<sr1d::Conserved> u_dot1D(std::vector<sr1d::Conserved> &u_state);
           
           std::vector<std::vector<real>>
-          simulate1D(std::vector<real> &lorentz_gamma,
-                     std::vector<std::vector<real>> &sources, real tstart,
-                     real tend, real dt, real plm_theta, real engine_duraction,
-                     real chkpt_interval, std::string data_directory,
-                     bool first_order, bool periodic, bool linspace, bool hllc);
+          simulate1D(
+               std::vector<std::vector<real>> &sources, 
+               real tstart,
+               real tend, real dt, real plm_theta, real engine_duraction,
+               real chkpt_interval, std::string data_directory,
+               bool first_order, bool periodic, bool linspace, bool hllc);
      };
 
      struct SRHD_DualSpace
