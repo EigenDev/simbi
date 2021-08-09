@@ -42,12 +42,6 @@ std::vector<real> rollVector(const std::vector<real>& v, unsigned int n){
     return ret;
 };
 
-// Roll a single vector index
-real roll(std::vector<real>  &v, unsigned int n) {
-   return v[n % v.size()];
-};
-
-
 GPU_CALLABLE_MEMBER
 bool strong_shock(real pl, real pr)
 {

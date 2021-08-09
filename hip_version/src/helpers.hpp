@@ -114,11 +114,8 @@ template <typename T>
 GPU_CALLABLE_MEMBER
 constexpr int sgn(T val) { return (T(0) < val) - (val < T(0)); }
 
-
 template<typename T>
-GPU_CALLABLE_MEMBER
-T roll(const T &v, unsigned int n, int size);
-
+GPU_CALLABLE_MEMBER constexpr T roll(const T *v, unsigned int n, int size) { return v[n % size];}
 
 template<typename T>
 constexpr T roll(const std::vector<T>  &v, unsigned int n) { return v[n % v.size()];}
@@ -131,7 +128,6 @@ void config_gpu_space();
 //----------------Define Methods-------------------------
 sr2d::PrimitiveData vecs2struct(const std::vector<sr2d::Primitive> &p);
 std::vector<real> rollVector(const std::vector<real> &, unsigned int);
-real roll(std::vector<real> &, unsigned int);
 // real roll(std::vector<std::vector<real>> &, unsigned int xpos, unsigned int ypos);
 void toWritePrim(sr1d::PrimitiveArray *from, PrimData *to);
 void toWritePrim(sr2d::PrimitiveData *from, PrimData *to);
