@@ -2125,7 +2125,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                 ncheck += 1;
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
-                zu_avg += NX * NY / delta_t.count();
+                zu_avg += total_zones / delta_t.count();
                 std::cout << std::fixed << std::setprecision(3) << std::scientific;
                     std::cout << "\r"
                         << "Iteration: " << std::setw(5) << n 
@@ -2134,10 +2134,9 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                         << "\t"
                         << "Time: " << std::setw(10) <<  t
                         << "\t"
-                        << "Zones/sec: "<< NX * NY / delta_t.count() << std::flush;
+                        << "Zones/sec: "<< total_zones / delta_t.count() << std::flush;
                 nfold += 100;
             }
-            hipCheckErrors("Kernel call got fucked");
             /* Write to a File every tenth of a second */
             if (t >= t_interval)
             {
