@@ -1744,12 +1744,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             
             n++;
             // Adapt the timestep
-            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nxBlocks, physical_nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, geometry[coord_system]);
-            hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+            // hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nxBlocks, physical_nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, geometry[coord_system]);
+            // hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
 
             // Update decay constant
             decay_const = 1.0 / (1.0 + exp(10.0 * (t - engine_duration)));
-            hipMemcpy(&decay_const, &(device_self->decay_const),  sizeof(real), hipMemcpyHostToDevice);
+            hipMemcpy(&(device_self->decay_const), &decay_const,  sizeof(real), hipMemcpyHostToDevice);
         }
     } else {
         const int radius = 2;
@@ -1815,7 +1815,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
             // Update decay constant
             decay_const = 1.0 / (1.0 + exp(10.0 * (t - engine_duration)));
-            hipMemcpy(&decay_const, &(device_self->decay_const),  sizeof(real), hipMemcpyHostToDevice);
+            hipMemcpy(&(device_self->decay_const), &decay_const,  sizeof(real), hipMemcpyHostToDevice);
         }
 
     }
