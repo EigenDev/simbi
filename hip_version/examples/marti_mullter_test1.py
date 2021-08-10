@@ -8,17 +8,20 @@ from pysimbi_gpu import Hydro
 
 gamma = 4/3 
 tend = 0.4249
-N = 2**12
-dt = 1.e-6
+N = 2**16
+xmin = 0.0
+xmax = 1.0 
+xmid = (xmax - xmin) / 2
+dt = (xmax - xmin) / N
 data_dir = "../data/"
 
 fig, axs = plt.subplots(3, 1, figsize=(15,30), sharex=True)
 
 hydro2 = Hydro(gamma=gamma, initial_state = ((10.0,13.33,0.0),(1.0,1.e-10,0.0)),
-        Npts=N, geometry=(0.0,1.0,0.5), n_vars=3, regime="relativistic")
+        Npts=N, geometry=(xmin,xmax,xmid), n_vars=3, regime="relativistic")
 
 hydro = Hydro(gamma=gamma, initial_state = ((10.0,13.33,0.0),(1.0,1.e-10,0.0)),
-        Npts=N, geometry=(0.0,1.0,0.5), n_vars=3, regime="relativistic")
+        Npts=N, geometry=(xmin,xmax,xmid), n_vars=3, regime="relativistic")
 
 
 

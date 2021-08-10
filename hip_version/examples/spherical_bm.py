@@ -28,7 +28,7 @@ epsilon = 2.
 
 rho_init = rho0(0, np.pi)
 v_init = 0.
-ntheta = 256
+ntheta = 512
 rmin = 0.01
 rmax = 1
 N_exp = 5
