@@ -581,77 +581,6 @@ Conserved SRHD3D::prims2cons(const Primitive &prims)
 //---------------------------------------------------------------------
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
-
-// Adapt the CFL conditonal timestep
-// real SRHD3D::adapt_dt(const std::vector<Primitive> &prims)
-// {
-//     real dx1, cs, dx2, x2_right, x2_left, rho, pressure, v1, v2, volAvg, h;
-//     real min_dt, cfl_dt;
-//     int shift_i, shift_j;
-//     real plus_v1, plus_v2, minus_v1, minus_v2;
-
-//     min_dt = 0;
-//     // Compute the minimum timestep given CFL
-//     for (int jj = 0; jj < yphysical_grid; jj++)
-//     {
-//         shift_j  = jj + idx_active;
-//         x2_right = coord_lattice.x2vertices[jj + 1];
-//         x2_left  = coord_lattice.x2vertices[jj];
-//         dx2 = x2_right - x2_left;
-//         for (int ii = 0; ii < xphysical_grid; ii++)
-//         {
-            
-//             shift_i = ii + idx_active;
-
-//             r_right = coord_lattice.x1vertices[ii + 1];
-//             r_left = coord_lattice.x1vertices[ii];
-
-//             dx1 = r_right - r_left;
-//             rho = prims[shift_i + NX * shift_j].rho;
-//             v1  = prims[shift_i + NX * shift_j].v1;
-//             v2  = prims[shift_i + NX * shift_j].v2;
-//             pressure = prims[shift_i + NX * shift_j].p;
-
-//             h = 1. + gamma * pressure / (rho * (gamma - 1.));
-//             cs = sqrt(gamma * pressure / (rho * h));
-
-//             plus_v1 = (v1 + cs) / (1. + v1 * cs);
-//             plus_v2 = (v2 + cs) / (1. + v2 * cs);
-//             minus_v1 = (v1 - cs) / (1. - v1 * cs);
-//             minus_v2 = (v2 - cs) / (1. - v2 * cs);
-
-//             if (coord_system == "cartesian")
-//             {
-
-//                 cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
-//                              dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
-//             }
-//             else
-//             {
-//                 // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-//                 volAvg = coord_lattice.x1mean[ii];
-//                 // std::cout << volAvg << "\n";
-//                 // std::cout << dx1 << "\n";
-//                 // std::cout << dx2 << "\n";
-//                 // std::cout << volAvg * dx2 << "\n";
-//                 // std::cin.get();
-//                 cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
-//                              volAvg * dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
-//             }
-
-//             if ((ii > 0) || (jj > 0))
-//             {
-//                 min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
-//             }
-//             else
-//             {
-//                 min_dt = cfl_dt;
-//             }
-//         }
-//     }
-//     return CFL * min_dt;
-// };
-
 __device__ void warp_reduce_min(volatile real smem[BLOCK_SIZE3D][BLOCK_SIZE3D])
 {
 
@@ -672,70 +601,58 @@ __global__ void adapt_dtGPU(
     SRHD3D *s, 
     const simbi::Geometry geometry)
 {
-    real cs;
-    real cfl_dt;
-    real h, rho, p, v1, v2, dx1, dx2, rmean;
-    real plus_v1 , plus_v2 , minus_v1, minus_v2;
-
     real gamma = s->gamma;
-    real min_dt = INFINITY;
-    int neighbor_tx, neighbor_ty, neighbor_tid;
-
-    __shared__ volatile real dt_buff[BLOCK_SIZE3D][BLOCK_SIZE3D];
-    __shared__ Primitive   prim_buff[BLOCK_SIZE3D][BLOCK_SIZE3D];
+    __shared__ volatile real dt_buff[BLOCK_SIZE3D][BLOCK_SIZE3D][BLOCK_SIZE3D];
+    __shared__ Primitive   prim_buff[BLOCK_SIZE3D][BLOCK_SIZE3D][BLOCK_SIZE3D];
 
     const int tx  = threadIdx.x;
     const int ty  = threadIdx.y;
+    const int tz  = threadIdx.z;
     const int ii  = blockDim.x * blockIdx.x + threadIdx.x;
     const int jj  = blockDim.y * blockIdx.y + threadIdx.y;
+    const int zz  = blockDim.z * blockIdx.z + threadIdx.z;
     const int ia  = ii + s->idx_active;
     const int ja  = jj + s->idx_active;
     const int gid = jj * s-> NX + ii;
     const int nx  = s->NX;
 
-    const int shift_i = ii + s->idx_active;
-    const int shift_j = jj + s->idx_active;
-
     const CLattice3D *coord_lattice = &(s->coord_lattice);
 
+    real cfl_dt;
     if ( (ii < s->xphysical_grid) && (jj < s->yphysical_grid))
     {   
 
-        dx1  = s->coord_lattice.gpu_dx1[ii];
-        dx2  = s->coord_lattice.gpu_dx2[jj];
-        rho  = s->gpu_prims[ja * nx + ia].rho;
-        p    = s->gpu_prims[ja * nx + ia].p;
-        v1   = s->gpu_prims[ja * nx + ia].v1;
-        v2   = s->gpu_prims[ja * nx + ia].v2;
+        real dx1  = s->coord_lattice.gpu_dx1[ii];
+        real dx2  = s->coord_lattice.gpu_dx2[jj];
+        real rho  = s->gpu_prims[ja * nx + ia].rho;
+        real p    = s->gpu_prims[ja * nx + ia].p;
+        real v1   = s->gpu_prims[ja * nx + ia].v1;
+        real v2   = s->gpu_prims[ja * nx + ia].v2;
 
-        h  = 1. + gamma * p / (rho * (gamma - 1.));
-        cs = sqrt(gamma * p / (rho * h));
+        real h  = 1. + gamma * p / (rho * (gamma - 1.));
+        real cs = sqrt(gamma * p / (rho * h));
 
-        plus_v1  = (v1 + cs) / (1. + v1 * cs);
-        plus_v2  = (v2 + cs) / (1. + v2 * cs);
-        minus_v1 = (v1 - cs) / (1. - v1 * cs);
-        minus_v2 = (v2 - cs) / (1. - v2 * cs);
+        real plus_v1  = (v1 + cs) / (1. + v1 * cs);
+        real plus_v2  = (v2 + cs) / (1. + v2 * cs);
+        real minus_v1 = (v1 - cs) / (1. - v1 * cs);
+        real minus_v2 = (v2 - cs) / (1. - v2 * cs);
 
         switch (geometry)
         {
-        case simbi::Geometry::CARTESIAN:
-            cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
-                            dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
-            break;
-        
-        case simbi::Geometry::SPHERICAL:
-            // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-            rmean = coord_lattice->gpu_x1mean[neighbor_tx];
-            cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
-                        rmean * dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
-            break;
+            case simbi::Geometry::CARTESIAN:
+                cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
+                                dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
+                break;
+            
+            case simbi::Geometry::SPHERICAL:
+                // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
+                real rmean = coord_lattice->gpu_x1mean[ii];
+                cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
+                            rmean * dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
+                break;
         }
 
-        min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
-
-        min_dt *= s->CFL;
-
-        dt_buff[threadIdx.y][threadIdx.x] = min_dt;
+        dt_buff[threadIdx.z][threadIdx.y][threadIdx.x] = s->CFL * cfl_dt;
 
         __syncthreads();
 
