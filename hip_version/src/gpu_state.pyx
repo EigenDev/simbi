@@ -14,7 +14,8 @@ from libcpp.string cimport string
 from cpython cimport array 
 
 cdef extern from "config.hpp":
-    ctypedef float real 
+    cdef int FLOAT_PRECISION "FLOAT_PRECISION"
+    ctypedef double real 
 
 cdef extern from "euler1D.hpp" namespace "simbi":
     cdef int total_zones "total_zones"
