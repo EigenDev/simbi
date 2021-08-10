@@ -599,18 +599,6 @@ __global__ void simbi::adapt_dtGPU(
     }
 };
 
-__global__ void printGPU(SRHD2D* s, int active_zones)
-{
-    // real min_dt = INFINITY;
-    // for (int ii=0; ii< active_zones; ii++)
-    // {
-    //     // printf("[%d]: %f\n", ii, s->dt_min[ii]);
-    //     // min_dt = min_dt < s->dt_min[ii] ? min_dt : s->dt_min[ii];
-    // }
-    // s->dt = min_dt;
-    printf("dt_min[0]: %f\n", s->dt_min[0]);
-}
-
 //===================================================================================================================
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
