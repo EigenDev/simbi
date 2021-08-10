@@ -40,7 +40,7 @@ namespace simbi
           std::vector<sr1d::Conserved> sys_state, du_dt, un;
           std::vector<sr1d::Primitive> prims;
 
-          int Nx, n, pgrid_size, idx_shift, i_start, i_bound;
+          int nx, n, active_zones, idx_shift, i_start, i_bound;
           real tend;
           real plm_theta, engine_duration, t, decay_constant;
           bool first_order, periodic, linspace, hllc;
@@ -84,7 +84,7 @@ namespace simbi
           real adapt_dt(const sr1d::Primitive* prims);
 
           GPU_CALLABLE_MEMBER
-          sr1d::Conserved calc_state(real rho, real v, real pressure);
+          sr1d::Conserved prims2cons(const sr1d::Primitive &prim);
 
           GPU_CALLABLE_MEMBER
           sr1d::Conserved calc_hll_state(
@@ -103,7 +103,7 @@ namespace simbi
                const real pStar);
 
           GPU_CALLABLE_MEMBER
-          sr1d::Conserved calc_flux(real rho, real v, real pressure);
+          sr1d::Conserved prims2flux(const sr1d::Primitive &prim);
 
           GPU_CALLABLE_MEMBER
           sr1d::Conserved calc_hll_flux(
@@ -163,7 +163,7 @@ namespace simbi
      __global__ void adapt_dtGPU(SRHD *s);
      __global__ void gpu_advance(SRHD *s, const int n, const simbi::Geometry geometry);
      __global__ void shared_gpu_advance(SRHD *s, const int sh_block_size, const int radius, const simbi::Geometry geometry);
-     __global__ void shared_gpu_cons2prim(SRHD *s, int n);
+     __global__ void shared_gpu_cons2prim(SRHD *s);
 } // namespace simbi
 
 #endif
