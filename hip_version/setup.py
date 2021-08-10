@@ -83,7 +83,7 @@ def locate_hip():
     
     hipconfig = {'home':     home, 
                  'hipcc':    hipcc,
-                 'include':  pjoin(home, 'include') if platform == "amd" else CUDA["include"],
+                 'include':  pjoin(home, 'include'),
                  'lib':      pjoin(home, 'lib') if platform == "amd" else CUDA["lib64"],
                  'platform': platform}
     
