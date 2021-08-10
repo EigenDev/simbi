@@ -228,7 +228,7 @@ void SRHD2D_DualSpace::copyStateToGPU(
     hipCheckErrors("Memcpy failed at transferring x2 face areas");
 
     hipMemcpy(&(device->dt),          &host.dt      ,  sizeof(real), hipMemcpyHostToDevice);
-    hipMemcpy(&(device->plm_theta),  &host.plm_theta,  sizeof(real), hipMemcpyHostToDevice);
+    hipMemcpy(&(device->plm_theta),   &host.plm_theta,  sizeof(real), hipMemcpyHostToDevice);
     hipMemcpy(&(device->gamma),       &host.gamma   ,  sizeof(real), hipMemcpyHostToDevice);
     hipMemcpy(&(device->CFL)  ,       &host.CFL     ,  sizeof(real), hipMemcpyHostToDevice);
     hipMemcpy(&(device->NX),          &host.NX      ,  sizeof(int),  hipMemcpyHostToDevice);
@@ -513,7 +513,6 @@ Conserved SRHD2D::calc_intermed_statesSR2D(const Primitive &prims,
 //---------------------------------------------------------------------
 __device__ void simbi::warp_reduce_min(volatile real smem[BLOCK_SIZE2D][BLOCK_SIZE2D])
 {
-
     for (int stridey = BLOCK_SIZE2D /2; stridey >= 1; stridey /=  2)
     {
         for (int stridex = BLOCK_SIZE2D/2; stridex >= 1; stridex /= 2)
@@ -531,13 +530,8 @@ __global__ void simbi::adapt_dtGPU(
     SRHD2D *s, 
     const simbi::Geometry geometry)
 {
-    real cs;
-    real cfl_dt;
-    real h, rho, p, v1, v2, dx1, dx2, rmean;
-    real plus_v1 , plus_v2 , minus_v1, minus_v2;
-
+    real cfl_dt, rmean;
     real gamma = s->gamma;
-    real min_dt = INFINITY;
     __shared__ volatile real dt_buff[BLOCK_SIZE2D][BLOCK_SIZE2D];
     __shared__ Primitive prim_buff[BLOCK_SIZE2D][BLOCK_SIZE2D];
 
@@ -554,24 +548,23 @@ __global__ void simbi::adapt_dtGPU(
 
     if ( (ii < s->xphysical_grid) && (jj < s->yphysical_grid))
     {   
-
         prim_buff[ty][tx] = s->gpu_prims[aid];
         __syncthreads();
 
-        dx1  = s->coord_lattice.gpu_dx1[ii];
-        dx2  = s->coord_lattice.gpu_dx2[jj];
-        rho  = prim_buff[ty][tx].rho;
-        p    = prim_buff[ty][tx].p;
-        v1   = prim_buff[ty][tx].v1;
-        v2   = prim_buff[ty][tx].v2;
+        real dx1  = s->coord_lattice.gpu_dx1[ii];
+        real dx2  = s->coord_lattice.gpu_dx2[jj];
+        real rho  = prim_buff[ty][tx].rho;
+        real p    = prim_buff[ty][tx].p;
+        real v1   = prim_buff[ty][tx].v1;
+        real v2   = prim_buff[ty][tx].v2;
 
-        h  = 1. + gamma * p / (rho * (gamma - 1.));
-        cs = sqrt(gamma * p / (rho * h));
+        real h  = 1. + gamma * p / (rho * (gamma - 1.));
+        real cs = sqrt(gamma * p / (rho * h));
 
-        plus_v1  = (v1 + cs) / (1. + v1 * cs);
-        plus_v2  = (v2 + cs) / (1. + v2 * cs);
-        minus_v1 = (v1 - cs) / (1. - v1 * cs);
-        minus_v2 = (v2 - cs) / (1. - v2 * cs);
+        real plus_v1  = (v1 + cs) / (1. + v1 * cs);
+        real plus_v2  = (v2 + cs) / (1. + v2 * cs);
+        real minus_v1 = (v1 - cs) / (1. - v1 * cs);
+        real minus_v2 = (v2 - cs) / (1. - v2 * cs);
 
         switch (geometry)
         {
@@ -584,7 +577,7 @@ __global__ void simbi::adapt_dtGPU(
                 // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
                 rmean = coord_lattice->gpu_x1mean[ii];
                 cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
-                            rmean * dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
+                                rmean * dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
                 break;
         } // end switch
 
@@ -597,12 +590,26 @@ __global__ void simbi::adapt_dtGPU(
         }
         if((threadIdx.x == 0) && (threadIdx.y == 0) )
         {
-            s->dt_min[blockIdx.x] = dt_buff[threadIdx.y][threadIdx.x]; // dt_min[0] == minimum
+            // printf("min dt: %f", s->dt_min[0]);
+            s->dt_min[blockIdx.x + blockIdx.y * blockDim.x] = dt_buff[threadIdx.y][threadIdx.x]; // dt_min[0] == minimum
+            // printf("min dt: %f\n", s->dt_min[0]);
             s->dt = s->dt_min[0];
         }
         
     }
 };
+
+__global__ void printGPU(SRHD2D* s, int active_zones)
+{
+    // real min_dt = INFINITY;
+    // for (int ii=0; ii< active_zones; ii++)
+    // {
+    //     // printf("[%d]: %f\n", ii, s->dt_min[ii]);
+    //     // min_dt = min_dt < s->dt_min[ii] ? min_dt : s->dt_min[ii];
+    // }
+    // s->dt = min_dt;
+    printf("dt_min[0]: %f\n", s->dt_min[0]);
+}
 
 //===================================================================================================================
 //                                            FLUX CALCULATIONS
@@ -809,7 +816,6 @@ Conserved SRHD2D::calc_hllc_flux(
 //=====================================================================
 __global__ void simbi::shared_gpu_cons2prim(SRHD2D *s){
     __shared__ Conserved  conserved_buff[BLOCK_SIZE2D][BLOCK_SIZE2D];
-    __shared__ Primitive  primitive_buff[BLOCK_SIZE2D][BLOCK_SIZE2D];
 
     real eps, p, v2, et, c2, h, g, f, W, rho;
     int ii = blockDim.x * blockIdx.x + threadIdx.x;
@@ -823,7 +829,6 @@ __global__ void simbi::shared_gpu_cons2prim(SRHD2D *s){
         int gid = jj * nx + ii;
         // load shared memory
         conserved_buff[ty][tx] = s->gpu_state2D[gid];
-        primitive_buff[ty][tx] = s->gpu_prims[gid];
         real D    = conserved_buff[ty][tx].D;
         real S1   = conserved_buff[ty][tx].S1;
         real S2   = conserved_buff[ty][tx].S2;
@@ -1458,7 +1463,7 @@ __global__ void simbi::shared_gpu_advance(
                             // L(D)
                             -(f1.D * s1R - f2.D * s1L) / dV1 
                                 - (g1.D * s2R - g2.D * s2L) / dV2 
-                                    + s->gpu_sourceD[0] * decay_constant,
+                                    + s->gpu_sourceD[real_loc] * decay_constant,
 
                             // L(S1)
                             -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
@@ -1518,7 +1523,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->periodic = periodic;
     this->hllc = hllc;
     this->linspace = linspace;
-    this->lorentz_gamma = lorentz_gamma;
     this->plm_theta = plm_theta;
     this->dt    = init_dt;
 
@@ -1544,8 +1548,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     }
 
     this->active_zones = xphysical_grid * yphysical_grid;
-    this->xvertices.resize(x1.size() + 1);
-    this->yvertices.resize(x2.size() + 1);
 
     //--------Config the System Enums
     config_system();
@@ -1596,7 +1598,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         u0[i] =
             Conserved(state2D[0][i], state2D[1][i], state2D[2][i], state2D[3][i]);
     }
-    n = 0;
     // deallocate initial state vector
     std::vector<int> state2D;
 
@@ -1640,12 +1641,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     dim3 gridDim   = dim3(nxBlocks, nyBlocks);
     dim3 threadDim = dim3(BLOCK_SIZE2D, BLOCK_SIZE2D);
     // Some benchmarking tools 
+    int      n   = 0;
     int  nfold   = 0;
     int  ncheck  = 0;
     double zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<double> delta_t;
-
 
     // Simulate :)
     if (first_order)
@@ -1719,14 +1720,14 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         {
             t1 = high_resolution_clock::now();
             // First Half Step
-            hipLaunchKernelGGL(shared_gpu_cons2prim, dim3(nxBlocks, nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self);
-            hipLaunchKernelGGL(shared_gpu_advance,   dim3(nxBlocks, nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), shBlockBytes, 0, device_self, shBlockSize, shBlockSpace, radius, geometry[coord_system]);
-            hipLaunchKernelGGL(config_ghosts2DGPU,   dim3(nxBlocks, nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, NX, NY, first_order);
+            hipLaunchKernelGGL(shared_gpu_cons2prim, gridDim, threadDim, 0, 0, device_self);
+            hipLaunchKernelGGL(shared_gpu_advance,   gridDim, threadDim, shBlockBytes, 0, device_self, shBlockSize, shBlockSpace, radius, geometry[coord_system]);
+            hipLaunchKernelGGL(config_ghosts2DGPU,   gridDim, threadDim, 0, 0, device_self, NX, NY, first_order);
 
             // Final Half Step
-            hipLaunchKernelGGL(shared_gpu_cons2prim, dim3(nxBlocks, nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self);
-            hipLaunchKernelGGL(shared_gpu_advance,   dim3(nxBlocks, nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), shBlockBytes, 0, device_self, shBlockSize, shBlockSpace, radius, geometry[coord_system]);
-            hipLaunchKernelGGL(config_ghosts2DGPU,   dim3(nxBlocks, nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, NX, NY, first_order);
+            hipLaunchKernelGGL(shared_gpu_cons2prim, gridDim, threadDim, 0, 0, device_self);
+            hipLaunchKernelGGL(shared_gpu_advance,   gridDim, threadDim, shBlockBytes, 0, device_self, shBlockSize, shBlockSpace, radius, geometry[coord_system]);
+            hipLaunchKernelGGL(config_ghosts2DGPU,   gridDim, threadDim, 0, 0, device_self, NX, NY, first_order);
 
             t += dt; 
             
@@ -1769,13 +1770,13 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 t_interval += chkpt_interval;
             }
             n++;
-            //Adapt the timestep
-            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nxBlocks, physical_nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, geometry[coord_system]);
-            hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
-
             // Update decay constant
             decay_const = 1.0 / (1.0 + exp(10.0 * (t - engine_duration)));
             hipMemcpy(&(device_self->decay_const), &decay_const,  sizeof(real), hipMemcpyHostToDevice);
+
+            //Adapt the timestep
+            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nxBlocks, physical_nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, geometry[coord_system]);
+            hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
         }
 
     }

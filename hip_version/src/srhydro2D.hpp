@@ -33,7 +33,6 @@ namespace simbi
         int i_start, i_bound, j_start, j_bound;
         std::string coord_system;
         std::vector<real> x1, x2, sourceD, source_S1, source_S2, source_tau, pressure_guess;
-        std::vector<real> lorentz_gamma, xvertices, yvertices;
         CLattice2D coord_lattice;
 
         //==============GPU Mirrors================
