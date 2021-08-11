@@ -55,10 +55,15 @@ namespace simbi {
             void compute_dx1();
 
             // Compute the effective directional "volumes"
-
             void compute_dV();
 
             void compute_x1mean();
+
+            // Compute new values for moving faces
+            void compute_newx1(
+                simbi::Cellspacing Cellspacing, 
+                const real vinner_excision,
+                const real vouter_excision);
 
             void config_lattice(simbi::Cellspacing cellspacing);
 
