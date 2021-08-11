@@ -5,15 +5,14 @@
  * given the state itself.
  */
 
-#ifndef SRHYDRO1D_HPP
-#define SRHYDRO1D_HPP
+#ifndef SRHYDRO1D_HIP_HPP
+#define SRHYDRO1D_HIP_HPP
 
 #include <string>
 #include <vector>
 #include "clattice1D.hpp"
 #include "hydro_structs.hpp"
 #include "helpers.hpp"
-#include "gpu_vector.hpp"
 
 namespace simbi
 {
@@ -24,7 +23,7 @@ namespace simbi
           real dt;
           real gamma, CFL;
           std::string coord_system;
-          std::vector<real> r;
+          std::vector<real> r, dt_arr;
           std::vector<std::vector<real>> state;
           CLattice1D coord_lattice;
 
@@ -37,7 +36,7 @@ namespace simbi
           // SRHD* device_self;
 
           // Create vector instances that will live on host
-          std::vector<sr1d::Conserved> sys_state, du_dt, un;
+          std::vector<sr1d::Conserved> cons;
           std::vector<sr1d::Primitive> prims;
 
           int nx, n, active_zones, idx_shift, i_start, i_bound;
@@ -45,13 +44,13 @@ namespace simbi
           real plm_theta, engine_duration, t, decay_constant;
           bool first_order, periodic, linspace, hllc;
 
-          std::vector<real> lorentz_gamma, sourceD, sourceS, source0, pressure_guess;
+          std::vector<real> sourceD, sourceS, source0, pressure_guess;
           
           // Create dynamic array instances that will live on device
           //================================
           //             GPU RESOURCES
           //================================
-          sr1d::Conserved *gpu_sys_state, *gpu_du_dt, *gpu_u1;
+          sr1d::Conserved *gpu_cons, *gpu_du_dt, *gpu_u1;
           sr1d::Primitive *gpu_prims;
           real            *gpu_pressure_guess, *gpu_sourceD, *gpu_sourceS, *gpu_source0, *dt_min;
           CLattice1D      *gpu_coord_lattice;
@@ -72,16 +71,14 @@ namespace simbi
               bool linspace = true,
               bool hllc = false);
 
-          void cons2prim1D(const std::vector<sr1d::Conserved> &sys_state);
+          void cons2prim1D();
 
           GPU_CALLABLE_MEMBER
           sr1d::Eigenvals calc_eigenvals(const sr1d::Primitive &prims_l,
                                          const sr1d::Primitive &prims_r);
 
-          real adapt_dt(const std::vector<sr1d::Primitive> &prims);
-
-          
-          real adapt_dt(const sr1d::Primitive* prims);
+          void adapt_dt();
+          void adapt_dt(SRHD *dev, int blockSize);
 
           GPU_CALLABLE_MEMBER
           sr1d::Conserved prims2cons(const sr1d::Primitive &prim);
@@ -159,8 +156,8 @@ namespace simbi
           void cleanUp();
      };
 
-     __device__ void warp_reduce_min(volatile real smem[BLOCK_SIZE]);
-     __global__ void adapt_dtGPU(SRHD *s);
+     // __device__ void warpReduceMin(volatile real smem[BLOCK_SIZE]);
+     // __global__ void adapt_dtGPU(SRHD *s);
      __global__ void gpu_advance(SRHD *s, const int n, const simbi::Geometry geometry);
      __global__ void shared_gpu_advance(SRHD *s, const int sh_block_size, const int radius, const simbi::Geometry geometry);
      __global__ void shared_gpu_cons2prim(SRHD *s);

@@ -11,8 +11,8 @@
 #include "clattice3D.hpp"
 #include "viscous_diff.hpp"
 
-#ifndef SRHYDRO3D_HPP
-#define SRHYDRO3D_HPP
+#ifndef SRHYDRO3D_HIP_HPP
+#define SRHYDRO3D_HIP_HPP
 namespace simbi
 {
     struct SRHD3D

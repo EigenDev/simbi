@@ -61,36 +61,6 @@ void config_ghosts1D(T &u_state, int grid_size, bool first_order){
     }
 };
 
-template <typename T>
-__global__ void config_ghosts1DGPU(T *dev_sim, int grid_size, bool first_order){
-    sr1d::Conserved *u_state = dev_sim->gpu_sys_state;
-    if (first_order){
-        u_state[0].D = u_state[1].D;
-        u_state[grid_size - 1].D = u_state[grid_size - 2].D;
-
-        u_state[0].S = - u_state[1].S;
-        u_state[grid_size - 1].S = u_state[grid_size - 2].S;
-
-        u_state[0].tau = u_state[1].tau;
-        u_state[grid_size - 1].tau = u_state[grid_size - 2].tau;
-    } else {
-        u_state[0].D = u_state[3].D;
-        u_state[1].D = u_state[2].D;
-        u_state[grid_size - 1].D = u_state[grid_size - 3].D;
-        u_state[grid_size - 2].D = u_state[grid_size - 3].D;
-
-        u_state[0].S = - u_state[3].S;
-        u_state[1].S = - u_state[2].S;
-        u_state[grid_size - 1].S = u_state[grid_size - 3].S;
-        u_state[grid_size - 2].S = u_state[grid_size - 3].S;
-
-        u_state[0].tau = u_state[3].tau;
-        u_state[1].tau = u_state[2].tau;
-        u_state[grid_size - 1].tau = u_state[grid_size - 3].tau;
-        u_state[grid_size - 2].tau = u_state[grid_size - 3].tau;
-    }
-};
-
 //Handle 2D primitive arrays whether SR or Newtonian
 template<typename T, typename N>
 typename std::enable_if<is_3D_primitive<N>::value>::type

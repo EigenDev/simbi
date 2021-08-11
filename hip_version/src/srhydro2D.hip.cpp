@@ -7,7 +7,8 @@
  */
 
 #include "helpers.hpp"
-#include "srhydro2D.hpp"
+#include "helpers.hip.hpp"
+#include "srhydro2D.hip.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -1680,8 +1681,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                     tchunk_order_of_mag += 1;
                 }
                 
-                transfer_prims = vecs2struct(prims);
-                toWritePrim(&transfer_prims, &prods);
+                transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
+                writeToProd<sr2d::PrimitiveData, Primitive>(&transfer_prims, &prods);
                 tnow = create_step_str(t_interval, tchunk);
                 filename = string_format("%d.chkpt." + tnow + ".h5", yphysical_grid);
                 setup.t = t;
@@ -1748,8 +1749,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                     tchunk_order_of_mag += 1;
                 }
                 
-                transfer_prims = vecs2struct(prims);
-                toWritePrim(&transfer_prims, &prods);
+                transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
+                writeToProd<sr2d::PrimitiveData, Primitive>(&transfer_prims, &prods);
                 tnow = create_step_str(t_interval, tchunk);
                 filename = string_format("%d.chkpt." + tnow + ".h5", yphysical_grid);
                 setup.t = t;
@@ -1777,7 +1778,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     hipFree(device_self);
 
     cons2prim2D();
-    transfer_prims = vecs2struct(prims);
+    transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
 
     std::vector<std::vector<real>> solution(4, std::vector<real>(nzones));
 

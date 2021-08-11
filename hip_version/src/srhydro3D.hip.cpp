@@ -7,7 +7,8 @@
  */
 
 #include "helpers.hpp"
-#include "srhydro3D.hpp"
+#include "helpers.hip.hpp"
+#include "srhydro3D.hip.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>

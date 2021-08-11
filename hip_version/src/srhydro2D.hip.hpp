@@ -11,8 +11,8 @@
 #include "clattice2D.hpp"
 #include "viscous_diff.hpp"
 
-#ifndef SRHYDRO2D_HPP
-#define SRHYDRO2D_HPP
+#ifndef SRHYDRO2D_HIP_HPP
+#define SRHYDRO2D_HIP_HPP
 namespace simbi
 {
     class SRHD2D

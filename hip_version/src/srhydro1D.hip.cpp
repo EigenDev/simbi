@@ -8,7 +8,8 @@
  */
 
 #include "helpers.hpp"
-#include "srhydro1D.hpp"
+#include "helpers.hip.hpp"
+#include "srhydro1D.hip.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -96,8 +97,8 @@ void SRHD_DualSpace::copyStateToGPU(
     hipMalloc((void **)&host_clattice, sizeof(CLattice1D));
 
     //--------Copy the host resources to pointer variables on host
-    hipMemcpy(host_u0,    host.sys_state.data(), cbytes, hipMemcpyHostToDevice);
-    hipCheckErrors("Memcpy failed at transferring host.sys_state to host_u0");
+    hipMemcpy(host_u0,    host.cons.data(), cbytes, hipMemcpyHostToDevice);
+    hipCheckErrors("Memcpy failed at transferring host.cons to host_u0");
 
     hipMemcpy(host_prims, host.prims.data()    , pbytes, hipMemcpyHostToDevice);
     hipCheckErrors("Memcpy failed at transferring host.prims to host_prims");
@@ -115,7 +116,7 @@ void SRHD_DualSpace::copyStateToGPU(
     hipCheckErrors("Memcpy failed at transferring host.sourceS to host_sourceS");
 
     // copy pointer to allocated device storage to device class
-    if ( hipMemcpy(&(device->gpu_sys_state), &host_u0,    sizeof(Conserved *),  hipMemcpyHostToDevice) != hipSuccess )
+    if ( hipMemcpy(&(device->gpu_cons), &host_u0,    sizeof(Conserved *),  hipMemcpyHostToDevice) != hipSuccess )
     {
         printf("Hip Memcpy failed at: host_u0 -> device_sys_tate\n");
     };
@@ -190,7 +191,7 @@ void SRHD_DualSpace::copyGPUStateToHost(
     const int cbytes = nz * sizeof(Conserved); 
     const int pbytes = nz * sizeof(Primitive); 
 
-    hipMemcpy(host.sys_state.data(), host_u0,        cbytes, hipMemcpyDeviceToHost);
+    hipMemcpy(host.cons.data(), host_u0,        cbytes, hipMemcpyDeviceToHost);
     hipCheckErrors("Memcpy failed at transferring device conservatives to host");
     hipMemcpy(host.prims.data(),     host_prims ,    pbytes, hipMemcpyDeviceToHost);
     hipCheckErrors("Memcpy failed at transferring device prims to host");
@@ -206,18 +207,17 @@ void SRHD_DualSpace::copyGPUStateToHost(
  * variables density (rho), pressure, and
  * velocity (v)
  */
-void SRHD::cons2prim1D(const std::vector<Conserved> &u_state)
+void SRHD::cons2prim1D()
 {
     real rho, S, D, tau;
     real v, W, tol, f, g, peq, h;
     real eps, p, v2, et, c2;
     int iter = 0;
-
     for (int ii = 0; ii < nx; ii++)
     {
-        D = u_state[ii].D;
-        S = u_state[ii].S;
-        tau = u_state[ii].tau;
+        D   = cons[ii].D;
+        S   = cons[ii].S;
+        tau = cons[ii].tau;
 
         peq = n != 0 ? pressure_guess[ii] : abs(abs(S) - tau - D);
 
@@ -253,10 +253,8 @@ void SRHD::cons2prim1D(const std::vector<Conserved> &u_state)
         } while (abs(peq - p) >= tol);
 
         v = S / (tau + D + peq);
-
-        W = 1. / sqrt(1 - v * v);
         pressure_guess[ii] = peq;
-        prims[ii] = Primitive{D / W, v, peq};
+        prims[ii] = Primitive{D * std::sqrt(1 - v * v), v, peq};
     }
 };
 
@@ -311,60 +309,46 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
 };
 
 // Adapt the CFL conditonal timestep
-__device__ void simbi::warp_reduce_min(volatile real smem[BLOCK_SIZE])
-{
-
-    for (int stride = BLOCK_SIZE /2; stride >= 1; stride /=  2)
+// Adapt the timestep on the Host
+void SRHD::adapt_dt()
+{   
+    double min_dt = INFINITY;
+    #pragma omp parallel 
     {
-        smem[threadIdx.x] = smem[threadIdx.x+stride] < smem[threadIdx.x] ? 
-						smem[threadIdx.x+stride] : smem[threadIdx.x];;
-    }
+        double dr, cs, cfl_dt;
+        double h, rho, p, v, vPLus, vMinus;
 
-}
-
-// Adapt the CFL conditonal timestep
-__global__ void simbi::adapt_dtGPU(SRHD *s)
-{
-    const real gamma     = s->gamma;
-    __shared__ volatile real dt_buff[BLOCK_SIZE];
-    __shared__  Primitive prim_buff[BLOCK_SIZE];
-
-    int tid = threadIdx.x;
-    int gid = blockDim.x*blockIdx.x + threadIdx.x;
-    int aid = gid + s->idx_shift;
-    if (gid < s->active_zones)
-    {
-        prim_buff[tid] = s->gpu_prims[aid];
-        __syncthreads();
-        
-        real dr  = s->coord_lattice.gpu_dx1[gid];
-        real rho = prim_buff[tid].rho;
-        real p   = prim_buff[tid].p;
-        real v   = prim_buff[tid].v;
-
-        real h = 1. + gamma * p / (rho * (gamma - 1.));
-        real cs = sqrt(gamma * p / (rho * h));
-
-        real vPLus  = (v + cs) / (1 + v * cs);
-        real vMinus = (v - cs) / (1 - v * cs);
-
-        real cfl_dt = dr / (my_max(abs(vPLus), abs(vMinus)));
-
-        dt_buff[threadIdx.x] = s->CFL * cfl_dt;
-
-        __syncthreads();
-
-        if (threadIdx.x < BLOCK_SIZE / 2)
+        // Compute the minimum timestep given CFL
+        #pragma omp for schedule(static)
+        for (int ii = 0; ii < active_zones; ii++)
         {
-            warp_reduce_min(dt_buff);
+            dr  = coord_lattice.dx1[ii];
+            rho = prims[ii + idx_shift].rho;
+            p   = prims[ii + idx_shift].p;
+            v   = prims[ii + idx_shift].v;
+
+            h = 1. + gamma * p / (rho * (gamma - 1.));
+            cs = sqrt(gamma * p / (rho * h));
+
+            vPLus  = (v + cs) / (1 + v * cs);
+            vMinus = (v - cs) / (1 - v * cs);
+
+            cfl_dt = dr / (std::max(std::abs(vPLus), std::abs(vMinus)));
+
+            min_dt = std::min(min_dt, cfl_dt);
         }
-        if(threadIdx.x == 0)
-        {
-            s->dt_min[blockIdx.x] = dt_buff[threadIdx.x]; // dt_min[0] == minimum
-            s->dt = s->dt_min[0];
-        }
-        
-    }
+    }   
+
+    dt = CFL * min_dt;
+};
+
+void SRHD::adapt_dt(SRHD *dev, int blockSize)
+{   
+    real min_dt = INFINITY;
+    dtWarpReduce<SRHD, Primitive, 128><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
+    hipDeviceSynchronize();
+    hipMemcpy(&dt, &(dev->dt),  sizeof(real), hipMemcpyDeviceToHost);
+    
 };
 //----------------------------------------------------------------------------------------------------
 //              STATE ARRAY CALCULATIONS
@@ -566,11 +550,11 @@ __global__ void simbi::shared_gpu_cons2prim(SRHD *s){
     int iter = 0;
     if (ii < s->nx){
         // load shared memory
-        conserved_buff[tx] = s->gpu_sys_state[ii];
+        conserved_buff[tx] = s->gpu_cons[ii];
         primitive_buff[tx] = s->gpu_prims[ii];
-        const real D   = conserved_buff[tx].D;
-        const real S   = conserved_buff[tx].S;
-        const real tau = conserved_buff[tx].tau;
+        const real D       = conserved_buff[tx].D;
+        const real S       = conserved_buff[tx].S;
+        const real tau     = conserved_buff[tx].tau;
 
         real peq = s->gpu_pressure_guess[ii];
 
@@ -639,12 +623,12 @@ __global__ void simbi::shared_gpu_advance(
 
     if (ii < s-> nx)
     {
-        cons_buff[txa] = s->gpu_sys_state[ii];
+        cons_buff[txa] = s->gpu_cons[ii];
         prim_buff[txa] = s->gpu_prims[ii];
         if (threadIdx.x < radius)
         {
-            cons_buff[txa - radius]     = s->gpu_sys_state[ii - radius];
-            cons_buff[txa + BLOCK_SIZE] = s->gpu_sys_state[ii + BLOCK_SIZE];
+            cons_buff[txa - radius]     = s->gpu_cons[ii - radius];
+            cons_buff[txa + BLOCK_SIZE] = s->gpu_cons[ii + BLOCK_SIZE];
             prim_buff[txa - radius]     = s->gpu_prims[ii - radius];
             prim_buff[txa + BLOCK_SIZE] = s->gpu_prims[ii + BLOCK_SIZE];  
         }
@@ -716,9 +700,9 @@ __global__ void simbi::shared_gpu_advance(
                 {
                 case simbi::Geometry::CARTESIAN:
                     dx = coord_lattice->gpu_dx1[coordinate];
-                    s->gpu_sys_state[ii].D   += dt * ( -(f1.D - f2.D)     / dx + s->gpu_sourceD[coordinate] );
-                    s->gpu_sys_state[ii].S   += dt * ( -(f1.S - f2.S)     / dx + s->gpu_sourceS[coordinate] );
-                    s->gpu_sys_state[ii].tau += dt * ( -(f1.tau - f2.tau) / dx + s->gpu_source0[coordinate] );
+                    s->gpu_cons[ii].D   += dt * ( -(f1.D - f2.D)     / dx + s->gpu_sourceD[coordinate] );
+                    s->gpu_cons[ii].S   += dt * ( -(f1.S - f2.S)     / dx + s->gpu_sourceS[coordinate] );
+                    s->gpu_cons[ii].tau += dt * ( -(f1.tau - f2.tau) / dx + s->gpu_source0[coordinate] );
 
                     break;
                 
@@ -729,11 +713,11 @@ __global__ void simbi::shared_gpu_advance(
                     dV = coord_lattice->gpu_dV[coordinate];
                     rmean = coord_lattice->gpu_x1mean[coordinate];
 
-                    s->gpu_sys_state[ii] += Conserved{ 
+                    s->gpu_cons[ii] += Conserved{ 
                         -(sR * f1.D - sL * f2.D) / dV +
                         s->gpu_sourceD[coordinate] * decay_constant,
 
-                        -(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean +
+                        -(sR * f1.S - sL * f2.S) / dV + 2.0 * pc / rmean +
                         s->gpu_sourceS[coordinate] * decay_constant,
 
                         -(sR * f1.tau - sL * f2.tau) / dV +
@@ -868,9 +852,9 @@ __global__ void simbi::shared_gpu_advance(
                 {
                 case simbi::Geometry::CARTESIAN:
                     dx = coord_lattice->gpu_dx1[coordinate];
-                    s->gpu_sys_state[ii].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx +  s->gpu_sourceD[coordinate] );
-                    s->gpu_sys_state[ii].S   += 0.5 * dt * ( -(f1.S - f2.S)     / dx +  s->gpu_sourceS[coordinate] );
-                    s->gpu_sys_state[ii].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx  + s->gpu_source0[coordinate] );
+                    s->gpu_cons[ii].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx +  s->gpu_sourceD[coordinate] );
+                    s->gpu_cons[ii].S   += 0.5 * dt * ( -(f1.S - f2.S)     / dx +  s->gpu_sourceS[coordinate] );
+                    s->gpu_cons[ii].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx  + s->gpu_source0[coordinate] );
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
@@ -880,11 +864,11 @@ __global__ void simbi::shared_gpu_advance(
                     dV    = coord_lattice->gpu_dV[coordinate];
                     rmean = coord_lattice->gpu_x1mean[coordinate];
 
-                    s->gpu_sys_state[ii] += Conserved{ 
+                    s->gpu_cons[ii] += Conserved{ 
                         -(sR * f1.D - sL * f2.D) / dV +
                         s->gpu_sourceD[coordinate] * decay_constant,
 
-                        -(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean +
+                        -(sR * f1.S - sL * f2.S) / dV + 2.0 * pc / rmean +
                         s->gpu_sourceS[coordinate] * decay_constant,
 
                         -(sR * f1.tau - sL * f2.tau) / dV +
@@ -924,7 +908,6 @@ SRHD::simulate1D(
     this->hllc = hllc;
     this->engine_duration = engine_duration;
     this->t    = tstart;
-    this->dt   = init_dt;
     this->tend = tend;
     // Define the swap vector for the integrated state
     this->nx = state[0].size();
@@ -973,13 +956,13 @@ SRHD::simulate1D(
     // data to files once ready
     sr1d::PrimitiveArray transfer_prims;
 
-    u.resize(nx);
+    cons.resize(nx);
     prims.resize(nx);
     pressure_guess.resize(nx);
     // Copy the state array into real & profile variables
     for (size_t ii = 0; ii < nx; ii++)
     {
-        u[ii] = Conserved{state[0][ii],
+        cons[ii] = Conserved{state[0][ii],
                           state[1][ii],
                           state[2][ii]};
     }
@@ -1002,9 +985,14 @@ SRHD::simulate1D(
         coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE);
     }
 
-    cons2prim1D(u);
+    cons2prim1D();
+    // Check if user input a valid initial timestep. 
+    // if not, adapt it
+    adapt_dt();
+    dt = init_dt < dt ? init_dt : dt;
 
-    sys_state = u;
+    dt_arr.resize(nx);
+
 
     // Copy the current SRHD instance over to the device
     simbi::SRHD *device_self;
@@ -1027,8 +1015,8 @@ SRHD::simulate1D(
     const dim3 gridDim   = dim3(nBlocks);
     const dim3 threadDim = dim3(BLOCK_SIZE);
     // Some benchmarking tools 
-    int  nfold   = 0;
-    int  ncheck  = 0;
+    int   nfold   = 0;
+    int   ncheck  = 0;
     double zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<double> delta_t;
@@ -1087,8 +1075,7 @@ SRHD::simulate1D(
             }
             n++;
             // Adapt the timestep
-            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self);
-            hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+            adapt_dt(device_self, physical_nBlocks);
         }
     } else {
         const int radius = 2;
@@ -1124,7 +1111,7 @@ SRHD::simulate1D(
                         << "Time: " << std::setw(10) <<  t
                         << "\t"
                         << "Zones/sec: "<< nx / delta_t.count() << std::flush;
-                nfold += 100;
+                nfold += 1;
             }
             
             /* Write to a File every tenth of a second */
@@ -1148,8 +1135,7 @@ SRHD::simulate1D(
             }
             n++;
             //Adapt the timestep
-            hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self);
-            hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+            adapt_dt(device_self, physical_nBlocks);
         }
 
     }
@@ -1160,7 +1146,7 @@ SRHD::simulate1D(
     << zu_avg / ncheck << " zones/sec" << "\n";
 
     hipFree(device_self);
-    cons2prim1D(sys_state);
+    cons2prim1D();
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
     for (size_t ii = 0; ii < nx; ii++)
