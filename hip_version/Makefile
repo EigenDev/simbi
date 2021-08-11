@@ -9,13 +9,14 @@ ifeq (,$(HIP_PATH))
 	HIP_PATH=../../..
 endif
 
-CC =gcc
-CXX=g++ #${HIPCC}
+PYTHON=python
+CC  = gcc
+CXX = g++
 CXXFLAGS = -I.
 LDFLAGS = -lhdf5 -lhdf5_cpp -shared
 LD_LIBRARY_PATH := 
 LIBS=-L$(LD_LIBRARY_PATH) $(LDFLAGS)
-PRECISION = 
+PRECISION := 
 
 ifeq (, ${LD_LIBRARY_PATH})
 	LIBS=$(LDFLAGS)
@@ -29,7 +30,7 @@ HEADERS=$(wildcard src/*.hpp)
 all: pySimbi
 
 pySimbi: setup.py $(SOURCES) $(HEADERS)
-	python setup.py build_ext --inplace $(PRECISION) && rm -f src/gpu_state.cpp && rm -Rf build
+	$(PYTHON) setup.py build_ext --inplace $(PRECISION) && rm -f src/gpu_state.cpp && rm -Rf build
 
 clean:
 	rm *.so 
