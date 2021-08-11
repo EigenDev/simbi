@@ -1,5 +1,5 @@
-#ifndef GPU_ERROR_CHECKER_H
-#define GPU_ERROR_CHECKER_H
+#ifndef GPU_ERROR_CHECK_H
+#define GPU_ERROR_CHECK_H
 
 #define hipCheckErrors(msg) \
     do { \

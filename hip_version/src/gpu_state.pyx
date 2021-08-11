@@ -66,7 +66,7 @@ cdef extern from "euler2D.hpp" namespace "simbi":
             bool hllc)
 
 
-cdef extern from "srhydro1D.hpp" namespace "simbi":
+cdef extern from "srhydro1D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD:
         SRHD() except +
         SRHD(vector[vector[real]], real, real, vector[real], string) except + 
@@ -89,7 +89,7 @@ cdef extern from "srhydro1D.hpp" namespace "simbi":
             bool linspace, 
             bool hllc)
 
-cdef extern from "srhydro2D.hpp" namespace "simbi":
+cdef extern from "srhydro2D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD2D:
         SRHD2D() except +
         SRHD2D(vector[vector[real]], int, int, real, vector[real], vector[real],
@@ -113,7 +113,7 @@ cdef extern from "srhydro2D.hpp" namespace "simbi":
             bool linspace,
             bool hllc)
 
-cdef extern from "srhydro3D.hpp" namespace "simbi":
+cdef extern from "srhydro3D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD3D:
         SRHD3D() except +
         SRHD3D(

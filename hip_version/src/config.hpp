@@ -6,10 +6,19 @@
 #ifndef CONFIG_HPP
 #define CONFIG_HPP
 
+#include "hip/hip_runtime.h"
+// Precision preprocessing
 #ifdef FLOAT_PRECISION
 typedef float real;
 #else
 typedef double real;
+#endif 
+
+// HIP preprocessing
+#ifdef __HIPCC__
+#define GPU_CALLABLE_MEMBER __host__ __device__
+#else
+#define GPU_CALLABLE_MEMBER 
 #endif 
 
 #define my_max(a,b)             \
@@ -25,7 +34,6 @@ typedef double real;
     __typeof__ (b) _b = (b); \
     _a < _b ? _a : _b;       \
 })
-
 
 constexpr int BLOCK_SIZE   = 64;
 constexpr int BLOCK_SIZE2D = 16;
