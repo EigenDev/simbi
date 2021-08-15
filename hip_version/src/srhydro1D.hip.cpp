@@ -614,28 +614,30 @@ __global__ void simbi::shared_gpu_advance(
     const CLattice1D *coord_lattice = &(s->coord_lattice);
     const real dt                   = s->dt;
     const real plm_theta            = s->plm_theta;
+    const int nx                    = s->nx;
 
     int coordinate;
     Conserved u_l, u_r;
     Conserved f_l, f_r, f1, f2;
     Primitive prims_l, prims_r;
     real rmean, dV, sL, sR, pc, dx;
-
-    if (ii < s-> nx)
+    if (ii < s->active_zones)
     {
-        cons_buff[txa] = s->gpu_cons[ii];
-        prim_buff[txa] = s->gpu_prims[ii];
+        const int ia = ii + 2;
+        cons_buff[txa] = s->gpu_cons[ia];
+        prim_buff[txa] = s->gpu_prims[ia];
         if (threadIdx.x < radius)
         {
-            cons_buff[txa - radius]     = s->gpu_cons[ii - radius];
-            cons_buff[txa + BLOCK_SIZE] = s->gpu_cons[ii + BLOCK_SIZE];
-            prim_buff[txa - radius]     = s->gpu_prims[ii - radius];
-            prim_buff[txa + BLOCK_SIZE] = s->gpu_prims[ii + BLOCK_SIZE];  
+            cons_buff[txa - radius]     = s->gpu_cons[ia - radius];
+            cons_buff[txa + BLOCK_SIZE] = (ia + BLOCK_SIZE < nx - 1) ? s->gpu_cons[ia + BLOCK_SIZE] : s->gpu_cons[nx - 1];
+            prim_buff[txa - radius]     = s->gpu_prims[ia - radius];
+            prim_buff[txa + BLOCK_SIZE] = (ia + BLOCK_SIZE < nx - 1) ? s->gpu_prims[ia + BLOCK_SIZE] : s->gpu_prims[nx - 1];  
         }
         __syncthreads();
+
         if (s->first_order)
         {
-            if ( (unsigned)(ii - istart) < (ibound - istart))
+            // if ( (unsigned)(ii - istart) < (ibound - istart))
             {
                 if (s->periodic)
                 {
@@ -646,7 +648,7 @@ __global__ void simbi::shared_gpu_advance(
                 }
                 else
                 {
-                    coordinate = ii - 1;
+                    coordinate = ii;
                     // Set up the left and right state interfaces for i+1/2
                     u_l = cons_buff[txa];
                     u_r = cons_buff[txa + 1];
@@ -700,9 +702,9 @@ __global__ void simbi::shared_gpu_advance(
                 {
                 case simbi::Geometry::CARTESIAN:
                     dx = coord_lattice->gpu_dx1[coordinate];
-                    s->gpu_cons[ii].D   += dt * ( -(f1.D - f2.D)     / dx + s->gpu_sourceD[coordinate] );
-                    s->gpu_cons[ii].S   += dt * ( -(f1.S - f2.S)     / dx + s->gpu_sourceS[coordinate] );
-                    s->gpu_cons[ii].tau += dt * ( -(f1.tau - f2.tau) / dx + s->gpu_source0[coordinate] );
+                    s->gpu_cons[ia].D   += dt * ( -(f1.D - f2.D)     / dx + s->gpu_sourceD[coordinate] );
+                    s->gpu_cons[ia].S   += dt * ( -(f1.S - f2.S)     / dx + s->gpu_sourceS[coordinate] );
+                    s->gpu_cons[ia].tau += dt * ( -(f1.tau - f2.tau) / dx + s->gpu_source0[coordinate] );
 
                     break;
                 
@@ -713,7 +715,7 @@ __global__ void simbi::shared_gpu_advance(
                     dV = coord_lattice->gpu_dV[coordinate];
                     rmean = coord_lattice->gpu_x1mean[coordinate];
 
-                    s->gpu_cons[ii] += Conserved{ 
+                    s->gpu_cons[ia] += Conserved{ 
                         -(sR * f1.D - sL * f2.D) / dV +
                         s->gpu_sourceD[coordinate] * decay_constant,
 
@@ -731,7 +733,7 @@ __global__ void simbi::shared_gpu_advance(
         else
         {
             Primitive left_most, right_most, left_mid, right_mid, center;
-            if ( (unsigned)(ii - istart) < (ibound - istart))
+            // if ( (unsigned)(ii - istart) < (ibound - istart))
             {
                 if (s->periodic)
                 {
@@ -745,7 +747,7 @@ __global__ void simbi::shared_gpu_advance(
                 }
                 else
                 {
-                    coordinate = ii - 2;
+                    coordinate = ii;
                     left_most  = prim_buff[txa - 2];
                     left_mid   = prim_buff[txa - 1];
                     center     = prim_buff[txa];
@@ -852,9 +854,9 @@ __global__ void simbi::shared_gpu_advance(
                 {
                 case simbi::Geometry::CARTESIAN:
                     dx = coord_lattice->gpu_dx1[coordinate];
-                    s->gpu_cons[ii].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx +  s->gpu_sourceD[coordinate] );
-                    s->gpu_cons[ii].S   += 0.5 * dt * ( -(f1.S - f2.S)     / dx +  s->gpu_sourceS[coordinate] );
-                    s->gpu_cons[ii].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx  + s->gpu_source0[coordinate] );
+                    s->gpu_cons[ia].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx +  s->gpu_sourceD[coordinate] );
+                    s->gpu_cons[ia].S   += 0.5 * dt * ( -(f1.S - f2.S)     / dx +  s->gpu_sourceS[coordinate] );
+                    s->gpu_cons[ia].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx  + s->gpu_source0[coordinate] );
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
@@ -864,7 +866,7 @@ __global__ void simbi::shared_gpu_advance(
                     dV    = coord_lattice->gpu_dV[coordinate];
                     rmean = coord_lattice->gpu_x1mean[coordinate];
 
-                    s->gpu_cons[ii] += Conserved{ 
+                    s->gpu_cons[ia] += Conserved{ 
                         -(sR * f1.D - sL * f2.D) / dV +
                         s->gpu_sourceD[coordinate] * decay_constant,
 

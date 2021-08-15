@@ -39,7 +39,7 @@ namespace simbi
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceTau, *gpu_pressure_guess;
         real *sys_state, *dt_min;
         sr2d::Primitive *gpu_prims;
-        sr2d::Conserved *gpu_state2D;
+        sr2d::Conserved *gpu_cons;
 
         /* Methods */
         SRHD2D();
@@ -57,7 +57,7 @@ namespace simbi
             const unsigned int nhat);
 
         GPU_CALLABLE_MEMBER
-        sr2d::Conserved calc_stateSR2D(const sr2d::Primitive &prims);
+        sr2d::Conserved prims2cons(const sr2d::Primitive &prims);
         
         sr2d::Conserved calc_hll_state(
             const sr2d::Conserved &left_state,
