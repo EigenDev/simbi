@@ -7,9 +7,9 @@
  * Compressible Hydro Simulation
  */
 
+#include "srhydro1D.hip.hpp"
 #include "helpers.hpp"
 #include "helpers.hip.hpp"
-#include "srhydro1D.hip.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -344,7 +344,6 @@ void SRHD::adapt_dt()
 
 void SRHD::adapt_dt(SRHD *dev, int blockSize)
 {   
-    real min_dt = INFINITY;
     dtWarpReduce<SRHD, Primitive, 128><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
     hipDeviceSynchronize();
     hipMemcpy(&dt, &(dev->dt),  sizeof(real), hipMemcpyDeviceToHost);
@@ -581,6 +580,8 @@ __global__ void simbi::shared_gpu_cons2prim(SRHD *s){
                 printf("\n");
                 printf("Cons2Prim cannot converge");
                 printf("\n");
+                s->dt = INFINITY;
+                return;
                 // exit(EXIT_FAILURE);
             }
             iter++;
@@ -604,9 +605,7 @@ __global__ void simbi::shared_gpu_advance(
     int ii  = blockDim.x * blockIdx.x + threadIdx.x;
     int txa = threadIdx.x + radius;
 
-    extern __shared__ Conserved smem_buff[];
-    Conserved *cons_buff = smem_buff;
-    Primitive *prim_buff = (Primitive *)&cons_buff[sh_block_size];
+    extern __shared__ Primitive prim_buff[];
 
     const int ibound                = s->i_bound;
     const int istart                = s->i_start;
@@ -616,22 +615,25 @@ __global__ void simbi::shared_gpu_advance(
     const real plm_theta            = s->plm_theta;
     const int nx                    = s->nx;
 
-    int coordinate;
     Conserved u_l, u_r;
     Conserved f_l, f_r, f1, f2;
     Primitive prims_l, prims_r;
     real rmean, dV, sL, sR, pc, dx;
-    if (ii < s->active_zones)
+    if ( (ii >= s->active_zones) ){
+        prim_buff[txa] = s->gpu_prims[nx - 1]; 
+        return;
+    }
+
+    // if (ii < s->active_zones)
     {
-        const int ia = ii + 2;
-        cons_buff[txa] = s->gpu_cons[ia];
+        const int ia = ii + radius;
+        const bool inbounds = ia + BLOCK_SIZE < nx - 1;
         prim_buff[txa] = s->gpu_prims[ia];
+
         if (threadIdx.x < radius)
         {
-            cons_buff[txa - radius]     = s->gpu_cons[ia - radius];
-            cons_buff[txa + BLOCK_SIZE] = (ia + BLOCK_SIZE < nx - 1) ? s->gpu_cons[ia + BLOCK_SIZE] : s->gpu_cons[nx - 1];
             prim_buff[txa - radius]     = s->gpu_prims[ia - radius];
-            prim_buff[txa + BLOCK_SIZE] = (ia + BLOCK_SIZE < nx - 1) ? s->gpu_prims[ia + BLOCK_SIZE] : s->gpu_prims[nx - 1];  
+            prim_buff[txa + BLOCK_SIZE] = inbounds ? s->gpu_prims[ia + BLOCK_SIZE] : s->gpu_prims[nx - 1];  
         }
         __syncthreads();
 
@@ -641,22 +643,18 @@ __global__ void simbi::shared_gpu_advance(
             {
                 if (s->periodic)
                 {
-                    coordinate = ii;
                     // Set up the left and right state interfaces for i+1/2
-                    u_l   = cons_buff[txa];
-                    u_r   = roll(cons_buff, txa + 1, sh_block_size);
+                    prims_l = prim_buff[txa];
+                    prims_r = roll(prim_buff, txa + 1, sh_block_size);
                 }
                 else
                 {
-                    coordinate = ii;
                     // Set up the left and right state interfaces for i+1/2
-                    u_l = cons_buff[txa];
-                    u_r = cons_buff[txa + 1];
+                    prims_l = prim_buff[txa];
+                    prims_r = prim_buff[txa + 1];
                 }
-
-                prims_l = prim_buff[txa];
-                prims_r = prim_buff[txa + 1];
-
+                u_l = s->prims2cons(prims_l);
+                u_r = s->prims2cons(prims_r);
                 f_l = s->prims2flux(prims_l);
                 f_r = s->prims2flux(prims_r);
 
@@ -673,17 +671,17 @@ __global__ void simbi::shared_gpu_advance(
                 // Set up the left and right state interfaces for i-1/2
                 if (s->periodic)
                 {
-                    u_l = roll(cons_buff, txa - 1, sh_block_size);
-                    u_r = cons_buff[txa];
+                    prims_l = roll(prim_buff, txa - 1, sh_block_size);
+                    prims_r = prim_buff[txa];
                 }
                 else
                 {
-                    u_l   = cons_buff[txa - 1];
-                    u_r   = cons_buff[txa];
+                    prims_l = prim_buff[txa - 1];
+                    prims_r = prim_buff[txa];
                 }
 
-                prims_l = prim_buff[txa - 1];
-                prims_r = prim_buff[txa];
+                u_l = s->prims2cons(prims_l);
+                u_r = s->prims2cons(prims_r);
 
                 f_l = s->prims2flux(prims_l);
                 f_r = s->prims2flux(prims_r);
@@ -701,29 +699,29 @@ __global__ void simbi::shared_gpu_advance(
                 switch (geometry)
                 {
                 case simbi::Geometry::CARTESIAN:
-                    dx = coord_lattice->gpu_dx1[coordinate];
-                    s->gpu_cons[ia].D   += dt * ( -(f1.D - f2.D)     / dx + s->gpu_sourceD[coordinate] );
-                    s->gpu_cons[ia].S   += dt * ( -(f1.S - f2.S)     / dx + s->gpu_sourceS[coordinate] );
-                    s->gpu_cons[ia].tau += dt * ( -(f1.tau - f2.tau) / dx + s->gpu_source0[coordinate] );
+                    dx = coord_lattice->gpu_dx1[ii];
+                    s->gpu_cons[ia].D   += dt * ( -(f1.D - f2.D)     / dx + s->gpu_sourceD[ii] );
+                    s->gpu_cons[ia].S   += dt * ( -(f1.S - f2.S)     / dx + s->gpu_sourceS[ii] );
+                    s->gpu_cons[ia].tau += dt * ( -(f1.tau - f2.tau) / dx + s->gpu_source0[ii] );
 
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
                     pc = prim_buff[txa].p;
-                    sL = coord_lattice->gpu_face_areas[coordinate + 0];
-                    sR = coord_lattice->gpu_face_areas[coordinate + 1];
-                    dV = coord_lattice->gpu_dV[coordinate];
-                    rmean = coord_lattice->gpu_x1mean[coordinate];
+                    sL = coord_lattice->gpu_face_areas[ii + 0];
+                    sR = coord_lattice->gpu_face_areas[ii + 1];
+                    dV = coord_lattice->gpu_dV[ii];
+                    rmean = coord_lattice->gpu_x1mean[ii];
 
                     s->gpu_cons[ia] += Conserved{ 
                         -(sR * f1.D - sL * f2.D) / dV +
-                        s->gpu_sourceD[coordinate] * decay_constant,
+                        s->gpu_sourceD[ii] * decay_constant,
 
                         -(sR * f1.S - sL * f2.S) / dV + 2.0 * pc / rmean +
-                        s->gpu_sourceS[coordinate] * decay_constant,
+                        s->gpu_sourceS[ii] * decay_constant,
 
                         -(sR * f1.tau - sL * f2.tau) / dV +
-                        s->gpu_source0[coordinate] * decay_constant
+                        s->gpu_source0[ii] * decay_constant
                     } * dt;
                     break;
                 }
@@ -738,7 +736,6 @@ __global__ void simbi::shared_gpu_advance(
                 if (s->periodic)
                 {
                     // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
-                    coordinate = ii;
                     left_most  = roll(prim_buff, txa - 2, sh_block_size);
                     left_mid   = roll(prim_buff, txa - 1, sh_block_size);
                     center     = prim_buff[txa];
@@ -747,10 +744,9 @@ __global__ void simbi::shared_gpu_advance(
                 }
                 else
                 {
-                    coordinate = ii;
                     left_most  = prim_buff[txa - 2];
                     left_mid   = prim_buff[txa - 1];
-                    center     = prim_buff[txa];
+                    center     = prim_buff[txa + 0];
                     right_mid  = prim_buff[txa + 1];
                     right_most = prim_buff[txa + 2];
                 }
@@ -791,7 +787,6 @@ __global__ void simbi::shared_gpu_advance(
                 // primitives
                 u_l = s->prims2cons(prims_l);
                 u_r = s->prims2cons(prims_r);
-
                 f_l = s->prims2flux(prims_l);
                 f_r = s->prims2flux(prims_r);
 
@@ -837,7 +832,6 @@ __global__ void simbi::shared_gpu_advance(
                 // primitives
                 u_l = s->prims2cons(prims_l);
                 u_r = s->prims2cons(prims_r);
-
                 f_l = s->prims2flux(prims_l);
                 f_r = s->prims2flux(prims_r);
 
@@ -853,28 +847,28 @@ __global__ void simbi::shared_gpu_advance(
                 switch (geometry)
                 {
                 case simbi::Geometry::CARTESIAN:
-                    dx = coord_lattice->gpu_dx1[coordinate];
-                    s->gpu_cons[ia].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx +  s->gpu_sourceD[coordinate] );
-                    s->gpu_cons[ia].S   += 0.5 * dt * ( -(f1.S - f2.S)     / dx +  s->gpu_sourceS[coordinate] );
-                    s->gpu_cons[ia].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx  + s->gpu_source0[coordinate] );
+                    dx = coord_lattice->gpu_dx1[ii];
+                    s->gpu_cons[ia].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx +  s->gpu_sourceD[ii] );
+                    s->gpu_cons[ia].S   += 0.5 * dt * ( -(f1.S - f2.S)     / dx +  s->gpu_sourceS[ii] );
+                    s->gpu_cons[ia].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx  + s->gpu_source0[ii] );
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
                     pc    = prim_buff[txa].p;
-                    sL    = coord_lattice->gpu_face_areas[coordinate + 0];
-                    sR    = coord_lattice->gpu_face_areas[coordinate + 1];
-                    dV    = coord_lattice->gpu_dV[coordinate];
-                    rmean = coord_lattice->gpu_x1mean[coordinate];
+                    sL    = coord_lattice->gpu_face_areas[ii + 0];
+                    sR    = coord_lattice->gpu_face_areas[ii + 1];
+                    dV    = coord_lattice->gpu_dV[ii];
+                    rmean = coord_lattice->gpu_x1mean[ii];
 
                     s->gpu_cons[ia] += Conserved{ 
                         -(sR * f1.D - sL * f2.D) / dV +
-                        s->gpu_sourceD[coordinate] * decay_constant,
+                        s->gpu_sourceD[ii] * decay_constant,
 
                         -(sR * f1.S - sL * f2.S) / dV + 2.0 * pc / rmean +
-                        s->gpu_sourceS[coordinate] * decay_constant,
+                        s->gpu_sourceS[ii] * decay_constant,
 
                         -(sR * f1.tau - sL * f2.tau) / dV +
-                        s->gpu_source0[coordinate] * decay_constant
+                        s->gpu_source0[ii] * decay_constant
                     } * dt * 0.5;
                     break;
                 }
@@ -991,7 +985,7 @@ SRHD::simulate1D(
     // Check if user input a valid initial timestep. 
     // if not, adapt it
     adapt_dt();
-    dt = init_dt < dt ? init_dt : dt;
+    this->dt = dt < init_dt ? dt : init_dt;
 
     dt_arr.resize(nx);
 
@@ -1014,8 +1008,10 @@ SRHD::simulate1D(
     // Setup the system
     const int nBlocks = (nx + BLOCK_SIZE - 1) / BLOCK_SIZE;
     const int physical_nBlocks = (active_zones + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    const dim3 gridDim   = dim3(nBlocks);
-    const dim3 threadDim = dim3(BLOCK_SIZE);
+    const dim3 fgridDim   = dim3(nBlocks);
+    const dim3 agridDim   = dim3(physical_nBlocks);
+    const dim3 threadDim  = dim3(BLOCK_SIZE);
+
     // Some benchmarking tools 
     int   nfold   = 0;
     int   ncheck  = 0;
@@ -1028,13 +1024,13 @@ SRHD::simulate1D(
     {  
         const int radius = 1;
         const int shBlockSize  = BLOCK_SIZE + 2 * radius;
-        const unsigned shBlockBytes = shBlockSize * sizeof(Conserved) + shBlockSize * sizeof(Primitive);
+        const unsigned shBlockBytes = shBlockSize * sizeof(Primitive);
         while (t < tend)
         {
             t1 = high_resolution_clock::now();
-            hipLaunchKernelGGL(shared_gpu_cons2prim, gridDim, threadDim, 0, 0, device_self);
-            hipLaunchKernelGGL(shared_gpu_advance, gridDim, threadDim, shBlockBytes, 0, device_self, shBlockSize, radius, geometry[coord_system]);
-            hipLaunchKernelGGL(config_ghosts1DGPU, dim3(1), dim3(1), 0, 0, device_self, nx, first_order);
+            hipLaunchKernelGGL(shared_gpu_cons2prim, fgridDim, threadDim, 0, 0, device_self);
+            hipLaunchKernelGGL(shared_gpu_advance,   agridDim, threadDim, shBlockBytes, 0, device_self, shBlockSize, radius, geometry[coord_system]);
+            hipLaunchKernelGGL(config_ghosts1DGPU,   dim3(1), dim3(1), 0, 0, device_self, nx, first_order);
             t += dt; 
             
             hipDeviceSynchronize();
@@ -1053,7 +1049,7 @@ SRHD::simulate1D(
                         << "Time: " << std::setw(10) <<  t
                         << "\t"
                         << "Zones/sec: "<< nx / delta_t.count() << std::flush;
-                nfold += 100;
+                nfold += 1;
             }
 
             /* Write to a File every tenth of a second */
@@ -1082,19 +1078,19 @@ SRHD::simulate1D(
     } else {
         const int radius = 2;
         const int shBlockSize  = BLOCK_SIZE + 2 * radius;
-        const unsigned shBlockBytes = shBlockSize * sizeof(Conserved) + shBlockSize * sizeof(Primitive);
+        const unsigned shBlockBytes = shBlockSize * sizeof(Primitive);
         while (t < tend)
         {
             t1 = high_resolution_clock::now();
             // First Half Step
-            hipLaunchKernelGGL(shared_gpu_cons2prim, gridDim, threadDim, 0, 0, device_self);
-            hipLaunchKernelGGL(shared_gpu_advance, gridDim, threadDim, shBlockBytes, 0, device_self, shBlockSize, radius, geometry[coord_system]);
+            hipLaunchKernelGGL(shared_gpu_cons2prim, fgridDim, threadDim, 0, 0, device_self);
+            hipLaunchKernelGGL(shared_gpu_advance,   fgridDim, threadDim, shBlockBytes, 0, device_self, shBlockSize, radius, geometry[coord_system]);
             hipLaunchKernelGGL(config_ghosts1DGPU, dim3(1), dim3(1), 0, 0, device_self, nx, first_order);
 
             // Final Half Step
-            hipLaunchKernelGGL(shared_gpu_cons2prim, dim3(nBlocks), dim3(BLOCK_SIZE), 0, 0, device_self);
-            hipLaunchKernelGGL(shared_gpu_advance, dim3(nBlocks), dim3(BLOCK_SIZE), shBlockBytes, 0, device_self, shBlockSize, radius, geometry[coord_system]);
-            hipLaunchKernelGGL(config_ghosts1DGPU, dim3(1), dim3(1), 0, 0, device_self, nx, first_order);
+            hipLaunchKernelGGL(shared_gpu_cons2prim, fgridDim, dim3(BLOCK_SIZE), 0, 0, device_self);
+            hipLaunchKernelGGL(shared_gpu_advance,   fgridDim, dim3(BLOCK_SIZE), shBlockBytes, 0, device_self, shBlockSize, radius, geometry[coord_system]);
+            hipLaunchKernelGGL(config_ghosts1DGPU,   dim3(1), dim3(1), 0, 0, device_self, nx, first_order);
 
             t += dt; 
             hipDeviceSynchronize();
