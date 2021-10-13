@@ -1,0 +1,271 @@
+# Cython Compile the Hydro Code
+
+import os
+import numpy
+import subprocess
+from os.path import join as pjoin
+from setuptools import setup, find_namespace_packages
+from distutils.extension import Extension
+from distutils.core import Command
+from distutils import sysconfig
+from Cython.Build import cythonize, build_ext
+from setuptools.command.build_ext import build_ext as build_ext_orig
+
+
+class CompilerParams():
+    def __init__(self, arch='cpu'):
+        self._arch        = arch 
+
+        super().__init__()
+        
+    @property
+    def arch(self):
+        return self._arch 
+    
+    @property   
+    def compiler_args(self):
+        cpu_compiler_args = ['-std=c++17', '-march=native', '-fno-wrapv', '-O3', '-fopenmp']
+        if self._arch == 'gpu':
+            gpu_compiler_args = { '$ENV{CXX}': cpu_compiler_args,
+                                   'hipcc': []
+                                 }
+            if "${HIP_PLATFORM}" == "nvidia":
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_50', '-c',
+                                            '--ptxas-options=-v', '--extended-lambda',
+                                            '--compiler-options', '-fPIC', '-O3', '-lineinfo']
+            else:
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-fno-wrapv', '-O3', "-fPIC"]
+                
+        self._compiler_args = cpu_compiler_args if self._arch == "cpu" else gpu_compiler_args
+        return self._compiler_args
+                
+    @property
+    def linker_args(self):
+        self._linker_args = ['-lhdf5', '-lhdf5_cpp', '-fopenmp']
+        # if self._arch == "cpu":
+        #     self._linker_args += ['-fopenmp']
+        return self._linker_args 
+    
+    @property
+    def libraries(self):
+        self._libraries = ['hdf5', 'hdf5_cpp']
+        if self._arch != "cpu":
+            if "${HIP_PLATFORM}" == "nvidia":
+                self._libraries += ['cudart']
+            else:
+                self._libraries   += ['amdhip64']
+                
+        return self._libraries
+    
+    @property
+    def runtime_libs(self):
+        self._runtime_libs = []
+        if self._arch != "cpu":
+            self._runtime_libs += ["${HIP_RUNTIME_LIBRARY_DIRS}"]
+    
+    @property
+    def linker_args(self):
+        self._linker_args = []
+        if self._arch != "cpu":
+            self._linker_args += ['-lcudart']
+            
+        return self._linker_args
+    
+    @property
+    def define_macros(self):
+        self._defineMacros = []
+        if self._arch != "cpu":
+            if "${HIP_PLATFORM}" == "nvidia":
+                self._defineMacros = [("__HIP_PLATFORM_NVIDIA__", "1")]
+            else:
+                self._defineMacros = [("__HIP_PLATFORM_AMD__", "1")]
+                
+        return self._defineMacros
+    
+    @property        
+    def library_dirs(self):
+        hdf5_path = os.path.dirname('${HDF5_CPP_LIB}')
+        self._library_dirs = [hdf5_path]
+        if self._arch != "cpu":
+            gpu_libs = '${HIP_RUNTIME_LIBRARY_DIRS}'.split(';')
+            self._library_dirs += gpu_libs
+            
+        return self._library_dirs
+    
+    @property
+    def language(self):
+        self._language = "c++"
+        return self._language 
+        
+    @property
+    def extra_includes(self):
+        self._extraIncludes = ['${CMAKE_CURRENT_SOURCE_DIR}/src', '${HDF5_INCLUDE_DIRS}']
+        if self._arch != "cpu":
+            gpu_includes = '${HIP_INCLUDE_DIRS}'.split(';')
+            self._extraIncludes += gpu_includes
+        return self._extraIncludes
+    
+    @property
+    def sources(self):
+        src_dir = os.path.dirname("${CMAKE_CURRENT_SOURCE_DIR}/src/")
+        com_src = pjoin(src_dir, "common")
+        self._sources  = [pjoin(com_src, file) for file in os.listdir(com_src) if file.endswith('.cpp')]
+        self._sources += [pjoin(src_dir, file) for file in os.listdir(src_dir) if file.endswith('.cpp')]
+        if self._arch == "cpu":
+            cpu_src = pjoin(src_dir, "gpu")
+            self._sources.insert(0, pjoin(cpu_src,"gpu_state.pyx"))
+            for file in os.listdir(cpu_src):
+                if file.endswith(".cpp") and file != "gpu_state.cpp":
+                    self._sources.append(pjoin(cpu_src, file))
+        elif self._arch == "gpu":
+            gpu_src = pjoin(src_dir, "gpu")
+            for file in os.listdir(gpu_src):
+                if file.endswith(".cpp") and file != "gpu_state.cpp":
+                    self._sources.append(pjoin(gpu_src, file))
+            self._sources.insert(0, pjoin(gpu_src, "gpu_state.pyx"))
+        return self._sources
+
+def extensions(comp: CompilerParams, name: str = "state"):
+    '''
+    Handle generation of extensions (a.k.a "managing cython compilery").
+    '''
+    try:
+        from Cython.Build import cythonize
+    except ImportError:
+        def cythonize(*args, **kwargs):
+            print("Hint: Wrapping import of cythonize in extensions()")
+            from Cython.Build import cythonize
+            return cythonize(*args, **kwargs)
+
+    try:
+        import numpy
+        npIncludes = [numpy.get_include()]
+    except ImportError:
+        npIncludes = []
+
+    extensionArguments = {
+        'include_dirs':          npIncludes + comp.extra_includes,
+        'library_dirs':          comp.library_dirs,
+        'extra_compile_args':    comp.compiler_args,
+        'extra_link_args':       comp.linker_args,
+        'libraries':             comp.libraries,
+        'runtime_library_dirs':  comp.runtime_libs,
+        'language':              comp.language,
+        'define_macros':         comp.define_macros
+    }
+
+    # Ensure disutils does not mess with the build process
+    # sysconfig.get_config_vars()['CFLAGS'] = ''
+    # sysconfig.get_config_vars()['OPT'] = ''
+    # sysconfig.get_config_vars()['PY_CFLAGS'] = ''
+    # sysconfig.get_config_vars()['PY_CORE_CFLAGS'] = ''
+    # sysconfig.get_config_vars()['CC'] = '$ENV{CC}'
+    # sysconfig.get_config_vars()['CXX'] = '$ENV{CXX}'
+    # sysconfig.get_config_vars()['BASECFLAGS'] = ''
+    # sysconfig.get_config_vars()['CCSHARED'] = '-fPIC'
+    # sysconfig.get_config_vars()['LDSHARED'] = '$ENV{CXX} -shared'
+    # sysconfig.get_config_vars()['CPP'] = '$ENV{CXX}'
+    # sysconfig.get_config_vars()['CPPFLAGS'] = ''
+    # sysconfig.get_config_vars()['BLDSHARED'] = ''
+    # sysconfig.get_config_vars()['CONFIGURE_LDFLAGS'] = ''
+    # sysconfig.get_config_vars()['LDFLAGS'] = ''
+    # sysconfig.get_config_vars()['PY_LDFLAGS'] = ''
+    # sysconfig.get_config_vars()['OPT'] = ''
+
+    return cythonize([Extension(name, comp.sources, **extensionArguments)], language_level = "3", nthreads=2)
+    # if comp.arch == "cpu":
+    #     return cythonize([Extension(name, comp.sources, **extensionArguments)], language_level = "3", nthreads=2)
+    # else:
+    #     return [Extension(name, comp.sources, **extensionArguments)]
+
+
+
+
+def customize_compiler_for_hipcc(self):
+    """Inject deep into distutils to customize how the dispatch
+    to gcc/hipcc works.
+
+    If you subclass UnixCCompiler, it's not trivial to get your subclass
+    injected in, and still have the right customizations (i.e.
+    distutils.sysconfig.customize_compiler) run on it. So instead of going
+    the OO route, I have this. Note, it's kindof like a wierd functional
+    subclassing going on.
+    """
+
+    # Tell the compiler it can processes .cu
+    self.src_extensions.append('.hip.cpp')
+
+    # Save references to the default compiler_so and _comple methods
+    default_compiler_so = self.compiler_so
+    super = self._compile
+
+    # Now redefine the _compile method. This gets executed for each
+    # object but distutils doesn't have the ability to change compilers
+    # based on source extension: we add it.
+    def _compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
+        if src != "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/gpu_state.cpp":
+            # use the cuda for .cu files
+            self.set_executable('compiler_so', '${HIPCC}')
+            # use only a subset of the extra_postargs, which are 1-1
+            # translated from the extra_compile_args in the Extension class
+            postargs = extra_postargs['hipcc']
+        else:
+            postargs = extra_postargs['$ENV{CXX}']
+
+        super(obj, src, ext, cc_args, postargs, pp_opts)
+        # Reset the default compiler_so, which we might have changed for cuda
+        self.compiler_so = default_compiler_so
+
+    # Inject our redefined _compile method into the class
+    self._compile = _compile
+    
+class custom_build_ext(build_ext):
+    def build_extensions(self):
+        # self.extensions = extensions(CompilerParams("gpu"), 'gpu_state')
+        customize_compiler_for_hipcc(self.compiler)
+        build_ext.build_extensions(self)
+
+class BuildPlatformCommand(build_ext):
+    """A custom command to choose to build on CPU, GPU, or both."""
+
+    description = 'build for the GPU architecture'
+    # user_options = build_ext.user_options + [
+    #     # The format is (long option, short option, description).
+    #     ('cpu',  None,  None),
+    # ]
+    def initialize_options(self):
+        """Set default values for options."""
+        # Each user option must be listed here with their default value.
+        self.cpu  = None
+
+    def finalize_options(self):
+        """Post-process options."""
+        # set the compiler params based on selected option
+        pass
+    def build_extensions(self):
+        if self.cpu:
+            self.extensions = extensions(CompilerParams('cpu'), 'state')
+        else:
+            customize_compiler_for_hipcc(self.compiler)
+        build_ext.build_extensions(self)
+
+# Initialize default CPU extension
+gpu_mode = "${GPU_CODE}"
+ext      = extensions(CompilerParams("cpu"), 'gpu_state') if gpu_mode == "OFF" else extensions(CompilerParams("gpu"), 'gpu_state')
+builder  = build_ext if gpu_mode == "OFF" else custom_build_ext
+setup(
+    name='PySIMBI',
+    author='Marcus DuPont',
+    author_email="md4469@nyu.edu",
+    description="Python module to solve hydrodynamic equations using a hip/c++ backend",
+    version='${PROJECT_VERSION}',
+    ext_modules=ext,
+    cmdclass={
+        'build_ext': builder
+        },
+    package_dir={'pysimbi': '${CMAKE_CURRENT_SOURCE_DIR}'},
+    packages=find_namespace_packages(include=['pysimbi.*']),
+    install_requires=['numpy', 'cython'],
+    python_requires=">=3.6",
+    # Since the package has c++ code, the egg cannot be zipped
+    zip_safe=False)
