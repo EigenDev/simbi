@@ -15,11 +15,54 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.animation import FuncAnimation
 import os, os.path
 
-def get_frames(dir):
+
+cons = ['D', 'momentum', 'energy', 'energy_rst']
+field_choices = ['rho', 'v1', 'v2', 'pre', 'gamma_beta', 'temperature', 'line_profile', 'energy'] + cons 
+col = plt.cm.jet([0.25,0.75])  
+
+R_0 = const.R_sun.cgs 
+c   = const.c.cgs
+m   = const.M_sun.cgs
+ 
+rho_scale  = m / (4./3. * np.pi * R_0 ** 3) 
+e_scale    = m * const.c.cgs.value**2
+pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
+vel_scale  = c 
+time_scale = R_0 / c
+
+def get_field_str(args):
+    if args.field == "rho":
+        if args.units:
+            return r'$\rho$ [g cm$^{-3}$]'
+        else:
+            return r'$\rho$'
+    elif args.field == "gamma_beta":
+        return r"$\Gamma \ \beta$"
+    elif args.field == "energy":
+        if args.units:
+            return r"$\tau [\rm erg \ cm^{-3}]$"
+        else:
+            return r"$\tau $"
+    elif args.field == "energy_rst":
+        if args.units:
+            return r"$\tau - D \  [\rm erg \ cm^{-3}]$"
+        else:
+            return r"$\tau - D"
+        
+    elif args.field == "pre":
+        if args.units:
+            return r"$p [\rm erg \ cm^{-3}]$"
+        else:
+            return r"$p$"
+    else:
+        return args.field
+
+
+def get_frames(dir, max_file_num):
     frames       = sorted([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
-    total_frames = len(frames)
     frames.sort(key=len, reverse=False) # sorts by ascending length
-    
+    frames = frames[:max_file_num]
+    total_frames = len(frames)
     return total_frames, frames
 
 def read_file(filepath, filename, args):
@@ -34,7 +77,7 @@ def read_file(filepath, filename, args):
         p           = hf.get("p")[:]
         nx          = ds.attrs["NX"]
         ny          = ds.attrs["NY"]
-        t           = ds.attrs["current_time"]
+        t           = ds.attrs["current_time"] * time_scale
         xmax        = ds.attrs["xmax"]
         xmin        = ds.attrs["xmin"]
         ymax        = ds.attrs["ymax"]
@@ -114,7 +157,7 @@ def read_file(filepath, filename, args):
         field_dict["rho"]         = rho
         field_dict["v1"]          = v1 
         field_dict["v2"]          = v2 
-        field_dict["p"]           = p
+        field_dict["pre"]         = p
         field_dict["gamma_beta"]  = W*beta
         field_dict["temperature"] = T
         field_dict["enthalpy"]    = h
@@ -123,7 +166,12 @@ def read_file(filepath, filename, args):
         
     return field_dict, setup_dict
 
-def plot_polar_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
+def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
+    if args.wedge:
+        ax    = axs[0]
+        wedge = axs[1]
+    else:
+        ax = axs
     rr, tt = mesh['rr'], mesh['theta']
     t2 = mesh['t2']
     xmax        = ds["xmax"]
@@ -131,8 +179,21 @@ def plot_polar_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     ymax        = ds["ymax"]
     ymin        = ds["ymin"]
     
-    vmin,vmax = eval(args.cbar)
+    vmin,vmax = args.cbar
 
+    unit_scale = 1.0
+    if (args.units):
+        if args.field == "rho" or args.field == "D":
+            unit_scale = rho_scale
+        elif args.field == "pre" or args.field == "energy" or args.field == "energy_rst":
+            unit_scale = pre_scale
+    
+    units = unit_scale.value if args.units else 1.0
+    if args.field in cons:
+        var = units * prims2cons(field_dict, args.field)
+    else:
+        var = units * field_dict[args.field]
+        
     if args.log:
         kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
     else:
@@ -144,58 +205,95 @@ def plot_polar_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
         color_map = plt.cm.get_cmap(args.cmap)
         
     tend = ds["time"]
-    c1 = ax.pcolormesh(tt, rr, field_dict[args.field], cmap=color_map, shading='auto', **kwargs)
-    c2 = ax.pcolormesh(t2[::-1], rr, field_dict[args.field],  cmap=color_map, shading='auto', **kwargs)
+    c1 = ax.pcolormesh(tt[::-1], rr, var, cmap=color_map, shading='nearest', **kwargs)
+    c2 = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, shading='nearest', **kwargs)
     
-    
-        
+    # ax.set_thetamin(0)
+    # ax.set_thetamax(180)
     if ymax < np.pi:
+        ax.set_position( [0.1, -0.18, 0.8, 1.43])
+        # cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
         cbar_orientation = "horizontal"
-        ymd = int( np.floor(ymax * 180/np.pi) )
-        ax.set_thetamin(-ymd)
+        ymd = int( np.floor(ymax * 180/np.pi) )                                                                                                                                                                                     
+        ax.set_thetamin(-ymd)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
         ax.set_thetamax(ymd)
     else:
+        # cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
         cbar_orientation = "vertical"
         
     if args.log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        cbar = fig.colorbar(c2, orientation=cbar_orientation, cax=cbaxes, format=logfmt)
+        cbar = fig.colorbar(c1, orientation=cbar_orientation, cax=cbaxes, format=logfmt)
     else:
-        cbar = fig.colorbar(c2, orientation=cbar_orientation, cax=cbaxes)
-        
+        cbar = fig.colorbar(c1, orientation=cbar_orientation, cax=cbaxes)
     
+    if args.wedge:
+        wedge_min = args.wedge_lims[0]
+        wedge_max = args.wedge_lims[1]
+        ang_min   = args.wedge_lims[2]
+        ang_max   = args.wedge_lims[3]
+        
+        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=2, color="white")
+        ax.plot(np.radians(np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color="white")
+        ax.plot(np.radians(np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color="white")
+        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=2, color="white")
         
     # ax.set_position( [0.1, -0.18, 0.8, 1.43])
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
-    ax.yaxis.grid(True, alpha=0.1)
-    ax.xaxis.grid(True, alpha=0.1)
+    ax.yaxis.grid(True, alpha=0.2)
+    ax.xaxis.grid(True, alpha=0.2)
     ax.tick_params(axis='both', labelsize=10)
+    rlabels = ax.get_ymajorticklabels()
+    for label in rlabels:
+        label.set_color('white')
+        
     ax.axes.xaxis.set_ticklabels([])
     ax.set_rmax(xmax) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
-
-    # Change the format of the field
-    if args.field == "rho":
-        field_str = r'$\rho$'
-    elif args.field == "gamma_beta":
-        field_str = r"$\Gamma \ \beta$"
-    elif args.field == "temperature":
-        field_str = r"T [K]"
-    else:
-        field_str = args.field
+    ax.set_rmin(xmin)
     
+    ax.set_position( [0.05, -0.5, 0.48, 2])
+    
+    field_str = get_field_str(args)
+    
+    if args.wedge:
+        vmin2, vmax2 = args.cbar2
+        if args.log:
+            kwargs = {'norm': colors.LogNorm(vmin = vmin2, vmax = vmax2)}
+        else:
+            kwargs = {'vmin': vmin2, 'vmax': vmax2}
+            
+        # wedge = fig.add_subplot(1, 2, 1, polar=True)
+        wedge.pcolormesh(tt, rr, var, cmap=color_map, shading='nearest', **kwargs)
+        wedge.set_theta_zero_location("N")
+        wedge.set_theta_direction(-1)
+        wedge.yaxis.grid(True, alpha=0.2)
+        wedge.xaxis.grid(True, alpha=0.2)
+        wedge.tick_params(axis='both', labelsize=10)
+        rlabels = ax.get_ymajorticklabels()
+        for label in rlabels:
+            label.set_color('white')
+            
+        #wedge.axes.xaxis.set_ticklabels([])
+        wedge.set_ylim([wedge_min, wedge_max])
+        wedge.set_rorigin(-wedge_min)
+        wedge.set_thetamin(ang_min)
+        wedge.set_thetamax(ang_max)
+        wedge.set_aspect(1.)
+        wedge.set_position( [0.5, -0.5, 0.3, 2])
+    # fig.set_tight_layout(True)
     if args.log:
         if ymax >= np.pi:
-            cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+            cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
         else:
-            cbar.ax.set_xlabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+            cbar.ax.set_xlabel(r'$\log$ {}'.format(field_str), fontsize=20)
     else:
         if ymax >= np.pi:
             cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
         else:
             cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
         
-    fig.suptitle('{} at t = {:.2f} s'.format(args.setup[0], tend), fontsize=20, y=0.95)
+    fig.suptitle('{} at t = {:.2f}'.format(args.setup[0], tend), fontsize=20, y=0.95)
     
 def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     xx, yy = mesh['xx'], mesh['yy']
@@ -204,7 +302,7 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     ymax        = ds["ymax"]
     ymin        = ds["ymin"]
     
-    vmin,vmax = eval(args.cbar)
+    vmin,vmax = args.cbar
 
     if args.log:
         kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
@@ -241,7 +339,7 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
         field_str = args.field
     
     if args.log:
-        cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+        cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
     else:
         cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
         
@@ -271,9 +369,6 @@ def create_mesh(fig, ax, filepath, filename, cbaxes, args):
     
         
     return ax
-    
-
-field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature']
 
 def main():
     parser = argparse.ArgumentParser(
@@ -292,8 +387,11 @@ def main():
     parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',
                         default = 0.0, help='The domain range')
     
-    parser.add_argument('--cbar_range', dest = "cbar", metavar='Range of Color Bar',
-                        default ='None, None', help='The colorbar range you\'d like to plot')
+    parser.add_argument('--cbar', dest = "cbar", metavar='Range of Color Bar',nargs=2,type=float,
+                        default =[None, None], help='The colorbar range you\'d like to plot')
+    
+    parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs=2,type=float,
+                        default =[None, None], help='The colorbar range you\'d like to plot')
     
     parser.add_argument('--cmap', dest = "cmap", metavar='Color Bar Colarmap',
                         default = 'magma', help='The colorbar cmap you\'d like to plot')
@@ -310,9 +408,34 @@ def main():
                         default=False,
                         help='True if you want the colormap to be reversed')
 
-    parser.add_argument('--save', dest='save', action='store_true',
-                        default=False,
-                        help='True if you want save the fig')
+    parser.add_argument('--x', dest='x', nargs="+", default = None, type=float,
+                        help='List of x values to plot field max against')
+    
+    parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X',
+                        help='X label name')
+    
+    parser.add_argument('--ehist', dest='ehist', action='store_true',
+                        default=False, help='True if you want the plot the energy histogram')
+    
+    parser.add_argument('--norm', dest='norm', action='store_true',
+                        default=False, help='True if you want the plot normalized to max value')
+    
+    parser.add_argument('--labels', dest='labels', nargs="+", default = None,
+                        help='Optionally give a list of labels for multi-file plotting')
+    
+    parser.add_argument('--tidx', dest='tidx', type=int, default = None,
+                        help='Set to a value if you wish to plot a 1D curve about some angle')
+
+    parser.add_argument('--units', dest='units', default = False, action='store_true')
+    
+    parser.add_argument('--file_max', dest='file_max', default = None, type=int)
+    
+    parser.add_argument('--wedge', dest='wedge', default=False, action='store_true')
+    parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 80, 110], type=float, nargs=4)
+    
+    parser.add_argument('--save', dest='save', type=str,
+                        default=None,
+                        help='Save the fig with some name')
     
     parser.add_argument('--half', dest='half', action='store_true',
                         default=False,
@@ -320,7 +443,7 @@ def main():
 
    
     args = parser.parse_args()
-    frame_count, flist = get_frames(args.data_dir[0])
+    frame_count, flist = get_frames(args.data_dir[0], args.file_max)
     
     # read the first file and infer the system configuration from it
     init_setup = read_file(args.data_dir[0], flist[0], args)[1]
@@ -330,8 +453,13 @@ def main():
         cbaxes = divider.append_axes('right', size='5%', pad=0.05)
         cbar_orientation = "vertical"
     else:
-        fig = plt.figure(figsize=(15,8), constrained_layout=False)
-        ax  = fig.add_subplot(111, projection='polar')
+        if args.wedge:
+            fig, ax = plt.subplots(1, 2, subplot_kw={'projection': 'polar'},
+                         figsize=(15, 10), constrained_layout=True)
+        else:
+            fig = plt.figure(figsize=(15,8), constrained_layout=False)
+            ax  = fig.add_subplot(111, projection='polar')
+            
         if init_setup["ymax"] < np.pi:
             ax.set_position( [0.1, -0.18, 0.8, 1.43])
             cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
@@ -351,7 +479,11 @@ def main():
         data to plot) and a line object to update.
         """
         cbaxes.cla()
-        ax.cla()
+        if isinstance(ax, (list, np.ndarray)):
+            for axs in ax:
+                axs.cla()
+        else:
+            ax.cla()
         # Not strictly neccessary, just so we know we are stealing these from
         # the global scope
         pcolor_mesh = create_mesh(fig, ax, args.data_dir[0], flist[frame], cbaxes, args)
@@ -373,17 +505,15 @@ def main():
         fargs=[args],
         # repeat=False,
         # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
-        interval= 1000 / 20
+        interval= 1000 / 5
     )
 
-    if args.save:
-        animation.save("{}.mp4".format(args.setup[0]).replace(" ", "_"))
-    else:
+    if not args.save:
         plt.show()
+    else:
+        animation.save("{}.mp4".format(args.save.replace(" ", "_")))
     
     
     
 if __name__ == "__main__":
     main()
-
-import h5py 

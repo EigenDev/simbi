@@ -16,8 +16,9 @@ import os
 
 from datetime import datetime
 
-
-field_choices = ['rho', 'v', 'p', 'gamma_beta', 'temperature', 'vpdf']
+cons = ['D', 'momentum', 'energy']
+field_choices = ['rho', 'v', 'p', 'gamma_beta', 'temperature'] + cons
+col = plt.cm.jet([0.25,0.75])  
 
 R_0 = const.R_sun.cgs 
 c   = const.c.cgs
@@ -33,15 +34,31 @@ def find_nearest(arr, val):
     idx = np.argmin(np.abs(arr - val))
     return idx, arr[idx]
  
+def get_field_str(args):
+    if args.field == "rho":
+        if args.units:
+            return r'$\rho$ [g cm$^{-3}$]'
+        else:
+            return r'$\rho$'
+    elif args.field == "gamma_beta":
+        return r"$\Gamma \ \beta$"
+    elif args.field == "energy":
+        return r"$\tau$"
+    else:
+        return args.field
+    
 def prims2cons(fields, cons):
     if cons == "D":
         return fields['rho'] * fields['W']
+    elif cons == "S":
+        return fields['rho'] * fields['W']**2 * fields['v']
     elif cons == "energy":
         return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p'] - fields['rho']*fields['W']
 
 
-def plot_profile(args, field_dict, ax = None, overplot = False, case = 0):
+def plot_profile(args, field_dict, ax = None, overplot = False, subplot = False, case = 0):
     
+    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
     r = field_dict["r"]
     tend = field_dict['t']
     if not overplot:
@@ -54,14 +71,15 @@ def plot_profile(args, field_dict, ax = None, overplot = False, case = 0):
         elif args.field == "p":
             unit_scale = pre_scale
         
-    if args.labels is None:
-        ax.plot(r, field_dict[args.field] * unit_scale)
+    if args.field in cons:
+        var = prims2cons(field_dict, args.field)
     else:
-        ax.plot(r, field_dict[args.field] * unit_scale, label=r'${}$, t={:.2f}'.format(args.labels[case], tend))
+        var = field_dict[args.field]
         
-    
-    ax.set_title('{} at t = {:.2f}'.format(args.setup[0], field_dict["t"]), fontsize=20)
-
+    if args.labels is None:
+        ax.plot(r, var * unit_scale, color=colors[case])
+    else:
+        ax.plot(r, var * unit_scale, color=colors[case], label=r'${}$, t={:.2f}'.format(args.labels[case], tend))
 
     ax.tick_params(axis='both', labelsize=15)
     
@@ -76,24 +94,42 @@ def plot_profile(args, field_dict, ax = None, overplot = False, case = 0):
         xmin, xmax = eval(args.xlim)
         ax.set_xlim(xmin, xmax)
     # Change the format of the field
-    if args.field == "rho":
-        if args.units:
-            field_str = r'$\rho$ [g cm$^{-3}$]'
-        else:
-            field_str = r'$\rho$'
-    elif args.field == "gamma_beta":
-        field_str = r"$\Gamma \ \beta$"
-    elif args.field == "vpdf":
-        field_str = r"$\exp[- (v_{\rm lab} - v_H)^2/v_{\rm rms}^2]$"
-    else:
-        field_str = args.field
+    field_str = get_field_str(args)
         
     ax.set_ylabel('{}'.format(field_str), fontsize=20)
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.axvline(0.60, color='black', linestyle='--')
     
+    ########
+    # Personal Calculations
+    # TODO: Remove Later
+    ########
+    r_outer = find_nearest(r, 0.55)[0]
+    r_slow  = find_nearest(r, 1.50)[0]
+    if field_dict["is_linspace"]:
+        rvertices = 0.5 * (r[1:] + r[:-1])
+    else:  
+        rvertices = np.sqrt(r[1:] * r[:-1])
+        
+    rvertices = np.insert(rvertices,  0, r[0])
+    rvertices = np.insert(rvertices, rvertices.shape[0], r[-1])
+    dr = rvertices[1:] - rvertices[:-1]
+    dV          =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
+    mout    = (4./3.) * np.pi * np.sum(dV[r_outer:r_slow] * field_dict["rho"][r_outer: r_slow])
+    print(mout)
+    # zzz = input('')
+    ########################
+    
+    
+    if not subplot:   
+        ax.set_title('{}'.format(args.setup[0]), fontsize=20)
     if not overplot:
+        ax.set_title('{} at t = {:.3f}'.format(args.setup[0], tend), fontsize=20)
         return fig
     
-def plot_hist(args, fields, overplot=False, ax=None, case=0):
+def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
+    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
@@ -102,7 +138,11 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
     edens_total = prims2cons(fields, "energy")
     r           = fields["r"]
     
-    rvertices = np.sqrt(r[1:] * r[:-1])
+    if fields["is_linspace"]:
+        rvertices = 0.5 * (r[1:] + r[:-1])
+    else:  
+        rvertices = np.sqrt(r[1:] * r[:-1])
+        
     rvertices = np.insert(rvertices,  0, r[0])
     rvertices = np.insert(rvertices, rvertices.shape[0], r[-1])
     dr = rvertices[1:] - rvertices[:-1]
@@ -112,6 +152,8 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
     mass   = dV * fields["W"] * fields["rho"]
     e_k    = (fields['W'] - 1.0) * mass * e_scale.value
 
+    print(etotal)
+    zzz = input('')
     u = fields['gamma_beta']
     w = np.diff(u).max()*1e-1
     n = int(np.ceil( (u.max() - u.min() ) / w ) )
@@ -140,28 +182,25 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
     
     E_0 = ets[up_min] * upower[0] ** (alpha - 1)
     if args.labels is None:
-        hist = ax.hist(gbs, bins=gbs, weights=ets, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0)
+        hist = ax.hist(gbs, bins=gbs, weights=ets, label= r'$E_T$', histtype='step', color=colors[case], rwidth=1.0, linewidth=3.0)
         # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
     else:
-        hist = ax.hist(gbs, bins=gbs, weights=ets, label=r'${}$, t={:.2f}'.format(args.labels[case], tend), histtype='step', rwidth=1.0, linewidth=3.0)
+        hist = ax.hist(gbs, bins=gbs, weights=ets, label=r'${}$, t={:.2f}'.format(args.labels[case], tend), color=colors[case], histtype='step', rwidth=1.0, linewidth=3.0)
         # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--', label = r'${}$ fit'.format(args.labels[case]))
-    
-   
-    # if case == 0:
-    #     ax.hist(gbs_1d, bins=gbs_1d, weights=ets_1d, alpha=0.8, label= r'1D Sphere', histtype='step', linewidth=3.0)
-    
+
     sorted_energy = np.sort(ets)
-    plt.xscale('log')
-    plt.yscale('log')
-    # ax.set_ylim(sorted_energy[1], 1.5*ets.max())
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_ylim(sorted_energy[1], 1.5*ets.max())
     ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
     ax.set_ylabel(r'$E( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
     ax.tick_params('both', labelsize=15)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     
-    ax.set_title(r'setup: {}'.format(args.setup[0]), fontsize=20)
-    ax.legend(fontsize=15)
+    if not subplot:
+        ax.set_title(r'setup: {}'.format(args.setup[0]), fontsize=20)
+        # ax.legend(fontsize=15)
     if not overplot:
         ax.set_title(r'setup: {}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
         return fig
@@ -205,6 +244,10 @@ def main():
     parser.add_argument('--first_order', dest='forder', action='store_true',
                         default=False,
                         help='True if this is a grid using RK1')
+    
+    parser.add_argument('--plots', dest='plots', type = int,
+                        default=1,
+                        help=r'Number of subplots you\'d like')
     
     parser.add_argument('--units', dest='units', action='store_true',
                         default=False,
@@ -289,14 +332,26 @@ def main():
             field_dict[idx]["xmax"]        = xmax
             field_dict[idx]["xactive"]     = xactive
             field_dict[idx]["r"]           = r
+            field_dict[idx]["is_linspace"]           = is_linspace
         
     if len(args.filename) > 1:
-        fig, ax = plt.subplots(1, 1, figsize = (10, 10))
-        for idx, file in enumerate(args.filename):
-            if args.ehist:
-                plot_hist(args, field_dict[idx], ax = ax, overplot= True, case = idx)
-            else:
-                plot_profile(args, field_dict[idx], ax = ax, overplot=True, case = idx)
+        if args.plots == 1:
+            fig = plt.figure(figsize=(10,10))
+            ax = fig.add_subplot(1, 1, 1)
+            for idx, file in enumerate(args.filename):
+                if args.ehist:
+                    plot_hist(args, field_dict[idx], ax = ax, overplot= True, case = idx)
+                else:
+                    plot_profile(args, field_dict[idx], ax = ax, overplot=True, case = idx)
+        else:
+            fig = plt.figure(figsize=(30,10))
+            ax1 = fig.add_subplot(1, 2, 1)
+            ax2 = fig.add_subplot(1, 2, 2)
+            for idx, file in enumerate(args.filename):
+                plot_hist(args, field_dict[idx], ax = ax1, overplot= True, subplot = True, case = idx)
+                plot_profile(args, field_dict[idx], ax = ax2, overplot=True, subplot = True, case = idx)
+                
+            fig.suptitle("{}".format(args.setup[0]), fontsize=40)
         if args.labels != None:
             ax.legend(fontsize = 15)
             
@@ -309,7 +364,7 @@ def main():
     
     
     if args.save:
-        fig.savefig("plots/{}.png".format(args.setup[0]), bbox_inches='tight')
+        fig.savefig("{}.png".format(args.setup[0]), bbox_inches='tight')
     else:
         plt.show()
     
