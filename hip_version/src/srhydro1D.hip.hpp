@@ -12,7 +12,6 @@
 #include <vector>
 #include "clattice1D.hpp"
 #include "hydro_structs.hpp"
-#include "helpers.hpp"
 
 namespace simbi
 {

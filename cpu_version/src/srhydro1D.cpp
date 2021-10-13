@@ -183,10 +183,10 @@ void SRHD::adapt_dt()
 
             cfl_dt = dr / (std::max(std::abs(vPLus), std::abs(vMinus)));
 
+
             min_dt = std::min(min_dt, cfl_dt);
         }
     }   
-
     dt = CFL * min_dt;
 };
 
@@ -481,14 +481,16 @@ void SRHD::advance()
                     dV = coord_lattice.dV[coordinate];
                     rmean = coord_lattice.x1mean[coordinate];
 
-                    cons_n[ii].D += dt * (-(sR * f1.D - sL * f2.D) / dV +
-                                            sourceD[coordinate] * decay_constant);
+                    cons_n[ii] += Conserved{ 
+                        -(sR * f1.D - sL * f2.D) / dV +
+                        sourceD[coordinate] * decay_constant,
 
-                    cons_n[ii].S += dt * (-(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean +
-                                            sourceS[coordinate] * decay_constant);
+                        -(sR * f1.S - sL * f2.S) / dV + 2.0 * pc / rmean +
+                        sourceS[coordinate] * decay_constant,
 
-                    cons_n[ii].tau += dt * (-(sR * f1.tau - sL * f2.tau) / dV +
-                                                source0[coordinate] * decay_constant);
+                        -(sR * f1.tau - sL * f2.tau) / dV +
+                        source0[coordinate] * decay_constant
+                    } * dt;
                     break;
                 }
             }
@@ -631,12 +633,16 @@ void SRHD::advance()
                     dV = coord_lattice.dV[coordinate];
                     rmean = coord_lattice.x1mean[coordinate];
 
-                    cons_n[ii].D += 0.5 * dt * (-(sR * f1.D - sL * f2.D) / dV + sourceD[coordinate] * decay_constant);
+                    cons_n[ii] += Conserved{ 
+                        -(sR * f1.D - sL * f2.D) / dV +
+                        sourceD[coordinate] * decay_constant,
 
-                    cons_n[ii].S += 0.5 * dt * (-(sR * f1.S - sL * f2.S) / dV + 2 * pc / rmean + sourceS[coordinate] * decay_constant);
+                        -(sR * f1.S - sL * f2.S) / dV + 2.0 * pc / rmean +
+                        sourceS[coordinate] * decay_constant,
 
-                    cons_n[ii].tau += 0.5 * dt * (-(sR * f1.tau - sL * f2.tau) / dV + source0[coordinate] * decay_constant);
-                    break;
+                        -(sR * f1.tau - sL * f2.tau) / dV +
+                        source0[coordinate] * decay_constant
+                    } * dt * 0.5;
                 }
             }
         }
@@ -799,7 +805,7 @@ SRHD::simulate1D(
             advance();
             if (periodic == false)
             {
-                config_ghosts1D(cons_n, NX);
+                config_ghosts1D(cons_n, NX, first_order);
             }
             cons = cons_n;
 
@@ -808,7 +814,7 @@ SRHD::simulate1D(
             advance();
             if (periodic == false)
             {
-                config_ghosts1D(cons_n, NX);
+                config_ghosts1D(cons_n, NX, first_order);
             }
             cons = cons_n;
 
@@ -820,6 +826,7 @@ SRHD::simulate1D(
 
             std::cout << std::fixed << std::setprecision(3) << std::scientific;
             std::cout << "\r"
+                      << "Iteration: " << n << "\t"
                       << "dt: " << std::setw(5) << dt << "\t"
                       << "t: "  << std::setw(5) << t << "\t"
                       << "Zones per sec: " << NX / time_span.count() << std::flush;

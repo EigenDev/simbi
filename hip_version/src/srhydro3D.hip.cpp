@@ -1869,6 +1869,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     setup.NY = NY;
     setup.NZ = NZ;
     setup.linspace = linspace;
+    setup.ad_gamma = gamma;
 
     u0.resize(nzones);
 

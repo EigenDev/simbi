@@ -84,7 +84,7 @@ void SRHD2D::cons2prim2D()
                 S1  = cons[gid].S1;   // X1-Momentum Denity
                 S2  = cons[gid].S2;   // X2-Momentum Density
                 tau = cons[gid].tau; // Energy Density
-                S = sqrt(S1 * S1 + S2 * S2);
+                S = std::sqrt(S1 * S1 + S2 * S2);
 
                 peq = (n != 0.0) ? pressure_guess[gid] : std::abs(S - D - tau);
 
@@ -99,7 +99,7 @@ void SRHD2D::cons2prim2D()
                     p = peq;
                     etotal = tau + p + D;
                     v2 = S * S / (etotal * etotal);
-                    Ws = 1.0 / sqrt(1.0 - v2);
+                    Ws = 1.0 / std::sqrt(1.0 - v2);
                     rhos = D / Ws;
                     eps = (tau + D * (1. - Ws) + (1. - Ws * Ws) * p) / (D * Ws);
                     f = (gamma - 1.0) * rhos * eps - p;
@@ -319,7 +319,7 @@ void SRHD2D::adapt_dt()
         for (int jj = 0; jj < yphysical_grid; jj++)
         {
             dx2 = coord_lattice.dx2[jj];
-
+            shift_j = jj + idx_active;
             #pragma omp for schedule(static)
             for (int ii = 0; ii < xphysical_grid; ii++)
             {
@@ -332,7 +332,7 @@ void SRHD2D::adapt_dt()
                 pressure = prims[aid].p;
 
                 h = 1. + gamma * pressure / (rho * (gamma - 1.));
-                cs = sqrt(gamma * pressure / (rho * h));
+                cs = std::sqrt(gamma * pressure / (rho * h));
 
                 plus_v1  = (v1 + cs) / (1. + v1 * cs);
                 plus_v2  = (v2 + cs) / (1. + v2 * cs);
@@ -357,6 +357,7 @@ void SRHD2D::adapt_dt()
             } // end ii 
         } // end jj
     } // end parallel region
+
     dt = CFL * min_dt;
 };
 
@@ -743,24 +744,24 @@ void SRHD2D::evolve()
                             // L(D)
                             -(f1.D * s1R - f2.D * s1L) / dV1 
                                 - (g1.D * s2R - g2.D * s2L) / dV2 
-                                    + sourceD[xcoordinate + xphysical_grid * ycoordinate] * decay_const,
+                                    + sourceD[real_loc] * decay_const,
 
                             // L(S1)
                             -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
                                 - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
                                     + rhoc * hc * wc2 * vc * vc / rmean + 2 * pc / rmean +
-                                        source_S1[xcoordinate + xphysical_grid * ycoordinate] * decay_const,
+                                        source_S1[real_loc] * decay_const,
 
                             // L(S2)
                             -(f1.S2 * s1R - f2.S2 * s1L) / dV1
                                 - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
                                     - (rhoc * hc * wc2 * uc * vc / rmean - pc * coord_lattice.cot[ycoordinate] / rmean) 
-                                        + source_S2[xcoordinate + xphysical_grid * ycoordinate] * decay_const,
+                                        + source_S2[real_loc] * decay_const,
 
                             // L(tau)
                             -(f1.tau * s1R - f2.tau * s1L) / dV1 
                                 - (g1.tau * s2R - g2.tau * s2L) / dV2 
-                                    + source_tau[xcoordinate + xphysical_grid * ycoordinate] * decay_const
+                                    + source_tau[real_loc] * decay_const
                         } * dt;
                         break;
                     }
@@ -775,7 +776,7 @@ void SRHD2D::evolve()
                 s2L         = coord_lattice.x2_face_areas[ycoordinate];
                 s2R         = coord_lattice.x2_face_areas[ycoordinate + 1];
 
-                #pragma omp parallel for
+                #pragma omp for nowait
                 for (int ii = i_start; ii < i_bound; ii++)
                 {
                     aid = jj * NX + ii;
@@ -1201,6 +1202,7 @@ std::vector<std::vector<double>> SRHD2D::simulate2D(
     setup.NX           = NX;
     setup.NY           = NY;
     setup.coord_system = coord_system;
+    setup.linspace     = linspace;
 
     cons.resize(nzones);
     prims.resize(nzones);

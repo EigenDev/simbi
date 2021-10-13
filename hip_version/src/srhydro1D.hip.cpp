@@ -345,7 +345,7 @@ void SRHD::adapt_dt()
 void SRHD::adapt_dt(SRHD *dev, int blockSize)
 {   
     dtWarpReduce<SRHD, Primitive, 128><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
-    hipDeviceSynchronize();
+    // hipDeviceSynchronize();
     hipMemcpy(&dt, &(dev->dt),  sizeof(real), hipMemcpyDeviceToHost);
     
 };
@@ -1033,7 +1033,7 @@ SRHD::simulate1D(
             hipLaunchKernelGGL(config_ghosts1DGPU,   dim3(1), dim3(1), 0, 0, device_self, nx, first_order);
             t += dt; 
             
-            hipDeviceSynchronize();
+            // hipDeviceSynchronize();
 
             if (n >= nfold){
                 ncheck += 1;
@@ -1093,7 +1093,7 @@ SRHD::simulate1D(
             hipLaunchKernelGGL(config_ghosts1DGPU,   dim3(1), dim3(1), 0, 0, device_self, nx, first_order);
 
             t += dt; 
-            hipDeviceSynchronize();
+            // hipDeviceSynchronize();
 
             if (n >= nfold){
                 ncheck += 1;

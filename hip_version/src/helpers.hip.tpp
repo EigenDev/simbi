@@ -43,7 +43,7 @@ namespace simbi{
             dt_buff[tid] = s->CFL * cfl_dt;
             __syncthreads();
 
-            // printf("[%d] dt_min: %f, cfl_dt: %f\n",blockIdx.x, s->dt_min[blockIdx.x], s->CFL * cfl_dt);
+            // printf("[%d] dt_min: %f, dt_buf: %f, cfl_dt: %f\n",blockIdx.x, s->dt_min[blockIdx.x], dt_buff[tid], s->CFL * cfl_dt);
 
             for (unsigned int stride=blockDim.x/2; stride>32; stride>>=1) 
             {   
@@ -57,8 +57,14 @@ namespace simbi{
             }
             if(tid == 0)
             {
+
                 s->dt_min[blockIdx.x] = dt_buff[tid]; // dt_min[0] == minimum
                 s->dt = s->dt_min[0];
+                // printf("dt_buff[%d] = %f\n", tid + 0, dt_buff[tid + 0]);
+                // printf("dt_buff[%d] = %f\n", tid + 1, dt_buff[tid + 1]);
+                // printf("dt_buff[%d] = %f\n", tid + 2, dt_buff[tid + 2]);
+                // printf("dt_buff[%d] = %f\n", tid + 3, dt_buff[tid + 3]);
+                //printf("dt_min[%d] = %f", blockIdx.x, s->dt_min[blockIdx.x]);
             }
             
         }

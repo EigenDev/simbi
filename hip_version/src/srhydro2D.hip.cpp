@@ -1521,6 +1521,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     setup.ymin = x2[0];
     setup.NX = NX;
     setup.NY = NY;
+    setup.ad_gamma = gamma;
     setup.linspace = linspace;
 
     u0.resize(nzones);
@@ -1604,9 +1605,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             hipLaunchKernelGGL(config_ghosts2DGPU,   fgridDim, threadDim, 0, 0, device_self, NX, NY, first_order);
             t += dt; 
             
-            hipDeviceSynchronize();
+            // hipDeviceSynchronize();
 
             if (n >= nfold){
+                hipDeviceSynchronize();
                 ncheck += 1;
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
@@ -1672,9 +1674,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
             t += dt; 
             
-            hipDeviceSynchronize();
+            // hipDeviceSynchronize();
 
             if (n >= nfold){
+                hipDeviceSynchronize();
                 ncheck += 1;
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
