@@ -113,15 +113,15 @@ HIP  = locate_hip()
 
 compilerArguments = {
             'g++': ['-std=c++17','-march=native', '-fno-wrapv', '-O3'],
-            'hipcc': [
-                ]
+            'hipcc': []
             }
 if HIP["platform"] == "nvidia":
-    compilerArguments["hipcc"] += ['-arch=sm_50', '-c', '--ptxas-options=-v', '--compiler-options', "-fPIC", "-O3"]
+    compilerArguments["hipcc"] += ['-arch=sm_50', '-c', 
+                                   '--ptxas-options=-v', 
+                                   '--compiler-options', '-fPIC', '-O3', '-lineinfo']
 else:
     compilerArguments["hipcc"] += ['-std=c++17', '-fno-wrapv', '-O3', "-fPIC"]
     
-compiler_args = ['-march=native', '-fno-wrapv', '-O3']
 linker_args   = ['-lhdf5', '-lhdf5_cpp']
 libraries     = ['hdf5', 'hdf5_cpp'] 
 library_dirs  = [HIP["lib"]]
@@ -129,7 +129,8 @@ extraIncludes = []
 language = "c++"
 if HIP["platform"] == "nvidia":
     defineMacros      = [("__HIP_PLATFORM_NVIDIA__", "1")]
-    libraries         += ['cudart']
+    libraries         += ['cudart', 'cudadevrt']
+    linker_args       += ['-lcudart', '-lcudadevrt']
 else:
     defineMacros      = [("__HIP_PLATFORM_AMD__", "1")]
     libraries        += ['amdhip64']
@@ -209,7 +210,7 @@ def customize_compiler_for_hipcc(self):
     """
 
     # Tell the compiler it can processes .cu
-    # self.src_extensions.append('.cu')
+    self.src_extensions.append('.hip.cpp')
 
     # Save references to the default compiler_so and _comple methods
     default_compiler_so = self.compiler_so
@@ -219,7 +220,7 @@ def customize_compiler_for_hipcc(self):
     # object but distutils doesn't have the ability to change compilers
     # based on source extension: we add it.
     def _compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
-        if src != "src/gpu_state.cpp":
+        if src != "src/gpu_state.cpp" or os.path.splitext(src)[1] == '.hip.cpp':
             # use the cuda for .cu files
             self.set_executable('compiler_so', HIP['hipcc'])
             # use only a subset of the extra_postargs, which are 1-1
@@ -250,9 +251,8 @@ setup(
     author = 'Marcus DuPont',
     author_email="md4469@nyu.edu",
     description="Cython module to solve hydrodynamic systems using a hip/c++ backend",
-    version = '0.0.1',
+    version = '0.2.0',
     ext_modules = ext,
-    # Inject our custom trigger
     cmdclass = {'build_ext': custom_build_ext},
     packages=['pysimbi_gpu'],
     # Since the package has c code, the egg cannot be zipped
