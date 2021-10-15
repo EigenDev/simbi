@@ -1506,8 +1506,7 @@ void SRHD3D::advance(
             {
                 case simbi::Geometry::CARTESIAN:
                     {
-                        if constexpr(BuildPlatform == Platform::GPU)
-                        {
+                        #if GPU_CODE
                             real dx = coord_lattice->gpu_dx1[ii];
                             real dy = coord_lattice->gpu_dx2[jj];
                             real dz = coord_lattice->gpu_dx3[kk];
@@ -1516,7 +1515,7 @@ void SRHD3D::advance(
                             self->gpu_cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx  - (g1.S2  - g2.S2) / dy - (h1.S2 - h2.S3)   / dz + self->gpu_sourceS2  [real_loc] );
                             self->gpu_cons[aid].S3  += (real)0.5 * dt * ( -(f1.S3 - f2.S3)   / dx  - (g1.S3  - g2.S3) / dy - (h1.S3 - h2.S3)   / dz + self->gpu_sourceS3  [real_loc] );
                             self->gpu_cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau) / dy - (h1.tau - h2.tau) / dz + self->gpu_sourceTau [real_loc] );
-                        } else {
+                        #else
                             real dx = self->coord_lattice.dx1[ii];
                             real dy = self->coord_lattice.dx2[jj];
                             real dz = self->coord_lattice.dx3[kk];
@@ -1525,7 +1524,7 @@ void SRHD3D::advance(
                             cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx  - (g1.S2  - g2.S2) / dy - (h1.S2 - h2.S3)   / dz + sourceS2  [real_loc] );
                             cons[aid].S3  += (real)0.5 * dt * ( -(f1.S3 - f2.S3)   / dx  - (g1.S3  - g2.S3) / dy - (h1.S3 - h2.S3)   / dz + sourceS3  [real_loc] );
                             cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau) / dy - (h1.tau - h2.tau) / dz + sourceTau [real_loc] );
-                        }
+                        #endif
                         
                     break;
                     }
@@ -1552,8 +1551,7 @@ void SRHD3D::advance(
                     real hc    = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
                     real gam2  = (real)1.0/((real)1.0 - (uc * uc + vc * vc + wc * wc));
 
-                    if constexpr(BuildPlatform == Platform::GPU)
-                    {
+                    #if GPU_CODE
                         self->gpu_cons[aid] +=
                         Conserved{
                             // L(D)
@@ -1589,7 +1587,7 @@ void SRHD3D::advance(
                                     - (h1.tau* s3R - h2.tau* s3L) / dV3 
                                         + self->gpu_sourceTau[real_loc] * decay_const
                         } * dt * (real)0.5;
-                    } else {
+                    #else
                         cons[aid] +=
                         Conserved{
                             // L(D)
@@ -1625,7 +1623,7 @@ void SRHD3D::advance(
                                     - (h1.tau* s3R - h2.tau* s3L) / dV3 
                                         + sourceTau[real_loc] * decay_const
                         } * dt * (real)0.5;
-                    }
+                    #endif 
                     
                     break;
 

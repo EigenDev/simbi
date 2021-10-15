@@ -849,22 +849,21 @@ void SRHD2D::advance(
             {
                 case simbi::Geometry::CARTESIAN:
                     {
-                        if constexpr(BuildPlatform == Platform::GPU)
-                        {
+                        #if GPU_CODE
                             real dx = coord_lattice->gpu_dx1[ii];
                             real dy = coord_lattice->gpu_dx2[jj];
                             self->gpu_cons[aid].D   += dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D ) / dy + self->gpu_sourceD [real_loc] );
                             self->gpu_cons[aid].S1  += dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1) / dy + self->gpu_sourceS1[real_loc] );
                             self->gpu_cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx  -(g1.S2  - g2.S2) / dy + self->gpu_sourceS2[real_loc] );
                             self->gpu_cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau)/ dy + self->gpu_sourceTau [real_loc]);
-                        } else {
+                        #else
                             real dx = coord_lattice->dx1[ii];
                             real dy = coord_lattice->dx2[jj];
                             cons[aid].D   += dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D ) / dy + sourceD   [real_loc] );
                             cons[aid].S1  += dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1) / dy + sourceS1  [real_loc] );
                             cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx  -(g1.S2  - g2.S2) / dy + sourceS2  [real_loc] );
                             cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau)/ dy + sourceTau [real_loc] );
-                        }
+                        #endif
                     
 
                     break;
@@ -889,8 +888,7 @@ void SRHD2D::advance(
                     real hc   = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
                     real gam2 = (real)1.0/((real)1.0 - (uc * uc + vc * vc));
 
-                    if constexpr(BuildPlatform == Platform::GPU)
-                    {   
+                    #if GPU_CODE 
                         self->gpu_cons[aid] += Conserved{
                                 // L(D)
                                 -(f1.D * s1R - f2.D * s1L) / dV1 
@@ -914,7 +912,7 @@ void SRHD2D::advance(
                                     - (g1.tau * s2R - g2.tau * s2L) / dV2 
                                         + self->gpu_sourceTau[real_loc] * decay_const
                             } * dt;
-                    } else {
+                    #else
                         cons[aid] += Conserved{
                                 // L(D)
                                 -(f1.D * s1R - f2.D * s1L) / dV1 
@@ -938,7 +936,7 @@ void SRHD2D::advance(
                                     - (g1.tau * s2R - g2.tau * s2L) / dV2 
                                         + self->sourceTau[real_loc] * decay_const
                             } * dt;
-                    }
+                    #endif
                     
                     break;
                     }

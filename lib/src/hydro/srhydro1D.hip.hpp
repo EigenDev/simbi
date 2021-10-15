@@ -15,7 +15,6 @@
 #include "common/hydro_structs.hpp"
 #include "build_options.hpp"
 #include "util/exec_policy.hpp"
-
 namespace simbi
 {
      struct SRHD
@@ -54,12 +53,14 @@ namespace simbi
           real      * pguess_ptr;
           sr1d::Primitive * prims_ptr;
           void cons2prim1D();
+
           void advance(
                SRHD *s, 
                const int sh_block_size, 
                const int radius, 
                const simbi::Geometry geometry, 
                const simbi::MemSide user = simbi::MemSide::Host);
+
           void set_mirror_ptrs();
           void initalizeSystem(
               std::vector<std::vector<real>> &sources,
@@ -149,4 +150,5 @@ namespace simbi
      };
      
 } // namespace simbi
+
 #endif
