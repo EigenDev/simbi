@@ -8,7 +8,6 @@
 */
 
 #include "euler1D.hpp" 
-#include "../common/helpers.hpp"
 #include <cmath>
 #include <algorithm>
 #include <chrono>
@@ -25,10 +24,10 @@ Newtonian1D::Newtonian1D () {}
 
 // Overloaded Constructor
 Newtonian1D::Newtonian1D(
-    std::vector< std::vector<double> > init_state, 
-    double gamma, 
-    double CFL, 
-    std::vector<double> r,
+    std::vector< std::vector<real> > init_state, 
+    real gamma, 
+    real CFL, 
+    std::vector<real> r,
     std::string coord_system = "cartesian") :
 
     init_state(init_state),
@@ -56,13 +55,13 @@ typedef hydro1d::Eigenvals Eigenvals;
 void Newtonian1D::cons2prim(){
     #pragma omp parallel
     {
-        double rho, pre, v;
+        real rho, pre, v;
         #pragma omp for schedule(static)
-        for (int ii = 0; ii < NX; ii++)
+        for (int ii = 0; ii < nx; ii++)
         {  
             rho = cons[ii].rho;
             v   = cons[ii].m/rho;
-            pre = (gamma - 1.0)*(cons[ii].e_dens - 0.5 * rho * v * v);
+            pre = (gamma - (real)1.0)*(cons[ii].e_dens - (real)0.5 * rho * v * v);
             prims [ii] = Primitive{rho, v, pre};
         }
     }
@@ -77,35 +76,35 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
 {
     Eigenvals lambdas;
     // Separate the left and right state components
-    double rho_l = left_prim.rho;
-    double v_l   = left_prim.v;
-    double p_l   = left_prim.p;
+    real rho_l = left_prim.rho;
+    real v_l   = left_prim.v;
+    real p_l   = left_prim.p;
 
-    double rho_r    = right_prim.rho;
-    double v_r      = right_prim.v;
-    double p_r      = right_prim.p;
+    real rho_r    = right_prim.rho;
+    real v_r      = right_prim.v;
+    real p_r      = right_prim.p;
 
-    double cs_r = std::sqrt(gamma * p_r/rho_r);
-    double cs_l = std::sqrt(gamma * p_l/rho_l);
+    real cs_r = std::sqrt(gamma * p_r/rho_r);
+    real cs_l = std::sqrt(gamma * p_l/rho_l);
 
     switch (sim_solver)
     {
     case SOLVER::HLLE:
-        lambdas.aR = std::max({v_l + cs_l, v_r + cs_r, 0.0}); 
-        lambdas.aL = std::min({v_l - cs_l, v_r - cs_r, 0.0});
+        lambdas.aR = std::max({v_l + cs_l, v_r + cs_r, (real)0.0}); 
+        lambdas.aL = std::min({v_l - cs_l, v_r - cs_r, (real)0.0});
         return lambdas;
     
     case SOLVER::HLLC:
-        double cbar   = 0.5*(cs_l + cs_r);
-        double rhoBar = 0.5*(rho_l + rho_r);
-        double pStar  = 0.5*(p_l + p_r) + 0.5*(v_l - v_r)*cbar*rhoBar;
+        real cbar   = (real)0.5*(cs_l + cs_r);
+        real rhoBar = (real)0.5*(rho_l + rho_r);
+        real pStar  = (real)0.5*(p_l + p_r) + (real)0.5*(v_l - v_r)*cbar*rhoBar;
 
         // Steps to Compute HLLC as described in Toro et al. 2019
-        double z      = (gamma - 1.)/(2.*gamma);
-        double num    = cs_l + cs_r - ( gamma-1.)/2 *(v_r - v_l);
-        double denom  = cs_l/pow(p_l,z) + cs_r/pow(p_r, z);
-        double p_term = num/denom;
-        double qL, qR;
+        real z      = (gamma - 1.)/(2.*gamma);
+        real num    = cs_l + cs_r - ( gamma-1.)/2 *(v_r - v_l);
+        real denom  = cs_l/pow(p_l,z) + cs_r/pow(p_r, z);
+        real p_term = num/denom;
+        real qL, qR;
 
         pStar = pow(p_term, (1./z));
 
@@ -121,10 +120,10 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
             qR = sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_r - 1.));
         }
 
-        double aL = v_l - qL*cs_l;
-        double aR = v_r + qR*cs_r;
+        real aL = v_l - qL*cs_l;
+        real aR = v_r + qR*cs_r;
 
-        double aStar = ( (p_r - p_l + rho_l*v_l*(aL - v_l) - rho_r*v_r*(aR - v_r))/
+        real aStar = ( (p_r - p_l + rho_l*v_l*(aL - v_l) - rho_r*v_r*(aR - v_r))/
                         (rho_l*(aL - v_l) - rho_r*(aR - v_r) ) );
 
         lambdas.aL = aL;
@@ -140,11 +139,11 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
 
 // Adapt the CFL conditonal timestep
 void Newtonian1D::adapt_dt(){
-    double min_dt = INFINITY;
+    real min_dt = INFINITY;
     #pragma omp parallel 
     {
-        double r_left, r_right, dx, cs, cfl_dt;
-        double v, pre, rho;
+        real dx, cs, cfl_dt;
+        real v, pre, rho;
         int shift_i;
 
         // Compute the minimum timestep given CFL
@@ -176,7 +175,7 @@ void Newtonian1D::adapt_dt(){
 // Get the (3,1) state tensor for computation. Used for Higher Order Reconstruction
 Conserved Newtonian1D::prims2cons(const Primitive &prim)
 {
-    double energy = prim.p/(gamma - 1.0) + 0.5 * prim.rho * prim.v * prim.v;
+    real energy = prim.p/(gamma - (real)1.0) + (real)0.5 * prim.rho * prim.v * prim.v;
 
     return Conserved{prim.rho, prim.rho * prim.v, energy};
 };
@@ -188,7 +187,7 @@ Conserved Newtonian1D::prims2cons(const Primitive &prim)
 // Get the 1D Flux array (3,1)
 Conserved Newtonian1D::calc_flux(const Primitive &prim)
 {
-    double energy = prim.p/(gamma - 1.0) + 0.5 * prim.rho * prim.v * prim.v;
+    real energy = prim.p/(gamma - (real)1.0) + (real)0.5 * prim.rho * prim.v * prim.v;
 
     return Conserved{
         prim.rho * prim.v,
@@ -208,8 +207,8 @@ Conserved Newtonian1D::calc_hll_flux(
 {
     Eigenvals lambda;
     lambda = calc_eigenvals(left_prims, right_prims);
-    double am = lambda.aL;
-    double ap = lambda.aR;
+    real am = lambda.aL;
+    real ap = lambda.aR;
 
     // Compute the HLL Flux component-wise
     return (left_flux * ap - right_flux * am + (right_state - left_state) * am * ap)  / (ap - am) ;
@@ -226,10 +225,10 @@ Conserved Newtonian1D::calc_hllc_flux(
 {
     Eigenvals lambda = calc_eigenvals(left_prims, right_prims);
 
-    double aL = lambda.aL; 
-    double aR = lambda.aR; 
-    double ap = std::max(0.0, aR);
-    double am = std::min(0.0, aL);
+    real aL = lambda.aL; 
+    real aR = lambda.aR; 
+    real ap = std::max((real)0.0, aR);
+    real am = std::min((real)0.0, aL);
     if (0.0 <= aL){
         return left_flux;
     } 
@@ -237,40 +236,40 @@ Conserved Newtonian1D::calc_hllc_flux(
         return right_flux;
     }
 
-    double aStar = lambda.aStar;
-    double pStar = lambda.pStar;
+    real aStar = lambda.aStar;
+    real pStar = lambda.pStar;
 
     auto hll_flux = (left_flux * ap + right_flux * am - (right_state - left_state) * am * ap)  / (am + ap) ;
 
     auto hll_state = (right_state * aR - left_state * aL - right_flux + left_flux)/(aR - aL);
     
     if (- aL <= (aStar - aL)){
-        double pressure = left_prims.p;
-        double v        = left_prims.v;
-        double rho      = left_state.rho;
-        double m        = left_state.m;
-        double energy   = left_state.e_dens;
-        double cofac    = 1./(aL - aStar);
+        real pressure = left_prims.p;
+        real v        = left_prims.v;
+        real rho      = left_state.rho;
+        real m        = left_state.m;
+        real energy   = left_state.e_dens;
+        real cofac    = 1./(aL - aStar);
 
-        double rhoStar = cofac * (aL - v)*rho;
-        double mstar   = cofac * (m*(aL - v) - pressure + pStar);
-        double eStar   = cofac * (energy*(aL - v) + pStar*aStar - pressure*v);
+        real rhoStar = cofac * (aL - v)*rho;
+        real mstar   = cofac * (m*(aL - v) - pressure + pStar);
+        real eStar   = cofac * (energy*(aL - v) + pStar*aStar - pressure*v);
 
         auto star_state = Conserved{rhoStar, mstar, eStar};
 
         // Compute the intermediate left flux
         return left_flux + (star_state - left_state) * aL;
     } else {
-        double pressure = right_prims.p;
-        double v        = right_prims.v;
-        double rho      = right_state.rho;
-        double m        = right_state.m;
-        double energy   = right_state.e_dens;
-        double cofac    = 1./(aR - aStar);
+        real pressure = right_prims.p;
+        real v        = right_prims.v;
+        real rho      = right_state.rho;
+        real m        = right_state.m;
+        real energy   = right_state.e_dens;
+        real cofac    = 1./(aR - aStar);
 
-        double rhoStar = cofac * (aR - v)*rho;
-        double mstar   = cofac * (m*(aR - v) - pressure + pStar);
-        double eStar   = cofac * (energy*(aR - v) + pStar*aStar - pressure*v);
+        real rhoStar = cofac * (aR - v)*rho;
+        real mstar   = cofac * (m*(aR - v) - pressure + pStar);
+        real eStar   = cofac * (energy*(aR - v) + pStar*aStar - pressure*v);
 
         auto star_state = Conserved{rhoStar, mstar, eStar};
 
@@ -293,10 +292,10 @@ void Newtonian1D::evolve()
         Conserved f_l, f_r, f1, f2;
         Primitive prims_l, prims_r;
 
-        double dx, rmean, dV, sL, sR, pc;
+        real dx, rmean, dV, sL, sR, pc;
         if (first_order)
         {
-            double rho_l, rho_r, v_l, v_r, p_l, p_r;
+            real rho_l, rho_r, v_l, v_r, p_l, p_r;
             #pragma omp for nowait
             for (int ii = i_start; ii < i_bound; ii++)
             {
@@ -416,32 +415,32 @@ void Newtonian1D::evolve()
 
                 // Reconstructed left primitives vector
                 prims_l.rho =
-                    center.rho + 0.5 * minmod(plm_theta * (center.rho - left_mid.rho),
-                                            0.5 * (right_mid.rho - left_mid.rho),
+                    center.rho + (real)0.5 * minmod(plm_theta * (center.rho - left_mid.rho),
+                                            (real)0.5 * (right_mid.rho - left_mid.rho),
                                             plm_theta * (right_mid.rho - center.rho));
 
-                prims_l.v = center.v + 0.5 * minmod(plm_theta * (center.v - left_mid.v),
-                                                    0.5 * (right_mid.v - left_mid.v),
+                prims_l.v = center.v + (real)0.5 * minmod(plm_theta * (center.v - left_mid.v),
+                                                    (real)0.5 * (right_mid.v - left_mid.v),
                                                     plm_theta * (right_mid.v - center.v));
 
-                prims_l.p = center.p + 0.5 * minmod(plm_theta * (center.p - left_mid.p),
-                                                    0.5 * (right_mid.p - left_mid.p),
+                prims_l.p = center.p + (real)0.5 * minmod(plm_theta * (center.p - left_mid.p),
+                                                    (real)0.5 * (right_mid.p - left_mid.p),
                                                     plm_theta * (right_mid.p - center.p));
 
                 // Reconstructed right primitives vector
                 prims_r.rho = right_mid.rho -
-                            0.5 * minmod(plm_theta * (right_mid.rho - center.rho),
-                                        0.5 * (right_most.rho - center.rho),
+                            (real)0.5 * minmod(plm_theta * (right_mid.rho - center.rho),
+                                        (real)0.5 * (right_most.rho - center.rho),
                                         plm_theta * (right_most.rho - right_mid.rho));
 
                 prims_r.v =
-                    right_mid.v - 0.5 * minmod(plm_theta * (right_mid.v - center.v),
-                                            0.5 * (right_most.v - center.v),
+                    right_mid.v - (real)0.5 * minmod(plm_theta * (right_mid.v - center.v),
+                                            (real)0.5 * (right_most.v - center.v),
                                             plm_theta * (right_most.v - right_mid.v));
 
                 prims_r.p =
-                    right_mid.p - 0.5 * minmod(plm_theta * (right_mid.p - center.p),
-                                            0.5 * (right_most.p - center.p),
+                    right_mid.p - (real)0.5 * minmod(plm_theta * (right_mid.p - center.p),
+                                            (real)0.5 * (right_most.p - center.p),
                                             plm_theta * (right_most.p - right_mid.p));
 
                 // Calculate the left and right states using the reconstructed PLM
@@ -463,31 +462,31 @@ void Newtonian1D::evolve()
 
                 // Do the same thing, but for the right side interface [i - 1/2]
                 prims_l.rho =
-                    left_mid.rho + 0.5 * minmod(plm_theta * (left_mid.rho - left_most.rho),
-                                                0.5 * (center.rho - left_most.rho),
+                    left_mid.rho + (real)0.5 * minmod(plm_theta * (left_mid.rho - left_most.rho),
+                                                (real)0.5 * (center.rho - left_most.rho),
                                                 plm_theta * (center.rho - left_mid.rho));
 
                 prims_l.v =
-                    left_mid.v + 0.5 * minmod(plm_theta * (left_mid.v - left_most.v),
-                                            0.5 * (center.v - left_most.v),
+                    left_mid.v + (real)0.5 * minmod(plm_theta * (left_mid.v - left_most.v),
+                                            (real)0.5 * (center.v - left_most.v),
                                             plm_theta * (center.v - left_mid.v));
 
                 prims_l.p =
-                    left_mid.p + 0.5 * minmod(plm_theta * (left_mid.p - left_most.p),
-                                            0.5 * (center.p - left_most.p),
+                    left_mid.p + (real)0.5 * minmod(plm_theta * (left_mid.p - left_most.p),
+                                            (real)0.5 * (center.p - left_most.p),
                                             plm_theta * (center.p - left_mid.p));
 
                 prims_r.rho =
-                    center.rho - 0.5 * minmod(plm_theta * (center.rho - left_mid.rho),
-                                            0.5 * (right_mid.rho - left_mid.rho),
+                    center.rho - (real)0.5 * minmod(plm_theta * (center.rho - left_mid.rho),
+                                            (real)0.5 * (right_mid.rho - left_mid.rho),
                                             plm_theta * (right_mid.rho - center.rho));
 
-                prims_r.v = center.v - 0.5 * minmod(plm_theta * (center.v - left_mid.v),
-                                                    0.5 * (right_mid.v - left_mid.v),
+                prims_r.v = center.v - (real)0.5 * minmod(plm_theta * (center.v - left_mid.v),
+                                                    (real)0.5 * (right_mid.v - left_mid.v),
                                                     plm_theta * (right_mid.v - center.v));
 
-                prims_r.p = center.p - 0.5 * minmod(plm_theta * (center.p - left_mid.p),
-                                                    0.5 * (right_mid.p - left_mid.p),
+                prims_r.p = center.p - (real)0.5 * minmod(plm_theta * (center.p - left_mid.p),
+                                                    (real)0.5 * (right_mid.p - left_mid.p),
                                                     plm_theta * (right_mid.p - center.p));
 
                 // Calculate the left and right states using the reconstructed PLM
@@ -511,9 +510,9 @@ void Newtonian1D::evolve()
                 {
                 case simbi::Geometry::CARTESIAN:
                     dx = coord_lattice.dx1[coordinate];
-                    cons_n[ii].rho    += 0.5 * dt * (-(f1.rho - f2.rho)       / dx + sourceRho[coordinate]);
-                    cons_n[ii].m      += 0.5 * dt * (-(f1.m - f2.m)           / dx + sourceMom[coordinate]);
-                    cons_n[ii].e_dens += 0.5 * dt * (-(f1.e_dens - f2.e_dens) / dx + sourceE[coordinate]);
+                    cons_n[ii].rho    += (real)0.5 * dt * (-(f1.rho - f2.rho)       / dx + sourceRho[coordinate]);
+                    cons_n[ii].m      += (real)0.5 * dt * (-(f1.m - f2.m)           / dx + sourceMom[coordinate]);
+                    cons_n[ii].e_dens += (real)0.5 * dt * (-(f1.e_dens - f2.e_dens) / dx + sourceE[coordinate]);
                     break;
 
                 case simbi::Geometry::SPHERICAL:
@@ -523,11 +522,11 @@ void Newtonian1D::evolve()
                     dV    = coord_lattice.dV[coordinate];
                     rmean = coord_lattice.x1mean[coordinate];
 
-                    cons_n[ii].rho    += 0.5 * dt * (-(sR * f1.rho - sL * f2.rho) / dV + sourceRho[coordinate] * decay_constant);
+                    cons_n[ii].rho    += (real)0.5 * dt * (-(sR * f1.rho - sL * f2.rho) / dV + sourceRho[coordinate] * decay_constant);
 
-                    cons_n[ii].m      += 0.5 * dt * (-(sR * f1.m - sL * f2.m) / dV + 2 * pc / rmean + sourceMom[coordinate] * decay_constant);
+                    cons_n[ii].m      += (real)0.5 * dt * (-(sR * f1.m - sL * f2.m) / dV + 2 * pc / rmean + sourceMom[coordinate] * decay_constant);
 
-                    cons_n[ii].e_dens += 0.5 * dt * (-(sR * f1.e_dens - sL * f2.e_dens) / dV + sourceE[coordinate] * decay_constant);
+                    cons_n[ii].e_dens += (real)0.5 * dt * (-(sR * f1.e_dens - sL * f2.e_dens) / dV + sourceE[coordinate] * decay_constant);
                     break;
                 }
             }
@@ -537,14 +536,14 @@ void Newtonian1D::evolve()
 };
 
 
- std::vector<std::vector<double> > Newtonian1D::simulate1D(
-    std::vector<std::vector<double>> &sources,
-    double tstart,
-    double tend,
-    double init_dt,
-    double plm_theta,
-    double engine_duration,
-    double chkpt_interval,
+ std::vector<std::vector<real> > Newtonian1D::simulate1D(
+    std::vector<std::vector<real>> &sources,
+    real tstart,
+    real tend,
+    real init_dt,
+    real plm_theta,
+    real engine_duration,
+    real chkpt_interval,
     std::string data_directory,
     bool first_order,
     bool periodic,
@@ -563,24 +562,24 @@ void Newtonian1D::evolve()
     this->t               = tstart;
     this->dt              = init_dt;
     // Define the swap vector for the integrated state
-    this->NX = init_state[0].size();
+    this->nx = init_state[0].size();
 
     if (periodic){
         this->idx_active    = 0;
-        this->active_zones = NX;
+        this->active_zones = nx;
         this->i_start      = 0;
-        this->i_bound      = NX;
+        this->i_bound      = nx;
     } else {
         if (first_order){
             this->idx_active = 1;
             this->i_start   = 1;
-            this->i_bound   = NX - 1;
-            this->active_zones = NX - 2;
+            this->i_bound   = nx - 1;
+            this->active_zones = nx - 2;
         } else {
             this->idx_active = 2;
             this->i_start    = 2;
-            this->i_bound    = NX - 2;
-            this->active_zones = NX - 4; 
+            this->i_bound    = nx - 2;
+            this->active_zones = nx - 4; 
         }
     }
     if (hllc){
@@ -594,23 +593,23 @@ void Newtonian1D::evolve()
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
     PrimData prods;
-    double round_place = 1 / chkpt_interval;
-    double t_interval =
-        t == 0 ? floor(tstart * round_place + 0.5) / round_place
-               : floor(tstart * round_place + 0.5) / round_place + chkpt_interval;
+    real round_place = 1 / chkpt_interval;
+    real t_interval =
+        t == 0 ? floor(tstart * round_place + (real)0.5) / round_place
+               : floor(tstart * round_place + (real)0.5) / round_place + chkpt_interval;
     DataWriteMembers setup;
     setup.xmax          = r[active_zones - 1];
     setup.xmin          = r[0];
     setup.xactive_zones = active_zones;
-    setup.NX            = NX;
+    setup.nx            = nx;
     setup.linspace      = linspace;
     setup.coord_system  = coord_system;
 
 
-    cons.resize(NX);
-    prims.resize(NX);
+    cons.resize(nx);
+    prims.resize(nx);
     // Copy the state array into real & profile variables
-    for (size_t ii = 0; ii < NX; ii++)
+    for (size_t ii = 0; ii < nx; ii++)
     {
         cons [ii] = Conserved{init_state[0][ii], init_state[1][ii], init_state[2][ii]};
     }
@@ -649,20 +648,20 @@ void Newtonian1D::evolve()
             evolve();
             if (periodic == false)
             {
-                config_ghosts1D(cons_n, NX, true);
+                config_ghosts1D(cons_n, nx, true);
             }
             cons = cons_n;
             t += dt;
 
             /* Compute the loop execution time */
             high_resolution_clock::time_point t2 = high_resolution_clock::now();
-            duration<double> time_span = duration_cast<duration<double>>(t2 - t1);
+            duration<real> time_span = duration_cast<duration<real>>(t2 - t1);
 
             std::cout << std::fixed << std::setprecision(3) << std::scientific;
             std::cout << "\r"
                       << "dt: " << std::setw(5) << dt << "\t"
                       << "t: "  << std::setw(5) << t << "\t"
-                      << "Zones per sec: " << NX / time_span.count() << std::flush;
+                      << "Zones per sec: " << nx / time_span.count() << std::flush;
             adapt_dt();
             n++;
         }
@@ -678,7 +677,7 @@ void Newtonian1D::evolve()
             evolve();
             if (periodic == false)
             {
-                config_ghosts1D(cons_n, NX, false);
+                config_ghosts1D(cons_n, nx, false);
             }
             cons = cons_n;
             // Final Half Step
@@ -686,20 +685,20 @@ void Newtonian1D::evolve()
             evolve();
             if (periodic == false)
             {
-                config_ghosts1D(cons_n, NX, false);
+                config_ghosts1D(cons_n, nx, false);
             }
             cons = cons_n;
             t += dt;
 
             /* Compute the loop execution time */
             high_resolution_clock::time_point t2 = high_resolution_clock::now();
-            duration<double> time_span = duration_cast<duration<double>>(t2 - t1);
+            duration<real> time_span = duration_cast<duration<real>>(t2 - t1);
 
             std::cout << std::fixed << std::setprecision(3) << std::scientific;
             std::cout << "\r"
                       << "dt: " << std::setw(5) << dt << "\t"
                       << "t: "  << std::setw(5) << t << "\t"
-                      << "Zones per sec: " << NX / time_span.count() << std::flush;
+                      << "Zones per sec: " << nx / time_span.count() << std::flush;
 
             //--- Decay the source terms
             decay_constant = std::exp(-t / engine_duration);
@@ -719,7 +718,7 @@ void Newtonian1D::evolve()
                 filename    = string_format("%d.chkpt." + tnow + ".h5", active_zones);
                 setup.t     = t;
                 setup.dt    = dt;
-                write_hdf5(data_directory, filename, prods, setup, 1, NX);
+                write_hdf5(data_directory, filename, prods, setup, 1, nx);
                 t_interval += chkpt_interval;
             }
             adapt_dt();
@@ -728,8 +727,8 @@ void Newtonian1D::evolve()
     }
     cons2prim();
     std::cout << "\n";
-    std::vector<std::vector<double>> solution(3, std::vector<double>(NX));
-    for (size_t ii = 0; ii < NX; ii++)
+    std::vector<std::vector<real>> solution(3, std::vector<real>(nx));
+    for (size_t ii = 0; ii < nx; ii++)
     {
         solution[0][ii] = prims[ii].rho;
         solution[1][ii] = prims[ii].v;

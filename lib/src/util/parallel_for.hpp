@@ -23,17 +23,8 @@ namespace simbi
 			{
 				for (auto idx : range(first, last, globalThreadXCount()))  function(idx);
 			} else {
-				#pragma omp parallel
-				{
-					#pragma omp single 
-					{
-						for (auto idx : range(first, last))
-						{
-							function(idx);
-						}
-					}
-					
-				} 
+				#pragma omp parallel for schedule(static) 
+				for(auto idx = first; idx < last; idx++) function(idx);
 			}
 			
 		});

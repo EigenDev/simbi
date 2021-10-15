@@ -1,5 +1,0 @@
-
-namespace simbi
-{
-    
-} // namespace simbi

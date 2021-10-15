@@ -42,8 +42,6 @@ class CompilerParams():
     @property
     def linker_args(self):
         self._linker_args = ['-lhdf5', '-lhdf5_cpp', '-fopenmp']
-        # if self._arch == "cpu":
-        #     self._linker_args += ['-fopenmp']
         return self._linker_args 
     
     @property
@@ -84,7 +82,8 @@ class CompilerParams():
     
     @property        
     def library_dirs(self):
-        hdf5_path = os.path.dirname('${HDF5_CPP_LIB}')
+        hdf5_cxx_libs = [lib for lib in '${HDF5_CXX_LIBRARIES}'.split(';')]
+        hdf5_path = os.path.dirname(hdf5_cxx_libs[0])
         self._library_dirs = [hdf5_path]
         if self._arch != "cpu":
             gpu_libs = '${HIP_RUNTIME_LIBRARY_DIRS}'.split(';')
@@ -107,22 +106,17 @@ class CompilerParams():
     
     @property
     def sources(self):
-        src_dir = os.path.dirname("${CMAKE_CURRENT_SOURCE_DIR}/src/")
-        com_src = pjoin(src_dir, "common")
-        self._sources  = [pjoin(com_src, file) for file in os.listdir(com_src) if file.endswith('.cpp')]
-        self._sources += [pjoin(src_dir, file) for file in os.listdir(src_dir) if file.endswith('.cpp')]
-        if self._arch == "cpu":
-            cpu_src = pjoin(src_dir, "gpu")
-            self._sources.insert(0, pjoin(cpu_src,"gpu_state.pyx"))
-            for file in os.listdir(cpu_src):
-                if file.endswith(".cpp") and file != "gpu_state.cpp":
-                    self._sources.append(pjoin(cpu_src, file))
-        elif self._arch == "gpu":
-            gpu_src = pjoin(src_dir, "gpu")
-            for file in os.listdir(gpu_src):
-                if file.endswith(".cpp") and file != "gpu_state.cpp":
-                    self._sources.append(pjoin(gpu_src, file))
-            self._sources.insert(0, pjoin(gpu_src, "gpu_state.pyx"))
+        src_dir  = os.path.dirname("${CMAKE_CURRENT_SOURCE_DIR}/src/")
+        com_src  = pjoin(src_dir, "common")
+        util_src = pjoin(src_dir, "util")
+        self._sources   = [pjoin(com_src,  file) for file in os.listdir(com_src)  if file.endswith('.cpp')]
+        self._sources  += [pjoin(util_src, file) for file in os.listdir(util_src) if file.endswith('.cpp')]
+        self._sources  += [pjoin(src_dir,  file) for file in os.listdir(src_dir)  if file.endswith('.cpp')]
+        agno_src = pjoin(src_dir, "hydro")
+        for file in os.listdir(agno_src):
+            if file.endswith(".cpp") and file != "gpu_state.cpp":
+                self._sources.append(pjoin(agno_src, file))
+        self._sources.insert(0, pjoin(agno_src, "gpu_state.pyx"))
         return self._sources
 
 def extensions(comp: CompilerParams, name: str = "state"):
@@ -203,7 +197,7 @@ def customize_compiler_for_hipcc(self):
     # object but distutils doesn't have the ability to change compilers
     # based on source extension: we add it.
     def _compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
-        if src != "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/gpu_state.cpp":
+        if src != "${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp":
             # use the cuda for .cu files
             self.set_executable('compiler_so', '${HIPCC}')
             # use only a subset of the extra_postargs, which are 1-1

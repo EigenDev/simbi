@@ -84,12 +84,11 @@ namespace simbi{
                 s->dt_min[blockIdx.x] = dt_buff[tid]; // dt_min[0] == minimum
                 s->dt = s->dt_min[0];
             }
-            
         }
     }; // end dtWarpReduce
 
     template<typename T, typename N, unsigned int blockSize>
-    GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type 
+    GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
     dtWarpReduce(T *s, const simbi::Geometry geometry)
     {
         const real gamma     = s->gamma;
@@ -108,6 +107,7 @@ namespace simbi{
         const int nx  = s->nx;
         const CLattice2D *coord_lattice = &(s->coord_lattice);
 
+        // printf("%d\n", aid);
         if (aid < s->active_zones)
         {
             prim_buff[ty][tx] = s->gpu_prims[aid];
@@ -146,7 +146,7 @@ namespace simbi{
             dt_buff[tid] = s->CFL * cfl_dt;
             __syncthreads();
 
-            for (unsigned int stride=blockDim.x/2; stride>32; stride>>=1) 
+            for (unsigned int stride=(blockDim.x*blockDim.y)/2; stride>32; stride>>=1) 
             {   
                 if (tid < stride) dt_buff[tid] = dt_buff[tid] < dt_buff[tid + stride] ? dt_buff[tid] : dt_buff[tid + stride]; 
                 __syncthreads();
@@ -189,6 +189,7 @@ namespace simbi{
         const int nx  = s->nx;
         const int ny  = s->ny;
         const int aid = ka * ny * nx + ja * nx + ia;
+        const real sint = s->coord_lattice.gpu_sin[jj];
         
         const CLattice3D *coord_lattice = &(s->coord_lattice);
         if (aid < s->active_zones)
@@ -225,20 +226,25 @@ namespace simbi{
                 case simbi::Geometry::SPHERICAL:
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
                     real rmean = coord_lattice->gpu_x1mean[ii];
-                    real rproj = rmean * coord_lattice->gpu_sin[kk];
-                    cfl_dt = my_min(
-                                my_min(dx1         / (my_max(abs(plus_v1), abs(minus_v1))),
-                                       rmean * dx2 / (my_max(abs(plus_v2), abs(minus_v2))) 
-                                ),
-                                rproj * dx3 / (my_max(abs(plus_v3), abs(minus_v3)))
-                            );
+                    real rproj = rmean * sint;
+                    // check if in pure r,theta plane
+                    if (rproj == 0)
+                            cfl_dt = my_min(dx1         / (my_max(abs(plus_v1), abs(minus_v1))),
+                                            rmean * dx2 / (my_max(abs(plus_v2), abs(minus_v2))) );
+                    else
+                        cfl_dt = my_min(
+                                    my_min(dx1         / (my_max(abs(plus_v1), abs(minus_v1))),
+                                        rmean * dx2 / (my_max(abs(plus_v2), abs(minus_v2))) 
+                                    ),
+                                    rproj * dx3 / (my_max(abs(plus_v3), abs(minus_v3)))
+                                );
                     break;
             }
 
         dt_buff[tid] = s->CFL * cfl_dt;
         __syncthreads();
 
-        for (unsigned int stride=blockDim.x/2; stride>32; stride>>=1) 
+        for (unsigned int stride=(blockDim.x*blockDim.y*blockDim.z)/2; stride>32; stride>>=1) 
         {   
             if (tid < stride) dt_buff[tid] = dt_buff[tid] < dt_buff[tid + stride] ? dt_buff[tid] : dt_buff[tid + stride]; 
             __syncthreads();
@@ -248,7 +254,7 @@ namespace simbi{
         {
             warpReduceMin<blockSize>(dt_buff, tx, ty, tz);
         }
-        if((threadIdx.x == 0) && (threadIdx.y == 0) )
+        if((threadIdx.x == 0) && (threadIdx.y == 0) && (threadIdx.z == 0))
         {
             s->dt_min[blockDim.x * blockDim.y * blockIdx.z + blockIdx.y * blockDim.x + blockIdx.x] = dt_buff[tid]; // dt_min[0] == minimum
             s->dt = s->dt_min[0];

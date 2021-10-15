@@ -11,7 +11,6 @@
 #include <string>
 #include "../common/hydro_structs.hpp"
 #include "../common/clattice3D.hpp"
-#include "../common/viscous_diff.hpp"
 
 namespace simbi
 {
@@ -19,7 +18,6 @@ namespace simbi
     {
     public:
         /* Shared Data Members */
-        simbi::ArtificialViscosity aVisc;
         sr3d::Eigenvals lambda;
         std::vector<sr3d::Primitive> prims;
         std::vector<sr3d::Conserved> cons;
@@ -127,9 +125,9 @@ namespace simbi
 
         std::vector<std::vector<real>> simulate3D(
             const std::vector<std::vector<real>> sources,
-            float tstart,
-            float tend,
-            real dt,
+            real tstart,
+            real tend,
+            real init_dt,
             real plm_theta,
             real engine_duration,
             real chkpt_interval,
@@ -139,37 +137,6 @@ namespace simbi
             bool linspace,
             bool hllc);
     };
-
-    struct SRHD3D_DualSpace
-     {
-           SRHD3D_DualSpace();
-          ~SRHD3D_DualSpace();
-
-          sr3d::Primitive *host_prims;
-          sr3d::Conserved *host_u0;
-          real            *host_pressure_guess;
-          real            *host_source0;
-          real            *host_sourceD;
-          real            *host_sourceS1;
-          real            *host_sourceS2;
-          real            *host_sourceS3;
-          real            *host_dtmin;
-          real            *host_dx1, *host_x1m, *host_fas1, *host_dV1, *host_dx3, *host_sin;
-          real            *host_dx2, *host_cot, *host_fas2, *host_dV2, *host_dV3, *host_fas3;
-          CLattice2D      *host_clattice;
-
-          real host_dt;
-          real host_xmin;
-          real host_xmax;
-          real host_ymin;
-          real host_ymax;
-          real host_zmin;
-          real host_zmax;
-
-          void copyStateToGPU(const SRHD3D &host, SRHD3D *device);
-          void copyGPUStateToHost(const SRHD3D *device, SRHD3D &host);
-          void cleanUp();
-     };
 }
 
 #endif

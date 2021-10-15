@@ -11,7 +11,6 @@
 #include <string>
 #include "common/hydro_structs.hpp"
 #include "common/clattice2D.hpp"
-#include "common/viscous_diff.hpp"
 #include "util/exec_policy.hpp"
 
 namespace simbi
@@ -20,7 +19,6 @@ namespace simbi
     {
     public:
         /* Shared Data Members */
-        simbi::ArtificialViscosity aVisc;
         sr2d::Eigenvals lambda;
         std::vector<sr2d::Primitive> prims;
         std::vector<sr2d::Conserved> cons;
@@ -121,48 +119,19 @@ namespace simbi
         void cons2prim(SRHD2D *s);
 
         std::vector<std::vector<real>> simulate2D(
-            std::vector<std::vector<double>> &sources,
-            double tstart,
-            double tend,
-            double init_dt,
-            double plm_theta,
-            double engine_duration,
-            double chkpt_interval,
+            std::vector<std::vector<real>> &sources,
+            real tstart,
+            real tend,
+            real init_dt,
+            real plm_theta,
+            real engine_duration,
+            real chkpt_interval,
             std::string data_directory,
             bool first_order,
             bool periodic,
             bool linspace,
             bool hllc);
     };
-    
-    struct SRHD2D_DualSpace
-     {
-           SRHD2D_DualSpace();
-          ~SRHD2D_DualSpace();
-
-          sr2d::Primitive *host_prims;
-          sr2d::Conserved *host_u0;
-          real            *host_pressure_guess;
-          real            *host_source0;
-          real            *host_sourceD;
-          real            *host_sourceS1;
-          real            *host_sourceS2;
-          real            *host_dtmin;
-          real            *host_dx1, *host_x1m, *host_x1c, *host_fas1, *host_dV1;
-          real            *host_dx2, *host_cot, *host_x2c, *host_fas2, *host_dV2;
-          CLattice2D      *host_clattice;
-
-          real host_dt;
-          real host_xmin;
-          real host_xmax;
-          real host_ymin;
-          real host_ymax;
-          real host_dx;
-
-          void copyStateToGPU(const SRHD2D &host, SRHD2D *device);
-          void copyGPUStateToHost(const SRHD2D *device, SRHD2D &host);
-          void cleanUp();
-     };
 }
 
 #endif

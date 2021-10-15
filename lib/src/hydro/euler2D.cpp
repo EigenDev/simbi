@@ -8,7 +8,7 @@
 
 #include "euler2D.hpp" 
 #include <cmath>
-// #include <omp.h>
+#include <omp.h>
 #include <algorithm>
 #include <iomanip>
 #include <chrono>
@@ -23,18 +23,18 @@ Newtonian2D::Newtonian2D () {}
 
 // Overloaded Constructor
 Newtonian2D::Newtonian2D(
-    std::vector<std::vector<double> > init_state, 
-    int NX,
-    int NY,
-    double gamma, 
-    std::vector<double> x1, 
-    std::vector<double> x2, 
-    double CFL, 
+    std::vector<std::vector<real> > init_state, 
+    int nx,
+    int ny,
+    real gamma, 
+    std::vector<real> x1, 
+    std::vector<real> x2, 
+    real CFL, 
     std::string coord_system = "cartesian")
 :
     init_state(init_state),
-    NX(NX),
-    NY(NY),
+    nx(nx),
+    ny(ny),
     gamma(gamma),
     x1(x1),
     x2(x2),
@@ -63,14 +63,14 @@ void Newtonian2D::cons2prim()
 {
     #pragma omp parallel
     {
-        double rho, energy;
-        double v1, v2, pre;
-        for (int jj = 0; jj < NY; jj++)
+        real rho, energy;
+        real v1, v2, pre;
+        for (int jj = 0; jj < ny; jj++)
         {  
             #pragma omp for nowait schedule(static)
-            for (int ii = 0; ii < NX; ii++)
+            for (int ii = 0; ii < nx; ii++)
             {   
-                int gid = jj * NX + ii;
+                int gid = jj * nx + ii;
                 rho     = cons[gid].rho;
                 v1      = cons[gid].m1/rho;
                 v2      = cons[gid].m2/rho;
@@ -95,42 +95,42 @@ Eigenvals Newtonian2D::calc_eigenvals(
     {
     case simbi::Solver::HLLC:
         {
-            const double vx_l = left_prims.v1;
-            const double vx_r = right_prims.v1;
-            const double vy_l = left_prims.v2;
-            const double vy_r = right_prims.v2;
+            const real vx_l = left_prims.v1;
+            const real vx_r = right_prims.v1;
+            const real vy_l = left_prims.v2;
+            const real vy_r = right_prims.v2;
 
-            const double p_r   = right_prims.p;
-            const double p_l   = left_prims.p;
-            const double rho_l = left_prims.rho;
-            const double rho_r = right_prims.rho;
+            const real p_r   = right_prims.p;
+            const real p_l   = left_prims.p;
+            const real rho_l = left_prims.rho;
+            const real rho_r = right_prims.rho;
 
-            const double cs_r = std::sqrt(gamma * p_r/rho_r);
-            const double cs_l = std::sqrt(gamma * p_l/rho_l);
+            const real cs_r = std::sqrt(gamma * p_r/rho_r);
+            const real cs_l = std::sqrt(gamma * p_l/rho_l);
 
             switch (ehat)
             {
                 case 1:
                     {
                         // Calculate the mean velocities of sound and fluid
-                        const double cbar   = 0.5*(cs_l + cs_r);
-                        const double rhoBar = 0.5*(rho_l + rho_r);
-                        const double z      = (gamma - 1.)/(2.0*gamma);
-                        const double num    = cs_l + cs_r - (gamma - 1.) * 0.5 *(vx_r - vx_l);
-                        const double denom  = cs_l/std::pow(p_l,z) + cs_r/std::pow(p_r, z);
-                        const double p_term = num/denom;
-                        const double pStar  = std::pow(p_term, (1./z));
+                        const real cbar   = 0.5*(cs_l + cs_r);
+                        const real rhoBar = 0.5*(rho_l + rho_r);
+                        const real z      = (gamma - 1.)/(2.0*gamma);
+                        const real num    = cs_l + cs_r - (gamma - 1.) * 0.5 *(vx_r - vx_l);
+                        const real denom  = cs_l/std::pow(p_l,z) + cs_r/std::pow(p_r, z);
+                        const real p_term = num/denom;
+                        const real pStar  = std::pow(p_term, (1./z));
 
-                        const double qL = 
+                        const real qL = 
                             (pStar <= p_l) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_l - 1.));
 
-                        const double qR = 
+                        const real qR = 
                             (pStar <= p_r) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_r - 1.));
 
-                        const double aL = vx_l - qL*cs_l;
-                        const double aR = vx_r + qR*cs_r;
+                        const real aL = vx_l - qL*cs_l;
+                        const real aR = vx_r + qR*cs_r;
 
-                        const double aStar = 
+                        const real aStar = 
                             ( (p_r - p_l + rho_l*vx_l*(aL - vx_l) - rho_r*vx_r*(aR - vx_r) )/ 
                                 (rho_l*(aL - vx_l) - rho_r*(aR - vx_r) ) );
 
@@ -139,24 +139,24 @@ Eigenvals Newtonian2D::calc_eigenvals(
 
                 case 2:
                     {
-                        const double cbar   = 0.5*(cs_l + cs_r);
-                        const double rhoBar = 0.5*(rho_l + rho_r);
-                        const double z      = (gamma - 1.)/(2.*gamma);
-                        const double num    = cs_l + cs_r - (gamma - 1.) * 0.5 *(vy_r - vy_l);
-                        const double denom  = cs_l/std::pow(p_l,z) + cs_r/std::pow(p_r, z);
-                        const double p_term = num/denom;
-                        const double pStar  = std::pow(p_term, (1./z));
+                        const real cbar   = 0.5*(cs_l + cs_r);
+                        const real rhoBar = 0.5*(rho_l + rho_r);
+                        const real z      = (gamma - 1.)/(2.*gamma);
+                        const real num    = cs_l + cs_r - (gamma - 1.) * 0.5 *(vy_r - vy_l);
+                        const real denom  = cs_l/std::pow(p_l,z) + cs_r/std::pow(p_r, z);
+                        const real p_term = num/denom;
+                        const real pStar  = std::pow(p_term, (1./z));
 
-                        const double qL =
+                        const real qL =
                             (pStar <= p_l) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_l - 1.));
 
-                        const double qR = 
+                        const real qR = 
                             (pStar <= p_r) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_r - 1.));
 
-                        const double aL = vy_l - qL*cs_l;
-                        const double aR = vy_r + qR*cs_r;
+                        const real aL = vy_l - qL*cs_l;
+                        const real aR = vy_r + qR*cs_r;
 
-                        const double aStar = 
+                        const real aStar = 
                             ( (p_r - p_l + rho_l*vy_l*(aL - vy_l) - rho_r*vy_r*(aR - vy_r))/
                                     (rho_l*(aL - vy_l) - rho_r*(aR - vy_r) ) );
                         return Eigenvals(aL, aR, aStar, pStar);
@@ -169,17 +169,17 @@ Eigenvals Newtonian2D::calc_eigenvals(
             {
             case 1:
                 {   
-                    const double vx_l = left_prims.v1;
-                    const double vx_r = right_prims.v1;
-                    const double p_r   = right_prims.p;
-                    const double p_l   = left_prims.p;
-                    const double rho_l = left_prims.rho;
-                    const double rho_r = right_prims.rho;
-                    const double cs_r = std::sqrt(gamma * p_r/rho_r);
-                    const double cs_l = std::sqrt(gamma * p_l/rho_l);
+                    const real vx_l = left_prims.v1;
+                    const real vx_r = right_prims.v1;
+                    const real p_r   = right_prims.p;
+                    const real p_l   = left_prims.p;
+                    const real rho_l = left_prims.rho;
+                    const real rho_r = right_prims.rho;
+                    const real cs_r = std::sqrt(gamma * p_r/rho_r);
+                    const real cs_l = std::sqrt(gamma * p_l/rho_l);
 
-                    const double aL = std::min({0.0, vx_l - cs_l, vx_r - cs_r});
-                    const double aR = std::max({0.0, vx_l + cs_l, vx_r + cs_r});
+                    const real aL = std::min({(real)0.0, vx_l - cs_l, vx_r - cs_r});
+                    const real aR = std::max({(real)0.0, vx_l + cs_l, vx_r + cs_r});
 
                     return Eigenvals(aL, aR);
                 }
@@ -187,18 +187,18 @@ Eigenvals Newtonian2D::calc_eigenvals(
             
             case 2:
                 {
-                    const double vy_l  = left_prims.v2;
-                    const double vy_r  = right_prims.v2;
-                    const double p_r   = right_prims.p;
-                    const double p_l   = left_prims.p;
-                    const double rho_l = left_prims.rho;
-                    const double rho_r = right_prims.rho;
-                    const double cs_r = std::sqrt(gamma * p_r/rho_r);
-                    const double cs_l = std::sqrt(gamma * p_l/rho_l);
+                    const real vy_l  = left_prims.v2;
+                    const real vy_r  = right_prims.v2;
+                    const real p_r   = right_prims.p;
+                    const real p_l   = left_prims.p;
+                    const real rho_l = left_prims.rho;
+                    const real rho_r = right_prims.rho;
+                    const real cs_r = std::sqrt(gamma * p_r/rho_r);
+                    const real cs_l = std::sqrt(gamma * p_l/rho_l);
                     
                     
-                    const double aL = std::min({0.0, vy_l - cs_l, vy_r - cs_r});
-                    const double aR = std::max({0.0, vy_l + cs_l, vy_r + cs_r});
+                    const real aL = std::min({(real)0.0, vy_l - cs_l, vy_r - cs_r});
+                    const real aR = std::max({(real)0.0, vy_l + cs_l, vy_r + cs_r});
                     return Eigenvals(aL, aR);
                 }
             }
@@ -215,11 +215,11 @@ Eigenvals Newtonian2D::calc_eigenvals(
 // the entire array since we are in c++
 Conserved Newtonian2D::prims2cons(const Primitive &prims)
  {
-    const double rho = prims.rho;
-    const double vx  = prims.v1;
-    const double vy  = prims.v2;
-    const double pre = prims.p;
-    const double et  = pre/(gamma - 1.0) + 0.5 * rho * (vx*vx + vy*vy);
+    const real rho = prims.rho;
+    const real vx  = prims.v1;
+    const real vy  = prims.v2;
+    const real pre = prims.p;
+    const real et  = pre/(gamma - 1.0) + 0.5 * rho * (vx*vx + vy*vy);
 
     return Conserved{rho, rho*vx, rho*vy, et};
 }
@@ -232,11 +232,11 @@ Conserved Newtonian2D::prims2cons(const Primitive &prims)
 // Adapt the CFL conditonal timestep
 void Newtonian2D::adapt_dt()
 {
-    double min_dt = INFINITY;
+    real min_dt = INFINITY;
     #pragma omp parallel
     {
-        double dx1, cs, dx2, rho, pressure, v1, v2, rmean;
-        double cfl_dt;
+        real dx1, cs, dx2, rho, pressure, v1, v2, rmean;
+        real cfl_dt;
         int shift_i, shift_j, aid;
 
         for (int jj = 0; jj < yphysical_grid; jj++)
@@ -247,7 +247,7 @@ void Newtonian2D::adapt_dt()
             {
                 shift_i = ii + idx_active;
                 dx1 = coord_lattice.dx1[ii];
-                aid = shift_j * NX + shift_i;
+                aid = shift_j * nx + shift_i;
                 rho      = prims[aid].rho;
                 v1       = prims[aid].v1;
                 v2       = prims[aid].v2;
@@ -327,8 +327,8 @@ Conserved Newtonian2D::calc_hll_flux(
                                         
 {
     Eigenvals lambda = calc_eigenvals(left_prims, right_prims, ehat);
-    double am = lambda.aL;
-    double ap = lambda.aR;
+    real am = lambda.aL;
+    real ap = lambda.aR;
 
     // if (am == ap)
     // {
@@ -353,8 +353,8 @@ Conserved Newtonian2D::calc_hllc_flux(
 {
     Eigenvals lambda = calc_eigenvals(left_prims, right_prims, ehat);
 
-    const double aL    = lambda.aL;
-    const double aR    = lambda.aR;
+    const real aL    = lambda.aL;
+    const real aR    = lambda.aR;
 
     // Quick checks before moving on with rest of computation
     if (0.0 <= aL){
@@ -363,8 +363,8 @@ Conserved Newtonian2D::calc_hllc_flux(
         return right_flux;
     }
 
-    const double aStar = lambda.aStar;
-    const double pStar = lambda.pStar;
+    const real aStar = lambda.aStar;
+    const real pStar = lambda.pStar;
 
     if (-aL <= (aStar - aL) ){
         const auto pre      = left_prims.p;
@@ -464,8 +464,8 @@ void Newtonian2D::evolve()
         const int j_start = idx_active;
         const int i_bound = x_bound;
         const int j_bound = y_bound;
-        double dx, dy, rmean, dV1, dV2, s1L, s1R, s2L, s2R;
-        double pc, rhoc, uc, vc;
+        real dx, dy, rmean, dV1, dV2, s1L, s1R, s2L, s2R;
+        real pc, rhoc, uc, vc;
 
         if (first_order)
         {
@@ -483,36 +483,36 @@ void Newtonian2D::evolve()
                     {
                         xcoordinate = ii - 1;
                         // i+1/2
-                        ux_l = cons[(ii + 0) + NX * jj];
-                        ux_r = cons[(ii + 1) + NX * jj];
+                        ux_l = cons[(ii + 0) + nx * jj];
+                        ux_r = cons[(ii + 1) + nx * jj];
 
                         // j+1/2
-                        uy_l = cons[ii + NX * (jj + 0)];
-                        uy_r = cons[ii + NX * (jj + 1)];
+                        uy_l = cons[ii + nx * (jj + 0)];
+                        uy_r = cons[ii + nx * (jj + 1)];
 
-                        xprims_l = prims[ii + jj * NX];
-                        xprims_r = prims[(ii + 1) + jj * NX];
+                        xprims_l = prims[ii + jj * nx];
+                        xprims_r = prims[(ii + 1) + jj * nx];
 
-                        yprims_l = prims[ii + jj * NX];
-                        yprims_r = prims[ii + (jj + 1) * NX];
+                        yprims_l = prims[ii + jj * nx];
+                        yprims_r = prims[ii + (jj + 1) * nx];
                     } else {
                         xcoordinate = ii;
                         ycoordinate = jj;
                         // i+1/2
-                        ux_l = cons[(ii + 0) + NX * jj];
-                        ux_r = roll(cons, (ii + 1) + NX * jj);
+                        ux_l = cons[(ii + 0) + nx * jj];
+                        ux_r = roll(cons, (ii + 1) + nx * jj);
 
                         // j+1/2
-                        uy_l = cons[ii + NX * (jj + 0)];
-                        uy_r = roll(cons, ii + NX * (jj + 1));
+                        uy_l = cons[ii + nx * (jj + 0)];
+                        uy_r = roll(cons, ii + nx * (jj + 1));
 
-                        xprims_l = prims[ii + jj * NX];
-                        xprims_r = roll(prims, (ii + 1) + jj * NX);
+                        xprims_l = prims[ii + jj * nx];
+                        xprims_r = roll(prims, (ii + 1) + jj * nx);
 
-                        yprims_l = prims[ii + jj * NX];
-                        yprims_r = roll(prims, ii + (jj + 1) * NX);
+                        yprims_l = prims[ii + jj * nx];
+                        yprims_r = roll(prims, ii + (jj + 1) * nx);
                     }
-                    aid = jj * NX + ii;
+                    aid = jj * nx + ii;
                     
 
                     f_l = calc_flux(xprims_l, 1);
@@ -534,32 +534,32 @@ void Newtonian2D::evolve()
                     if (!periodic)
                     {
                         // i-1/2
-                        ux_l = cons[(ii - 1) + NX * jj];
-                        ux_r = cons[(ii - 0) + NX * jj];
+                        ux_l = cons[(ii - 1) + nx * jj];
+                        ux_r = cons[(ii - 0) + nx * jj];
 
                         // j-1/2
-                        uy_l = cons[ii + NX * (jj - 1)];
-                        uy_r = cons[ii + NX * jj];
+                        uy_l = cons[ii + nx * (jj - 1)];
+                        uy_r = cons[ii + nx * jj];
 
-                        xprims_l = prims[(ii - 1) + jj * NX];
-                        xprims_r = prims[ii + jj * NX];
+                        xprims_l = prims[(ii - 1) + jj * nx];
+                        xprims_r = prims[ii + jj * nx];
 
-                        yprims_l = prims[ii + (jj - 1) * NX];
-                        yprims_r = prims[ii + jj * NX];
+                        yprims_l = prims[ii + (jj - 1) * nx];
+                        yprims_r = prims[ii + jj * nx];
                     } else {
-                        // i-1/2
-                        ux_l = roll(cons, (ii - 1) + NX * jj);
-                        ux_r = cons[(ii + 0) + NX * jj];
+                        // i+1/2
+                        ux_l = roll(cons, (ii - 1) + nx * jj);
+                        ux_r = cons[(ii + 0) + nx * jj];
 
-                        // j-1/2
-                        uy_l = roll(cons, ii + NX * (jj - 1));
-                        uy_r = cons[ii + NX * jj];
+                        // j+1/2
+                        uy_l = roll(cons, ii + nx * (jj - 1));
+                        uy_r = cons[ii + nx * jj];
 
-                        xprims_l = roll(prims,  ii - 1 + jj * NX);
-                        xprims_r = prims[ii + jj * NX];
+                        xprims_l = roll(prims,  ii - 1 + jj * nx);
+                        xprims_r = prims[ii + jj * nx];
 
-                        yprims_l = roll(prims, ii + (jj - 1) * NX);
-                        yprims_r = prims[ii + jj * NX];
+                        yprims_l = roll(prims, ii + (jj - 1) * nx);
+                        yprims_r = prims[ii + jj * nx];
                     }
 
                     f_l = calc_flux(xprims_l, 1);
@@ -639,23 +639,23 @@ void Newtonian2D::evolve()
                 #pragma omp for nowait
                 for (ii = i_start; ii < i_bound; ii++)
                 {
-                    aid = jj * NX + ii;
+                    aid = jj * nx + ii;
                     if (periodic)
                     {
                         xcoordinate = ii;
                         ycoordinate = jj;
 
                         // X Coordinate
-                        xleft_most   = roll(prims, jj * NX + ii - 2);
-                        xleft_mid    = roll(prims, jj * NX + ii - 1);
-                        center       = prims[jj * NX + ii];
-                        xright_mid   = roll(prims, jj * NX + ii + 1);
-                        xright_most  = roll(prims, jj * NX + ii + 2);
+                        xleft_most   = roll(prims, jj * nx + ii - 2);
+                        xleft_mid    = roll(prims, jj * nx + ii - 1);
+                        center       = prims[jj * nx + ii];
+                        xright_mid   = roll(prims, jj * nx + ii + 1);
+                        xright_most  = roll(prims, jj * nx + ii + 2);
 
-                        yleft_most   = roll(prims, ii +  NX * (jj - 2) );
-                        yleft_mid    = roll(prims, ii +  NX * (jj - 1) );
-                        yright_mid   = roll(prims, ii +  NX * (jj + 1) );
-                        yright_most  = roll(prims, ii +  NX * (jj + 2) );
+                        yleft_most   = roll(prims, ii +  nx * (jj - 2) );
+                        yleft_mid    = roll(prims, ii +  nx * (jj - 1) );
+                        yright_mid   = roll(prims, ii +  nx * (jj + 1) );
+                        yright_most  = roll(prims, ii +  nx * (jj + 2) );
                     }
                     else
                     {
@@ -663,17 +663,17 @@ void Newtonian2D::evolve()
                         xcoordinate = ii - 2;
 
                         // Coordinate X
-                        xleft_most  = prims[(ii - 2) + NX * jj];
-                        xleft_mid   = prims[(ii - 1) + NX * jj];
-                        center      = prims[(ii + 0) + NX * jj];
-                        xright_mid  = prims[(ii + 1) + NX * jj];
-                        xright_most = prims[(ii + 2) + NX * jj];
+                        xleft_most  = prims[(ii - 2) + nx * jj];
+                        xleft_mid   = prims[(ii - 1) + nx * jj];
+                        center      = prims[(ii + 0) + nx * jj];
+                        xright_mid  = prims[(ii + 1) + nx * jj];
+                        xright_most = prims[(ii + 2) + nx * jj];
 
                         // Coordinate Y
-                        yleft_most  = prims[ii + NX * (jj - 2)];
-                        yleft_mid   = prims[ii + NX * (jj - 1)];
-                        yright_mid  = prims[ii + NX * (jj + 1)];
-                        yright_most = prims[ii + NX * (jj + 2)];
+                        yleft_most  = prims[ii + nx * (jj - 2)];
+                        yleft_mid   = prims[ii + nx * (jj - 1)];
+                        yright_mid  = prims[ii + nx * (jj + 1)];
+                        yright_most = prims[ii + nx * (jj + 2)];
                     }
 
                     // Reconstructed left X Primitive vector at the i+1/2 interface
@@ -954,14 +954,14 @@ void Newtonian2D::evolve()
 //-----------------------------------------------------------------------------------------------------------
 //                                            SIMULATE 
 //-----------------------------------------------------------------------------------------------------------
-std::vector<std::vector<double> > Newtonian2D::simulate2D(
-    const std::vector<std::vector<double>> sources,
-    double tstart, 
-    double tend, 
-    double init_dt, 
-    double plm_theta,
-    double engine_duration, 
-    double chkpt_interval,
+std::vector<std::vector<real> > Newtonian2D::simulate2D(
+    const std::vector<std::vector<real>> sources,
+    real tstart, 
+    real tend, 
+    real init_dt, 
+    real plm_theta,
+    real engine_duration, 
+    real chkpt_interval,
     std::string data_directory, 
     bool first_order,
     bool periodic, 
@@ -970,13 +970,13 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
 {
 
     std::string tnow, tchunk, tstep, filename;
-    double round_place = 1 / chkpt_interval;
-    double t = tstart;
-    double t_interval =
+    real round_place = 1 / chkpt_interval;
+    real t = tstart;
+    real t_interval =
         t == 0 ? floor(tstart * round_place + 0.5) / round_place
                : floor(tstart * round_place + 0.5) / round_place + chkpt_interval;
 
-    this->nzones      = NX * NY;
+    this->nzones      = nx * ny;
     this->sources     = sources;
     this->first_order = first_order;
     this->periodic    = periodic;
@@ -986,27 +986,27 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
     this->dt          = init_dt;
 
     if (periodic){
-        this->xphysical_grid = NX;
-        this->yphysical_grid = NY;
-        this->x_bound        = NX;
-        this->y_bound        = NY;
+        this->xphysical_grid = nx;
+        this->yphysical_grid = ny;
+        this->x_bound        = nx;
+        this->y_bound        = ny;
         this->idx_active      = 0;
     } else {
         if (first_order)
         {
-            this->xphysical_grid = NX - 2;
-            this->yphysical_grid = NY - 2;
+            this->xphysical_grid = nx - 2;
+            this->yphysical_grid = ny - 2;
             this->idx_active = 1;
-            this->x_bound = NX - 1;
-            this->y_bound = NY - 1;
+            this->x_bound = nx - 1;
+            this->y_bound = ny - 1;
         }
         else
         {
-            this->xphysical_grid = NX - 4;
-            this->yphysical_grid = NY - 4;
+            this->xphysical_grid = nx - 4;
+            this->yphysical_grid = ny - 4;
             this->idx_active = 2;
-            this->x_bound = NX - 2;
-            this->y_bound = NY - 2;
+            this->x_bound = nx - 2;
+            this->y_bound = ny - 2;
         }
     }
     this->active_zones = xphysical_grid * yphysical_grid;
@@ -1041,8 +1041,8 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
     setup.xmin         = x1[0];
     setup.ymax         = x2[yphysical_grid - 1];
     setup.ymin         = x2[0];
-    setup.NX           = NX;
-    setup.NY           = NY;
+    setup.nx           = nx;
+    setup.ny           = ny;
     setup.coord_system = coord_system;
 
     cons.resize(nzones);
@@ -1078,7 +1078,7 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
 
     if ((t == 0) && (!periodic))
     {
-        config_ghosts2D(cons, NX, NY, first_order);
+        config_ghosts2D(cons, nx, ny, first_order);
     }
 
     if (first_order)
@@ -1090,13 +1090,13 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
 
             cons2prim();
             evolve();
-            if (!periodic) config_ghosts2D(cons_n, NX, NY, true);
+            if (!periodic) config_ghosts2D(cons_n, nx, ny, true);
             cons = cons_n;
             t += dt;
 
             /* Compute the loop execution time */
             t2 = high_resolution_clock::now();
-            duration<double> time_span = duration_cast<duration<double>>(t2 - t1);
+            duration<real> time_span = duration_cast<duration<real>>(t2 - t1);
 
             std::cout << std::fixed << std::setprecision(3) << std::scientific;
             std::cout << "\r"
@@ -1118,19 +1118,19 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
             // First half step
             cons2prim();
             evolve();
-            if (!periodic) config_ghosts2D(cons_n, NX, NY, false);
+            if (!periodic) config_ghosts2D(cons_n, nx, ny, false);
             cons = cons_n;
 
             // Final half step
             cons2prim();
             evolve();
-            if (!periodic) config_ghosts2D(cons_n, NX, NY, false);
+            if (!periodic) config_ghosts2D(cons_n, nx, ny, false);
             cons = cons_n;
 
             t += dt;
 
             t2 = high_resolution_clock::now();
-            auto time_span = duration_cast<duration<double>>(t2 - t1);
+            auto time_span = duration_cast<duration<real>>(t2 - t1);
             
             std::cout << std::fixed << std::setprecision(3) << std::scientific;
             std::cout << "\r"
@@ -1167,7 +1167,7 @@ std::vector<std::vector<double> > Newtonian2D::simulate2D(
     }
     cons2prim();
     std::cout << "\n ";
-    std::vector<std::vector<double> > solution(4, std::vector<double>(nzones));
+    std::vector<std::vector<real> > solution(4, std::vector<real>(nzones));
     for (size_t ii = 0; ii < nzones; ii++)
     {
         solution[0][ii] = prims[ii].rho;

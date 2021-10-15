@@ -19,19 +19,19 @@ namespace simbi
     GPU_DEV void warpReduceMin(volatile real smem[BLOCK_SIZE2D * BLOCK_SIZE2D], const int tx, const int ty);
 
     template<unsigned int blockSize>
-    GPU_DEV void warpReduceMin(volatile real smem[BLOCK_SIZE2D * BLOCK_SIZE2D], const int tx, const int ty, const int tz);
+    GPU_DEV void warpReduceMin(volatile real smem[BLOCK_SIZE3D * BLOCK_SIZE3D * BLOCK_SIZE3D], const int tx, const int ty, const int tz);
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_1D_primitive<N>::value>::type 
     dtWarpReduce(T *s);
 
     template<typename T, typename N, unsigned int blockSize>
-    GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type 
-    dtWarpReduce(T *s, simbi::Geometry geometry);
+    GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
+    dtWarpReduce(T *s, const simbi::Geometry geometry);
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_3D_primitive<N>::value>::type 
-    dtWarpReduce(T *s, simbi::Geometry geometry);
+    dtWarpReduce(T *s, const simbi::Geometry geometry);
 
     //======================================
     //              HELPER OVERLOADS

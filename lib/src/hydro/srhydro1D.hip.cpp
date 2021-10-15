@@ -9,10 +9,10 @@
 
 #include "srhydro1D.hip.hpp"
 #include "helpers.hip.hpp"
-#include "device_api.hpp"
-#include "dual.hpp"
+#include "util/device_api.hpp"
+#include "util/dual.hpp"
 #include "common/helpers.hpp"
-#include "parallel_for.hpp"
+#include "util/parallel_for.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -81,7 +81,6 @@ void SRHD::advance(
         #else 
         auto* const prim_buff = &prims[0];
         #endif 
-
         
         Conserved u_l, u_r;
         Conserved f_l, f_r, f1, f2;
@@ -108,121 +107,119 @@ void SRHD::advance(
 
         if (self->first_order)
         {
+            if (self->periodic)
             {
-                if (self->periodic)
-                {
-                    // Set up the left and right state interfaces for i+1/2
-                    prims_l = prim_buff[txa];
-                    prims_r = roll(prim_buff, txa + 1, sh_block_size);
-                }
-                else
-                {
-                    // Set up the left and right state interfaces for i+1/2
-                    prims_l = prim_buff[txa];
-                    prims_r = prim_buff[txa + 1];
-                }
-                u_l = self->prims2cons(prims_l);
-                u_r = self->prims2cons(prims_r);
-                f_l = self->prims2flux(prims_l);
-                f_r = self->prims2flux(prims_r);
-
-                // Calc HLL Flux at i+1/2 interface
-                if (self->hllc)
-                {
-                    f1 = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-                }
-                else
-                {
-                    f1 = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-                }
-
-                // Set up the left and right state interfaces for i-1/2
-                if (self->periodic)
-                {
-                    prims_l = roll(prim_buff, txa - 1, sh_block_size);
-                    prims_r = prim_buff[txa];
-                }
-                else
-                {
-                    prims_l = prim_buff[txa - 1];
-                    prims_r = prim_buff[txa];
-                }
-
-                u_l = self->prims2cons(prims_l);
-                u_r = self->prims2cons(prims_r);
-
-                f_l = self->prims2flux(prims_l);
-                f_r = self->prims2flux(prims_r);
-
-                // Calc HLL Flux at i-1/2 interface
-                if (self->hllc)
-                {
-                    f2 = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-                }
-                else
-                {
-                    f2 = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-                }
-
-                switch (geometry)
-                {
-                case simbi::Geometry::CARTESIAN:
-                    if constexpr(BuildPlatform == Platform::GPU)
-                    {
-                        dx = coord_lattice->gpu_dx1[ii];
-                        self->gpu_cons[ia].D   += dt * ( -(f1.D - f2.D)     / dx +  self->gpu_sourceD[ii] );
-                        self->gpu_cons[ia].S   += dt * ( -(f1.S - f2.S)     / dx +  self->gpu_sourceS[ii] );
-                        self->gpu_cons[ia].tau += dt * ( -(f1.tau - f2.tau) / dx  + self->gpu_source0[ii] );
-                    } else {
-                        dx = self->coord_lattice.dx1[ii];
-                        self->cons[ia].D   += dt * ( -(f1.D - f2.D)     / dx +  self->sourceD[ii] );
-                        self->cons[ia].S   += dt * ( -(f1.S - f2.S)     / dx +  self->sourceS[ii] );
-                        self->cons[ia].tau += dt * ( -(f1.tau - f2.tau) / dx  + self->source0[ii] );
-                    }
-                    
-                    break;  
-                
-                case simbi::Geometry::SPHERICAL:
-                    if constexpr(BuildPlatform == Platform::GPU)
-                    {
-                        pc    = prim_buff[txa].p;
-                        sL    = coord_lattice->gpu_face_areas[ii + 0];
-                        sR    = coord_lattice->gpu_face_areas[ii + 1];
-                        dV    = coord_lattice->gpu_dV[ii];
-                        rmean = coord_lattice->gpu_x1mean[ii];
-
-                        self->gpu_cons[ia] += Conserved{ 
-                            -(sR * f1.D - sL * f2.D) / dV +
-                            self->gpu_sourceD[ii] * decay_constant,
-
-                            -(sR * f1.S - sL * f2.S) / dV + 2.0 * pc / rmean +
-                            self->gpu_sourceS[ii] * decay_constant,
-
-                            -(sR * f1.tau - sL * f2.tau) / dV +
-                            self->gpu_source0[ii] * decay_constant
-                        } * dt;
-                    } else {
-                        pc    = prim_buff[txa].p;
-                        sL    = self->coord_lattice.face_areas[ii + 0];
-                        sR    = self->coord_lattice.face_areas[ii + 1];
-                        dV    = self->coord_lattice.dV[ii];
-                        rmean = self->coord_lattice.x1mean[ii];
-
-                        self->cons[ia] += Conserved{ 
-                            -(sR * f1.D - sL * f2.D) / dV +
-                            self->sourceD[ii] * decay_constant,
-
-                            -(sR * f1.S - sL * f2.S) / dV + 2.0 * pc / rmean +
-                            self->sourceS[ii] * decay_constant,
-
-                            -(sR * f1.tau - sL * f2.tau) / dV +
-                            self->source0[ii] * decay_constant
-                        } * dt;
-                    }
-                    break;
-                }
-                
+                // Set up the left and right state interfaces for i+1/2
+                prims_l = prim_buff[txa];
+                prims_r = roll(prim_buff, txa + 1, sh_block_size);
             }
+            else
+            {
+                // Set up the left and right state interfaces for i+1/2
+                prims_l = prim_buff[txa];
+                prims_r = prim_buff[txa + 1];
+            }
+            u_l = self->prims2cons(prims_l);
+            u_r = self->prims2cons(prims_r);
+            f_l = self->prims2flux(prims_l);
+            f_r = self->prims2flux(prims_r);
+
+            // Calc HLL Flux at i+1/2 interface
+            if (self->hllc)
+            {
+                f1 = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+            }
+            else
+            {
+                f1 = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+            }
+
+            // Set up the left and right state interfaces for i-1/2
+            if (self->periodic)
+            {
+                prims_l = roll(prim_buff, txa - 1, sh_block_size);
+                prims_r = prim_buff[txa];
+            }
+            else
+            {
+                prims_l = prim_buff[txa - 1];
+                prims_r = prim_buff[txa];
+            }
+
+            u_l = self->prims2cons(prims_l);
+            u_r = self->prims2cons(prims_r);
+
+            f_l = self->prims2flux(prims_l);
+            f_r = self->prims2flux(prims_r);
+
+            // Calc HLL Flux at i-1/2 interface
+            if (self->hllc)
+            {
+                f2 = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+            }
+            else
+            {
+                f2 = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+            }
+
+            switch (geometry)
+            {
+            case simbi::Geometry::CARTESIAN:
+                if constexpr(BuildPlatform == Platform::GPU)
+                {
+                    dx = coord_lattice->gpu_dx1[ii];
+                    self->gpu_cons[ia].D   += dt * ( -(f1.D - f2.D)     / dx +  self->gpu_sourceD[ii] );
+                    self->gpu_cons[ia].S   += dt * ( -(f1.S - f2.S)     / dx +  self->gpu_sourceS[ii] );
+                    self->gpu_cons[ia].tau += dt * ( -(f1.tau - f2.tau) / dx  + self->gpu_source0[ii] );
+                } else {
+                    dx = self->coord_lattice.dx1[ii];
+                    cons[ia].D   += dt * ( -(f1.D - f2.D)     / dx +  sourceD[ii] );
+                    cons[ia].S   += dt * ( -(f1.S - f2.S)     / dx +  sourceS[ii] );
+                    cons[ia].tau += dt * ( -(f1.tau - f2.tau) / dx  + source0[ii] );
+                }
+                
+                break;  
+            
+            case simbi::Geometry::SPHERICAL:
+                if constexpr(BuildPlatform == Platform::GPU)
+                {
+                    pc    = prim_buff[txa].p;
+                    sL    = coord_lattice->gpu_face_areas[ii + 0];
+                    sR    = coord_lattice->gpu_face_areas[ii + 1];
+                    dV    = coord_lattice->gpu_dV[ii];
+                    rmean = coord_lattice->gpu_x1mean[ii];
+
+                    self->gpu_cons[ia] += Conserved{ 
+                        -(sR * f1.D - sL * f2.D) / dV +
+                        self->gpu_sourceD[ii] * decay_constant,
+
+                        -(sR * f1.S - sL * f2.S) / dV + (real)2.0 * pc / rmean +
+                        self->gpu_sourceS[ii] * decay_constant,
+
+                        -(sR * f1.tau - sL * f2.tau) / dV +
+                        self->gpu_source0[ii] * decay_constant
+                    } * dt;
+                } else {
+                    pc    = prim_buff[txa].p;
+                    sL    = self->coord_lattice.face_areas[ii + 0];
+                    sR    = self->coord_lattice.face_areas[ii + 1];
+                    dV    = self->coord_lattice.dV[ii];
+                    rmean = self->coord_lattice.x1mean[ii];
+
+                    self->cons[ia] += Conserved{ 
+                        -(sR * f1.D - sL * f2.D) / dV +
+                        self->sourceD[ii] * decay_constant,
+
+                        -(sR * f1.S - sL * f2.S) / dV + (real)2.0 * pc / rmean +
+                        self->sourceS[ii] * decay_constant,
+
+                        -(sR * f1.tau - sL * f2.tau) / dV +
+                        self->source0[ii] * decay_constant
+                    } * dt;
+                }
+                break;
+            }
+                
         }
         else
         {
@@ -231,7 +228,6 @@ void SRHD::advance(
             {
                 if (self->periodic)
                 {
-                    // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
                     left_most  = roll(prim_buff, txa - 2, sh_block_size);
                     left_mid   = roll(prim_buff, txa - 1, sh_block_size);
                     center     = prim_buff[txa];
@@ -242,7 +238,7 @@ void SRHD::advance(
                 {
                     left_most  = prim_buff[txa - 2];
                     left_mid   = prim_buff[txa - 1];
-                    center     = prim_buff[txa + 0];
+                    center     = prim_buff[txa];
                     right_mid  = prim_buff[txa + 1];
                     right_most = prim_buff[txa + 2];
                 }
@@ -250,34 +246,35 @@ void SRHD::advance(
                 // Compute the reconstructed primitives at the i+1/2 interface
 
                 // Reconstructed left primitives vector
+                
                 prims_l.rho =
-                    center.rho + 0.5 * minmod(plm_theta * (center.rho - left_mid.rho),
-                                                0.5 * (right_mid.rho - left_mid.rho),
-                                                plm_theta * (right_mid.rho - center.rho));
+                    center.rho + (real)0.5 * minmod(plm_theta * (center.rho - left_mid.rho),
+                                            (real)0.5 * (right_mid.rho - left_mid.rho),
+                                            plm_theta * (right_mid.rho - center.rho));
 
-                prims_l.v = center.v + 0.5 * minmod(plm_theta * (center.v - left_mid.v),
-                                                    0.5 * (right_mid.v - left_mid.v),
+                prims_l.v = center.v + (real)0.5 * minmod(plm_theta * (center.v - left_mid.v),
+                                                    (real)0.5 * (right_mid.v - left_mid.v),
                                                     plm_theta * (right_mid.v - center.v));
 
-                prims_l.p = center.p + 0.5 * minmod(plm_theta * (center.p - left_mid.p),
-                                                    0.5 * (right_mid.p - left_mid.p),
+                prims_l.p = center.p + (real)0.5 * minmod(plm_theta * (center.p - left_mid.p),
+                                                    (real)0.5 * (right_mid.p - left_mid.p),
                                                     plm_theta * (right_mid.p - center.p));
 
                 // Reconstructed right primitives vector
                 prims_r.rho = right_mid.rho -
-                                0.5 * minmod(plm_theta * (right_mid.rho - center.rho),
-                                            0.5 * (right_most.rho - center.rho),
-                                            plm_theta * (right_most.rho - right_mid.rho));
+                            (real)0.5 * minmod(plm_theta * (right_mid.rho - center.rho),
+                                        (real)0.5 * (right_most.rho - center.rho),
+                                        plm_theta * (right_most.rho - right_mid.rho));
 
                 prims_r.v =
-                    right_mid.v - 0.5 * minmod(plm_theta * (right_mid.v - center.v),
-                                                0.5 * (right_most.v - center.v),
-                                                plm_theta * (right_most.v - right_mid.v));
+                    right_mid.v - (real)0.5 * minmod(plm_theta * (right_mid.v - center.v),
+                                            (real)0.5 * (right_most.v - center.v),
+                                            plm_theta * (right_most.v - right_mid.v));
 
                 prims_r.p =
-                    right_mid.p - 0.5 * minmod(plm_theta * (right_mid.p - center.p),
-                                                0.5 * (right_most.p - center.p),
-                                                plm_theta * (right_most.p - right_mid.p));
+                    right_mid.p - (real)0.5 * minmod(plm_theta * (right_mid.p - center.p),
+                                            (real)0.5 * (right_most.p - center.p),
+                                            plm_theta * (right_most.p - right_mid.p));
 
                 // Calculate the left and right states using the reconstructed PLM
                 // primitives
@@ -294,34 +291,36 @@ void SRHD::advance(
                 {
                     f1 = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                 }
-
+                
+                // printf("plm_theta: %f", plm_theta);
+                // std::cin.get();
                 // Do the same thing, but for the right side interface [i - 1/2]
                 prims_l.rho =
-                    left_mid.rho + 0.5 * minmod(plm_theta * (left_mid.rho - left_most.rho),
-                                                0.5 * (center.rho - left_most.rho),
+                    left_mid.rho + (real)0.5 * minmod(plm_theta * (left_mid.rho - left_most.rho),
+                                                (real)0.5 * (center.rho - left_most.rho),
                                                 plm_theta * (center.rho - left_mid.rho));
 
                 prims_l.v =
-                    left_mid.v + 0.5 * minmod(plm_theta * (left_mid.v - left_most.v),
-                                                0.5 * (center.v - left_most.v),
-                                                plm_theta * (center.v - left_mid.v));
+                    left_mid.v + (real)0.5 * minmod(plm_theta * (left_mid.v - left_most.v),
+                                            (real)0.5 * (center.v - left_most.v),
+                                            plm_theta * (center.v - left_mid.v));
 
                 prims_l.p =
-                    left_mid.p + 0.5 * minmod(plm_theta * (left_mid.p - left_most.p),
-                                                0.5 * (center.p - left_most.p),
-                                                plm_theta * (center.p - left_mid.p));
+                    left_mid.p + (real)0.5 * minmod(plm_theta * (left_mid.p - left_most.p),
+                                            (real)0.5 * (center.p - left_most.p),
+                                            plm_theta * (center.p - left_mid.p));
 
                 prims_r.rho =
-                    center.rho - 0.5 * minmod(plm_theta * (center.rho - left_mid.rho),
-                                                0.5 * (right_mid.rho - left_mid.rho),
-                                                plm_theta * (right_mid.rho - center.rho));
+                    center.rho - (real)0.5 * minmod(plm_theta * (center.rho - left_mid.rho),
+                                            (real)0.5 * (right_mid.rho - left_mid.rho),
+                                            plm_theta * (right_mid.rho - center.rho));
 
-                prims_r.v = center.v - 0.5 * minmod(plm_theta * (center.v - left_mid.v),
-                                                    0.5 * (right_mid.v - left_mid.v),
+                prims_r.v = center.v - (real)0.5 * minmod(plm_theta * (center.v - left_mid.v),
+                                                    (real)0.5 * (right_mid.v - left_mid.v),
                                                     plm_theta * (right_mid.v - center.v));
 
-                prims_r.p = center.p - 0.5 * minmod(plm_theta * (center.p - left_mid.p),
-                                                    0.5 * (right_mid.p - left_mid.p),
+                prims_r.p = center.p - (real)0.5 * minmod(plm_theta * (center.p - left_mid.p),
+                                                    (real)0.5 * (right_mid.p - left_mid.p),
                                                     plm_theta * (right_mid.p - center.p));
 
                 // Calculate the left and right states using the reconstructed PLM
@@ -340,25 +339,23 @@ void SRHD::advance(
                     f2 = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                 }
 
-                
                 switch (geometry)
                 {
                 case simbi::Geometry::CARTESIAN:
                     if constexpr(BuildPlatform == Platform::GPU)
                     {
                         dx = coord_lattice->gpu_dx1[ii];
-                        self->gpu_cons[ia].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx +  self->gpu_sourceD[ii] );
-                        self->gpu_cons[ia].S   += 0.5 * dt * ( -(f1.S - f2.S)     / dx +  self->gpu_sourceS[ii] );
-                        self->gpu_cons[ia].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx  + self->gpu_source0[ii] );
+                        self->gpu_cons[ia].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx +  self->gpu_sourceD[ii] );
+                        self->gpu_cons[ia].S   += (real)0.5 * dt * ( -(f1.S - f2.S)     / dx +  self->gpu_sourceS[ii] );
+                        self->gpu_cons[ia].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx  + self->gpu_source0[ii] );
                     } else {
-                        dx = self->coord_lattice.dx1[ii];
-                        self->cons[ia].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx +  self->sourceD[ii] );
-                        self->cons[ia].S   += 0.5 * dt * ( -(f1.S - f2.S)     / dx +  self->sourceS[ii] );
-                        self->cons[ia].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx  + self->source0[ii] );
+                        dx = coord_lattice->dx1[ii];
+                        cons[ia].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx +  sourceD[ii] );
+                        cons[ia].S   += (real)0.5 * dt * ( -(f1.S - f2.S)     / dx +  sourceS[ii] );
+                        cons[ia].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx  + source0[ii] );
                     }
                     
                     break;
-                
                 case simbi::Geometry::SPHERICAL:
                     if constexpr(BuildPlatform == Platform::GPU)
                     {
@@ -372,29 +369,29 @@ void SRHD::advance(
                             -(sR * f1.D - sL * f2.D) / dV +
                             self->gpu_sourceD[ii] * decay_constant,
 
-                            -(sR * f1.S - sL * f2.S) / dV + 2.0 * pc / rmean +
+                            -(sR * f1.S - sL * f2.S) / dV + (real)2.0 * pc / rmean +
                             self->gpu_sourceS[ii] * decay_constant,
 
                             -(sR * f1.tau - sL * f2.tau) / dV +
                             self->gpu_source0[ii] * decay_constant
-                        } * dt * 0.5;
+                        } * dt * (real)0.5;
                     } else {
                         pc    = prim_buff[txa].p;
-                        sL    = self->coord_lattice.face_areas[ii + 0];
-                        sR    = self->coord_lattice.face_areas[ii + 1];
-                        dV    = self->coord_lattice.dV[ii];
-                        rmean = self->coord_lattice.x1mean[ii];
+                        sL    = coord_lattice->face_areas[ii + 0];
+                        sR    = coord_lattice->face_areas[ii + 1];
+                        dV    = coord_lattice->dV[ii];
+                        rmean = coord_lattice->x1mean[ii];
 
-                        self->cons[ia] += Conserved{ 
+                        cons[ia] += Conserved{ 
                             -(sR * f1.D - sL * f2.D) / dV +
                             self->sourceD[ii] * decay_constant,
 
-                            -(sR * f1.S - sL * f2.S) / dV + 2.0 * pc / rmean +
+                            -(sR * f1.S - sL * f2.S) / dV + (real)2.0 * pc / rmean +
                             self->sourceS[ii] * decay_constant,
 
                             -(sR * f1.tau - sL * f2.tau) / dV +
                             self->source0[ii] * decay_constant
-                        } * dt * 0.5;
+                        } * dt * (real)0.5;
                     }
                     
                     break;
@@ -427,22 +424,22 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         const real tau     = conserved_buff[tx].tau;
         real peq           = (BuildPlatform == Platform::GPU) ? self->gpu_pressure_guess[ii] : self->pressure_guess[ii];
         int iter           = 0;
-        const real tol     = D * 1.e-12;
+        const real tol     = D * tol_scale;
         do
         {
             pre = peq;
             et = tau + D + pre;
             v2 = S * S / (et * et);
-            W = 1.0 / sqrt(1.0 - v2);
+            W = (real)1.0 / real_sqrt((real)1.0 - v2);
             rho = D / W;
 
-            eps = (tau + (1.0 - W) * D + (1. - W * W) * pre) / (D * W);
+            eps = (tau + ((real)1.0 - W) * D + ((real)1.0 - W * W) * pre) / (D * W);
 
-            h  = 1. + eps + pre / rho;
+            h  = (real)1.0 + eps + pre / rho;
             c2 = self->gamma * pre / (h * rho); 
 
-            g = c2 * v2 - 1.0;
-            f = (self->gamma - 1.0) * rho * eps - pre;
+            g = c2 * v2 - (real)1.0;
+            f = (self->gamma - (real)1) * rho * eps - pre;
 
             peq = pre - f / g;
             if (iter >= MAX_ITER)
@@ -455,17 +452,17 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             }
             iter++;
 
-        } while (abs(peq - pre) >= tol);
+        } while (std::abs(peq - pre) >= tol);
 
         real v = S / (tau + D + peq);
 
         if constexpr(BuildPlatform == Platform::GPU)
         {
             self->gpu_pressure_guess[ii] = peq;
-            self->gpu_prims[ii]          = Primitive{D * sqrt(1 - v * v), v, peq};
+            self->gpu_prims[ii]          = Primitive{D * real_sqrt(1 - v * v), v, peq};
         } else {
-            self->pressure_guess[ii] = peq;
-            self->prims[ii]  = Primitive{D * sqrt(1 - v * v), v, peq};
+            pressure_guess[ii] = peq;
+            prims[ii]  = Primitive{D * real_sqrt(1 - v * v), v, peq};
         }   
     });
 }
@@ -483,61 +480,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
  * variables density (rho), pressure, and
  * velocity (v)
  */
-void SRHD::cons2prim1D()
-{
-    int iter;
-    #pragma omp parallel 
-    {
-        double rho, S, D, tau, pmin;
-        double v, W, tol, f, g, peq, h;
-        double eps, rhos, p, v2, et, c2;
 
-        #pragma omp for nowait schedule(static)
-        for (int ii = 0; ii < nx; ii++)
-        {
-            D   = cons[ii].D;
-            S   = cons[ii].S;
-            tau = cons[ii].tau;
-
-            peq = n != 0 ? pressure_guess[ii] : std::abs(std::abs(S) - tau - D);
-
-            tol = D * 1.e-12;
-
-            iter = 0;
-            do
-            {
-                p = peq;
-                et = tau + D + p;
-                v2 = S * S / (et * et);
-                W = 1.0 / sqrt(1.0 - v2);
-                rho = D / W;
-
-                eps = (tau + (1.0 - W) * D + (1. - W * W) * p) / (D * W);
-
-                h = 1. + eps + p / rho;
-                c2 = gamma * p / (h * rho);
-
-                g = c2 * v2 - 1.0;
-                f = (gamma - 1.0) * rho * eps - p;
-
-                peq = p - f / g;
-                iter++;
-                if (iter >= MAX_ITER)
-                {
-                    std::cout << "\n"
-                              << "Cons2Prim cannot converge"
-                              << "\n";
-                    exit(EXIT_FAILURE);
-                }
-
-            } while (std::abs(peq - p) >= tol);
-
-            v = S / (tau + D + peq);
-            pressure_guess[ii] = peq;
-            prims[ii] = Primitive{D * sqrt(1 - v * v), v, peq};
-        }
-    }
-};
 
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
@@ -550,18 +493,18 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     const real rho_l = prims_l.rho;
     const real p_l   = prims_l.p;
     const real v_l   = prims_l.v;
-    const real h_l   = 1. + gamma * p_l / (rho_l * (gamma - 1.));
-    const real cs_l  = sqrt(gamma * p_l / (rho_l * h_l));
+    const real h_l   = (real)1.0 + gamma * p_l / (rho_l * (gamma - 1));
+    const real cs_l  = real_sqrt(gamma * p_l / (rho_l * h_l));
 
     const real rho_r = prims_r.rho;
     const real p_r   = prims_r.p;
     const real v_r   = prims_r.v;
-    const real h_r   = 1. + gamma * p_r / (rho_r * (gamma - 1.));
-    const real cs_r  = sqrt(gamma * p_r / (rho_r * h_r));
+    const real h_r   = (real)1.0 + gamma * p_r / (rho_r * (gamma - 1));
+    const real cs_r  = real_sqrt(gamma * p_r / (rho_r * h_r));
 
     // Compute waves based on Schneider et al. 1993 Eq(31 - 33)
-    const real vbar = 0.5 * (v_l + v_r);
-    const real cbar = 0.5 * (cs_r + cs_l);
+    const real vbar = (real)0.5 * (v_l + v_r);
+    const real cbar = (real)0.5 * (cs_r + cs_l);
     const real br = (vbar + cbar) / (1 + vbar * cbar);
     const real bl = (vbar - cbar) / (1 - vbar * cbar);
 
@@ -573,10 +516,10 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     // const real sL = cs_l*cs_l/(gamma*gamma*(1.0 - cs_l*cs_l));
     // const real sR = cs_r*cs_r/(gamma*gamma*(1.0 - cs_r*cs_r));
     // // Define temporaries to save computational cycles
-    // const real qfL = 1. / (1. + sL);
-    // const real qfR = 1. / (1. + sR);
-    // const real sqrtR = sqrt(sR * (1.0 - v_r * v_r + sR));
-    // const real sqrtL = sqrt(sL * (1.0 - v_l * v_l + sL));
+    // const real qfL = (real)1.0 / ((real)1.0 + sL);
+    // const real qfR = (real)1.0 / ((real)1.0 + sR);
+    // const real sqrtR = real_sqrt(sR * (1.0 - v_r * v_r + sR));
+    // const real sqrtL = real_sqrt(sL * (1.0 - v_l * v_l + sL));
 
     // const real lamLm = (v_l - sqrtL) * qfL;
     // const real lamRm = (v_r - sqrtR) * qfR;
@@ -593,11 +536,11 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
 // Adapt the timestep on the Host
 void SRHD::adapt_dt()
 {   
-    double min_dt = INFINITY;
+    real min_dt = INFINITY;
     #pragma omp parallel 
     {
-        double dr, cs, cfl_dt;
-        double h, rho, p, v, vPLus, vMinus;
+        real dr, cs, cfl_dt;
+        real h, rho, p, v, vPLus, vMinus;
 
         // Compute the minimum timestep given CFL
         #pragma omp for schedule(static)
@@ -608,8 +551,8 @@ void SRHD::adapt_dt()
             p   = prims[ii + idx_shift].p;
             v   = prims[ii + idx_shift].v;
 
-            h = 1. + gamma * p / (rho * (gamma - 1.));
-            cs = sqrt(gamma * p / (rho * h));
+            h = (real)1.0 + gamma * p / (rho * (gamma - 1));
+            cs = real_sqrt(gamma * p / (rho * h));
 
             vPLus  = (v + cs) / (1 + v * cs);
             vMinus = (v - cs) / (1 - v * cs);
@@ -646,8 +589,8 @@ Conserved SRHD::prims2cons(const Primitive &prim)
     const real rho = prim.rho;
     const real v   = prim.v;
     const real pre = prim.p;  
-    const real h = 1. + gamma * pre / (rho * (gamma - 1.));
-    const real W = 1. / sqrt(1 - v * v);
+    const real h = (real)1.0 + gamma * pre / (rho * (gamma - 1));
+    const real W = (real)1.0 / real_sqrt(1 - v * v);
 
     return Conserved{rho * W, rho * h * W * W * v, rho * h * W * W - pre - rho * W};
 };
@@ -681,8 +624,8 @@ Conserved SRHD::calc_intermed_state(const Primitive &prims,
     const real E = tau + D;
 
     const real DStar = ((a - v) / (a - aStar)) * D;
-    const real Sstar = (1. / (a - aStar)) * (S * (a - v) - pressure + pStar);
-    const real Estar = (1. / (a - aStar)) * (E * (a - v) + pStar * aStar - pressure * v);
+    const real Sstar = ((real)1.0 / (a - aStar)) * (S * (a - v) - pressure + pStar);
+    const real Estar = ((real)1.0 / (a - aStar)) * (E * (a - v) + pStar * aStar - pressure * v);
     const real tauStar = Estar - DStar;
 
     return Conserved{DStar, Sstar, tauStar};
@@ -700,8 +643,8 @@ Conserved SRHD::prims2flux(const Primitive &prim)
     const real pre = prim.p;
     const real v   = prim.v;
 
-    const real W = 1. / sqrt(1 - v * v);
-    const real h = 1. + gamma * pre / (rho * (gamma - 1.));
+    const real W = (real)1.0 / real_sqrt(1 - v * v);
+    const real h = (real)1.0 + gamma * pre / (rho * (gamma - 1));
     const real D = rho * W;
     const real S = rho * h * W * W * v;
 
@@ -723,8 +666,8 @@ SRHD::calc_hll_flux(
     // Grab the necessary wave speeds
     const real aR  = lambda.aR;
     const real aL  = lambda.aL;
-    const real aLm = aL < 0.0 ? aL : 0.0;
-    const real aRp = aR > 0.0 ? aR : 0.0;
+    const real aLm = aL < (real)0.0 ? aL : (real)0.0;
+    const real aRp = aR > (real)0.0 ? aR : (real)0.0;
 
     // Compute the HLL Flux component-wise
     return (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
@@ -744,11 +687,11 @@ SRHD::calc_hllc_flux(
     const real aL = lambda.aL;
     const real aR = lambda.aR;
 
-    if (0.0 <= aL)
+    if ((real)0.0 <= aL)
     {
         return left_flux;
     }
-    else if (0.0 >= aR)
+    else if ((real)0.0 >= aR)
     {
         return right_flux;
     }
@@ -767,8 +710,8 @@ SRHD::calc_hllc_flux(
     const real a = fe;
     const real b = - (e + fs);
     const real c = s;
-    const real disc = sqrt( b*b - 4.0*a*c);
-    const real quad = -0.5*(b + sgn(b)*disc);
+    const real disc = real_sqrt( b*b - 4.0*a*c);
+    const real quad = -(real)0.5*(b + sgn(b)*disc);
     const real aStar = c/quad;
     const real pStar = -fe * aStar + fs;
 
@@ -779,7 +722,7 @@ SRHD::calc_hllc_flux(
         const real S        = left_state.S;
         const real tau      = left_state.tau;
         const real E        = tau + D;
-        const real cofactor = 1. / (aL - aStar);
+        const real cofactor = (real)1.0 / (aL - aStar);
         //--------------Compute the L Star State----------
         const real v = left_prims.v;
         // Left Star State in x-direction of coordinate lattice
@@ -800,7 +743,7 @@ SRHD::calc_hllc_flux(
         const real S         = right_state.S;
         const real tau       = right_state.tau;
         const real E         = tau + D;
-        const real cofactor  = 1. / (aR - aStar);
+        const real cofactor  = (real)1.0 / (aR - aStar);
         //--------------Compute the L Star State----------
         const real v = right_prims.v;
         // Left Star State in x-direction of coordinate lattice
@@ -822,13 +765,13 @@ SRHD::calc_hllc_flux(
 
 std::vector<std::vector<real>>
 SRHD::simulate1D(
-    std::vector<std::vector<double>> &sources,
-    double tstart,
-    double tend,
-    double init_dt,
-    double plm_theta,
-    double engine_duration,
-    double chkpt_interval,
+    std::vector<std::vector<real>> &sources,
+    real tstart,
+    real tend,
+    real init_dt,
+    real plm_theta,
+    real engine_duration,
+    real chkpt_interval,
     std::string data_directory,
     bool first_order,
     bool periodic,
@@ -880,8 +823,8 @@ SRHD::simulate1D(
     PrimData prods;
     real round_place = 1 / chkpt_interval;
     real t_interval =
-        t == 0 ? floor(tstart * round_place + 0.5) / round_place
-               : floor(tstart * round_place + 0.5) / round_place + chkpt_interval;
+        t == 0 ? floor(tstart * round_place + (real)0.5) / round_place
+               : floor(tstart * round_place + (real)0.5) / round_place + chkpt_interval;
     DataWriteMembers setup;
     setup.xmax = r[active_zones - 1];
     setup.xmin = r[0];
@@ -898,7 +841,7 @@ SRHD::simulate1D(
     pressure_guess.resize(nx);
     dt_arr.resize(nx);
     // Copy the state array into real & profile variables
-    for (size_t ii = 0; ii < nx; ii++)
+    for (int ii = 0; ii < nx; ii++)
     {
 
         cons[ii] = Conserved{state[0][ii],
@@ -906,7 +849,7 @@ SRHD::simulate1D(
                           state[2][ii]};
 
         // initial pressure guess is | |S| - D - tau|
-        pressure_guess[ii] = abs((state[1][ii]) - state[0][ii] - state[2][ii]);
+        pressure_guess[ii] = std::abs((state[1][ii]) - state[0][ii] - state[2][ii]);
     }
     // deallocate the init state vector now
     std::vector<int> state;
@@ -943,7 +886,7 @@ SRHD::simulate1D(
 
     const auto fullP            = simbi::ExecutionPolicy(nx);
     const auto activeP          = simbi::ExecutionPolicy(active_zones);
-    const int radius            = (first_order) ? 1 : 2;
+    const unsigned int radius   = (first_order) ? 1 : 2;
     const int shBlockSize       = BLOCK_SIZE + 2 * radius;
     const unsigned shBlockBytes = shBlockSize * sizeof(Primitive);
 
@@ -972,9 +915,9 @@ SRHD::simulate1D(
     // Some benchmarking tools 
     int   nfold   = 0;
     int   ncheck  = 0;
-    double zu_avg = 0;
+    real zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
-    std::chrono::duration<double> delta_t;
+    std::chrono::duration<real> delta_t;
     
     // Simulate :)
     if (first_order)
@@ -1042,9 +985,6 @@ SRHD::simulate1D(
             }
         }
     } else {
-        const int radius = 2;
-        const int shBlockSize  = BLOCK_SIZE + 2 * radius;
-        const unsigned shBlockBytes = shBlockSize * sizeof(Conserved) + shBlockSize * sizeof(Primitive);
         while (t < tend)
         {
             t1 = high_resolution_clock::now();
@@ -1061,11 +1001,11 @@ SRHD::simulate1D(
             } else {
                 advance(device_self, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Host);
                 cons2prim(fullP);
-                config_ghosts1DGPU(fullP, this, nx, true);
+                config_ghosts1DGPU(fullP, this, nx, false);
 
                 advance(device_self, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Host);
                 cons2prim(fullP);
-                config_ghosts1DGPU(fullP, this, nx, true);
+                config_ghosts1DGPU(fullP, this, nx, false);
             }
             
             t += dt; 
@@ -1092,7 +1032,7 @@ SRHD::simulate1D(
             /* Write to a File every tenth of a second */
             if (t >= t_interval)
             {
-                dualMem.copyDevToHost(device_self, *this);
+                if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
                 time_order_of_mag = std::floor(std::log10(t));
                 if (time_order_of_mag > tchunk_order_of_mag)
                 {
@@ -1133,7 +1073,7 @@ SRHD::simulate1D(
     
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
-    for (size_t ii = 0; ii < nx; ii++)
+    for (int ii = 0; ii < nx; ii++)
     {
         final_prims[0][ii] = prims[ii].rho;
         final_prims[1][ii] = prims[ii].v;

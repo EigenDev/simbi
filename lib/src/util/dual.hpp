@@ -18,7 +18,7 @@ namespace simbi
             DualSpace1D() {};
             ~DualSpace1D()
             {
-                printf("\nFreeing Device Memory...\n");
+                // printf("\nFreeing Device Memory...\n");
                 simbi::gpu::api::gpuFree(host_u0);
                 simbi::gpu::api::gpuFree(host_prims);
                 simbi::gpu::api::gpuFree(host_clattice);
@@ -30,7 +30,7 @@ namespace simbi
                 simbi::gpu::api::gpuFree(host_sourceD);
                 simbi::gpu::api::gpuFree(host_sourceS);
                 simbi::gpu::api::gpuFree(host_pressure_guess);
-                printf("Memory Freed.\n");
+                // printf("Memory Freed.\n");
             };
 
             T *host_prims;
@@ -60,7 +60,7 @@ namespace simbi
             DualSpace2D() {};
             ~DualSpace2D()
             {
-                printf("\nFreeing Device Memory...\n");
+                // printf("\nFreeing Device Memory...\n");
                 simbi::gpu::api::gpuFree(host_u0);
                 simbi::gpu::api::gpuFree(host_prims);
                 simbi::gpu::api::gpuFree(host_clattice);
@@ -77,7 +77,7 @@ namespace simbi
                 simbi::gpu::api::gpuFree(host_sourceS1);
                 simbi::gpu::api::gpuFree(host_sourceS2);
                 simbi::gpu::api::gpuFree(host_pressure_guess);
-                printf("Memory Freed Successfully.\n");
+                // printf("Memory Freed Successfully.\n");
             };
 
             T *host_prims;
@@ -109,7 +109,7 @@ namespace simbi
             DualSpace3D() {};
             ~DualSpace3D()
             {
-                printf("\nFreeing Device Memory...\n");
+                // printf("\nFreeing Device Memory...\n");
                 simbi::gpu::api::gpuFree(host_u0);
                 simbi::gpu::api::gpuFree(host_prims);
                 simbi::gpu::api::gpuFree(host_clattice);
@@ -130,7 +130,7 @@ namespace simbi
                 simbi::gpu::api::gpuFree(host_sourceS2);
                 simbi::gpu::api::gpuFree(host_sourceS3);
                 simbi::gpu::api::gpuFree(host_pressure_guess);
-                printf("Memory Freed.\n");
+                // printf("Memory Freed.\n");
             };
 
             T *host_prims;

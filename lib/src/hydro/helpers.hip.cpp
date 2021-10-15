@@ -1,5 +1,5 @@
 #include "helpers.hip.hpp"
-#include "parallel_for.hpp"
+#include "util/parallel_for.hpp"
 
 //==================================
 //              GPU HELPERS
@@ -161,8 +161,8 @@ namespace simbi{
                             : x1grid_size * x2grid_size * x3grid_size;
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
             const int kk = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(gid, x1grid_size, x2grid_size);
-            const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_column(gid, x1grid_size, x2grid_size, kk);
-            const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_row(gid, x1grid_size, x2grid_size, kk);
+            const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(gid, x1grid_size, x2grid_size, kk);
+            const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(gid, x1grid_size, x2grid_size, kk);
             
             sr3d::Conserved *u_state = (BuildPlatform == Platform::GPU) ? sim->gpu_cons : sim->cons.data();
             if (first_order){

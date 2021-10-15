@@ -6,13 +6,13 @@
  * Compressible Hydro Simulation
  */
 
-#include "device_api.hpp"
-#include "dual.hpp"
+#include "util/device_api.hpp"
+#include "util/dual.hpp"
 #include "common/helpers.hpp"
 #include "helpers.hip.hpp"
 #include "srhydro2D.hip.hpp"
 #include "util/printb.hpp"
-#include "parallel_for.hpp"
+#include "util/parallel_for.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -54,92 +54,6 @@ typedef sr2d::Eigenvals Eigenvals;
 //                          GET THE Primitive
 //-----------------------------------------------------------------------------------------
 
-void SRHD2D::cons2prim2D()
-{
-    /**
-   * Return a 2D matrix containing the primitive
-   * variables density , pressure, and
-   * three-velocity
-   */
-
-    real S1, S2, S, D, tau, tol;
-    real W, v1, v2;
-
-    // Define Newton-Raphson Vars
-    real etotal, c2, f, g, p, peq;
-    real Ws, rhos, eps, h;
-
-    int aid  = 0;
-    int iter = 0;
-    int maximum_iteration = 50;
-    for (int jj = 0; jj < ny; jj++)
-    {
-        for (int ii = 0; ii < nx; ii++)
-        {
-            aid = ii + nx * jj;
-            D   = cons[aid].D;     // Relativistic Mass Density
-            S1  = cons[aid].S1;   // X1-Momentum Denity
-            S2  = cons[aid].S2;   // X2-Momentum Density
-            tau = cons[aid].tau; // Energy Density
-            S = sqrt(S1 * S1 + S2 * S2);
-
-            peq = (n != 0.0) ? pressure_guess[aid] : abs(S - D - tau);
-
-            tol = D * 1.e-12;
-
-            //--------- Iteratively Solve for Pressure using Newton-Raphson
-            // Note: The NR scheme can be modified based on:
-            // https://www.sciencedirect.com/science/article/pii/S0893965913002930
-            iter = 0;
-            do
-            {
-                p = peq;
-                etotal = tau + p + D;
-                v2 = S * S / (etotal * etotal);
-                Ws = 1.0 / sqrt(1.0 - v2);
-                rhos = D / Ws;
-                eps = (tau + D * (1. - Ws) + (1. - Ws * Ws) * p) / (D * Ws);
-                f = (gamma - 1.0) * rhos * eps - p;
-
-                h = 1. + eps + p / rhos;
-                c2 = gamma * p / (h * rhos);
-                g = c2 * v2 - 1.0;
-                peq = p - f / g;
-                iter++;
-
-                if (iter > maximum_iteration)
-                {
-                    std::cout << "\n";
-                    std::cout << "p: " << p       << "\n";
-                    std::cout << "S: " << S       << "\n";
-                    std::cout << "tau: " << tau   << "\n";
-                    std::cout << "D: " << D       << "\n";
-                    std::cout << "et: " << etotal << "\n";
-                    std::cout << "Ws: " << Ws     << "\n";
-                    std::cout << "v2: " << v2     << "\n";
-                    std::cout << "W: " << W       << "\n";
-                    std::cout << "n: " << n       << "\n";
-                    std::cout << "\n Cons2Prim Cannot Converge" << "\n";
-                    exit(EXIT_FAILURE);
-                }
-
-            } while (abs(peq - p) >= tol);
-        
-
-            v1 = S1 / (tau + D + peq);
-            v2 = S2 / (tau + D + peq);
-            Ws = 1.0 / sqrt(1.0 - (v1 * v1 + v2 * v2));
-
-            // Update the Gamma array
-            // lorentz_gamma[ii + nx * jj] = Ws;
-
-            // Update the pressure guess for the next time step
-            pressure_guess[aid] = peq;
-            prims[aid] = Primitive{D / Ws, v1, v2, peq};
-        }
-    }
-};
-
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
@@ -159,8 +73,8 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
     const real p_r = prims_r.p;
     const real h_r = 1. + gamma * p_r / (rho_r * (gamma - 1));
 
-    const real cs_r = sqrt(gamma * p_r / (h_r * rho_r));
-    const real cs_l = sqrt(gamma * p_l / (h_l * rho_l));
+    const real cs_r = real_sqrt(gamma * p_r / (h_r * rho_r));
+    const real cs_l = real_sqrt(gamma * p_l / (h_l * rho_l));
 
     switch (nhat)
     {
@@ -170,8 +84,8 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         const real v1_r = prims_r.v1;
 
         //-----------Calculate wave speeds based on Shneider et al. 1992
-        const real vbar  = 0.5 * (v1_l + v1_r);
-        const real cbar  = 0.5 * (cs_l + cs_r);
+        const real vbar  = (real)0.5 * (v1_l + v1_r);
+        const real cbar  = (real)0.5 * (cs_l + cs_r);
         const real bl    = (vbar - cbar)/(1. - cbar*vbar);
         const real br    = (vbar + cbar)/(1. + cbar*vbar);
         const real aL    = my_min(bl, (v1_l - cs_l)/(1. - v1_l*cs_l));
@@ -184,8 +98,8 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         // // Define temporaries to save computational cycles
         // const real qfL = 1. / (1. + sL);
         // const real qfR = 1. / (1. + sR);
-        // const real sqrtR = sqrt(sR * (1 - v1_r * v1_r + sR));
-        // const real sqrtL = sqrt(sL * (1 - v1_l * v1_l + sL));
+        // const real sqrtR = real_sqrt(sR * (1 - v1_r * v1_r + sR));
+        // const real sqrtL = real_sqrt(sL * (1 - v1_l * v1_l + sL));
 
         // const real lamLm = (v1_l - sqrtL) * qfL;
         // const real lamRm = (v1_r - sqrtR) * qfR;
@@ -195,15 +109,15 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         // const real aL = lamLm < lamRm ? lamLm : lamRm;
         // const real aR = lamLp > lamRp ? lamLp : lamRp;
 
-        return Eigenvals(aL, aR);
+        return Eigenvals(aL, aR, cs_l, cs_r);
     }
     case 2:
         const real v2_r = prims_r.v2;
         const real v2_l = prims_l.v2;
 
         //-----------Calculate wave speeds based on Shneider et al. 1992
-        const real vbar  = 0.5 * (v2_l + v2_r);
-        const real cbar  = 0.5 * (cs_l + cs_r);
+        const real vbar  = (real)0.5 * (v2_l + v2_r);
+        const real cbar  = (real)0.5 * (cs_l + cs_r);
         const real bl    = (vbar - cbar)/(1. - cbar*vbar);
         const real br    = (vbar + cbar)/(1. + cbar*vbar);
         const real aL    = my_min(bl, (v2_l - cs_l)/(1. - v2_l*cs_l));
@@ -212,14 +126,14 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         // return Eigenvals(aL, aR);
 
         // Calc the wave speeds based on Mignone and Bodo (2005)
-        // real sL = cs_l * cs_l * (1.0 / (gamma * gamma * (1 - cs_l * cs_l)));
-        // real sR = cs_r * cs_r * (1.0 / (gamma * gamma * (1 - cs_r * cs_r)));
+        // real sL = cs_l * cs_l * ((real)1.0 / (gamma * gamma * (1 - cs_l * cs_l)));
+        // real sR = cs_r * cs_r * ((real)1.0 / (gamma * gamma * (1 - cs_r * cs_r)));
 
         // // Define some temporaries to save a few cycles
         // const real qfL = 1. / (1. + sL);
         // const real qfR = 1. / (1. + sR);
-        // const real sqrtR = sqrt(sR * (1 - v2_r * v2_r + sR));
-        // const real sqrtL = sqrt(sL * (1 - v2_l * v2_l + sL));
+        // const real sqrtR = real_sqrt(sR * (1 - v2_r * v2_r + sR));
+        // const real sqrtL = real_sqrt(sL * (1 - v2_l * v2_l + sL));
 
         // const real lamLm = (v2_l - sqrtL) * qfL;
         // const real lamRm = (v2_r - sqrtR) * qfR;
@@ -228,7 +142,7 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         // const real aL = lamLm < lamRm ? lamLm : lamRm;
         // const real aR = lamLp > lamRp ? lamLp : lamRp;
 
-        return Eigenvals(aL, aR);
+        return Eigenvals(aL, aR, cs_l, cs_r);
     }
 };
 
@@ -242,7 +156,7 @@ Conserved SRHD2D::prims2cons(const Primitive &prims)
     const real vx = prims.v1;
     const real vy = prims.v2;
     const real pressure = prims.p;
-    const real lorentz_gamma = 1. / sqrt(1 - (vx * vx + vy * vy));
+    const real lorentz_gamma = 1. / real_sqrt(1 - (vx * vx + vy * vy));
     const real h = 1. + gamma * pressure / (rho * (gamma - 1.));
 
     return Conserved{
@@ -306,13 +220,13 @@ Conserved SRHD2D::calc_intermed_statesSR2D(const Primitive &prims,
 // Adapt the CFL conditonal timestep
 void SRHD2D::adapt_dt()
 {
-    double min_dt = INFINITY;
+    real min_dt = INFINITY;
     #pragma omp parallel 
     {
-        double dx1, cs, dx2, rho, pressure, v1, v2, rmean, h;
-        double cfl_dt;
+        real dx1, cs, dx2, rho, pressure, v1, v2, rmean, h;
+        real cfl_dt;
         int shift_i, shift_j;
-        double plus_v1, plus_v2, minus_v1, minus_v2;
+        real plus_v1, plus_v2, minus_v1, minus_v2;
         int aid; // active index id
 
         // Compute the minimum timestep given CFL
@@ -332,7 +246,7 @@ void SRHD2D::adapt_dt()
                 pressure = prims[aid].p;
 
                 h = 1. + gamma * pressure / (rho * (gamma - 1.));
-                cs = std::sqrt(gamma * pressure / (rho * h));
+                cs = real_sqrt(gamma * pressure / (rho * h));
 
                 plus_v1  = (v1 + cs) / (1. + v1 * cs);
                 plus_v2  = (v2 + cs) / (1. + v2 * cs);
@@ -386,7 +300,7 @@ Conserved SRHD2D::prims2flux(const Primitive &prims, unsigned int nhat = 1)
     const real vx = prims.v1;
     const real vy = prims.v2;
     const real pressure = prims.p;
-    const real lorentz_gamma = 1. / sqrt(1. - (vx * vx + vy * vy));
+    const real lorentz_gamma = 1. / real_sqrt(1. - (vx * vx + vy * vy));
 
     const real h = 1. + gamma * pressure / (rho * (gamma - 1));
     const real D = rho * lorentz_gamma;
@@ -417,8 +331,8 @@ Conserved SRHD2D::calc_hll_flux(
     const real aR = lambda.aR;
 
     // Calculate plus/minus alphas
-    const real aLminus = aL < 0.0 ? aL : 0.0;
-    const real aRplus  = aR > 0.0 ? aR : 0.0;
+    const real aLminus = aL < (real)0.0 ? aL : (real)0.0;
+    const real aRplus  = aR > (real)0.0 ? aR : (real)0.0;
 
     // Compute the HLL Flux component-wise
     return (left_flux * aRplus - right_flux * aLminus 
@@ -437,23 +351,24 @@ Conserved SRHD2D::calc_hllc_flux(
     const unsigned int nhat = 1)
 {
 
+    Conserved starStateR, starStateL;
     Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
 
     const real aL = lambda.aL;
     const real aR = lambda.aR;
 
     //---- Check Wave Speeds before wasting computations
-    if (0.0 <= aL)
+    if ((real)0.0 <= aL)
     {
         return left_flux;
     }
-    else if (0.0 >= aR)
+    else if ((real)0.0 >= aR)
     {
         return right_flux;
     }
 
-    const real aLminus = aL < 0.0 ? aL : 0.0;
-    const real aRplus  = aR > 0.0 ? aR : 0.0;
+    const real aLminus = aL < (real)0.0 ? aL : (real)0.0;
+    const real aRplus  = aR > (real)0.0 ? aR : (real)0.0;
 
     //-------------------Calculate the HLL Intermediate State
     const auto hll_state = 
@@ -474,98 +389,200 @@ Conserved SRHD2D::calc_hllc_flux(
     const real a = fe;
     const real b = -(e + fs);
     const real c = s;
-    const real quad = -0.5 * (b + sgn(b) * sqrt(b * b - 4.0 * a * c));
-    const real aStar = c * (1.0 / quad);
+    const real quad = -(real)0.5 * (b + sgn(b) * real_sqrt(b * b - 4.0 * a * c));
+    const real aStar = c * ((real)1.0 / quad);
     const real pStar = -aStar * fe + fs;
 
-    // return Conserved(0.0, 0.0, 0.0, 0.0);
-    if (-aL <= (aStar - aL))
+    // Apply the low-Mach HLLC fix found in: 
+    // https://www.sciencedirect.com/science/article/pii/S0021999120305362
+    const real cL       = lambda.csL;
+    const real cR       = lambda.csR;
+    const real ma_lim   = 0.1;
+
+    //--------------Compute the L Star State----------
+    switch (nhat)
     {
-        const real pressure = left_prims.p;
-        const real D = left_state.D;
-        const real S1 = left_state.S1;
-        const real S2 = left_state.S2;
-        const real tau = left_state.tau;
-        const real E = tau + D;
-        const real cofactor = 1. / (aL - aStar);
-        //--------------Compute the L Star State----------
-        switch (nhat)
+    case 1:
         {
-        case 1:
-        {
-            const real v1 = left_prims.v1;
+            real pressure = left_prims.p;
+            real D        = left_state.D;
+            real S1       = left_state.S1;
+            real S2       = left_state.S2;
+            real tau      = left_state.tau;
+            real E        = tau + D;
+            real cofactor = 1. / (aL - aStar);
+
+            real v1 = left_prims.v1;
             // Left Star State in x-direction of coordinate lattice
-            const real Dstar    = cofactor * (aL - v1) * D;
-            const real S1star   = cofactor * (S1 * (aL - v1) - pressure + pStar);
-            const real S2star   = cofactor * (aL - v1) * S2;
-            const real Estar    = cofactor * (E * (aL - v1) + pStar * aStar - pressure * v1);
-            const real tauStar  = Estar - Dstar;
+            real Dstar    = cofactor * (aL - v1) * D;
+            real S1star   = cofactor * (S1 * (aL - v1) - pressure + pStar);
+            real S2star   = cofactor * (aL - v1) * S2;
+            real Estar    = cofactor * (E * (aL - v1) + pStar * aStar - pressure * v1);
+            real tauStar  = Estar - Dstar;
+            starStateL    = Conserved(Dstar, S1star, S2star, tauStar);
 
-            const auto interstate_left = Conserved(Dstar, S1star, S2star, tauStar);
+            pressure = right_prims.p;
+            D        = right_state.D;
+            S1       = right_state.S1;
+            S2       = right_state.S2;
+            tau      = right_state.tau;
+            E        = tau + D;
+            cofactor = 1. / (aR - aStar);
 
-            //---------Compute the L Star Flux
-            return left_flux + (interstate_left - left_state) * aL;
+            v1      = right_prims.v1;
+            Dstar   = cofactor * (aR - v1) * D;
+            S1star  = cofactor * (S1 * (aR - v1) - pressure + pStar);
+            S2star  = cofactor * (aR - v1) * S2;
+            Estar   = cofactor * (E * (aR - v1) + pStar * aStar - pressure * v1);
+            tauStar = Estar - Dstar;
+            starStateR = Conserved(Dstar, S1star, S2star, tauStar);
+
+            const real ma_local = my_max(std::abs(left_prims.v1 / cL), std::abs(right_prims.v1 / cR));
+            const real phi      = sin(my_min((real)1.0, ma_local / ma_lim) * PI * (real)0.5);
+            const real aL_lm    = phi * aL;
+            const real aR_lm    = phi * aR;
+
+            return (left_flux + right_flux) * (real)0.5 + ( (starStateL - left_state) * aL_lm
+                + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR ) * (real)0.5;
         }
-
-        case 2:
-            const real v2 = left_prims.v2;
-            // Start States in y-direction in the coordinate lattice
-            const real Dstar   = cofactor * (aL - v2) * D;
-            const real S1star  = cofactor * (aL - v2) * S1;
-            const real S2star  = cofactor * (S2 * (aL - v2) - pressure + pStar);
-            const real Estar   = cofactor * (E * (aL - v2) + pStar * aStar - pressure * v2);
-            const real tauStar = Estar - Dstar;
-
-            const auto interstate_left = Conserved(Dstar, S1star, S2star, tauStar);
-
-            //---------Compute the L Star Flux
-            return left_flux + (interstate_left - left_state) * aL;
-        }
-    }
-    else
-    {
-        const real pressure = right_prims.p;
-        const real D = right_state.D;
-        const real S1 = right_state.S1;
-        const real S2 = right_state.S2;
-        const real tau = right_state.tau;
-        const real E = tau + D;
-        const real cofactor = 1. / (aR - aStar);
-
-        /* Compute the L/R Star State */
-        switch (nhat)
+        break;
+    
+    case 2:
         {
-        case 1:
-        {
-            const real v1 = right_prims.v1;
-            const real Dstar = cofactor * (aR - v1) * D;
-            const real S1star = cofactor * (S1 * (aR - v1) - pressure + pStar);
-            const real S2star = cofactor * (aR - v1) * S2;
-            const real Estar = cofactor * (E * (aR - v1) + pStar * aStar - pressure * v1);
-            const real tauStar = Estar - Dstar;
+            real pressure = left_prims.p;
+            real D        = left_state.D;
+            real S1       = left_state.S1;
+            real S2       = left_state.S2;
+            real tau      = left_state.tau;
+            real E        = tau + D;
+            real cofactor = 1. / (aL - aStar);
 
-            const auto interstate_right = Conserved(Dstar, S1star, S2star, tauStar);
-
-            // Compute the intermediate right flux
-            return right_flux + (interstate_right - right_state) * aR;
-        }
-
-        case 2:
-            const real v2 = right_prims.v2;
+            real v2 = left_prims.v2;
             // Start States in y-direction in the coordinate lattice
-            const real cofactor = 1. / (aR - aStar);
-            const real Dstar = cofactor * (aR - v2) * D;
-            const real S1star = cofactor * (aR - v2) * S1;
-            const real S2star = cofactor * (S2 * (aR - v2) - pressure + pStar);
-            const real Estar = cofactor * (E * (aR - v2) + pStar * aStar - pressure * v2);
-            const real tauStar = Estar - Dstar;
+            real Dstar   = cofactor * (aL - v2) * D;
+            real S1star  = cofactor * (aL - v2) * S1;
+            real S2star  = cofactor * (S2 * (aL - v2) - pressure + pStar);
+            real Estar   = cofactor * (E * (aL - v2) + pStar * aStar - pressure * v2);
+            real tauStar = Estar - Dstar;
 
-            const auto interstate_right = Conserved(Dstar, S1star, S2star, tauStar);
+            starStateL = Conserved(Dstar, S1star, S2star, tauStar);
+            v2 = right_prims.v2;
+            // Start States in y-direction in the coordinate lattice
+            pressure = right_prims.p;
+            D        = right_state.D;
+            S1       = right_state.S1;
+            S2       = right_state.S2;
+            tau      = right_state.tau;
+            E        = tau + D;
+            cofactor = 1. / (aR - aStar);
 
-            // Compute the intermediate right flux
-            return right_flux + (interstate_right - right_state) * aR;
+            Dstar    = cofactor * (aR - v2) * D;
+            S1star   = cofactor * (aR - v2) * S1;
+            S2star   = cofactor * (S2 * (aR - v2) - pressure + pStar);
+            Estar    = cofactor * (E * (aR - v2) + pStar * aStar - pressure * v2);
+            tauStar  = Estar - Dstar;
+
+            starStateR = Conserved(Dstar, S1star, S2star, tauStar);
+
+            const real ma_local = my_max(std::abs(left_prims.v2 / cL), std::abs(right_prims.v2 / cR));
+            const real phi      = sin(my_min((real)1.0, ma_local / ma_lim) * PI * (real)0.5);
+            const real aL_lm    = phi * aL;
+            const real aR_lm    = phi * aR;
+
+            return (left_flux + right_flux) * (real)0.5 + ( (starStateL - left_state) * aL_lm
+                + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR ) * (real)0.5;
         }
+        break;
     }
+
+    // return Conserved(0.0, 0.0, 0.0, 0.0);
+    // if (-aL <= (aStar - aL))
+    // {
+    //     const real pressure = left_prims.p;
+    //     const real D = left_state.D;
+    //     const real S1 = left_state.S1;
+    //     const real S2 = left_state.S2;
+    //     const real tau = left_state.tau;
+    //     const real E = tau + D;
+    //     const real cofactor = 1. / (aL - aStar);
+    //     //--------------Compute the L Star State----------
+    //     switch (nhat)
+    //     {
+    //     case 1:
+    //     {
+    //         const real v1 = left_prims.v1;
+    //         // Left Star State in x-direction of coordinate lattice
+    //         const real Dstar    = cofactor * (aL - v1) * D;
+    //         const real S1star   = cofactor * (S1 * (aL - v1) - pressure + pStar);
+    //         const real S2star   = cofactor * (aL - v1) * S2;
+    //         const real Estar    = cofactor * (E * (aL - v1) + pStar * aStar - pressure * v1);
+    //         const real tauStar  = Estar - Dstar;
+
+    //         const auto interstate_left = Conserved(Dstar, S1star, S2star, tauStar);
+
+    //         //---------Compute the L Star Flux
+    //         return left_flux + (interstate_left - left_state) * aL;
+    //     }
+
+    //     case 2:
+    //         const real v2 = left_prims.v2;
+    //         // Start States in y-direction in the coordinate lattice
+    //         const real Dstar   = cofactor * (aL - v2) * D;
+    //         const real S1star  = cofactor * (aL - v2) * S1;
+    //         const real S2star  = cofactor * (S2 * (aL - v2) - pressure + pStar);
+    //         const real Estar   = cofactor * (E * (aL - v2) + pStar * aStar - pressure * v2);
+    //         const real tauStar = Estar - Dstar;
+
+    //         const auto interstate_left = Conserved(Dstar, S1star, S2star, tauStar);
+
+    //         //---------Compute the L Star Flux
+    //         return left_flux + (interstate_left - left_state) * aL;
+    //     }
+    // }
+    // else
+    // {
+    //     const real pressure = right_prims.p;
+    //     const real D = right_state.D;
+    //     const real S1 = right_state.S1;
+    //     const real S2 = right_state.S2;
+    //     const real tau = right_state.tau;
+    //     const real E = tau + D;
+    //     const real cofactor = 1. / (aR - aStar);
+
+    //     /* Compute the L/R Star State */
+    //     switch (nhat)
+    //     {
+    //     case 1:
+    //     {
+    //         const real v1 = right_prims.v1;
+    //         const real Dstar = cofactor * (aR - v1) * D;
+    //         const real S1star = cofactor * (S1 * (aR - v1) - pressure + pStar);
+    //         const real S2star = cofactor * (aR - v1) * S2;
+    //         const real Estar = cofactor * (E * (aR - v1) + pStar * aStar - pressure * v1);
+    //         const real tauStar = Estar - Dstar;
+
+    //         const auto interstate_right = Conserved(Dstar, S1star, S2star, tauStar);
+
+    //         // Compute the intermediate right flux
+    //         return right_flux + (interstate_right - right_state) * aR;
+    //     }
+
+    //     case 2:
+    //         const real v2 = right_prims.v2;
+    //         // Start States in y-direction in the coordinate lattice
+    //         const real cofactor = 1. / (aR - aStar);
+    //         const real Dstar = cofactor * (aR - v2) * D;
+    //         const real S1star = cofactor * (aR - v2) * S1;
+    //         const real S2star = cofactor * (S2 * (aR - v2) - pressure + pStar);
+    //         const real Estar = cofactor * (E * (aR - v2) + pStar * aStar - pressure * v2);
+    //         const real tauStar = Estar - Dstar;
+
+    //         const auto interstate_right = Conserved(Dstar, S1star, S2star, tauStar);
+
+    //         // Compute the intermediate right flux
+    //         return right_flux + (interstate_right - right_state) * aR;
+    //     }
+    // }
 };
 
 //===================================================================================================================
@@ -597,26 +614,26 @@ void SRHD2D::cons2prim(
         real S1   = conserved_buff[tid].S1;
         real S2   = conserved_buff[tid].S2;
         real tau  = conserved_buff[tid].tau;
-        real S    = sqrt(S1 * S1 + S2 * S2);
+        real S    = real_sqrt(S1 * S1 + S2 * S2);
 
         real peq = (BuildPlatform == Platform::GPU) ? self->gpu_pressure_guess[gid] : self->pressure_guess[gid];
 
-        real tol = D * 1.e-12;
+        real tol = D * tol_scale;
         do
         {
             pre = peq;
             et  = tau + D + pre;
             v2 = S * S / (et * et);
-            W   = 1.0 / sqrt(1.0 - v2);
+            W   = (real)1.0 / real_sqrt((real)1.0 - v2);
             rho = D / W;
 
-            eps = (tau + (1.0 - W) * D + (1. - W * W) * pre) / (D * W);
+            eps = (tau + ((real)1.0 - W) * D + (1. - W * W) * pre) / (D * W);
 
-            h = 1. + eps + pre / rho;
+            h = 1 + eps + pre / rho;
             c2 = self->gamma * pre / (h * rho);
 
-            g = c2 * v2 - 1.0;
-            f = (self->gamma - 1.0) * rho * eps - pre;
+            g = c2 * v2 - (real)1.0;
+            f = (self->gamma - (real)1.0) * rho * eps - pre;
 
             peq = pre - f / g;
             iter++;
@@ -627,7 +644,7 @@ void SRHD2D::cons2prim(
                 return;
             }
 
-        } while (abs(peq - pre) >= tol);
+        } while (std::abs(peq - pre) >= tol);
 
         real inv_et = 1. / (tau + D + peq);
         real vx     = S1 * inv_et;
@@ -636,10 +653,10 @@ void SRHD2D::cons2prim(
         if constexpr(BuildPlatform == Platform::GPU)
         {
             self->gpu_pressure_guess[gid] = peq;
-            self->gpu_prims[gid]          = Primitive{D * sqrt(1 - (vx * vx + vy * vy)), vx, vy, peq};
+            self->gpu_prims[gid]          = Primitive{D * real_sqrt(1 - (vx * vx + vy * vy)), vx, vy, peq};
         } else {
             self->pressure_guess[gid] = peq;
-            self->prims[gid]          = Primitive{D * sqrt(1 - (vx * vx + vy * vy)), vx, vy, peq};
+            self->prims[gid]          = Primitive{D * real_sqrt(1 - (vx * vx + vy * vy)), vx, vy, peq};
         }
         
 
@@ -757,18 +774,19 @@ void SRHD2D::advance(
             // Calc HLL Flux at i+1/2 interface
             if (hllc)
             {
-                if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
-                    f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                } else {
-                    f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                }
+                // if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
+                //     f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // } else {
+                //     f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // }
                 
-                if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
-                    g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                } else {
-                    g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                }
-
+                // if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
+                //     g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // } else {
+                //     g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // }
+                f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             } else {
                 f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
                 g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
@@ -868,8 +886,8 @@ void SRHD2D::advance(
                     real uc   = prim_buff[tya * bs + txa].v1;
                     real vc   = prim_buff[tya * bs + txa].v2;
 
-                    real hc   = 1.0 + gamma * pc/(rhoc * (gamma - 1.0));
-                    real gam2 = 1.0/(1.0 - (uc * uc + vc * vc));
+                    real hc   = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
+                    real gam2 = (real)1.0/((real)1.0 - (uc * uc + vc * vc));
 
                     if constexpr(BuildPlatform == Platform::GPU)
                     {   
@@ -882,7 +900,7 @@ void SRHD2D::advance(
                                 // L(S1)
                                 -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
                                     - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        + rhoc * hc * gam2 * vc * vc / rmean + 2.0 * pc / rmean +
+                                        + rhoc * hc * gam2 * vc * vc / rmean + (real)(real)2.0 * pc / rmean +
                                             self->gpu_sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
@@ -906,7 +924,7 @@ void SRHD2D::advance(
                                 // L(S1)
                                 -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
                                     - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        + rhoc * hc * gam2 * vc * vc / rmean + 2.0 * pc / rmean +
+                                        + rhoc * hc * gam2 * vc * vc / rmean + (real)2.0 * pc / rmean +
                                             self->sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
@@ -962,88 +980,88 @@ void SRHD2D::advance(
             }
                 // Reconstructed left X Primitive vector at the i+1/2 interface
                 xprims_l.rho =
-                    center.rho + 0.5 * minmod(plm_theta * (center.rho - xleft_mid.rho),
-                                                0.5 * (xright_mid.rho - xleft_mid.rho),
+                    center.rho + (real)0.5 * minmod(plm_theta * (center.rho - xleft_mid.rho),
+                                                (real)0.5 * (xright_mid.rho - xleft_mid.rho),
                                                 plm_theta * (xright_mid.rho - center.rho));
 
                 xprims_l.v1 =
-                    center.v1 + 0.5 * minmod(plm_theta * (center.v1 - xleft_mid.v1),
-                                                0.5 * (xright_mid.v1 - xleft_mid.v1),
+                    center.v1 + (real)0.5 * minmod(plm_theta * (center.v1 - xleft_mid.v1),
+                                                (real)0.5 * (xright_mid.v1 - xleft_mid.v1),
                                                 plm_theta * (xright_mid.v1 - center.v1));
 
                 xprims_l.v2 =
-                    center.v2 + 0.5 * minmod(plm_theta * (center.v2 - xleft_mid.v2),
-                                                0.5 * (xright_mid.v2 - xleft_mid.v2),
+                    center.v2 + (real)0.5 * minmod(plm_theta * (center.v2 - xleft_mid.v2),
+                                                (real)0.5 * (xright_mid.v2 - xleft_mid.v2),
                                                 plm_theta * (xright_mid.v2 - center.v2));
 
                 xprims_l.p =
-                    center.p + 0.5 * minmod(plm_theta * (center.p - xleft_mid.p),
-                                            0.5 * (xright_mid.p - xleft_mid.p),
+                    center.p + (real)0.5 * minmod(plm_theta * (center.p - xleft_mid.p),
+                                            (real)0.5 * (xright_mid.p - xleft_mid.p),
                                             plm_theta * (xright_mid.p - center.p));
 
                 // Reconstructed right Primitive vector in x
                 xprims_r.rho =
                     xright_mid.rho -
-                    0.5 * minmod(plm_theta * (xright_mid.rho - center.rho),
-                                    0.5 * (xright_most.rho - center.rho),
+                    (real)0.5 * minmod(plm_theta * (xright_mid.rho - center.rho),
+                                    (real)0.5 * (xright_most.rho - center.rho),
                                     plm_theta * (xright_most.rho - xright_mid.rho));
 
                 xprims_r.v1 = xright_mid.v1 -
-                                0.5 * minmod(plm_theta * (xright_mid.v1 - center.v1),
-                                            0.5 * (xright_most.v1 - center.v1),
+                                (real)0.5 * minmod(plm_theta * (xright_mid.v1 - center.v1),
+                                            (real)0.5 * (xright_most.v1 - center.v1),
                                             plm_theta * (xright_most.v1 - xright_mid.v1));
 
                 xprims_r.v2 = xright_mid.v2 -
-                                0.5 * minmod(plm_theta * (xright_mid.v2 - center.v2),
-                                            0.5 * (xright_most.v2 - center.v2),
+                                (real)0.5 * minmod(plm_theta * (xright_mid.v2 - center.v2),
+                                            (real)0.5 * (xright_most.v2 - center.v2),
                                             plm_theta * (xright_most.v2 - xright_mid.v2));
 
                 xprims_r.p = xright_mid.p -
-                                0.5 * minmod(plm_theta * (xright_mid.p - center.p),
-                                            0.5 * (xright_most.p - center.p),
+                                (real)0.5 * minmod(plm_theta * (xright_mid.p - center.p),
+                                            (real)0.5 * (xright_most.p - center.p),
                                             plm_theta * (xright_most.p - xright_mid.p));
 
                 // Reconstructed right Primitive vector in y-direction at j+1/2
                 // interfce
                 yprims_l.rho =
-                    center.rho + 0.5 * minmod(plm_theta * (center.rho - yleft_mid.rho),
-                                                0.5 * (yright_mid.rho - yleft_mid.rho),
+                    center.rho + (real)0.5 * minmod(plm_theta * (center.rho - yleft_mid.rho),
+                                                (real)0.5 * (yright_mid.rho - yleft_mid.rho),
                                                 plm_theta * (yright_mid.rho - center.rho));
 
                 yprims_l.v1 =
-                    center.v1 + 0.5 * minmod(plm_theta * (center.v1 - yleft_mid.v1),
-                                                0.5 * (yright_mid.v1 - yleft_mid.v1),
+                    center.v1 + (real)0.5 * minmod(plm_theta * (center.v1 - yleft_mid.v1),
+                                                (real)0.5 * (yright_mid.v1 - yleft_mid.v1),
                                                 plm_theta * (yright_mid.v1 - center.v1));
 
                 yprims_l.v2 =
-                    center.v2 + 0.5 * minmod(plm_theta * (center.v2 - yleft_mid.v2),
-                                                0.5 * (yright_mid.v2 - yleft_mid.v2),
+                    center.v2 + (real)0.5 * minmod(plm_theta * (center.v2 - yleft_mid.v2),
+                                                (real)0.5 * (yright_mid.v2 - yleft_mid.v2),
                                                 plm_theta * (yright_mid.v2 - center.v2));
 
                 yprims_l.p =
-                    center.p + 0.5 * minmod(plm_theta * (center.p - yleft_mid.p),
-                                            0.5 * (yright_mid.p - yleft_mid.p),
+                    center.p + (real)0.5 * minmod(plm_theta * (center.p - yleft_mid.p),
+                                            (real)0.5 * (yright_mid.p - yleft_mid.p),
                                             plm_theta * (yright_mid.p - center.p));
 
                 yprims_r.rho =
                     yright_mid.rho -
-                    0.5 * minmod(plm_theta * (yright_mid.rho - center.rho),
-                                    0.5 * (yright_most.rho - center.rho),
+                    (real)0.5 * minmod(plm_theta * (yright_mid.rho - center.rho),
+                                    (real)0.5 * (yright_most.rho - center.rho),
                                     plm_theta * (yright_most.rho - yright_mid.rho));
 
                 yprims_r.v1 = yright_mid.v1 -
-                                0.5 * minmod(plm_theta * (yright_mid.v1 - center.v1),
-                                            0.5 * (yright_most.v1 - center.v1),
+                                (real)0.5 * minmod(plm_theta * (yright_mid.v1 - center.v1),
+                                            (real)0.5 * (yright_most.v1 - center.v1),
                                             plm_theta * (yright_most.v1 - yright_mid.v1));
 
                 yprims_r.v2 = yright_mid.v2 -
-                                0.5 * minmod(plm_theta * (yright_mid.v2 - center.v2),
-                                            0.5 * (yright_most.v2 - center.v2),
+                                (real)0.5 * minmod(plm_theta * (yright_mid.v2 - center.v2),
+                                            (real)0.5 * (yright_most.v2 - center.v2),
                                             plm_theta * (yright_most.v2 - yright_mid.v2));
 
                 yprims_r.p = yright_mid.p -
-                                0.5 * minmod(plm_theta * (yright_mid.p - center.p),
-                                            0.5 * (yright_most.p - center.p),
+                                (real)0.5 * minmod(plm_theta * (yright_mid.p - center.p),
+                                            (real)0.5 * (yright_most.p - center.p),
                                             plm_theta * (yright_most.p - yright_mid.p));
 
                 // Calculate the left and right states using the reconstructed PLM
@@ -1060,19 +1078,19 @@ void SRHD2D::advance(
 
                 if (hllc)
                 {
-                    if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
-                        f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                    } else {
-                        f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                    }
+                    // if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
+                    //     f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                    // } else {
+                    //     f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                    // }
                     
-                    if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
-                        g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                    } else {
-                        g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                    }
-                    // f1 = calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                    // g1 = calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                    // if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
+                    //     g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                    // } else {
+                    //     g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                    // }
+                    f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                    g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                 }
                 else
                 {
@@ -1084,86 +1102,86 @@ void SRHD2D::advance(
 
                 // Left side Primitive in x
                 xprims_l.rho = xleft_mid.rho +
-                                0.5 * minmod(plm_theta * (xleft_mid.rho - xleft_most.rho),
-                                            0.5 * (center.rho - xleft_most.rho),
+                                (real)0.5 * minmod(plm_theta * (xleft_mid.rho - xleft_most.rho),
+                                            (real)0.5 * (center.rho - xleft_most.rho),
                                             plm_theta * (center.rho - xleft_mid.rho));
 
                 xprims_l.v1 = xleft_mid.v1 +
-                                0.5 * minmod(plm_theta * (xleft_mid.v1 - xleft_most.v1),
-                                            0.5 * (center.v1 - xleft_most.v1),
+                                (real)0.5 * minmod(plm_theta * (xleft_mid.v1 - xleft_most.v1),
+                                            (real)0.5 * (center.v1 - xleft_most.v1),
                                             plm_theta * (center.v1 - xleft_mid.v1));
 
                 xprims_l.v2 = xleft_mid.v2 +
-                                0.5 * minmod(plm_theta * (xleft_mid.v2 - xleft_most.v2),
-                                            0.5 * (center.v2 - xleft_most.v2),
+                                (real)0.5 * minmod(plm_theta * (xleft_mid.v2 - xleft_most.v2),
+                                            (real)0.5 * (center.v2 - xleft_most.v2),
                                             plm_theta * (center.v2 - xleft_mid.v2));
 
                 xprims_l.p =
-                    xleft_mid.p + 0.5 * minmod(plm_theta * (xleft_mid.p - xleft_most.p),
-                                                0.5 * (center.p - xleft_most.p),
+                    xleft_mid.p + (real)0.5 * minmod(plm_theta * (xleft_mid.p - xleft_most.p),
+                                                (real)0.5 * (center.p - xleft_most.p),
                                                 plm_theta * (center.p - xleft_mid.p));
 
                 // Right side Primitive in x
                 xprims_r.rho =
-                    center.rho - 0.5 * minmod(plm_theta * (center.rho - xleft_mid.rho),
-                                                0.5 * (xright_mid.rho - xleft_mid.rho),
+                    center.rho - (real)0.5 * minmod(plm_theta * (center.rho - xleft_mid.rho),
+                                                (real)0.5 * (xright_mid.rho - xleft_mid.rho),
                                                 plm_theta * (xright_mid.rho - center.rho));
 
                 xprims_r.v1 =
-                    center.v1 - 0.5 * minmod(plm_theta * (center.v1 - xleft_mid.v1),
-                                                0.5 * (xright_mid.v1 - xleft_mid.v1),
+                    center.v1 - (real)0.5 * minmod(plm_theta * (center.v1 - xleft_mid.v1),
+                                                (real)0.5 * (xright_mid.v1 - xleft_mid.v1),
                                                 plm_theta * (xright_mid.v1 - center.v1));
 
                 xprims_r.v2 =
-                    center.v2 - 0.5 * minmod(plm_theta * (center.v2 - xleft_mid.v2),
-                                                0.5 * (xright_mid.v2 - xleft_mid.v2),
+                    center.v2 - (real)0.5 * minmod(plm_theta * (center.v2 - xleft_mid.v2),
+                                                (real)0.5 * (xright_mid.v2 - xleft_mid.v2),
                                                 plm_theta * (xright_mid.v2 - center.v2));
 
                 xprims_r.p =
-                    center.p - 0.5 * minmod(plm_theta * (center.p - xleft_mid.p),
-                                            0.5 * (xright_mid.p - xleft_mid.p),
+                    center.p - (real)0.5 * minmod(plm_theta * (center.p - xleft_mid.p),
+                                            (real)0.5 * (xright_mid.p - xleft_mid.p),
                                             plm_theta * (xright_mid.p - center.p));
 
                 // Left side Primitive in y
                 yprims_l.rho = yleft_mid.rho +
-                                0.5 * minmod(plm_theta * (yleft_mid.rho - yleft_most.rho),
-                                            0.5 * (center.rho - yleft_most.rho),
+                                (real)0.5 * minmod(plm_theta * (yleft_mid.rho - yleft_most.rho),
+                                            (real)0.5 * (center.rho - yleft_most.rho),
                                             plm_theta * (center.rho - yleft_mid.rho));
 
                 yprims_l.v1 = yleft_mid.v1 +
-                                0.5 * minmod(plm_theta * (yleft_mid.v1 - yleft_most.v1),
-                                            0.5 * (center.v1 - yleft_most.v1),
+                                (real)0.5 * minmod(plm_theta * (yleft_mid.v1 - yleft_most.v1),
+                                            (real)0.5 * (center.v1 - yleft_most.v1),
                                             plm_theta * (center.v1 - yleft_mid.v1));
 
                 yprims_l.v2 = yleft_mid.v2 +
-                                0.5 * minmod(plm_theta * (yleft_mid.v2 - yleft_most.v2),
-                                            0.5 * (center.v2 - yleft_most.v2),
+                                (real)0.5 * minmod(plm_theta * (yleft_mid.v2 - yleft_most.v2),
+                                            (real)0.5 * (center.v2 - yleft_most.v2),
                                             plm_theta * (center.v2 - yleft_mid.v2));
 
                 yprims_l.p =
-                    yleft_mid.p + 0.5 * minmod(plm_theta * (yleft_mid.p - yleft_most.p),
-                                                0.5 * (center.p - yleft_most.p),
+                    yleft_mid.p + (real)0.5 * minmod(plm_theta * (yleft_mid.p - yleft_most.p),
+                                                (real)0.5 * (center.p - yleft_most.p),
                                                 plm_theta * (center.p - yleft_mid.p));
 
                 // Right side Primitive in y
                 yprims_r.rho =
-                    center.rho - 0.5 * minmod(plm_theta * (center.rho - yleft_mid.rho),
-                                                0.5 * (yright_mid.rho - yleft_mid.rho),
+                    center.rho - (real)0.5 * minmod(plm_theta * (center.rho - yleft_mid.rho),
+                                                (real)0.5 * (yright_mid.rho - yleft_mid.rho),
                                                 plm_theta * (yright_mid.rho - center.rho));
 
                 yprims_r.v1 =
-                    center.v1 - 0.5 * minmod(plm_theta * (center.v1 - yleft_mid.v1),
-                                                0.5 * (yright_mid.v1 - yleft_mid.v1),
+                    center.v1 - (real)0.5 * minmod(plm_theta * (center.v1 - yleft_mid.v1),
+                                                (real)0.5 * (yright_mid.v1 - yleft_mid.v1),
                                                 plm_theta * (yright_mid.v1 - center.v1));
 
                 yprims_r.v2 =
-                    center.v2 - 0.5 * minmod(plm_theta * (center.v2 - yleft_mid.v2),
-                                                0.5 * (yright_mid.v2 - yleft_mid.v2),
+                    center.v2 - (real)0.5 * minmod(plm_theta * (center.v2 - yleft_mid.v2),
+                                                (real)0.5 * (yright_mid.v2 - yleft_mid.v2),
                                                 plm_theta * (yright_mid.v2 - center.v2));
 
                 yprims_r.p =
-                    center.p - 0.5 * minmod(plm_theta * (center.p - yleft_mid.p),
-                                            0.5 * (yright_mid.p - yleft_mid.p),
+                    center.p - (real)0.5 * minmod(plm_theta * (center.p - yleft_mid.p),
+                                            (real)0.5 * (yright_mid.p - yleft_mid.p),
                                             plm_theta * (yright_mid.p - center.p));
 
                 // Calculate the left and right states using the reconstructed PLM
@@ -1211,17 +1229,17 @@ void SRHD2D::advance(
                         {
                             real dx = coord_lattice->gpu_dx1[ii];
                             real dy = coord_lattice->gpu_dx2[jj];
-                            self->gpu_cons[aid].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D ) / dy + self->gpu_sourceD [real_loc] );
-                            self->gpu_cons[aid].S1  += 0.5 * dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1) / dy + self->gpu_sourceS1[real_loc] );
-                            self->gpu_cons[aid].S2  += 0.5 * dt * ( -(f1.S2 - f2.S2)   / dx - (g1.S2  - g2.S2) / dy + self->gpu_sourceS2[real_loc] );
-                            self->gpu_cons[aid].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau)/ dy + self->gpu_sourceTau [real_loc]);
+                            self->gpu_cons[aid].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D ) / dy + self->gpu_sourceD [real_loc] );
+                            self->gpu_cons[aid].S1  += (real)0.5 * dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1) / dy + self->gpu_sourceS1[real_loc] );
+                            self->gpu_cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx - (g1.S2  - g2.S2) / dy + self->gpu_sourceS2[real_loc] );
+                            self->gpu_cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau)/ dy + self->gpu_sourceTau [real_loc]);
                         } else {
                             real dx = self->coord_lattice.dx1[ii];
                             real dy = self->coord_lattice.dx2[jj];
-                            self->cons[aid].D   += 0.5 * dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D ) / dy + self->sourceD   [real_loc] );
-                            self->cons[aid].S1  += 0.5 * dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1) / dy + self->sourceS1  [real_loc] );
-                            self->cons[aid].S2  += 0.5 * dt * ( -(f1.S2 - f2.S2)   / dx  -(g1.S2  - g2.S2) / dy + self->sourceS2  [real_loc] );
-                            self->cons[aid].tau += 0.5 * dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau)/ dy + self->sourceTau [real_loc] );
+                            self->cons[aid].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D ) / dy + self->sourceD   [real_loc] );
+                            self->cons[aid].S1  += (real)0.5 * dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1) / dy + self->sourceS1  [real_loc] );
+                            self->cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx  -(g1.S2  - g2.S2) / dy + self->sourceS2  [real_loc] );
+                            self->cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau)/ dy + self->sourceTau [real_loc] );
                         }
                     
 
@@ -1244,8 +1262,8 @@ void SRHD2D::advance(
                     real uc   = prim_buff[tya * bs + txa].v1;
                     real vc   = prim_buff[tya * bs + txa].v2;
 
-                    real hc   = 1.0 + gamma * pc/(rhoc * (gamma - 1.0));
-                    real gam2 = 1.0/(1.0 - (uc * uc + vc * vc));
+                    real hc   = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
+                    real gam2 = (real)1.0/((real)1.0 - (uc * uc + vc * vc));
 
                     if constexpr(BuildPlatform == Platform::GPU)
                     {   
@@ -1258,7 +1276,7 @@ void SRHD2D::advance(
                                 // L(S1)
                                 -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
                                     - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        + rhoc * hc * gam2 * vc * vc / rmean + 2.0 * pc / rmean +
+                                        + rhoc * hc * gam2 * vc * vc / rmean + (real)2.0 * pc / rmean +
                                             self->gpu_sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
@@ -1271,7 +1289,7 @@ void SRHD2D::advance(
                                 -(f1.tau * s1R - f2.tau * s1L) / dV1 
                                     - (g1.tau * s2R - g2.tau * s2L) / dV2 
                                         + self->gpu_sourceTau[real_loc] * decay_const
-                            } * dt * 0.5;
+                            } * dt * (real)0.5;
                     } else {
                         self->cons[aid] += Conserved{
                                 // L(D)
@@ -1282,7 +1300,7 @@ void SRHD2D::advance(
                                 // L(S1)
                                 -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
                                     - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        + rhoc * hc * gam2 * vc * vc / rmean + 2.0 * pc / rmean +
+                                        + rhoc * hc * gam2 * vc * vc / rmean + (real)2.0 * pc / rmean +
                                             self->sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
@@ -1295,7 +1313,7 @@ void SRHD2D::advance(
                                 -(f1.tau * s1R - f2.tau * s1L) / dV1 
                                     - (g1.tau * s2R - g2.tau * s2L) / dV2 
                                         + self->sourceTau[real_loc] * decay_const
-                            } * dt * 0.5;
+                            } * dt * (real)0.5;
                     }
                     
                     break;
@@ -1310,13 +1328,13 @@ void SRHD2D::advance(
 //                                            SIMULATE
 //===================================================================================================================
 std::vector<std::vector<real>> SRHD2D::simulate2D(
-    std::vector<std::vector<double>> &sources,
-    double tstart,
-    double tend,
-    double init_dt,
-    double plm_theta,
-    double engine_duration,
-    double chkpt_interval,
+    std::vector<std::vector<real>> &sources,
+    real tstart,
+    real tend,
+    real init_dt,
+    real plm_theta,
+    real engine_duration,
+    real chkpt_interval,
     std::string data_directory,
     bool first_order,
     bool periodic,
@@ -1329,8 +1347,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     real round_place = 1 / chkpt_interval;
     real t = tstart;
     real t_interval =
-        t == 0 ? floor(tstart * round_place + 0.5) / round_place
-               : floor(tstart * round_place + 0.5) / round_place + chkpt_interval;
+        t == 0 ? floor(tstart * round_place + (real)0.5) / round_place
+               : floor(tstart * round_place + (real)0.5) / round_place + chkpt_interval;
 
     this->first_order = first_order;
     this->periodic = periodic;
@@ -1412,7 +1430,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         auto S1           = state2D[1][i];
         auto S2           = state2D[2][i];
         auto E            = state2D[3][i];
-        auto S            = std::sqrt(S1 * S1 + S2 * S2);
+        auto S            = real_sqrt(S1 * S1 + S2 * S2);
         cons[i]           = Conserved(D, S1, S2, E);
         pressure_guess[i] = std::abs(S - D - E);
     }
@@ -1420,7 +1438,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::vector<int> state2D;
 
     // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_const = 1.0 / (1.0 + exp(10.0 * (tstart - engine_duration)));
+    decay_const = (real)1.0 / ((real)1.0 + exp((real)10.0 * (tstart - engine_duration)));
 
     // Declare I/O variables for Read/Write capability
     PrimData prods;
@@ -1473,9 +1491,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     int      n   = 0;
     int  nfold   = 0;
     int  ncheck  = 0;
-    double zu_avg = 0;
+    real zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
-    std::chrono::duration<double> delta_t;
+    std::chrono::duration<real> delta_t;
 
     // Simulate :)
     if (first_order)
@@ -1491,11 +1509,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             } else {
                 advance(device_self, activeP, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Host);
                 cons2prim(fullP);
-                // config_ghosts2DGPU(fullP, this, nx, ny, true);
+                config_ghosts2DGPU(fullP, this, nx, ny, true);
             }
             
             t += dt; 
-
             if (n >= nfold){
                 ncheck += 1;
                 simbi::gpu::api::deviceSynch();
@@ -1503,6 +1520,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 delta_t = t2 - t1;
                 zu_avg += total_zones / delta_t.count();
                 std::cout << std::fixed << std::setprecision(3) << std::scientific;
+                // simbi::util::writeln("Iteration: {0} \t dt: {1} \t time: {2} \t Zones/sec: {3}", n, dt, t, total_zones / delta_t.count());
                     std::cout << "\r"
                         << "Iteration: " << std::setw(5) << n 
                         << "\t"
@@ -1546,7 +1564,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
 
             // Update decay constant
-            decay_const = 1.0 / (1.0 + exp(10.0 * (t - engine_duration)));
+            decay_const = (real)1.0 / ((real)1.0 + exp((real)10.0 * (t - engine_duration)));
         }
     } else {
         while (t < tend)
@@ -1618,7 +1636,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             n++;
 
             // Update decay constant
-            decay_const = 1.0 / (1.0 + exp(10.0 * (t - engine_duration)));
+            decay_const = (real)1.0 / ((real)1.0 + exp((real)10.0 * (t - engine_duration)));
 
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)

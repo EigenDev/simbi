@@ -150,7 +150,7 @@ bool strong_shock(real pl, real pr);
 //-------------------Inline for Speed--------------------------------------
 GPU_CALLABLE_MEMBER inline real minmod(const real x, const real y, const real z)
 {
-    return 0.25 * abs(sgn(x) + sgn(y)) * (sgn(x) + sgn(z)) * fmin( fmin(abs(x), abs(y)) , abs(z)) ;
+    return 0.25 * std::abs(sgn(x) + sgn(y)) * (sgn(x) + sgn(z)) * my_min(my_min(std::abs(x), std::abs(y)) , std::abs(z)) ;
 };
 
 #include "helpers.tpp"

@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(GPU_CODE "Turns gpu compilation on/off" ON)
+option(FLOAT_PRECISION "Turns float precision on/off" OFF)
 set(BUILD_OPTS_IN  "${CMAKE_CURRENT_SOURCE_DIR}/build_options.hpp.in")
 set(BUILD_OPTS     "${CMAKE_CURRENT_SOURCE_DIR}/src/build_options.hpp")
 configure_file(${BUILD_OPTS_IN} ${BUILD_OPTS})
@@ -14,14 +15,11 @@ list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_program(PYTHON3 "python3")
 find_package(HDF5 REQUIRED COMPONENTS CXX HL)
-find_path(HDF5_LIB_PATH ${HDF5_LIBRARIES})
 find_package(HIP REQUIRED)
 
-find_library(HDF5_CPP_LIB hdf5_cpp)
-find_library(HDF5_LIB hdf5)
-SET (HDF5_LIBS ${HDF5_LIBS} "${HDF5_CPP_LIB}/../")
-message(STATUS "HDF5 Lib Path: ${HDF5_CPP_LIB}")
-message(STATUS "HDF5 Lib Path: ${HDF5_LIB}")
+# SET (HDF5_LIBS ${HDF5_LIBRARIES} "${HDF5_CPP_LIBRARIES}/../")
+# message(STATUS "HDF5 Lib Path: ${HDF5_CXX_LIBRARIES}")
+# message(STATUS "HDF5 Lib Path: ${HDF5_LIBRARIES}")
 
 # Determine HIP_PLATFORM
 if(NOT DEFINED HIP_PLATFORM)
@@ -85,41 +83,42 @@ set(SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/hydro_structs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/hydro_structs.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/traits.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/common/viscous_diff.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/common/viscous_diff.hpp
-
-    #######################
-    #### CPU Dependencies
-    #######################
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpu/euler1D.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpu/euler1D.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpu/euler2D.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpu/euler2D.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpu/srhydro1D.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpu/srhydro1D.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpu/srhydro2D.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpu/srhydro2D.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/cpu/state.pyx
+    # ${CMAKE_CURRENT_SOURCE_DIR}/src/common/viscous_diff.cpp
+    # ${CMAKE_CURRENT_SOURCE_DIR}/src/common/viscous_diff.hpp
 
     #######################
     #### GPU Dependencies
     #######################
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/euler1D.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/euler1D.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/euler2D.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/euler2D.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/srhydro1D.hip.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/srhydro1D.hip.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/srhydro2D.hip.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/srhydro2D.hip.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/srhydro3D.hip.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/srhydro3D.hip.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/helpers.hip.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/helpers.hip.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/helpers.hip.tpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/gpu_state.pyx
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/device_api.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/device_api.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/euler1D.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/euler1D.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/euler2D.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/euler2D.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/srhydro1D.hip.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/srhydro1D.hip.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/srhydro2D.hip.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/srhydro2D.hip.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/srhydro3D.hip.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/srhydro3D.hip.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.tpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.pyx
+
+    #######################
+    #### UTIL Dependencies
+    #######################
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/exec_policy.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/kernel.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/launch.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/launch.tpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/printb.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/printb.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/printb.tpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/parallel_for.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/device_api.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/device_api.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/dual.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util/dual.tpp
 )
 
 if(PYTHON3)
@@ -134,7 +133,7 @@ if(PYTHON3)
     add_custom_command(
         OUTPUT  ${OUTPUT}/pytimestamp
         COMMAND ${PYTHON3} setup.py build_ext --inplace && rm -f 
-                                    ${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+                                    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
         COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp
         DEPENDS ${DEPS}
     )

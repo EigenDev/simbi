@@ -2,6 +2,9 @@
 #define BUILD_OPTIONS_HPP
 
 #define GPU_CODE 0
+#define FLOAT_PRECISION 0
+
+
 enum class Platform: int {CPU = 0, GPU = 1};
 #if GPU_CODE
 #include "hip/hip_runtime.h"
@@ -24,12 +27,12 @@ typedef hipStream_t simbiStream_t;
 #define GPU_KERNEL_LAUNCH( name , gridDim , blockDim , sharedBytes, streamId,  ... ) \
     hipLaunchKernelGGL(name, gridDim, blockDim, sharedBytes, streamId,  __VA_ARGS__ )
 #else
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <stdint.h>
 #include <stdexcept>
 constexpr Platform BuildPlatform = Platform::CPU;
-// typedef double real;
 
 #define GPU_DEV                         
 #define GPU_LAUNCHABLE                 
@@ -102,7 +105,11 @@ using namespace simbi;
 
 #endif
 
-
+#if FLOAT_PRECISION
+const auto real_sqrt = sqrtf;
+#else 
+const auto real_sqrt = static_cast<double(*)(const double)>(std::sqrt);
+#endif
 
 
 

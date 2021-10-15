@@ -7,12 +7,13 @@
 #define CONFIG_HPP
 
 #include "build_options.hpp"
-#include "util/loup_error.h"
 // Precision preprocessing
-#ifdef FLOAT_PRECISION
+#if FLOAT_PRECISION
 typedef float real;
+constexpr real tol_scale = 1e-6;
 #else
 typedef double real;
+constexpr real tol_scale = 1e-12;
 #endif 
 
 #define my_max(a,b)             \

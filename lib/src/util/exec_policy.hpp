@@ -2,8 +2,8 @@
 #define EXEC_POLICY_HPP
 
 #include "build_options.hpp"
-#include <iostream>
 #include <vector>
+#include <iostream>
 struct ExecutionException : public std::exception {
    const char * what () const throw () {
       return "Invalid constructor args";

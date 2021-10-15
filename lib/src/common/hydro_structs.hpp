@@ -232,8 +232,9 @@ namespace sr2d {
     struct Eigenvals{
         GPU_CALLABLE_MEMBER Eigenvals() {}
         GPU_CALLABLE_MEMBER ~Eigenvals() {}
-        real aL, aR;
+        real aL, aR, csL, csR;
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
+        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR, real csL, real csR) : aL(aL), aR(aR), csL(csL), csR(csR) {}
     };
 
 }

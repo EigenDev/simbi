@@ -149,6 +149,4 @@ namespace simbi
      };
      
 } // namespace simbi
-
-#include "srhydro1D.hip.tpp"
 #endif
