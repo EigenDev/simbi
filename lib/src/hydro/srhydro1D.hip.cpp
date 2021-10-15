@@ -165,24 +165,22 @@ void SRHD::advance(
             switch (geometry)
             {
             case simbi::Geometry::CARTESIAN:
-                if constexpr(BuildPlatform == Platform::GPU)
-                {
+                #if GPU_CODE
                     dx = coord_lattice->gpu_dx1[ii];
                     self->gpu_cons[ia].D   += dt * ( -(f1.D - f2.D)     / dx +  self->gpu_sourceD[ii] );
                     self->gpu_cons[ia].S   += dt * ( -(f1.S - f2.S)     / dx +  self->gpu_sourceS[ii] );
                     self->gpu_cons[ia].tau += dt * ( -(f1.tau - f2.tau) / dx  + self->gpu_source0[ii] );
-                } else {
+                #else
                     dx = self->coord_lattice.dx1[ii];
                     cons[ia].D   += dt * ( -(f1.D - f2.D)     / dx +  sourceD[ii] );
                     cons[ia].S   += dt * ( -(f1.S - f2.S)     / dx +  sourceS[ii] );
                     cons[ia].tau += dt * ( -(f1.tau - f2.tau) / dx  + source0[ii] );
-                }
+                #endif
                 
                 break;  
             
             case simbi::Geometry::SPHERICAL:
-                if constexpr(BuildPlatform == Platform::GPU)
-                {
+                #if GPU_CODE
                     pc    = prim_buff[txa].p;
                     sL    = coord_lattice->gpu_face_areas[ii + 0];
                     sR    = coord_lattice->gpu_face_areas[ii + 1];
@@ -199,7 +197,7 @@ void SRHD::advance(
                         -(sR * f1.tau - sL * f2.tau) / dV +
                         self->gpu_source0[ii] * decay_constant
                     } * dt;
-                } else {
+                #else
                     pc    = prim_buff[txa].p;
                     sL    = self->coord_lattice.face_areas[ii + 0];
                     sR    = self->coord_lattice.face_areas[ii + 1];
@@ -216,7 +214,7 @@ void SRHD::advance(
                         -(sR * f1.tau - sL * f2.tau) / dV +
                         self->source0[ii] * decay_constant
                     } * dt;
-                }
+                #endif
                 break;
             }
                 
