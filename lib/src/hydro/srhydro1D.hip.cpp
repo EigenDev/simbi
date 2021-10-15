@@ -418,7 +418,11 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         const real D       = conserved_buff[tx].D;
         const real S       = conserved_buff[tx].S;
         const real tau     = conserved_buff[tx].tau;
-        real peq           = (BuildPlatform == Platform::GPU) ? self->gpu_pressure_guess[ii] : self->pressure_guess[ii];
+        #if GPU_CODE
+        real peq           =  self->gpu_pressure_guess[ii];
+        #else 
+        real peq           = self->pressure_guess[ii];
+        #endif
         int iter           = 0;
         const real tol     = D * tol_scale;
         do
@@ -452,14 +456,13 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 
         real v = S / (tau + D + peq);
 
-        if constexpr(BuildPlatform == Platform::GPU)
-        {
+        #if GPU_CODE
             self->gpu_pressure_guess[ii] = peq;
             self->gpu_prims[ii]          = Primitive{D * real_sqrt(1 - v * v), v, peq};
-        } else {
+        #else
             pressure_guess[ii] = peq;
             prims[ii]  = Primitive{D * real_sqrt(1 - v * v), v, peq};
-        }   
+        #endif
     });
 }
 //--------------------------------------------------------------------------------------------------

@@ -616,7 +616,11 @@ void SRHD2D::cons2prim(
         real tau  = conserved_buff[tid].tau;
         real S    = real_sqrt(S1 * S1 + S2 * S2);
 
-        real peq = (BuildPlatform == Platform::GPU) ? self->gpu_pressure_guess[gid] : self->pressure_guess[gid];
+        #if GPU_CODE
+        real peq = self->gpu_pressure_guess[gid];
+        #else 
+        real peq = self->pressure_guess[gid];
+        #endif
 
         real tol = D * tol_scale;
         do
@@ -650,14 +654,13 @@ void SRHD2D::cons2prim(
         real vx     = S1 * inv_et;
         real vy     = S2 * inv_et;
 
-        if constexpr(BuildPlatform == Platform::GPU)
-        {
+        #if GPU_CODE
             self->gpu_pressure_guess[gid] = peq;
             self->gpu_prims[gid]          = Primitive{D * real_sqrt(1 - (vx * vx + vy * vy)), vx, vy, peq};
-        } else {
+        #else
             self->pressure_guess[gid] = peq;
             self->prims[gid]          = Primitive{D * real_sqrt(1 - (vx * vx + vy * vy)), vx, vy, peq};
-        }
+        #endif
         
 
     });

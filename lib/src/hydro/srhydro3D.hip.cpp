@@ -161,11 +161,12 @@ void SRHD3D::cons2prim(
         auto *const conserved_buff = &cons[0];
         #endif 
 
-        auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * blockDim.y * threadIdx.z 
-                                                        + blockDim.x * threadIdx.y + threadIdx.x : gid;
+        auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * blockDim.y * threadIdx.z + blockDim.x * threadIdx.y + threadIdx.x : gid;
+
         // load shared memory
         if constexpr(BuildPlatform == Platform::GPU)
             conserved_buff[tid] = self->gpu_cons[gid];
+
         simbi::gpu::api::synchronize();
         int iter  = 0;
         real D    = conserved_buff[tid].D;
@@ -175,7 +176,11 @@ void SRHD3D::cons2prim(
         real tau  = conserved_buff[tid].tau;
         real S    = real_sqrt(S1 * S1 + S2 * S2 + S3 * S3);
 
-        real peq = (BuildPlatform == Platform::GPU) ? self->gpu_pressure_guess[gid] : pressure_guess[gid];
+        #if GPU_CODE
+        real peq = self->gpu_pressure_guess[gid];
+        #else 
+        real peq = pressure_guess[gid];
+        #endif
 
         real tol = D * tol_scale;
         do
@@ -210,14 +215,13 @@ void SRHD3D::cons2prim(
         real vy = S2 * inv_et;
         real vz = S3 * inv_et;
 
-        if constexpr(BuildPlatform == Platform::GPU)
-        {
+        #if GPU_CODE
             self->gpu_pressure_guess[gid] = peq;
             self->gpu_prims[gid]          = Primitive{D * real_sqrt((real)1.0 - (vx * vx + vy * vy + vz * vz)), vx, vy, vz, peq};
-        } else {
+        #else
             pressure_guess[gid] = peq;
             prims[gid]          = Primitive{D * real_sqrt((real)1.0 - (vx * vx + vy * vy + vz * vz)), vx, vy, vz,  peq};
-        }
+        #endif
     });
 }
 //----------------------------------------------------------------------------------------------------------
