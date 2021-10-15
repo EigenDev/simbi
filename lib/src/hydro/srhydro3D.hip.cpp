@@ -966,8 +966,7 @@ void SRHD3D::advance(
             {
                 case simbi::Geometry::CARTESIAN:
                     {
-                        if constexpr(BuildPlatform == Platform::GPU)
-                        {
+                        #if GPU_CODE
                             real dx = coord_lattice->gpu_dx1[ii];
                             real dy = coord_lattice->gpu_dx2[jj];
                             real dz = coord_lattice->gpu_dx3[kk];
@@ -976,7 +975,7 @@ void SRHD3D::advance(
                             self->gpu_cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx  - (g1.S2  - g2.S2) / dy - (h1.S2 - h2.S3)   / dz + self->gpu_sourceS2  [real_loc] );
                             self->gpu_cons[aid].S3  += dt * ( -(f1.S3 - f2.S3)   / dx  - (g1.S3  - g2.S3) / dy - (h1.S3 - h2.S3)   / dz + self->gpu_sourceS3  [real_loc] );
                             self->gpu_cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau) / dy - (h1.tau - h2.tau) / dz + self->gpu_sourceTau [real_loc] );
-                        } else {
+                        #else
                             real dx = coord_lattice->dx1[ii];
                             real dy = coord_lattice->dx2[jj];
                             real dz = coord_lattice->dx3[kk];
@@ -985,7 +984,7 @@ void SRHD3D::advance(
                             self->cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx  - (g1.S2  - g2.S2) / dy - (h1.S2 - h2.S3)   / dz + sourceS2  [real_loc] );
                             self->cons[aid].S3  += dt * ( -(f1.S3 - f2.S3)   / dx  - (g1.S3  - g2.S3) / dy - (h1.S3 - h2.S3)   / dz + sourceS3  [real_loc] );
                             self->cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau) / dy - (h1.tau - h2.tau) / dz + sourceTau [real_loc] );
-                        }
+                        #endif
                         
                     break;
                     }
@@ -1012,8 +1011,7 @@ void SRHD3D::advance(
                     real hc    = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
                     real gam2  = (real)1.0/((real)1.0 - (uc * uc + vc * vc + wc * wc));
 
-                    if constexpr(BuildPlatform == Platform::GPU)
-                    {
+                    #if GPU_CODE
                         self->gpu_cons[aid] +=
                         Conserved{
                             // L(D)
@@ -1049,7 +1047,7 @@ void SRHD3D::advance(
                                     - (h1.tau* s3R - h2.tau* s3L) / dV3 
                                         + self->gpu_sourceTau[real_loc] * decay_const
                         } * dt;
-                    } else {
+                    #else
                         cons[aid] +=
                         Conserved{
                             // L(D)
@@ -1085,7 +1083,7 @@ void SRHD3D::advance(
                                     - (h1.tau* s3R - h2.tau* s3L) / dV3 
                                         + sourceTau[real_loc] * decay_const
                         } * dt;
-                    }
+                    #endif
                     
                     break;
 
@@ -1535,99 +1533,112 @@ void SRHD3D::advance(
                 
                 case simbi::Geometry::SPHERICAL:
                     {
-                    real s1R        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x1_face_areas[ii + 1]: self->coord_lattice.x1_face_areas[ii + 1];
-                    real s1L        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x1_face_areas[ii + 0]: self->coord_lattice.x1_face_areas[ii + 0];
-                    real s2R        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x2_face_areas[jj + 1]: self->coord_lattice.x2_face_areas[jj + 1];
-                    real s2L        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x2_face_areas[jj + 0]: self->coord_lattice.x2_face_areas[jj + 0];
-                    real s3R        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x3_face_areas[kk + 1]: self->coord_lattice.x3_face_areas[kk + 1];
-                    real s3L        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x3_face_areas[kk + 0]: self->coord_lattice.x3_face_areas[kk + 0];
-                    real rmean      = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x1mean[ii]           : self->coord_lattice.x1mean[ii];
-                    real dV1        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_dV1[ii]              : self->coord_lattice.dV1[ii];
-                    real dV2        = (BuildPlatform == Platform::GPU) ? rmean * coord_lattice->gpu_dV2[jj]      : rmean * self->coord_lattice.dV2[jj];
-                    real dV3        = (BuildPlatform == Platform::GPU) ? rmean * coord_lattice->gpu_sin[jj] * coord_lattice->gpu_dx3[kk] : rmean * self->coord_lattice.sin[jj] * self->coord_lattice.dx3[kk];
-                    // // Grab central primitives
-                    real rhoc = prim_buff[tza * bx * by + tya * bx + txa].rho;
-                    real pc   = prim_buff[tza * bx * by + tya * bx + txa].p;
-                    real uc   = prim_buff[tza * bx * by + tya * bx + txa].v1;
-                    real vc   = prim_buff[tza * bx * by + tya * bx + txa].v2;
-                    real wc   = prim_buff[tza * bx * by + tya * bx + txa].v3;
+                        #if GPU_CODE
+                        real s1R        = coord_lattice->gpu_x1_face_areas[ii + 1];
+                        real s1L        = coord_lattice->gpu_x1_face_areas[ii + 0];
+                        real s2R        = coord_lattice->gpu_x2_face_areas[jj + 1];
+                        real s2L        = coord_lattice->gpu_x2_face_areas[jj + 0];
+                        real s3R        = coord_lattice->gpu_x3_face_areas[kk + 1];
+                        real s3L        = coord_lattice->gpu_x3_face_areas[kk + 0];
+                        real rmean      = coord_lattice->gpu_x1mean[ii]           ;
+                        real dV1        = coord_lattice->gpu_dV1[ii]              ;
+                        real dV2        = rmean * coord_lattice->gpu_dV2[jj]      ;
+                        real dV3        = rmean * coord_lattice->gpu_sin[jj] * coord_lattice->gpu_dx3[kk];
+                        #else
+                        real s1R    = self->coord_lattice.x1_face_areas[ii + 1];
+                        real s1L    = self->coord_lattice.x1_face_areas[ii + 0];
+                        real s2R    = self->coord_lattice.x2_face_areas[jj + 1];
+                        real s2L    = self->coord_lattice.x2_face_areas[jj + 0];
+                        real s3R    = self->coord_lattice.x3_face_areas[kk + 1];
+                        real s3L    = self->coord_lattice.x3_face_areas[kk + 0];
+                        real rmean  = self->coord_lattice.x1mean[ii];
+                        real dV1    = self->coord_lattice.dV1[ii];
+                        real dV2    = rmean * self->coord_lattice.dV2[jj];
+                        real dV3    = rmean * self->coord_lattice.sin[jj] * self->coord_lattice.dx3[kk];
+                        #endif
+                        // // Grab central primitives
+                        real rhoc = prim_buff[tza * bx * by + tya * bx + txa].rho;
+                        real pc   = prim_buff[tza * bx * by + tya * bx + txa].p;
+                        real uc   = prim_buff[tza * bx * by + tya * bx + txa].v1;
+                        real vc   = prim_buff[tza * bx * by + tya * bx + txa].v2;
+                        real wc   = prim_buff[tza * bx * by + tya * bx + txa].v3;
 
-                    real hc    = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
-                    real gam2  = (real)1.0/((real)1.0 - (uc * uc + vc * vc + wc * wc));
+                        real hc    = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
+                        real gam2  = (real)1.0/((real)1.0 - (uc * uc + vc * vc + wc * wc));
 
-                    #if GPU_CODE
-                        self->gpu_cons[aid] +=
-                        Conserved{
-                            // L(D)
-                            -(f1.D * s1R - f2.D * s1L) / dV1 
-                                - (g1.D * s2R - g2.D * s2L) / dV2 
-                                    - (h1.D * s3R - h2.D * s3L) / dV3 
-                                        + self->gpu_sourceD[real_loc] * decay_const,
+                        #if GPU_CODE
+                            self->gpu_cons[aid] +=
+                            Conserved{
+                                // L(D)
+                                -(f1.D * s1R - f2.D * s1L) / dV1 
+                                    - (g1.D * s2R - g2.D * s2L) / dV2 
+                                        - (h1.D * s3R - h2.D * s3L) / dV3 
+                                            + self->gpu_sourceD[real_loc] * decay_const,
 
-                            // L(S1)
-                            -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
-                                - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                    - (h1.S1 * s3R - h2.S1 * s3L) / dV3 
-                                    + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
-                                            self->gpu_sourceS1[real_loc] * decay_const,
+                                // L(S1)
+                                -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
+                                    - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
+                                        - (h1.S1 * s3R - h2.S1 * s3L) / dV3 
+                                        + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
+                                                self->gpu_sourceS1[real_loc] * decay_const,
 
-                            // L(S2)
-                            -(f1.S2 * s1R - f2.S2 * s1L) / dV1
-                                    - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
-                                        - (h1.S2 * s3R - h2.S2 * s3L) / dV3 
-                                        - rhoc * hc * gam2 * uc * vc / rmean + coord_lattice->gpu_cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
-                                        + self->gpu_sourceS2[real_loc] * decay_const,
+                                // L(S2)
+                                -(f1.S2 * s1R - f2.S2 * s1L) / dV1
+                                        - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
+                                            - (h1.S2 * s3R - h2.S2 * s3L) / dV3 
+                                            - rhoc * hc * gam2 * uc * vc / rmean + coord_lattice->gpu_cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
+                                            + self->gpu_sourceS2[real_loc] * decay_const,
 
-                            // L(S3)
-                            -(f1.S3 * s1R - f2.S3 * s1L) / dV1
-                                    - (g1.S3 * s2R - g2.S3 * s2L) / dV2 
-                                        - (h1.S3 * s3R - h2.S3 * s3L) / dV3 
-                                            - rhoc * hc * gam2 * wc * (uc + vc * coord_lattice->gpu_cot[jj])/ rmean
-                                        +     self->gpu_sourceS3[real_loc] * decay_const,
+                                // L(S3)
+                                -(f1.S3 * s1R - f2.S3 * s1L) / dV1
+                                        - (g1.S3 * s2R - g2.S3 * s2L) / dV2 
+                                            - (h1.S3 * s3R - h2.S3 * s3L) / dV3 
+                                                - rhoc * hc * gam2 * wc * (uc + vc * coord_lattice->gpu_cot[jj])/ rmean
+                                            +     self->gpu_sourceS3[real_loc] * decay_const,
 
-                            // L(tau)
-                            -(f1.tau * s1R - f2.tau * s1L) / dV1 
-                                - (g1.tau * s2R - g2.tau * s2L) / dV2 
-                                    - (h1.tau* s3R - h2.tau* s3L) / dV3 
-                                        + self->gpu_sourceTau[real_loc] * decay_const
-                        } * dt * (real)0.5;
-                    #else
-                        cons[aid] +=
-                        Conserved{
-                            // L(D)
-                            -(f1.D * s1R - f2.D * s1L) / dV1 
-                                - (g1.D * s2R - g2.D * s2L) / dV2 
-                                    - (h1.D * s3R - h2.D * s3L) / dV3 
-                                        + sourceD[real_loc] * decay_const,
+                                // L(tau)
+                                -(f1.tau * s1R - f2.tau * s1L) / dV1 
+                                    - (g1.tau * s2R - g2.tau * s2L) / dV2 
+                                        - (h1.tau* s3R - h2.tau* s3L) / dV3 
+                                            + self->gpu_sourceTau[real_loc] * decay_const
+                            } * dt * (real)0.5;
+                        #else
+                            cons[aid] +=
+                            Conserved{
+                                // L(D)
+                                -(f1.D * s1R - f2.D * s1L) / dV1 
+                                    - (g1.D * s2R - g2.D * s2L) / dV2 
+                                        - (h1.D * s3R - h2.D * s3L) / dV3 
+                                            + sourceD[real_loc] * decay_const,
 
-                            // L(S1)
-                            -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
-                                - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                    - (h1.S1 * s3R - h2.S1 * s3L) / dV3 
-                                    + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
-                                            sourceS1[real_loc] * decay_const,
+                                // L(S1)
+                                -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
+                                    - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
+                                        - (h1.S1 * s3R - h2.S1 * s3L) / dV3 
+                                        + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
+                                                sourceS1[real_loc] * decay_const,
 
-                            // L(S2)
-                            -(f1.S2 * s1R - f2.S2 * s1L) / dV1
-                                    - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
-                                        - (h1.S2 * s3R - h2.S2 * s3L) / dV3 
-                                        - rhoc * hc * gam2 * uc * vc / rmean + self->coord_lattice.cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
-                                        + sourceS2[real_loc] * decay_const,
+                                // L(S2)
+                                -(f1.S2 * s1R - f2.S2 * s1L) / dV1
+                                        - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
+                                            - (h1.S2 * s3R - h2.S2 * s3L) / dV3 
+                                            - rhoc * hc * gam2 * uc * vc / rmean + self->coord_lattice.cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
+                                            + sourceS2[real_loc] * decay_const,
 
-                            // L(S3)
-                            -(f1.S3 * s1R - f2.S3 * s1L) / dV1
-                                    - (g1.S3 * s2R - g2.S3 * s2L) / dV2 
-                                        - (h1.S3 * s3R - h2.S3 * s3L) / dV3 
-                                            - rhoc * hc * gam2 * wc * (uc + vc * self->coord_lattice.cot[jj])/ rmean
-                                                + sourceS3[real_loc] * decay_const,
+                                // L(S3)
+                                -(f1.S3 * s1R - f2.S3 * s1L) / dV1
+                                        - (g1.S3 * s2R - g2.S3 * s2L) / dV2 
+                                            - (h1.S3 * s3R - h2.S3 * s3L) / dV3 
+                                                - rhoc * hc * gam2 * wc * (uc + vc * self->coord_lattice.cot[jj])/ rmean
+                                                    + sourceS3[real_loc] * decay_const,
 
-                            // L(tau)
-                            -(f1.tau * s1R - f2.tau * s1L) / dV1 
-                                - (g1.tau * s2R - g2.tau * s2L) / dV2 
-                                    - (h1.tau* s3R - h2.tau* s3L) / dV3 
-                                        + sourceTau[real_loc] * decay_const
-                        } * dt * (real)0.5;
-                    #endif 
+                                // L(tau)
+                                -(f1.tau * s1R - f2.tau * s1L) / dV1 
+                                    - (g1.tau * s2R - g2.tau * s2L) / dV2 
+                                        - (h1.tau* s3R - h2.tau* s3L) / dV3 
+                                            + sourceTau[real_loc] * decay_const
+                            } * dt * (real)0.5;
+                        #endif 
                     
                     break;
 

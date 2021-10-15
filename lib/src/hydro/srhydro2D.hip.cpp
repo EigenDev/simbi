@@ -874,14 +874,23 @@ void SRHD2D::advance(
                 
                 case simbi::Geometry::SPHERICAL:
                     {
-                    
-                    real s1R        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x1_face_areas[ii + 1] : coord_lattice->x1_face_areas[ii + 1];
-                    real s1L        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x1_face_areas[ii + 0] : coord_lattice->x1_face_areas[ii + 0];
-                    real s2R        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x2_face_areas[jj + 1] : coord_lattice->x2_face_areas[jj + 1];
-                    real s2L        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x2_face_areas[jj + 0] : coord_lattice->x2_face_areas[jj + 0];
-                    real rmean      = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_x1mean[ii]            : coord_lattice->x1mean[ii];
-                    real dV1        = (BuildPlatform == Platform::GPU) ? coord_lattice->gpu_dV1[ii]               : coord_lattice->dV1[ii];
-                    real dV2        = (BuildPlatform == Platform::GPU) ? rmean * coord_lattice->gpu_dV2[jj]       : rmean * coord_lattice->dV2[jj];
+                    #if GPU_CODE
+                    real s1R        = coord_lattice->gpu_x1_face_areas[ii + 1];
+                    real s1L        = coord_lattice->gpu_x1_face_areas[ii + 0];
+                    real s2R        = coord_lattice->gpu_x2_face_areas[jj + 1];
+                    real s2L        = coord_lattice->gpu_x2_face_areas[jj + 0];
+                    real rmean      = coord_lattice->gpu_x1mean[ii]           ;
+                    real dV1        = coord_lattice->gpu_dV1[ii]              ;
+                    real dV2        = rmean * coord_lattice->gpu_dV2[jj]      ;
+                    #else 
+                    real s1R = coord_lattice->x1_face_areas[ii + 1];
+                    real s1R = coord_lattice->x1_face_areas[ii + 0];
+                    real s1R = coord_lattice->x2_face_areas[jj + 1];
+                    real s1R = coord_lattice->x2_face_areas[jj + 0];
+                    real s1R = coord_lattice->x1mean[ii];
+                    real s1R = coord_lattice->dV1[ii];
+                    real s1R = rmean * coord_lattice->dV2[jj];
+                    #endif
                     // Grab central primitives
                     real rhoc = prim_buff[tya * bs + txa].rho;
                     real pc   = prim_buff[tya * bs + txa].p;
