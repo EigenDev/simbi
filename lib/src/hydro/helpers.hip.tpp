@@ -57,7 +57,7 @@ namespace simbi{
             real v   = prim_buff[tid].v;
 
             real h = 1. + gamma * p / (rho * (gamma - 1.));
-            real cs = real_sqrt(gamma * p / (rho * h));
+            real cs = sqrt(gamma * p / (rho * h));
 
             real vPLus  = (v + cs) / (1 + v * cs);
             real vMinus = (v - cs) / (1 - v * cs);
@@ -121,7 +121,7 @@ namespace simbi{
             real v2   = prim_buff[ty][tx].v2;
 
             real h  = 1. + gamma * p / (rho * (gamma - 1.));
-            real cs = real_sqrt(gamma * p / (rho * h));
+            real cs = sqrt(gamma * p / (rho * h));
 
             real plus_v1  = (v1 + cs) / (1. + v1 * cs);
             real plus_v2  = (v2 + cs) / (1. + v2 * cs);
@@ -204,7 +204,7 @@ namespace simbi{
             real v3   = s->gpu_prims[ka * nx * ny + ja * nx + ia].v3;
 
             real h  = 1. + gamma * p / (rho * (gamma - 1.));
-            real cs = real_sqrt(gamma * p / (rho * h));
+            real cs = sqrt(gamma * p / (rho * h));
 
             real plus_v1  = (v1 + cs) / (1. + v1 * cs);
             real plus_v2  = (v2 + cs) / (1. + v2 * cs);

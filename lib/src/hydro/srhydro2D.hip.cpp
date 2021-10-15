@@ -73,8 +73,8 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
     const real p_r = prims_r.p;
     const real h_r = 1. + gamma * p_r / (rho_r * (gamma - 1));
 
-    const real cs_r = real_sqrt(gamma * p_r / (h_r * rho_r));
-    const real cs_l = real_sqrt(gamma * p_l / (h_l * rho_l));
+    const real cs_r = sqrt(gamma * p_r / (h_r * rho_r));
+    const real cs_l = sqrt(gamma * p_l / (h_l * rho_l));
 
     switch (nhat)
     {
@@ -98,8 +98,8 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         // // Define temporaries to save computational cycles
         // const real qfL = 1. / (1. + sL);
         // const real qfR = 1. / (1. + sR);
-        // const real sqrtR = real_sqrt(sR * (1 - v1_r * v1_r + sR));
-        // const real sqrtL = real_sqrt(sL * (1 - v1_l * v1_l + sL));
+        // const real sqrtR = sqrt(sR * (1 - v1_r * v1_r + sR));
+        // const real sqrtL = sqrt(sL * (1 - v1_l * v1_l + sL));
 
         // const real lamLm = (v1_l - sqrtL) * qfL;
         // const real lamRm = (v1_r - sqrtR) * qfR;
@@ -132,8 +132,8 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
         // // Define some temporaries to save a few cycles
         // const real qfL = 1. / (1. + sL);
         // const real qfR = 1. / (1. + sR);
-        // const real sqrtR = real_sqrt(sR * (1 - v2_r * v2_r + sR));
-        // const real sqrtL = real_sqrt(sL * (1 - v2_l * v2_l + sL));
+        // const real sqrtR = sqrt(sR * (1 - v2_r * v2_r + sR));
+        // const real sqrtL = sqrt(sL * (1 - v2_l * v2_l + sL));
 
         // const real lamLm = (v2_l - sqrtL) * qfL;
         // const real lamRm = (v2_r - sqrtR) * qfR;
@@ -156,7 +156,7 @@ Conserved SRHD2D::prims2cons(const Primitive &prims)
     const real vx = prims.v1;
     const real vy = prims.v2;
     const real pressure = prims.p;
-    const real lorentz_gamma = 1. / real_sqrt(1 - (vx * vx + vy * vy));
+    const real lorentz_gamma = 1. / sqrt(1 - (vx * vx + vy * vy));
     const real h = 1. + gamma * pressure / (rho * (gamma - 1.));
 
     return Conserved{
@@ -246,7 +246,7 @@ void SRHD2D::adapt_dt()
                 pressure = prims[aid].p;
 
                 h = 1. + gamma * pressure / (rho * (gamma - 1.));
-                cs = real_sqrt(gamma * pressure / (rho * h));
+                cs = sqrt(gamma * pressure / (rho * h));
 
                 plus_v1  = (v1 + cs) / (1. + v1 * cs);
                 plus_v2  = (v2 + cs) / (1. + v2 * cs);
@@ -300,7 +300,7 @@ Conserved SRHD2D::prims2flux(const Primitive &prims, unsigned int nhat = 1)
     const real vx = prims.v1;
     const real vy = prims.v2;
     const real pressure = prims.p;
-    const real lorentz_gamma = 1. / real_sqrt(1. - (vx * vx + vy * vy));
+    const real lorentz_gamma = 1. / sqrt(1. - (vx * vx + vy * vy));
 
     const real h = 1. + gamma * pressure / (rho * (gamma - 1));
     const real D = rho * lorentz_gamma;
@@ -389,7 +389,7 @@ Conserved SRHD2D::calc_hllc_flux(
     const real a = fe;
     const real b = -(e + fs);
     const real c = s;
-    const real quad = -(real)0.5 * (b + sgn(b) * real_sqrt(b * b - 4.0 * a * c));
+    const real quad = -(real)0.5 * (b + sgn(b) * sqrt(b * b - 4.0 * a * c));
     const real aStar = c * ((real)1.0 / quad);
     const real pStar = -aStar * fe + fs;
 
@@ -614,7 +614,7 @@ void SRHD2D::cons2prim(
         real S1   = conserved_buff[tid].S1;
         real S2   = conserved_buff[tid].S2;
         real tau  = conserved_buff[tid].tau;
-        real S    = real_sqrt(S1 * S1 + S2 * S2);
+        real S    = sqrt(S1 * S1 + S2 * S2);
 
         #if GPU_CODE
         real peq = self->gpu_pressure_guess[gid];
@@ -628,7 +628,7 @@ void SRHD2D::cons2prim(
             pre = peq;
             et  = tau + D + pre;
             v2 = S * S / (et * et);
-            W   = (real)1.0 / real_sqrt((real)1.0 - v2);
+            W   = (real)1.0 / sqrt((real)1.0 - v2);
             rho = D / W;
 
             eps = (tau + ((real)1.0 - W) * D + (1. - W * W) * pre) / (D * W);
@@ -656,10 +656,10 @@ void SRHD2D::cons2prim(
 
         #if GPU_CODE
             self->gpu_pressure_guess[gid] = peq;
-            self->gpu_prims[gid]          = Primitive{D * real_sqrt(1 - (vx * vx + vy * vy)), vx, vy, peq};
+            self->gpu_prims[gid]          = Primitive{D * sqrt(1 - (vx * vx + vy * vy)), vx, vy, peq};
         #else
             self->pressure_guess[gid] = peq;
-            self->prims[gid]          = Primitive{D * real_sqrt(1 - (vx * vx + vy * vy)), vx, vy, peq};
+            self->prims[gid]          = Primitive{D * sqrt(1 - (vx * vx + vy * vy)), vx, vy, peq};
         #endif
         
 
@@ -1447,7 +1447,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         auto S1           = state2D[1][i];
         auto S2           = state2D[2][i];
         auto E            = state2D[3][i];
-        auto S            = real_sqrt(S1 * S1 + S2 * S2);
+        auto S            = sqrt(S1 * S1 + S2 * S2);
         cons[i]           = Conserved(D, S1, S2, E);
         pressure_guess[i] = std::abs(S - D - E);
     }

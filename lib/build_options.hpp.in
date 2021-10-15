@@ -105,11 +105,11 @@ using namespace simbi;
 
 #endif
 
-#if FLOAT_PRECISION
-const auto real_sqrt = sqrtf;
-#else 
-const auto real_sqrt = static_cast<double(*)(const double)>(std::sqrt);
-#endif
+// #if FLOAT_PRECISION
+// const auto sqrt = sqrtf;
+// #else 
+// const auto sqrt = static_cast<double(*)(const double)>(std::sqrt);
+// #endif
 
 
 

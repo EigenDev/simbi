@@ -430,7 +430,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             pre = peq;
             et = tau + D + pre;
             v2 = S * S / (et * et);
-            W = (real)1.0 / real_sqrt((real)1.0 - v2);
+            W = (real)1.0 / sqrt((real)1.0 - v2);
             rho = D / W;
 
             eps = (tau + ((real)1.0 - W) * D + ((real)1.0 - W * W) * pre) / (D * W);
@@ -458,10 +458,10 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 
         #if GPU_CODE
             self->gpu_pressure_guess[ii] = peq;
-            self->gpu_prims[ii]          = Primitive{D * real_sqrt(1 - v * v), v, peq};
+            self->gpu_prims[ii]          = Primitive{D * sqrt(1 - v * v), v, peq};
         #else
             pressure_guess[ii] = peq;
-            prims[ii]  = Primitive{D * real_sqrt(1 - v * v), v, peq};
+            prims[ii]  = Primitive{D * sqrt(1 - v * v), v, peq};
         #endif
     });
 }
@@ -493,13 +493,13 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     const real p_l   = prims_l.p;
     const real v_l   = prims_l.v;
     const real h_l   = (real)1.0 + gamma * p_l / (rho_l * (gamma - 1));
-    const real cs_l  = real_sqrt(gamma * p_l / (rho_l * h_l));
+    const real cs_l  = sqrt(gamma * p_l / (rho_l * h_l));
 
     const real rho_r = prims_r.rho;
     const real p_r   = prims_r.p;
     const real v_r   = prims_r.v;
     const real h_r   = (real)1.0 + gamma * p_r / (rho_r * (gamma - 1));
-    const real cs_r  = real_sqrt(gamma * p_r / (rho_r * h_r));
+    const real cs_r  = sqrt(gamma * p_r / (rho_r * h_r));
 
     // Compute waves based on Schneider et al. 1993 Eq(31 - 33)
     const real vbar = (real)0.5 * (v_l + v_r);
@@ -517,8 +517,8 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     // // Define temporaries to save computational cycles
     // const real qfL = (real)1.0 / ((real)1.0 + sL);
     // const real qfR = (real)1.0 / ((real)1.0 + sR);
-    // const real sqrtR = real_sqrt(sR * (1.0 - v_r * v_r + sR));
-    // const real sqrtL = real_sqrt(sL * (1.0 - v_l * v_l + sL));
+    // const real sqrtR = sqrt(sR * (1.0 - v_r * v_r + sR));
+    // const real sqrtL = sqrt(sL * (1.0 - v_l * v_l + sL));
 
     // const real lamLm = (v_l - sqrtL) * qfL;
     // const real lamRm = (v_r - sqrtR) * qfR;
@@ -551,7 +551,7 @@ void SRHD::adapt_dt()
             v   = prims[ii + idx_shift].v;
 
             h = (real)1.0 + gamma * p / (rho * (gamma - 1));
-            cs = real_sqrt(gamma * p / (rho * h));
+            cs = sqrt(gamma * p / (rho * h));
 
             vPLus  = (v + cs) / (1 + v * cs);
             vMinus = (v - cs) / (1 - v * cs);
@@ -589,7 +589,7 @@ Conserved SRHD::prims2cons(const Primitive &prim)
     const real v   = prim.v;
     const real pre = prim.p;  
     const real h = (real)1.0 + gamma * pre / (rho * (gamma - 1));
-    const real W = (real)1.0 / real_sqrt(1 - v * v);
+    const real W = (real)1.0 / sqrt(1 - v * v);
 
     return Conserved{rho * W, rho * h * W * W * v, rho * h * W * W - pre - rho * W};
 };
@@ -642,7 +642,7 @@ Conserved SRHD::prims2flux(const Primitive &prim)
     const real pre = prim.p;
     const real v   = prim.v;
 
-    const real W = (real)1.0 / real_sqrt(1 - v * v);
+    const real W = (real)1.0 / sqrt(1 - v * v);
     const real h = (real)1.0 + gamma * pre / (rho * (gamma - 1));
     const real D = rho * W;
     const real S = rho * h * W * W * v;
@@ -709,7 +709,7 @@ SRHD::calc_hllc_flux(
     const real a = fe;
     const real b = - (e + fs);
     const real c = s;
-    const real disc = real_sqrt( b*b - 4.0*a*c);
+    const real disc = sqrt( b*b - 4.0*a*c);
     const real quad = -(real)0.5*(b + sgn(b)*disc);
     const real aStar = c/quad;
     const real pStar = -fe * aStar + fs;
