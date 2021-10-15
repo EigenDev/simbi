@@ -12,7 +12,11 @@ namespace simbi{
         const bool first_order)
     {
         simbi::parallel_for(p, 0, 1, [=] GPU_LAMBDA (const int gid) {
-            sr1d::Conserved *cons = (BuildPlatform == Platform::GPU) ? sim->gpu_cons : sim->cons.data();
+            #if GPU_CODE
+            sr1d::Conserved *cons = sim->gpu_cons;
+            #else 
+            sr1d::Conserved *cons = sim->cons.data();
+            #endif
             if (first_order){
                 cons[0].D = cons[1].D;
                 cons[grid_size - 1].D = cons[grid_size - 2].D;
@@ -51,9 +55,14 @@ namespace simbi{
         
         const int extent = (BuildPlatform == Platform::GPU) ? p.gridSize.x * p.blockSize.x * p.gridSize.y * p.blockSize.y : x1grid_size * x2grid_size; 
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
-            sr2d::Conserved *u_state = (BuildPlatform == Platform::GPU) ? sim->gpu_cons : sim->cons.data();
             const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % x1grid_size;
             const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / x1grid_size;
+
+            #if GPU_CODE
+            sr2d::Conserved *u_state = sim->gpu_cons;
+            #else 
+            sr2d::Conserved *u_state = sim->cons.data();
+            #endif 
             if (first_order){
                 if ((jj < x2grid_size) && (ii < x1grid_size))
                 {
@@ -163,8 +172,12 @@ namespace simbi{
             const int kk = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(gid, x1grid_size, x2grid_size);
             const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(gid, x1grid_size, x2grid_size, kk);
             const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(gid, x1grid_size, x2grid_size, kk);
-            
-            sr3d::Conserved *u_state = (BuildPlatform == Platform::GPU) ? sim->gpu_cons : sim->cons.data();
+
+            #if GPU_CODE
+            sr3d::Conserved *u_state = sim->gpu_cons;
+            #else
+            sr3d::Conserved *u_state = sim->cons.data();
+            #endif
             if (first_order){
                 if ((jj < x2grid_size) && (ii < x1grid_size) && (kk < x3grid_size))
                 {
