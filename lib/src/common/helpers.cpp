@@ -13,11 +13,6 @@ using namespace H5;
 //        HELPER FUNCTIONS FOR COMPUTATION
 // =========================================================================================================
 
-bool strong_shock(real pl, real pr)
-{
-    return abs(pr - pl) / my_min(pl, pr) > QUIRK_THERSHOLD;
-}
-
 std::map<std::string, simbi::Geometry> geometry;
 void config_system() {
     geometry["cartesian"] = simbi::Geometry::CARTESIAN;

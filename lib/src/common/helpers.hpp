@@ -142,8 +142,6 @@ void config_ghosts2D(
     bool first_order,
     bool bipolar = true);
 
-GPU_CALLABLE_MEMBER
-bool strong_shock(real pl, real pr);
 
 
 
