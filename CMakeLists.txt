@@ -1,4 +1,4 @@
-CMAKE_MINIMUM_REQUIRED( VERSION 3.12.0)  # Supports CONFIGURE_DEPENDS in globbing
+CMAKE_MINIMUM_REQUIRED( VERSION 3.1)  # Supports CONFIGURE_DEPENDS in globbing
 project(pysimbi_gpu VERSION 0.2.0)
 
 # add_library(simbi "")
