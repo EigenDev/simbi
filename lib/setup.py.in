@@ -4,7 +4,7 @@ import os
 import numpy
 import subprocess
 from os.path import join as pjoin
-from setuptools import setup, find_namespace_packages
+from setuptools import setup, find_packages
 from distutils.extension import Extension
 from distutils.core import Command
 from distutils import sysconfig
@@ -64,8 +64,11 @@ class CompilerParams():
     @property
     def linker_args(self):
         self._linker_args = []
-        if self._arch != "cpu":
-            self._linker_args += ['-lcudart']
+        # if self._arch != "cpu":
+        #     if "${HIP_PLATFORM}" == "nvidia":
+        #         self._libraries += ['cudart']
+        #     else:
+        #         self._libraries   += ['amdhip64']
             
         return self._linker_args
     
@@ -258,7 +261,7 @@ setup(
         'build_ext': builder
         },
     package_dir={'pysimbi': '${CMAKE_CURRENT_SOURCE_DIR}'},
-    packages=find_namespace_packages(include=['pysimbi.*']),
+    packages=find_packages(),
     install_requires=['numpy', 'cython'],
     python_requires=">=3.6",
     # Since the package has c++ code, the egg cannot be zipped
