@@ -24,7 +24,7 @@ find_package(HIP REQUIRED)
 # Determine HIP_PLATFORM
 if(NOT DEFINED HIP_PLATFORM)
     if(NOT DEFINED ENV{HIP_PLATFORM})
-        execute_process(COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/bin/hipconfig --platform
+        execute_process(COMMAND /opt/rocm/hip/bin/hipconfig --platform
             OUTPUT_VARIABLE HIP_PLATFORM
             OUTPUT_STRIP_TRAILING_WHITESPACE)
     else()
@@ -131,12 +131,21 @@ if(PYTHON3)
     configure_file(${SETUP_PY_IN} ${SETUP_PY})
     # Custom make command for building default cpu instance in place
     add_custom_command(
-        OUTPUT  ${OUTPUT}/pytimestamp
+        OUTPUT  ${OUTPUT}/pytimestamp_gpu
         COMMAND ${PYTHON3} setup.py build_ext --inplace && rm -f 
                                     ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
-        COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp
+        COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_gpu
         DEPENDS ${DEPS}
     )
-    add_custom_target(inplace ALL DEPENDS ${OUTPUT}/pytimestamp)
+    add_custom_target(gpu ALL DEPENDS ${OUTPUT}/pytimestamp_gpu)
+
+    add_custom_command(
+        OUTPUT  ${OUTPUT}/pytimestamp_cpu
+        COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
+                                    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+        COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
+        DEPENDS ${DEPS}
+    )
+    add_custom_target(cpu DEPENDS ${OUTPUT}/pytimestamp_cpu)
     install(CODE "execute_process(COMMAND pip install ${_pip_args} lib/)")
 endif(PYTHON3)

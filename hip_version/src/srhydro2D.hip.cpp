@@ -710,7 +710,7 @@ Conserved SRHD2D::calc_hllc_flux(
     // https://www.sciencedirect.com/science/article/pii/S0021999120305362
     const real cL       = lambda.csL;
     const real cR       = lambda.csR;
-    const real ma_lim   = 0.1;
+    const real ma_lim   = 0.2;
 
     //--------------Compute the L Star State----------
     switch (nhat)
@@ -750,13 +750,14 @@ Conserved SRHD2D::calc_hllc_flux(
             tauStar = Estar - Dstar;
             starStateR = Conserved(Dstar, S1star, S2star, tauStar);
 
-            const real ma_local = max(abs(left_prims.v1 / cL), abs(right_prims.v1 / cR));
-            const real phi      = sin(min(1.0, ma_local / ma_lim) * PI * 0.5);
-            const real aL_lm    = phi * aL;
-            const real aR_lm    = phi * aR;
+            const real ma_local = my_max(std::abs(left_prims.v1 / cL), std::abs(right_prims.v1 / cR));
+            const real phi      = sin(my_min(1.0, ma_local / ma_lim) * PI * 0.5);
+            const real aL_lm    = (phi != 0 ) ? phi * aL : aL;
+            const real aR_lm    = (phi != 0 ) ? phi * aR : aR;
 
+            // printf("ma_local: %f\n", ma_local);
             return (left_flux + right_flux) * 0.5 + ( (starStateL - left_state) * aL_lm
-                + (starStateL - starStateR) * abs(aStar) + (starStateR - right_state) * aR ) * 0.5;
+                + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm ) * 0.5;
         }
         break;
     
@@ -797,13 +798,13 @@ Conserved SRHD2D::calc_hllc_flux(
 
             starStateR = Conserved(Dstar, S1star, S2star, tauStar);
 
-            const real ma_local = max(abs(left_prims.v2 / cL), abs(right_prims.v2 / cR));
-            const real phi      = sin(min(1.0, ma_local / ma_lim) * PI * 0.5);
-            const real aL_lm    = phi * aL;
-            const real aR_lm    = phi * aR;
-
+            const real ma_local = my_max(std::abs(left_prims.v2 / cL), std::abs(right_prims.v2 / cR));
+            const real phi      = sin(my_min(1.0, ma_local / ma_lim) * PI * 0.5);
+            const real aL_lm    = (phi != 0) ? phi * aL : aL;
+            const real aR_lm    = (phi != 0) ? phi * aR : aR;
+            // printf("ma_local: %f\n", ma_local);
             return (left_flux + right_flux) * 0.5 + ( (starStateL - left_state) * aL_lm
-                + (starStateL - starStateR) * abs(aStar) + (starStateR - right_state) * aR ) * 0.5;
+                + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm ) * 0.5;
         }
         break;
     }
@@ -997,29 +998,33 @@ __global__ void simbi::shared_gpu_advance(
 
     int ia  = ii + radius;
     int ja  = jj + radius;
-    const bool xinbounds = ia + BLOCK_SIZE2D < nx - 1;
-    const bool yinbounds = ja + BLOCK_SIZE2D < ny - 1;
     int aid = ja * nx + ia;
 
 
     // Check if we are at phyical grid boundary. If so, the active thread index
     // there becomes the ghost zone
     if ((ii >= s->xphysical_grid) || (jj >= s->yphysical_grid)){
-        prim_buff[tya * bs + txa] = s->gpu_prims[ja * nx + nx - 1]; 
         return;
     }
     // Load Shared memory into buffer for active zones plus ghosts
     prim_buff[tya * bs + txa] = s->gpu_prims[aid];
-    if (threadIdx.y < radius)    
+    int txl = BLOCK_SIZE2D;
+    int tyl = BLOCK_SIZE2D;
+
+    // Load Shared memory into buffer for active zones plus ghosts
+    prim_buff[tya * bs + txa] = s->gpu_prims[aid];
+    if (threadIdx.y < radius)
     {
-        prim_buff[(tya - radius      ) * bs + txa] = s->gpu_prims[(ja - radius) * nx + ia];
-        prim_buff[(tya + BLOCK_SIZE2D) * bs + txa] = yinbounds ? s->gpu_prims[(ja + BLOCK_SIZE2D) * nx + ia] :  s->gpu_prims[(ny - 1) * nx + ia]; 
+        if (ja + BLOCK_SIZE2D > ny - 1) tyl = ny - radius - ja + threadIdx.y;
+        prim_buff[(tya - radius) * bs + txa] = s->gpu_prims[(ja - radius) * nx + ia];
+        prim_buff[(tya + tyl   ) * bs + txa] = s->gpu_prims[(ja + tyl   ) * nx + ia]; 
     
     }
     if (threadIdx.x < radius)
     {   
-        prim_buff[tya * bs + txa - radius      ] =  s->gpu_prims[(ja * nx) + ia - radius];
-        prim_buff[tya * bs + txa + BLOCK_SIZE2D] =  xinbounds ? s->gpu_prims[ja * nx + ia + BLOCK_SIZE2D] :  s->gpu_prims[ja * nx + nx - 1]; 
+        if (ia + BLOCK_SIZE2D > nx - 1) txl = nx - radius - ia + threadIdx.x;
+        prim_buff[tya * bs + txa - radius] =  s->gpu_prims[ja * nx + ia - radius];
+        prim_buff[tya * bs + txa +    txl] =  s->gpu_prims[ja * nx + ia + txl]; 
     }
     __syncthreads();
 
@@ -1111,23 +1116,25 @@ __global__ void simbi::shared_gpu_advance(
         // Calc HLL Flux at i-1/2 interface
         if (s-> hllc)
         {
-            if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
-                f2 = s->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-            } else {
-                f2 = s->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-            }
+            // if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
+            //     f2 = s->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+            // } else {
+            //     f2 = s->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+            // }
             
-            if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
-                g2 = s->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-            } else {
-                g2 = s->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-            }
+            // if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
+            //     g2 = s->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+            // } else {
+            //     g2 = s->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+            // }
+            f2 = s->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+            g2 = s->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
 
         } else {
             f2 = s->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
             g2 = s->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
         }
-
+        // printf("(%d, %d), f1: %f, f2: %f, g1: %f, g2: %f\n",ia, ja, f1.tau, f2.tau, g1.tau, g2.tau);
         //Advance depending on geometry
         int real_loc = jj * xpg + ii;
         switch (geometry)
@@ -1449,19 +1456,19 @@ __global__ void simbi::shared_gpu_advance(
             
             if (s->hllc)
             {
-                if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
-                    f2 = s->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                } else {
-                    f2 = s->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                }
+                // if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
+                //     f2 = s->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // } else {
+                //     f2 = s->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // }
                 
-                if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
-                    g2 = s->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                } else {
-                    g2 = s->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                }
-                // f2 = calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                // g2 = calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
+                //     g2 = s->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // } else {
+                //     g2 = s->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // }
+                f2 = s->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g2 = s->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                 
             }
             else
@@ -1469,6 +1476,7 @@ __global__ void simbi::shared_gpu_advance(
                 f2 = s->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
                 g2 = s->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             }
+
         //Advance depending on geometry
         int real_loc = jj * xpg + ii;
         switch (geometry)
@@ -1751,6 +1759,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
             
             n++;
+            // std::cin.get();
             // Adapt the timestep
             hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nxBlocks, physical_nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, geometry[coord_system]);
             hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);

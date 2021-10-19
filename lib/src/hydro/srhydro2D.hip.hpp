@@ -107,7 +107,8 @@ namespace simbi
         void advance(
                SRHD2D *s, 
                const ExecutionPolicy<> p, 
-               const int sh_block_size,
+               const int bx,
+               const int by,
                const int radius, 
                const simbi::Geometry geometry, 
                const simbi::MemSide user = simbi::MemSide::Host);

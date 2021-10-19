@@ -1003,16 +1003,16 @@ void SRHD3D::advance(
                         real dV2        = rmean * coord_lattice->gpu_dV2[jj]      ;
                         real dV3        = rmean * coord_lattice->gpu_sin[jj] * coord_lattice->gpu_dx3[kk];
                         #else 
-                        real s1R  =  coord_lattice->x1_face_areas[ii + 1];
-                        real s1L  =  coord_lattice->x1_face_areas[ii + 0];
-                        real s2R  =  coord_lattice->x2_face_areas[jj + 1];
-                        real s2L  =  coord_lattice->x2_face_areas[jj + 0];
-                        real s3R  =  coord_lattice->x3_face_areas[kk + 1];
-                        real s3L  =  coord_lattice->x3_face_areas[kk + 0];
-                        real rmea =  coord_lattice->x1mean[ii];
-                        real dV1  =  coord_lattice->dV1[ii];
-                        real dV2  =  rmean * coord_lattice->dV2[jj];
-                        real dV3  =  rmean * coord_lattice->sin[jj] * coord_lattice->dx3[kk];
+                        real s1R   =  coord_lattice->x1_face_areas[ii + 1];
+                        real s1L   =  coord_lattice->x1_face_areas[ii + 0];
+                        real s2R   =  coord_lattice->x2_face_areas[jj + 1];
+                        real s2L   =  coord_lattice->x2_face_areas[jj + 0];
+                        real s3R   =  coord_lattice->x3_face_areas[kk + 1];
+                        real s3L   =  coord_lattice->x3_face_areas[kk + 0];
+                        real rmean =  coord_lattice->x1mean[ii];
+                        real dV1   =  coord_lattice->dV1[ii];
+                        real dV2   =  rmean * coord_lattice->dV2[jj];
+                        real dV3   =  rmean * coord_lattice->sin[jj] * coord_lattice->dx3[kk];
                         #endif
                         // // Grab central primitives
                         real rhoc = prim_buff[tza * bx * by + tya * bx + txa].rho;

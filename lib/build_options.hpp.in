@@ -1,12 +1,13 @@
 #ifndef BUILD_OPTIONS_HPP
 #define BUILD_OPTIONS_HPP
 
-#cmakedefine01 GPU_CODE
+// #cmakedefine01 GPU_CODE
 #cmakedefine01 FLOAT_PRECISION
 
 
 enum class Platform: int {CPU = 0, GPU = 1};
-#if GPU_CODE
+#if defined(__CUDACC__) || defined(__HCC__)
+#define GPU_CODE 1
 #include "hip/hip_runtime.h"
 constexpr Platform BuildPlatform = Platform::GPU;
 // typedef float real;
