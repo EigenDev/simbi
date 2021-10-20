@@ -1493,8 +1493,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const int xblockdim         = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
     const int yblockdim         = yphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : yphysical_grid;
     const int radius            = (first_order) ? 1 : 2;
-    const int bx                = xblockdim + 2 * radius;
-    const int by                = yblockdim + 2 * radius;
+    const int bx                = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
+    const int by                = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
     const int shBlockSpace      = bx * by;
     const unsigned shBlockBytes = shBlockSpace * sizeof(Primitive);
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
