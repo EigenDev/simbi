@@ -242,9 +242,6 @@ def initializeModel(model, first_order = False, periodic = False):
                         bottom_ghost = model.u[:, -1]
                         upper_ghost = model.u[:, 0]
                         
-                        bottom_gamma = W[-1]
-                        upper_gamma = W[0]
-                        
                         model.u = np.insert(model.u, model.u.shape[1], 
                                         (bottom_ghost, bottom_ghost) , axis=1)
                         
