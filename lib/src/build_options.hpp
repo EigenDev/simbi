@@ -1,7 +1,6 @@
 #ifndef BUILD_OPTIONS_HPP
 #define BUILD_OPTIONS_HPP
 
-// #define GPU_CODE 1
 #define FLOAT_PRECISION 0
 
 

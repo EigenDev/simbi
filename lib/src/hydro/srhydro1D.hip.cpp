@@ -81,12 +81,12 @@ void SRHD::advance(
         #else 
         auto* const prim_buff = &prims[0];
         #endif 
-        
+
         Conserved u_l, u_r;
         Conserved f_l, f_r, f1, f2;
         Primitive prims_l, prims_r;
         real rmean, dV, sL, sR, pc, dx;
-        
+  
         auto ia = ii + radius;
         auto txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + radius : ia;
         if constexpr(BuildPlatform == Platform::GPU)
@@ -910,7 +910,6 @@ SRHD::simulate1D(
     int tchunk_order_of_mag = 2;
     int time_order_of_mag;
 
-
     // Some benchmarking tools 
     int   nfold   = 0;
     int   ncheck  = 0;
@@ -934,11 +933,11 @@ SRHD::simulate1D(
                 cons2prim(fullP);
                 config_ghosts1DGPU(fullP, this, nx, true);
             }
-            
+            simbi::gpu::api::deviceSynch();
             t += dt; 
             
             if (n >= nfold){
-                simbi::gpu::api::deviceSynch();
+                // simbi::gpu::api::deviceSynch();
                 ncheck += 1;
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
@@ -1006,12 +1005,12 @@ SRHD::simulate1D(
                 cons2prim(fullP);
                 config_ghosts1DGPU(fullP, this, nx, false);
             }
-            
+            simbi::gpu::api::deviceSynch();
             t += dt; 
             
 
             if (n >= nfold){
-                simbi::gpu::api::deviceSynch();
+                // simbi::gpu::api::deviceSynch();
                 ncheck += 1;
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;

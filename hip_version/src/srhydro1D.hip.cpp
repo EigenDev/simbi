@@ -1032,10 +1032,9 @@ SRHD::simulate1D(
             hipLaunchKernelGGL(shared_gpu_advance,   agridDim, threadDim, shBlockBytes, 0, device_self, shBlockSize, radius, geometry[coord_system]);
             hipLaunchKernelGGL(config_ghosts1DGPU,   dim3(1), dim3(1), 0, 0, device_self, nx, first_order);
             t += dt; 
-            
-            // hipDeviceSynchronize();
 
             if (n >= nfold){
+                hipDeviceSynchronize();
                 ncheck += 1;
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
@@ -1093,9 +1092,9 @@ SRHD::simulate1D(
             hipLaunchKernelGGL(config_ghosts1DGPU,   dim3(1), dim3(1), 0, 0, device_self, nx, first_order);
 
             t += dt; 
-            // hipDeviceSynchronize();
 
             if (n >= nfold){
+                hipDeviceSynchronize();
                 ncheck += 1;
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
