@@ -1,14 +1,14 @@
 # Cython Compile the Hydro Code
 
 import os
+import sys
 import numpy
-import subprocess
 from os.path import join as pjoin
 from setuptools import setup, find_packages
-from distutils.extension import Extension
+from setuptools.extension import Extension
 from distutils.core import Command
 from distutils import sysconfig
-from Cython.Build import cythonize, build_ext
+from Cython.Build import cythonize
 from setuptools.command.build_ext import build_ext as build_ext_orig
 
 
@@ -26,7 +26,7 @@ class CompilerParams():
     def compiler_args(self):
         cpu_compiler_args = ['-std=c++17', '-march=native', '-fno-wrapv', '-O3', '-fopenmp']
         if self._arch == 'gpu':
-            gpu_compiler_args = { '$ENV{CXX}': cpu_compiler_args,
+            gpu_compiler_args = { '$ENV{CC}': cpu_compiler_args,
                                    'hipcc': []
                                  }
             if "${HIP_PLATFORM}" == "nvidia":
@@ -51,7 +51,7 @@ class CompilerParams():
             if "${HIP_PLATFORM}" == "nvidia":
                 self._libraries += ['cudart']
             else:
-                self._libraries   += ['amdhip64']
+                self._libraries += ['amdhip64']
                 
         return self._libraries
     
@@ -64,12 +64,6 @@ class CompilerParams():
     @property
     def linker_args(self):
         self._linker_args = []
-        # if self._arch != "cpu":
-        #     if "${HIP_PLATFORM}" == "nvidia":
-        #         self._libraries += ['cudart']
-        #     else:
-        #         self._libraries   += ['amdhip64']
-            
         return self._linker_args
     
     @property
@@ -156,7 +150,7 @@ def extensions(comp: CompilerParams, name: str = "state"):
     # sysconfig.get_config_vars()['OPT'] = ''
     # sysconfig.get_config_vars()['PY_CFLAGS'] = ''
     # sysconfig.get_config_vars()['PY_CORE_CFLAGS'] = ''
-    # sysconfig.get_config_vars()['CC'] = '$ENV{CC}'
+    # sysconfig.get_config_vars()['CC'] = '$ENV{CXX}'
     # sysconfig.get_config_vars()['CXX'] = '$ENV{CXX}'
     # sysconfig.get_config_vars()['BASECFLAGS'] = ''
     # sysconfig.get_config_vars()['CCSHARED'] = '-fPIC'
@@ -207,7 +201,7 @@ def customize_compiler_for_hipcc(self):
             # translated from the extra_compile_args in the Extension class
             postargs = extra_postargs['hipcc']
         else:
-            postargs = extra_postargs['$ENV{CXX}']
+            postargs = extra_postargs['$ENV{CC}']
 
         super(obj, src, ext, cc_args, postargs, pp_opts)
         # Reset the default compiler_so, which we might have changed for cuda
@@ -216,40 +210,50 @@ def customize_compiler_for_hipcc(self):
     # Inject our redefined _compile method into the class
     self._compile = _compile
     
-class custom_build_ext(build_ext):
+class custom_build_ext(build_ext_orig):
     def build_extensions(self):
         # self.extensions = extensions(CompilerParams("gpu"), 'gpu_state')
         customize_compiler_for_hipcc(self.compiler)
-        build_ext.build_extensions(self)
+        build_ext_orig.build_extensions(self)
 
-class BuildPlatformCommand(build_ext):
+class BuildPlatformCommand(build_ext_orig):
     """A custom command to choose to build on CPU, GPU, or both."""
 
-    description = 'build for the GPU architecture'
-    # user_options = build_ext.user_options + [
-    #     # The format is (long option, short option, description).
-    #     ('cpu',  None,  None),
-    # ]
+    description = 'build for the CPU/GPU architecture'
+    user_options = build_ext_orig.user_options + [
+        # The format is (long option, short option, description).
+        ('cpu',  None,  None),
+    ]
     def initialize_options(self):
         """Set default values for options."""
         # Each user option must be listed here with their default value.
+        build_ext_orig.initialize_options(self)
         self.cpu  = None
 
     def finalize_options(self):
         """Post-process options."""
         # set the compiler params based on selected option
-        pass
+        build_ext_orig.finalize_options(self)
+        
+    def get_ext_filename(self, ext_name):
+        filename = super().get_ext_filename(ext_name)
+        suffix = sysconfig.get_config_var('EXT_SUFFIX')
+        ext = os.path.splitext(filename)[1]
+        return filename.replace(suffix, "") + ext
+    
     def build_extensions(self):
-        if self.cpu:
-            self.extensions = extensions(CompilerParams('cpu'), 'state')
-        else:
+        if self.cpu is None:
+            # self.extensions = extensions(CompilerParams('cpu'), 'gpu_state')
             customize_compiler_for_hipcc(self.compiler)
-        build_ext.build_extensions(self)
+        build_ext_orig.build_extensions(self)
 
 # Initialize default CPU extension
-gpu_mode = "${GPU_CODE}"
-ext      = extensions(CompilerParams("cpu"), 'gpu_state') if gpu_mode == "OFF" else extensions(CompilerParams("gpu"), 'gpu_state')
-builder  = build_ext if gpu_mode == "OFF" else custom_build_ext
+ext = None
+if "--cpu" in sys.argv:
+    ext = extensions(CompilerParams("cpu"), 'gpu_state')
+else:
+    ext = extensions(CompilerParams("gpu"), 'gpu_state')
+
 setup(
     name='PySIMBI',
     author='Marcus DuPont',
@@ -258,7 +262,7 @@ setup(
     version='${PROJECT_VERSION}',
     ext_modules=ext,
     cmdclass={
-        'build_ext': builder
+        'build_ext': BuildPlatformCommand
         },
     package_dir={'pysimbi': '${CMAKE_CURRENT_SOURCE_DIR}'},
     packages=find_packages(),

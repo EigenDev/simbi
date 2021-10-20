@@ -1,12 +1,13 @@
 #ifndef BUILD_OPTIONS_HPP
 #define BUILD_OPTIONS_HPP
 
-#define GPU_CODE 0
+// #define GPU_CODE 1
 #define FLOAT_PRECISION 0
 
 
 enum class Platform: int {CPU = 0, GPU = 1};
-#if GPU_CODE
+#if defined(__CUDACC__) || defined(__HCC__) || (defined(__clang__) && defined(__HIP__))
+#define GPU_CODE 1
 #include "hip/hip_runtime.h"
 constexpr Platform BuildPlatform = Platform::GPU;
 // typedef float real;
@@ -105,11 +106,11 @@ using namespace simbi;
 
 #endif
 
-#if FLOAT_PRECISION
-const auto real_sqrt = sqrtf;
-#else 
-const auto real_sqrt = static_cast<double(*)(const double)>(std::sqrt);
-#endif
+// #if FLOAT_PRECISION
+// const auto sqrt = sqrtf;
+// #else 
+// const auto sqrt = static_cast<double(*)(const double)>(std::sqrt);
+// #endif
 
 
 
