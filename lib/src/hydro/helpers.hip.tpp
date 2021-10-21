@@ -103,7 +103,7 @@ namespace simbi{
         const int jj  = blockDim.y * blockIdx.y + threadIdx.y;
         const int ia  = ii + s->idx_active;
         const int ja  = jj + s->idx_active;
-        const int aid = ja * s-> nx + ia;
+        const int aid = ia * s-> ny + ja;
         const int nx  = s->nx;
         const CLattice2D *coord_lattice = &(s->coord_lattice);
 

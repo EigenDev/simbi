@@ -692,8 +692,11 @@ void SRHD2D::advance(
     const int yextent               = p.blockSize.y;
 
     const CLattice2D *coord_lattice = &(self->coord_lattice);
-    const int bs                    = (BuildPlatform == Platform::GPU) ? bx : nx;
     const int nbs                   = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
+
+    // if on GPU, do column major striding, row-major otherwise
+    const int sx = (BuildPlatform == Platform::GPU) ? 1  : bx;
+    const int sy = (BuildPlatform == Platform::GPU) ? by :  1;
 
     simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int idx){
         #if GPU_CODE 
@@ -713,32 +716,31 @@ void SRHD2D::advance(
         const int txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
         const int tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
 
-        // printf("(%d, %d) -- rho = %f\n", ia, ja, prim_buff[bs * ja + ia].rho);
-
         Conserved ux_l, ux_r, uy_l, uy_r;
         Conserved f_l, f_r, g_l, g_r, f1, f2, g1, g2;
         Primitive xprims_l, xprims_r, yprims_l, yprims_r;
 
-        int aid = ja * nx + ia;
+        // do column-major index if on GPU
+        int aid = (BuildPlatform == Platform::GPU) ? ia * ny + ja : ja * nx + ia;
         if  constexpr(BuildPlatform == Platform::GPU)
         {
             int txl = xextent;
             int tyl = yextent;
 
             // Load Shared memory into buffer for active zones plus ghosts
-            prim_buff[tya * bx + txa] = self->gpu_prims[aid];
-            if (ty < radius)
+            prim_buff[txa * by + tya] = self->gpu_prims[aid];
+            if (tx < radius)
             {
-                if (ja + yextent > ny - 1) tyl = ny - radius - ja + threadIdx.y;
-                prim_buff[(tya - radius) * bx + txa] = self->gpu_prims[(ja - radius) * nx + ia];
-                prim_buff[(tya + tyl   ) * bx + txa] = self->gpu_prims[(ja + tyl   ) * nx + ia]; 
+                if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
+                prim_buff[(txa - radius) * by + tya] = self->gpu_prims[(ia - radius) * ny + ja];
+                prim_buff[(txa + txl   ) * by + tya] = self->gpu_prims[(ia + txl   ) * ny + ja]; 
             
             }
-            if (tx < radius)
+            if (ty < radius)
             {   
-                if (ia + xextent > nx - 1) txl = nx - radius - ia + threadIdx.x;
-                prim_buff[tya * bx + txa - radius] =  self->gpu_prims[ja * nx + ia - radius];
-                prim_buff[tya * bx + txa +    txl] =  self->gpu_prims[ja * nx + ia + txl]; 
+                if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
+                prim_buff[txa * by + tya - radius] =  self->gpu_prims[ia * ny + ja - radius];
+                prim_buff[txa * by + tya +    tyl] =  self->gpu_prims[ia * ny + ja + tyl]; 
             }
             simbi::gpu::api::synchronize();
         }
@@ -747,19 +749,19 @@ void SRHD2D::advance(
         {
             if (is_periodic)
             {
-                xprims_l = prim_buff[txa + tya * bx];
-                xprims_r = roll(prim_buff, (txa + 1) + tya * bx, nbs);
+                xprims_l = prim_buff[txa * sy + tya * sx];
+                xprims_r = roll(prim_buff, (txa + 1) * sy + tya * sx, nbs);
 
-                yprims_l = prim_buff[txa + tya * bx];
-                yprims_r = roll(prim_buff, txa + (tya + 1) * bx, nbs);
+                yprims_l = prim_buff[txa * sy + tya * sx];
+                yprims_r = roll(prim_buff, txa + (tya + 1) * sx, nbs);
             }
             else
             {
-                xprims_l = prim_buff[tya * bx + (txa + 0)];
-                xprims_r = prim_buff[tya * bx + (txa + 1)];
+                xprims_l = prim_buff[(txa + 0) * sy + (tya + 0) * sx];
+                xprims_r = prim_buff[(txa + 1) * sy + (tya + 0) * sx];
                 //j+1/2
-                yprims_l = prim_buff[(tya + 0) * bx + txa];
-                yprims_r = prim_buff[(tya + 1) * bx + txa];
+                yprims_l = prim_buff[(txa + 0) * sy + (tya + 0) * sx];
+                yprims_r = prim_buff[(txa + 0) * sy + (tya + 1) * sx];
             }
             
             // i+1/2
@@ -807,11 +809,11 @@ void SRHD2D::advance(
             }
             else
             {
-                xprims_l = prim_buff[tya * bx + (txa - 1)];
-                xprims_r = prim_buff[tya * bx + (txa + 0)];
+                xprims_l = prim_buff[(txa - 1) * sy + (tya + 0) * sx];
+                xprims_r = prim_buff[(txa - 0) * sy + (tya + 0) * sx];
                 //j+1/2
-                yprims_l = prim_buff[(tya - 1) * bx + txa]; 
-                yprims_r = prim_buff[(tya + 0) * bx + txa]; 
+                yprims_l = prim_buff[(txa - 0) * sy + (tya - 1) * sx]; 
+                yprims_r = prim_buff[(txa + 0) * sy + (tya - 0) * sx]; 
             }
 
             // i+1/2
@@ -849,8 +851,9 @@ void SRHD2D::advance(
                 g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             }
 
+            // printf("(%d, %d) f1: %f, f2: %f, g1: %f, g2: %f\n", ia, ja, f1.D, f2.D, g1.D, g2.D);
             //Advance depending on geometry
-            int real_loc = jj * xpg + ii;
+            int real_loc = (BuildPlatform == Platform::GPU) ? ii * ypg + jj : jj * xpg + ii;
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
@@ -895,10 +898,10 @@ void SRHD2D::advance(
                     real dV2   = rmean * coord_lattice->dV2[jj];
                     #endif
                     // Grab central primitives
-                    real rhoc = prim_buff[tya * bx + txa].rho;
-                    real pc   = prim_buff[tya * bx + txa].p;
-                    real uc   = prim_buff[tya * bx + txa].v1;
-                    real vc   = prim_buff[tya * bx + txa].v2;
+                    real rhoc = prim_buff[txa * sy + tya * sx].rho;
+                    real pc   = prim_buff[txa * sy + tya * sx].p;
+                    real uc   = prim_buff[txa * sy + tya * sx].v1;
+                    real vc   = prim_buff[txa * sy + tya * sx].v2;
 
                     real hc   = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
                     real gam2 = (real)1.0/((real)1.0 - (uc * uc + vc * vc));
@@ -965,31 +968,31 @@ void SRHD2D::advance(
             if (!is_periodic)
             {
                 // Coordinate X
-                xleft_most  = prim_buff[(txa - 2) + bs * tya];
-                xleft_mid   = prim_buff[(txa - 1) + bs * tya];
-                center      = prim_buff[ txa      + bs * tya];
-                xright_mid  = prim_buff[(txa + 1) + bs * tya];
-                xright_most = prim_buff[(txa + 2) + bs * tya];
+                xleft_most  = prim_buff[(txa - 2) * sy + tya * sx];
+                xleft_mid   = prim_buff[(txa - 1) * sy + tya * sx];
+                center      = prim_buff[(txa + 0) * sy + tya * sx];
+                xright_mid  = prim_buff[(txa + 1) * sy + tya * sx];
+                xright_most = prim_buff[(txa + 2) * sy + tya * sx];
 
                 // Coordinate Y
-                yleft_most  = prim_buff[txa + bs * (tya - 2)];
-                yleft_mid   = prim_buff[txa + bs * (tya - 1)];
-                yright_mid  = prim_buff[txa + bs * (tya + 1)];
-                yright_most = prim_buff[txa + bs * (tya + 2)];
+                yleft_most  = prim_buff[txa * sy + (tya - 2) * sx];
+                yleft_mid   = prim_buff[txa * sy + (tya - 1) * sx];
+                yright_mid  = prim_buff[txa * sy + (tya + 1) * sx];
+                yright_most = prim_buff[txa * sy + (tya + 2) * sx];
             }
             else
             {
                 // X Coordinate
-                xleft_most   = roll(prim_buff, tya * bx + txa - 2, nbs);
-                xleft_mid    = roll(prim_buff, tya * bx + txa - 1, nbs);
-                center       = prim_buff[tya * bx + txa];
-                xright_mid   = roll(prim_buff, tya * bx + txa + 1, nbs);
-                xright_most  = roll(prim_buff, tya * bx + txa + 2, nbs);
+                xleft_most   = roll(prim_buff, tya * sx + (txa - 2) * sy, nbs);
+                xleft_mid    = roll(prim_buff, tya * sx + (txa - 1) * sy, nbs);
+                center       =      prim_buff[ tya * sx + (txa + 0) * sy];
+                xright_mid   = roll(prim_buff, tya * sx + (txa + 1) * sy, nbs);
+                xright_most  = roll(prim_buff, tya * sx + (txa + 2) * sy, nbs);
 
-                yleft_most   = roll(prim_buff, txa +  bs * (tya - 2), nbs);
-                yleft_mid    = roll(prim_buff, txa +  bs * (tya - 1), nbs);
-                yright_mid   = roll(prim_buff, txa +  bs * (tya + 1), nbs);
-                yright_most  = roll(prim_buff, txa +  bs * (tya + 2), nbs);
+                yleft_most   = roll(prim_buff, txa * sy + (tya - 2) * sx, nbs);
+                yleft_mid    = roll(prim_buff, txa * sy + (tya - 1) * sx, nbs);
+                yright_mid   = roll(prim_buff, txa * sy + (tya + 1) * sx, nbs);
+                yright_most  = roll(prim_buff, txa * sy + (tya + 2) * sx, nbs);
             }
                 // Reconstructed left X Primitive vector at the i+1/2 interface
                 xprims_l.rho =
@@ -1232,7 +1235,7 @@ void SRHD2D::advance(
                     g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                 }
             //Advance depending on geometry
-            int real_loc = jj * xpg + ii;
+            int real_loc = (BuildPlatform == Platform::GPU) ? ii * xpg + jj : jj * xpg + ii;
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
@@ -1277,10 +1280,10 @@ void SRHD2D::advance(
                     real dV2   = rmean * self->coord_lattice.dV2[jj];
                     #endif
                     // Grab central primitives
-                    real rhoc = prim_buff[tya * bx + txa].rho;
-                    real pc   = prim_buff[tya * bx + txa].p;
-                    real uc   = prim_buff[tya * bx + txa].v1;
-                    real vc   = prim_buff[tya * bx + txa].v2;
+                    real rhoc = prim_buff[tya * sx + txa * sy].rho;
+                    real pc   = prim_buff[tya * sx + txa * sy].p;
+                    real uc   = prim_buff[tya * sx + txa * sy].v1;
+                    real vc   = prim_buff[tya * sx + txa * sy].v2;
 
                     real hc   = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
                     real gam2 = (real)1.0/((real)1.0 - (uc * uc + vc * vc));
@@ -1573,7 +1576,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
             
             n++;
-
 
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)

@@ -22,42 +22,43 @@ find_package(HIP REQUIRED)
 # message(STATUS "HDF5 Lib Path: ${HDF5_LIBRARIES}")
 
 # Determine HIP_PLATFORM
-if(NOT DEFINED HIP_PLATFORM)
-    if(NOT DEFINED ENV{HIP_PLATFORM})
-        execute_process(COMMAND /opt/rocm/hip/bin/hipconfig --platform
-            OUTPUT_VARIABLE HIP_PLATFORM
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
-    else()
-        set(HIP_PLATFORM $ENV{HIP_PLATFORM} CACHE STRING "HIP Platform")
+if (HIP_FOUND)
+    if(NOT DEFINED HIP_PLATFORM)
+        if(NOT DEFINED ENV{HIP_PLATFORM})
+            execute_process(COMMAND /opt/rocm/hip/bin/hipconfig --platform
+                OUTPUT_VARIABLE HIP_PLATFORM
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+        else()
+            set(HIP_PLATFORM $ENV{HIP_PLATFORM} CACHE STRING "HIP Platform")
+        endif()
     endif()
-endif()
-message(STATUS "HIP Platform: " ${HIP_PLATFORM})
+    message(STATUS "HIP Platform: " ${HIP_PLATFORM})
 
-# Detect the hipcc compiler path
-# execute_process(COMMAND which hipcc OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE HIPCC)
-set(HIPCC "/opt/rocm/bin/hipcc")
-if(HIP_PLATFORM STREQUAL "nvidia")
-    set(HIP_RUNTIME "cuda"  CACHE STRING "HIP Runtime")
-    set(HIP_COMPILER "nvcc" CACHE STRING "HIP Compiler")
-    set(HIP_RUNTIME_LIBRARY_DIRS "/opt/rocm/hip/lib")
-    find_package(CUDA)
-    enable_language(CUDA)
-    set(CUDART_LIB_PATH ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
-    list(APPEND  HIP_RUNTIME_LIBRARY_DIRS ${CUDART_LIB_PATH})
-    list(APPEND HIP_INCLUDE_DIRS ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-    message(STATUS "CUDA_TOOLKIT_PATH: ${CUDA_TOOLKIT_ROOT_DIR}")
-elseif(HIP_PLATFORM STREQUAL "amd")
-    set(HIP_RUNTIME "rocclr" CACHE STRING "HIP Runtime")
-    set(HIP_COMPILER "clang" CACHE STRING "HIP Compiler")
-    set(HIP_RUNTIME_LIBRARY_DIRS "/opt/rocm/hip/lib")
-else()
-    message(FATAL_ERROR "Unexpected HIP_PLATFORM: " ${HIP_PLATFORM})
-endif()
+    # Detect the hipcc compiler path
+    # execute_process(COMMAND which hipcc OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE HIPCC)
+    set(HIPCC "/opt/rocm/bin/hipcc")
+    if(HIP_PLATFORM STREQUAL "nvidia")
+        set(HIP_RUNTIME "cuda"  CACHE STRING "HIP Runtime")
+        set(HIP_COMPILER "nvcc" CACHE STRING "HIP Compiler")
+        set(HIP_RUNTIME_LIBRARY_DIRS "/opt/rocm/hip/lib")
+        find_package(CUDA)
+        enable_language(CUDA)
+        set(CUDART_LIB_PATH ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+        list(APPEND  HIP_RUNTIME_LIBRARY_DIRS ${CUDART_LIB_PATH})
+        list(APPEND HIP_INCLUDE_DIRS ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+        message(STATUS "CUDA_TOOLKIT_PATH: ${CUDA_TOOLKIT_ROOT_DIR}")
+    elseif(HIP_PLATFORM STREQUAL "amd")
+        set(HIP_RUNTIME "rocclr" CACHE STRING "HIP Runtime")
+        set(HIP_COMPILER "clang" CACHE STRING "HIP Compiler")
+        set(HIP_RUNTIME_LIBRARY_DIRS "/opt/rocm/hip/lib")
+    else()
+        message(FATAL_ERROR "Unexpected HIP_PLATFORM: " ${HIP_PLATFORM})
+    endif()
 
-message(STATUS "HIP Runtime: "  ${HIP_RUNTIME})
-message(STATUS "HIP Compiler: " ${HIP_COMPILER})
-message(STATUS "HIP LIBS: " ${HIP_LIBRARIES})
-
+    message(STATUS "HIP Runtime: "  ${HIP_RUNTIME})
+    message(STATUS "HIP Compiler: " ${HIP_COMPILER})
+    message(STATUS "HIP LIBS: " ${HIP_LIBRARIES})
+endif(HIP_FOUND)
 # COPY_IF_DIFFERENT("${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}")
 if(DEFINED ENV{VIRTUAL_ENV} OR DEFINED ENV{CONDA_PREFIX})
     set(_pip_args)
@@ -130,22 +131,35 @@ if(PYTHON3)
     list(APPEND DEPS ${SRCS})
     configure_file(${SETUP_PY_IN} ${SETUP_PY})
     # Custom make command for building default cpu instance in place
-    add_custom_command(
-        OUTPUT  ${OUTPUT}/pytimestamp_gpu
-        COMMAND ${PYTHON3} setup.py build_ext --inplace && rm -f 
-                                    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
-        COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_gpu
-        DEPENDS ${DEPS}
-    )
-    add_custom_target(gpu ALL DEPENDS ${OUTPUT}/pytimestamp_gpu)
+    if(HIP_FOUND)
+        add_custom_command(
+            OUTPUT  ${OUTPUT}/pytimestamp_gpu
+            COMMAND ${PYTHON3} setup.py build_ext --inplace && rm -f 
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+            COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_gpu
+            DEPENDS ${DEPS}
+        )
+        add_custom_target(gpu ALL DEPENDS ${OUTPUT}/pytimestamp_gpu)
 
-    add_custom_command(
-        OUTPUT  ${OUTPUT}/pytimestamp_cpu
-        COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
-                                    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
-        COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
-        DEPENDS ${DEPS}
-    )
-    add_custom_target(cpu DEPENDS ${OUTPUT}/pytimestamp_cpu)
+        add_custom_command(
+            OUTPUT  ${OUTPUT}/pytimestamp_cpu
+            COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+            COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
+            DEPENDS ${DEPS}
+        )
+        add_custom_target(cpu DEPENDS ${OUTPUT}/pytimestamp_cpu)
+
+    else()
+        add_custom_command(
+            OUTPUT  ${OUTPUT}/pytimestamp_cpu
+            COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+            COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
+            DEPENDS ${DEPS}
+        )
+        add_custom_target(cpu ALL EPENDS ${OUTPUT}/pytimestamp_cpu)
+    
+    endif(HIP_FOUND)
     install(CODE "execute_process(COMMAND pip install ${_pip_args} lib/)")
 endif(PYTHON3)

@@ -18,29 +18,17 @@ namespace simbi{
             sr1d::Conserved *cons = sim->cons.data();
             #endif
             if (first_order){
-                cons[0].D = cons[1].D;
-                cons[grid_size - 1].D = cons[grid_size - 2].D;
-
+                cons[0] = cons[1];
                 cons[0].S = - cons[1].S;
-                cons[grid_size - 1].S = cons[grid_size - 2].S;
 
-                cons[0].tau = cons[1].tau;
-                cons[grid_size - 1].tau = cons[grid_size - 2].tau;
             } else {
-                cons[0].D = cons[3].D;
-                cons[1].D = cons[2].D;
-                cons[grid_size - 1].D = cons[grid_size - 3].D;
-                cons[grid_size - 2].D = cons[grid_size - 3].D;
+                cons[0] = cons[3];
+                cons[1] = cons[2];
+                cons[grid_size - 1] = cons[grid_size - 3];
+                cons[grid_size - 2] = cons[grid_size - 3];
 
                 cons[0].S = - cons[3].S;
                 cons[1].S = - cons[2].S;
-                cons[grid_size - 1].S = cons[grid_size - 3].S;
-                cons[grid_size - 2].S = cons[grid_size - 3].S;
-
-                cons[0].tau = cons[3].tau;
-                cons[1].tau = cons[2].tau;
-                cons[grid_size - 1].tau = cons[grid_size - 3].tau;
-                cons[grid_size - 2].tau = cons[grid_size - 3].tau;
             }
         });
     };
@@ -58,6 +46,9 @@ namespace simbi{
             const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % x1grid_size;
             const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / x1grid_size;
 
+            const int sx = (BuildPlatform == Platform::GPU) ? 1 : x1grid_size;
+            const int sy = (BuildPlatform == Platform::GPU) ? x2grid_size : 1;
+
             #if GPU_CODE
             sr2d::Conserved *u_state = sim->gpu_cons;
             #else 
@@ -67,29 +58,13 @@ namespace simbi{
                 if ((jj < x2grid_size) && (ii < x1grid_size))
                 {
                     if (jj < 1){
-                        u_state[ii + x1grid_size * jj].D   =   u_state[ii + x1grid_size].D;
-                        u_state[ii + x1grid_size * jj].S1  =   u_state[ii + x1grid_size].S1;
-                        u_state[ii + x1grid_size * jj].S2  =   u_state[ii + x1grid_size].S2;
-                        u_state[ii + x1grid_size * jj].tau =   u_state[ii + x1grid_size].tau;
-                        
+                        u_state[ii * sy + jj * sx]   = u_state[ii * sy + 1 * sx];
                     } else if (jj > x2grid_size - 2) {
-                        u_state[ii + x1grid_size * jj].D    =   u_state[(x2grid_size - 2) * x1grid_size + ii].D;
-                        u_state[ii + x1grid_size * jj].S1   =   u_state[(x2grid_size - 2) * x1grid_size + ii].S1;
-                        u_state[ii + x1grid_size * jj].S2   =   u_state[(x2grid_size - 2) * x1grid_size + ii].S2;
-                        u_state[ii + x1grid_size * jj].tau  =   u_state[(x2grid_size - 2) * x1grid_size + ii].tau;
-
+                        u_state[ii * sy + jj * sx] = u_state[(x2grid_size - 2) * sx + ii * sy];
                     } else {
-                        u_state[jj * x1grid_size].D    = u_state[jj * x1grid_size + 1].D;
-                        u_state[jj * x1grid_size + x1grid_size - 1].D = u_state[jj*x1grid_size + x1grid_size - 2].D;
-
-                        u_state[jj * x1grid_size + 0].S1               = - u_state[jj * x1grid_size + 1].S1;
-                        u_state[jj * x1grid_size + x1grid_size - 1].S1 =   u_state[jj * x1grid_size + x1grid_size - 2].S1;
-
-                        u_state[jj * x1grid_size + 0].S2                = u_state[jj * x1grid_size + 1].S2;
-                        u_state[jj * x1grid_size + x1grid_size - 1].S2  = u_state[jj * x1grid_size + x1grid_size - 2].S2;
-
-                        u_state[jj * x1grid_size + 0].tau               = u_state[jj * x1grid_size + 1].tau;
-                        u_state[jj * x1grid_size + x1grid_size - 1].tau = u_state[jj * x1grid_size + x1grid_size - 2].tau;
+                        u_state[jj * sx + 0 * sy]                 =   u_state[jj * sx + 1 * sy];
+                        u_state[jj * sx + (x1grid_size - 1) * sy] =   u_state[jj * sx + (x1grid_size - 2) * sy];
+                        u_state[jj * sx + 0 * sy].S1              = - u_state[jj * sx + 1 * sy].S1;
                     }
                     
                 }
@@ -99,57 +74,33 @@ namespace simbi{
                 {
 
                     // Fix the ghost zones at the radial boundaries
-                u_state[jj * x1grid_size +  0].D               = u_state[jj * x1grid_size +  3].D;
-                u_state[jj * x1grid_size +  1].D               = u_state[jj * x1grid_size +  2].D;
-                u_state[jj * x1grid_size +  x1grid_size - 1].D = u_state[jj * x1grid_size +  x1grid_size - 3].D;
-                u_state[jj * x1grid_size +  x1grid_size - 2].D = u_state[jj * x1grid_size +  x1grid_size - 3].D;
+                    u_state[jj * sx +  0 * sy]                 = u_state[jj * sx +  3 * sy];
+                    u_state[jj * sx +  1 * sy]                 = u_state[jj * sx +  2 * sy];
+                    u_state[jj * sx +  (x1grid_size - 1) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
+                    u_state[jj * sx +  (x1grid_size - 2) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
 
-                u_state[jj * x1grid_size + 0].S1               = - u_state[jj * x1grid_size + 3].S1;
-                u_state[jj * x1grid_size + 1].S1               = - u_state[jj * x1grid_size + 2].S1;
-                u_state[jj * x1grid_size + x1grid_size - 1].S1 =   u_state[jj * x1grid_size + x1grid_size - 3].S1;
-                u_state[jj * x1grid_size + x1grid_size - 2].S1 =   u_state[jj * x1grid_size + x1grid_size - 3].S1;
+                    u_state[jj * sx + 0 * sy].S1               = - u_state[jj * sx + 3 * sy].S1;
+                    u_state[jj * sx + 1 * sy].S1               = - u_state[jj * sx + 2 * sy].S1;
 
-                u_state[jj * x1grid_size + 0].S2               = u_state[jj * x1grid_size + 3].S2;
-                u_state[jj * x1grid_size + 1].S2               = u_state[jj * x1grid_size + 2].S2;
-                u_state[jj * x1grid_size + x1grid_size - 1].S2 = u_state[jj * x1grid_size + x1grid_size - 3].S2;
-                u_state[jj * x1grid_size + x1grid_size - 2].S2 = u_state[jj * x1grid_size + x1grid_size - 3].S2;
 
-                u_state[jj * x1grid_size + 0].tau                = u_state[jj * x1grid_size + 3].tau;
-                u_state[jj * x1grid_size + 1].tau                = u_state[jj * x1grid_size + 2].tau;
-                u_state[jj * x1grid_size + x1grid_size - 1].tau  = u_state[jj * x1grid_size + x1grid_size - 3].tau;
-                u_state[jj * x1grid_size + x1grid_size - 2].tau  = u_state[jj * x1grid_size + x1grid_size - 3].tau;
-
-                // Fix the ghost zones at the angular boundaries
-                
-                if (jj < 2){
-                    if (ii < x1grid_size){
-                        if (jj == 0){
-                            u_state[jj * x1grid_size + ii].D   =   u_state[3 * x1grid_size + ii].D;
-                            u_state[jj * x1grid_size + ii].S1  =   u_state[3 * x1grid_size + ii].S1;
-                            u_state[jj * x1grid_size + ii].S2  =   u_state[3 * x1grid_size + ii].S2;
-                            u_state[jj * x1grid_size + ii].tau =   u_state[3 * x1grid_size + ii].tau;
-                        } else {
-                            u_state[jj * x1grid_size + ii].D    =   u_state[2 * x1grid_size + ii].D;
-                            u_state[jj * x1grid_size + ii].S1   =   u_state[2 * x1grid_size + ii].S1;
-                            u_state[jj * x1grid_size + ii].S2   =   u_state[2 * x1grid_size + ii].S2;
-                            u_state[jj * x1grid_size + ii].tau  =   u_state[2 * x1grid_size + ii].tau;
+                    // Fix the ghost zones at the angular boundaries
+                    if (jj < 2){
+                        if (ii < x1grid_size){
+                            if (jj == 0){
+                                u_state[jj * sx + ii * sy]  =   u_state[3 * sx + ii * sy];
+                            } else {
+                                u_state[jj * sx + ii * sy]  =   u_state[2 * sx + ii * sy];
+                            }
+                        }
+                    } else if (jj > x2grid_size - 3) {
+                        if (ii < x1grid_size){
+                            if (jj == x2grid_size - 1){
+                                u_state[jj * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + ii * sy];
+                            } else {
+                                u_state[jj * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + ii * sy];
+                            }
                         }
                     }
-                } else if (jj > x2grid_size - 3) {
-                    if (ii < x1grid_size){
-                        if (jj == x2grid_size - 1){
-                            u_state[jj * x1grid_size + ii].D   =   u_state[(x2grid_size - 4) * x1grid_size + ii].D;
-                            u_state[jj * x1grid_size + ii].S1  =   u_state[(x2grid_size - 4) * x1grid_size + ii].S1;
-                            u_state[jj * x1grid_size + ii].S2  =   u_state[(x2grid_size - 4) * x1grid_size + ii].S2;
-                            u_state[jj * x1grid_size + ii].tau =   u_state[(x2grid_size - 4) * x1grid_size + ii].tau;
-                        } else {
-                            u_state[jj * x1grid_size + ii].D   =   u_state[(x2grid_size - 3) * x1grid_size + ii].D;
-                            u_state[jj * x1grid_size + ii].S1  =   u_state[(x2grid_size - 3) * x1grid_size + ii].S1;
-                            u_state[jj * x1grid_size + ii].S2  =   u_state[(x2grid_size - 3) * x1grid_size + ii].S2;
-                            u_state[jj * x1grid_size + ii].tau =   u_state[(x2grid_size - 3) * x1grid_size + ii].tau;
-                        }
-                    }
-                }
                     
                 }
             }

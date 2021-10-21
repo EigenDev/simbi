@@ -1,9 +1,14 @@
 #ifndef BUILD_OPTIONS_HPP
 #define BUILD_OPTIONS_HPP
 
-// #cmakedefine01 GPU_CODE
+
 #cmakedefine01 FLOAT_PRECISION
 
+#if defined(__HIP_PLATFORM_NVIDIA__) || defined(__HIP_PLATFORM_AMD__)
+#define CYTHON_GPU_MODE 1 
+#else 
+#define CYTHON_GPU_MODE 0
+#endif 
 
 enum class Platform: int {CPU = 0, GPU = 1};
 #if defined(__CUDACC__) || defined(__HCC__) || (defined(__clang__) && defined(__HIP__))
@@ -28,6 +33,7 @@ typedef hipStream_t simbiStream_t;
 #define GPU_KERNEL_LAUNCH( name , gridDim , blockDim , sharedBytes, streamId,  ... ) \
     hipLaunchKernelGGL(name, gridDim, blockDim, sharedBytes, streamId,  __VA_ARGS__ )
 #else
+#define GPU_CODE 0
 #include <cmath>
 #include <cstring>
 #include <string>
