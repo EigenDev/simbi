@@ -64,7 +64,7 @@ class CompilerParams():
     def runtime_libs(self):
         self._runtime_libs = []
         if self._arch != "cpu":
-            self._runtime_libs += ["${HIP_RUNTIME_LIBRARY_DIRS}"]
+            self._runtime_libs += ["${HIP_RUNTIME_LIBRARY_DIRS}".split(';')]
     
     @property
     def define_macros(self):
