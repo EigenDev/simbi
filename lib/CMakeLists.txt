@@ -15,7 +15,7 @@ list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_program(PYTHON3 "python3")
 find_package(HDF5 REQUIRED COMPONENTS CXX HL)
-find_package(HIP REQUIRED)
+find_package(HIP)
 
 # SET (HDF5_LIBS ${HDF5_LIBRARIES} "${HDF5_CPP_LIBRARIES}/../")
 # message(STATUS "HDF5 Lib Path: ${HDF5_CXX_LIBRARIES}")
