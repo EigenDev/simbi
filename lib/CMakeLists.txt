@@ -12,7 +12,7 @@ configure_file(${BUILD_OPTS_IN} ${BUILD_OPTS})
 # Search for rocm in common locations
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
 
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
+# find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_program(PYTHON3 "python3")
 find_package(HDF5 REQUIRED COMPONENTS CXX HL)
 find_package(HIP)
