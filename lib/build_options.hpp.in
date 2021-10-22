@@ -3,14 +3,18 @@
 
 
 #cmakedefine01 FLOAT_PRECISION
+enum class Platform: int {CPU = 0, GPU = 1};
 
-#if defined(__HIP_PLATFORM_NVIDIA__) || defined(__HIP_PLATFORM_AMD__)
-#define CYTHON_GPU_MODE 1 
+// NVIDIA seems to like to stencil better in 
+// column major order for some reason...hmmmm
+#if defined(__HIP_PLATFORM_NVIDIA__)
+#define CYTHON_COL_MAJOR 1 
+constexpr bool col_maj = true;
 #else 
-#define CYTHON_GPU_MODE 0
+#define CYTHON_COL_MAJOR 0
+constexpr bool col_maj = false;
 #endif 
 
-enum class Platform: int {CPU = 0, GPU = 1};
 #if defined(__CUDACC__) || defined(__HCC__) || (defined(__clang__) && defined(__HIP__))
 #define GPU_CODE 1
 #include "hip/hip_runtime.h"
