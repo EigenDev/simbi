@@ -64,7 +64,8 @@ class CompilerParams():
     def runtime_libs(self):
         self._runtime_libs = []
         if self._arch != "cpu":
-            self._runtime_libs += ["${HIP_RUNTIME_LIBRARY_DIRS}".split(';')]
+            rtimelibs = [lib for lib in "${HIP_RUNTIME_LIBRARY_DIRS}".split(';')]
+            self._runtime_libs += rtimelibs
     
     @property
     def define_macros(self):
@@ -95,7 +96,8 @@ class CompilerParams():
         
     @property
     def extra_includes(self):
-        self._extraIncludes = ['${CMAKE_CURRENT_SOURCE_DIR}/src', '${HDF5_INCLUDE_DIRS}'.split(';')]
+        hdflist = '${HDF5_INCLUDE_DIRS}'.split(';')
+        self._extraIncludes = ['${CMAKE_CURRENT_SOURCE_DIR}/src'] + hdflist 
         if self._arch != "cpu":
             gpu_includes = '${HIP_INCLUDE_DIRS}'.split(';')
             self._extraIncludes += gpu_includes
