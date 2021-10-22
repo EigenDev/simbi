@@ -5,7 +5,7 @@ from libcpp cimport bool
 from libcpp.string cimport string 
 
 cdef extern from "build_options.hpp":
-    cdef bool gpu_mode "CYTHON_GPU_MODE"
+    cdef bool col_maj "CYTHON_COL_MAJOR"
 
 cdef extern from "common/config.hpp":
     cdef int FLOAT_PRECISION "FLOAT_PRECISION"

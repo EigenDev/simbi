@@ -158,8 +158,9 @@ cdef class PyStateSR2D:
         real cfl, 
         string coord_system = "cartesian".encode('ascii')):
 
+
         ny, nx = state[0].shape
-        if  gpu_mode:
+        if  col_maj:
             state = np.transpose(state, axes=(0,2,1))
         state_contig = state.reshape(state.shape[0], -1)
         self.c_state = SRHD2D(state_contig, nx, ny, gamma, x1, x2, cfl, coord_system)
@@ -194,7 +195,7 @@ cdef class PyStateSR2D:
             hllc)
 
         result = np.asarray(result)
-        if gpu_mode:
+        if col_maj:
             result = result.reshape(4, self.c_state.nx, self.c_state.ny)
             result = np.transpose(result, axes=(0, 2, 1))
         else:

@@ -695,8 +695,8 @@ void SRHD2D::advance(
     const int nbs                   = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
 
     // if on GPU, do column major striding, row-major otherwise
-    const int sx = (BuildPlatform == Platform::GPU) ? 1  : bx;
-    const int sy = (BuildPlatform == Platform::GPU) ? by :  1;
+    const int sx = (col_maj) ? 1  : bx;
+    const int sy = (col_maj) ? by :  1;
 
     simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int idx){
         #if GPU_CODE 
@@ -721,27 +721,46 @@ void SRHD2D::advance(
         Primitive xprims_l, xprims_r, yprims_l, yprims_r;
 
         // do column-major index if on GPU
-        int aid = (BuildPlatform == Platform::GPU) ? ia * ny + ja : ja * nx + ia;
+        int aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
         if  constexpr(BuildPlatform == Platform::GPU)
         {
             int txl = xextent;
             int tyl = yextent;
 
             // Load Shared memory into buffer for active zones plus ghosts
-            prim_buff[txa * by + tya] = self->gpu_prims[aid];
-            if (tx < radius)
+            prim_buff[tya * sx + txa * sy] = self->gpu_prims[aid];
+            if constexpr(col_maj)
             {
-                if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
-                prim_buff[(txa - radius) * by + tya] = self->gpu_prims[(ia - radius) * ny + ja];
-                prim_buff[(txa + txl   ) * by + tya] = self->gpu_prims[(ia + txl   ) * ny + ja]; 
+                if (tx < radius)
+                {
+                    if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
+                    prim_buff[(txa - radius) * sy + tya] = self->gpu_prims[(ia - radius) * ny + ja];
+                    prim_buff[(txa + txl   ) * sy + tya] = self->gpu_prims[(ia + txl   ) * ny + ja]; 
+                
+                }
+                if (ty < radius)
+                {   
+                    if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
+                    prim_buff[txa * sy + tya - radius] =  self->gpu_prims[ia * ny + ja - radius];
+                    prim_buff[txa * sy + tya +    tyl] =  self->gpu_prims[ia * ny + ja + tyl]; 
+                }
+
+            } else {
+                if (ty < radius)
+                {
+                    if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
+                    prim_buff[(tya - radius) * sx + txa] = self->gpu_prims[(ja - radius) * nx + ia];
+                    prim_buff[(tya + tyl   ) * sx + txa] = self->gpu_prims[(ja + tyl   ) * nx + ia]; 
+                
+                }
+                if (tx < radius)
+                {   
+                    if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
+                    prim_buff[tya * sx + txa - radius] =  self->gpu_prims[ja * nx + ia - radius];
+                    prim_buff[tya * sx + txa +    txl] =  self->gpu_prims[ja * nx + ia + txl]; 
+                }
+            }
             
-            }
-            if (ty < radius)
-            {   
-                if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
-                prim_buff[txa * by + tya - radius] =  self->gpu_prims[ia * ny + ja - radius];
-                prim_buff[txa * by + tya +    tyl] =  self->gpu_prims[ia * ny + ja + tyl]; 
-            }
             simbi::gpu::api::synchronize();
         }
 
@@ -851,9 +870,8 @@ void SRHD2D::advance(
                 g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             }
 
-            // printf("(%d, %d) f1: %f, f2: %f, g1: %f, g2: %f\n", ia, ja, f1.D, f2.D, g1.D, g2.D);
             //Advance depending on geometry
-            int real_loc = (BuildPlatform == Platform::GPU) ? ii * ypg + jj : jj * xpg + ii;
+            int real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
@@ -1235,7 +1253,7 @@ void SRHD2D::advance(
                     g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                 }
             //Advance depending on geometry
-            int real_loc = (BuildPlatform == Platform::GPU) ? ii * xpg + jj : jj * xpg + ii;
+            int real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
