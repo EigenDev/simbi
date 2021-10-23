@@ -84,7 +84,7 @@ class CompilerParams():
         hdf5_path = os.path.dirname(hdf5_cxx_libs[0])
         self._library_dirs = [hdf5_path]
         if self._arch != "cpu":
-            gpu_libs = '${HIP_RUNTIME_LIBRARY_DIRS}'.split(';')
+            gpu_libs = [lib for lib in '${HIP_RUNTIME_LIBRARY_DIRS}'.split(';')]
             self._library_dirs += gpu_libs
             
         return self._library_dirs
@@ -166,10 +166,6 @@ def extensions(comp: CompilerParams, name: str = "state"):
     # sysconfig.get_config_vars()['OPT'] = ''
 
     return cythonize([Extension(name, comp.sources, **extensionArguments)], language_level = "3", nthreads=2)
-    # if comp.arch == "cpu":
-    #     return cythonize([Extension(name, comp.sources, **extensionArguments)], language_level = "3", nthreads=2)
-    # else:
-    #     return [Extension(name, comp.sources, **extensionArguments)]
 
 
 
@@ -197,7 +193,7 @@ def customize_compiler_for_hipcc(self):
     # based on source extension: we add it.
     def _compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
         if src != "${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp":
-            # use the cuda for .cu files
+            # use the hip for .hip.cpp files
             self.set_executable('compiler_so', '${HIPCC}')
             # use only a subset of the extra_postargs, which are 1-1
             # translated from the extra_compile_args in the Extension class
@@ -206,7 +202,7 @@ def customize_compiler_for_hipcc(self):
             postargs = extra_postargs['$ENV{CC}']
 
         super(obj, src, ext, cc_args, postargs, pp_opts)
-        # Reset the default compiler_so, which we might have changed for cuda
+        # Reset the default compiler_so, which we might have changed for hip
         self.compiler_so = default_compiler_so
 
     # Inject our redefined _compile method into the class
