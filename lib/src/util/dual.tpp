@@ -112,18 +112,14 @@ namespace simbi
             simbi::gpu::api::gpuMalloc(&host_u0,              cbytes  );
             simbi::gpu::api::gpuMalloc(&host_prims,           pbytes  );
             simbi::gpu::api::gpuMalloc(&host_pressure_guess,  rbytes  );
-            simbi::gpu::api::gpuMalloc(&host_dx1,             r1bytes );
-            simbi::gpu::api::gpuMalloc(&host_dx2,             r2bytes );
-            simbi::gpu::api::gpuMalloc(&host_dV1,             r1bytes );
-            simbi::gpu::api::gpuMalloc(&host_dV2,             r2bytes );
-            simbi::gpu::api::gpuMalloc(&host_x1m,             r1bytes );
-            simbi::gpu::api::gpuMalloc(&host_cot,             r2bytes );
-            simbi::gpu::api::gpuMalloc(&host_fas1,            fa1bytes);
-            simbi::gpu::api::gpuMalloc(&host_fas2,            fa2bytes);
-            simbi::gpu::api::gpuMalloc(&host_source0,         rrbytes );
-            simbi::gpu::api::gpuMalloc(&host_sourceD,         rrbytes );
-            simbi::gpu::api::gpuMalloc(&host_sourceS1,        rrbytes );
-            simbi::gpu::api::gpuMalloc(&host_sourceS2,        rrbytes );
+            // simbi::gpu::api::gpuMalloc(&host_dx1,             r1bytes );
+            // simbi::gpu::api::gpuMalloc(&host_dx2,             r2bytes );
+            // simbi::gpu::api::gpuMalloc(&host_dV1,             r1bytes );
+            // simbi::gpu::api::gpuMalloc(&host_dV2,             r2bytes );
+            // simbi::gpu::api::gpuMalloc(&host_x1m,             r1bytes );
+            // simbi::gpu::api::gpuMalloc(&host_cot,             r2bytes );
+            // simbi::gpu::api::gpuMalloc(&host_fas1,            fa1bytes);
+            // simbi::gpu::api::gpuMalloc(&host_fas2,            fa2bytes);
             simbi::gpu::api::gpuMalloc(&host_dtmin,            rbytes );
             simbi::gpu::api::gpuMalloc(&host_clattice, sizeof(CLattice2D));
 
@@ -131,39 +127,63 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(host_u0,    host.cons.data(), cbytes);
             simbi::gpu::api::copyHostToDevice(host_prims, host.prims.data()    , pbytes);
             simbi::gpu::api::copyHostToDevice(host_pressure_guess, host.pressure_guess.data() , rbytes);
-            simbi::gpu::api::copyHostToDevice(host_source0, host.sourceTau.data() , rrbytes);
-            simbi::gpu::api::copyHostToDevice(host_sourceD, host.sourceD.data() , rrbytes);
-            simbi::gpu::api::copyHostToDevice(host_sourceS1, host.sourceS1.data() , rrbytes);
-            simbi::gpu::api::copyHostToDevice(host_sourceS2, host.sourceS2.data() , rrbytes);
+
             // copy pointer to allocated device storage to device class
             simbi::gpu::api::copyHostToDevice(&(device->gpu_cons), &host_u0,    sizeof(C *));
             simbi::gpu::api::copyHostToDevice(&(device->gpu_prims),&host_prims, sizeof(T *));
             simbi::gpu::api::copyHostToDevice(&(device->gpu_pressure_guess),  &host_pressure_guess, sizeof(real *));
-
-            simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceTau),&host_source0,  sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceD),  &host_sourceD,  sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceS1), &host_sourceS1, sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceS2), &host_sourceS2, sizeof(real *));
             simbi::gpu::api::copyHostToDevice(&(device->dt_min),       &host_dtmin,    sizeof(real *));
 
+            //===================================================
+            // SOURCE TERM OFF-LOADING BRANCHES
+            //===================================================
+            if (!host.d_all_zeros)
+            {
+                this->d_all_zeros = false;
+                simbi::gpu::api::gpuMalloc(&host_sourceD, rrbytes);
+                simbi::gpu::api::copyHostToDevice(host_sourceD, host.sourceD.data() , rrbytes);
+                simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceD),  &host_sourceD,  sizeof(real *));
+            } 
+            if(!host.s1_all_zeros)
+            {
+                this->s1_all_zeros = false;
+                simbi::gpu::api::gpuMalloc(&host_sourceS1, rrbytes);
+                simbi::gpu::api::copyHostToDevice(host_sourceS1, host.sourceS1.data() , rrbytes);
+                simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceS1), &host_sourceS1, sizeof(real *));
+            }
+            if (!host.s2_all_zeros)
+            {
+                this->s2_all_zeros = false;
+                simbi::gpu::api::gpuMalloc(&host_sourceS2, rrbytes );
+                simbi::gpu::api::copyHostToDevice(host_sourceS2, host.sourceS2.data() , rrbytes);
+                simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceS2), &host_sourceS2, sizeof(real *));
+            } 
+            if (!host.e_all_zeros)
+            {
+                this->e_all_zeros = false;
+                simbi::gpu::api::gpuMalloc(&host_source0, rrbytes );
+                simbi::gpu::api::copyHostToDevice(host_source0, host.sourceTau.data() , rrbytes);
+                simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceTau),&host_source0,  sizeof(real *));
+            }
+            
             // ====================================================
             //          GEOMETRY DEEP COPY
             //=====================================================
-            simbi::gpu::api::copyHostToDevice(host_dx1, host.coord_lattice.dx1.data() , r1bytes);
-            simbi::gpu::api::copyHostToDevice(host_dx2, host.coord_lattice.dx2.data() , r2bytes);
+            // simbi::gpu::api::copyHostToDevice(host_dx1, host.coord_lattice.dx1.data() , r1bytes);
+            // simbi::gpu::api::copyHostToDevice(host_dx2, host.coord_lattice.dx2.data() , r2bytes);
             // simbi::gpu::api::copyHostToDevice(host_dV1,  host.coord_lattice.dV1.data(), r1bytes);
             // simbi::gpu::api::copyHostToDevice(host_dV2,  host.coord_lattice.dV2.data(), r2bytes);
             // simbi::gpu::api::copyHostToDevice(host_fas1, host.coord_lattice.x1_face_areas.data() , fa1bytes);
             // simbi::gpu::api::copyHostToDevice(host_fas2, host.coord_lattice.x2_face_areas.data() , fa2bytes);
-            simbi::gpu::api::copyHostToDevice(host_x1m, host.coord_lattice.x1mean.data(), r1bytes);
+            // simbi::gpu::api::copyHostToDevice(host_x1m, host.coord_lattice.x1mean.data(), r1bytes);
             // simbi::gpu::api::copyHostToDevice(host_cot, host.coord_lattice.cot.data(), r2bytes);
 
             // // Now copy pointer to device directly
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dx1), &host_dx1, sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dx2), &host_dx2, sizeof(real *));
+            // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dx1), &host_dx1, sizeof(real *));
+            // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dx2), &host_dx2, sizeof(real *));
             // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dV1), &host_dV1, sizeof(real *));
             // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dV2), &host_dV2, sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x1mean),&host_x1m, sizeof(real *));
+            // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x1mean),&host_x1m, sizeof(real *));
             // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_cot),&host_cot, sizeof(real *));
             // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x1_face_areas), &host_fas1, sizeof(real *));
             // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x2_face_areas), &host_fas2, sizeof(real *));

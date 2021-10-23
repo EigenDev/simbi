@@ -57,28 +57,38 @@ namespace simbi
         template <typename T, typename C, typename U>
         struct DualSpace2D
         {
-            DualSpace2D() {};
+            bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros;
+            DualSpace2D() {
+                d_all_zeros  = true;
+                s1_all_zeros = true;
+                s2_all_zeros = true;
+                e_all_zeros  = true;
+            };
+
             ~DualSpace2D()
             {
                 // printf("\nFreeing Device Memory...\n");
                 simbi::gpu::api::gpuFree(host_u0);
                 simbi::gpu::api::gpuFree(host_prims);
-                simbi::gpu::api::gpuFree(host_clattice);
-                simbi::gpu::api::gpuFree(host_dV1);
-                simbi::gpu::api::gpuFree(host_dV2);
-                simbi::gpu::api::gpuFree(host_dx1);
-                simbi::gpu::api::gpuFree(host_dx2);
-                simbi::gpu::api::gpuFree(host_fas1);
-                simbi::gpu::api::gpuFree(host_fas2);
-                simbi::gpu::api::gpuFree(host_x1m);
-                simbi::gpu::api::gpuFree(host_cot);
-                simbi::gpu::api::gpuFree(host_source0);
-                simbi::gpu::api::gpuFree(host_sourceD);
-                simbi::gpu::api::gpuFree(host_sourceS1);
-                simbi::gpu::api::gpuFree(host_sourceS2);
                 simbi::gpu::api::gpuFree(host_pressure_guess);
+                simbi::gpu::api::gpuFree(host_clattice);
+                // simbi::gpu::api::gpuFree(host_dV1);
+                // simbi::gpu::api::gpuFree(host_dV2);
+                // simbi::gpu::api::gpuFree(host_dx1);
+                // simbi::gpu::api::gpuFree(host_dx2);
+                // simbi::gpu::api::gpuFree(host_fas1);
+                // simbi::gpu::api::gpuFree(host_fas2);
+                // simbi::gpu::api::gpuFree(host_x1m);
+                // simbi::gpu::api::gpuFree(host_cot);
+                if(!e_all_zeros)  simbi::gpu::api::gpuFree(host_source0);
+                if(!d_all_zeros) simbi::gpu::api::gpuFree(host_sourceD);
+                if(!s1_all_zeros) simbi::gpu::api::gpuFree(host_sourceS1);
+                if(!s2_all_zeros)  simbi::gpu::api::gpuFree(host_sourceS2);
+                
                 // printf("Memory Freed Successfully.\n");
             };
+
+            
 
             T *host_prims;
             C *host_u0;

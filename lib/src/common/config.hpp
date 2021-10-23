@@ -31,7 +31,7 @@ constexpr real tol_scale = 1e-12;
 })
 
 constexpr int BLOCK_SIZE   = 64;
-constexpr int BLOCK_SIZE2D = 16;
+constexpr int BLOCK_SIZE2D = 8;
 constexpr int BLOCK_SIZE3D = 4;
 constexpr int MAX_ITER     = 50;
 

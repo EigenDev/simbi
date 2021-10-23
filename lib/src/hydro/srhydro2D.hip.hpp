@@ -35,6 +35,7 @@ namespace simbi
         CLattice2D coord_lattice;
 
         real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
+        bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros;
 
         //==============GPU Mirrors================
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceTau, *gpu_pressure_guess;

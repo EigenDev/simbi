@@ -89,13 +89,13 @@ namespace simbi{
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
-    dtWarpReduce(T *s, const simbi::Geometry geometry)
+    dtWarpReduce(T *s, const simbi::Geometry geometry, real dx, real dy, real rmin = 0, real rmax = 1)
     {
         const real gamma     = s->gamma;
         __shared__ volatile real dt_buff[BLOCK_SIZE2D * BLOCK_SIZE2D];
         __shared__  N prim_buff[BLOCK_SIZE2D][BLOCK_SIZE2D];
 
-        real cfl_dt, rmean;
+        real cfl_dt, rmean, rl, rr, dr;
         const int tx  = threadIdx.x;
         const int ty  = threadIdx.y;
         const int tid = blockDim.x * ty + tx;
@@ -103,18 +103,16 @@ namespace simbi{
         const int jj  = blockDim.y * blockIdx.y + threadIdx.y;
         const int ia  = ii + s->idx_active;
         const int ja  = jj + s->idx_active;
-        const int aid = ia * s-> ny + ja;
-        const int nx  = s->nx;
-        const CLattice2D *coord_lattice = &(s->coord_lattice);
+        const int aid = (col_maj) ? ia * s-> ny + ja : ja * s->nx + ia;
+        // const CLattice2D *coord_lattice = &(s->coord_lattice);
 
-        // printf("%d\n", aid);
         if (aid < s->active_zones)
         {
             prim_buff[ty][tx] = s->gpu_prims[aid];
             __syncthreads();
 
-            real dx1  = s->coord_lattice.gpu_dx1[ii];
-            real dx2  = s->coord_lattice.gpu_dx2[jj];
+            // real dx1  = s->coord_lattice.gpu_dx1[ii];
+            // real dx2  = s->coord_lattice.gpu_dx2[jj];
             real rho  = prim_buff[ty][tx].rho;
             real p    = prim_buff[ty][tx].p;
             real v1   = prim_buff[ty][tx].v1;
@@ -131,15 +129,17 @@ namespace simbi{
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
-                    cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
-                                    dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
+                    cfl_dt = my_min(dx / (my_max(abs(plus_v1), abs(minus_v1))),
+                                    dy / (my_max(abs(plus_v2), abs(minus_v2))));
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    rmean = coord_lattice->gpu_x1mean[ii];
-                    cfl_dt = my_min(dx1 / (my_max(abs(plus_v1), abs(minus_v1))),
-                                    rmean * dx2 / (my_max(abs(plus_v2), abs(minus_v2))));
+                    rl = (ii > 0) ? rmin*pow(10, (ii - 0.5) * dx)   : rmin;
+                    rr = (ii < s->xphysical_grid) ? rl * pow(10, dx) : rmax; 
+                    rmean = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
+                    cfl_dt = my_min(dr / (my_max(abs(plus_v1), abs(minus_v1))),
+                                    rmean * dy / (my_max(abs(plus_v2), abs(minus_v2))));
                     break;
             } // end switch
 
