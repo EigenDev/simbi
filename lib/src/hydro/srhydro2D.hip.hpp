@@ -34,6 +34,8 @@ namespace simbi
         std::vector<real> x1, x2, sourceD, sourceS1, sourceS2, sourceTau, pressure_guess;
         CLattice2D coord_lattice;
 
+        real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
+
         //==============GPU Mirrors================
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceTau, *gpu_pressure_guess;
         real *sys_state, *dt_min;

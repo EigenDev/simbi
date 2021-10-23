@@ -691,6 +691,16 @@ void SRHD2D::advance(
     const int xextent               = p.blockSize.x;
     const int yextent               = p.blockSize.y;
 
+    #if GPU_CODE
+    const real rmin                 = this->x1min;
+    const real rmax                 = this->x1max;
+    const real ymin                 = this->x2min;
+    const real ymax                 = this->x2max;
+    const real dx2                  = this->dx2;
+    const real dlogx1               = this->dlogx1;
+    const real imax                 = this->xphysical_grid - 1;
+    const real jmax                 = this->yphysical_grid - 1;
+    #endif
     const CLattice2D *coord_lattice = &(self->coord_lattice);
     const int nbs                   = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
 
@@ -899,14 +909,22 @@ void SRHD2D::advance(
                 case simbi::Geometry::SPHERICAL:
                     {
                     #if GPU_CODE
-                    real s1R        = coord_lattice->gpu_x1_face_areas[ii + 1];
-                    real s1L        = coord_lattice->gpu_x1_face_areas[ii + 0];
-                    real s2R        = coord_lattice->gpu_x2_face_areas[jj + 1];
-                    real s2L        = coord_lattice->gpu_x2_face_areas[jj + 0];
-                    real rmean      = coord_lattice->gpu_x1mean[ii]           ;
-                    real dV1        = coord_lattice->gpu_dV1[ii]              ;
-                    real dV2        = rmean * coord_lattice->gpu_dV2[jj]      ;
-                    #else 
+                    const real rl           = (ii > 0)    ? rmin * pow(10, (ii - 0.5) * dlogx1) : rmin;
+                    const real rr           = (ii < imax) ? rl   * pow(10, dlogx1) : rmax;
+                    const real tl           = (jj > 0)    ? ymin + (jj - 0.5) * dx2: ymin;
+                    const real tr           = (jj < jmax) ? tl + dx2 : ymax; 
+                    const real rmean        = (real)0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
+                    const real s1R          = rr * rr; //coord_lattice->gpu_x1_face_areas[ii + 1];
+                    const real s1L          = rl * rl; //coord_lattice->gpu_x1_face_areas[ii + 0];
+                    const real s2R          = sin(tr); //coord_lattice->gpu_x2_face_areas[jj + 1];
+                    const real s2L          = sin(tl); //coord_lattice->gpu_x2_face_areas[jj + 0];
+                    // real rmean      = coord_lattice->gpu_x1mean[ii]           ;
+                    const real thmean       = 0.5 * (tl + tr);
+                    const real sint         = sin(thmean);
+                    const real dV1          = rmean * rmean * (rr - rl);   //coord_lattice->gpu_dV1[ii]              ;
+                    const real dV2          = rmean * sint * dx2; //rmean * coord_lattice->gpu_dV2[jj]    
+                    const real cot          = cos(thmean) / sint ;
+                    #else
                     real s1R   = coord_lattice->x1_face_areas[ii + 1];
                     real s1L   = coord_lattice->x1_face_areas[ii + 0];
                     real s2R   = coord_lattice->x2_face_areas[jj + 1];
@@ -934,13 +952,13 @@ void SRHD2D::advance(
                                 // L(S1)
                                 -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
                                     - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        + rhoc * hc * gam2 * vc * vc / rmean + (real)(real)2.0 * pc / rmean +
+                                        + (rhoc * hc * gam2 * vc * vc + (real)2.0 * pc) / rmean +
                                             self->gpu_sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
                                 -(f1.S2 * s1R - f2.S2 * s1L) / dV1
                                     - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
-                                        - (rhoc * hc * gam2 * uc * vc / rmean - pc * coord_lattice->gpu_cot[jj] / rmean) 
+                                        - (rhoc * hc * gam2 * uc * vc - pc * cot) / rmean 
                                             + self->gpu_sourceS2[real_loc] * decay_const,
 
                                 // L(tau)
@@ -1281,13 +1299,21 @@ void SRHD2D::advance(
                 case simbi::Geometry::SPHERICAL:
                     {
                     #if GPU_CODE
-                    real s1R        = coord_lattice->gpu_x1_face_areas[ii + 1] ;
-                    real s1L        = coord_lattice->gpu_x1_face_areas[ii + 0] ;
-                    real s2R        = coord_lattice->gpu_x2_face_areas[jj + 1] ;
-                    real s2L        = coord_lattice->gpu_x2_face_areas[jj + 0] ;
-                    real rmean      = coord_lattice->gpu_x1mean[ii]            ;
-                    real dV1        = coord_lattice->gpu_dV1[ii]               ;
-                    real dV2        = rmean * coord_lattice->gpu_dV2[jj]       ;
+                    const real rl           = (ii > 0)    ? rmin * pow(10, (ii - 0.5) * dlogx1) : rmin;
+                    const real rr           = (ii < imax) ? rl   * pow(10, dlogx1) : rmax;
+                    const real tl           = (jj > 0)    ? ymin + (jj - 0.5) * dx2: ymin;
+                    const real tr           = (jj < jmax) ? tl + dx2 : ymax; 
+                    const real rmean        = (real)0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
+                    const real s1R          = rr * rr; //coord_lattice->gpu_x1_face_areas[ii + 1];
+                    const real s1L          = rl * rl; //coord_lattice->gpu_x1_face_areas[ii + 0];
+                    const real s2R          = sin(tr); //coord_lattice->gpu_x2_face_areas[jj + 1];
+                    const real s2L          = sin(tl); //coord_lattice->gpu_x2_face_areas[jj + 0];
+                    // real rmean      = coord_lattice->gpu_x1mean[ii]           ;
+                    const real thmean       = 0.5 * (tl + tr);
+                    const real sint         = sin(thmean);
+                    const real dV1          = rmean * rmean * (rr - rl);   //coord_lattice->gpu_dV1[ii]              ;
+                    const real dV2          = rmean * sint * dx2; //rmean * coord_lattice->gpu_dV2[jj]    
+                    const real cot          = cos(thmean) / sint ;
                     #else 
                     real s1R   = self->coord_lattice.x1_face_areas[ii + 1];
                     real s1L   = self->coord_lattice.x1_face_areas[ii + 0];
@@ -1322,7 +1348,7 @@ void SRHD2D::advance(
                                 // L(S2)
                                 -(f1.S2 * s1R - f2.S2 * s1L) / dV1
                                     - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
-                                        - (rhoc * hc * gam2 * uc * vc / rmean - pc * coord_lattice->gpu_cot[jj] / rmean) 
+                                        - (rhoc * hc * gam2 * uc * vc / rmean - pc * cot / rmean) 
                                             + self->gpu_sourceS2[real_loc] * decay_const,
 
                                 // L(tau)
@@ -1484,10 +1510,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     PrimData prods;
     sr2d::PrimitiveData transfer_prims;
 
-    // if (t == 0)
-    // {
-    //     config_ghosts2D(cons, nx, ny, first_order);
-    // }
+    
     // Copy the current SRHD instance over to the device
     SRHD2D *device_self;
     simbi::gpu::api::gpuMalloc(&device_self, sizeof(SRHD2D));
@@ -1495,6 +1518,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     simbi::dual::DualSpace2D<Primitive, Conserved, SRHD2D> dualMem;
     dualMem.copyHostToDev(*this, device_self);
 
+    dx2 = (x2[yphysical_grid - 1] - x2[0]) / yphysical_grid;
+    dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
+    x1min   = x1[0];
+    x1max   = x1[xphysical_grid - 1];
+    x2min   = x2[0];
+    x2max   = x2[yphysical_grid - 1];
     // Some variables to handle file automatic file string
     // formatting 
     tchunk = "000000";
@@ -1520,6 +1549,16 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const unsigned shBlockBytes = shBlockSpace * sizeof(Primitive);
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
+
+    if (t == 0)
+    {
+        if constexpr(BuildPlatform == Platform::GPU)
+        {
+            config_ghosts2DGPU(fullP, device_self, nx, ny, true);
+        } else {
+            config_ghosts2DGPU(fullP, this, nx, ny, true);
+        }
+    }
 
     if constexpr(BuildPlatform == Platform::GPU)
         cons2prim(fullP, device_self, simbi::MemSide::Dev);

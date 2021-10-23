@@ -151,22 +151,22 @@ namespace simbi
             //=====================================================
             simbi::gpu::api::copyHostToDevice(host_dx1, host.coord_lattice.dx1.data() , r1bytes);
             simbi::gpu::api::copyHostToDevice(host_dx2, host.coord_lattice.dx2.data() , r2bytes);
-            simbi::gpu::api::copyHostToDevice(host_dV1,  host.coord_lattice.dV1.data(), r1bytes);
-            simbi::gpu::api::copyHostToDevice(host_dV2,  host.coord_lattice.dV2.data(), r2bytes);
-            simbi::gpu::api::copyHostToDevice(host_fas1, host.coord_lattice.x1_face_areas.data() , fa1bytes);
-            simbi::gpu::api::copyHostToDevice(host_fas2, host.coord_lattice.x2_face_areas.data() , fa2bytes);
+            // simbi::gpu::api::copyHostToDevice(host_dV1,  host.coord_lattice.dV1.data(), r1bytes);
+            // simbi::gpu::api::copyHostToDevice(host_dV2,  host.coord_lattice.dV2.data(), r2bytes);
+            // simbi::gpu::api::copyHostToDevice(host_fas1, host.coord_lattice.x1_face_areas.data() , fa1bytes);
+            // simbi::gpu::api::copyHostToDevice(host_fas2, host.coord_lattice.x2_face_areas.data() , fa2bytes);
             simbi::gpu::api::copyHostToDevice(host_x1m, host.coord_lattice.x1mean.data(), r1bytes);
-            simbi::gpu::api::copyHostToDevice(host_cot, host.coord_lattice.cot.data(), r2bytes);
+            // simbi::gpu::api::copyHostToDevice(host_cot, host.coord_lattice.cot.data(), r2bytes);
 
-            // Now copy pointer to device directly
+            // // Now copy pointer to device directly
             simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dx1), &host_dx1, sizeof(real *));
             simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dx2), &host_dx2, sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dV1), &host_dV1, sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dV2), &host_dV2, sizeof(real *));
+            // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dV1), &host_dV1, sizeof(real *));
+            // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dV2), &host_dV2, sizeof(real *));
             simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x1mean),&host_x1m, sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_cot),&host_cot, sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x1_face_areas), &host_fas1, sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x2_face_areas), &host_fas2, sizeof(real *));
+            // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_cot),&host_cot, sizeof(real *));
+            // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x1_face_areas), &host_fas1, sizeof(real *));
+            // simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x2_face_areas), &host_fas2, sizeof(real *));
 
             simbi::gpu::api::copyHostToDevice(&(device->dt),          &host.dt      ,    sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->plm_theta),   &host.plm_theta,   sizeof(real));
