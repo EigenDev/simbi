@@ -27,9 +27,9 @@ namespace simbi
         real plm_theta, gamma, bipolar;
         bool first_order, periodic, hllc, linspace;
         real CFL, dt, decay_const;
-        int nx, ny, nzones, n, block_size, xphysical_grid, yphysical_grid;
-        int active_zones, idx_active, x_bound, y_bound;
-        int i_start, i_bound, j_start, j_bound;
+        luint nx, ny, nzones, n, block_size, xphysical_grid, yphysical_grid;
+        luint active_zones, idx_active, x_bound, y_bound;
+        luint i_start, i_bound, j_start, j_bound;
         std::string coord_system;
         std::vector<real> x1, x2, sourceD, sourceS1, sourceS2, sourceTau, pressure_guess;
         CLattice2D coord_lattice;
@@ -45,7 +45,7 @@ namespace simbi
 
         /* Methods */
         SRHD2D();
-        SRHD2D(std::vector<std::vector<real>> state2D, int nx, int ny, real gamma, std::vector<real> x1,
+        SRHD2D(std::vector<std::vector<real>> state2D, luint nx, luint ny, real gamma, std::vector<real> x1,
                std::vector<real> x2,
                real CFL, std::string coord_system);
         ~SRHD2D();
@@ -56,7 +56,7 @@ namespace simbi
         sr2d::Eigenvals calc_Eigenvals(
             const sr2d::Primitive &prims_l,
             const sr2d::Primitive &prims_r,
-            const unsigned int nhat);
+            const luint nhat);
 
         GPU_CALLABLE_MEMBER
         sr2d::Conserved prims2cons(const sr2d::Primitive &prims);
@@ -68,14 +68,14 @@ namespace simbi
             const sr2d::Conserved &right_flux,
             const sr2d::Primitive &left_prims,
             const sr2d::Primitive &right_prims,
-            unsigned int nhat);
+            luint nhat);
 
         sr2d::Conserved calc_intermed_statesSR2D(const sr2d::Primitive &prims,
                                                  const sr2d::Conserved &state,
                                                  real a,
                                                  real aStar,
                                                  real pStar,
-                                                 int nhat);
+                                                 luint nhat);
 
         GPU_CALLABLE_MEMBER
         sr2d::Conserved calc_hllc_flux(
@@ -85,10 +85,10 @@ namespace simbi
             const sr2d::Conserved &right_flux,
             const sr2d::Primitive &left_prims,
             const sr2d::Primitive &right_prims,
-            const unsigned int nhat);
+            const luint nhat);
 
         GPU_CALLABLE_MEMBER
-        sr2d::Conserved prims2flux(const sr2d::Primitive &prims, unsigned int nhat);
+        sr2d::Conserved prims2flux(const sr2d::Primitive &prims,  luint nhat);
 
         GPU_CALLABLE_MEMBER
         sr2d::Conserved calc_hll_flux(
@@ -98,9 +98,9 @@ namespace simbi
             const sr2d::Conserved &right_flux,
             const sr2d::Primitive &left_prims,
             const sr2d::Primitive &right_prims,
-            const unsigned int nhat);
+            const luint nhat);
 
-        sr2d::Conserved u_dot(unsigned int ii, unsigned int jj);
+        sr2d::Conserved u_dot(luint ii, luint jj);
 
         std::vector<sr2d::Conserved> u_dot2D(const std::vector<sr2d::Conserved> &cons_state);
 
@@ -110,9 +110,9 @@ namespace simbi
         void advance(
                SRHD2D *s, 
                const ExecutionPolicy<> p, 
-               const int bx,
-               const int by,
-               const int radius, 
+               const luint bx,
+               const luint by,
+               const luint radius, 
                const simbi::Geometry geometry, 
                const simbi::MemSide user = simbi::MemSide::Host);
 

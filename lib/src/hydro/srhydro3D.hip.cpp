@@ -26,7 +26,7 @@ SRHD3D::SRHD3D() {}
 // Overloaded Constructor
 SRHD3D::SRHD3D(
     std::vector<std::vector<real>> state3D, 
-    int nx, int ny, int nz, real gamma,
+    luint nx, luint ny, luint nz, real gamma,
     std::vector<real> x1, 
     std::vector<real> x2,
     std::vector<real> x3, 
@@ -75,13 +75,13 @@ void SRHD3D::cons2prim()
     real etotal, c2, f, g, p, peq;
     real Ws, rhos, eps, h;
 
-    int idx;
-    int iter = 0;
-    for (int kk = 0; kk < nz; kk++)
+    luint idx;
+    luint iter = 0;
+    for (luint kk = 0; kk < nz; kk++)
     {
-        for (int jj = 0; jj < ny; jj++)
+        for (luint jj = 0; jj < ny; jj++)
         {
-            for (int ii = 0; ii < nx; ii++)
+            for (luint ii = 0; ii < nx; ii++)
             {
                 idx = ii + nx * jj + nx * ny * kk;
                 D   = cons[idx].D;     // Relativistic Mass Density
@@ -153,7 +153,7 @@ void SRHD3D::cons2prim(
     simbi::MemSide user)
 {
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
-    simbi::parallel_for(p, 0, nzones, [=] GPU_LAMBDA (int gid){
+    simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         #if GPU_CODE 
         extern __shared__ Conserved conserved_buff[];
@@ -168,7 +168,7 @@ void SRHD3D::cons2prim(
             conserved_buff[tid] = self->gpu_cons[gid];
 
         simbi::gpu::api::synchronize();
-        int iter  = 0;
+        luint iter  = 0;
         real D    = conserved_buff[tid].D;
         real S1   = conserved_buff[tid].S1;
         real S2   = conserved_buff[tid].S2;
@@ -230,7 +230,7 @@ void SRHD3D::cons2prim(
 GPU_CALLABLE_MEMBER
 Eigenvals SRHD3D::calc_Eigenvals(const Primitive &prims_l,
                                  const Primitive &prims_r,
-                                 const unsigned int nhat = 1)
+                                 const luint nhat = 1)
 {
     // Eigenvals lambda;
 
@@ -360,7 +360,7 @@ Conserved SRHD3D::prims2cons(const Primitive &prims)
 // Conserved SRHD3D::calc_intermed_statesSR2D(const Primitive &prims,
 //                                            const Conserved &state, real a,
 //                                            real aStar, real pStar,
-//                                            int nhat = 1)
+//                                            luint nhat = 1)
 // {
 //     real Dstar, S1star, S2star, tauStar, Estar, cofactor;
 //     Conserved starStates;
@@ -415,22 +415,22 @@ void SRHD3D::adapt_dt()
     {
         real cs, dx1, dx2, dx3, rho, pressure, v1, v2,v3, rmean, rproj, h, sint;
         real cfl_dt;
-        int shift_i, shift_j, shift_k;
+        luint shift_i, shift_j, shift_k;
         real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
-        int aid; // active index id
+        luint aid; // active index id
 
         // Compute the minimum timestep given CFL
-        for (int kk = 0; kk < zphysical_grid; kk++)
+        for (luint kk = 0; kk < zphysical_grid; kk++)
         {
             dx3  = coord_lattice.dx3[kk];
             shift_k = kk + idx_active;
-            for (int jj = 0; jj < yphysical_grid; jj++)
+            for (luint jj = 0; jj < yphysical_grid; jj++)
             {
                 dx2 = coord_lattice.dx2[jj];
                 shift_j = jj + idx_active;
                 sint = coord_lattice.sin[jj];
                 #pragma omp for schedule(static)
-                for (int ii = 0; ii < xphysical_grid; ii++)
+                for (luint ii = 0; ii < xphysical_grid; ii++)
                 {
                     shift_i  = ii + idx_active;
                     aid      = shift_k * nx * ny + shift_j * nx + shift_i;
@@ -504,7 +504,7 @@ void SRHD3D::adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const Executi
 // Get the 2D Flux array (4,1). Either return F or G depending on directional
 // flag
 GPU_CALLABLE_MEMBER
-Conserved SRHD3D::calc_Flux(const Primitive &prims, unsigned int nhat = 1)
+Conserved SRHD3D::calc_Flux(const Primitive &prims,   luint nhat = 1)
 {
 
     const real rho      = prims.rho;
@@ -535,7 +535,7 @@ Conserved SRHD3D::calc_hll_flux(
     const Conserved &right_flux,
     const Primitive &left_prims, 
     const Primitive &right_prims,
-    const unsigned int nhat)
+    const   luint nhat)
 {
     Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
 
@@ -560,7 +560,7 @@ Conserved SRHD3D::calc_hllc_flux(
     const Conserved &right_flux,
     const Primitive &left_prims,
     const Primitive &right_prims,
-    const unsigned int nhat = 1)
+    const   luint nhat = 1)
 {
 
     Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
@@ -745,69 +745,69 @@ Conserved SRHD3D::calc_hllc_flux(
 void SRHD3D::advance(
     SRHD3D *dev, 
     const ExecutionPolicy<> p,
-    const int sh_block_size,
-    const int radius, 
+    const luint sh_block_size,
+    const luint radius, 
     const simbi::Geometry geometry, 
     const simbi::MemSide user)
 {
     auto *self = (BuildPlatform == Platform::GPU) ? dev : this;
-    const int xpg                   = this->xphysical_grid;
-    const int ypg                   = this->yphysical_grid;
-    const int zpg                   = this->zphysical_grid;
+    const luint xpg                   = this->xphysical_grid;
+    const luint ypg                   = this->yphysical_grid;
+    const luint zpg                   = this->zphysical_grid;
     const bool is_first_order       = this->first_order;
     const bool is_periodic          = this->periodic;
     const bool hllc                 = this->hllc;
-    const int bx                    = (BuildPlatform == Platform::GPU) ? sh_block_size : nx;
-    const int by                    = (BuildPlatform == Platform::GPU) ? sh_block_size : ny;
-    const int nbs                   = (BuildPlatform == Platform::GPU) ? sh_block_size * sh_block_size * sh_block_size : nzones;
+    const luint bx                    = (BuildPlatform == Platform::GPU) ? sh_block_size : nx;
+    const luint by                    = (BuildPlatform == Platform::GPU) ? sh_block_size : ny;
+    const luint nbs                   = (BuildPlatform == Platform::GPU) ? sh_block_size * sh_block_size * sh_block_size : nzones;
     const real dt                   = this->dt;
     const real decay_const          = this->decay_const;
     const real plm_theta            = this->plm_theta;
     const real gamma                = this->gamma;
-    const int nx                    = this->nx;
-    const int ny                    = this->ny;
-    const int nz                    = this->nz;
-    const int extent                = (BuildPlatform == Platform::GPU) ? 
+    const luint nx                    = this->nx;
+    const luint ny                    = this->ny;
+    const luint nz                    = this->nz;
+    const luint extent                = (BuildPlatform == Platform::GPU) ? 
                                             p.blockSize.z * p.gridSize.z * p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
-    const int xextent               = p.blockSize.x;
-    const int yextent               = p.blockSize.y;
-    const int zextent               = p.blockSize.z;
+    const luint xextent               = p.blockSize.x;
+    const luint yextent               = p.blockSize.y;
+    const luint zextent               = p.blockSize.z;
     const CLattice3D *coord_lattice = &(self->coord_lattice);
 
-    simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int idx){
+    simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
         #else 
         auto *const prim_buff = &prims[0];
         #endif 
 
-        const int kk  = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(idx, xpg, ypg);
-        const int jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(idx, xpg, ypg, kk);
-        const int ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(idx, xpg, ypg, kk);
+        const luint kk  = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(idx, xpg, ypg);
+        const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(idx, xpg, ypg, kk);
+        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(idx, xpg, ypg, kk);
         if     constexpr(BuildPlatform == Platform::GPU) if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg)) return;
         
         
-        const int ia  = ii + radius;
-        const int ja  = jj + radius;
-        const int ka  = kk + radius;
-        const int tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
-        const int ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
-        const int tz  = (BuildPlatform == Platform::GPU) ? threadIdx.z: 0;
-        const int txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
-        const int tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
-        const int tza = (BuildPlatform == Platform::GPU) ? tz + radius : ka;
+        const luint ia  = ii + radius;
+        const luint ja  = jj + radius;
+        const luint ka  = kk + radius;
+        const luint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
+        const luint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
+        const luint tz  = (BuildPlatform == Platform::GPU) ? threadIdx.z: 0;
+        const luint txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
+        const luint tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
+        const luint tza = (BuildPlatform == Platform::GPU) ? tz + radius : ka;
 
         // printf("(%d, %d, %d)\n", txa, tya, tza);
         Conserved ux_l, ux_r, uy_l, uy_r, uz_l, uz_r;
         Conserved f_l, f_r, g_l, g_r, h_l, h_r, f1, f2, g1, g2, h1, h2;
         Primitive xprims_l, xprims_r, yprims_l, yprims_r, zprims_l, zprims_r;
 
-        int aid = ka * nx * ny + ja * nx + ia;
+        luint aid = ka * nx * ny + ja * nx + ia;
         if  constexpr(BuildPlatform == Platform::GPU)
         {
-            int txl = xextent;
-            int tyl = yextent;
-            int tzl = zextent;
+            luint txl = xextent;
+            luint tyl = yextent;
+            luint tzl = zextent;
 
             // Load Shared memory into buffer for active zones plus ghosts
             prim_buff[tza * bx * by + tya * bx + txa] = self->gpu_prims[aid];
@@ -953,7 +953,7 @@ void SRHD3D::advance(
             }
 
             //Advance depending on geometry
-            int real_loc = kk * xpg * ypg + jj * xpg + ii;
+            luint real_loc = kk * xpg * ypg + jj * xpg + ii;
 
             // printf("f1: %f, f2: %f, g1: %f, g2: %f, h1: %f, h2: %f\n",
             // f1.D,
@@ -1516,7 +1516,7 @@ void SRHD3D::advance(
 
                 
             //Advance depending on geometry
-            int real_loc = kk * xpg * ypg + jj * xpg + ii;
+            luint real_loc = kk * xpg * ypg + jj * xpg + ii;
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
@@ -1679,7 +1679,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     bool hllc = false)
 {
     std::string tnow, tchunk, tstep;
-    int total_zones = nx * ny * nz;
+    luint total_zones = nx * ny * nz;
     
     real round_place = 1 / chkpt_interval;
     real t = tstart;
@@ -1804,27 +1804,27 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     // Some variables to handle file automatic file string
     // formatting 
     tchunk = "000000";
-    int tchunk_order_of_mag = 2;
-    int time_order_of_mag;
+    luint tchunk_order_of_mag = 2;
+    luint time_order_of_mag;
 
-    const int nxBlocks          = (nx + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-    const int nyBlocks          = (ny + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-    const int nzBlocks          = (nz + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-    const int physical_nxBlocks = (xphysical_grid + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-    const int physical_nyBlocks = (yphysical_grid + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-    const int physical_nzBlocks = (zphysical_grid + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
+    const luint nxBlocks          = (nx + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
+    const luint nyBlocks          = (ny + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
+    const luint nzBlocks          = (nz + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
+    const luint physical_nxBlocks = (xphysical_grid + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
+    const luint physical_nyBlocks = (yphysical_grid + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
+    const luint physical_nzBlocks = (zphysical_grid + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
 
     dim3 agridDim  = dim3(physical_nxBlocks, physical_nyBlocks, physical_nzBlocks); // active grid dimensions
     dim3 fgridDim  = dim3(nxBlocks, nyBlocks, nzBlocks);                            // full grid dimensions
     dim3 threadDim = dim3(BLOCK_SIZE3D, BLOCK_SIZE3D, BLOCK_SIZE3D);                // thread block dimensions
 
-    const int xblockdim         = xphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : xphysical_grid;
-    const int yblockdim         = yphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : yphysical_grid;
-    const int zblockdim         = zphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : zphysical_grid;
-    const int radius            = (first_order) ? 1 : 2;
-    const int shBlockSize       = BLOCK_SIZE3D + 2 * radius;
-    const int shBlockSpace      = shBlockSize * shBlockSize * shBlockSize;
-    const unsigned shBlockBytes = shBlockSpace * sizeof(Primitive);
+    const luint xblockdim         = xphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : xphysical_grid;
+    const luint yblockdim         = yphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : yphysical_grid;
+    const luint zblockdim         = zphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : zphysical_grid;
+    const luint radius            = (first_order) ? 1 : 2;
+    const luint shBlockSize       = BLOCK_SIZE3D + 2 * radius;
+    const luint shBlockSpace      = shBlockSize * shBlockSize * shBlockSize;
+    const luint shBlockBytes = shBlockSpace * sizeof(Primitive);
     const auto fullP            = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, 
                                                          {xblockdim, yblockdim, zblockdim}, shBlockBytes);
@@ -1837,9 +1837,9 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     simbi::gpu::api::deviceSynch();
     
     // Some benchmarking tools 
-    int      n   = 0;
-    int  nfold   = 0;
-    int  ncheck  = 0;
+    luint      n   = 0;
+    luint  nfold   = 0;
+    luint  ncheck  = 0;
     real zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;

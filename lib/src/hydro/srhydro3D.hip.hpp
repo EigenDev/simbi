@@ -26,9 +26,9 @@ namespace simbi
         real plm_theta, gamma, bipolar;
         bool first_order, periodic, hllc, linspace;
         real CFL, dt, decay_const;
-        int nx, ny, nz, nzones, n, block_size, xphysical_grid, yphysical_grid, zphysical_grid;
-        int active_zones, idx_active, x_bound, y_bound;
-        int i_start, i_bound, j_start, j_bound, k_start, k_bound;
+        luint nx, ny, nz, nzones, n, block_size, xphysical_grid, yphysical_grid, zphysical_grid;
+        luint active_zones, idx_active, x_bound, y_bound;
+        luint i_start, i_bound, j_start, j_bound, k_start, k_bound;
         std::string coord_system;
         std::vector<real> x1, x2, x3, sourceD, sourceS1, sourceS2, sourceS3, sourceTau, pressure_guess;
         CLattice3D coord_lattice;
@@ -43,9 +43,9 @@ namespace simbi
         SRHD3D();
         SRHD3D(
             std::vector<std::vector<real>> state3D, 
-            int nx, 
-            int ny,
-            int nz, 
+            luint nx, 
+            luint ny,
+            luint nz, 
             real gamma, 
             std::vector<real> x1,
             std::vector<real> x2, 
@@ -63,8 +63,8 @@ namespace simbi
         void advance(
             SRHD3D *dev, 
             const ExecutionPolicy<> p,
-            const int sh_block_size,
-            const int radius, 
+            const luint sh_block_size,
+            const luint radius, 
             const simbi::Geometry geometry, 
             const simbi::MemSide user);
 
@@ -72,7 +72,7 @@ namespace simbi
         sr3d::Eigenvals calc_Eigenvals(
             const sr3d::Primitive &prims_l,
             const sr3d::Primitive &prims_r,
-            const unsigned int nhat);
+            const luint nhat);
 
         GPU_CALLABLE_MEMBER
         sr3d::Conserved prims2cons(const sr3d::Primitive &prims);
@@ -84,14 +84,14 @@ namespace simbi
             const sr3d::Conserved &right_flux,
             const sr3d::Primitive &left_prims,
             const sr3d::Primitive &right_prims,
-            unsigned int nhat);
+            const luint nhat);
 
-        sr3d::Conserved calc_intermed_statesSR2D(const sr3d::Primitive &prims,
+        sr3d::Conserved calc_luintermed_statesSR2D(const sr3d::Primitive &prims,
                                                  const sr3d::Conserved &state,
                                                  real a,
                                                  real aStar,
                                                  real pStar,
-                                                 int nhat);
+                                                 luint nhat);
 
         GPU_CALLABLE_MEMBER
         sr3d::Conserved calc_hllc_flux(
@@ -101,10 +101,10 @@ namespace simbi
             const sr3d::Conserved &right_flux,
             const sr3d::Primitive &left_prims,
             const sr3d::Primitive &right_prims,
-            const unsigned int nhat);
+            const luint nhat);
 
         GPU_CALLABLE_MEMBER
-        sr3d::Conserved calc_Flux(const sr3d::Primitive &prims, unsigned int nhat);
+        sr3d::Conserved calc_Flux(const sr3d::Primitive &prims, luint nhat);
 
         GPU_CALLABLE_MEMBER
         sr3d::Conserved calc_hll_flux(
@@ -114,9 +114,9 @@ namespace simbi
             const sr3d::Conserved &right_flux,
             const sr3d::Primitive &left_prims,
             const sr3d::Primitive &right_prims,
-            const unsigned int nhat);
+            const luint nhat);
 
-        sr3d::Conserved u_dot(unsigned int ii, unsigned int jj);
+        sr3d::Conserved u_dot(luint ii, luint jj);
 
         std::vector<sr3d::Conserved> u_dot2D(const std::vector<sr3d::Conserved> &cons_state);
 
@@ -130,7 +130,7 @@ namespace simbi
             real init_dt,
             real plm_theta,
             real engine_duration,
-            real chkpt_interval,
+            real chkpt_luinterval,
             std::string data_directory,
             bool first_order,
             bool periodic,

@@ -5,6 +5,10 @@
 #cmakedefine01 FLOAT_PRECISION
 enum class Platform: int {CPU = 0, GPU = 1};
 
+#include "stdint.h"
+typedef uint64_t luint;
+typedef int64_t  lint;
+
 // NVIDIA seems to like to stencil better in 
 // column major order for some reason...hmmmm
 #if defined(__HIP_PLATFORM_NVIDIA__)

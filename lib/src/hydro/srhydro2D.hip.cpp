@@ -25,7 +25,7 @@ using namespace std::chrono;
 SRHD2D::SRHD2D() {}
 
 // Overloaded Constructor
-SRHD2D::SRHD2D(std::vector<std::vector<real>> state2D, int nx, int ny, real gamma,
+SRHD2D::SRHD2D(std::vector<std::vector<real>> state2D, luint nx, luint ny, real gamma,
                std::vector<real> x1, std::vector<real> x2, real CFL,
                std::string coord_system = "cartesian")
 :
@@ -64,7 +64,7 @@ typedef sr2d::Eigenvals Eigenvals;
 GPU_CALLABLE_MEMBER
 Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
                                  const Primitive &prims_r,
-                                 const unsigned int nhat = 1)
+                                 const luint nhat = 1)
 {
     // Eigenvals lambda;
 
@@ -173,7 +173,7 @@ Conserved SRHD2D::prims2cons(const Primitive &prims)
 Conserved SRHD2D::calc_intermed_statesSR2D(const Primitive &prims,
                                            const Conserved &state, real a,
                                            real aStar, real pStar,
-                                           int nhat = 1)
+                                           luint nhat = 1)
 {
     real Dstar, S1star, S2star, tauStar, Estar, cofactor;
     Conserved starStates;
@@ -229,17 +229,17 @@ void SRHD2D::adapt_dt()
     {
         real dx1, cs, dx2, rho, pressure, v1, v2, rmean, h;
         real cfl_dt;
-        int shift_i, shift_j;
+        luint shift_i, shift_j;
         real plus_v1, plus_v2, minus_v1, minus_v2;
-        int aid; // active index id
+        luint aid; // active index id
 
         // Compute the minimum timestep given CFL
-        for (int jj = 0; jj < yphysical_grid; jj++)
+        for (luint jj = 0; jj < yphysical_grid; jj++)
         {
             dx2 = coord_lattice.dx2[jj];
             shift_j = jj + idx_active;
             #pragma omp for schedule(static)
-            for (int ii = 0; ii < xphysical_grid; ii++)
+            for (luint ii = 0; ii < xphysical_grid; ii++)
             {
                 shift_i  = ii + idx_active;
                 aid      = shift_i + nx * shift_j;
@@ -309,7 +309,7 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
 // Get the 2D Flux array (4,1). Either return F or G depending on directional
 // flag
 GPU_CALLABLE_MEMBER
-Conserved SRHD2D::prims2flux(const Primitive &prims, unsigned int nhat = 1)
+Conserved SRHD2D::prims2flux(const Primitive &prims, luint nhat = 1)
 {
 
     const real rho = prims.rho;
@@ -339,7 +339,7 @@ Conserved SRHD2D::calc_hll_flux(
     const Conserved &right_flux,
     const Primitive &left_prims, 
     const Primitive &right_prims,
-    const unsigned int nhat)
+    const luint nhat)
 {
     Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
 
@@ -364,7 +364,7 @@ Conserved SRHD2D::calc_hllc_flux(
     const Conserved &right_flux,
     const Primitive &left_prims,
     const Primitive &right_prims,
-    const unsigned int nhat = 1)
+    const luint nhat = 1)
 {
 
     Conserved starStateR, starStateL;
@@ -611,7 +611,7 @@ void SRHD2D::cons2prim(
     simbi::MemSide user)
 {
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
-    simbi::parallel_for(p, 0, nzones, [=] GPU_LAMBDA (int gid){
+    simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         #if GPU_CODE
         extern __shared__ Conserved  conserved_buff[];
@@ -625,7 +625,7 @@ void SRHD2D::cons2prim(
             conserved_buff[tid] = self->gpu_cons[gid];
             
         simbi::gpu::api::synchronize();
-        int iter  = 0;
+        luint iter  = 0;
         real D    = conserved_buff[tid].D;
         real S1   = conserved_buff[tid].S1;
         real S2   = conserved_buff[tid].S2;
@@ -685,15 +685,15 @@ void SRHD2D::cons2prim(
 void SRHD2D::advance(
     SRHD2D *dev, 
     const ExecutionPolicy<> p,
-    const int bx,
-    const int by,
-    const int radius, 
+    const luint bx,
+    const luint by,
+    const luint radius, 
     const simbi::Geometry geometry, 
     const simbi::MemSide user)
 {
     auto *self = (BuildPlatform == Platform::GPU) ? dev : this;
-    const int xpg                   = this->xphysical_grid;
-    const int ypg                   = this->yphysical_grid;
+    const luint xpg                   = this->xphysical_grid;
+    const luint ypg                   = this->yphysical_grid;
     const bool is_first_order       = this->first_order;
     const bool is_periodic          = this->periodic;
     const bool hllc                 = this->hllc;
@@ -701,11 +701,11 @@ void SRHD2D::advance(
     const real decay_const          = this->decay_const;
     const real plm_theta            = this->plm_theta;
     const real gamma                = this->gamma;
-    const int nx                    = this->nx;
-    const int ny                    = this->ny;
-    const int extent                = (BuildPlatform == Platform::GPU) ? p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
-    const int xextent               = p.blockSize.x;
-    const int yextent               = p.blockSize.y;
+    const luint nx                    = this->nx;
+    const luint ny                    = this->ny;
+    const luint extent                = (BuildPlatform == Platform::GPU) ? p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
+    const luint xextent               = p.blockSize.x;
+    const luint yextent               = p.blockSize.y;
 
     #if GPU_CODE
     const real xmin                 = this->x1min;
@@ -724,40 +724,40 @@ void SRHD2D::advance(
     #endif
 
     const CLattice2D *coord_lattice = &(self->coord_lattice);
-    const int nbs                   = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
+    const luint nbs                   = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
 
     // if on NVidia GPU, do column major striding, row-major otherwise
-    const int sx = (col_maj) ? 1  : bx;
-    const int sy = (col_maj) ? by :  1;
+    const luint sx = (col_maj) ? 1  : bx;
+    const luint sy = (col_maj) ? by :  1;
 
-    simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int idx){
+    simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
         #else 
         auto *const prim_buff = &prims[0];
         #endif 
 
-        const int ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
-        const int jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
+        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
+        const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
         if     constexpr(BuildPlatform == Platform::GPU) if ((ii >= xpg) || (jj >= ypg)) return;
 
-        const int ia  = ii + radius;
-        const int ja  = jj + radius;
-        const int tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
-        const int ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
-        const int txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
-        const int tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
+        const luint ia  = ii + radius;
+        const luint ja  = jj + radius;
+        const luint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
+        const luint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
+        const luint txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
+        const luint tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
 
         Conserved ux_l, ux_r, uy_l, uy_r;
         Conserved f_l, f_r, g_l, g_r, f1, f2, g1, g2;
         Primitive xprims_l, xprims_r, yprims_l, yprims_r;
 
         // do column-major index if on GPU
-        int aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
+        luint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
         if  constexpr(BuildPlatform == Platform::GPU)
         {
-            int txl = xextent;
-            int tyl = yextent;
+            luint txl = xextent;
+            luint tyl = yextent;
 
             // Load Shared memory into buffer for active zones plus ghosts
             prim_buff[tya * sx + txa * sy] = self->gpu_prims[aid];
@@ -903,7 +903,7 @@ void SRHD2D::advance(
             }
 
             //Advance depending on geometry
-            int real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
+            luint real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
 
             switch (geometry)
             {
@@ -947,10 +947,10 @@ void SRHD2D::advance(
                     const real s2R          = sin(tr); //coord_lattice->gpu_x2_face_areas[jj + 1];
                     const real s2L          = sin(tl); //coord_lattice->gpu_x2_face_areas[jj + 0];
                     const real thmean       = 0.5 * (tl + tr);
-                    const real sint         = sin(thmean);
+                    const real sluint         = sin(thmean);
                     const real dV1          = rmean * rmean * (-rl + rr);             
-                    const real dV2          = rmean * sint * dx2; 
-                    const real cot          = cos(thmean) / sint ;
+                    const real dV2          = rmean * sluint * dx2; 
+                    const real cot          = cos(thmean) / sluint ;
 
                     const real d_source  = (d_all_zeros)   ? 0 : self->gpu_sourceD[real_loc];
                     const real s1_source = (s1_all_zeros)  ? 0 : self->gpu_sourceS1[real_loc];
@@ -1303,7 +1303,7 @@ void SRHD2D::advance(
                     g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                 }
             //Advance depending on geometry
-            int real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
+            luint real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
@@ -1342,10 +1342,10 @@ void SRHD2D::advance(
                     const real s2L          = sin(tl); //coord_lattice->gpu_x2_face_areas[jj + 0];
                     // real rmean      = coord_lattice->gpu_x1mean[ii]           ;
                     const real thmean       = 0.5 * (tl + tr);
-                    const real sint         = sin(thmean);
+                    const real sluint         = sin(thmean);
                     const real dV1          = rmean * rmean * (rr - rl);   //coord_lattice->gpu_dV1[ii]              ;
-                    const real dV2          = rmean * sint * dx2; //rmean * coord_lattice->gpu_dV2[jj]    
-                    const real cot          = cos(thmean) / sint ;
+                    const real dV2          = rmean * sluint * dx2; //rmean * coord_lattice->gpu_dV2[jj]    
+                    const real cot          = cos(thmean) / sluint ;
 
                     const real d_source  = (d_all_zeros)   ? 0 : self->gpu_sourceD[real_loc];
                     const real s1_source = (s1_all_zeros)  ? 0 : self->gpu_sourceS1[real_loc];
@@ -1445,7 +1445,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     bool hllc)
 {
     std::string tnow, tchunk, tstep, filename;
-    int total_zones = nx * ny;
+    luint total_zones = nx * ny;
     
     real round_place = 1 / chkpt_interval;
     real t = tstart;
@@ -1574,26 +1574,17 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // Some variables to handle file automatic file string
     // formatting 
     tchunk = "000000";
-    int tchunk_order_of_mag = 2;
-    int time_order_of_mag;
+    luint tchunk_order_of_mag = 2;
+    luint time_order_of_mag;
 
     // // Setup the system
-    const int nxBlocks          = (nx + BLOCK_SIZE2D - 1) / BLOCK_SIZE2D;
-    const int nyBlocks          = (ny + BLOCK_SIZE2D - 1) / BLOCK_SIZE2D;
-    const int physical_nxBlocks = (xphysical_grid + BLOCK_SIZE2D - 1) / BLOCK_SIZE2D;
-    const int physical_nyBlocks = (yphysical_grid + BLOCK_SIZE2D - 1) / BLOCK_SIZE2D;
-
-    dim3 agridDim  = dim3(physical_nxBlocks, physical_nyBlocks);    // active grid dimensions
-    dim3 fgridDim  = dim3(nxBlocks, nyBlocks);                      // full grid dimensions
-    dim3 threadDim = dim3(BLOCK_SIZE2D, BLOCK_SIZE2D);              // thread block dimensions
-
-    const int xblockdim         = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
-    const int yblockdim         = yphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : yphysical_grid;
-    const int radius            = (first_order) ? 1 : 2;
-    const int bx                = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
-    const int by                = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
-    const int shBlockSpace      = bx * by;
-    const unsigned shBlockBytes = shBlockSpace * sizeof(Primitive);
+    const luint xblockdim       = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
+    const luint yblockdim       = yphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : yphysical_grid;
+    const luint radius          = (first_order) ? 1 : 2;
+    const luint bx              = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
+    const luint by              = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
+    const luint shBlockSpace    = bx * by;
+    const luint shBlockBytes    = shBlockSpace * sizeof(Primitive);
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
 
@@ -1615,9 +1606,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     simbi::gpu::api::deviceSynch();
     
     // Some benchmarking tools 
-    int      n   = 0;
-    int  nfold   = 0;
-    int  ncheck  = 0;
+    luint      n   = 0;
+    luint  nfold   = 0;
+    luint  ncheck  = 0;
     real zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;

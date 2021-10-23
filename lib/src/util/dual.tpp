@@ -5,17 +5,17 @@ namespace simbi
         template<typename T, typename C, typename U>
         void DualSpace1D<T, C, U>::copyHostToDev(const U &host, U *device)
         {
-            int nz     = host.nx;
-            int nzreal = host.active_zones; 
+            luint nz     = host.nx;
+            luint nzreal = host.active_zones; 
 
             // Precompute byes
-            int cbytes  = nz * sizeof(C);
-            int pbytes  = nz * sizeof(T);
-            int rbytes  = nz * sizeof(real);
+            luint cbytes  = nz * sizeof(C);
+            luint pbytes  = nz * sizeof(T);
+            luint rbytes  = nz * sizeof(real);
 
 
-            int rrbytes = nzreal * sizeof(real);
-            int fabytes = host.coord_lattice.face_areas.size() * sizeof(real);
+            luint rrbytes = nzreal * sizeof(real);
+            luint fabytes = host.coord_lattice.face_areas.size() * sizeof(real);
 
             //--------Allocate the memory for pointer objects-------------------------
             simbi::gpu::api::gpuMalloc(&host_u0,               cbytes);
@@ -75,9 +75,9 @@ namespace simbi
         template<typename T, typename C, typename U>
         void DualSpace1D<T, C, U>::copyDevToHost(const U *device, U &host)
         {
-            const int nz     = host.nx;
-            const int cbytes = nz * sizeof(C); 
-            const int pbytes = nz * sizeof(T); 
+            const luint nz     = host.nx;
+            const luint cbytes = nz * sizeof(C); 
+            const luint pbytes = nz * sizeof(T); 
 
             simbi::gpu::api::copyDevToHost(host.cons.data(),  host_u0,    cbytes);
             simbi::gpu::api::copyDevToHost(host.prims.data(), host_prims, pbytes);
@@ -89,24 +89,24 @@ namespace simbi
             U *device
         )
         {
-            int nx     = host.nx;
-            int ny     = host.ny;
-            int nxreal = host.xphysical_grid; 
-            int nyreal = host.yphysical_grid;
+            luint nx     = host.nx;
+            luint ny     = host.ny;
+            luint nxreal = host.xphysical_grid; 
+            luint nyreal = host.yphysical_grid;
 
-            int nzones = nx * ny;
-            int nzreal = nxreal * nyreal;
+            luint nzones = nx * ny;
+            luint nzreal = nxreal * nyreal;
 
             // Precompute byes
-            int cbytes  = nzones * sizeof(C);
-            int pbytes  = nzones * sizeof(T);
-            int rbytes  = nzones * sizeof(real);
+            luint cbytes  = nzones * sizeof(C);
+            luint pbytes  = nzones * sizeof(T);
+            luint rbytes  = nzones * sizeof(real);
 
-            int rrbytes  = nzreal * sizeof(real);
-            int r1bytes  = nxreal * sizeof(real);
-            int r2bytes  = nyreal * sizeof(real);
-            int fa1bytes = host.coord_lattice.x1_face_areas.size() * sizeof(real);
-            int fa2bytes = host.coord_lattice.x2_face_areas.size() * sizeof(real);
+            luint rrbytes  = nzreal * sizeof(real);
+            luint r1bytes  = nxreal * sizeof(real);
+            luint r2bytes  = nyreal * sizeof(real);
+            luint fa1bytes = host.coord_lattice.x1_face_areas.size() * sizeof(real);
+            luint fa2bytes = host.coord_lattice.x2_face_areas.size() * sizeof(real);
 
             //--------Allocate the memory for pointer objects-------------------------
             simbi::gpu::api::gpuMalloc(&host_u0,              cbytes  );
@@ -212,10 +212,10 @@ namespace simbi
             U &host
         )
         {
-            const int nx     = host.nx;
-            const int ny     = host.ny;
-            const int cbytes = nx * ny * sizeof(C); 
-            const int pbytes = nx * ny * sizeof(T);
+            const luint nx     = host.nx;
+            const luint ny     = host.ny;
+            const luint cbytes = nx * ny * sizeof(C); 
+            const luint pbytes = nx * ny * sizeof(T);
 
             simbi::gpu::api::copyDevToHost(host.cons.data(), host_u0, cbytes);
             simbi::gpu::api::copyDevToHost(host.prims.data(),   host_prims , pbytes);
@@ -229,28 +229,28 @@ namespace simbi
             V *device
         )
         {
-            int nx     = host.nx;
-            int ny     = host.ny;
-            int nz     = host.nz;
-            int nxreal = host.xphysical_grid; 
-            int nyreal = host.yphysical_grid;
-            int nzreal = host.zphysical_grid;
+            luint nx     = host.nx;
+            luint ny     = host.ny;
+            luint nz     = host.nz;
+            luint nxreal = host.xphysical_grid; 
+            luint nyreal = host.yphysical_grid;
+            luint nzreal = host.zphysical_grid;
 
-            int nzones      = nx * ny * nz;
-            int nzones_real = nxreal * nyreal * nzreal;
+            luint nzones      = nx * ny * nz;
+            luint nzones_real = nxreal * nyreal * nzreal;
 
             // Precompute byes
-            int cbytes  = nzones * sizeof(U);
-            int pbytes  = nzones * sizeof(T);
-            int rbytes  = nzones * sizeof(real);
+            luint cbytes  = nzones * sizeof(U);
+            luint pbytes  = nzones * sizeof(T);
+            luint rbytes  = nzones * sizeof(real);
 
-            int rrbytes  = nzones_real * sizeof(real);
-            int r1bytes  = nxreal * sizeof(real);
-            int r2bytes  = nyreal * sizeof(real);
-            int r3bytes  = nzreal * sizeof(real);
-            int fa1bytes = host.coord_lattice.x1_face_areas.size() * sizeof(real);
-            int fa2bytes = host.coord_lattice.x2_face_areas.size() * sizeof(real);
-            int fa3bytes = host.coord_lattice.x3_face_areas.size() * sizeof(real);
+            luint rrbytes  = nzones_real * sizeof(real);
+            luint r1bytes  = nxreal * sizeof(real);
+            luint r2bytes  = nyreal * sizeof(real);
+            luint r3bytes  = nzreal * sizeof(real);
+            luint fa1bytes = host.coord_lattice.x1_face_areas.size() * sizeof(real);
+            luint fa2bytes = host.coord_lattice.x2_face_areas.size() * sizeof(real);
+            luint fa3bytes = host.coord_lattice.x3_face_areas.size() * sizeof(real);
 
             
 
@@ -355,11 +355,11 @@ namespace simbi
             V &host
         )
         {
-            const int nx     = host.nx;
-            const int ny     = host.ny;
-            const int nz     = host.nz;
-            const int cbytes = nx * ny * nz * sizeof(U); 
-            const int pbytes = nx * ny * nz * sizeof(T);
+            const luint nx     = host.nx;
+            const luint ny     = host.ny;
+            const luint nz     = host.nz;
+            const luint cbytes = nx * ny * nz * sizeof(U); 
+            const luint pbytes = nx * ny * nz * sizeof(T);
 
             simbi::gpu::api::copyDevToHost(host.cons.data(), host_u0, cbytes);
             simbi::gpu::api::copyDevToHost(host.prims.data(), host_prims , pbytes);

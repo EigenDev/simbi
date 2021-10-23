@@ -18,7 +18,7 @@ namespace simbi {
     };
 
 
-    template<typename T = int, typename U = int>
+    template<typename T = luint, typename U = luint>
     struct ExecutionPolicy
     {
         T      nzones;
@@ -85,15 +85,15 @@ namespace simbi {
                 this->blockSize = dim3(blist[0]); 
             } else if (glist.size() == 2)
             {
-                int nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
-                int nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
+                luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
+                luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
                 this->gridSize  = dim3(nxBlocks, nyBlocks);
                 this->blockSize = dim3(blist[0], blist[1]); 
             } else if (glist.size() == 3)
             {
-                int nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
-                int nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
-                int nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];
+                luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
+                luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
+                luint nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];
                 this->gridSize  = dim3(nxBlocks, nyBlocks, nzBlocks);
                 this->blockSize = dim3(blist[0], blist[1], blist[2]); 
             }
@@ -120,15 +120,15 @@ namespace simbi {
                 this->blockSize = dim3(blist[0]); 
             } else if (glist.size() == 2)
             {
-                int nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
-                int nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
+                luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
+                luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
                 this->gridSize  = dim3(nxBlocks, nyBlocks);
                 this->blockSize = dim3(blist[0], blist[1]); 
             } else if (glist.size() == 3)
             {
-                int nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
-                int nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
-                int nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];
+                luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
+                luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
+                luint nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];
                 this->gridSize  = dim3(nxBlocks, nyBlocks, nzBlocks);
                 this->blockSize = dim3(blist[0], blist[1], blist[2]); 
             }
@@ -154,15 +154,15 @@ namespace simbi {
                 this->blockSize = dim3(blist[0]); 
             } else if (glist.size() == 2)
             {
-                int nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
-                int nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
+                luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
+                luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
                 this->gridSize  = dim3(nxBlocks, nyBlocks);
                 this->blockSize = dim3(blist[0], blist[1]); 
             } else if (glist.size() == 3)
             {
-                int nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
-                int nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
-                int nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];
+                luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
+                luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
+                luint nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];
                 this->gridSize  = dim3(nxBlocks, nyBlocks, nzBlocks);
                 this->blockSize = dim3(blist[0], blist[1], blist[2]); 
             }
@@ -171,7 +171,7 @@ namespace simbi {
             
         ~ExecutionPolicy() {}
 
-        T compute_blocks(const T nzones, const int nThreads) const
+        T compute_blocks(const T nzones, const luint nThreads) const
         {
             return (nzones + nThreads - 1) / nThreads;
         }

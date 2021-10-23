@@ -58,8 +58,8 @@ void SRHD::set_mirror_ptrs()
 //=====================================================================
 void SRHD::advance(
     SRHD *dev,  
-    const int sh_block_size,
-    const int radius, 
+    const luint sh_block_size,
+    const luint radius, 
     const simbi::Geometry geometry,
     const simbi::MemSide user)
 {
@@ -71,11 +71,11 @@ void SRHD::advance(
     
     const real dt                   = this->dt;
     const real plm_theta            = this->plm_theta;
-    const int nx                    = this->nx;
+    const luint nx                  = this->nx;
     const real decay_constant       = this->decay_constant;
     const CLattice1D *coord_lattice = &(self->coord_lattice);
 
-    simbi::parallel_for(p, 0, active_zones, [=] GPU_LAMBDA (int ii) {
+    simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
         #else 
@@ -400,14 +400,14 @@ void SRHD::advance(
 void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 {
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
-    simbi::parallel_for(p, 0, nx, [=] GPU_LAMBDA (int ii){
+    simbi::parallel_for(p, (luint)0, nx, [=] GPU_LAMBDA (luint ii){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         #if GPU_CODE
         __shared__ Conserved  conserved_buff[BLOCK_SIZE];
         #else 
         auto* const conserved_buff = &cons[0];
         #endif 
-        int tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
+        luint tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
 
         // Compile time thread selection
         if constexpr(BuildPlatform == Platform::GPU)
@@ -543,7 +543,7 @@ void SRHD::adapt_dt()
 
         // Compute the minimum timestep given CFL
         #pragma omp for schedule(static)
-        for (int ii = 0; ii < active_zones; ii++)
+        for (luint ii = 0; ii < active_zones; ii++)
         {
             dr  = coord_lattice.dx1[ii];
             rho = prims[ii + idx_shift].rho;
@@ -565,7 +565,7 @@ void SRHD::adapt_dt()
     dt = CFL * min_dt;
 };
 
-void SRHD::adapt_dt(SRHD *dev, int blockSize)
+void SRHD::adapt_dt(SRHD *dev, luint blockSize)
 {   
     #if GPU_CODE
     {
@@ -840,7 +840,7 @@ SRHD::simulate1D(
     pressure_guess.resize(nx);
     dt_arr.resize(nx);
     // Copy the state array into real & profile variables
-    for (int ii = 0; ii < nx; ii++)
+    for (luint ii = 0; ii < nx; ii++)
     {
 
         cons[ii] = Conserved{state[0][ii],
@@ -876,18 +876,11 @@ SRHD::simulate1D(
     simbi::dual::DualSpace1D<Primitive, Conserved, SRHD> dualMem;
     dualMem.copyHostToDev(*this, device_self);
 
-    // Config the system
-    const int nBlocks          = (nx + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    const int physical_nBlocks = (active_zones + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    const dim3 fgridDim   = dim3(nBlocks);
-    const dim3 agridDim   = dim3(physical_nBlocks);
-    const dim3 threadDim  = dim3(BLOCK_SIZE);
-
-    const auto fullP            = simbi::ExecutionPolicy(nx);
-    const auto activeP          = simbi::ExecutionPolicy(active_zones);
-    const unsigned int radius   = (first_order) ? 1 : 2;
-    const int shBlockSize       = BLOCK_SIZE + 2 * radius;
-    const unsigned shBlockBytes = shBlockSize * sizeof(Primitive);
+    const auto fullP              = simbi::ExecutionPolicy(nx);
+    const auto activeP            = simbi::ExecutionPolicy(active_zones);
+    const luint radius            = (first_order) ? 1 : 2;
+    const luint shBlockSize       = BLOCK_SIZE + 2 * radius;
+    const luint shBlockBytes      = shBlockSize * sizeof(Primitive);
 
     if constexpr(BuildPlatform == Platform::GPU)
         cons2prim(fullP, device_self, simbi::MemSide::Dev);
@@ -899,7 +892,7 @@ SRHD::simulate1D(
     // Adapt the timestep
     if constexpr(BuildPlatform == Platform::GPU)
     {
-        adapt_dt(device_self, physical_nBlocks);
+        adapt_dt(device_self, activeP.gridSize.x);
     } else {
         adapt_dt();
     }
@@ -907,12 +900,12 @@ SRHD::simulate1D(
     // Some variables to handle file automatic file string
     // formatting 
     tchunk = "000000";
-    int tchunk_order_of_mag = 2;
-    int time_order_of_mag;
+    luint tchunk_order_of_mag = 2;
+    luint time_order_of_mag;
 
     // Some benchmarking tools 
-    int   nfold   = 0;
-    int   ncheck  = 0;
+    luint   nfold   = 0;
+    luint   ncheck  = 0;
     real zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;
@@ -977,7 +970,7 @@ SRHD::simulate1D(
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
-                adapt_dt(device_self, physical_nBlocks);
+                adapt_dt(device_self, activeP.gridSize.x);
             } else {
                 adapt_dt();
             }
@@ -1050,7 +1043,7 @@ SRHD::simulate1D(
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
-                adapt_dt(device_self, physical_nBlocks);
+                adapt_dt(device_self, activeP.gridSize.x);
             } else {
                 adapt_dt();
             }
@@ -1071,7 +1064,7 @@ SRHD::simulate1D(
     
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
-    for (int ii = 0; ii < nx; ii++)
+    for (luint ii = 0; ii < nx; ii++)
     {
         final_prims[0][ii] = prims[ii].rho;
         final_prims[1][ii] = prims[ii].v;

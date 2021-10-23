@@ -96,14 +96,14 @@ namespace simbi{
         __shared__  N prim_buff[BLOCK_SIZE2D][BLOCK_SIZE2D];
 
         real cfl_dt, rmean, rl, rr, dr;
-        const int tx  = threadIdx.x;
-        const int ty  = threadIdx.y;
-        const int tid = blockDim.x * ty + tx;
-        const int ii  = blockDim.x * blockIdx.x + threadIdx.x;
-        const int jj  = blockDim.y * blockIdx.y + threadIdx.y;
-        const int ia  = ii + s->idx_active;
-        const int ja  = jj + s->idx_active;
-        const int aid = (col_maj) ? ia * s-> ny + ja : ja * s->nx + ia;
+        const luint tx  = threadIdx.x;
+        const luint ty  = threadIdx.y;
+        const luint tid = blockDim.x * ty + tx;
+        const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
+        const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
+        const luint ia  = ii + s->idx_active;
+        const luint ja  = jj + s->idx_active;
+        const luint aid = (col_maj) ? ia * s-> ny + ja : ja * s->nx + ia;
         // const CLattice2D *coord_lattice = &(s->coord_lattice);
 
         if (aid < s->active_zones)
@@ -146,7 +146,7 @@ namespace simbi{
             dt_buff[tid] = s->CFL * cfl_dt;
             __syncthreads();
 
-            for (unsigned int stride=(blockDim.x*blockDim.y)/2; stride>32; stride>>=1) 
+            for (luint stride=(blockDim.x*blockDim.y)/2; stride>32; stride>>=1) 
             {   
                 if (tid < stride) dt_buff[tid] = dt_buff[tid] < dt_buff[tid + stride] ? dt_buff[tid] : dt_buff[tid + stride]; 
                 __syncthreads();

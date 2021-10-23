@@ -19,7 +19,7 @@ namespace simbi
 {
      struct SRHD
      {
-          int xmin, xmax;
+          lint xmin, xmax;
           real dt;
           real gamma, CFL;
           std::string coord_system;
@@ -39,7 +39,7 @@ namespace simbi
           std::vector<sr1d::Conserved> cons;
           std::vector<sr1d::Primitive> prims;
 
-          int nx, n, active_zones, idx_shift, i_start, i_bound;
+          luint nx, n, active_zones, idx_shift, i_start, i_bound;
           real tend;
           real plm_theta, engine_duration, t, decay_constant;
           bool first_order, periodic, linspace, hllc;
@@ -56,8 +56,8 @@ namespace simbi
 
           void advance(
                SRHD *s, 
-               const int sh_block_size, 
-               const int radius, 
+               const luint sh_block_size, 
+               const luint radius, 
                const simbi::Geometry geometry, 
                const simbi::MemSide user = simbi::MemSide::Host);
 
@@ -83,7 +83,7 @@ namespace simbi
                                          const sr1d::Primitive &prims_r);
 
           void adapt_dt();
-          void adapt_dt(SRHD *dev, int blockSize);
+          void adapt_dt(SRHD *dev, luint blockSize);
 
           GPU_CALLABLE_MEMBER
           sr1d::Conserved prims2cons(const sr1d::Primitive &prim);
@@ -141,7 +141,7 @@ namespace simbi
           //==============================================================
           //             GPU RESOURCES
           //==============================================================
-          int blockSize;
+          luint blockSize;
           sr1d::Conserved *gpu_cons, *gpu_du_dt, *gpu_u1;
           sr1d::Primitive *gpu_prims;
           real            *gpu_pressure_guess, *gpu_sourceD, *gpu_sourceS, *gpu_source0, *dt_min;
