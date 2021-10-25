@@ -608,30 +608,31 @@ void SRHD2D::advance(
     #if GPU_CODE
     const bool first_order         = this->first_order;
     const bool periodic            = this->periodic;
-    const bool hllc                   = this->hllc;
-    const real dt                     = this->dt;
-    const real decay_const            = this->decay_const;
-    const real plm_theta              = this->plm_theta;
-    const real gamma                  = this->gamma;
-    const luint nx                    = this->nx;
-    const luint ny                    = this->ny;
-    const real xmin                 = this->x1min;
-    const real xmax                 = this->x1max;
-    const real ymin                 = this->x2min;
-    const real ymax                 = this->x2max;
-    const real dx2                  = this->dx2;
-    const real dlogx1               = this->dlogx1;
-    const real dx1                  = this->dx1;
-    const real imax                 = this->xphysical_grid - 1;
-    const real jmax                 = this->yphysical_grid - 1;
-    const bool d_all_zeros          = this->d_all_zeros;
-    const bool s1_all_zeros         = this->s1_all_zeros;
-    const bool s2_all_zeros         = this->s2_all_zeros;
-    const bool e_all_zeros          = this->e_all_zeros;
+    const bool hllc                = this->hllc;
+    const real dt                  = this->dt;
+    const real decay_const         = this->decay_const;
+    const real plm_theta           = this->plm_theta;
+    const real gamma               = this->gamma;
+    const luint nx                 = this->nx;
+    const luint ny                 = this->ny;
+    const real xmin                = this->x1min;
+    const real xmax                = this->x1max;
+    const real ymin                = this->x2min;
+    const real ymax                = this->x2max;
+    const real dx2                 = this->dx2;
+    const real dlogx1              = this->dlogx1;
+    const real dx1                 = this->dx1;
+    const real imax                = this->xphysical_grid - 1;
+    const real jmax                = this->yphysical_grid - 1;
+    const bool d_all_zeros         = this->d_all_zeros;
+    const bool s1_all_zeros        = this->s1_all_zeros;
+    const bool s2_all_zeros        = this->s2_all_zeros;
+    const bool e_all_zeros         = this->e_all_zeros;
+    const real pow_dlogr           = pow(10, dlogx1);
     #endif
 
     // const CLattice2D *coord_lattice = &(self->coord_lattice);
-    const luint nbs                   = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
+    const luint nbs = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
 
     // if on NVidia GPU, do column major striding, row-major otherwise
     const luint sx = (col_maj) ? 1  : bx;
@@ -644,14 +645,15 @@ void SRHD2D::advance(
         auto *const prim_buff = &prims[0];
         #endif 
 
-        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
-        const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
-        if     constexpr(BuildPlatform == Platform::GPU) if ((ii >= xpg) || (jj >= ypg)) return;
+        const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
+        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
+        if       constexpr(BuildPlatform == Platform::GPU) if ((ii >= xpg) || (jj >= ypg)) return;
 
+        // printf("ii=%lu, jj=%lu\n", ii, jj);
         const luint ia  = ii + radius;
         const luint ja  = jj + radius;
-        const luint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
-        const luint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
+        const luint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
+        const luint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
         const luint txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
         const luint tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
 
@@ -845,7 +847,7 @@ void SRHD2D::advance(
                     {
                     #if GPU_CODE
                     const real rl           = (ii > 0)    ? xmin * pow(10, (ii - 0.5) * dlogx1) : xmin;
-                    const real rr           = (ii < imax) ? rl   * pow(10, dlogx1) : xmax;
+                    const real rr           = (ii < imax) ? rl   * pow_dlogr: xmax;
                     const real tl           = (jj > 0)    ? ymin + (jj - 0.5) * dx2: ymin;
                     const real tr           = (jj < jmax) ? tl + dx2 : ymax; 
                     const real rmean        = (real)0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
@@ -1239,7 +1241,7 @@ void SRHD2D::advance(
                     {
                     #if GPU_CODE
                     const real rl           = (ii > 0)    ? xmin * pow(10, (ii - 0.5) * dlogx1) : xmin;
-                    const real rr           = (ii < imax) ? rl   * pow(10, dlogx1) : xmax;
+                    const real rr           = (ii < imax) ? rl   * pow_dlogr: xmax;
                     const real tl           = (jj > 0)    ? ymin + (jj - 0.5) * dx2: ymin;
                     const real tr           = (jj < jmax) ? tl + dx2 : ymax; 
                     const real rmean        = (real)0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
@@ -1492,7 +1494,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const luint shBlockSpace    = bx * by;
     const luint shBlockBytes    = shBlockSpace * sizeof(Primitive);
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
-    const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
+    const auto activeP          = simbi::ExecutionPolicy({yphysical_grid, xphysical_grid}, {yblockdim, xblockdim}, shBlockBytes);
 
     if (t == 0)
     {
@@ -1582,7 +1584,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
             
             n++;
-
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
@@ -1590,6 +1591,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             } else {
                 adapt_dt();
             }
+            // std::cin.get();
 
             // Update decay constant
             decay_const = 1 / (1 + exp((real)10.0 * (t - engine_duration)));
