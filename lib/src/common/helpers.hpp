@@ -99,7 +99,7 @@ template <typename... Args>
 std::string string_format(const std::string &format, Args... args);
 
 template <typename T>
-GPU_CALLABLE_MEMBER
+GPU_CALLABLE_INLINE
 constexpr int sgn(T val) { return (T(0) < val) - (val < T(0)); }
 
 template<typename T>
@@ -146,10 +146,38 @@ void config_ghosts2D(
 
 
 //-------------------Inline for Speed--------------------------------------
-GPU_CALLABLE_MEMBER inline real minmod(const real x, const real y, const real z)
+GPU_CALLABLE_INLINE real minmod(const real x, const real y, const real z)
 {
     return 0.25 * std::abs(sgn(x) + sgn(y)) * (sgn(x) + sgn(z)) * my_min(my_min(std::abs(x), std::abs(y)) , std::abs(z)) ;
 };
+
+template<typename T>
+GPU_CALLABLE_INLINE typename std::enable_if<is_2D_primitive<T>::value, T>::type
+minmod(const T x, const T y, const T z)
+{
+    real xrho = x.rho;
+    real xv1  = x.v1;
+    real xv2  = x.v2;
+    real xp   = x.p;
+
+    real yrho = y.rho;
+    real yv1  = y.v1;
+    real yv2  = y.v2;
+    real yp   = y.p;
+
+    real zrho = z.rho;
+    real zv1  = z.v1;
+    real zv2  = z.v2;
+    real zp   = z.p;
+
+     return T{(real)0.25 * std::abs(sgn(xrho) + sgn(yrho)) * (sgn(xrho) + sgn(zrho)) * my_min(my_min(std::abs(xrho), std::abs(yrho)) , std::abs(zrho)),
+              (real)0.25 * std::abs(sgn(xv1) + sgn(yv1)) * (sgn(xv1) + sgn(zv1)) * my_min(my_min(std::abs(xv1), std::abs(yv1)) , std::abs(zv1)),
+              (real)0.25 * std::abs(sgn(xv2) + sgn(yv2)) * (sgn(xv2) + sgn(zv2)) * my_min(my_min(std::abs(xv2), std::abs(yv2)) , std::abs(zv2)),
+              (real)0.25 * std::abs(sgn(xp) + sgn(yp)) * (sgn(xp) + sgn(zp)) * my_min(my_min(std::abs(xp), std::abs(yp)) , std::abs(zp))
+     };
+
+}
+
 
 #include "helpers.tpp"
 #endif
