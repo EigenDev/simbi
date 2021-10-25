@@ -13,13 +13,7 @@ namespace simbi
     //          GPU TEMPLATES
     //======================================
     template <unsigned int blockSize>
-    GPU_DEV void warpReduceMin(volatile real smem[BLOCK_SIZE], const int tid);
-
-    template<unsigned int blockSize>
-    GPU_DEV void warpReduceMin(volatile real smem[BLOCK_SIZE2D * BLOCK_SIZE2D], const int tx, const int ty);
-
-    template<unsigned int blockSize>
-    GPU_DEV void warpReduceMin(volatile real smem[BLOCK_SIZE3D * BLOCK_SIZE3D * BLOCK_SIZE3D], const int tx, const int ty, const int tz);
+    GPU_DEV void warpReduceMin(volatile real* smem, unsigned int tid);
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_1D_primitive<N>::value>::type 
@@ -27,7 +21,13 @@ namespace simbi
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
-    dtWarpReduce(T *s, const simbi::Geometry geometry);
+    dtWarpReduce(T *s, const simbi::Geometry geometry, 
+        real dx, 
+        real dy, 
+        real rmin = 0, 
+        real rmax = 1,
+        real ymin = 0,
+        real ymax = 1);
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_3D_primitive<N>::value>::type 
@@ -41,6 +41,9 @@ namespace simbi
     {
         return abs(pr - pl) / my_min(pl, pr) > QUIRK_THERSHOLD;
     }
+
+    GPU_CALLABLE_INLINE
+    unsigned int kronecker(luint i, luint j) { return (i == j ? 1 : 0); }
 
     void config_ghosts1DGPU(
         const ExecutionPolicy<> p,

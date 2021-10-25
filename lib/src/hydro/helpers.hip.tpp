@@ -1,32 +1,8 @@
 
 namespace simbi{
     template<unsigned int blockSize>
-    GPU_DEV void warpReduceMin(volatile real smem[BLOCK_SIZE], int tid)
+    GPU_DEV void warpReduceMin(volatile real* smem, unsigned int tid)
     {
-        if (blockSize >= 64) smem[tid] = (smem[tid] < smem[tid + 32]) ? smem[tid] : smem[tid + 32];
-        if (blockSize >= 32) smem[tid] = (smem[tid] < smem[tid + 16]) ? smem[tid] : smem[tid + 16];
-        if (blockSize >= 16) smem[tid] = (smem[tid] < smem[tid +  8]) ? smem[tid] : smem[tid +  8];
-        if (blockSize >=  8) smem[tid] = (smem[tid] < smem[tid +  4]) ? smem[tid] : smem[tid +  4];
-        if (blockSize >=  4) smem[tid] = (smem[tid] < smem[tid +  2]) ? smem[tid] : smem[tid +  2];
-        if (blockSize >=  2) smem[tid] = (smem[tid] < smem[tid +  1]) ? smem[tid] : smem[tid +  1];
-    };
-
-    template<unsigned int blockSize>
-    GPU_DEV void warpReduceMin(volatile real smem[BLOCK_SIZE2D * BLOCK_SIZE2D], const int tx, const int ty)
-    {
-        const int tid = blockDim.x * ty + tx;
-        if (blockSize >= 64) smem[tid] = (smem[tid] < smem[tid + 32]) ? smem[tid] : smem[tid + 32];
-        if (blockSize >= 32) smem[tid] = (smem[tid] < smem[tid + 16]) ? smem[tid] : smem[tid + 16];
-        if (blockSize >= 16) smem[tid] = (smem[tid] < smem[tid +  8]) ? smem[tid] : smem[tid +  8];
-        if (blockSize >=  8) smem[tid] = (smem[tid] < smem[tid +  4]) ? smem[tid] : smem[tid +  4];
-        if (blockSize >=  4) smem[tid] = (smem[tid] < smem[tid +  2]) ? smem[tid] : smem[tid +  2];
-        if (blockSize >=  2) smem[tid] = (smem[tid] < smem[tid +  1]) ? smem[tid] : smem[tid +  1];
-    };
-
-    template<unsigned int blockSize>
-    GPU_DEV void warpReduceMin(volatile real smem[BLOCK_SIZE2D * BLOCK_SIZE2D], const int tx, const int ty, const int tz)
-    {
-        const int tid = blockDim.x * blockDim.y * tz + blockDim.x * ty + tx;
         if (blockSize >= 64) smem[tid] = (smem[tid] < smem[tid + 32]) ? smem[tid] : smem[tid + 32];
         if (blockSize >= 32) smem[tid] = (smem[tid] < smem[tid + 16]) ? smem[tid] : smem[tid + 16];
         if (blockSize >= 16) smem[tid] = (smem[tid] < smem[tid +  8]) ? smem[tid] : smem[tid +  8];
@@ -87,15 +63,23 @@ namespace simbi{
         }
     }; // end dtWarpReduce
 
+    
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
-    dtWarpReduce(T *s, const simbi::Geometry geometry, real dx, real dy, real rmin = 0, real rmax = 1)
+    dtWarpReduce(T *s, 
+        const simbi::Geometry geometry, 
+        real dx, 
+        real dy, 
+        real rmin, 
+        real rmax,
+        real ymin,
+        real ymax)
     {
         const real gamma     = s->gamma;
         __shared__ volatile real dt_buff[BLOCK_SIZE2D * BLOCK_SIZE2D];
         __shared__  N prim_buff[BLOCK_SIZE2D][BLOCK_SIZE2D];
 
-        real cfl_dt, rmean, rl, rr, dr;
+        real cfl_dt, rmean, rl, rr, dr, tl, tr;
         const luint tx  = threadIdx.x;
         const luint ty  = threadIdx.y;
         const luint tid = blockDim.x * ty + tx;
@@ -106,62 +90,62 @@ namespace simbi{
         const luint aid = (col_maj) ? ia * s-> ny + ja : ja * s->nx + ia;
         // const CLattice2D *coord_lattice = &(s->coord_lattice);
 
-        if (aid < s->active_zones)
+        if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid))
         {
             prim_buff[ty][tx] = s->gpu_prims[aid];
             __syncthreads();
 
-            // real dx1  = s->coord_lattice.gpu_dx1[ii];
-            // real dx2  = s->coord_lattice.gpu_dx2[jj];
             real rho  = prim_buff[ty][tx].rho;
             real p    = prim_buff[ty][tx].p;
             real v1   = prim_buff[ty][tx].v1;
             real v2   = prim_buff[ty][tx].v2;
 
-            real h  = 1. + gamma * p / (rho * (gamma - 1.));
+            real h  = 1 + gamma * p / (rho * (gamma - 1));
             real cs = sqrt(gamma * p / (rho * h));
 
-            real plus_v1  = (v1 + cs) / (1. + v1 * cs);
-            real plus_v2  = (v2 + cs) / (1. + v2 * cs);
-            real minus_v1 = (v1 - cs) / (1. - v1 * cs);
-            real minus_v2 = (v2 - cs) / (1. - v2 * cs);
+            real plus_v1  = (v1 + cs) / (1 + v1 * cs);
+            real plus_v2  = (v2 + cs) / (1 + v2 * cs);
+            real minus_v1 = (v1 - cs) / (1 - v1 * cs);
+            real minus_v2 = (v2 - cs) / (1 - v2 * cs);
 
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
-                    cfl_dt = my_min(dx / (my_max(abs(plus_v1), abs(minus_v1))),
-                                    dy / (my_max(abs(plus_v2), abs(minus_v2))));
+                    cfl_dt = my_min(dx / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                    dy / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    rl = (ii > 0) ? rmin*pow(10, (ii - 0.5) * dx)   : rmin;
-                    rr = (ii < s->xphysical_grid) ? rl * pow(10, dx) : rmax; 
+                    rl    = (ii > 0) ? rmin*pow(10, (ii - 0.5) * dx)    : rmin;
+                    rr    = (ii < s->xphysical_grid - 1) ? rl * pow(10, dx) : rmax; 
+                    tl    = (jj > 0) ? ymin + (jj - 0.5) * dy   : ymin;
+                    tr    = (jj < s->yphysical_grid - 1) ? tl + dy : ymax; 
                     rmean = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
-                    cfl_dt = my_min(dr / (my_max(abs(plus_v1), abs(minus_v1))),
-                                    rmean * dy / (my_max(abs(plus_v2), abs(minus_v2))));
+                    cfl_dt = my_min((rr - rl) / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                            rmean * (tr - tl) / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
                     break;
             } // end switch
 
             dt_buff[tid] = s->CFL * cfl_dt;
             __syncthreads();
 
-            for (luint stride=(blockDim.x*blockDim.y)/2; stride>32; stride>>=1) 
+            for (luint stride=(blockDim.x*blockDim.y)/2; stride > 32; stride>>=1) 
             {   
-                if (tid < stride) dt_buff[tid] = dt_buff[tid] < dt_buff[tid + stride] ? dt_buff[tid] : dt_buff[tid + stride]; 
                 __syncthreads();
+                if (tid < stride) 
+                    dt_buff[tid] = dt_buff[tid] < dt_buff[tid + stride] ? dt_buff[tid] : dt_buff[tid + stride];
             }
 
-            if ((threadIdx.x < BLOCK_SIZE2D / 2) && (threadIdx.y < BLOCK_SIZE2D / 2))
+            
+            if (tid < 32)
             {
-                warpReduceMin<blockSize>(dt_buff, tx, ty);
+                warpReduceMin<blockSize>(dt_buff, tid);
             }
-            if((threadIdx.x == 0) && (threadIdx.y == 0) )
+            if(tid == 0)
             {
-                // printf("min dt: %f", s->dt_min[0]);
-                s->dt_min[blockIdx.x + blockIdx.y * blockDim.x] = dt_buff[tid]; // dt_min[0] == minimum
-                // printf("min dt: %f\n", s->dt_min[0]);
-                s->dt = s->dt_min[0];
+                s->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
+                s->dt = s->CFL * s->dt_min[0];
             }
         } // end if
 
@@ -252,7 +236,7 @@ namespace simbi{
 
         if ((threadIdx.x < BLOCK_SIZE3D / 2) && (threadIdx.y < BLOCK_SIZE3D / 2) && (threadIdx.z < BLOCK_SIZE3D / 2))
         {
-            warpReduceMin<blockSize>(dt_buff, tx, ty, tz);
+            warpReduceMin<blockSize>(dt_buff, tid);
         }
         if((threadIdx.x == 0) && (threadIdx.y == 0) && (threadIdx.z == 0))
         {

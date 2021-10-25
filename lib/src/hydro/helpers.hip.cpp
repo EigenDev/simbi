@@ -82,26 +82,15 @@ namespace simbi{
                     u_state[jj * sx + 0 * sy].S1               = - u_state[jj * sx + 3 * sy].S1;
                     u_state[jj * sx + 1 * sy].S1               = - u_state[jj * sx + 2 * sy].S1;
 
-
                     // Fix the ghost zones at the angular boundaries
-                    if (jj < 2){
-                        if (ii < x1grid_size){
-                            if (jj == 0){
-                                u_state[jj * sx + ii * sy]  =   u_state[3 * sx + ii * sy];
-                            } else {
-                                u_state[jj * sx + ii * sy]  =   u_state[2 * sx + ii * sy];
-                            }
-                        }
-                    } else if (jj > x2grid_size - 3) {
-                        if (ii < x1grid_size){
-                            if (jj == x2grid_size - 1){
-                                u_state[jj * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + ii * sy];
-                            } else {
-                                u_state[jj * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + ii * sy];
-                            }
-                        }
+                    if (ii < x1grid_size){
+                        u_state[0 * sx + ii * sy]  =   u_state[3 * sx + ii * sy];
+                        u_state[1 * sx + ii * sy]  =   u_state[2 * sx + ii * sy];
                     }
-                    
+                    else if (ii < x1grid_size){
+                        u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + ii * sy];
+                        u_state[(x2grid_size - 2) * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + ii * sy];
+                    }
                 }
             }
         });
