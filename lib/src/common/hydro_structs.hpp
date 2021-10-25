@@ -172,7 +172,8 @@ namespace sr2d {
         GPU_CALLABLE_MEMBER Conserved(real D, real S1, real S2, real tau) :  D(D), S1(S1), S2(S2), tau(tau) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &u) : D(u.D), S1(u.S1), S2(u.S2), tau(u.tau) {}
         GPU_CALLABLE_MEMBER Conserved operator + (const Conserved &p)  const { return Conserved(D+p.D, S1+p.S1, S2+p.S2, tau+p.tau); }  
-        GPU_CALLABLE_MEMBER Conserved operator - (const Conserved &p)  const { return Conserved(D-p.D, S1-p.S1, S2-p.S2, tau-p.tau); }  
+        GPU_CALLABLE_MEMBER Conserved operator - (const Conserved &p)  const { return Conserved(D-p.D, S1-p.S1, S2-p.S2, tau-p.tau); }
+        GPU_CALLABLE_MEMBER Conserved operator * (const Conserved &p)  const { return Conserved(D*p.D, S1*p.S1, S2*p.S2, tau*p.tau); }  
         GPU_CALLABLE_MEMBER Conserved operator * (const real c)      const { return Conserved(D*c, S1*c, S2*c, tau*c ); }
         GPU_CALLABLE_MEMBER Conserved operator / (const real c)      const { return Conserved(D/c, S1/c, S2/c, tau/c ); }
 
@@ -221,6 +222,10 @@ namespace sr2d {
             p      -= prims.p;
             return *this;
         }
+        
+        GPU_CALLABLE_MEMBER
+        real vcomponent(const unsigned nhat) const {return (nhat == 1 ? v1 : v2); }
+
     };
 
     struct PrimitiveData {
@@ -296,6 +301,8 @@ namespace hydro2d {
             p      -= prims.p;
             return *this;
         }
+
+        real vcomponent(const unsigned nhat) const {return (nhat == 1 ? v1 : v2); }
 
     };
     
