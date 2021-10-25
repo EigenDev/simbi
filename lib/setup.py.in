@@ -4,7 +4,7 @@ import os
 import sys
 import numpy
 from os.path import join as pjoin
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, find_namespace_packages
 from setuptools.extension import Extension
 from distutils.core import Command
 from distutils import sysconfig
@@ -262,8 +262,8 @@ setup(
     cmdclass={
         'build_ext': BuildPlatformCommand
         },
-    package_dir={'pysimbi': '${CMAKE_CURRENT_SOURCE_DIR}'},
-    packages=find_packages(),
+    package_dir={'pysimbi': '${CMAKE_CURRENT_BINARY_DIR}/pysimbi'},
+    packages=find_namespace_packages(),
     install_requires=['numpy', 'cython'],
     python_requires=">=3.6",
     # Since the package has c++ code, the egg cannot be zipped

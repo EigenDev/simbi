@@ -4,11 +4,12 @@
 # 06/10/2020
 
 import numpy as np 
+import os
 import sys 
 import h5py 
 import pysimbi.initial_condition as simbi_ic 
 
-from state import *
+from cpu_state import *
 
 class Hydro:
     

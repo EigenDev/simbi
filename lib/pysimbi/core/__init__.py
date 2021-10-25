@@ -1,1 +1,1 @@
-from pysimbi.core import Hydro
+from .simbi import Hydro
