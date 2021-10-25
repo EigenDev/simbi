@@ -606,8 +606,8 @@ void SRHD2D::advance(
     const luint yextent               = p.blockSize.y;
 
     #if GPU_CODE
-    const bool is_first_order         = this->first_order;
-    const bool is_periodic            = this->periodic;
+    const bool first_order         = this->first_order;
+    const bool periodic            = this->periodic;
     const bool hllc                   = this->hllc;
     const real dt                     = this->dt;
     const real decay_const            = this->decay_const;
