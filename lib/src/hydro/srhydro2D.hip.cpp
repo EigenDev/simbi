@@ -80,74 +80,36 @@ Eigenvals SRHD2D::calc_Eigenvals(const Primitive &prims_l,
     const real cs_r = sqrt(gamma * p_r / (h_r * rho_r));
     const real cs_l = sqrt(gamma * p_l / (h_l * rho_l));
 
-    switch (nhat)
-    {
-    case 1:
-    {
-        const real v1_l = prims_l.v1;
-        const real v1_r = prims_r.v1;
+    const real v_l = prims_l.vcomponent(nhat);
+    const real v_r = prims_r.vcomponent(nhat);
 
-        //-----------Calculate wave speeds based on Shneider et al. 1992
-        const real vbar  = (real)0.5 * (v1_l + v1_r);
-        const real cbar  = (real)0.5 * (cs_l + cs_r);
-        const real bl    = (vbar - cbar)/(1. - cbar*vbar);
-        const real br    = (vbar + cbar)/(1. + cbar*vbar);
-        const real aL    = my_min(bl, (v1_l - cs_l)/(1. - v1_l*cs_l));
-        const real aR    = my_max(br, (v1_r + cs_r)/(1. + v1_r*cs_r));
+    //-----------Calculate wave speeds based on Shneider et al. 1992
+    const real vbar  = (real)0.5 * (v_l + v_r);
+    const real cbar  = (real)0.5 * (cs_l + cs_r);
+    const real bl    = (vbar - cbar)/(1. - cbar*vbar);
+    const real br    = (vbar + cbar)/(1. + cbar*vbar);
+    const real aL    = my_min(bl, (v_l - cs_l)/(1. - v_l*cs_l));
+    const real aR    = my_max(br, (v_r + cs_r)/(1. + v_r*cs_r));
 
-        //--------Calc the wave speeds based on Mignone and Bodo (2005)
-        // const real sL = cs_l * cs_l * (1. / (gamma * gamma * (1 - cs_l * cs_l)));
-        // const real sR = cs_r * cs_r * (1. / (gamma * gamma * (1 - cs_r * cs_r)));
+    //--------Calc the wave speeds based on Mignone and Bodo (2005)
+    // const real sL = cs_l * cs_l * (1. / (gamma * gamma * (1 - cs_l * cs_l)));
+    // const real sR = cs_r * cs_r * (1. / (gamma * gamma * (1 - cs_r * cs_r)));
 
-        // // Define temporaries to save computational cycles
-        // const real qfL = 1. / (1. + sL);
-        // const real qfR = 1. / (1. + sR);
-        // const real sqrtR = sqrt(sR * (1 - v1_r * v1_r + sR));
-        // const real sqrtL = sqrt(sL * (1 - v1_l * v1_l + sL));
+    // // Define temporaries to save computational cycles
+    // const real qfL = 1. / (1. + sL);
+    // const real qfR = 1. / (1. + sR);
+    // const real sqrtR = sqrt(sR * (1 - v1_r * v1_r + sR));
+    // const real sqrtL = sqrt(sL * (1 - v1_l * v1_l + sL));
 
-        // const real lamLm = (v1_l - sqrtL) * qfL;
-        // const real lamRm = (v1_r - sqrtR) * qfR;
-        // const real lamLp = (v1_l + sqrtL) * qfL;
-        // const real lamRp = (v1_r + sqrtR) * qfR;
+    // const real lamLm = (v1_l - sqrtL) * qfL;
+    // const real lamRm = (v1_r - sqrtR) * qfR;
+    // const real lamLp = (v1_l + sqrtL) * qfL;
+    // const real lamRp = (v1_r + sqrtR) * qfR;
 
-        // const real aL = lamLm < lamRm ? lamLm : lamRm;
-        // const real aR = lamLp > lamRp ? lamLp : lamRp;
+    // const real aL = lamLm < lamRm ? lamLm : lamRm;
+    // const real aR = lamLp > lamRp ? lamLp : lamRp;
 
-        return Eigenvals(aL, aR, cs_l, cs_r);
-    }
-    case 2:
-        const real v2_r = prims_r.v2;
-        const real v2_l = prims_l.v2;
-
-        //-----------Calculate wave speeds based on Shneider et al. 1992
-        const real vbar  = (real)0.5 * (v2_l + v2_r);
-        const real cbar  = (real)0.5 * (cs_l + cs_r);
-        const real bl    = (vbar - cbar)/(1. - cbar*vbar);
-        const real br    = (vbar + cbar)/(1. + cbar*vbar);
-        const real aL    = my_min(bl, (v2_l - cs_l)/(1. - v2_l*cs_l));
-        const real aR    = my_max(br, (v2_r + cs_r)/(1. + v2_r*cs_r));
-
-        // return Eigenvals(aL, aR);
-
-        // Calc the wave speeds based on Mignone and Bodo (2005)
-        // real sL = cs_l * cs_l * ((real)1.0 / (gamma * gamma * (1 - cs_l * cs_l)));
-        // real sR = cs_r * cs_r * ((real)1.0 / (gamma * gamma * (1 - cs_r * cs_r)));
-
-        // // Define some temporaries to save a few cycles
-        // const real qfL = 1. / (1. + sL);
-        // const real qfR = 1. / (1. + sR);
-        // const real sqrtR = sqrt(sR * (1 - v2_r * v2_r + sR));
-        // const real sqrtL = sqrt(sL * (1 - v2_l * v2_l + sL));
-
-        // const real lamLm = (v2_l - sqrtL) * qfL;
-        // const real lamRm = (v2_r - sqrtR) * qfR;
-        // const real lamLp = (v2_l + sqrtL) * qfL;
-        // const real lamRp = (v2_r + sqrtR) * qfR;
-        // const real aL = lamLm < lamRm ? lamLm : lamRm;
-        // const real aR = lamLp > lamRp ? lamLp : lamRp;
-
-        return Eigenvals(aL, aR, cs_l, cs_r);
-    }
+    return Eigenvals(aL, aR, cs_l, cs_r);
 };
 
 //-----------------------------------------------------------------------------------------
@@ -286,19 +248,21 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
-            dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize, dim3(BLOCK_SIZE2D, BLOCK_SIZE2D)>>>
+            dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize>>>
             (dev, geometry, dx1, dx2);
             break;
         
         case simbi::Geometry::SPHERICAL:
-            dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize, dim3(BLOCK_SIZE2D, BLOCK_SIZE2D)>>>
-            (dev, geometry, dlogx1, dx2, x1min, x1max);
+            dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize>>>
+            (dev, geometry, dlogx1, dx2, x1min, x1max, x2min, x2max);
             break;
         }
         
         simbi::gpu::api::deviceSynch();
         simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
     }
+    // std::cout << "dt out: " <<  dt << "\n";
+    // std::cin.get();
     #endif
 }
 
@@ -311,7 +275,8 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
 GPU_CALLABLE_MEMBER
 Conserved SRHD2D::prims2flux(const Primitive &prims, luint nhat = 1)
 {
-
+    const real vn = prims.vcomponent(nhat);
+    const unsigned int kron = kronecker(nhat, 1);
     const real rho = prims.rho;
     const real vx = prims.v1;
     const real vy = prims.v2;
@@ -322,13 +287,9 @@ Conserved SRHD2D::prims2flux(const Primitive &prims, luint nhat = 1)
     const real D = rho * lorentz_gamma;
     const real S1 = rho * lorentz_gamma * lorentz_gamma * h * vx;
     const real S2 = rho * lorentz_gamma * lorentz_gamma * h * vy;
-    const real tau =
-                    rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma;
+    const real tau = rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma;
 
-    return (nhat == 1) ? Conserved(D * vx, S1 * vx + pressure, S2 * vx,
-                                   (tau + pressure) * vx)
-                       : Conserved(D * vy, S1 * vy, S2 * vy + pressure,
-                                   (tau + pressure) * vy);
+    return Conserved{D * vn, S1 * vn + kron * pressure, S2 * vn + !kron * pressure, (tau + pressure) * vn};
 };
 
 GPU_CALLABLE_MEMBER
@@ -374,17 +335,17 @@ Conserved SRHD2D::calc_hllc_flux(
     const real aR = lambda.aR;
 
     //---- Check Wave Speeds before wasting computations
-    if ((real)0.0 <= aL)
+    if (0 <= aL)
     {
         return left_flux;
     }
-    else if ((real)0.0 >= aR)
+    else if (0 >= aR)
     {
         return right_flux;
     }
 
-    const real aLminus = aL < (real)0.0 ? aL : (real)0.0;
-    const real aRplus  = aR > (real)0.0 ? aR : (real)0.0;
+    const real aLminus = aL < 0 ? aL : 0;
+    const real aRplus  = aR > 0 ? aR : 0;
 
     //-------------------Calculate the HLL Intermediate State
     const auto hll_state = 
@@ -405,113 +366,59 @@ Conserved SRHD2D::calc_hllc_flux(
     const real a = fe;
     const real b = -(e + fs);
     const real c = s;
-    const real quad = -(real)0.5 * (b + sgn(b) * sqrt(b * b - 4.0 * a * c));
-    const real aStar = c * ((real)1.0 / quad);
+    const real quad = -0.5 * (b + sgn(b) * sqrt(b * b - 4 * a * c));
+    const real aStar = c * (1 / quad);
     const real pStar = -aStar * fe + fs;
 
-    // Apply the low-Mach HLLC fix found in: 
+    // Apply the low-Mach HLLC fix found in Fleichman et al 2020: 
     // https://www.sciencedirect.com/science/article/pii/S0021999120305362
     const real cL       = lambda.csL;
     const real cR       = lambda.csR;
-    const real ma_lim   = 0.2;
+    const real ma_lim   = 0.20;
 
     //--------------Compute the L Star State----------
-    switch (nhat)
-    {
-    case 1:
-        {
-            real pressure = left_prims.p;
-            real D        = left_state.D;
-            real S1       = left_state.S1;
-            real S2       = left_state.S2;
-            real tau      = left_state.tau;
-            real E        = tau + D;
-            real cofactor = 1. / (aL - aStar);
+    real pressure = left_prims.p;
+    real D        = left_state.D;
+    real S1       = left_state.S1;
+    real S2       = left_state.S2;
+    real tau      = left_state.tau;
+    real E        = tau + D;
+    real cofactor = 1. / (aL - aStar);
 
-            real v1 = left_prims.v1;
-            // Left Star State in x-direction of coordinate lattice
-            real Dstar    = cofactor * (aL - v1) * D;
-            real S1star   = cofactor * (S1 * (aL - v1) - pressure + pStar);
-            real S2star   = cofactor * (aL - v1) * S2;
-            real Estar    = cofactor * (E * (aL - v1) + pStar * aStar - pressure * v1);
-            real tauStar  = Estar - Dstar;
-            starStateL    = Conserved(Dstar, S1star, S2star, tauStar);
+    real vL =  left_prims.vcomponent(nhat);
+    real vR = right_prims.vcomponent(nhat);
+    unsigned int kron = kronecker(nhat, 1);
+    // Left Star State in x-direction of coordinate lattice
+    real Dstar    = cofactor * (aL - vL) * D;
+    real S1star   = cofactor * (S1 * (aL - vL) +  kron * (-pressure + pStar) );
+    real S2star   = cofactor * (S2 * (aL - vL) + !kron * (-pressure + pStar) );
+    real Estar    = cofactor * (E * (aL - vL) + pStar * aStar - pressure * vL);
+    real tauStar  = Estar - Dstar;
+    starStateL    = Conserved(Dstar, S1star, S2star, tauStar);
 
-            pressure = right_prims.p;
-            D        = right_state.D;
-            S1       = right_state.S1;
-            S2       = right_state.S2;
-            tau      = right_state.tau;
-            E        = tau + D;
-            cofactor = 1. / (aR - aStar);
+    pressure = right_prims.p;
+    D        = right_state.D;
+    S1       = right_state.S1;
+    S2       = right_state.S2;
+    tau      = right_state.tau;
+    E        = tau + D;
+    cofactor = 1. / (aR - aStar);
 
-            v1      = right_prims.v1;
-            Dstar   = cofactor * (aR - v1) * D;
-            S1star  = cofactor * (S1 * (aR - v1) - pressure + pStar);
-            S2star  = cofactor * (aR - v1) * S2;
-            Estar   = cofactor * (E * (aR - v1) + pStar * aStar - pressure * v1);
-            tauStar = Estar - Dstar;
-            starStateR = Conserved(Dstar, S1star, S2star, tauStar);
+    Dstar   = cofactor * (aR - vR) * D;
+    S1star   = cofactor * (S1 * (aR - vR) +  kron * (-pressure + pStar) );
+    S2star   = cofactor * (S2 * (aR - vR) + !kron * (-pressure + pStar) );
+    Estar   = cofactor * (E * (aR - vR) + pStar * aStar - pressure * vR);
+    tauStar = Estar - Dstar;
+    starStateR = Conserved(Dstar, S1star, S2star, tauStar);
 
-            const real ma_local = my_max(std::abs(left_prims.v1 / cL), std::abs(right_prims.v1 / cR));
-            const real phi      = sin(my_min((real)1.0, ma_local / ma_lim) * PI * (real)0.5);
-            const real aL_lm    = (phi != 0) ? phi * aL : aL;
-            const real aR_lm    = (phi != 0) ? phi * aR : aR;
+    const real ma_local = my_max(std::abs(vL / cL), std::abs(vR / cR));
+    const real phi      = sin(my_min(1.0, ma_local / ma_lim) * PI * 0.5);
+    const real aL_lm    = (phi != 0 ) ? phi * aL : aL;
+    const real aR_lm    = (phi != 0 ) ? phi * aR : aR;
 
-            return (left_flux + right_flux) * (real)0.5 + ( (starStateL - left_state) * aL_lm
-                + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm ) * (real)0.5;
-        }
-        break;
-    
-    case 2:
-        {
-            real pressure = left_prims.p;
-            real D        = left_state.D;
-            real S1       = left_state.S1;
-            real S2       = left_state.S2;
-            real tau      = left_state.tau;
-            real E        = tau + D;
-            real cofactor = 1. / (aL - aStar);
+    return (left_flux + right_flux) * 0.5 + ( (starStateL - left_state) * aL_lm
+        + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm ) * 0.5;
 
-            real v2 = left_prims.v2;
-            // Start States in y-direction in the coordinate lattice
-            real Dstar   = cofactor * (aL - v2) * D;
-            real S1star  = cofactor * (aL - v2) * S1;
-            real S2star  = cofactor * (S2 * (aL - v2) - pressure + pStar);
-            real Estar   = cofactor * (E * (aL - v2) + pStar * aStar - pressure * v2);
-            real tauStar = Estar - Dstar;
-
-            starStateL = Conserved(Dstar, S1star, S2star, tauStar);
-            v2 = right_prims.v2;
-            // Start States in y-direction in the coordinate lattice
-            pressure = right_prims.p;
-            D        = right_state.D;
-            S1       = right_state.S1;
-            S2       = right_state.S2;
-            tau      = right_state.tau;
-            E        = tau + D;
-            cofactor = 1. / (aR - aStar);
-
-            Dstar    = cofactor * (aR - v2) * D;
-            S1star   = cofactor * (aR - v2) * S1;
-            S2star   = cofactor * (S2 * (aR - v2) - pressure + pStar);
-            Estar    = cofactor * (E * (aR - v2) + pStar * aStar - pressure * v2);
-            tauStar  = Estar - Dstar;
-
-            starStateR = Conserved(Dstar, S1star, S2star, tauStar);
-
-            const real ma_local = my_max(std::abs(left_prims.v2 / cL), std::abs(right_prims.v2 / cR));
-            const real phi      = sin(my_min((real)1.0, ma_local / ma_lim) * PI * (real)0.5);
-            const real aL_lm    = (phi != 0) ? phi * aL : aL;
-            const real aR_lm    = (phi != 0) ? phi * aR : aR;
-
-            return (left_flux + right_flux) * (real)0.5 + ( (starStateL - left_state) * aL_lm
-                + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm ) * (real)0.5;
-        }
-        break;
-    }
-
-    // return Conserved(0.0, 0.0, 0.0, 0.0);
     // if (-aL <= (aStar - aL))
     // {
     //     const real pressure = left_prims.p;
@@ -619,7 +526,7 @@ void SRHD2D::cons2prim(
         auto* const conserved_buff = &cons[0];
         #endif 
 
-        auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * threadIdx.y + threadIdx.x : gid;
+        const auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * threadIdx.y + threadIdx.x : gid;
         // load shared memory
         if constexpr(BuildPlatform == Platform::GPU)
             conserved_buff[tid] = self->gpu_cons[gid];
@@ -644,16 +551,16 @@ void SRHD2D::cons2prim(
             pre = peq;
             et  = tau + D + pre;
             v2 = S * S / (et * et);
-            W   = (real)1.0 / sqrt((real)1.0 - v2);
+            W   = 1 / sqrt(1 - v2);
             rho = D / W;
 
-            eps = (tau + ((real)1.0 - W) * D + (1. - W * W) * pre) / (D * W);
+            eps = (tau + (1 - W) * D + (1 - W * W) * pre) / (D * W);
 
             h = 1 + eps + pre / rho;
             c2 = self->gamma * pre / (h * rho);
 
-            g = c2 * v2 - (real)1.0;
-            f = (self->gamma - (real)1.0) * rho * eps - pre;
+            g = c2 * v2 - 1;
+            f = (self->gamma - 1) * rho * eps - pre;
 
             peq = pre - f / g;
             iter++;
@@ -666,7 +573,7 @@ void SRHD2D::cons2prim(
 
         } while (std::abs(peq - pre) >= tol);
 
-        real inv_et = 1. / (tau + D + peq);
+        real inv_et = 1 / (tau + D + peq);
         real vx     = S1 * inv_et;
         real vy     = S2 * inv_et;
 
@@ -694,20 +601,20 @@ void SRHD2D::advance(
     auto *self = (BuildPlatform == Platform::GPU) ? dev : this;
     const luint xpg                   = this->xphysical_grid;
     const luint ypg                   = this->yphysical_grid;
-    const bool is_first_order       = this->first_order;
-    const bool is_periodic          = this->periodic;
-    const bool hllc                 = this->hllc;
-    const real dt                   = this->dt;
-    const real decay_const          = this->decay_const;
-    const real plm_theta            = this->plm_theta;
-    const real gamma                = this->gamma;
-    const luint nx                    = this->nx;
-    const luint ny                    = this->ny;
     const luint extent                = (BuildPlatform == Platform::GPU) ? p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
     const luint xextent               = p.blockSize.x;
     const luint yextent               = p.blockSize.y;
 
     #if GPU_CODE
+    const bool is_first_order         = this->first_order;
+    const bool is_periodic            = this->periodic;
+    const bool hllc                   = this->hllc;
+    const real dt                     = this->dt;
+    const real decay_const            = this->decay_const;
+    const real plm_theta              = this->plm_theta;
+    const real gamma                  = this->gamma;
+    const luint nx                    = this->nx;
+    const luint ny                    = this->ny;
     const real xmin                 = this->x1min;
     const real xmax                 = this->x1max;
     const real ymin                 = this->x2min;
@@ -723,7 +630,7 @@ void SRHD2D::advance(
     const bool e_all_zeros          = this->e_all_zeros;
     #endif
 
-    const CLattice2D *coord_lattice = &(self->coord_lattice);
+    // const CLattice2D *coord_lattice = &(self->coord_lattice);
     const luint nbs                   = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
 
     // if on NVidia GPU, do column major striding, row-major otherwise
@@ -796,9 +703,9 @@ void SRHD2D::advance(
             simbi::gpu::api::synchronize();
         }
 
-        if (is_first_order)
+        if (first_order)
         {
-            if (is_periodic)
+            if (periodic)
             {
                 xprims_l = prim_buff[txa * sy + tya * sx];
                 xprims_r = roll(prim_buff, (txa + 1) * sy + tya * sx, nbs);
@@ -850,7 +757,7 @@ void SRHD2D::advance(
             }
 
             // Set up the left and right state interfaces for i-1/2
-            if (is_periodic)
+            if (periodic)
             {
                 xprims_l = roll(prim_buff,  txa - 1 + tya * bx, nbs);
                 xprims_r = prim_buff[txa + tya * bx];
@@ -904,7 +811,7 @@ void SRHD2D::advance(
 
             //Advance depending on geometry
             luint real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
-
+            // printf("(%lu, %lu) f1: %f, f2: %f, g1: %f, g2: %f\n", ia, ja,  f1.tau, f2.tau, g1.tau, g2.tau);
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
@@ -922,8 +829,8 @@ void SRHD2D::advance(
                             self->gpu_cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx1  -(g1.S2  - g2.S2) / dx2 + d_source * decay_const);
                             self->gpu_cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau)/ dx2 + d_source * decay_const);
                         #else
-                            real dx = coord_lattice->dx1[ii];
-                            real dy = coord_lattice->dx2[jj];
+                            real dx = coord_lattice.dx1[ii];
+                            real dy = coord_lattice.dx2[jj];
                             cons[aid].D   += dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D ) / dy + sourceD   [real_loc] );
                             cons[aid].S1  += dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1) / dy + sourceS1  [real_loc] );
                             cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx  -(g1.S2  - g2.S2) / dy + sourceS2  [real_loc] );
@@ -947,23 +854,23 @@ void SRHD2D::advance(
                     const real s2R          = sin(tr); //coord_lattice->gpu_x2_face_areas[jj + 1];
                     const real s2L          = sin(tl); //coord_lattice->gpu_x2_face_areas[jj + 0];
                     const real thmean       = 0.5 * (tl + tr);
-                    const real sluint         = sin(thmean);
-                    const real dV1          = rmean * rmean * (-rl + rr);             
-                    const real dV2          = rmean * sluint * dx2; 
-                    const real cot          = cos(thmean) / sluint ;
+                    const real sint         = sin(thmean);
+                    const real dV1          = rmean * rmean * (rr - rl);             
+                    const real dV2          = rmean * sint * (tr - tl); 
+                    const real cot          = cos(thmean) / sint ;
 
                     const real d_source  = (d_all_zeros)   ? 0 : self->gpu_sourceD[real_loc];
                     const real s1_source = (s1_all_zeros)  ? 0 : self->gpu_sourceS1[real_loc];
                     const real s2_source = (s2_all_zeros)  ? 0 : self->gpu_sourceS2[real_loc];
                     const real e_source  = (e_all_zeros)   ? 0 : self->gpu_sourceTau[real_loc];
                     #else
-                    real s1R   = coord_lattice->x1_face_areas[ii + 1];
-                    real s1L   = coord_lattice->x1_face_areas[ii + 0];
-                    real s2R   = coord_lattice->x2_face_areas[jj + 1];
-                    real s2L   = coord_lattice->x2_face_areas[jj + 0];
-                    real rmean = coord_lattice->x1mean[ii];
-                    real dV1   = coord_lattice->dV1[ii];
-                    real dV2   = rmean * coord_lattice->dV2[jj];
+                    real s1R   = coord_lattice.x1_face_areas[ii + 1];
+                    real s1L   = coord_lattice.x1_face_areas[ii + 0];
+                    real s2R   = coord_lattice.x2_face_areas[jj + 1];
+                    real s2L   = coord_lattice.x2_face_areas[jj + 0];
+                    real rmean = coord_lattice.x1mean[ii];
+                    real dV1   = coord_lattice.dV1[ii];
+                    real dV2   = rmean * coord_lattice.dV2[jj];
                     #endif
                     // Grab central primitives
                     real rhoc = prim_buff[txa * sy + tya * sx].rho;
@@ -971,8 +878,8 @@ void SRHD2D::advance(
                     real uc   = prim_buff[txa * sy + tya * sx].v1;
                     real vc   = prim_buff[txa * sy + tya * sx].v2;
 
-                    real hc   = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
-                    real gam2 = (real)1.0/((real)1.0 - (uc * uc + vc * vc));
+                    real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+                    real gam2 = 1/(1 - (uc * uc + vc * vc));
 
                     #if GPU_CODE 
                         self->gpu_cons[aid] += Conserved{
@@ -1008,13 +915,13 @@ void SRHD2D::advance(
                                 // L(S1)
                                 -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
                                     - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        + rhoc * hc * gam2 * vc * vc / rmean + (real)2.0 * pc / rmean +
+                                        + rhoc * hc * gam2 * vc * vc / rmean + 2 * pc / rmean +
                                             self->sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
                                 -(f1.S2 * s1R - f2.S2 * s1L) / dV1
                                     - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
-                                        - (rhoc * hc * gam2 * uc * vc / rmean - pc * coord_lattice->cot[jj] / rmean) 
+                                        - (rhoc * hc * gam2 * uc * vc / rmean - pc * coord_lattice.cot[jj] / rmean) 
                                             + self->sourceS2[real_loc] * decay_const,
 
                                 // L(tau)
@@ -1033,7 +940,7 @@ void SRHD2D::advance(
         {
             Primitive xleft_most, xright_most, xleft_mid, xright_mid, center;
             Primitive yleft_most, yright_most, yleft_mid, yright_mid;
-            if (!is_periodic)
+            if (!periodic)
             {
                 // Coordinate X
                 xleft_most  = prim_buff[(txa - 2) * sy + tya * sx];
@@ -1318,10 +1225,10 @@ void SRHD2D::advance(
                         #else
                             real dx = self->coord_lattice.dx1[ii];
                             real dy = self->coord_lattice.dx2[jj];
-                            self->cons[aid].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D ) / dy + self->sourceD   [real_loc] );
-                            self->cons[aid].S1  += (real)0.5 * dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1) / dy + self->sourceS1  [real_loc] );
-                            self->cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx  -(g1.S2  - g2.S2) / dy + self->sourceS2  [real_loc] );
-                            self->cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau)/ dy + self->sourceTau [real_loc] );
+                            self->cons[aid].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D ) / dy + sourceD   [real_loc] );
+                            self->cons[aid].S1  += (real)0.5 * dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1) / dy + sourceS1  [real_loc] );
+                            self->cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx  -(g1.S2  - g2.S2) / dy + sourceS2  [real_loc] );
+                            self->cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau)/ dy + sourceTau [real_loc] );
                         #endif
                     
 
@@ -1340,25 +1247,24 @@ void SRHD2D::advance(
                     const real s1L          = rl * rl; //coord_lattice->gpu_x1_face_areas[ii + 0];
                     const real s2R          = sin(tr); //coord_lattice->gpu_x2_face_areas[jj + 1];
                     const real s2L          = sin(tl); //coord_lattice->gpu_x2_face_areas[jj + 0];
-                    // real rmean      = coord_lattice->gpu_x1mean[ii]           ;
                     const real thmean       = 0.5 * (tl + tr);
-                    const real sluint         = sin(thmean);
-                    const real dV1          = rmean * rmean * (rr - rl);   //coord_lattice->gpu_dV1[ii]              ;
-                    const real dV2          = rmean * sluint * dx2; //rmean * coord_lattice->gpu_dV2[jj]    
-                    const real cot          = cos(thmean) / sluint ;
+                    const real sint         = sin(thmean);
+                    const real dV1          = rmean * rmean * (rr - rl);             
+                    const real dV2          = rmean * sint * (tr - tl); 
+                    const real cot          = cos(thmean) / sint ;
 
                     const real d_source  = (d_all_zeros)   ? 0 : self->gpu_sourceD[real_loc];
                     const real s1_source = (s1_all_zeros)  ? 0 : self->gpu_sourceS1[real_loc];
                     const real s2_source = (s2_all_zeros)  ? 0 : self->gpu_sourceS2[real_loc];
                     const real e_source  = (e_all_zeros)   ? 0 : self->gpu_sourceTau[real_loc];
                     #else 
-                    real s1R   = self->coord_lattice.x1_face_areas[ii + 1];
-                    real s1L   = self->coord_lattice.x1_face_areas[ii + 0];
-                    real s2R   = self->coord_lattice.x2_face_areas[jj + 1];
-                    real s2L   = self->coord_lattice.x2_face_areas[jj + 0];
-                    real rmean = self->coord_lattice.x1mean[ii];
-                    real dV1   = self->coord_lattice.dV1[ii];
-                    real dV2   = rmean * self->coord_lattice.dV2[jj];
+                    real s1R   = coord_lattice.x1_face_areas[ii + 1];
+                    real s1L   = coord_lattice.x1_face_areas[ii + 0];
+                    real s2R   = coord_lattice.x2_face_areas[jj + 1];
+                    real s2L   = coord_lattice.x2_face_areas[jj + 0];
+                    real rmean = coord_lattice.x1mean[ii];
+                    real dV1   = coord_lattice.dV1[ii];
+                    real dV2   = rmean * coord_lattice.dV2[jj];
                     #endif
                     // Grab central primitives
                     real rhoc = prim_buff[tya * sx + txa * sy].rho;
@@ -1366,8 +1272,8 @@ void SRHD2D::advance(
                     real uc   = prim_buff[tya * sx + txa * sy].v1;
                     real vc   = prim_buff[tya * sx + txa * sy].v2;
 
-                    real hc   = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
-                    real gam2 = (real)1.0/((real)1.0 - (uc * uc + vc * vc));
+                    real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+                    real gam2 = 1 / (1 - (uc * uc + vc * vc));
 
                     #if GPU_CODE 
                         self->gpu_cons[aid] += Conserved{
@@ -1379,7 +1285,7 @@ void SRHD2D::advance(
                                 // L(S1)
                                 -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
                                     - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        + rhoc * hc * gam2 * vc * vc / rmean + (real)2.0 * pc / rmean +
+                                        + rhoc * hc * gam2 * vc * vc / rmean + 2 * pc / rmean +
                                             s1_source * decay_const,
 
                                 // L(S2)
@@ -1394,28 +1300,28 @@ void SRHD2D::advance(
                                         + e_source * decay_const
                             } * dt * (real)0.5;
                     #else
-                        self->cons[aid] += Conserved{
+                        cons[aid] += Conserved{
                                 // L(D)
                                 -(f1.D * s1R - f2.D * s1L) / dV1 
                                     - (g1.D * s2R - g2.D * s2L) / dV2 
-                                        + self->sourceD[real_loc] * decay_const,
+                                        + sourceD[real_loc] * decay_const,
 
                                 // L(S1)
                                 -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
                                     - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        + rhoc * hc * gam2 * vc * vc / rmean + (real)2.0 * pc / rmean +
-                                            self->sourceS1[real_loc] * decay_const,
+                                        + (rhoc * hc * gam2 * vc * vc + 2 * pc ) / rmean +
+                                            sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
                                 -(f1.S2 * s1R - f2.S2 * s1L) / dV1
                                     - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
-                                        - (rhoc * hc * gam2 * uc * vc / rmean - pc * self->coord_lattice.cot[jj] / rmean) 
-                                            + self->sourceS2[real_loc] * decay_const,
+                                        - (rhoc * hc * gam2 * uc * vc - pc * coord_lattice.cot[jj]) / rmean 
+                                            + sourceS2[real_loc] * decay_const,
 
                                 // L(tau)
                                 -(f1.tau * s1R - f2.tau * s1L) / dV1 
                                     - (g1.tau * s2R - g2.tau * s2L) / dV2 
-                                        + self->sourceTau[real_loc] * decay_const
+                                        + sourceTau[real_loc] * decay_const
                             } * dt * (real)0.5;
                     #endif
                     
@@ -1541,7 +1447,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::vector<int> state2D;
 
     // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_const = (real)1.0 / ((real)1.0 + exp((real)10.0 * (tstart - engine_duration)));
+    decay_const = 1 / (1 + exp((real)10.0 * (tstart - engine_duration)));
 
     // Declare I/O variables for Read/Write capability
     PrimData prods;
@@ -1557,9 +1463,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
     if constexpr(BuildPlatform == Platform::GPU)
     {   
-        dx2     = (x2[yphysical_grid - 1] - x2[0]) / yphysical_grid;
+        dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
         dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
-        dx1     = (x1[xphysical_grid - 1] - x1[0]) / xphysical_grid;
+        dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
         x1min   = x1[0];
         x1max   = x1[xphysical_grid - 1];
         x2min   = x2[0];
@@ -1574,8 +1480,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // Some variables to handle file automatic file string
     // formatting 
     tchunk = "000000";
-    luint tchunk_order_of_mag = 2;
-    luint time_order_of_mag;
+    int tchunk_order_of_mag = 2;
+    int time_order_of_mag;
 
     // // Setup the system
     const luint xblockdim       = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
@@ -1599,17 +1505,22 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     }
 
     if constexpr(BuildPlatform == Platform::GPU)
+    {
         cons2prim(fullP, device_self, simbi::MemSide::Dev);
-    else 
+        adapt_dt(device_self, geometry[coord_system], activeP);
+    } else
+    {
         cons2prim(fullP);
-
+        adapt_dt();
+    }
+        
     simbi::gpu::api::deviceSynch();
     
     // Some benchmarking tools 
     luint      n   = 0;
     luint  nfold   = 0;
     luint  ncheck  = 0;
-    real zu_avg = 0;
+    real    zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;
 
@@ -1681,7 +1592,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
 
             // Update decay constant
-            decay_const = (real)1.0 / ((real)1.0 + exp((real)10.0 * (t - engine_duration)));
+            decay_const = 1 / (1 + exp((real)10.0 * (t - engine_duration)));
         }
     } else {
         while (t < tend)
@@ -1753,7 +1664,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             n++;
 
             // Update decay constant
-            decay_const = (real)1.0 / ((real)1.0 + exp((real)10.0 * (t - engine_duration)));
+            decay_const = 1 / (1 + exp((real)10.0 * (t - engine_duration)));
 
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
