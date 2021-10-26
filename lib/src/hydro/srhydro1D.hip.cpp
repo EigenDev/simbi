@@ -89,8 +89,7 @@ void SRHD::advance(
   
         auto ia = ii + radius;
         auto txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + radius : ia;
-        if constexpr(BuildPlatform == Platform::GPU)
-        {
+        #if GPU_CODE
             int txl = BLOCK_SIZE;
             // Check if the active index exceeds the active zones
             // if it does, then this thread buffer will taken on the
@@ -102,8 +101,8 @@ void SRHD::advance(
                 prim_buff[txa - radius] = self->gpu_prims[ia - radius];
                 prim_buff[txa + txl   ] = self->gpu_prims[ia + txl   ];
             }
-            __syncthreads();
-        } 
+            simbi::gpu::api::synchronize();
+        #endif
 
         if (self->first_order)
         {
@@ -410,10 +409,9 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         luint tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
 
         // Compile time thread selection
-        if constexpr(BuildPlatform == Platform::GPU)
-        {
+        #if GPU_CODE
             conserved_buff[tx] = self->gpu_cons[ii];
-        } 
+        #endif
 
         const real D       = conserved_buff[tx].D;
         const real S       = conserved_buff[tx].S;

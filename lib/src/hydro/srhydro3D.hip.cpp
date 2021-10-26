@@ -164,8 +164,9 @@ void SRHD3D::cons2prim(
         auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * blockDim.y * threadIdx.z + blockDim.x * threadIdx.y + threadIdx.x : gid;
 
         // load shared memory
-        if constexpr(BuildPlatform == Platform::GPU)
+        #if GPU_CODE
             conserved_buff[tid] = self->gpu_cons[gid];
+        #endif
 
         simbi::gpu::api::synchronize();
         luint iter  = 0;
@@ -784,8 +785,9 @@ void SRHD3D::advance(
         const luint kk  = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(idx, xpg, ypg);
         const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(idx, xpg, ypg, kk);
         const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(idx, xpg, ypg, kk);
-        if     constexpr(BuildPlatform == Platform::GPU) if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg)) return;
-        
+        #if GPU_CODE
+        if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg)) return;
+        #endif 
         
         const luint ia  = ii + radius;
         const luint ja  = jj + radius;
@@ -803,8 +805,7 @@ void SRHD3D::advance(
         Primitive xprims_l, xprims_r, yprims_l, yprims_r, zprims_l, zprims_r;
 
         luint aid = ka * nx * ny + ja * nx + ia;
-        if  constexpr(BuildPlatform == Platform::GPU)
-        {
+        #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
             luint tzl = zextent;
@@ -851,7 +852,7 @@ void SRHD3D::advance(
                 }
             }
             simbi::gpu::api::synchronize();
-        }
+        #endif
 
         if (is_first_order)
         {

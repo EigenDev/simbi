@@ -23,7 +23,6 @@ namespace simbi
         std::vector<sr2d::Primitive> prims;
         std::vector<sr2d::Conserved> cons;
         std::vector<std::vector<real>> state2D;
-        float tend, tstart;
         real plm_theta, gamma, bipolar;
         bool first_order, periodic, hllc, linspace;
         real CFL, dt, decay_const;
@@ -33,9 +32,9 @@ namespace simbi
         std::string coord_system;
         std::vector<real> x1, x2, sourceD, sourceS1, sourceS2, sourceTau, pressure_guess;
         CLattice2D coord_lattice;
-
+        simbi::Geometry sim_geom;
         real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
-        bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros;
+        bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros;
 
         //==============GPU Mirrors================
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceTau, *gpu_pressure_guess;
@@ -50,16 +49,14 @@ namespace simbi
                real CFL, std::string coord_system);
         ~SRHD2D();
 
-        void cons2prim2D();
-
         GPU_CALLABLE_MEMBER
         sr2d::Eigenvals calc_Eigenvals(
             const sr2d::Primitive &prims_l,
             const sr2d::Primitive &prims_r,
-            const luint nhat);
+            const luint nhat) const;
 
         GPU_CALLABLE_MEMBER
-        sr2d::Conserved prims2cons(const sr2d::Primitive &prims);
+        sr2d::Conserved prims2cons(const sr2d::Primitive &prims) const;
         
         sr2d::Conserved calc_hll_state(
             const sr2d::Conserved &left_state,
@@ -68,7 +65,7 @@ namespace simbi
             const sr2d::Conserved &right_flux,
             const sr2d::Primitive &left_prims,
             const sr2d::Primitive &right_prims,
-            luint nhat);
+            luint nhat) const;
 
         sr2d::Conserved calc_intermed_statesSR2D(const sr2d::Primitive &prims,
                                                  const sr2d::Conserved &state,
@@ -85,10 +82,10 @@ namespace simbi
             const sr2d::Conserved &right_flux,
             const sr2d::Primitive &left_prims,
             const sr2d::Primitive &right_prims,
-            const luint nhat);
+            const luint nhat) const;
 
         GPU_CALLABLE_MEMBER
-        sr2d::Conserved prims2flux(const sr2d::Primitive &prims,  luint nhat);
+        sr2d::Conserved prims2flux(const sr2d::Primitive &prims,  luint nhat) const;
 
         GPU_CALLABLE_MEMBER
         sr2d::Conserved calc_hll_flux(
@@ -98,7 +95,7 @@ namespace simbi
             const sr2d::Conserved &right_flux,
             const sr2d::Primitive &left_prims,
             const sr2d::Primitive &right_prims,
-            const luint nhat);
+            const luint nhat) const;
 
         sr2d::Conserved u_dot(luint ii, luint jj);
 
@@ -124,6 +121,7 @@ namespace simbi
 
         std::vector<std::vector<real>> simulate2D(
             std::vector<std::vector<real>> &sources,
+            std::vector<std::vector<real>> & scalar_field,
             real tstart,
             real tend,
             real init_dt,

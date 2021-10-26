@@ -15,17 +15,15 @@ namespace simbi
 		parallel_for(p, first, last, function);
 	}
 
-	template <typename index_type, typename F>
+	template <typename index_type, typename F, Platform P = BuildPlatform>
 	void parallel_for(const ExecutionPolicy<> &p, index_type first, index_type last, F function) {
 		simbi::launch(p, [=] GPU_LAMBDA () {
-			
-			if constexpr(BuildPlatform ==Platform::GPU)
-			{
+			#if GPU_CODE
 				for (auto idx : range(first, last, globalThreadXCount()))  function(idx);
-			} else {
+			#else
 				#pragma omp parallel for schedule(static) 
 				for(auto idx = first; idx < last; idx++) function(idx);
-			}
+			#endif
 			
 		});
 			
