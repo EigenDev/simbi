@@ -1703,6 +1703,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<double> delta_t;
 
+    //Adapt the timestep
+    hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nxBlocks, physical_nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, geometry[coord_system]);
+    hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
+
     // Simulate :)
     if (first_order)
     {  
@@ -1759,7 +1763,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
             
             n++;
-            // std::cin.get();
+
             // Adapt the timestep
             hipLaunchKernelGGL(adapt_dtGPU, dim3(physical_nxBlocks, physical_nyBlocks), dim3(BLOCK_SIZE2D, BLOCK_SIZE2D), 0, 0, device_self, geometry[coord_system]);
             hipMemcpy(&dt, &(device_self->dt),  sizeof(real), hipMemcpyDeviceToHost);
