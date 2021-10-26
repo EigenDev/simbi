@@ -103,10 +103,10 @@ GPU_CALLABLE_INLINE
 constexpr int sgn(T val) { return (T(0) < val) - (val < T(0)); }
 
 template<typename T>
-GPU_CALLABLE_MEMBER constexpr T roll(const T *v, unsigned int n, int size) { return v[n % size];}
+GPU_CALLABLE_INLINE constexpr T roll(const T *v, unsigned int n, int size) { return v[n % size];}
 
 template<typename T>
-constexpr T roll(const std::vector<T>  &v, unsigned int n) { return v[n % v.size()];}
+GPU_CALLABLE_INLINE constexpr T roll(const std::vector<T>  &v, unsigned int n) { return v[n % v.size()];}
 
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-METHODS

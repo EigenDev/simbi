@@ -24,24 +24,24 @@ class CompilerParams():
     
     @property   
     def compiler_args(self):
-        cpu_compiler_args = ['-std=c++17', '-march=native', '-fno-wrapv', '-O3', '-fopenmp']
+        cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-flto']
         if self._arch == 'gpu':
             gpu_compiler_args = { '$ENV{CC}': cpu_compiler_args,
                                    'hipcc': []
                                  }
             if "${HIP_PLATFORM}" == "nvidia":
-                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_50', '-c',
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_50',
                                             '--ptxas-options=-v', '--extended-lambda',
-                                            '--compiler-options', '-fPIC', '-O3', '-lineinfo']
+                                            '--compiler-options', '-fPIC', '-O3']
             else:
-                gpu_compiler_args["hipcc"] += ['-std=c++17', '-fno-wrapv', '-O3', "-fPIC"]
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-O3', "-fPIC"]
                 
         self._compiler_args = cpu_compiler_args if self._arch == "cpu" else gpu_compiler_args
         return self._compiler_args
                 
     @property
     def linker_args(self):
-        self._linker_args = ['-lhdf5', '-lhdf5_cpp', '-fopenmp']
+        self._linker_args = ['-lhdf5', '-lhdf5_cpp', '-fopenmp', '-flto']
         if self._arch != "cpu":
             if "${HIP_PLATFORM}" == "nvidia":
                 self._linker_args += ['-lcudart']
@@ -195,6 +195,7 @@ def customize_compiler_for_hipcc(self):
         if src != "${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp":
             # use the hip for .hip.cpp files
             self.set_executable('compiler_so', '${HIPCC}')
+            #self.set_executable('linker_so', '${HIPCC}')
             # use only a subset of the extra_postargs, which are 1-1
             # translated from the extra_compile_args in the Extension class
             postargs = extra_postargs['hipcc']
@@ -248,10 +249,9 @@ class BuildPlatformCommand(build_ext_orig):
 # Initialize default CPU extension
 ext = None
 if "--cpu" in sys.argv:
-    ext = extensions(CompilerParams("cpu"), 'gpu_state')
+    ext = extensions(CompilerParams("cpu"), 'cpu_state')
 else:
     ext = extensions(CompilerParams("gpu"), 'gpu_state')
-
 setup(
     name='PySIMBI',
     author='Marcus DuPont',

@@ -155,13 +155,13 @@ vec2struct(const std::vector<N> &p){
 
 // Roll a single vector index
 template<typename T>
-GPU_CALLABLE_MEMBER
+GPU_CALLABLE_INLINE
 T roll(T &v, unsigned int n, int size) {
    return v[n % size];
 };
 
 template<typename T>
-GPU_CALLABLE_MEMBER
+GPU_CALLABLE_INLINE
 T roll(T *v, unsigned int n, int size) {
    return v[n % size];
 };

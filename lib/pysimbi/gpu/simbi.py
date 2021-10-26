@@ -50,7 +50,7 @@ class Hydro:
             None
         """
         # TODO: Add an example Instantian Here for the Sod Problem
-        
+        self.coord_system = coord_system
         self.regime = regime
         discontinuity = False
         
@@ -314,9 +314,9 @@ class Hydro:
                  first_order: bool = True,
                  periodic: bool = False,
                  linspace: bool = True,
-                 coordinates: str="cartesian",
                  CFL: float = 0.4,
                  sources: np.ndarray = None,
+                 scalars: np.ndarray = None,
                  hllc: bool =False,
                  chkpt: str = None,
                  chkpt_interval:float = 0.1,
@@ -343,7 +343,7 @@ class Hydro:
         
         #Convert strings to byte arrays
         data_directory = data_directory.encode('utf-8')
-        coordinates    = coordinates.encode('utf-8')
+        coordinates    = self.coord_system.encode('utf-8')
         # Initialize conserved u-tensor
         
         self.u = np.asarray(self.u)
@@ -356,7 +356,6 @@ class Hydro:
             
         u = self.u 
         start_time = tstart if self.t == 0 else self.t
-        
         
         if self.dimensions == 1:
             if (linspace):
@@ -376,7 +375,7 @@ class Hydro:
                 a = PyStateSR(u, self.gamma, CFL, r = x1, coord_system = coordinates)
     
             u = a.simulate(sources = sources,
-                tstart = tstart,
+                tstart = start_time,
                 tend = tend,
                 dt = dt,
                 plm_theta = plm_theta,
@@ -399,6 +398,9 @@ class Hydro:
             sources = np.zeros((4, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             
+            scalars = np.zeros((4, x2.size, x1.size), dtype=float) if not scalars else np.asarray(scalars)
+            scalars = scalars.reshape(scalars.shape[0], -1)
+            
             if (first_order):
                 print("Computing First Order...")
             
@@ -410,8 +412,10 @@ class Hydro:
             else:
                 b = PyStateSR2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
                    
-            u = b.simulate(sources = sources,
-                tstart = tstart,
+            u = b.simulate(
+                sources = sources,
+                scalar_field = scalars,
+                tstart = start_time,
                 tend = tend,
                 dt = dt,
                 plm_theta = plm_theta,
