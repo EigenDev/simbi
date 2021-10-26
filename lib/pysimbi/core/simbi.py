@@ -315,6 +315,7 @@ class Hydro:
                  coordinates: str="cartesian",
                  CFL: float = 0.4,
                  sources: np.ndarray = None,
+                 scalars: np.ndarray = None,
                  hllc: bool =False,
                  chkpt: str = None,
                  chkpt_interval:float = 0.1,
@@ -400,16 +401,35 @@ class Hydro:
             
             if (first_order):
                 print("Computing First Order...")
-            
+                scalars = np.zeros((4, x2.size, x1.size), dtype=float) if not scalars else np.asarray(scalars)
+                
+                #L/R ghosts
+                scalars = np.insert(scalars, scalars.shape[-1], scalars[:, :, -1], axis=2)
+                scalars = np.insert(scalars, 0, scalars[:, :,  0], axis=2)
+                #U/D Ghosts
+                scalars = np.insert(scalars, scalars.shape[1], scalars[:, -1], axis=1)
+                scalars = np.insert(scalars, 0, scalars[:, 0], axis=1)
+                scalars = scalars.reshape(scalars.shape[0], -1)
             else:
                 print('Computing Higher Order...')
+                scalars = np.zeros((4, x2.size, x1.size), dtype=float) if not scalars else np.asarray(scalars)
+                
+                #L/R ghosts
+                scalars = np.insert(scalars, scalars.shape[-1], (scalars[:, :, -1], scalars[:, :, -1]), axis=2)
+                scalars = np.insert(scalars, 0, (scalars[:, :,  0],scalars[:, :, -1]), axis=2)
+                #U/D Ghosts
+                scalars = np.insert(scalars, scalars.shape[1], (scalars[:, -1],scalars[:,-1]), axis=1)
+                scalars = np.insert(scalars, 0, (scalars[:, 0],scalars[:,0]), axis=1)
+                scalars = scalars.reshape(scalars.shape[0], -1)
                 
             if self.regime == "classical":
                 b = PyState2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
             else:
                 b = PyStateSR2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
                    
-            u = b.simulate(sources = sources,
+            u = b.simulate(
+                sources = sources,
+                scalar_field = scalars,
                 tstart = tstart,
                 tend = tend,
                 dt = dt,
