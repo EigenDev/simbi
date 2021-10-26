@@ -8,7 +8,7 @@ from pysimbi import Hydro
 
 gamma = 5/3 
 tend = 0.4249
-N = 264
+N = 2**10
 dt = 1.e-4
 
 fig, axs = plt.subplots(3, 1, figsize=(15,30), sharex=True)
@@ -22,7 +22,7 @@ hydro = Hydro(gamma=gamma, initial_state = ((10.0,13.33,0.0),(1.0,1.e-10,0.0)),
 
 
 h = hydro2.simulate(tend=tend, first_order=False,  CFL=0.4, hllc=True )
-u = hydro.simulate(tend=tend,  first_order=False,  CFL=0.4, hllc=False)
+u = hydro.simulate(tend=tend,  first_order=True,  CFL=0.4, hllc=False)
 
 
 x = np.linspace(0, 1, N)

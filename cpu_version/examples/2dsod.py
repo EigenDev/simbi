@@ -17,7 +17,7 @@ rmin = 0.1
 rmax = 1.1
 xnpts = 256 
 
-rhoL = 1.4
+rhoL = 1.0
 vL = 0.0
 pL =1.
 
@@ -66,20 +66,20 @@ print("Dim: {}x{}".format(ynpts, xnpts))
 
 S = np.zeros(shape = rho.shape)
 
-SodHLLE = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt), 
+SodHLLE = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt), regime="relativistic",
               Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
 t1 = (time.time()*u.s).to(u.min)
-hlle_result = SodHLLE.simulate(tend=tend, first_order=True, dt=dt, coordinates="spherical",
+hlle_result = SodHLLE.simulate(tend=tend, first_order=False, dt=dt, coordinates="spherical",
                    linspace=False, CFL=0.1, hllc=False)
 
 
 # HLLC Simulation
-SodHLLC = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt), 
+SodHLLC = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt), regime="relativistic",
               Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
 t1 = (time.time()*u.s).to(u.min)
-hllc_result = SodHLLC.simulate(tend=tend, first_order=True, dt=dt, coordinates="spherical",
+hllc_result = SodHLLC.simulate(tend=tend, first_order=False, dt=dt, coordinates="spherical",
                     linspace=False, CFL=0.1, hllc=True)
 
 print("The 2D SOD Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))

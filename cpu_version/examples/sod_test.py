@@ -8,8 +8,8 @@ from pysimbi import Hydro
 
 from state import PyState, PyState2D
 
-gamma = 1.4 
-tend = 0.4
+gamma = 1.4
+tend = 0.228
 N = 1024
 dt = 1.e-4
 
@@ -18,10 +18,10 @@ stationary = ((1.4, 1.0, 0.0), (1.0, 1.0, 0.0))
 sod = ((1.0,1.0,0.0),(0.1,0.125,0.0))
 fig, ax = plt.subplots(1, 1, figsize=(10,10))
 
-hydro = Hydro(gamma=1.4, initial_state = stationary,
+hydro = Hydro(gamma=gamma, initial_state = sod,
         Npts=N, geometry=(0.0,1.0,0.5), n_vars=3)
 
-hydro2 = Hydro(gamma=1.4, initial_state = stationary,
+hydro2 = Hydro(gamma=gamma, initial_state = sod,
         Npts=N, geometry=(0.0,1.0,0.5), n_vars=3)
 
 t1 = time.time()
@@ -29,7 +29,7 @@ poll = hydro.simulate(tend=tend, dt=dt, first_order=True, hllc=False)
 print("Time for HLLE Simulation: {} sec".format(time.time() - t1))
 
 t2 = time.time()
-bar = hydro2.simulate(tend=tend, dt=dt, first_order=False, hllc=True)
+bar = hydro2.simulate(tend=tend, dt=dt, first_order=False, hllc=False)
 print("Time for HLLC Simulation: {} sec".format(time.time() - t2))
 
 u = bar[1]

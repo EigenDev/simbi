@@ -67,8 +67,8 @@ SodHLLC = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy),
 
 t1 = (time.time()*u.s).to(u.min)
 hllc_result = SodHLLC.simulate(tend=tend, first_order=False, dt=dt, 
-                               linspace=True, CFL=0.4,
-                               hllc=False, periodic = True)
+                               linspace=True, CFL=0.4, data_directory="data/kh/",
+                               hllc=False, periodic = True, chkpt_interval= 0.01)
 
 print("The 2D KH Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 
