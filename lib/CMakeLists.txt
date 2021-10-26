@@ -146,7 +146,7 @@ if(PYTHON3)
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_cpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/cpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
             DEPENDS ${GDEPS}
         )
@@ -157,11 +157,11 @@ if(PYTHON3)
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_cpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/cpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
             DEPENDS ${CDEPS}
         )
-        add_custom_target(cpu ALL EPENDS ${OUTPUT}/pytimestamp_cpu)
+        add_custom_target(cpu ALL DEPENDS ${OUTPUT}/pytimestamp_cpu)
     
     endif(HIP_FOUND)
     install(CODE "execute_process(COMMAND pip install ${_pip_args} -e ${CMAKE_CURRENT_BINARY_DIR})")
