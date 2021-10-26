@@ -183,7 +183,7 @@ def get_1d_equiv_file(rzones: int):
     return ofield
 
 cons = ['D', 'momentum', 'energy', 'energy_rst']
-field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'line_profile', 'energy'] + cons 
+field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'line_profile', 'energy', 'mass'] + cons 
 col = plt.cm.jet([0.25,0.75])  
 
 R_0 = const.R_sun.cgs 
@@ -196,13 +196,13 @@ pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
 vel_scale  = c 
 time_scale = R_0 / c
 
-def compute_rvertcies(r):
+def compute_rverticies(r):
     rvertices = np.sqrt(r[1:] * r[:-1])
     rvertices = np.insert(rvertices,  0, r[0])
     rvertices = np.insert(rvertices, r.shape, r[-1])
     return rvertices 
 
-def compute_theta_vertcies(theta):
+def compute_theta_verticies(theta):
     tvertices = 0.5 * (theta[1:] + theta[:-1])
     tvertices = np.insert(tvertices, 0, theta[0], axis=0)
     tvertices = np.insert(tvertices, tvertices.shape[0], theta[-1], axis=0)
@@ -230,18 +230,20 @@ def calc_cell_volume(r, theta):
         return ( (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos )
         
 def get_field_str(args):
-    if args.field == "rho":
+    if args.field == "rho" or args.field == 'D':
+        var = r"\rho" if args.field == "rho" else "D"
         if args.units:
-            return r'$\rho$ [g cm$^{-3}$]'
+            return r'${}$ [g cm$^{{-3}}$]'.format(var)
         else:
-            return r'$\rho$'
+            return r'${}$'.format(var)
     elif args.field == "gamma_beta":
         return r"$\Gamma \ \beta$"
-    elif args.field == "energy":
+    elif args.field == "energy" or args.field == 'p':
+        var = "\tau" if args.field == "energy" else "p"
         if args.units:
-            return r"$\tau [\rm erg \ cm^{-3}]$"
+            return r"${} [\rm erg \ cm^{{-3}}]$".format(var)
         else:
-            return r"$\tau $"
+            return r"${} $".format(var)
     elif args.field == "energy_rst":
         if args.units:
             return r"$\tau - D \  [\rm erg \ cm^{-3}]$"
@@ -267,7 +269,6 @@ def plot_polar_plot(field_dict, args, mesh, ds):
     if args.wedge:
         fig, axes = plt.subplots(1, 2, subplot_kw={'projection': 'polar'},
                             figsize=(15, 10), constrained_layout=True)
-        
         ax    = axes[0]
         wedge = axes[1]
     else:
@@ -308,7 +309,7 @@ def plot_polar_plot(field_dict, args, mesh, ds):
         color_map = plt.cm.get_cmap(args.cmap)
         
     tend = ds[0]["time"]
-    c1 = ax.pcolormesh(tt[::-1], rr, var, cmap=color_map, shading='auto', **kwargs)
+    c1 = ax.pcolormesh(tt, rr, var, cmap=color_map, shading='auto', **kwargs)
     c2 = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, shading='auto', **kwargs)
     
     # ax.set_thetamin(0)
@@ -397,7 +398,7 @@ def plot_polar_plot(field_dict, args, mesh, ds):
         else:
             cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
         
-    fig.suptitle('{} at t = {:.2f}'.format(args.setup[0], tend), fontsize=20, y=0.95)
+    fig.suptitle('{} at t = {:.2f}'.format(args.setup[0], tend), fontsize=20, y=1)
 
 def plot_cartesian_plot(field_dict, args, mesh, ds):
     fig, ax= plt.subplots(1, 1, figsize=(10,10), constrained_layout=False)
@@ -408,7 +409,7 @@ def plot_cartesian_plot(field_dict, args, mesh, ds):
     ymax        = ds[0]["ymax"]
     ymin        = ds[0]["ymin"]
     
-    vmin,vmax = eval(args.cbar)
+    vmin,vmax = args.cbar
 
     if args.log:
         kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
@@ -466,19 +467,35 @@ def plot_1d_curve(field_dict, args, mesh, ds, overplot=False, ax=None, case=0):
     ymax        = ds[0]["ymax"]
     ymin        = ds[0]["ymin"]
     
-    vmin,vmax = eval(args.cbar)
+    vmin,vmax = args.cbar
     ofield = get_1d_equiv_file(16384)
     #1D test 
     tend = ds[0]["time"]
     # for idx in range(len(theta)):
     #     ax.loglog(r, field_dict[args.field][idx])
-    ax.loglog(r, field_dict[args.field][args.tidx])
-    ax.loglog(ofield["r"], ofield[args.field], 'ro')
-        
+    if args.field == "mass":
+        dV          = calc_cell_volume(mesh["rr"], mesh['theta'])
+        mass        = 2.0 * np.pi * dV * field_dict["W"] * field_dict["rho"]
+        # linestyle = "-."
+        if args.labels is None:
+            ax.loglog(r, mass[args.tidx]/ np.max(mass[args.tidx]), label = "mass", linestyle="-.", color=colors[case])
+            ax.loglog(r, field_dict["p"][args.tidx] / np.max(field_dict["p"][args.tidx]), label = "pressure", color=colors[case])
+        else:
+            ax.loglog(r, mass[args.tidx]/ np.max(mass[args.tidx]), label = f"{args.labels[case]} mass", linestyle="-.", color=colors[case])
+            ax.loglog(r, field_dict["p"][args.tidx] / np.max(field_dict["p"][args.tidx]), label = f"{args.labels[case]} pressure", color=colors[case])
+        ax.legend(fontsize=20)
+        ax.axvline(0.65, linestyle="--", color="red")
+        ax.axvline(1.00, linestyle="--", color="blue")
+    else:
+        ax.loglog(r, field_dict[args.field][args.tidx])
+        ax.loglog(r, field_dict["p"][args.tidx])
+    # ax.loglog(ofield["r"], ofield[args.field], 'ro')
+    
+    
     # ax.set_position( [0.1, -0.18, 0.8, 1.43])
     ax.set_xlim(xmin, xmax)
     ax.set_xlabel(r'$r/R_\odot$', fontsize=20)
-    ax.tick_params(axis='both', labelsize=20)
+    ax.tick_params(axis='both', labelsize=10)
     # Change the format of the field
     if args.field == "rho":
         field_str = r'$\rho$'
@@ -494,6 +511,7 @@ def plot_1d_curve(field_dict, args, mesh, ds, overplot=False, ax=None, case=0):
     else:
         ax.set_ylabel(r'$[{}]$'.format(args.field), fontsize=20)
     
+    ax.set_title(r"$\theta = {:.2f}$ time: {:.3f}".format(mesh['th'][args.tidx] * 180 / np.pi, tend))
     if not overplot:
         return fig
     # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup[0],theta[args.tidx], tend), fontsize=20, y=0.95)
@@ -512,7 +530,7 @@ def plot_max(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     ymax        = ds[0]["ymax"]
     ymin        = ds[0]["ymin"]
     
-    vmin,vmax = eval(args.cbar)
+    vmin,vmax = args.cbar
     ofield = get_1d_equiv_file(16384)
     #1D test 
     tend = ds[0]["time"]
@@ -719,13 +737,18 @@ def main():
             v1          = hf.get("v1")[:]
             v2          = hf.get("v2")[:]
             p           = hf.get("p")[:]
-            nx          = ds.attrs["NX"]
-            ny          = ds.attrs["NY"]
             t           = ds.attrs["current_time"]
             xmax        = ds.attrs["xmax"]
             xmin        = ds.attrs["xmin"]
             ymax        = ds.attrs["ymax"]
             ymin        = ds.attrs["ymin"]
+            
+            try:
+                nx          = ds.attrs["nx"]
+                ny          = ds.attrs["ny"]
+            except:
+                nx          = ds.attrs["NX"]
+                ny          = ds.attrs["NY"]
             
             # New checkpoint files, so check if new attributes were
             # implemented or not
