@@ -168,6 +168,7 @@ cdef class PyStateSR2D:
 
     def simulate(self, 
         vector[vector[real]] sources,
+        vector[vector[real]] scalar_field,
         real tstart,
         real tend,
         real dt,
@@ -182,6 +183,7 @@ cdef class PyStateSR2D:
         
         result = self.c_state.simulate2D(
             sources,
+            scalar_field,
             tstart,
             tend,
             dt,

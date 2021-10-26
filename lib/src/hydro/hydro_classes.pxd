@@ -95,6 +95,7 @@ cdef extern from "srhydro2D.hip.hpp" namespace "simbi":
 
         vector[vector[real]] simulate2D(
             vector[vector[real]] sources,
+            vector[vector[real]] scalar_field,
             real tstart,
             real tend,
             real dt,
