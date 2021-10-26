@@ -2,6 +2,9 @@ plots/
 pysimbi/__pycache__/
 SIMBI_2D_Hydro_Code.egg-info/
 build/
+cpu_version/examples/*
+hip_version/examples/*
+lib/src/build_options.hpp 
 data/*
 tests/
 science/
