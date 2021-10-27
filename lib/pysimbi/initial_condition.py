@@ -46,7 +46,7 @@ def load_checkpoint(model, filename, dim):
                 ny          = ds.attrs["ny"]
                 
             try:
-                scalars    = hf.get("chi")
+                scalars    = hf.get("chi")[:]
             except:
                 scalars    = np.zeros((ny, nx))
                 
@@ -61,10 +61,11 @@ def load_checkpoint(model, filename, dim):
                 ad_gamma = 4./3.
             
             
-            rho = rho.reshape(ny, nx)
-            v1  = v1.reshape(ny, nx)
-            v2  = v2.reshape(ny, nx)
-            p   = p.reshape(ny, nx)
+            rho     = rho.reshape(ny, nx)
+            v1      = v1.reshape(ny, nx)
+            v2      = v2.reshape(ny, nx)
+            p       = p.reshape(ny, nx)
+            scalars = scalars.reshape(ny,nx)
             
             h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
             
