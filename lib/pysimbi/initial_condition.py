@@ -45,6 +45,11 @@ def load_checkpoint(model, filename, dim):
                 nx          = ds.attrs["nx"]
                 ny          = ds.attrs["ny"]
                 
+            try:
+                scalars    = hf.get("chi")
+            except:
+                scalars    = np.zeros((ny, nx))
+                
             model.t     = ds.attrs["current_time"]
             xmax        = ds.attrs["xmax"]
             xmin        = ds.attrs["xmin"]
@@ -64,15 +69,16 @@ def load_checkpoint(model, filename, dim):
             h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
             
             W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
-            model.D   = rho * W 
-            model.S1  = W*W*rho*h*v1 
-            model.S2  = W*W*rho*h*v2 
-            model.tau = W*W*rho*h - p - rho*W
+            model.D    = rho * W 
+            model.S1   = W*W*rho*h*v1 
+            model.S2   = W*W*rho*h*v2 
+            model.tau  = W*W*rho*h - p - rho*W
+            model.Dchi = model.D * scalars
             
-            model.u = np.array([model.D, model.S1, model.S2, model.tau])
+            model.u = np.array([model.D, model.S1, model.S2, model.tau, model.Dchi])
             
 
-def initializeModel(model, first_order = False, periodic = False):
+def initializeModel(model, first_order = False, periodic = False, scalars = 0):
     
     # Check if u-array is empty. If it is, generate an array.
     if model.dimensions == 1:
@@ -186,10 +192,9 @@ def initializeModel(model, first_order = False, periodic = False):
                         model.u = np.insert(model.u, model.u.shape[1], bottom_ghost , axis=1)
                         model.u = np.insert(model.u, 0, upper_ghost , axis=1)
                     else:
-                        model.u = np.empty(shape = (model.n_vars, model.yNpts, model.xNpts), dtype=float)
+                        model.u = np.empty(shape = (5, model.yNpts, model.xNpts), dtype=float)
                         model.u[:, :, :] = np.array([model.initD, model.initS1,
-                                                    model.initS2, model.init_tau])
-                        
+                                                    model.initS2, model.init_tau, model.init_initD * scalars])
                         # Add boundary ghosts
                         bottom_ghost = model.u[:, -1]
                         upper_ghost = model.u[:, 0]
@@ -238,9 +243,9 @@ def initializeModel(model, first_order = False, periodic = False):
                         model.u = np.insert(model.u, model.u.shape[2],
                                         (right_ghost, right_ghost) , axis=2)
                     else:
-                        model.u = np.empty(shape = (model.n_vars, model.yNpts, model.xNpts), dtype=float)
+                        model.u = np.empty(shape = (5, model.yNpts, model.xNpts), dtype=float)
                         model.u[:, :, :] = np.array([model.initD, model.initS1,
-                                                    model.initS2, model.init_tau])
+                                                    model.initS2, model.init_tau, model.initD * scalars])
                         
                         # Add boundary ghosts
                         bottom_ghost = model.u[:, -1]

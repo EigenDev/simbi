@@ -316,7 +316,7 @@ class Hydro:
                  linspace: bool = True,
                  CFL: float = 0.4,
                  sources: np.ndarray = None,
-                 scalars: np.ndarray = None,
+                 scalars: np.ndarray = 0,
                  hllc: bool =False,
                  chkpt: str = None,
                  chkpt_interval:float = 0.1,
@@ -350,7 +350,7 @@ class Hydro:
         self.t = 0
         
         if not chkpt:
-            simbi_ic.initializeModel(self, first_order, periodic)
+            simbi_ic.initializeModel(self, first_order, periodic, scalars)
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensions)
             
@@ -398,9 +398,6 @@ class Hydro:
             sources = np.zeros((4, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             
-            scalars = np.zeros((4, x2.size, x1.size), dtype=float) if not scalars else np.asarray(scalars)
-            scalars = scalars.reshape(scalars.shape[0], -1)
-            
             if (first_order):
                 print("Computing First Order...")
             
@@ -414,7 +411,6 @@ class Hydro:
                    
             u = b.simulate(
                 sources = sources,
-                scalar_field = scalars,
                 tstart = start_time,
                 tend = tend,
                 dt = dt,

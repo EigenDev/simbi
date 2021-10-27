@@ -33,7 +33,7 @@ constexpr double PI = 3.14159265358979323846;
 
 struct PrimData
 {
-    std::vector<real> rho, v1, v2, v3, p, v;
+    std::vector<real> rho, v1, v2, v3, p, v, chi;
 };
 
 struct MinMod
@@ -106,7 +106,7 @@ template<typename T>
 GPU_CALLABLE_INLINE constexpr T roll(const T *v, unsigned int n, int size) { return v[n % size];}
 
 template<typename T>
-GPU_CALLABLE_INLINE constexpr T roll(const std::vector<T>  &v, unsigned int n) { return v[n % v.size()];}
+constexpr T roll(const std::vector<T>  &v, unsigned int n) { return v[n % v.size()];}
 
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-METHODS

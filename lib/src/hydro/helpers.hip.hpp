@@ -22,6 +22,7 @@ namespace simbi
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
     dtWarpReduce(T *s, const simbi::Geometry geometry, 
+        luint bytes,
         real dx, 
         real dy, 
         real rmin = 0, 
@@ -49,7 +50,7 @@ namespace simbi
         const ExecutionPolicy<> p,
         SRHD *dev_sim, 
         const int, 
-        const bool = true);
+        const bool reflecting = true);
         
     void config_ghosts2DGPU(
         const ExecutionPolicy<> p,

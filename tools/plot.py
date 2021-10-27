@@ -183,7 +183,7 @@ def get_1d_equiv_file(rzones: int):
     return ofield
 
 cons = ['D', 'momentum', 'energy', 'energy_rst']
-field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'line_profile', 'energy', 'mass'] + cons 
+field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'line_profile', 'energy', 'mass', 'chi', 'chi_dens'] + cons 
 col = plt.cm.jet([0.25,0.75])  
 
 R_0 = const.R_sun.cgs 
@@ -249,6 +249,8 @@ def get_field_str(args):
             return r"$\tau - D \  [\rm erg \ cm^{-3}]$"
         else:
             return r"$\tau - D"
+    elif args.field == "chi":
+        return r"\chi"
     else:
         return args.field
     
@@ -750,6 +752,10 @@ def main():
                 nx          = ds.attrs["NX"]
                 ny          = ds.attrs["NY"]
             
+            try:
+                chi = hf.get("chi")[:]
+            except:
+                chi = np.zeros((ny, nx))
             # New checkpoint files, so check if new attributes were
             # implemented or not
             try:
@@ -781,12 +787,15 @@ def main():
             v1  = v1.reshape(ny, nx)
             v2  = v2.reshape(ny, nx)
             p   = p.reshape(ny, nx)
+            chi = chi.reshape(ny, nx)
+            
             
             if args.forder:
                 rho = rho[1:-1, 1: -1]
                 v1  = v1 [1:-1, 1: -1]
                 v2  = v2 [1:-1, 1: -1]
                 p   = p  [1:-1, 1: -1]
+                chi = chi[1:-1, 1: -1]
                 xactive = nx - 2
                 yactive = ny - 2
                 setup_dict[idx]["xactive"] = xactive
@@ -796,6 +805,7 @@ def main():
                 v1  = v1 [2:-2, 2: -2]
                 v2  = v2 [2:-2, 2: -2]
                 p   = p  [2:-2, 2: -2]
+                chi = chi[2:-2, 2: -2]
                 xactive = nx - 4
                 yactive = ny - 4
                 setup_dict[idx]["xactive"] = xactive
@@ -827,6 +837,7 @@ def main():
             field_dict[idx]["v1"]          = v1 
             field_dict[idx]["v2"]          = v2 
             field_dict[idx]["p"]           = p
+            field_dict[idx]["chi"]         = chi
             field_dict[idx]["gamma_beta"]  = W*beta
             field_dict[idx]["temperature"] = T
             field_dict[idx]["enthalpy"]    = h

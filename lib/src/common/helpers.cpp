@@ -383,11 +383,13 @@ void write_hdf5(
             real* v1  = new real[size];
             real* v2  = new real[size];
             real* p   = new real[size];
+            real* chi = new real[size];
 
-            std::copy(prims.rho.begin(), prims.rho.begin() + size, rho);
-            std::copy(prims.v1.begin(), prims.v1.begin() + size, v1);
-            std::copy(prims.v2.begin(), prims.v2.begin() + size, v2);
-            std::copy(prims.p.begin(),  prims.p.begin() + size, p);
+            std::copy(prims.rho.begin(),  prims.rho.begin() + size, rho);
+            std::copy(prims.v1.begin(),   prims.v1.begin()  + size, v1);
+            std::copy(prims.v2.begin(),   prims.v2.begin()  + size, v2);
+            std::copy(prims.p.begin(),    prims.p.begin()   + size, p);
+            std::copy(prims.chi.begin(),  prims.chi.begin() + size, chi);
             H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
 
             // Write the Primitives 
@@ -406,11 +408,16 @@ void write_hdf5(
             dataset.write(p, H5::PredType::NATIVE_DOUBLE);
             dataset.close();
 
+            dataset = file.createDataSet("chi", datatype, dataspace);
+            dataset.write(chi, H5::PredType::NATIVE_DOUBLE);
+            dataset.close();
+
             // Free the heap
             delete[] rho;
             delete[] v1;
             delete[] v2;
             delete[] p;
+            delete[] chi;
 
             // Write Datset Attributesauto real_type(H5::PredType::NATIVE_DOUBLE);
             H5::DataType int_type(H5::PredType::NATIVE_INT);
@@ -610,52 +617,4 @@ void write_hdf5(
     
     }
     
-}
-//=======================================================================================================
-//                                      RELATIVISITC HYDRO
-//=======================================================================================================
-real calc_intermed_wave(real energy_density, real momentum_density, 
-                            real flux_momentum_density, 
-                            real flux_energy_density)
-{
-    real a = flux_energy_density;
-    real b = - (energy_density + flux_momentum_density);
-    real c = momentum_density;
-    real disc = sqrt( b*b - 4*a*c);
-    real quad = -0.5*(b + sgn(b)*disc);
-    return c/quad;
-}
-
-real calc_intermed_pressure(real a,real aStar, real energy, real norm_mom, real u, real p){
-
-    real e, f, g;
-    e = (a*energy - norm_mom)*aStar;
-    f = norm_mom*(a - u) - p;
-    g = 1 + a*aStar;
-
-    return (e - f)/g;
-}
-//------------------------------------------------------------------------------------------------------------
-//  F-FUNCTION FOR ROOT FINDING: F(P)
-//------------------------------------------------------------------------------------------------------------
-real pressure_func(real pressure, real D, real tau, real lorentz_gamma, float gamma, real S){
-
-    real v       = S / (tau + pressure + D);
-    real W_s     = 1.0 / sqrt(1.0 - v * v);
-    real rho     = D / W_s; 
-    real epsilon = ( tau + D*(1. - W_s) + (1. - W_s*W_s)*pressure )/(D * W_s);
-
-    return (gamma - 1.)*rho*epsilon - pressure;
-}
-
-real dfdp(real pressure, real D, real tau, real lorentz_gamma, float gamma, real S){
-
-    real v       = S/(tau + D + pressure);
-    real W_s     = 1.0 / sqrt(1.0 - v*v);
-    real rho     = D / W_s; 
-    real h       = 1 + pressure*gamma/(rho*(gamma - 1.));
-    real c2      = gamma*pressure/(h*rho);
-    
-
-    return v*v*c2 - 1.;
 }

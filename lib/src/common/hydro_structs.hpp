@@ -237,7 +237,7 @@ namespace sr2d {
     struct PrimitiveData {
         PrimitiveData() {}
         ~PrimitiveData() {}
-        std::vector<real> rho, v1, v2, p;
+        std::vector<real> rho, v1, v2, p, chi;
     };
     
     struct Eigenvals{
@@ -281,33 +281,37 @@ namespace hydro2d {
     };
 
     struct Primitive {
-        Primitive() {}
-        ~Primitive() {}
-        real rho, v1, v2, p;
+        GPU_CALLABLE_MEMBER Primitive() {}
+        GPU_CALLABLE_MEMBER ~Primitive() {}
+        real rho, v1, v2, p, chi;
 
-        Primitive(real rho, real v1, real v2, real p) : rho(rho), v1(v1), v2(v2), p(p) {}
-        Primitive(const Primitive &c) : rho(c.rho), v1(c.v1), v2(c.v2), p(c.p) {}
-        Primitive operator + (const Primitive &e)  const { return Primitive(rho+e.rho, v1+e.v1, v2+e.v2, p+e.p); }  
-        Primitive operator - (const Primitive &e)  const { return Primitive(rho-e.rho, v1-e.v1, v2-e.v2, p-e.p); }  
-        Primitive operator * (const real c)      const { return Primitive(rho*c, v1*c, v2*c, p*c ); }
-        Primitive operator / (const real c)      const { return Primitive(rho/c, v1/c, v2/c, p/c ); }
+        GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p) : rho(rho), v1(v1), v2(v2), p(p), chi(0) {}
+        GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p, real chi) : rho(rho), v1(v1), v2(v2), p(p), chi(chi) {}
+        GPU_CALLABLE_MEMBER Primitive(const Primitive &c) : rho(c.rho), v1(c.v1), v2(c.v2), p(c.p), chi(c.chi) {}
+        GPU_CALLABLE_MEMBER Primitive operator + (const Primitive &e)  const { return Primitive(rho+e.rho, v1+e.v1, v2+e.v2, p+e.p, chi+e.chi); }  
+        GPU_CALLABLE_MEMBER Primitive operator - (const Primitive &e)  const { return Primitive(rho-e.rho, v1-e.v1, v2-e.v2, p-e.p, chi-e.chi); }  
+        GPU_CALLABLE_MEMBER Primitive operator * (const real c)        const { return Primitive(rho*c, v1*c, v2*c, p*c, chi*c ); }
+        GPU_CALLABLE_MEMBER Primitive operator / (const real c)        const { return Primitive(rho/c, v1/c, v2/c, p/c, chi/c ); }
 
-        Primitive & operator +=(const Primitive &prims) {
+        GPU_CALLABLE_MEMBER Primitive & operator +=(const Primitive &prims) {
             rho    += prims.rho;
             v1     += prims.v1;
             v2     += prims.v2;
             p      += prims.p;
+            chi    += prims.chi;
             return *this;
         }
 
-        Primitive & operator -=(const Primitive &prims) {
+        GPU_CALLABLE_MEMBER Primitive & operator -=(const Primitive &prims) {
             rho    -= prims.rho;
             v1     -= prims.v1;
             v2     -= prims.v2;
             p      -= prims.p;
+            chi    -= prims.chi;
             return *this;
         }
-
+        
+        GPU_CALLABLE_MEMBER
         real vcomponent(const unsigned nhat) const {return (nhat == 1 ? v1 : v2); }
 
     };
@@ -315,7 +319,7 @@ namespace hydro2d {
     struct PrimitiveData {
         PrimitiveData() {}
         ~PrimitiveData() {}
-        std::vector<real> rho, v1, v2, p;
+        std::vector<real> rho, v1, v2, p, chi;
     };
     
     struct Eigenvals{

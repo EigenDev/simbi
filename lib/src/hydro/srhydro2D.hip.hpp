@@ -102,7 +102,7 @@ namespace simbi
         std::vector<sr2d::Conserved> u_dot2D(const std::vector<sr2d::Conserved> &cons_state);
 
         void adapt_dt();
-        void adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p);
+        void adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, luint bytes);
         
         void advance(
                SRHD2D *s, 
@@ -121,7 +121,6 @@ namespace simbi
 
         std::vector<std::vector<real>> simulate2D(
             std::vector<std::vector<real>> &sources,
-            std::vector<std::vector<real>> & scalar_field,
             real tstart,
             real tend,
             real init_dt,

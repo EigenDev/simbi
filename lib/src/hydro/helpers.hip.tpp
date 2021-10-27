@@ -67,7 +67,8 @@ namespace simbi{
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
     dtWarpReduce(T *s, 
-        const simbi::Geometry geometry, 
+        const simbi::Geometry geometry,
+        luint bytes, 
         real dx, 
         real dy, 
         real rmin, 
@@ -76,8 +77,9 @@ namespace simbi{
         real ymax)
     {
         const real gamma     = s->gamma;
-        __shared__ volatile real dt_buff[BLOCK_SIZE2D * BLOCK_SIZE2D];
-        __shared__  N prim_buff[BLOCK_SIZE2D][BLOCK_SIZE2D];
+        extern __shared__ real arr[];
+        volatile real* dt_buff = (real*)arr;
+        N* prim_buff = (N*)&dt_buff[bytes];
 
         real cfl_dt, rmean, rl, rr, dr, tl, tr;
         const luint tx  = threadIdx.x;
@@ -88,17 +90,16 @@ namespace simbi{
         const luint ia  = ii + s->idx_active;
         const luint ja  = jj + s->idx_active;
         const luint aid = (col_maj) ? ia * s-> ny + ja : ja * s->nx + ia;
-        // const CLattice2D *coord_lattice = &(s->coord_lattice);
 
         if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid))
         {
-            prim_buff[ty][tx] = s->gpu_prims[aid];
+            prim_buff[tid] = s->gpu_prims[aid];
             __syncthreads();
 
-            real rho  = prim_buff[ty][tx].rho;
-            real p    = prim_buff[ty][tx].p;
-            real v1   = prim_buff[ty][tx].v1;
-            real v2   = prim_buff[ty][tx].v2;
+            real rho  = prim_buff[tid].rho;
+            real p    = prim_buff[tid].p;
+            real v1   = prim_buff[tid].v1;
+            real v2   = prim_buff[tid].v2;
 
             real h  = 1 + gamma * p / (rho * (gamma - 1));
             real cs = sqrt(gamma * p / (rho * h));
@@ -117,10 +118,10 @@ namespace simbi{
                 
                 case simbi::Geometry::SPHERICAL:
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    rl    = (ii > 0) ? rmin*pow(10, (ii - 0.5) * dx)    : rmin;
-                    rr    = (ii < s->xphysical_grid - 1) ? rl * pow(10, dx) : rmax; 
-                    tl    = (jj > 0) ? ymin + (jj - 0.5) * dy   : ymin;
-                    tr    = (jj < s->yphysical_grid - 1) ? tl + dy : ymax; 
+                    rl    = my_max(rmin*pow(10, (ii - 0.5) * dx), rmin);
+                    rr    = my_min(rl * pow(10, dx), rmax); 
+                    tl    = my_max(ymin + (jj - 0.5) * dy, ymin);
+                    tr    = my_min(tl + dy, ymax); 
                     rmean = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
                     cfl_dt = my_min((rr - rl) / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
                             rmean * (tr - tl) / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
@@ -144,7 +145,6 @@ namespace simbi{
             }
             if(tid == 0)
             {
-                // printf("dt_buff[0: %f\n", dt_buff[0]);
                 s->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
                 s->dt = s->CFL * s->dt_min[0];
             }

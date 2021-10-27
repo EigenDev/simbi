@@ -80,6 +80,7 @@ writeToProd(T *from, PrimData *to){
     to->v1   = from->v1;
     to->v2   = from->v2;
     to->p    = from->p;
+    to->chi  = from->chi;
 }
 
 template<typename T, typename N>
@@ -123,12 +124,14 @@ vec2struct(const std::vector<N> &p){
     sprims.v1.reserve(nzones);
     sprims.v2.reserve(nzones);
     sprims.p.reserve(nzones);
+    sprims.chi.reserve(nzones);
     for (size_t i = 0; i < nzones; i++)
     {
         sprims.rho.push_back(p[i].rho);
         sprims.v1.push_back(p[i].v1);
         sprims.v2.push_back(p[i].v2);
         sprims.p.push_back(p[i].p);
+        sprims.chi.push_back(p[i].chi);
     }
     
     return sprims;

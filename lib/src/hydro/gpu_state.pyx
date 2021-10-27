@@ -168,7 +168,6 @@ cdef class PyStateSR2D:
 
     def simulate(self, 
         vector[vector[real]] sources,
-        vector[vector[real]] scalar_field,
         real tstart,
         real tend,
         real dt,
@@ -183,7 +182,6 @@ cdef class PyStateSR2D:
         
         result = self.c_state.simulate2D(
             sources,
-            scalar_field,
             tstart,
             tend,
             dt,
@@ -198,10 +196,10 @@ cdef class PyStateSR2D:
 
         result = np.asarray(result)
         if col_maj:
-            result = result.reshape(4, self.c_state.nx, self.c_state.ny)
+            result = result.reshape(5, self.c_state.nx, self.c_state.ny)
             result = np.transpose(result, axes=(0, 2, 1))
         else:
-            result = result.reshape(4, self.c_state.ny, self.c_state.nx)
+            result = result.reshape(5, self.c_state.ny, self.c_state.nx)
         
         return result
 
