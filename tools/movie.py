@@ -236,8 +236,6 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
             else:
                 var += np.split(field_dict[field], 2)
         units  = np.repeat(units, 2)
-        print(units)
-        zzz = input('')
         var    = np.asarray(var)
         var    = np.array([units[idx] * var[idx] for idx in range(var.shape[0])])
         tchop  = np.split(tt, 2)
