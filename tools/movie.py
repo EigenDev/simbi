@@ -17,7 +17,8 @@ import os, os.path
 
 
 cons = ['D', 'momentum', 'energy', 'energy_rst']
-field_choices = ['rho', 'v1', 'v2', 'pre', 'gamma_beta', 'temperature', 'line_profile', 'energy'] + cons 
+field_choices = ['rho', 'v1', 'v2', 'pre', 'gamma_beta', 'temperature', 'gamma_beta_1', 'gamma_beta_2', 'energy', 'mass', 'chi', 'chi_dens'] + cons 
+lin_fields = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
 col = plt.cm.jet([0.25,0.75])  
 
 R_0 = const.R_sun.cgs 
@@ -30,32 +31,42 @@ pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
 vel_scale  = c 
 time_scale = R_0 / c
 
+def prims2cons(fields, cons):
+    if cons == "D":
+        return fields['rho'] * fields['W']
+    elif cons == "S":
+        return fields['rho'] * fields['W']**2 * fields['v']
+    elif cons == "energy":
+        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p'] - fields['rho']*fields['W']
+    elif cons == "energy_rst":
+        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p']
+    
 def get_field_str(args):
-    if args.field == "rho":
+    if args.field[0] == "rho":
         if args.units:
             return r'$\rho$ [g cm$^{-3}$]'
         else:
             return r'$\rho$'
-    elif args.field == "gamma_beta":
+    elif args.field[0] == "gamma_beta":
         return r"$\Gamma \ \beta$"
-    elif args.field == "energy":
+    elif args.field[0] == "energy":
         if args.units:
             return r"$\tau [\rm erg \ cm^{-3}]$"
         else:
             return r"$\tau $"
-    elif args.field == "energy_rst":
+    elif args.field[0] == "energy_rst":
         if args.units:
             return r"$\tau - D \  [\rm erg \ cm^{-3}]$"
         else:
             return r"$\tau - D"
         
-    elif args.field == "pre":
+    elif args.field[0] == "pre":
         if args.units:
             return r"$p [\rm erg \ cm^{-3}]$"
         else:
             return r"$p$"
     else:
-        return args.field
+        return args.field[0]
 
 
 def get_frames(dir, max_file_num):
@@ -75,8 +86,6 @@ def read_file(filepath, filename, args):
         v1          = hf.get("v1")[:]
         v2          = hf.get("v2")[:]
         p           = hf.get("p")[:]
-        nx          = ds.attrs["NX"]
-        ny          = ds.attrs["NY"]
         t           = ds.attrs["current_time"] * time_scale
         xmax        = ds.attrs["xmax"]
         xmin        = ds.attrs["xmin"]
@@ -85,6 +94,12 @@ def read_file(filepath, filename, args):
         
         # New checkpoint files, so check if new attributes were
         # implemented or not
+        try:
+            nx          = ds.attrs["nx"]
+            ny          = ds.attrs["ny"]
+        except:
+            nx          = ds.attrs["NX"]
+            ny          = ds.attrs["NY"]
         try:
             gamma = ds.attrs["adiabatic_gamma"]
         except:
@@ -99,6 +114,11 @@ def read_file(filepath, filename, args):
             is_linspace = ds.attrs["linspace"]
         except:
             is_linspace = False
+            
+        try:
+            chi = hf.get("chi")[:]
+        except:
+            chi = np.zeros((ny, nx))
         
         setup_dict["xmax"] = xmax 
         setup_dict["xmin"] = xmin 
@@ -110,12 +130,14 @@ def read_file(filepath, filename, args):
         v1  = v1.reshape(ny, nx)
         v2  = v2.reshape(ny, nx)
         p   = p.reshape(ny, nx)
+        chi = chi.reshape(ny, nx)
         
         if args.forder:
             rho = rho[1:-1, 1: -1]
             v1  = v1 [1:-1, 1: -1]
             v2  = v2 [1:-1, 1: -1]
             p   = p  [1:-1, 1: -1]
+            chi = chi[1:-1, 1: -1]
             xactive = nx - 2
             yactive = ny - 2
             setup_dict["xactive"] = xactive
@@ -125,6 +147,7 @@ def read_file(filepath, filename, args):
             v1  = v1 [2:-2, 2: -2]
             v2  = v2 [2:-2, 2: -2]
             p   = p  [2:-2, 2: -2]
+            chi = chi[2:-2, 2: -2]
             xactive = nx - 4
             yactive = ny - 4
             setup_dict["xactive"] = xactive
@@ -154,24 +177,30 @@ def read_file(filepath, filename, args):
         T = (3 * p * c ** 2  / a)**(1./4.)
         h = 1. + gamma*p/(rho*(gamma - 1.))
         
-        field_dict["rho"]         = rho
-        field_dict["v1"]          = v1 
-        field_dict["v2"]          = v2 
-        field_dict["pre"]         = p
-        field_dict["gamma_beta"]  = W*beta
-        field_dict["temperature"] = T
-        field_dict["enthalpy"]    = h
-        field_dict["W"]           = W
-        field_dict["energy"]      = rho * h * W * W  - p - rho * W
+        field_dict["rho"]          = rho
+        field_dict["v1"]           = v1 
+        field_dict["v2"]           = v2 
+        field_dict["pre"]          = p
+        field_dict["chi"]          = chi
+        field_dict["chi_dens"]     = chi * rho * W
+        field_dict["gamma_beta"]   = W*beta
+        field_dict["gamma_beta_1"] = abs(W*v1)
+        field_dict["gamma_beta_2"] = abs(W*v2)
+        field_dict["temperature"]  = T
+        field_dict["enthalpy"]     = h
+        field_dict["W"]            = W
+        field_dict["energy"]       = rho * h * W * W  - p - rho * W
         
     return field_dict, setup_dict
 
 def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
+    num_fields = len(args.field)
     if args.wedge:
         ax    = axs[0]
         wedge = axs[1]
     else:
         ax = axs
+        
     rr, tt = mesh['rr'], mesh['theta']
     t2 = mesh['t2']
     xmax        = ds["xmax"]
@@ -181,35 +210,98 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
     
     vmin,vmax = args.cbar
 
-    unit_scale = 1.0
+    unit_scale = np.ones(num_fields)
     if (args.units):
-        if args.field == "rho" or args.field == "D":
-            unit_scale = rho_scale
-        elif args.field == "pre" or args.field == "energy" or args.field == "energy_rst":
-            unit_scale = pre_scale
+        for idx, field in enumerate(args.field):
+            if field == "rho" or field == "D":
+                unit_scale[idx] = rho_scale.value
+            elif field == "p" or field == "energy" or field == "energy_rst":
+                unit_scale[idx] = pre_scale.value
     
-    units = unit_scale.value if args.units else 1.0
-    if args.field in cons:
-        var = units * prims2cons(field_dict, args.field)
-    else:
-        var = units * field_dict[args.field]
-        
-    if args.log:
-        kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
-    else:
-        kwargs = {'vmin': vmin, 'vmax': vmax}
-        
+    units = unit_scale if args.units else np.ones(num_fields)
+     
     if args.rcmap:
         color_map = (plt.cm.get_cmap(args.cmap)).reversed()
     else:
         color_map = plt.cm.get_cmap(args.cmap)
         
     tend = ds["time"]
-    c1 = ax.pcolormesh(tt[::-1], rr, var, cmap=color_map, shading='nearest', **kwargs)
-    c2 = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, shading='nearest', **kwargs)
+    if num_fields > 1:
+        cs  = np.zeros(4, dtype=object)
+        var = []
+        kwargs = []
+        for field in args.field:
+            if field in cons:
+                var += np.split(prims2cons(field_dict, field), 2)
+            else:
+                var += np.split(field_dict[field], 2)
+        units  = np.repeat(units, 2)
+        var    = np.asarray(var)
+        var    = np.array([units[idx] * var[idx] for idx in range(var.shape[0])])
+        tchop  = np.split(tt, 2)
+        trchop = np.split(t2, 2)
+        rchop  = np.split(rr, 2)
+        
+        quadr = {}
+        field1 = args.field[0]
+        field2 = args.field[1]
+        field3 = args.field[2 % num_fields]
+        field4 = args.field[-1]
+        
+        
+        quadr[field1] = var[0]
+        quadr[field2] = var[3]
+        
+        # Handle case of degenerate fields
+        if field3 == field4:
+            quadr[field3] = {}
+            quadr[field4] = {}
+            quadr[field3][0] = var[4 % var.shape[0]]
+            quadr[field4][1] = var[-1]
+        else:
+            quadr[field3] =  var[4 % var.shape[0]]
+            quadr[field4] = var[-1]
+
+
+        kwargs = {}
+        for idx, key in enumerate(quadr.keys()):
+            field = key
+            if idx == 0:
+                kwargs[field] =  {'vmin': vmin, 'vmax': vmax} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)} 
+            else:
+                if field3 == field4 and field == field3:
+                    ovmin = quadr[field][0].min()
+                    ovmax = quadr[field][0].max()
+                else:
+                    ovmin = quadr[field].min()
+                    ovmax = quadr[field].max()
+                kwargs[field] =  {'vmin': ovmin, 'vmax': ovmax} if field in lin_fields else {'norm': colors.LogNorm(vmin = ovmin, vmax = ovmax)} 
+
+        cs[0] = ax.pcolormesh(tchop[0],        rchop[0],  quadr[field1], cmap=color_map, shading='auto', **kwargs[field1])
+        cs[1] = ax.pcolormesh(tchop[1],        rchop[0],  quadr[field2], cmap=color_map, shading='auto', **kwargs[field2])
+        
+        if field3 == field4:
+            cs[2] = ax.pcolormesh(trchop[1][::-1], rchop[0],  quadr[field3][0], cmap=color_map, shading='auto', **kwargs[field3])
+            cs[3] = ax.pcolormesh(trchop[0][::-1], rchop[0],  quadr[field4][1], cmap=color_map, shading='auto', **kwargs[field4])
+        else:
+            cs[2] = ax.pcolormesh(trchop[1][::-1], rchop[0],  quadr[field3], cmap=color_map, shading='auto', **kwargs[field3])
+            cs[3] = ax.pcolormesh(trchop[0][::-1], rchop[0],  quadr[field4], cmap=color_map, shading='auto', **kwargs[field4])
+            
+    else:
+        if args.log:
+            kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
+        else:
+            kwargs = {'vmin': vmin, 'vmax': vmax}
+        cs = np.zeros(len(args.field), dtype=object)
+        
+        if args.field in cons:
+            var = units * prims2cons(field_dict, args.field[0])
+        else:
+            var = units * field_dict[args.field[0]]
+        
+        cs[0] = ax.pcolormesh(tt, rr, var, cmap=color_map, shading='auto', **kwargs)
+        cs[0] = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, shading='auto', **kwargs)
     
-    # ax.set_thetamin(0)
-    # ax.set_thetamax(180)
     if ymax < np.pi:
         ax.set_position( [0.1, -0.18, 0.8, 1.43])
         # cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
@@ -223,9 +315,9 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         
     if args.log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        cbar = fig.colorbar(c1, orientation=cbar_orientation, cax=cbaxes, format=logfmt)
+        cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes, format=logfmt)
     else:
-        cbar = fig.colorbar(c1, orientation=cbar_orientation, cax=cbaxes)
+        cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes)
     
     if args.wedge:
         wedge_min = args.wedge_lims[0]
@@ -237,8 +329,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         ax.plot(np.radians(np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color="white")
         ax.plot(np.radians(np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color="white")
         ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=2, color="white")
-        
-    # ax.set_position( [0.1, -0.18, 0.8, 1.43])
+    
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
     ax.yaxis.grid(True, alpha=0.2)
@@ -252,19 +343,40 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
     ax.set_rmax(xmax) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
     ax.set_rmin(xmin)
     
-    ax.set_position( [0.05, -0.5, 0.48, 2])
+    if args.wedge:
+        ax.set_position( [0.05, -0.5, 0.46, 2])
     
     field_str = get_field_str(args)
     
     if args.wedge:
-        vmin2, vmax2 = args.cbar2
-        if args.log:
-            kwargs = {'norm': colors.LogNorm(vmin = vmin2, vmax = vmax2)}
+        # ax.set_position( [0.1, -0.18, 0.8, 1.43])
+        if len(args.field) > 1:
+            if len(args.cbar2) == 4:
+                vmin2, vmax2, vmin3, vmax3 = args.cbar2
+            else:
+                vmin2, vmax2 = args.cbar2
+                vmin3, vmax3 = None, None
+            kwargs = {}
+            for idx, key in enumerate(quadr.keys()):
+                field = args.field[idx % num_fields]
+                if idx == 0:
+                    kwargs[field] =  {'vmin': vmin2, 'vmax': vmax2} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin2, vmax = vmax2)} 
+                elif idx == 1:
+                    ovmin = quadr[field].min()
+                    ovmax = quadr[field].max()
+                    kwargs[field] =  {'vmin': vmin3, 'vmax': vmax3} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin3, vmax = vmax3)} 
+                else:
+                    continue
+                
+            wedge.pcolormesh(tchop[0], rchop[0], quadr[field1], cmap=color_map, shading='nearest', **kwargs[field1])
+            wedge.pcolormesh(tchop[1], rchop[1], quadr[field2], cmap=color_map, shading='nearest', **kwargs[field2])
         else:
-            kwargs = {'vmin': vmin2, 'vmax': vmax2}
-            
-        # wedge = fig.add_subplot(1, 2, 1, polar=True)
-        wedge.pcolormesh(tt, rr, var, cmap=color_map, shading='nearest', **kwargs)
+            vmin2, vmax2 = args.cbar2
+            if args.log:
+                kwargs = {'norm': colors.LogNorm(vmin = vmin2, vmax = vmax2)}
+            else:
+                kwargs = {'vmin': vmin2, 'vmax': vmax2}
+            wedge.pcolormesh(tt, rr, var, cmap=color_map, shading='nearest', **kwargs)
         wedge.set_theta_zero_location("N")
         wedge.set_theta_direction(-1)
         wedge.yaxis.grid(True, alpha=0.2)
@@ -274,13 +386,14 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         for label in rlabels:
             label.set_color('white')
             
-        #wedge.axes.xaxis.set_ticklabels([])
+        wedge.axes.xaxis.set_ticklabels([])
         wedge.set_ylim([wedge_min, wedge_max])
         wedge.set_rorigin(-wedge_min)
         wedge.set_thetamin(ang_min)
         wedge.set_thetamax(ang_max)
         wedge.set_aspect(1.)
         wedge.set_position( [0.5, -0.5, 0.3, 2])
+        
     # fig.set_tight_layout(True)
     if args.log:
         if ymax >= np.pi:
@@ -293,7 +406,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         else:
             cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
         
-    fig.suptitle('{} at t = {:.2f}'.format(args.setup[0], tend), fontsize=20, y=0.95)
+    fig.suptitle('{} at t = {:.2f}'.format(args.setup[0], tend), fontsize=20, y=1)
     
 def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     xx, yy = mesh['xx'], mesh['yy']
@@ -381,16 +494,16 @@ def main():
     parser.add_argument('setup', metavar='Setup', nargs='+', type=str,
                         help='The name of the setup you are plotting (e.g., Blandford McKee)')
     
-    parser.add_argument('--field', dest = "field", metavar='Field Variable', nargs='?',
+    parser.add_argument('--field', dest = "field", metavar='Field Variable', nargs='+',
                         help='The name of the field variable you\'d like to plot',
-                        choices=field_choices, default="rho")
+                        choices=field_choices, default=["rho"])
     parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',
                         default = 0.0, help='The domain range')
     
-    parser.add_argument('--cbar', dest = "cbar", metavar='Range of Color Bar',nargs=2,type=float,
-                        default =[None, None], help='The colorbar range you\'d like to plot')
+    parser.add_argument('--cbar_range', dest = "cbar", metavar='Range of Color Bar', nargs=2,
+                        default = [None, None], help='The colorbar range you\'d like to plot')
     
-    parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs=2,type=float,
+    parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs='+',type=float,
                         default =[None, None], help='The colorbar range you\'d like to plot')
     
     parser.add_argument('--cmap', dest = "cmap", metavar='Color Bar Colarmap',
@@ -407,7 +520,7 @@ def main():
     parser.add_argument('--rev_cmap', dest='rcmap', action='store_true',
                         default=False,
                         help='True if you want the colormap to be reversed')
-
+    
     parser.add_argument('--x', dest='x', nargs="+", default = None, type=float,
                         help='List of x values to plot field max against')
     
@@ -425,13 +538,13 @@ def main():
     
     parser.add_argument('--tidx', dest='tidx', type=int, default = None,
                         help='Set to a value if you wish to plot a 1D curve about some angle')
+    
+    parser.add_argument('--wedge', dest='wedge', default=False, action='store_true')
+    parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 80, 110], type=float, nargs=4)
 
     parser.add_argument('--units', dest='units', default = False, action='store_true')
     
     parser.add_argument('--file_max', dest='file_max', default = None, type=int)
-    
-    parser.add_argument('--wedge', dest='wedge', default=False, action='store_true')
-    parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 80, 110], type=float, nargs=4)
     
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
