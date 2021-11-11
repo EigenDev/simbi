@@ -148,7 +148,7 @@ def get_1d_equiv_file(rzones: int):
             
             rho         = hf.get("rho")[:]
             v           = hf.get("v")[:]
-            p           = hf.get("p")[:]
+            p           = hf.get("pre")[:]
             nx          = ds.attrs["Nx"]
             t           = ds.attrs["current_time"]
             xmax        = ds.attrs["xmax"]
@@ -174,7 +174,7 @@ def get_1d_equiv_file(rzones: int):
             
             ofield["rho"]         = rho
             ofield["v"]           = v
-            ofield["p"]           = p
+            ofield["pre"]           = p
             ofield["W"]           = W
             ofield["enthalpy"]    = h
             ofield["gamma_beta"]  = W*beta
@@ -183,7 +183,8 @@ def get_1d_equiv_file(rzones: int):
     return ofield
 
 cons = ['D', 'momentum', 'energy', 'energy_rst']
-field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'line_profile', 'energy', 'mass', 'chi', 'chi_dens'] + cons 
+field_choices = ['rho', 'v1', 'v2', 'pre', 'gamma_beta', 'temperature', 'gamma_beta_1', 'gamma_beta_2', 'energy', 'mass', 'chi', 'chi_dens'] + cons 
+lin_fields = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
 col = plt.cm.jet([0.25,0.75])  
 
 R_0 = const.R_sun.cgs 
@@ -230,29 +231,41 @@ def calc_cell_volume(r, theta):
         return ( (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos )
         
 def get_field_str(args):
-    if args.field == "rho" or args.field == 'D':
-        var = r"\rho" if args.field == "rho" else "D"
-        if args.units:
-            return r'${}$ [g cm$^{{-3}}$]'.format(var)
+    field_str_list = []
+    for field in args.field:
+        if field == "rho" or field == 'D':
+            var = r"\rho" if args.field == "rho" else "D"
+            if args.units:
+                field_str_list.append( r'${}$ [g cm$^{{-3}}$]'.format(var))
+            else:
+                field_str_list.append( r'${}$'.format(var))
+            
+        elif field == "gamma_beta":
+            field_str_list.append( r"$\Gamma \beta$")
+        elif field == "gamma_beta_1":
+            field_str_list.append( r"$\Gamma \beta_1$")
+        elif field == "gamma_beta_2":
+            field_str_list.append( r"$\Gamma \beta_2$")
+        elif field == "energy" or field == "pre":
+            var = "\tau" if field == "energy" else "pre"
+            if args.units:
+                field_str_list.append( r"${} [\rm erg \ cm^{{-3}}]$".format(var))
+            else:
+                field_str_list.append( r"${} $".format(var))
+        elif field == "energy_rst":
+            if args.units:
+                field_str_list.append( r"$\tau - D \  [\rm erg \ cm^{-3}]$")
+            else:
+                field_str_list.append( r"$\tau - D")
+        elif field == "chi":
+            field_str_list.append( r"$\chi$")
+        elif field == "chi_dens":
+            field_str_list.append( r"$D \cdot \chi$")
         else:
-            return r'${}$'.format(var)
-    elif args.field == "gamma_beta":
-        return r"$\Gamma \ \beta$"
-    elif args.field == "energy" or args.field == 'p':
-        var = "\tau" if args.field == "energy" else "p"
-        if args.units:
-            return r"${} [\rm erg \ cm^{{-3}}]$".format(var)
-        else:
-            return r"${} $".format(var)
-    elif args.field == "energy_rst":
-        if args.units:
-            return r"$\tau - D \  [\rm erg \ cm^{-3}]$"
-        else:
-            return r"$\tau - D"
-    elif args.field == "chi":
-        return r"\chi"
-    else:
-        return args.field
+            field_str_list.append( field)
+    
+    
+    return field_str_list if len(args.field) > 1 else field_str_list[0]
     
 def prims2cons(fields, cons):
     if cons == "D":
@@ -260,24 +273,29 @@ def prims2cons(fields, cons):
     elif cons == "S":
         return fields['rho'] * fields['W']**2 * fields['v']
     elif cons == "energy":
-        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p'] - fields['rho']*fields['W']
+        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields["pre"] - fields['rho']*fields['W']
     elif cons == "energy_rst":
-        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p']
+        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields["pre"]
 
 
-def plot_polar_plot(field_dict, args, mesh, ds):
-    # fig = plt.figure(figsize=(10,8), constrained_layout=False)
-    # ax  = fig.add_subplot(1, 1, 1, polar=True)
-    if args.wedge:
-        fig, axes = plt.subplots(1, 2, subplot_kw={'projection': 'polar'},
-                            figsize=(15, 10), constrained_layout=True)
-        ax    = axes[0]
-        wedge = axes[1]
+def plot_polar_plot(field_dict, args, mesh, ds, subplots = False, fig = None, axs = None, fidx = 0):
+    num_fields = len(args.field)
+    if not subplots:
+        if args.wedge:
+            fig, axes = plt.subplots(1, 2, subplot_kw={'projection': 'polar'},
+                                figsize=(15, 10), constrained_layout=True)
+            ax    = axes[0]
+            wedge = axes[1]
+        else:
+            fig, ax = plt.subplots(1, 1, subplot_kw={'projection': 'polar'},
+                                figsize=(10, 8), constrained_layout=False)
     else:
-        fig, ax = plt.subplots(1, 1, subplot_kw={'projection': 'polar'},
-                            figsize=(8, 8), constrained_layout=False)
-    # fig, ax = plt.subplots(1, 1, figsize=(10,8), subplot_kw=dict(projection='polar'), constrained_layout=False)
-
+        if args.wedge:
+            ax    = axs[0]
+            wedge = axs[1]
+        else:
+            ax = axs
+        
     rr, tt = mesh['rr'], mesh['theta']
     t2 = mesh['t2']
     xmax        = ds[0]["xmax"]
@@ -287,35 +305,98 @@ def plot_polar_plot(field_dict, args, mesh, ds):
     
     vmin,vmax = args.cbar
 
-    unit_scale = 1.0
+    unit_scale = np.ones(num_fields)
     if (args.units):
-        if args.field == "rho" or args.field == "D":
-            unit_scale = rho_scale
-        elif args.field == "p" or args.field == "energy" or args.field == "energy_rst":
-            unit_scale = pre_scale
+        for idx, field in enumerate(args.field):
+            if field == "rho" or field == "D":
+                unit_scale[idx] = rho_scale.value
+            elif field == "pre" or field == "energy" or field == "energy_rst":
+                unit_scale[idx] = pre_scale.value
     
-    units = unit_scale.value if args.units else 1.0
-    if args.field in cons:
-        var = units * prims2cons(field_dict, args.field)
-    else:
-        var = units * field_dict[args.field]
-        
-    if args.log:
-        kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
-    else:
-        kwargs = {'vmin': vmin, 'vmax': vmax}
-        
+    units = unit_scale if args.units else np.ones(num_fields)
+     
     if args.rcmap:
         color_map = (plt.cm.get_cmap(args.cmap)).reversed()
     else:
         color_map = plt.cm.get_cmap(args.cmap)
         
     tend = ds[0]["time"]
-    c1 = ax.pcolormesh(tt, rr, var, cmap=color_map, shading='auto', **kwargs)
-    c2 = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, shading='auto', **kwargs)
+    if num_fields > 1:
+        cs  = np.zeros(4, dtype=object)
+        var = []
+        kwargs = []
+        for field in args.field:
+            if field in cons:
+                var += np.split(prims2cons(field_dict, field), 2)
+            else:
+                var += np.split(field_dict[field], 2)
+        units  = np.repeat(units, 2)
+        var    = np.asarray(var)
+        var    = np.array([units[idx] * var[idx] for idx in range(var.shape[0])])
+        tchop  = np.split(tt, 2)
+        trchop = np.split(t2, 2)
+        rchop  = np.split(rr, 2)
+        
+        quadr = {}
+        field1 = args.field[0]
+        field2 = args.field[1]
+        field3 = args.field[2 % num_fields]
+        field4 = args.field[-1]
+        
+        
+        quadr[field1] = var[0]
+        quadr[field2] = var[3]
+        
+        # Handle case of degenerate fields
+        if field3 == field4:
+            quadr[field3] = {}
+            quadr[field4] = {}
+            quadr[field3][0] = var[4 % var.shape[0]]
+            quadr[field4][1] = var[-1]
+        else:
+            quadr[field3] =  var[4 % var.shape[0]]
+            quadr[field4] = var[-1]
+
+
+        kwargs = {}
+        for idx, key in enumerate(quadr.keys()):
+            field = key
+            if idx == 0:
+                kwargs[field] =  {'vmin': vmin, 'vmax': vmax} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)} 
+            else:
+                if field3 == field4 and field == field3:
+                    ovmin = quadr[field][0].min()
+                    ovmax = quadr[field][0].max()
+                else:
+                    ovmin = quadr[field].min()
+                    ovmax = quadr[field].max()
+                kwargs[field] =  {'vmin': ovmin, 'vmax': ovmax} if field in lin_fields else {'norm': colors.LogNorm(vmin = ovmin, vmax = ovmax)} 
+
+        cs[0] = ax.pcolormesh(tchop[0],        rchop[0],  quadr[field1], cmap=color_map, shading='auto', **kwargs[field1])
+        cs[1] = ax.pcolormesh(tchop[1],        rchop[0],  quadr[field2], cmap=color_map, shading='auto', **kwargs[field2])
+        
+        if field3 == field4:
+            cs[2] = ax.pcolormesh(trchop[1][::-1], rchop[0],  quadr[field3][0], cmap=color_map, shading='auto', **kwargs[field3])
+            cs[3] = ax.pcolormesh(trchop[0][::-1], rchop[0],  quadr[field4][1], cmap=color_map, shading='auto', **kwargs[field4])
+        else:
+            cs[2] = ax.pcolormesh(trchop[1][::-1], rchop[0],  quadr[field3], cmap=color_map, shading='auto', **kwargs[field3])
+            cs[3] = ax.pcolormesh(trchop[0][::-1], rchop[0],  quadr[field4], cmap=color_map, shading='auto', **kwargs[field4])
+            
+    else:
+        if args.log:
+            kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
+        else:
+            kwargs = {'vmin': vmin, 'vmax': vmax}
+        cs = np.zeros(len(args.field), dtype=object)
+        
+        if args.field in cons:
+            var = units * prims2cons(field_dict, args.field[0])
+        else:
+            var = units * field_dict[args.field[0]]
+            
+        cs[0] = ax.pcolormesh(tt, rr, var, cmap=color_map, shading='auto', **kwargs)
+        cs[0] = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, shading='auto', **kwargs)
     
-    # ax.set_thetamin(0)
-    # ax.set_thetamax(180)
     if ymax < np.pi:
         ax.set_position( [0.1, -0.18, 0.8, 1.43])
         cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
@@ -324,14 +405,42 @@ def plot_polar_plot(field_dict, args, mesh, ds):
         ax.set_thetamin(-ymd)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
         ax.set_thetamax(ymd)
     else:
-        cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
-        cbar_orientation = "vertical"
+        if num_fields > 1:
+            if num_fields == 2:
+                ycoord  = [0.1, 0.1 ]
+                xcoord  = [0.1, 0.85]
+                cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
+                
+            if num_fields == 3:
+                ycoord  = [0.1, 0.5, 0.1]
+                xcoord  = [0.07, 0.85, 0.85]
+                cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8 * 0.5]) for i in range(1, num_fields)]
+                cbaxes.append(fig.add_axes([xcoord[0], ycoord[0] ,0.03, 0.8]))
+            if num_fields == 4:
+                ycoord  = [0.5, 0.1, 0.5, 0.1]
+                xcoord  = [0.85, 0.85, 0.07, 0.07]
+                cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8/(0.5 * num_fields)]) for i in range(num_fields)]
+                
+            cbar_orientation = "vertical"
+        else:
+            cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
+            cbar_orientation = "vertical"
         
     if args.log:
-        logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        cbar = fig.colorbar(c1, orientation=cbar_orientation, cax=cbaxes, format=logfmt)
+        
+        if num_fields > 1:
+            fmt = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.field]
+            cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i], format=fmt[i]) for i in range(num_fields)]
+            for cb in cbar:
+                cb.outline.set_visible(False)                                 
+        else:
+            logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+            cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes, format=logfmt)
     else:
-        cbar = fig.colorbar(c1, orientation=cbar_orientation, cax=cbaxes)
+        if num_fields > 1:
+            cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i]) for i in range(num_fields)]
+        else:
+            cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes)
     
     if args.wedge:
         wedge_min = args.wedge_lims[0]
@@ -343,8 +452,7 @@ def plot_polar_plot(field_dict, args, mesh, ds):
         ax.plot(np.radians(np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color="white")
         ax.plot(np.radians(np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color="white")
         ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=2, color="white")
-        
-    # ax.set_position( [0.1, -0.18, 0.8, 1.43])
+    
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
     ax.yaxis.grid(True, alpha=0.2)
@@ -358,19 +466,43 @@ def plot_polar_plot(field_dict, args, mesh, ds):
     ax.set_rmax(xmax) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
     ax.set_rmin(xmin)
     
-    if args.wedge:
-        ax.set_position( [0.05, -0.5, 0.46, 2])
-    
     field_str = get_field_str(args)
     
     if args.wedge:
-        vmin2, vmax2 = args.cbar2
-        if args.log:
-            kwargs = {'norm': colors.LogNorm(vmin = vmin2, vmax = vmax2)}
+        if num_fields == 1:
+            wedge.set_position( [0.5, -0.5, 0.3, 2])
+            ax.set_position( [0.05, -0.5, 0.46, 2])
         else:
-            kwargs = {'vmin': vmin2, 'vmax': vmax2}
+            ax.set_position( [0.16, -0.5, 0.46, 2])
+            wedge.set_position( [0.55, -0.5, 0.3, 2])
             
-        wedge.pcolormesh(tt, rr, var, cmap=color_map, shading='nearest', **kwargs)
+        if len(args.field) > 1:
+            if len(args.cbar2) == 4:
+                vmin2, vmax2, vmin3, vmax3 = args.cbar2
+            else:
+                vmin2, vmax2 = args.cbar2
+                vmin3, vmax3 = None, None
+            kwargs = {}
+            for idx, key in enumerate(quadr.keys()):
+                field = args.field[idx % num_fields]
+                if idx == 0:
+                    kwargs[field] =  {'vmin': vmin2, 'vmax': vmax2} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin2, vmax = vmax2)} 
+                elif idx == 1:
+                    ovmin = quadr[field].min()
+                    ovmax = quadr[field].max()
+                    kwargs[field] =  {'vmin': vmin3, 'vmax': vmax3} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin3, vmax = vmax3)} 
+                else:
+                    continue
+                
+            wedge.pcolormesh(tchop[0], rchop[0], quadr[field1], cmap=color_map, shading='nearest', **kwargs[field1])
+            wedge.pcolormesh(tchop[1], rchop[1], quadr[field2], cmap=color_map, shading='nearest', **kwargs[field2])
+        else:
+            vmin2, vmax2 = args.cbar2
+            if args.log:
+                kwargs = {'norm': colors.LogNorm(vmin = vmin2, vmax = vmax2)}
+            else:
+                kwargs = {'vmin': vmin2, 'vmax': vmax2}
+            wedge.pcolormesh(tt, rr, var, cmap=color_map, shading='nearest', **kwargs)
         wedge.set_theta_zero_location("N")
         wedge.set_theta_direction(-1)
         wedge.yaxis.grid(True, alpha=0.2)
@@ -380,18 +512,25 @@ def plot_polar_plot(field_dict, args, mesh, ds):
         for label in rlabels:
             label.set_color('white')
             
-        #wedge.axes.xaxis.set_ticklabels([])
+        wedge.axes.xaxis.set_ticklabels([])
         wedge.set_ylim([wedge_min, wedge_max])
         wedge.set_rorigin(-wedge_min)
         wedge.set_thetamin(ang_min)
         wedge.set_thetamax(ang_max)
         wedge.set_aspect(1.)
-        wedge.set_position( [0.5, -0.5, 0.3, 2])
+        
         
     # fig.set_tight_layout(True)
     if args.log:
         if ymax >= np.pi:
-            cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
+            if num_fields > 1:
+                for i in range(num_fields):
+                    if args.field[i] in lin_fields:
+                        cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
+                    else:
+                        cbar[i].ax.set_ylabel(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+            else:
+                cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
         else:
             cbar.ax.set_xlabel(r'$\log$ {}'.format(field_str), fontsize=20)
     else:
@@ -481,16 +620,16 @@ def plot_1d_curve(field_dict, args, mesh, ds, overplot=False, ax=None, case=0):
         # linestyle = "-."
         if args.labels is None:
             ax.loglog(r, mass[args.tidx]/ np.max(mass[args.tidx]), label = "mass", linestyle="-.", color=colors[case])
-            ax.loglog(r, field_dict["p"][args.tidx] / np.max(field_dict["p"][args.tidx]), label = "pressure", color=colors[case])
+            ax.loglog(r, field_dict["pre"][args.tidx] / np.max(field_dict["pre"][args.tidx]), label = "pressure", color=colors[case])
         else:
             ax.loglog(r, mass[args.tidx]/ np.max(mass[args.tidx]), label = f"{args.labels[case]} mass", linestyle="-.", color=colors[case])
-            ax.loglog(r, field_dict["p"][args.tidx] / np.max(field_dict["p"][args.tidx]), label = f"{args.labels[case]} pressure", color=colors[case])
+            ax.loglog(r, field_dict["pre"][args.tidx] / np.max(field_dict["pre"][args.tidx]), label = f"{args.labels[case]} pressure", color=colors[case])
         ax.legend(fontsize=20)
         ax.axvline(0.65, linestyle="--", color="red")
         ax.axvline(1.00, linestyle="--", color="blue")
     else:
         ax.loglog(r, field_dict[args.field][args.tidx])
-        ax.loglog(r, field_dict["p"][args.tidx])
+        ax.loglog(r, field_dict["pre"][args.tidx])
     # ax.loglog(ofield["r"], ofield[args.field], 'ro')
     
     
@@ -595,7 +734,7 @@ def plot_max(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     
 def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     print("Computing histogram...")
-    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
+    colors = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, len(args.filename)))
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
@@ -623,25 +762,25 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
         ets /= ets.max()
 
     if args.labels is None:
-        ax.hist(gbs, bins=gbs, weights=ets, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case])
+        ax.hist(gbs, bins=gbs, weights=ets, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
     else:
-        ax.hist(gbs, bins=gbs, weights=ets, label=r'$\{}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case])
+        ax.hist(gbs, bins=gbs, weights=ets, label=r'$\{}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
     fill_below_intersec(gbs, ets, 1e-6, colors[case])
-    if case == 0:
-        #1D Check 
-        ofield = get_1d_equiv_file(16384)
-        edens_1d = prims2cons(ofield, "energy")
-        dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
-        etotal_1d = edens_1d * dV_1d * e_scale.value
-        u1d       = ofield['gamma_beta']
-        w = 0.001
-        n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
-        gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
-        ets_1d = np.asarray([etotal_1d[np.where(u1d > gb)].sum() for gb in gbs_1d])
-        if args.norm:
-            ets_1d /= ets_1d.max()
-        fill_below_intersec(gbs_1d, ets_1d, 1e-6, colors[0])
-        ax.hist(gbs_1d, bins=gbs_1d, weights=ets_1d, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
+    # if case == 0:
+    #     #1D Check 
+    #     ofield = get_1d_equiv_file(16384)
+    #     edens_1d = prims2cons(ofield, "energy")
+    #     dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
+    #     etotal_1d = edens_1d * dV_1d * e_scale.value
+    #     u1d       = ofield['gamma_beta']
+    #     w = 0.001
+    #     n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
+    #     gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
+    #     ets_1d = np.asarray([etotal_1d[np.where(u1d > gb)].sum() for gb in gbs_1d])
+    #     if args.norm:
+    #         ets_1d /= ets_1d.max()
+    #     fill_below_intersec(gbs_1d, ets_1d, 1e-6, colors[0])
+    #     ax.hist(gbs_1d, bins=gbs_1d, weights=ets_1d, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
     
     sorted_energy = np.sort(ets)
     plt.xscale('log')
@@ -669,16 +808,16 @@ def main():
     parser.add_argument('setup', metavar='Setup', nargs='+', type=str,
                         help='The name of the setup you are plotting (e.g., Blandford McKee)')
     
-    parser.add_argument('--field', dest = "field", metavar='Field Variable', nargs='?',
+    parser.add_argument('--field', dest = "field", metavar='Field Variable', nargs='+',
                         help='The name of the field variable you\'d like to plot',
-                        choices=field_choices, default="rho")
+                        choices=field_choices, default=["rho"])
     parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',
                         default = 0.0, help='The domain range')
     
     parser.add_argument('--cbar_range', dest = "cbar", metavar='Range of Color Bar', nargs=2,
                         default = [None, None], help='The colorbar range you\'d like to plot')
     
-    parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs=2,type=float,
+    parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs='+',type=float,
                         default =[None, None], help='The colorbar range you\'d like to plot')
     
     parser.add_argument('--cmap', dest = "cmap", metavar='Color Bar Colarmap',
@@ -833,16 +972,19 @@ def main():
             T = (3 * p * c ** 2  / a)**(1./4.)
             h = 1.0 + gamma*p/(rho*(gamma - 1.0))
             tau = (rho * h * W**2 - p - rho * W )
-            field_dict[idx]["rho"]         = rho
-            field_dict[idx]["v1"]          = v1 
-            field_dict[idx]["v2"]          = v2 
-            field_dict[idx]["p"]           = p
-            field_dict[idx]["chi"]         = chi
-            field_dict[idx]["gamma_beta"]  = W*beta
-            field_dict[idx]["temperature"] = T
-            field_dict[idx]["enthalpy"]    = h
-            field_dict[idx]["W"]           = W
-            field_dict[idx]["energy"]      = rho * h * W * W  - p - rho * W
+            field_dict[idx]["rho"]          = rho
+            field_dict[idx]["v1"]           = v1 
+            field_dict[idx]["v2"]           = v2 
+            field_dict[idx]["pre"]            = p
+            field_dict[idx]["chi"]          = chi
+            field_dict[idx]["chi_dens"]     = chi * rho * W
+            field_dict[idx]["gamma_beta"]   = W*beta
+            field_dict[idx]["gamma_beta_1"] = abs(W*v1)
+            field_dict[idx]["gamma_beta_2"] = abs(W*v2)
+            field_dict[idx]["temperature"]  = T
+            field_dict[idx]["enthalpy"]     = h
+            field_dict[idx]["W"]            = W
+            field_dict[idx]["energy"]       = rho * h * W * W  - p - rho * W
         
         
     ynpts, xnpts = rho.shape 
@@ -865,15 +1007,13 @@ def main():
     if len(args.filename) > 1:
         fig, ax = plt.subplots(1, 1, figsize=(8,8))
         # if args.x is not None: plt.xlim(, max(args.x))
-        case = 0
         for idx, file in enumerate(args.filename):
             if args.ehist:
-                plot_hist(field_dict[idx], args, mesh, setup_dict, True, ax, case)
+                plot_hist(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
             elif args.x is not None:
-                plot_max(field_dict[idx], args, mesh, setup_dict, True, ax, case)
+                plot_max(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
             else:
-                plot_1d_curve(field_dict[idx], args, mesh, setup_dict, True, ax, case)
-            case += 1
+                plot_1d_curve(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
     else:
         if args.ehist:
             plot_hist(field_dict[0], args, mesh, setup_dict)

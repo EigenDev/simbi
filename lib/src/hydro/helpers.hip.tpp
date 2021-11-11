@@ -76,6 +76,7 @@ namespace simbi{
         real ymin,
         real ymax)
     {
+        #if GPU_CODE
         const real gamma     = s->gamma;
         extern __shared__ real arr[];
         volatile real* dt_buff = (real*)arr;
@@ -149,6 +150,7 @@ namespace simbi{
                 s->dt = s->CFL * s->dt_min[0];
             }
         } // end if
+    #endif
 
     }; // end dtWarpReduce
 

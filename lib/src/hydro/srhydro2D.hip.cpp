@@ -324,11 +324,16 @@ Conserved SRHD2D::calc_hll_flux(
     // Calculate plus/minus alphas
     const real aLminus = aL < (real)0.0 ? aL : (real)0.0;
     const real aRplus  = aR > (real)0.0 ? aR : (real)0.0;
+    auto hll_flux = (left_flux * aRplus - right_flux * aLminus + (right_state - left_state) * aRplus * aLminus) / (aRplus - aLminus);
+
+    // Upwind the scalar concentration flux
+    if (hll_flux.D < (real)0.0)
+        hll_flux.chi = right_prims.chi * hll_flux.D;
+    else
+        hll_flux.chi = left_prims.chi  * hll_flux.D;
 
     // Compute the HLL Flux component-wise
-    return (left_flux * aRplus - right_flux * aLminus 
-                + (right_state - left_state) * aRplus * aLminus) /
-                    (aRplus - aLminus);
+    return hll_flux;
 };
 
 GPU_CALLABLE_MEMBER
@@ -342,12 +347,13 @@ Conserved SRHD2D::calc_hllc_flux(
     const luint nhat = 1) const
 {
 
-    Conserved starStateR, starStateL;
+    // Conserved starStateR, starStateL;
     Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
 
     const real aL = lambda.aL;
     const real aR = lambda.aR;
-
+    const real cL = lambda.csL;
+    const real cR = lambda.csR;
     //---- Check Wave Speeds before wasting computations
     if ((real)0.0 <= aL)
     {
@@ -386,8 +392,6 @@ Conserved SRHD2D::calc_hllc_flux(
 
     // Apply the low-Mach HLLC fix found in Fleichman et al 2020: 
     // https://www.sciencedirect.com/science/article/pii/S0021999120305362
-    const real cL       = lambda.csL;
-    const real cR       = lambda.csR;
     const real ma_lim   = (real)0.20;
 
     //--------------Compute the L Star State----------
@@ -402,15 +406,15 @@ Conserved SRHD2D::calc_hllc_flux(
 
     real vL           =  left_prims.vcomponent(nhat);
     real vR           = right_prims.vcomponent(nhat);
-    unsigned int kron = kronecker(nhat, 1);
+    auto       kdelta = kronecker(nhat, 1);
     // Left Star State in x-direction of coordinate lattice
-    real Dstar    = cofactor * (aL - vL) * D;
-    real chistar  = cofactor * (aL - vL) * chi;
-    real S1star   = cofactor * (S1 * (aL - vL) +  kron * (-pressure + pStar) );
-    real S2star   = cofactor * (S2 * (aL - vL) + !kron * (-pressure + pStar) );
-    real Estar    = cofactor * (E * (aL - vL) + pStar * aStar - pressure * vL);
-    real tauStar  = Estar - Dstar;
-    starStateL    = Conserved{Dstar, S1star, S2star, tauStar, chistar};
+    real Dstar         = cofactor * (aL - vL) * D;
+    real chistar       = cofactor * (aL - vL) * chi;
+    real S1star        = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
+    real S2star        = cofactor * (S2 * (aL - vL) + !kdelta * (-pressure + pStar) );
+    real Estar         = cofactor * (E * (aL - vL) + pStar * aStar - pressure * vL);
+    real tauStar       = Estar - Dstar;
+    auto starStateL    = Conserved{Dstar, S1star, S2star, tauStar, chistar};
 
     pressure = right_prims.p;
     D        = right_state.D;
@@ -423,19 +427,31 @@ Conserved SRHD2D::calc_hllc_flux(
 
     Dstar      = cofactor * (aR - vR) * D;
     chistar    = cofactor * (aR - vR) * chi;
-    S1star     = cofactor * (S1 * (aR - vR) +  kron * (-pressure + pStar) );
-    S2star     = cofactor * (S2 * (aR - vR) + !kron * (-pressure + pStar) );
+    S1star     = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
+    S2star     = cofactor * (S2 * (aR - vR) + !kdelta * (-pressure + pStar) );
     Estar      = cofactor * (E * (aR - vR) + pStar * aStar - pressure * vR);
     tauStar    = Estar - Dstar;
-    starStateR = Conserved{Dstar, S1star, S2star, tauStar, chistar};
+    auto starStateR = Conserved{Dstar, S1star, S2star, tauStar, chistar};
 
-    const real ma_local = 0;//my_max(std::abs(vL / cL), std::abs(vR / cR));
-    const real phi      = 0;// std::sin(my_min((real)1.0, ma_local / ma_lim) * PI * (real)0.5);
-    const real aL_lm    = (phi != (real)0.0 ) ? phi * aL : aL;
-    const real aR_lm    = (phi != (real)0.0 ) ? phi * aR : aR;
+    const real voL      =  left_prims.vcomponent(!nhat);
+    const real voR      = right_prims.vcomponent(!nhat);
+    const real wL       = (real)1.0/ std::sqrt((real)1.0 - (vL * vL + voL * voL));
+    const real wR       = (real)1.0/ std::sqrt((real)1.0 - (vR * vR + voR * voR));
+    const real ma_local = my_max(std::abs(vL / cL / wL), std::abs(vR / cR / wR));
+    const real phi      = std::sin(my_min((real)1.0, ma_local / ma_lim) * PI * (real)0.5);
+    const real aL_lm    = (phi != 0) ? phi * aL : aL;
+    const real aR_lm    = (phi != 0) ? phi * aR : aR;
 
-    return (left_flux + right_flux) * (real)0.5 + ( (starStateL - left_state) * aL_lm
-        + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm ) * (real)0.5;
+    auto hllc_flux = (left_flux + right_flux) * (real)0.5 + ( (starStateL - left_state) * aL_lm
+                        + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm ) * (real)0.5;
+
+    // upwind the concentration flux 
+    if (hllc_flux.D < (real)0.0)
+        hllc_flux.chi = right_prims.chi * hllc_flux.D;
+    else
+        hllc_flux.chi = left_prims.chi  * hllc_flux.D;
+
+    return hllc_flux;
 
     // if (-aL <= (aStar - aL))
     // {
@@ -536,8 +552,9 @@ void SRHD2D::cons2prim(
     simbi::MemSide user)
 {
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
+    auto gamma = self->gamma;
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
-        real eps, pre, v2, et, c2, h, g, f, W, rho;
+        real eps, pre, v2, et, c2, h, g, f, W, rho, ps, preb;
         #if GPU_CODE
         extern __shared__ Conserved  conserved_buff[];
         #else
@@ -562,10 +579,11 @@ void SRHD2D::cons2prim(
         #if GPU_CODE
         real peq = self->gpu_pressure_guess[gid];
         #else 
-        real peq = self->pressure_guess[gid];
+        real peq =pressure_guess[gid];
         #endif
 
         real tol = D * tol_scale;
+        ps = peq;
         do
         {
             pre = peq;
@@ -574,15 +592,22 @@ void SRHD2D::cons2prim(
             W   = (real)1.0 / sqrt((real)1.0 - v2);
             rho = D / W;
 
-            eps = (tau + ((real)1.0 - W) * D + ((real)1.0 - W * W) * pre) / (D * W);
+            eps = (tau + ((real)1.0 - W) * D + ((real)1.0 - W * W) * 0.5 * (pre + ps)) / (D * W);
 
-            h = (real)1.0 + eps + pre / rho;
-            c2 = self->gamma * pre / (h * rho);
+            h = (real)1.0 + eps + 0.5 * (pre  + ps) / rho;
+            c2 = gamma * 0.5*(pre + ps) / (h * rho);
 
             g = c2 * v2 - (real)1.0;
-            f = (self->gamma - (real)1.0) * rho * eps - pre;
+            f = (gamma - (real)1.0) * rho * eps - pre;
 
             peq = pre - f / g;
+
+            eps = (tau + ((real)1.0 - W) * D + ((real)1.0 - W * W) * 0.5 * (pre + ps)) / (D * W);
+            h   = (real)1.0 + eps + 0.5 * (pre  + ps) / rho;
+            c2  = gamma * 0.5*(pre + ps) / (h * rho);
+            f   = (gamma - (real)1.0) * rho * eps - peq;
+            g   = c2 * v2 - (real)1.0;
+            ps  = peq - f / g;
             iter++;
             if (iter >= MAX_ITER)
             {
@@ -602,7 +627,7 @@ void SRHD2D::cons2prim(
             self->gpu_prims[gid]          = Primitive{D * sqrt((real)1.0 - (vx * vx + vy * vy)), vx, vy, peq, Dchi / D};
         #else
             self->pressure_guess[gid] = peq;
-            self->prims[gid]          = Primitive{D * sqrt((real)1.0 - (vx * vx + vy * vy)), vx, vy, Dchi / D};
+            self->prims[gid]          = Primitive{D * sqrt((real)1.0 - (vx * vx + vy * vy)), vx, vy, peq, Dchi / D};
         #endif
         
 
@@ -732,19 +757,19 @@ void SRHD2D::advance(
             // Calc HLL Flux at i+1/2 interface
             if (hllc)
             {
-                if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
-                    f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                } else {
-                    f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                }
+                // if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
+                //     f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // } else {
+                //     f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // }
                 
-                if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
-                    g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                } else {
-                    g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                }
-                // f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                // g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
+                //     g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // } else {
+                //     g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // }
+                f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             } else {
                 f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
                 g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
@@ -773,19 +798,19 @@ void SRHD2D::advance(
             // Calc HLL Flux at i-1/2 interface
             if (hllc)
             {
-                if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
-                    f2 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                } else {
-                    f2 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                }
+                // if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
+                //     f2 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // } else {
+                //     f2 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // }
                 
-                if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
-                    g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                } else {
-                    g2 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                }
-                // f2 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                // g2 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
+                //     g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // } else {
+                //     g2 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // }
+                f2 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g2 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
 
             } else {
                 f2 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
@@ -794,15 +819,12 @@ void SRHD2D::advance(
 
             //Advance depending on geometry
             luint real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
-            // printf("(%lu, %lu) f1: %f, f2: %f, g1: %f, g2: %f\n", ia, ja,  f1.tau, f2.tau, g1.tau, g2.tau);
+
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
                     {
                         #if GPU_CODE
-                            // const real xl = (ii > 0) ? x1min + (ii - 0.5) * dx
-                            // real dx = coord_lattice->gpu_dx1[ii];
-                            // real dy = coord_lattice->gpu_dx2[jj];
                             const real d_source  = (d_all_zeros)   ? 0 : self->gpu_sourceD[real_loc];
                             const real s1_source = (s1_all_zeros)  ? 0 : self->gpu_sourceS1[real_loc];
                             const real s2_source = (s2_all_zeros)  ? 0 : self->gpu_sourceS2[real_loc];
@@ -855,11 +877,12 @@ void SRHD2D::advance(
                     const real dV1   = coord_lattice.dV1[ii];
                     const real dV2   = rmean * coord_lattice.dV2[jj];
                     const real cot   = coord_lattice.cot[jj];
-                    const real d_source  = (d_all_zeros)   ? (real)0.0 : self->gpu_sourceD[real_loc];
-                    const real s1_source = (s1_all_zeros)  ? (real)0.0 : self->gpu_sourceS1[real_loc];
-                    const real s2_source = (s2_all_zeros)  ? (real)0.0 : self->gpu_sourceS2[real_loc];
-                    const real e_source  = (e_all_zeros)   ? (real)0.0 : self->gpu_sourceTau[real_loc];
+                    const real d_source  = (d_all_zeros)   ? (real)0.0 : sourceD[real_loc];
+                    const real s1_source = (s1_all_zeros)  ? (real)0.0 : sourceS1[real_loc];
+                    const real s2_source = (s2_all_zeros)  ? (real)0.0 : sourceS2[real_loc];
+                    const real e_source  = (e_all_zeros)   ? (real)0.0 : sourceTau[real_loc];
                     #endif
+
                     // Grab central primitives
                     real rhoc = prim_buff[txa * sy + tya * sx].rho;
                     real uc   = prim_buff[txa * sy + tya * sx].v1;
@@ -1025,17 +1048,19 @@ void SRHD2D::advance(
 
             if (hllc)
             {
-                if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
-                    f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                } else {
-                    f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                }
+                // if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
+                //     f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // } else {
+                //     f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // }
                 
-                if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
-                    g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                } else {
-                    g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                }
+                // if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
+                //     g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // } else {
+                //     g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // }
+                f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             }
             else
             {
@@ -1164,17 +1189,19 @@ void SRHD2D::advance(
             
             if (hllc)
             {
-                if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
-                    f2 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                } else {
-                    f2 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                }
+                // if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
+                //     f2 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // } else {
+                //     f2 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                // }
                 
-                if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
-                    g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                } else {
-                    g2 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                } 
+                // if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
+                //     g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // } else {
+                //     g2 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                // } 
+                f2 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                g2 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             }
             else
             {
@@ -1218,10 +1245,10 @@ void SRHD2D::advance(
                     const real tl           = (jj > 0 ) ? ymin + (jj - (real)0.5) * dx2 :  ymin;
                     const real tr           = (jj < ypg - 1) ? tl + dx2 :  ymax; 
                     const real rmean        = (real)0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
-                    const real s1R          = rr * rr; //coord_lattice->gpu_x1_face_areas[ii + 1];
-                    const real s1L          = rl * rl; //coord_lattice->gpu_x1_face_areas[ii + 0];
-                    const real s2R          = std::sin(tr); //coord_lattice->gpu_x2_face_areas[jj + 1];
-                    const real s2L          = std::sin(tl); //coord_lattice->gpu_x2_face_areas[jj + 0];
+                    const real s1R          = rr * rr; 
+                    const real s1L          = rl * rl; 
+                    const real s2R          = std::sin(tr);
+                    const real s2L          = std::sin(tl);
                     const real thmean       = (real)0.5 * (tl + tr);
                     const real sint         = std::sin(thmean);
                     const real dV1          = rmean * rmean * (rr - rl);             
@@ -1246,6 +1273,7 @@ void SRHD2D::advance(
                     const real s2_source = (s2_all_zeros)  ? (real)0.0 : sourceS2[real_loc];
                     const real e_source  = (e_all_zeros)   ? (real)0.0 : sourceTau[real_loc];
                     #endif
+                    // if (jj == ypg - 1) printf("flux at bottom face: %e, %e, %e, %e\n", s2R  * g1.D, s2R * g1.S1, s2R * g1.S2, s2R * g1.tau);
                     // Grab central primitives
                     real rhoc = prim_buff[txa * sy + tya * sx].rho;
                     real uc   = prim_buff[txa * sy + tya * sx].v1;
@@ -1374,7 +1402,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // Declare I/O variables for Read/Write capability
     PrimData prods;
     sr2d::PrimitiveData transfer_prims;
-
     
     // Copy the current SRHD instance over to the device
     // if compiling for CPU, these functions do nothing
@@ -1506,7 +1533,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
             
             n++;
-            // std::cin.get();
+
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {

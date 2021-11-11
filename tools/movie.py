@@ -42,31 +42,41 @@ def prims2cons(fields, cons):
         return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p']
     
 def get_field_str(args):
-    if args.field[0] == "rho":
-        if args.units:
-            return r'$\rho$ [g cm$^{-3}$]'
+    field_str_list = []
+    for field in args.field:
+        if field == "rho" or field == 'D':
+            var = r"\rho" if args.field == "rho" else "D"
+            if args.units:
+                field_str_list.append( r'${}$ [g cm$^{{-3}}$]'.format(var))
+            else:
+                field_str_list.append( r'${}$'.format(var))
+            
+        elif field == "gamma_beta":
+            field_str_list.append( r"$\Gamma \beta$")
+        elif field == "gamma_beta_1":
+            field_str_list.append( r"$\Gamma \beta_1$")
+        elif field == "gamma_beta_2":
+            field_str_list.append( r"$\Gamma \beta_2$")
+        elif field == "energy" or field == 'p':
+            var = "\tau" if field == "energy" else "p"
+            if args.units:
+                field_str_list.append( r"${} [\rm erg \ cm^{{-3}}]$".format(var))
+            else:
+                field_str_list.append( r"${} $".format(var))
+        elif field == "energy_rst":
+            if args.units:
+                field_str_list.append( r"$\tau - D \  [\rm erg \ cm^{-3}]$")
+            else:
+                field_str_list.append( r"$\tau - D")
+        elif field == "chi":
+            field_str_list.append( r"$\chi$")
+        elif field == "chi_dens":
+            field_str_list.append( r"$D \cdot \chi$")
         else:
-            return r'$\rho$'
-    elif args.field[0] == "gamma_beta":
-        return r"$\Gamma \ \beta$"
-    elif args.field[0] == "energy":
-        if args.units:
-            return r"$\tau [\rm erg \ cm^{-3}]$"
-        else:
-            return r"$\tau $"
-    elif args.field[0] == "energy_rst":
-        if args.units:
-            return r"$\tau - D \  [\rm erg \ cm^{-3}]$"
-        else:
-            return r"$\tau - D"
-        
-    elif args.field[0] == "pre":
-        if args.units:
-            return r"$p [\rm erg \ cm^{-3}]$"
-        else:
-            return r"$p$"
-    else:
-        return args.field[0]
+            field_str_list.append( field)
+    
+    
+    return field_str_list if len(args.field) > 1 else field_str_list[0]
 
 
 def get_frames(dir, max_file_num):
@@ -208,7 +218,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
     ymax        = ds["ymax"]
     ymin        = ds["ymin"]
     
-    vmin,vmax = args.cbar
+    vmin,vmax = args.cbar[:2]
 
     unit_scale = np.ones(num_fields)
     if (args.units):
@@ -270,11 +280,11 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
                 kwargs[field] =  {'vmin': vmin, 'vmax': vmax} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)} 
             else:
                 if field3 == field4 and field == field3:
-                    ovmin = quadr[field][0].min()
-                    ovmax = quadr[field][0].max()
+                    ovmin = args.cbar[4]
+                    ovmax = args.cbar[5]
                 else:
-                    ovmin = quadr[field].min()
-                    ovmax = quadr[field].max()
+                    ovmin = args.cbar[2*idx + 0]
+                    ovmax = args.cbar[2*idx + 1]
                 kwargs[field] =  {'vmin': ovmin, 'vmax': ovmax} if field in lin_fields else {'norm': colors.LogNorm(vmin = ovmin, vmax = ovmax)} 
 
         cs[0] = ax.pcolormesh(tchop[0],        rchop[0],  quadr[field1], cmap=color_map, shading='auto', **kwargs[field1])
@@ -314,10 +324,19 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         cbar_orientation = "vertical"
         
     if args.log:
-        logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes, format=logfmt)
+        if num_fields > 1:
+            fmt = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.field]
+            cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i], format=fmt[i]) for i in range(num_fields)]
+            for cb in cbar:
+                cb.outline.set_visible(False)                                 
+        else:
+            logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+            cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes, format=logfmt)
     else:
-        cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes)
+        if num_fields > 1:
+            cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i]) for i in range(num_fields)]
+        else:
+            cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes)
     
     if args.wedge:
         wedge_min = args.wedge_lims[0]
@@ -397,7 +416,14 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
     # fig.set_tight_layout(True)
     if args.log:
         if ymax >= np.pi:
-            cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
+            if num_fields > 1:
+                for i in range(num_fields):
+                    if args.field[i] in lin_fields:
+                        cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
+                    else:
+                        cbar[i].ax.set_ylabel(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+            else:
+                cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
         else:
             cbar.ax.set_xlabel(r'$\log$ {}'.format(field_str), fontsize=20)
     else:
@@ -500,7 +526,7 @@ def main():
     parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',
                         default = 0.0, help='The domain range')
     
-    parser.add_argument('--cbar_range', dest = "cbar", metavar='Range of Color Bar', nargs=2,
+    parser.add_argument('--cbar_range', dest = "cbar", metavar='Range of Color Bar(s)', nargs='+',
                         default = [None, None], help='The colorbar range you\'d like to plot')
     
     parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs='+',type=float,
@@ -546,6 +572,8 @@ def main():
     
     parser.add_argument('--file_max', dest='file_max', default = None, type=int)
     
+    parser.add_argument('--frame_range', dest='frame_range', default = [None, None], nargs=2, type=int)
+    
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
                         help='Save the fig with some name')
@@ -558,6 +586,16 @@ def main():
     args = parser.parse_args()
     frame_count, flist = get_frames(args.data_dir[0], args.file_max)
     
+    flist      = flist[args.frame_range[0]: args.frame_range[1]]
+    frame_count = len(flist)
+    
+    num_fields = len(args.field)
+    if num_fields > 1:
+        if len(args.cbar) == 2*num_fields:
+            pass
+        else:
+            args.cbar += (num_fields - 1) * [None, None]
+            
     # read the first file and infer the system configuration from it
     init_setup = read_file(args.data_dir[0], flist[0], args)[1]
     if init_setup["is_cartesian"]:
@@ -578,7 +616,23 @@ def main():
             cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
             cbar_orientation = "horizontal"
         else:
-            cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
+            if num_fields > 1:
+                if num_fields == 2:
+                    ycoord  = [0.1, 0.1 ]
+                    xcoord  = [0.1, 0.85]
+                    cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
+                    
+                if num_fields == 3:
+                    ycoord  = [0.1, 0.5, 0.1]
+                    xcoord  = [0.07, 0.85, 0.85]
+                    cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8 * 0.5]) for i in range(1, num_fields)]
+                    cbaxes.append(fig.add_axes([xcoord[0], ycoord[0] ,0.03, 0.8]))
+                if num_fields == 4:
+                    ycoord  = [0.5, 0.1, 0.5, 0.1]
+                    xcoord  = [0.85, 0.85, 0.07, 0.07]
+                    cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8/(0.5 * num_fields)]) for i in range(num_fields)]
+            else:
+                cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
             cbar_orientation = "vertical"
     
     def init_mesh(filename):
@@ -591,7 +645,12 @@ def main():
         Animation function. Takes the current frame number (to select the potion of
         data to plot) and a line object to update.
         """
-        cbaxes.cla()
+        try:
+            for cbax in cbaxes:
+                cbax.cla()
+        except:
+            cbaxes.cla()
+            
         if isinstance(ax, (list, np.ndarray)):
             for axs in ax:
                 axs.cla()
