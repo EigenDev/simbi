@@ -898,8 +898,8 @@ SRHD::simulate1D(
     // Some variables to handle file automatic file string
     // formatting 
     tchunk = "000000";
-    luint tchunk_order_of_mag = 2;
-    luint time_order_of_mag;
+    lint tchunk_order_of_mag = 2;
+    lint time_order_of_mag;
 
     // Some benchmarking tools 
     luint   nfold   = 0;

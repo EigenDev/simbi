@@ -7,12 +7,8 @@ import numpy as np
 import sys 
 import h5py 
 import pysimbi.initial_condition as simbi_ic 
-
-try:
-    from gpu_state import *
-except ImportError:
-    print("The gpu_state binary not configured. Be sure to install with --gpu flag enabled")
-
+from   gpu_ext import *
+# from   pysimbi.hydro import Hydro
 class Hydro:
     
     def __init__(self, 

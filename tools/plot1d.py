@@ -152,8 +152,7 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
     mass   = dV * fields["W"] * fields["rho"]
     e_k    = (fields['W'] - 1.0) * mass * e_scale.value
 
-    print(etotal)
-    zzz = input('')
+
     u = fields['gamma_beta']
     w = np.diff(u).max()*1e-1
     n = int(np.ceil( (u.max() - u.min() ) / w ) )
@@ -191,7 +190,7 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
     sorted_energy = np.sort(ets)
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.set_ylim(sorted_energy[1], 1.5*ets.max())
+    # ax.set_ylim(sorted_energy[1], 1.5*ets.max())
     ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
     ax.set_ylabel(r'$E( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
     ax.tick_params('both', labelsize=15)
