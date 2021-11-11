@@ -195,7 +195,7 @@ def initializeModel(model, first_order = False, periodic = False, scalars = 0):
                     else:
                         model.u = np.empty(shape = (5, model.yNpts, model.xNpts), dtype=float)
                         model.u[:, :, :] = np.array([model.initD, model.initS1,
-                                                    model.initS2, model.init_tau, model.init_initD * scalars])
+                                                    model.initS2, model.init_tau, model.initD * scalars])
                         # Add boundary ghosts
                         bottom_ghost = model.u[:, -1]
                         upper_ghost = model.u[:, 0]

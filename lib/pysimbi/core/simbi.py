@@ -1,15 +1,13 @@
-# A Hydro Code Useful for solving 1D structure problems
+# A Hydro Code Useful for solving MultiD structure problems
 # Marcus DuPont
 # New York University
 # 06/10/2020
 
 import numpy as np 
-import os
 import sys 
 import h5py 
 import pysimbi.initial_condition as simbi_ic 
-
-from cpu_state import *
+from   cpu_ext import *
 
 class Hydro:
     
@@ -48,7 +46,7 @@ class Hydro:
             None
         """
         # TODO: Add an example Instantian Here for the Sod Problem
-        
+        self.coord_system = coord_system
         self.regime = regime
         discontinuity = False
         
@@ -312,14 +310,13 @@ class Hydro:
                  first_order: bool = True,
                  periodic: bool = False,
                  linspace: bool = True,
-                 coordinates: str="cartesian",
                  CFL: float = 0.4,
                  sources: np.ndarray = None,
-                 scalars: np.ndarray = None,
+                 scalars: np.ndarray = 0,
                  hllc: bool =False,
                  chkpt: str = None,
                  chkpt_interval:float = 0.1,
-                 data_directory:str = "data",
+                 data_directory:str = "data/",
                  engine_duration: float = 10.0):
         """
         Simulate the Hydro Setup
@@ -339,24 +336,22 @@ class Hydro:
         Returns:
             u (array): The conserved/primitive variable array
         """
-        #Convert the data_dir into a path in case the use forgot the trailing slash
-        data_directory = os.path.join(data_directory, '')
+        
         #Convert strings to byte arrays
         data_directory = data_directory.encode('utf-8')
-        coordinates    = coordinates.encode('utf-8')
+        coordinates    = self.coord_system.encode('utf-8')
         # Initialize conserved u-tensor
         
         self.u = np.asarray(self.u)
         self.t = 0
         
         if not chkpt:
-            simbi_ic.initializeModel(self, first_order, periodic)
+            simbi_ic.initializeModel(self, first_order, periodic, scalars)
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensions)
             
         u = self.u 
         start_time = tstart if self.t == 0 else self.t
-        
         
         if self.dimensions == 1:
             if (linspace):
@@ -376,7 +371,7 @@ class Hydro:
                 a = PyStateSR(u, self.gamma, CFL, r = x1, coord_system = coordinates)
     
             u = a.simulate(sources = sources,
-                tstart = tstart,
+                tstart = start_time,
                 tend = tend,
                 dt = dt,
                 plm_theta = plm_theta,
@@ -401,9 +396,9 @@ class Hydro:
             
             if (first_order):
                 print("Computing First Order...")
+            
             else:
                 print('Computing Higher Order...')
-                zeros((4, x2.size, x1.size), dtype=float) if not scalars else np.asarray(scalars)
                 
             if self.regime == "classical":
                 b = PyState2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
@@ -412,8 +407,7 @@ class Hydro:
                    
             u = b.simulate(
                 sources = sources,
-                scalar_field = scalars,
-                tstart = tstart,
+                tstart = start_time,
                 tend = tend,
                 dt = dt,
                 plm_theta = plm_theta,

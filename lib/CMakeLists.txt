@@ -68,6 +68,10 @@ endif()
 
 set(SRCS 
     ${SRCS}
+
+    #######################
+    ### PY SOURCES
+    #######################
     #######################
     ### Common dependencies
     #######################
@@ -103,7 +107,7 @@ set(SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.tpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.pyx
+    # ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_ext.pyx
 
     #######################
     #### UTIL Dependencies
@@ -121,12 +125,13 @@ set(SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/util/dual.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/util/dual.tpp
 )
+
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/pysimbi DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 if(PYTHON3)
     set(SETUP_PY_IN  "${CMAKE_CURRENT_SOURCE_DIR}/setup.py.in")
     set(SETUP_PY     "${CMAKE_CURRENT_BINARY_DIR}/setup.py")
-    set(GDEPS         "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/gpu/__init__.py")
-    set(CDEPS         "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/core/__init__.py")
+    set(GDEPS        "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/gpu/__init__.py")
+    set(CDEPS        "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/core/__init__.py")
     set(OUTPUT       "${CMAKE_CURRENT_BINARY_DIR}/build")
 
     
@@ -137,7 +142,7 @@ if(PYTHON3)
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_gpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace && rm -f 
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_ext.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_gpu
             DEPENDS ${GDEPS}
         )
@@ -146,18 +151,23 @@ if(PYTHON3)
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_cpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/cpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/cpu_ext.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
             DEPENDS ${GDEPS}
         )
         add_custom_target(cpu DEPENDS ${OUTPUT}/pytimestamp_cpu)
+
+        # add_custom_target(copy_assets
+        #     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_LIST_DIR}/copy-assets.cmake
+        # )
+        # add_dependencies(cpu gpu copy_assets)
 
     else()
         list(APPEND CDEPS ${SRCS})
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_cpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/cpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/cpu_ext.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
             DEPENDS ${CDEPS}
         )
