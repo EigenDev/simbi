@@ -7,6 +7,7 @@
 
 #include "build_options.hpp"
 #include <string>
+#include <stdexcept>
 #define NAME_OF(variable) ((decltype(&variable))nullptr, #variable)
 
 namespace simbi
