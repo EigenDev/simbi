@@ -499,34 +499,45 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     const real h_r   = (real)1.0 + gamma * p_r / (rho_r * (gamma - 1));
     const real cs_r  = sqrt(gamma * p_r / (rho_r * h_r));
 
-    // Compute waves based on Schneider et al. 1993 Eq(31 - 33)
-    const real vbar = (real)0.5 * (v_l + v_r);
-    const real cbar = (real)0.5 * (cs_r + cs_l);
-    const real br = (vbar + cbar) / (1 + vbar * cbar);
-    const real bl = (vbar - cbar) / (1 - vbar * cbar);
+    switch (comp_wave_speed)
+    {
+    case simbi::WaveSpeeds::SCHNEIDER_ET_AL_93:
+        {
+            // Compute waves based on Schneider et al. 1993 Eq(31 - 33)
+            const real vbar = (real)0.5 * (v_l + v_r);
+            const real cbar = (real)0.5 * (cs_r + cs_l);
+            const real br = (vbar + cbar) / (1 + vbar * cbar);
+            const real bl = (vbar - cbar) / (1 - vbar * cbar);
 
-    const real aL = my_min(bl, (v_l - cs_l) / (1 - v_l * cs_l));
-    const real aR = my_max(br, (v_r + cs_r) / (1 + v_r * cs_r));
+            const real aL = my_min(bl, (v_l - cs_l) / (1 - v_l * cs_l));
+            const real aR = my_max(br, (v_r + cs_r) / (1 + v_r * cs_r));
 
+            return Eigenvals(aL, aR);
+        }
+    default:
+        {
+            // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
+            const real sL = cs_l*cs_l/(gamma*gamma*((real)1.0 - cs_l*cs_l));
+            const real sR = cs_r*cs_r/(gamma*gamma*((real)1.0 - cs_r*cs_r));
+            // Define temporaries to save computational cycles
+            const real qfL   = (real)1.0 / ((real)1.0 + sL);
+            const real qfR   = (real)1.0 / ((real)1.0 + sR);
+            const real sqrtR = sqrt(sR * ((real)1.0 - v_r * v_r + sR));
+            const real sqrtL = sqrt(sL * ((real)1.0 - v_l * v_l + sL));
 
-    // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-    // const real sL = cs_l*cs_l/(gamma*gamma*(1.0 - cs_l*cs_l));
-    // const real sR = cs_r*cs_r/(gamma*gamma*(1.0 - cs_r*cs_r));
-    // // Define temporaries to save computational cycles
-    // const real qfL = (real)1.0 / ((real)1.0 + sL);
-    // const real qfR = (real)1.0 / ((real)1.0 + sR);
-    // const real sqrtR = sqrt(sR * (1.0 - v_r * v_r + sR));
-    // const real sqrtL = sqrt(sL * (1.0 - v_l * v_l + sL));
+            const real lamLm = (v_l - sqrtL) * qfL;
+            const real lamRm = (v_r - sqrtR) * qfR;
+            const real lamLp = (v_l + sqrtL) * qfL;
+            const real lamRp = (v_r + sqrtR) * qfR;
 
-    // const real lamLm = (v_l - sqrtL) * qfL;
-    // const real lamRm = (v_r - sqrtR) * qfR;
-    // const real lamLp = (v_l + sqrtL) * qfL;
-    // const real lamRp = (v_r + sqrtR) * qfR;
+            const real aL = lamLm < lamRm ? lamLm : lamRm;
+            const real aR = lamLp > lamRp ? lamLp : lamRp;
 
-    // const real aL = lamLm < lamRm ? lamLm : lamRm;
-    // const real aR = lamLp > lamRp ? lamLp : lamRp;
+            return Eigenvals(aL, aR);
+        }
+    }
 
-    return Eigenvals(aL, aR);
+    
 };
 
 // Adapt the CFL conditonal timestep
@@ -904,7 +915,7 @@ SRHD::simulate1D(
     // Some benchmarking tools 
     luint   nfold   = 0;
     luint   ncheck  = 0;
-    real zu_avg = 0;
+    real     zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;
     
