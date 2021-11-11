@@ -142,7 +142,7 @@ if(PYTHON3)
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_gpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace && rm -f 
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_ext.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_gpu
             DEPENDS ${GDEPS}
         )
@@ -151,7 +151,7 @@ if(PYTHON3)
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_cpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/cpu_ext.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
             DEPENDS ${GDEPS}
         )

@@ -10,7 +10,8 @@ from distutils.core import Command
 from distutils import sysconfig
 from Cython.Build import cythonize
 from setuptools.command.build_ext import build_ext as build_ext_orig
-
+from setuptools.command.install import install
+from setuptools.command.develop import develop
 
 class CompilerParams():
     def __init__(self, arch='cpu'):
@@ -24,13 +25,13 @@ class CompilerParams():
     
     @property   
     def compiler_args(self):
-        cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-flto']
+        cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp']
         if self._arch == 'gpu':
             gpu_compiler_args = { '$ENV{CC}': cpu_compiler_args,
                                    'hipcc': []
                                  }
             if "${HIP_PLATFORM}" == "nvidia":
-                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_50',
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_86', '-ccbin=gcc-10',
                                             '--ptxas-options=-v', '--extended-lambda',
                                             '--compiler-options', '-fPIC', '-O3']
             else:
@@ -41,7 +42,7 @@ class CompilerParams():
                 
     @property
     def linker_args(self):
-        self._linker_args = ['-lhdf5', '-lhdf5_cpp', '-fopenmp', '-flto']
+        self._linker_args = ['-lhdf5', '-lhdf5_cpp', '-fopenmp']
         if self._arch != "cpu":
             if "${HIP_PLATFORM}" == "nvidia":
                 self._linker_args += ['-lcudart']
@@ -113,9 +114,9 @@ class CompilerParams():
         self._sources  += [pjoin(src_dir,  file) for file in os.listdir(src_dir)  if file.endswith('.cpp')]
         agno_src = pjoin(src_dir, "hydro")
         for file in os.listdir(agno_src):
-            if file.endswith(".cpp") and file != "gpu_state.cpp":
+            if file.endswith(".cpp") and file != "ag_state.cpp":
                 self._sources.append(pjoin(agno_src, file))
-        self._sources.insert(0, pjoin(agno_src, "gpu_state.pyx"))
+        self._sources.insert(0, pjoin(agno_src, "ag_state.pyx"))
         return self._sources
 
 def extensions(comp: CompilerParams, name: str = "state"):
@@ -192,7 +193,7 @@ def customize_compiler_for_hipcc(self):
     # object but distutils doesn't have the ability to change compilers
     # based on source extension: we add it.
     def _compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
-        if src != "${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.cpp":
+        if src != "${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.cpp":
             # use the hip for .hip.cpp files
             self.set_executable('compiler_so', '${HIPCC}')
             #self.set_executable('linker_so', '${HIPCC}')
@@ -208,12 +209,33 @@ def customize_compiler_for_hipcc(self):
 
     # Inject our redefined _compile method into the class
     self._compile = _compile
-    
-class custom_build_ext(build_ext_orig):
-    def build_extensions(self):
-        # self.extensions = extensions(CompilerParams("gpu"), 'gpu_state')
-        customize_compiler_for_hipcc(self.compiler)
-        build_ext_orig.build_extensions(self)
+
+class CommandMixin(object):
+    user_options = [
+        ('cpu', None, 'install in pure cpu mode'),
+    ]
+
+    def initialize_options(self):
+        super().initialize_options()
+        # Initialize options
+        self.cpu = None
+
+    def finalize_options(self):
+        # Validate options
+        super().finalize_options()
+
+    def run(self):
+        # Use options
+        global cpu
+        cpu = self.cpu 
+        super().run()
+
+class InstallCommand(CommandMixin, install):
+    user_options = getattr(install, 'user_options', []) + CommandMixin.user_options
+
+class DevelopCommand(CommandMixin, develop):
+    user_options = getattr(develop, 'user_options', []) + CommandMixin.user_options
+
 
 class BuildPlatformCommand(build_ext_orig):
     """A custom command to choose to build on CPU, GPU, or both."""
@@ -242,16 +264,16 @@ class BuildPlatformCommand(build_ext_orig):
     
     def build_extensions(self):
         if self.cpu is None:
-            # self.extensions = extensions(CompilerParams('cpu'), 'gpu_state')
             customize_compiler_for_hipcc(self.compiler)
         build_ext_orig.build_extensions(self)
 
 # Initialize default CPU extension
 ext = None
 if "--cpu" in sys.argv:
-    ext = extensions(CompilerParams("cpu"), 'cpu_state')
+    ext = extensions(CompilerParams("cpu"), 'cpu_ext')
 else:
-    ext = extensions(CompilerParams("gpu"), 'gpu_state')
+    ext = extensions(CompilerParams("gpu"), 'gpu_ext')
+    
 setup(
     name='PySIMBI',
     author='Marcus DuPont',
@@ -260,7 +282,9 @@ setup(
     version='${PROJECT_VERSION}',
     ext_modules=ext,
     cmdclass={
-        'build_ext': BuildPlatformCommand
+        'build_ext': BuildPlatformCommand,
+        'install': InstallCommand,
+        'develop': DevelopCommand,
         },
     package_dir={'pysimbi': '${CMAKE_CURRENT_BINARY_DIR}/pysimbi'},
     packages=find_namespace_packages(),
