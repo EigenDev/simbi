@@ -103,7 +103,7 @@ set(SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.tpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_state.pyx
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.pyx
 
     #######################
     #### UTIL Dependencies
@@ -151,18 +151,20 @@ if(PYTHON3)
             DEPENDS ${GDEPS}
         )
         add_custom_target(cpu DEPENDS ${OUTPUT}/pytimestamp_cpu)
+        install(CODE "execute_process(COMMAND pip install ${_pip_args} -e ${CMAKE_CURRENT_BINARY_DIR})")
 
     else()
         list(APPEND CDEPS ${SRCS})
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_cpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/cpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
             DEPENDS ${CDEPS}
         )
         add_custom_target(cpu ALL DEPENDS ${OUTPUT}/pytimestamp_cpu)
+        install(CODE "execute_process(COMMAND pip install ${_pip_args} -e ${CMAKE_CURRENT_BINARY_DIR} --install-option=--cpu)")
     
     endif(HIP_FOUND)
-    install(CODE "execute_process(COMMAND pip install ${_pip_args} -e ${CMAKE_CURRENT_BINARY_DIR})")
+    
 endif(PYTHON3)
