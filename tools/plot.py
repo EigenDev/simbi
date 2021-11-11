@@ -27,108 +27,6 @@ from mpl_toolkits.axisartist import GridHelperCurveLinear
 from matplotlib.projections import get_projection_class
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-def curvelinear_test(fig, *data):
-    """
-    polar projection, but in a rectangular box.
-    """
-    global ax1
-    # see demo_curvelinear_grid.py for details
-    tr = Affine2D().scale(np.pi / 180., 1.) + PolarAxes.PolarTransform()
-
-    extreme_finder = angle_helper.ExtremeFinderCycle(20,
-                                                     20,
-                                                     lon_cycle=360,
-                                                     lat_cycle=None,
-                                                     lon_minmax=None,
-                                                     lat_minmax=(0,
-                                                                 np.inf),
-                                                     )
-
-    grid_locator1 = angle_helper.LocatorDMS(12)
-
-    tick_formatter1 = angle_helper.FormatterDMS()
-
-    grid_helper = GridHelperCurveLinear(tr,
-                                        extreme_finder=extreme_finder,
-                                        grid_locator1=grid_locator1,
-                                        tick_formatter1=tick_formatter1
-                                        )
-
-    ax1 = SubplotHost(fig, 1, 1, 1, grid_helper=grid_helper)
-
-    fig.add_subplot(ax1)
-
-    # Now creates floating axis
-
-    # floating axis whose first coordinate (theta) is fixed at 60
-    ax1.axis["lat"] = axis = ax1.new_floating_axis(0, 60)
-    axis.label.set_text(r"$\theta = 60^{\circ}$")
-    axis.label.set_visible(True)
-    
-    # A parasite axes with given transform
-    ax2 = ax1.get_aux_axes(tr)
-    # note that ax2.transData == tr + ax1.transData
-    # Anything you draw in ax2 will match the ticks and grids of ax1.
-    ax1.parasites.append(ax2)
-    
-    ax2.pcolormesh(*data, shading="auto")
-
-    # floating axis whose second coordinate (r) is fixed at 6
-    ax1.axis["lon"] = axis = ax1.new_floating_axis(1, 6)
-    axis.label.set_text(r"$r = 6$")
-
-    ax1.set_aspect(1.)
-    ax1.set_xlim(-5, 12)
-    ax1.set_ylim(-5, 10)
-
-    ax1.grid(True)
-    
-
-def curvelinear_test2(ax1, args, *data):
-    """
-    polar projection, but in a rectangular box.
-    """
-    # see demo_curvelinear_grid.py for details
-    tr = Affine2D().scale(np.pi / 180., 1.) + PolarAxes.PolarTransform()
-
-    extreme_finder = angle_helper.ExtremeFinderCycle(20,
-                                                     20,
-                                                     lon_cycle=180,
-                                                     lat_cycle=None,
-                                                     lon_minmax=None,
-                                                     lat_minmax=(0,
-                                                                 np.inf),
-                                                     )
-
-    grid_locator1 = angle_helper.LocatorDMS(12)
-
-    tick_formatter1 = angle_helper.FormatterDMS()
-
-    grid_helper = GridHelperCurveLinear(tr,
-                                        extreme_finder=extreme_finder,
-                                        grid_locator1=grid_locator1,
-                                        tick_formatter1=tick_formatter1
-                                        )
-
-    # Now creates floating axis
-
-    # floating axis whose first coordinate (theta) is fixed at 60
-    # ax1.axis["lat"] = axis = ax1.new_floating_axis(0, 60)
-    vmin, vmax = args.cbar
-    ax1.pcolormesh(*data, shading='auto', cmap=args.cmap, norm = colors.LogNorm(vmin = vmin, vmax = vmax))
-    #axis.label.set_text(r"$\theta = 60^{\circ}$")
-    #axis.label.set_visible(True)
-
-    # floating axis whose second coordinate (r) is fixed at 6
-    # ax1.axis["lon"] = axis = ax1.new_floating_axis(1, 6)
-    # axis.label.set_text(r"$r = 6$")
-
-    ax1.set_aspect(1.)
-    ax1.set_xlim(0.1, 5.0)
-    ax1.set_ylim(0.1, 3.0)
-
-    ax1.grid(True)
-
 def find_nearest(arr, val):
     arr = np.asarray(arr)
     idx = np.argmin(np.abs(arr - val))
@@ -764,7 +662,7 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     if args.labels is None:
         ax.hist(gbs, bins=gbs, weights=ets, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
     else:
-        ax.hist(gbs, bins=gbs, weights=ets, label=r'$\{}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
+        ax.hist(gbs, bins=gbs, weights=ets, label=r'${}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
     fill_below_intersec(gbs, ets, 1e-6, colors[case])
     # if case == 0:
     #     #1D Check 
