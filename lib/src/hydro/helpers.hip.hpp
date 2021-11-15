@@ -40,7 +40,7 @@ namespace simbi
     GPU_CALLABLE_INLINE
     bool quirk_strong_shock(real pl, real pr)
     {
-        return abs(pr - pl) / my_min(pl, pr) > QUIRK_THERSHOLD;
+        return std::abs(pr - pl) / my_min(pl, pr) > QUIRK_THRESHOLD;
     }
 
     GPU_CALLABLE_INLINE
