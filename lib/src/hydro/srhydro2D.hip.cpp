@@ -651,10 +651,12 @@ void SRHD2D::cons2prim(
         volatile  __shared__ bool found_failure;
         bool workLeftToDo = true;
         
+        const auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * threadIdx.y + threadIdx.x : gid;
+        if (tid == 0) found_failure = false;
+        simbi::gpu::api::synchronize();
+        
         while (!found_failure && workLeftToDo)
         {
-            const auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * threadIdx.y + threadIdx.x : gid;
-            if (tid == 0) found_failure = false;
             #if GPU_CODE
             extern __shared__ Conserved  conserved_buff[];
             // load shared memory
@@ -706,7 +708,7 @@ void SRHD2D::cons2prim(
                     self->dt = INFINITY;
                     found_failure = true;
                     simbi::gpu::api::synchronize();
-                    return;
+                    // return;
                 }
 
             } while (std::abs(peq - pre) >= tol);
