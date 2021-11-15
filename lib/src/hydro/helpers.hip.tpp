@@ -146,8 +146,9 @@ namespace simbi{
             }
             if(tid == 0)
             {
+                // printf("dt at block %d is: %f\n", blockIdx.x + blockIdx.y * gridDim.x, s->dt_min[blockIdx.x + blockIdx.y * gridDim.x]);
                 s->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
-                s->dt = s->CFL * s->dt_min[0];
+                s->dt = s->dt_min[0];
             }
         } // end if
     #endif

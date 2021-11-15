@@ -44,13 +44,18 @@ namespace simbi
 
         /* Methods */
         SRHD2D();
-        SRHD2D(std::vector<std::vector<real>> state2D, luint nx, luint ny, real gamma, std::vector<real> x1,
-               std::vector<real> x2,
-               real CFL, std::string coord_system);
+        SRHD2D(std::vector<std::vector<real>> state2D, 
+            luint nx, 
+            luint ny, 
+            real gamma, 
+            std::vector<real> x1,
+            std::vector<real> x2,
+            real CFL, 
+            std::string coord_system);
         ~SRHD2D();
 
         GPU_CALLABLE_MEMBER
-        sr2d::Eigenvals calc_Eigenvals(
+        sr2d::Eigenvals calc_eigenvals(
             const sr2d::Primitive &prims_l,
             const sr2d::Primitive &prims_r,
             const luint nhat) const;
@@ -96,10 +101,6 @@ namespace simbi
             const sr2d::Primitive &left_prims,
             const sr2d::Primitive &right_prims,
             const luint nhat) const;
-
-        sr2d::Conserved u_dot(luint ii, luint jj);
-
-        std::vector<sr2d::Conserved> u_dot2D(const std::vector<sr2d::Conserved> &cons_state);
 
         void adapt_dt();
         void adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, luint bytes);
