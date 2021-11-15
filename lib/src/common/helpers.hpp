@@ -155,25 +155,31 @@ template<typename T>
 GPU_CALLABLE_INLINE typename std::enable_if<is_2D_primitive<T>::value, T>::type
 minmod(const T x, const T y, const T z)
 {
-    real xrho = x.rho;
-    real xv1  = x.v1;
-    real xv2  = x.v2;
-    real xp   = x.p;
+    const real xrho = x.rho;
+    const real xv1  = x.v1;
+    const real xv2  = x.v2;
+    const real xp   = x.p;
+    const real xc   = x.chi;
 
-    real yrho = y.rho;
-    real yv1  = y.v1;
-    real yv2  = y.v2;
-    real yp   = y.p;
+    const real yrho = y.rho;
+    const real yv1  = y.v1;
+    const real yv2  = y.v2;
+    const real yp   = y.p;
+    const real yc   = y.chi;
 
-    real zrho = z.rho;
-    real zv1  = z.v1;
-    real zv2  = z.v2;
-    real zp   = z.p;
+    const real zrho = z.rho;
+    const real zv1  = z.v1;
+    const real zv2  = z.v2;
+    const real zp   = z.p;
+    const real zc   = z.chi;
+
+    
 
      return T{(real)0.25 * std::abs(sgn(xrho) + sgn(yrho)) * (sgn(xrho) + sgn(zrho)) * my_min(my_min(std::abs(xrho), std::abs(yrho)) , std::abs(zrho)),
-              (real)0.25 * std::abs(sgn(xv1) + sgn(yv1)) * (sgn(xv1) + sgn(zv1)) * my_min(my_min(std::abs(xv1), std::abs(yv1)) , std::abs(zv1)),
-              (real)0.25 * std::abs(sgn(xv2) + sgn(yv2)) * (sgn(xv2) + sgn(zv2)) * my_min(my_min(std::abs(xv2), std::abs(yv2)) , std::abs(zv2)),
-              (real)0.25 * std::abs(sgn(xp) + sgn(yp)) * (sgn(xp) + sgn(zp)) * my_min(my_min(std::abs(xp), std::abs(yp)) , std::abs(zp))
+              (real)0.25 * std::abs(sgn(xv1)  + sgn(yv1))  * (sgn(xv1)  + sgn(zv1))  * my_min(my_min(std::abs(xv1),  std::abs(yv1)) ,  std::abs(zv1)),
+              (real)0.25 * std::abs(sgn(xv2)  + sgn(yv2))  * (sgn(xv2)  + sgn(zv2))  * my_min(my_min(std::abs(xv2),  std::abs(yv2)) ,  std::abs(zv2)),
+              (real)0.25 * std::abs(sgn(xp)   + sgn(yp))   * (sgn(xp)   + sgn(zp))   * my_min(my_min(std::abs(xp),   std::abs(yp)) ,   std::abs(zp)),
+              (real)0.25 * std::abs(sgn(xc)   + sgn(yc))   * (sgn(xc)   + sgn(zc))   * my_min(my_min(std::abs(xc),   std::abs(yc)) ,   std::abs(zc))
      };
 
 }
