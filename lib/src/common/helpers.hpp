@@ -23,7 +23,7 @@
 #include "traits.hpp"
 
 // Some useful global constants
-constexpr real QUIRK_THERSHOLD = 1e-3;
+constexpr real QUIRK_THRESHOLD = 1e-4;
 // Calculate a static PI
 constexpr double PI = 3.14159265358979323846;
 
