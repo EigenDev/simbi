@@ -530,6 +530,7 @@ void SRHD2D::cons2prim(
     auto gamma = self->gamma;
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
+        const auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * threadIdx.y + threadIdx.x : gid;
         #if GPU_CODE
         extern __shared__ Conserved  conserved_buff[];
         // load shared memory
@@ -539,7 +540,7 @@ void SRHD2D::cons2prim(
         auto* const conserved_buff = &cons[0];
         #endif 
 
-        const auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * threadIdx.y + threadIdx.x : gid;
+        
             
         luint iter  = 0;
         real D    = conserved_buff[tid].D;
