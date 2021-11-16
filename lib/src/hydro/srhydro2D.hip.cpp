@@ -647,7 +647,7 @@ void SRHD2D::cons2prim(
         volatile  __shared__ bool found_failure;
         const auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * threadIdx.y + threadIdx.x : gid;
         #if GPU_CODE
-        if (tid == 0) found_failure = inFailureState;
+        if (tid == 0) found_failure = self->inFailureState;
         simbi::gpu::api::synchronize();
         #else 
         found_failure = inFailureState;
