@@ -19,12 +19,11 @@ namespace simbi
     {
     public:
         /* Shared Data Members */
-        sr2d::Eigenvals lambda;
         std::vector<sr2d::Primitive> prims;
         std::vector<sr2d::Conserved> cons;
         std::vector<std::vector<real>> state2D;
         real plm_theta, gamma, bipolar;
-        bool first_order, periodic, hllc, linspace;
+        bool first_order, periodic, hllc, linspace, inFailureState;
         real CFL, dt, decay_const;
         luint nx, ny, nzones, n, block_size, xphysical_grid, yphysical_grid;
         luint active_zones, idx_active, x_bound, y_bound;
