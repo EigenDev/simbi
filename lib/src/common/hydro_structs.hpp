@@ -195,7 +195,7 @@ namespace sr2d {
             return *this;
         }
 
-        GPU_CALLABLE_MEMBER real momentum(const int nhat) const {return (nhat == 1 ? S1 : S2); }
+        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {return (nhat == 1 ? S1 : S2); }
     };
 
     struct Primitive {
@@ -230,7 +230,7 @@ namespace sr2d {
         }
         
         GPU_CALLABLE_MEMBER
-        real vcomponent(const unsigned nhat) const {return (nhat == 1 ? v1 : v2); }
+        constexpr real vcomponent(const unsigned nhat) const {return (nhat == 1 ? v1 : v2); }
 
     };
 

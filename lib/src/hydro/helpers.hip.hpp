@@ -44,7 +44,7 @@ namespace simbi
     }
 
     GPU_CALLABLE_INLINE
-    unsigned int kronecker(luint i, luint j) { return (i == j ? 1 : 0); }
+    constexpr unsigned int kronecker(luint i, luint j) { return (i == j ? 1 : 0); }
 
     void config_ghosts1DGPU(
         const ExecutionPolicy<> p,
