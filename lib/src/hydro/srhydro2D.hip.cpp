@@ -430,13 +430,13 @@ Conserved SRHD2D::calc_hllc_flux(
 
     // const real voL      =  left_prims.vcomponent(!nhat);
     // const real voR      = right_prims.vcomponent(!nhat);
-    const real ma_local = my_max(std::abs(vL / cL), std::abs(vR / cR));
-    const real phi      = std::sin(my_min((real)1.0, ma_local / ma_lim) * PI * (real)0.5);
-    const real aL_lm    = phi * aL;
-    const real aR_lm    = phi * aR;
+    // const real ma_local = 0; //my_max(std::abs(vL / cL), std::abs(vR / cR));
+    // const real phi      = 0; //std::sin(my_min((real)1.0, ma_local / ma_lim) * PI * (real)0.5);
+    // const real aL_lm    = aL; //phi * aL;
+    // const real aR_lm    = aR; //phi * aR;
 
-    auto hllc_flux = (left_flux + right_flux) * (real)0.5 + ( (starStateL - left_state) * aL_lm
-                        + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm ) * (real)0.5;
+    auto hllc_flux = (left_flux + right_flux) * (real)0.5 + ( (starStateL - left_state) * aL
+                        + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR ) * (real)0.5;
 
     // upwind the concentration flux 
     if (hllc_flux.D < (real)0.0)
@@ -1063,7 +1063,7 @@ void SRHD2D::advance(
             xprims_l = xleft_mid + minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * (real)0.5, (center - xleft_mid)*plm_theta) * (real)0.5;
             xprims_r = center    - minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*(real)0.5, (xright_mid - center)*plm_theta)*(real)0.5;
             yprims_l = yleft_mid + minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * (real)0.5, (center - yleft_mid)*plm_theta) * (real)0.5;
-            yprims_r = center    - minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*(real)0.5, (yright_mid - center)*plm_theta)*(real)0.5;;
+            yprims_r = center    - minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*(real)0.5, (yright_mid - center)*plm_theta)*(real)0.5;
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
