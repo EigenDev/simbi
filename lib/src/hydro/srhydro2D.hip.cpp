@@ -404,7 +404,7 @@ Conserved SRHD2D::calc_hllc_flux(
 
     const real vL           =  left_prims.vcomponent(nhat);
     const real vR           = right_prims.vcomponent(nhat);
-    const auto       kdelta = kronecker(nhat, 1);
+    const auto kdelta       = kronecker(nhat, 1);
     // Left Star State in x-direction of coordinate lattice
     real Dstar              = cofactor * (aL - vL) * D;
     real S1star             = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
@@ -428,12 +428,12 @@ Conserved SRHD2D::calc_hllc_flux(
     tauStar               = Estar - Dstar;
     const auto starStateR = Conserved{Dstar, S1star, S2star, tauStar};
 
-    const real voL      =  left_prims.vcomponent(!nhat);
-    const real voR      = right_prims.vcomponent(!nhat);
-    const real ma_local = 0; //my_max(std::abs(vL / cL), std::abs(vR / cR));
-    const real phi      = 0; //std::sin(my_min((real)1.0, ma_local / ma_lim) * PI * (real)0.5);
-    const real aL_lm    = aL; //phi * aL;
-    const real aR_lm    = aR; //phi * aR;
+    // const real voL      =  left_prims.vcomponent(!nhat);
+    // const real voR      = right_prims.vcomponent(!nhat);
+    const real ma_local = my_max(std::abs(vL / cL), std::abs(vR / cR));
+    const real phi      = std::sin(my_min((real)1.0, ma_local / ma_lim) * PI * (real)0.5);
+    const real aL_lm    = phi * aL;
+    const real aR_lm    = phi * aR;
 
     auto hllc_flux = (left_flux + right_flux) * (real)0.5 + ( (starStateL - left_state) * aL_lm
                         + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm ) * (real)0.5;
@@ -640,7 +640,7 @@ void SRHD2D::cons2prim(
     simbi::MemSide user)
 {
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
-    auto gamma = self->gamma;
+    auto gamma = this->gamma;
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
@@ -840,7 +840,7 @@ void SRHD2D::advance(
             // i+1/2
             ux_l = self->prims2cons(xprims_l); 
             ux_r = self->prims2cons(xprims_r); 
-            // j+1/2True
+            // j+1/2
             uy_l = self->prims2cons(yprims_l);  
             uy_r = self->prims2cons(yprims_r); 
 
@@ -1063,7 +1063,7 @@ void SRHD2D::advance(
             xprims_l = xleft_mid + minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * (real)0.5, (center - xleft_mid)*plm_theta) * (real)0.5;
             xprims_r = center    - minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*(real)0.5, (xright_mid - center)*plm_theta)*(real)0.5;
             yprims_l = yleft_mid + minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * (real)0.5, (center - yleft_mid)*plm_theta) * (real)0.5;
-            yprims_r = center    - minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*(real)0.5, (yright_mid - center)*plm_theta)*(real)0.5;
+            yprims_r = center    - minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*(real)0.5, (yright_mid - center)*plm_theta)*(real)0.5;;
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
@@ -1366,7 +1366,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     real    zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;
-
+    
     // Simulate :)
     if (first_order)
     {  
