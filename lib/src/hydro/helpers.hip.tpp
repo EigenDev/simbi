@@ -119,10 +119,10 @@ namespace simbi{
                 
                 case simbi::Geometry::SPHERICAL:
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    rl    = my_max(rmin*pow(10, (ii - 0.5) * dx), rmin);
-                    rr    = my_min(rl * pow(10, dx), rmax); 
-                    tl    = my_max(ymin + (jj - 0.5) * dy, ymin);
-                    tr    = my_min(tl + dy, ymax); 
+                    const real rl           = my_max(rmin * pow(10, (ii -(real) 0.5) * dx), rmin);
+                    const real rr           = my_min(rl * pow(10, dx * (ii == 0 ? 0.5 : 1.0)), rmax);
+                    const real tl           = my_max(ymin + (jj - (real)0.5) * dy, ymin);
+                    const real tr           = my_min(tl + dy * (jj == 0 ? 0.5 : 1.0), ymax); 
                     rmean = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
                     cfl_dt = my_min((rr - rl) / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
                             rmean * (tr - tl) / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
@@ -146,7 +146,6 @@ namespace simbi{
             }
             if(tid == 0)
             {
-                // printf("dt at block %d is: %f\n", blockIdx.x + blockIdx.y * gridDim.x, s->dt_min[blockIdx.x + blockIdx.y * gridDim.x]);
                 s->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
                 s->dt = s->dt_min[0];
             }
