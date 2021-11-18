@@ -42,7 +42,7 @@ namespace simbi
           luint nx, n, active_zones, idx_shift, i_start, i_bound;
           real tend;
           real plm_theta, engine_duration, t, decay_constant;
-          bool first_order, periodic, linspace, hllc;
+          bool first_order, periodic, linspace, hllc, inFailureState;
 
           std::vector<real> sourceD, sourceS, source0, pressure_guess;
 

@@ -33,13 +33,16 @@ SRHD::SRHD(){}
 
 // Overloaded Constructor
 SRHD::SRHD(std::vector<std::vector<real>> u_state, real gamma, real CFL,
-           std::vector<real> r, std::string coord_system = "cartesian")
+           std::vector<real> r, std::string coord_system = "cartesian") :
+
+    inFailureState(false),
+    state(u_state),
+    gamma(gamma),
+    r(r),
+    coord_system(coord_system),
+    CFL(CFL)
 {
-    this->state = u_state;
-    this->gamma = gamma;
-    this->r = r;
-    this->coord_system = coord_system;
-    this->CFL = CFL;
+
 }
 // Destructor
 SRHD::~SRHD()
@@ -376,7 +379,7 @@ void SRHD::advance(
                         sR    = coord_lattice->face_areas[ii + 1];
                         dV    = coord_lattice->dV[ii];
                         rmean = coord_lattice->x1mean[ii];
-
+                        
                         cons[ia] += Conserved{ 
                             -(sR * f1.D - sL * f2.D) / dV +
                             self->sourceD[ii] * decay_constant,
@@ -406,61 +409,71 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         #else 
         auto* const conserved_buff = &cons[0];
         #endif 
+        __shared__ volatile bool found_failure;
         luint tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
-
-        // Compile time thread selection
-        #if GPU_CODE
-            conserved_buff[tx] = self->gpu_cons[ii];
-        #endif
-
-        const real D       = conserved_buff[tx].D;
-        const real S       = conserved_buff[tx].S;
-        const real tau     = conserved_buff[tx].tau;
-        #if GPU_CODE
-        real peq           =  self->gpu_pressure_guess[ii];
-        #else 
-        real peq           = self->pressure_guess[ii];
-        #endif
-        int iter           = 0;
-        const real tol     = D * tol_scale;
-        do
+        if (tx == 0) found_failure = self->inFailureState;
+        simbi::gpu::api::synchronize();
+        
+        bool workLeftToDo = true;
+        while (!found_failure && workLeftToDo)
         {
-            pre = peq;
-            et = tau + D + pre;
-            v2 = S * S / (et * et);
-            W = (real)1.0 / sqrt((real)1.0 - v2);
-            rho = D / W;
+            // Compile time thread selection
+            #if GPU_CODE
+                conserved_buff[tx] = self->gpu_cons[ii];
+            #endif
 
-            eps = (tau + ((real)1.0 - W) * D + ((real)1.0 - W * W) * pre) / (D * W);
-
-            h  = (real)1.0 + eps + pre / rho;
-            c2 = self->gamma * pre / (h * rho); 
-
-            g = c2 * v2 - (real)1.0;
-            f = (self->gamma - (real)1) * rho * eps - pre;
-
-            peq = pre - f / g;
-            if (iter >= MAX_ITER)
+            const real D       = conserved_buff[tx].D;
+            const real S       = conserved_buff[tx].S;
+            const real tau     = conserved_buff[tx].tau;
+            #if GPU_CODE
+            real peq           =  self->gpu_pressure_guess[ii];
+            #else 
+            real peq           = self->pressure_guess[ii];
+            #endif
+            int iter           = 0;
+            const real tol     = D * tol_scale;
+            do
             {
-                printf("\n");
-                printf("Cons2Prim cannot converge");
-                printf("\n");
-                self->dt = INFINITY;
-                return;
-            }
-            iter++;
+                pre = peq;
+                et = tau + D + pre;
+                v2 = S * S / (et * et);
+                W = (real)1.0 / sqrt((real)1.0 - v2);
+                rho = D / W;
 
-        } while (std::abs(peq - pre) >= tol);
+                eps = (tau + ((real)1.0 - W) * D + ((real)1.0 - W * W) * pre) / (D * W);
 
-        real v = S / (tau + D + peq);
+                h  = (real)1.0 + eps + pre / rho;
+                c2 = self->gamma * pre / (h * rho); 
 
-        #if GPU_CODE
-            self->gpu_pressure_guess[ii] = peq;
-            self->gpu_prims[ii]          = Primitive{D * sqrt(1 - v * v), v, peq};
-        #else
-            pressure_guess[ii] = peq;
-            prims[ii]  = Primitive{D * sqrt(1 - v * v), v, peq};
-        #endif
+                g = c2 * v2 - (real)1.0;
+                f = (self->gamma - (real)1) * rho * eps - pre;
+
+                peq = pre - f / g;
+                if (iter >= MAX_ITER)
+                {
+                    printf("\nCons2Prim cannot converge\n");
+                    printf("Density: %.3e, Pressure: %.3e, vsq: %.3e\n", rho, peq, v2);
+                    self->dt             = INFINITY;
+                    self->inFailureState = true;
+                    found_failure        = true;
+                    simbi::gpu::api::synchronize();
+                    break;
+                }
+                iter++;
+
+            } while (std::abs(peq - pre) >= tol);
+
+            real v = S / (tau + D + peq);
+
+            #if GPU_CODE
+                self->gpu_pressure_guess[ii] = peq;
+                self->gpu_prims[ii]          = Primitive{D * sqrt(1 - v * v), v, peq};
+            #else
+                pressure_guess[ii] = peq;
+                prims[ii]  = Primitive{D * sqrt(1 - v * v), v, peq};
+            #endif
+            workLeftToDo = false;
+        }
     });
 }
 //--------------------------------------------------------------------------------------------------
@@ -1030,7 +1043,7 @@ SRHD::simulate1D(
             }
             
             /* Write to a File every tenth of a second */
-            if (t >= t_interval)
+            if (t >= t_interval && t != INFINITY)
             {
                 if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
                 time_order_of_mag = std::floor(std::log10(t));
