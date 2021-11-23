@@ -39,7 +39,7 @@ namespace simbi
           std::vector<sr1d::Conserved> cons;
           std::vector<sr1d::Primitive> prims;
 
-          luint nx, n, active_zones, idx_shift, i_start, i_bound;
+          luint nx, n, active_zones, idx_active, i_start, i_bound;
           real tend;
           real plm_theta, engine_duration, t, decay_constant;
           bool first_order, periodic, linspace, hllc, inFailureState;
@@ -52,7 +52,6 @@ namespace simbi
           sr1d::Conserved * cons_ptr;
           real      * pguess_ptr;
           sr1d::Primitive * prims_ptr;
-          void cons2prim1D();
 
           void advance(
                SRHD *s, 
