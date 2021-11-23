@@ -4,6 +4,8 @@
 #include "common/config.hpp"
 #include "common/hydro_structs.hpp"
 #include "common/helpers.hpp"
+#include "euler1D.hpp"
+#include "euler2D.hpp"
 #include "srhydro1D.hip.hpp"
 #include "srhydro2D.hip.hpp"
 #include "srhydro3D.hip.hpp"
@@ -49,12 +51,28 @@ namespace simbi
     void config_ghosts1DGPU(
         const ExecutionPolicy<> p,
         SRHD *dev_sim, 
-        const int, 
+        const int grid_size,
+        const bool first_order, 
+        const bool reflecting = true);
+
+    void config_ghosts1DGPU(
+        const ExecutionPolicy<> p,
+        Newtonian1D *dev_sim, 
+        const int grid_size,
+        const bool first_order, 
         const bool reflecting = true);
         
     void config_ghosts2DGPU(
         const ExecutionPolicy<> p,
         SRHD2D *sim, 
+        const int x1grid_size, 
+        const int x2grid_size, 
+        const bool first_order,
+        const bool bipolar = true);
+
+    void config_ghosts2DGPU(
+        const ExecutionPolicy<> p,
+        Newtonian2D *sim, 
         const int x1grid_size, 
         const int x2grid_size, 
         const bool first_order,

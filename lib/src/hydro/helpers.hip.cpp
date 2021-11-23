@@ -5,11 +5,15 @@
 //              GPU HELPERS
 //==================================
 namespace simbi{
+    //==================================================
+    //               1D
+    //==================================================
     void config_ghosts1DGPU(
         const ExecutionPolicy<> p, 
         SRHD *sim, 
         const int grid_size, 
-        const bool first_order)
+        const bool first_order,
+        const bool reflecting)
     {
         simbi::parallel_for(p, 0, 1, [=] GPU_LAMBDA (const int gid) {
             #if GPU_CODE
@@ -19,6 +23,8 @@ namespace simbi{
             #endif
             if (first_order){
                 cons[0] = cons[1];
+                cons[grid_size - 1] = cons[grid_size - 2];
+                
                 cons[0].S = - cons[1].S;
 
             } else {
@@ -32,6 +38,42 @@ namespace simbi{
             }
         });
     };
+
+    void config_ghosts1DGPU(
+        const ExecutionPolicy<> p, 
+        Newtonian1D *sim, 
+        const int grid_size, 
+        const bool first_order,
+        const bool reflecting)
+    {
+        simbi::parallel_for(p, 0, 1, [=] GPU_LAMBDA (const int gid) {
+            #if GPU_CODE
+            hydro1d::Conserved *cons = sim->gpu_cons;
+            #else 
+            hydro1d::Conserved *cons = sim->cons.data();
+            #endif
+            if (first_order){
+                cons[0] = cons[1];
+                cons[grid_size - 1] = cons[grid_size - 2];
+                
+                cons[0].m = - cons[1].m;
+
+            } else {
+                cons[0] = cons[3];
+                cons[1] = cons[2];
+                cons[grid_size - 1] = cons[grid_size - 3];
+                cons[grid_size - 2] = cons[grid_size - 3];
+
+                cons[0].m = - cons[3].m;
+                cons[1].m = - cons[2].m;
+            }
+        });
+    };
+
+
+    //==============================================
+    //                  2D
+    //==============================================
     void config_ghosts2DGPU(
         const ExecutionPolicy<> p,
         SRHD2D *sim, 
@@ -94,6 +136,80 @@ namespace simbi{
             }
         });
     };
+
+    void config_ghosts2DGPU(
+        const ExecutionPolicy<> p,
+        Newtonian2D *sim, 
+        const int x1grid_size, 
+        const int x2grid_size, 
+        const bool first_order,
+        const bool bipolar)
+    {
+        
+        const int extent = (BuildPlatform == Platform::GPU) ? p.gridSize.x * p.blockSize.x * p.gridSize.y * p.blockSize.y : x1grid_size * x2grid_size; 
+        simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
+            const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % x1grid_size;
+            const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / x1grid_size;
+
+            const int sx = (col_maj) ? 1 : x1grid_size;
+            const int sy = (col_maj) ? x2grid_size : 1;
+
+            #if GPU_CODE
+            hydro2d::Conserved *u_state = sim->gpu_cons;
+            #else 
+            hydro2d::Conserved *u_state = sim->cons.data();
+            #endif 
+            if (first_order){
+                if ((jj < x2grid_size) && (ii < x1grid_size))
+                {
+                    if (jj < 1){
+                        u_state[ii * sy + jj * sx]   = u_state[ii * sy + 1 * sx];
+                    } else if (jj > x2grid_size - 2) {
+                        u_state[ii * sy + jj * sx] = u_state[(x2grid_size - 2) * sx + ii * sy];
+                    } else {
+                        u_state[jj * sx + 0 * sy]                 =   u_state[jj * sx + 1 * sy];
+                        u_state[jj * sx + (x1grid_size - 1) * sy] =   u_state[jj * sx + (x1grid_size - 2) * sy];
+                        u_state[jj * sx + 0 * sy].m1             = - u_state[jj * sx + 1 * sy].m1;
+                    }
+                    
+                }
+
+            } else {
+                if(jj < x2grid_size)
+                {
+
+                    // Fix the ghost zones at the radial boundaries
+                    u_state[jj * sx +  0 * sy]                 = u_state[jj * sx +  3 * sy];
+                    u_state[jj * sx +  1 * sy]                 = u_state[jj * sx +  2 * sy];
+                    u_state[jj * sx +  (x1grid_size - 1) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
+                    u_state[jj * sx +  (x1grid_size - 2) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
+
+                    u_state[jj * sx + 0 * sy].m1              = - u_state[jj * sx + 3 * sy].m1;
+                    u_state[jj * sx + 1 * sy].m1              = - u_state[jj * sx + 2 * sy].m1;
+
+                    // Fix the ghost zones at the angular boundaries
+                    if (ii < x1grid_size){
+                        u_state[0 * sx + ii * sy]  = u_state[3 * sx + ii * sy];
+                        u_state[1 * sx + ii * sy]  = u_state[2 * sx + ii * sy];
+
+                        u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + ii * sy];
+                        u_state[(x2grid_size - 2) * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + ii * sy];
+                    }
+                }
+            }
+        });
+    };
+
+
+
+
+
+
+
+
+    //============================================
+    //                  3D
+    //============================================
     
     void config_ghosts3DGPU(
         const ExecutionPolicy<> p,

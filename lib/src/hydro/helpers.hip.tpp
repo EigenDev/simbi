@@ -16,12 +16,13 @@ namespace simbi{
     dtWarpReduce(T *s)
     {
         const real gamma     = s->gamma;
+        real cfl_dt, vPlus, vMinus;
         __shared__ volatile real dt_buff[BLOCK_SIZE];
         __shared__  N prim_buff[BLOCK_SIZE];
 
         int tid = threadIdx.x;
         int ii  = blockDim.x * blockIdx.x + threadIdx.x;
-        int aid = ii + s->idx_shift;
+        int aid = ii + s->idx_active;
         if (ii < s->active_zones)
         {
             prim_buff[tid] = s->gpu_prims[aid];
@@ -33,18 +34,22 @@ namespace simbi{
             real v   = prim_buff[tid].v;
 
             real h = 1. + gamma * p / (rho * (gamma - 1.));
-            real cs = sqrt(gamma * p / (rho * h));
+        
+            if constexpr(is_relativistic<N>::value)
+            {
+                real cs = sqrt(gamma * p / (rho * h));
+                vPlus  = (v + cs) / (1 + v * cs);
+                vMinus = (v - cs) / (1 - v * cs);
+            } else {
+                real cs = sqrt(gamma * p / rho );
+                vPlus  = (v + cs);
+                vMinus = (v - cs);
+            }
 
-            real vPLus  = (v + cs) / (1 + v * cs);
-            real vMinus = (v - cs) / (1 - v * cs);
-
-            real cfl_dt = dr / (my_max(abs(vPLus), abs(vMinus)));
-
+            cfl_dt = dr / (my_max(std::abs(vPlus), std::abs(vMinus)));
             dt_buff[tid] = s->CFL * cfl_dt;
             __syncthreads();
-
-            // printf("[%d] dt_min: %f, cfl_dt: %f\n",blockIdx.x, s->dt_min[blockIdx.x], s->CFL * cfl_dt);
-
+            
             for (unsigned int stride=blockDim.x/2; stride>32; stride>>=1) 
             {   
                 if (tid < stride) dt_buff[tid] = dt_buff[tid] < dt_buff[tid + stride] ? dt_buff[tid] : dt_buff[tid + stride]; 
@@ -55,9 +60,9 @@ namespace simbi{
             {
                 warpReduceMin<blockSize>(dt_buff, tid);
             }
-            if(tid == 0)
+            if(tid == 0) 
             {
-                s->dt_min[blockIdx.x] = dt_buff[tid]; // dt_min[0] == minimum
+                s->dt_min[blockIdx.x] = dt_buff[0]; // dt_min[0] == minimum
                 s->dt = s->dt_min[0];
             }
         }
@@ -94,21 +99,34 @@ namespace simbi{
 
         if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid))
         {
+            
             prim_buff[tid] = s->gpu_prims[aid];
             __syncthreads();
+
+            real plus_v1 , plus_v2 , minus_v1, minus_v2;
 
             real rho  = prim_buff[tid].rho;
             real p    = prim_buff[tid].p;
             real v1   = prim_buff[tid].v1;
             real v2   = prim_buff[tid].v2;
 
-            real h  = 1 + gamma * p / (rho * (gamma - 1));
-            real cs = sqrt(gamma * p / (rho * h));
+            if constexpr(is_relativistic<N>::value)
+            {
+                real h  = 1 + gamma * p / (rho * (gamma - 1));
+                real cs = sqrt(gamma * p / (rho * h));
+                plus_v1  = (v1 + cs) / (1 + v1 * cs);
+                plus_v2  = (v2 + cs) / (1 + v2 * cs);
+                minus_v1 = (v1 - cs) / (1 - v1 * cs);
+                minus_v2 = (v2 - cs) / (1 - v2 * cs);
+            } else {
+                real cs = sqrt(gamma * p / rho);
+                plus_v1  = (v1 + cs);
+                plus_v2  = (v2 + cs);
+                minus_v1 = (v1 - cs);
+                minus_v2 = (v2 - cs);
+            }
 
-            real plus_v1  = (v1 + cs) / (1 + v1 * cs);
-            real plus_v2  = (v2 + cs) / (1 + v2 * cs);
-            real minus_v1 = (v1 - cs) / (1 - v1 * cs);
-            real minus_v2 = (v2 - cs) / (1 - v2 * cs);
+            
 
             switch (geometry)
             {
@@ -249,5 +267,48 @@ namespace simbi{
             
         }
     }; // end dtWarpReduce
+
+
+    // template<typename T, typename U>
+    // void config_ghosts1DGPU(
+    //     const ExecutionPolicy<> p, 
+    //     U *sim, 
+    //     const int grid_size, 
+    //     const bool first_order,
+    //     const bool relecting)
+    // {
+    //     simbi::parallel_for(p, 0, 1, [=] GPU_LAMBDA (const int gid) {
+    //         #if GPU_CODE
+    //         T *cons = sim->gpu_cons;
+    //         #else 
+    //         T *cons = sim->cons.data();
+    //         #endif
+    //         if (first_order){
+    //             cons[0]             = cons[1];
+    //             cons[grid_size - 1] = cons[grid_size - 2];
+    //             if constexpr(is_relativistic<T>)
+    //             {
+    //                 cons[0].S = - cons[1].S;
+    //             } else {
+    //                 cons[0].m = - cons[1].m;
+    //             }
+
+    //         } else {
+    //             cons[0] = cons[3];
+    //             cons[1] = cons[2];
+    //             cons[grid_size - 1] = cons[grid_size - 3];
+    //             cons[grid_size - 2] = cons[grid_size - 3];
+
+    //             if constexpr(is_relativistic<T>)
+    //             {
+    //                 cons[0].S = - cons[3].S;
+    //                 cons[1].S = - cons[2].S;
+    //             } else {
+    //                 cons[0].m = - cons[3].m;
+    //                 cons[1].m = - cons[2].m;
+    //             }
+    //         }
+    //     });
+    // };
 }
 
