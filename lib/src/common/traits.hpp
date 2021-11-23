@@ -62,6 +62,56 @@ struct is_3D_primitive<sr3d::Primitive>
     static constexpr bool value = true;
 };
 
+template <typename T>
+struct is_relativistic {
+  static const bool value = false;
+};
+
+template<>
+struct is_relativistic<sr1d::Primitive>
+{
+    static constexpr bool value = true;
+};
+template<>
+struct is_relativistic<sr1d::Conserved>
+{
+    static constexpr bool value = true;
+};
+template<>
+struct is_relativistic<sr2d::Primitive>
+{
+    static constexpr bool value = true;
+};
+template<>
+struct is_relativistic<sr2d::Conserved>
+{
+    static constexpr bool value = true;
+};
+template<>
+struct is_relativistic<sr3d::Primitive>
+{
+    static constexpr bool value = true;
+};
+template<>
+struct is_relativistic<sr3d::Conserved>
+{
+    static constexpr bool value = true;
+};
+// template<>
+// struct is_relativistic<simbi::SRHD>
+// {
+//     static constexpr bool value = true;
+// };
+// template<>
+// struct is_relativistic<simbi::SRHD2D>
+// {
+//     static constexpr bool value = true;
+// };
+// template<>
+// struct is_relativistic<simbi::SRHD3D>
+// {
+//     static constexpr bool value = true;
+// }
 // template<typename T>
 // struct is_simstate {
 //     static const bool value = false;
