@@ -13,10 +13,12 @@
 #include <chrono>
 #include "util/parallel_for.hpp"
 #include "util/dual.hpp"
+#include "util/printb.hpp"
 #include "helpers.hip.hpp"
 
 
 using namespace simbi;
+using namespace simbi::util;
 using namespace std::chrono;
 
 // Default Constructor 
@@ -108,15 +110,14 @@ void Newtonian2D::cons2prim(
         simbi::gpu::api::synchronize();
         #endif 
 
-        const real rho     = cons_buff[gid].rho;
-        const real v1      = cons_buff[gid].m1/rho;
-        const real v2      = cons_buff[gid].m2/rho;
-        const real rho_chi = cons_buff[gid].chi;
-        const real pre  = (gamma - 1.0)*(cons_buff[tid].e_dens - 0.5 * rho * (v1 * v1 + v2 * v2));
+        const real rho     = cons_buff[tid].rho;
+        const real v1      = cons_buff[tid].m1/rho;
+        const real v2      = cons_buff[tid].m2/rho;
+        const real rho_chi = cons_buff[tid].chi;
+        const real pre     = (gamma - (real)1.0)*(cons_buff[tid].e_dens - (real)0.5 * rho * (v1 * v1 + v2 * v2));
 
-        printf("%lu\n", tid);
         #if GPU_CODE
-        self->gpu_prims[gid] = Primitive{rho, v1, v2, pre, rho / rho_chi};
+        self->gpu_prims[gid] = Primitive{rho, v1, v2, pre, rho_chi / rho};
         #else
         prims[gid] = Primitive{rho, v1, v2, pre, rho_chi / rho};
         #endif
@@ -286,6 +287,7 @@ void Newtonian2D::adapt_dt()
         {
             dx2     = coord_lattice.dx2[jj];
             shift_j = jj + idx_active;
+            #pragma omp for nowait schedule(static) reduction(min:min_dt)
             for (luint ii = 0; ii < xphysical_grid; ii++)
             {
                 shift_i = ii + idx_active;
@@ -548,7 +550,7 @@ void Newtonian2D::advance(
     const real ymin                = this->x2min;
     const real ymax                = this->x2max;
     const real pow_dlogr           = pow(10, dlogx1);
-    const auto nzones = nx * ny;
+    const auto nzones              = nx * ny;
     #endif
 
     // const CLattice2D *coord_lattice = &(self->coord_lattice);
@@ -592,15 +594,15 @@ void Newtonian2D::advance(
             if (ty < pseudo_radius)
             {
                 if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
-                prim_buff[(tya - pseudo_radius) * sx + txa] = self->gpu_prims[((ja - pseudo_radius) * nx + ia)%nzones];
-                prim_buff[(tya + tyl   ) * sx + txa]        = self->gpu_prims[((ja + tyl   ) * nx + ia)%nzones]; 
+                prim_buff[(tya - pseudo_radius) * sx + txa] = self->gpu_prims[((ja - pseudo_radius) * nx + ia) % nzones];
+                prim_buff[(tya + tyl   ) * sx + txa]        = self->gpu_prims[((ja + tyl   ) * nx + ia) % nzones]; 
             
             }
             if (tx < pseudo_radius)
             {   
                 if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
-                prim_buff[tya * sx + txa - pseudo_radius] =  self->gpu_prims[(ja * nx + ia - pseudo_radius) %nzones];
-                prim_buff[tya * sx + txa +    txl]        =  self->gpu_prims[(ja * nx + ia + txl)%nzones]; 
+                prim_buff[tya * sx + txa - pseudo_radius] =  self->gpu_prims[(ja * nx + ia - pseudo_radius) % nzones];
+                prim_buff[tya * sx + txa +    txl]        =  self->gpu_prims[(ja * nx + ia + txl) % nzones]; 
             }
             
             simbi::gpu::api::synchronize();
@@ -608,11 +610,11 @@ void Newtonian2D::advance(
 
         if (first_order)
         {
-            xprims_l = prim_buff[( (txa + 0) * sy + (tya + 0) * sx) % nbs];
-            xprims_r = prim_buff[( (txa + 1) * sy + (tya + 0) * sx) % nbs];
+            xprims_l = prim_buff[((txa + 0) * sy + (tya + 0) * sx) % nbs];
+            xprims_r = prim_buff[((txa + 1) * sy + (tya + 0) * sx) % nbs];
             //j+1/2
-            yprims_l = prim_buff[( (txa + 0) * sy + (tya + 0) * sx) % nbs];
-            yprims_r = prim_buff[( (txa + 0) * sy + (tya + 1) * sx) % nbs];
+            yprims_l = prim_buff[((txa + 0) * sy + (tya + 0) * sx) % nbs];
+            yprims_r = prim_buff[((txa + 0) * sy + (tya + 1) * sx) % nbs];
             
             // i+1/2
             ux_l = self->prims2cons(xprims_l); 
@@ -845,7 +847,7 @@ void Newtonian2D::advance(
                             const real m2_source = (m2_all_zeros)  ? (real)0.0 : self->gpu_sourceM2[real_loc];
                             const real e_source  = (e_all_zeros)   ? (real)0.0 : self->gpu_sourceE[real_loc];
                             const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                            self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf)/ dx2 - source_terms) * (real)0/5;
+                            self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf)/ dx2 - source_terms) * (real)0.5 * dt;
                         #else
                             const real rho_source  = (rho_all_zeros)   ? (real)0.0 : sourceRho[real_loc];
                             const real m1_source = (m1_all_zeros)  ? (real)0.0   : sourceM1[real_loc];
@@ -854,7 +856,7 @@ void Newtonian2D::advance(
                             const real dx = self->coord_lattice.dx1[ii];
                             const real dy = self->coord_lattice.dx2[jj];
                             const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                            cons[aid] -= ( (frf - flf) / dx + (grf - glf)/dy - source_terms) * (real)0/5;
+                            cons[aid] -= ( (frf - flf) / dx + (grf - glf)/dy - source_terms) * (real)0.5 * dt;
                         #endif
                     
 
@@ -961,7 +963,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->dt             = init_dt;
     this->xphysical_grid = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
     this->yphysical_grid = (periodic) ? ny : (first_order) ? ny - 2 : ny - 4;
-    this->idx_active     = (first_order) ? 1 : 2;
+    this->idx_active     = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->active_zones   = xphysical_grid * yphysical_grid;
 
     //--------Config the System Enums
@@ -1077,8 +1079,6 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             if (!periodic) config_ghosts2DGPU(fullP, this, nx, ny, first_order);
         }
     }
-
-    std::cout << nx << ", " << ny << ", " << nzones << "\n";
     const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive) + xblockdim * yblockdim * sizeof(real);
     if constexpr(BuildPlatform == Platform::GPU)
     {
@@ -1088,7 +1088,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         cons2prim(fullP);
         adapt_dt();
     }
-    
+
     // Some benchmarking tools 
     luint      n   = 0;
     luint  nfold   = 0;
@@ -1097,22 +1097,19 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;
 
+    const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
+    const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
+
     // Simulate :)
     if (first_order)
     {  
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Dev);
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                if (!periodic) config_ghosts2DGPU(fullP, device_self, nx, ny, true);
-            } else {
-                advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Host);
-                cons2prim(fullP);
-                if (!periodic) config_ghosts2DGPU(fullP, this, nx, ny, true);
-            }
+            // advance(self, activeP, bx, by, radius, geometry[coord_system], memside);
+            cons2prim(fullP, self, memside);
+            if (!periodic) config_ghosts2DGPU(fullP, self, nx, ny, true);
+
             t += dt; 
             
             if (n >= nfold){
@@ -1121,16 +1118,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones / delta_t.count();
-                std::cout << std::fixed << std::setprecision(3) << std::scientific;
-                // simbi::util::writeln("Iteration: {0} \t dt: {1} \t time: {2} \t Zones/sec: {3}", n, dt, t, total_zones / delta_t.count());
-                    std::cout << "\r"
-                        << "Iteration: " << std::setw(5) << n 
-                        << "\t"
-                        << "dt: " << std::setw(5) << dt 
-                        << "\t"
-                        << "Time: " << std::setw(10) <<  t
-                        << "\t"
-                        << "Zones/sec: "<< total_zones / delta_t.count() << std::flush;
+                // std::cout << std::fixed << std::setprecision(3) << std::scientific;
+                writefl("\r Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, total_zones/delta_t.count());
                 nfold += 100;
             }
 
@@ -1171,28 +1160,15 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                // First Half Step
-                // advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Dev);
-                // cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                if (!periodic) config_ghosts2DGPU(fullP, device_self, nx, ny, false);
+            // First Half Step
+            advance(self, activeP, bx, by, radius, geometry[coord_system], memside);
+            cons2prim(fullP, self, memside);
+            if (!periodic) config_ghosts2DGPU(fullP, self, nx, ny, false);
 
-                // Final Half Step
-                // advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Dev);
-                // cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                if (!periodic) config_ghosts2DGPU(fullP, device_self, nx, ny, false);
-            } else {
-                // First Half Step
-                advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Host);
-                cons2prim(fullP);
-                if (!periodic) config_ghosts2DGPU(fullP, this, nx, ny, false);
-
-                // Final Half Step
-                advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Host);
-                cons2prim(fullP);
-                if (!periodic) config_ghosts2DGPU(fullP, this, nx, ny, false);
-            }
+            // Final Half Step
+            advance(self, activeP, bx, by, radius, geometry[coord_system], memside);
+            cons2prim(fullP, self, memside);
+            if (!periodic) config_ghosts2DGPU(fullP, self, nx, ny, false);
 
             t += dt; 
 
@@ -1202,15 +1178,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones/ delta_t.count();
-                std::cout << std::fixed << std::setprecision(3) << std::scientific;
-                    std::cout << "\r"
-                        << "Iteration: " << std::setw(5) << n 
-                        << "\t"
-                        << "dt: " << std::setw(5) << dt 
-                        << "\t"
-                        << "Time: " << std::setw(10) <<  t
-                        << "\t"
-                        << "Zones/sec: "<< total_zones/ delta_t.count() << std::flush;
+                writefl("\r Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, total_zones/delta_t.count());
                 nfold += 100;
             }
             

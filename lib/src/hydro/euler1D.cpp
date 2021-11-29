@@ -17,8 +17,11 @@
 #include "util/exec_policy.hpp"
 #include "util/dual.hpp"
 #include "util/device_api.hpp"
+#include "util/printb.hpp"
 #include "helpers.hip.hpp"
+
 using namespace simbi;
+using namespace simbi::util;
 using namespace std::chrono;
 
 
@@ -162,7 +165,7 @@ void Newtonian1D::adapt_dt(){
         luint shift_i;
 
         // Compute the minimum timestep given CFL
-        #pragma omp for schedule(static)
+        #pragma omp for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++){
             shift_i = ii + idx_active;
             dx      = coord_lattice.dx1[ii];
@@ -665,39 +668,27 @@ void Newtonian1D::advance(
         adapt_dt();
     }
 
+    const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
+    const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
      if (first_order)
     {  
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                advance(radius, geometry[coord_system], activeP, device_self, shBlockSize, simbi::MemSide::Dev);
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                if (!periodic) config_ghosts1DGPU(fullP, device_self, nx, true);
-            } else {
-                advance(radius, geometry[coord_system], activeP);
-                cons2prim(fullP);
-                if (!periodic) config_ghosts1DGPU(fullP, this, nx, true);
-            }
-            simbi::gpu::api::deviceSynch();
+            advance(radius, geometry[coord_system], activeP, self, shBlockSize, memside);
+            cons2prim(fullP, self, memside);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true);
+
             t += dt; 
             
             if (n >= nfold){
-                // simbi::gpu::api::deviceSynch();
+                simbi::gpu::api::deviceSynch();
                 ncheck += 1;
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += nx / delta_t.count();
-                std::cout << std::fixed << std::setprecision(3) << std::scientific;
-                    std::cout << "\r"
-                        << "Iteration: " << std::setw(5) << n 
-                        << "\t"
-                        << "dt: " << std::setw(5) << dt 
-                        << "\t"
-                        << "Time: " << std::setw(10) <<  t
-                        << "\t"
-                        << "Zones/sec: "<< nx / delta_t.count() << std::flush;
+                // std::cout << std::fixed << std::setprecision(3) << std::scientific;
+                writefl("\r Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, nx/delta_t.count());
                 nfold += 100;
             }
 
@@ -736,24 +727,14 @@ void Newtonian1D::advance(
         {
             t1 = high_resolution_clock::now();
             // First Half Step
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                advance(radius, geometry[coord_system], activeP, device_self, shBlockSize, simbi::MemSide::Dev);
-                if (!periodic) config_ghosts1DGPU(fullP, device_self, nx, false);
+            cons2prim(fullP, self, memside);
+            advance(radius, geometry[coord_system], activeP, self, shBlockSize, memside);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false);
 
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                advance(radius, geometry[coord_system], activeP, device_self, shBlockSize, simbi::MemSide::Dev);
-                if (!periodic) config_ghosts1DGPU(fullP, device_self, nx, false);
-            } else {
-                advance(radius, geometry[coord_system], activeP);
-                cons2prim(fullP);
-                if (!periodic) config_ghosts1DGPU(fullP, this, nx, false);
-
-                advance(radius, geometry[coord_system], activeP);
-                cons2prim(fullP);
-                if (!periodic) config_ghosts1DGPU(fullP, this, nx, false);
-            }
+            // Final Half Step
+            cons2prim(fullP, self, memside);
+            advance(radius, geometry[coord_system], activeP, self, shBlockSize, memside);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false);
             simbi::gpu::api::deviceSynch();
             t += dt; 
             
@@ -764,15 +745,8 @@ void Newtonian1D::advance(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += nx / delta_t.count();
-                std::cout << std::fixed << std::setprecision(3) << std::scientific;
-                    std::cout << "\r"
-                        << "Iteration: " << std::setw(5) << n 
-                        << "\t"
-                        << "dt: " << std::setw(5) << dt 
-                        << "\t"
-                        << "Time: " << std::setw(10) <<  t
-                        << "\t"
-                        << "Zones/sec: "<< nx / delta_t.count() << std::flush;
+                // std::cout << std::fixed << std::setprecision(3) << std::scientific;
+                writefl("\r Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, nx/delta_t.count());
                 nfold += 100;
             }
             

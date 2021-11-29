@@ -143,7 +143,7 @@ cdef class PyState2D:
             hllc)
 
         result = np.asarray(result)
-        result = result.reshape(4, self.c_state.ny, self.c_state.nx)
+        result = result.reshape(5, self.c_state.ny, self.c_state.nx)
 
         return result
 

@@ -290,7 +290,7 @@ namespace simbi
             // copy pointer to allocated device storage to device class
             simbi::gpu::api::copyHostToDevice(&(device->gpu_cons), &host_u0,    sizeof(C *));
             simbi::gpu::api::copyHostToDevice(&(device->gpu_prims),&host_prims, sizeof(T *));
-            simbi::gpu::api::copyHostToDevice(&(device->dt_min),       &host_dtmin,    sizeof(real *));
+            simbi::gpu::api::copyHostToDevice(&(device->dt_min),   &host_dtmin,    sizeof(real *));
 
             //===================================================
             // SOURCE TERM OFF-LOADING BRANCHES
