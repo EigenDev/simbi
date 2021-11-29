@@ -25,7 +25,7 @@ class CompilerParams():
     
     @property   
     def compiler_args(self):
-        cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp']
+        cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-mfpmath=sse', '-flto']
         if self._arch == 'gpu':
             gpu_compiler_args = { '$ENV{CC}': cpu_compiler_args,
                                    'hipcc': []
@@ -33,9 +33,9 @@ class CompilerParams():
             if "${HIP_PLATFORM}" == "nvidia":
                 gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_86', '-ccbin=gcc-10',
                                             '--ptxas-options=-v', '--extended-lambda',
-                                            '--compiler-options', '-fPIC', '-O3']
+                                            '--compiler-options', '-fPIC', '-O2']
             else:
-                gpu_compiler_args["hipcc"] += ['-std=c++17', '-O3', "-fPIC"]
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-O2', '-fPIC', '-march=narive']
                 
         self._compiler_args = cpu_compiler_args if self._arch == "cpu" else gpu_compiler_args
         return self._compiler_args
@@ -178,11 +178,11 @@ def customize_compiler_for_hipcc(self):
     If you subclass UnixCCompiler, it's not trivial to get your subclass
     injected in, and still have the right customizations (i.e.
     distutils.sysconfig.customize_compiler) run on it. So instead of going
-    the OO route, I have this. Note, it's kindof like a wierd functional
+    the OO route, I have this. Note, it's kind've like a weird functional
     subclassing going on.
     """
 
-    # Tell the compiler it can processes .cu
+    # Tell the compiler it can processes .hip.cpp
     self.src_extensions.append('.hip.cpp')
 
     # Save references to the default compiler_so and _comple methods
@@ -287,7 +287,7 @@ setup(
         'develop': DevelopCommand,
         },
     package_dir={'pysimbi': '${CMAKE_CURRENT_BINARY_DIR}/pysimbi'},
-    packages=find_namespace_packages(),
+    packages=find_packages(),
     install_requires=['numpy', 'cython'],
     python_requires=">=3.6",
     # Since the package has c++ code, the egg cannot be zipped
