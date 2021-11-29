@@ -30,11 +30,10 @@ constexpr real tol_scale = 1e-12;
     _a < _b ? _a : _b;       \
 })
 
-constexpr int BLOCK_SIZE   = 64;
-constexpr int BLOCK_SIZE2D = 16;
-constexpr int BLOCK_SIZE3D = 4;
-
-constexpr int MAX_ITER     = 50;
+// constexpr int BLOCK_SIZE   = 64;
+// constexpr int BLOCK_SIZE2D = 16;
+// constexpr int BLOCK_SIZE3D = 4;
+// constexpr int MAX_ITER     = 50;
 
 // autonomous self memeber alias
 template<typename T>
@@ -60,6 +59,7 @@ namespace simbi{
     {
         SPHERICAL,
         CARTESIAN,
+        CYLINDRICAL,
     };
 
     enum class Accuracy
