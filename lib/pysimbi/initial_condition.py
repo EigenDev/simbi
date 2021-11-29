@@ -167,107 +167,57 @@ def initializeModel(model, first_order = False, periodic = False, scalars = 0):
                     
     elif model.dimensions == 2:
         if not model.u.any():
-            if periodic:
-                model.u = np.empty(shape = (model.n_vars, model.yNpts, model.xNpts), dtype = float)
-                
+            model.u = np.empty(shape = (model.n_vars+1, model.yNpts, model.xNpts), dtype=float)
+            if model.regime == "classical":
                 model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,
-                                            model.init_rho*model.init_vy, 
-                                            model.init_energy])
+                                        model.init_rho*model.init_vy, model.init_energy, model.init_rho * scalars])
             else:
-                if first_order:
-                    if model.regime == "classical":
-                        model.u = np.empty(shape = (model.n_vars, model.yNpts, model.xNpts), dtype=float)
-                        model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,
-                                                    model.init_rho*model.init_vy, model.init_energy])
-                        
-                        # Add boundary ghosts
-                        right_ghost = model.u[:, :, -1]
-                        left_ghost = model.u[:, :, 0]
-                        
-                        model.u = np.insert(model.u, model.u.shape[-1], right_ghost , axis=2)
-                        model.u = np.insert(model.u, 0, left_ghost , axis=2)
-                        
-                        upper_ghost = model.u[:, 0]
-                        bottom_ghost = model.u[:, -1]
-                        
-                        model.u = np.insert(model.u, model.u.shape[1], bottom_ghost , axis=1)
-                        model.u = np.insert(model.u, 0, upper_ghost , axis=1)
-                    else:
-                        model.u = np.empty(shape = (5, model.yNpts, model.xNpts), dtype=float)
-                        model.u[:, :, :] = np.array([model.initD, model.initS1,
+                model.u[:, :, :] = np.array([model.initD, model.initS1,
                                                     model.initS2, model.init_tau, model.initD * scalars])
-                        # Add boundary ghosts
-                        bottom_ghost = model.u[:, -1]
-                        upper_ghost = model.u[:, 0]
-                        
-                        model.u = np.insert(model.u, model.u.shape[1], 
-                                        bottom_ghost , axis=1)
-                        
-                        model.u = np.insert(model.u, 0,
-                                        upper_ghost , axis=1)
-                        
-                        
-                        left_ghost = model.u[:, :, 0]
-                        right_ghost = model.u[:, :, -1]
-                        
-                        
-                        
-                        model.u = np.insert(model.u, 0, 
-                                        left_ghost , axis=2)
-                        
-                        model.u = np.insert(model.u, model.u.shape[2],
-                                        right_ghost , axis=2)
+                
+            if not periodic:
+                if first_order:
+                    # Add boundary ghosts
+                    bottom_ghost = model.u[:, -1]
+                    upper_ghost = model.u[:, 0]
+                    
+                    model.u = np.insert(model.u, model.u.shape[1], 
+                                    bottom_ghost , axis=1)
+                    
+                    model.u = np.insert(model.u, 0,
+                                    upper_ghost , axis=1)
+                    
+                    
+                    left_ghost = model.u[:, :, 0]
+                    right_ghost = model.u[:, :, -1]
+                    
+                    
+                    
+                    model.u = np.insert(model.u, 0, 
+                                    left_ghost , axis=2)
+                    
+                    model.u = np.insert(model.u, model.u.shape[2],
+                                    right_ghost , axis=2)
                     
                 else:
-                    if model.regime == "classical":
-                        model.u = np.empty(shape = (model.n_vars, model.yNpts, model.xNpts), dtype=float)
-                        model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,
-                                                    model.init_rho*model.init_vy, model.init_energy])
-                        
-                        # Add boundary ghosts
-                        bottom_ghost = model.u[:, -1]
-                        upper_ghost = model.u[:, 0]
-                        
-                        
-                        model.u = np.insert(model.u, model.u.shape[1], 
-                                        (bottom_ghost, bottom_ghost) , axis=1)
-                        
-                        model.u = np.insert(model.u, 0,
-                                        (upper_ghost, upper_ghost) , axis=1)
-                        
-                        left_ghost = model.u[:, :, 0]
-                        right_ghost = model.u[:, :, -1]
-                        
-                        model.u = np.insert(model.u, 0, 
-                                        (left_ghost, left_ghost) , axis=2)
-                        
-                        model.u = np.insert(model.u, model.u.shape[2],
-                                        (right_ghost, right_ghost) , axis=2)
-                    else:
-                        model.u = np.empty(shape = (5, model.yNpts, model.xNpts), dtype=float)
-                        model.u[:, :, :] = np.array([model.initD, model.initS1,
-                                                    model.initS2, model.init_tau, model.initD * scalars])
-                        
-                        # Add boundary ghosts
-                        bottom_ghost = model.u[:, -1]
-                        upper_ghost = model.u[:, 0]
-                        
-                        model.u = np.insert(model.u, model.u.shape[1], 
-                                        (bottom_ghost, bottom_ghost) , axis=1)
-                        
-                        model.u = np.insert(model.u, 0,
-                                        (upper_ghost, upper_ghost) , axis=1)
-                        
-                        left_ghost = model.u[:, :, 0]
-                        right_ghost = model.u[:, :, -1]
-                        
-                        model.u = np.insert(model.u, 0, 
-                                        (left_ghost, left_ghost) , axis=2)
-                        
-                        model.u = np.insert(model.u, model.u.shape[2],
-                                        (right_ghost, right_ghost) , axis=2)
-                        
-                
+                    # Add boundary ghosts
+                    bottom_ghost = model.u[:, -1]
+                    upper_ghost = model.u[:, 0]
+                    
+                    model.u = np.insert(model.u, model.u.shape[1], 
+                                    (bottom_ghost, bottom_ghost) , axis=1)
+                    
+                    model.u = np.insert(model.u, 0,
+                                    (upper_ghost, upper_ghost) , axis=1)
+                    
+                    left_ghost = model.u[:, :, 0]
+                    right_ghost = model.u[:, :, -1]
+                    
+                    model.u = np.insert(model.u, 0, 
+                                    (left_ghost, left_ghost) , axis=2)
+                    
+                    model.u = np.insert(model.u, model.u.shape[2],
+                                    (right_ghost, right_ghost) , axis=2)
         else:
             if not first_order:
                 # Add the extra ghost cells for i-2, i+2
