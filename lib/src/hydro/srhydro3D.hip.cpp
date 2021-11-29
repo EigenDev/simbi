@@ -10,6 +10,7 @@
 #include "util/dual.hpp"
 #include "common/helpers.hpp"
 #include "util/parallel_for.hpp"
+#include "util/printb.hpp"
 #include "helpers.hip.hpp"
 #include "srhydro3D.hip.hpp"
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <iomanip>
 
 using namespace simbi;
+using namespace simbi::util;
 using namespace std::chrono;
 
 // Default Constructor
@@ -430,7 +432,7 @@ void SRHD3D::adapt_dt()
                 dx2 = coord_lattice.dx2[jj];
                 shift_j = jj + idx_active;
                 sint = coord_lattice.sin[jj];
-                #pragma omp for schedule(static)
+                #pragma omp for nowait schedule(static) reduction(min:min_dt)
                 for (luint ii = 0; ii < xphysical_grid; ii++)
                 {
                     shift_i  = ii + idx_active;
@@ -1870,15 +1872,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones / delta_t.count();
-                std::cout << std::fixed << std::setprecision(3) << std::scientific;
-                    std::cout << "\r"
-                        << "Iteration: " << std::setw(5) << n 
-                        << "\t"
-                        << "dt: " << std::setw(5) << dt 
-                        << "\t"
-                        << "Time: " << std::setw(10) <<  t
-                        << "\t"
-                        << "Zones/sec: "<< total_zones / delta_t.count() << std::flush;
+                writefl("\r Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, total_zones/delta_t.count());
                 nfold += 100;
             }
 
@@ -1949,15 +1943,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones / delta_t.count();
-                std::cout << std::fixed << std::setprecision(3) << std::scientific;
-                    std::cout << "\r"
-                        << "Iteration: " << std::setw(5) << n 
-                        << "\t"
-                        << "dt: " << std::setw(5) << dt 
-                        << "\t"
-                        << "Time: " << std::setw(10) <<  t
-                        << "\t"
-                        << "Zones/sec: "<< total_zones / delta_t.count() << std::flush;
+                writefl("\r Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, total_zones/delta_t.count());
                 nfold += 100;
             }
             /* Write to a File every tenth of a second */

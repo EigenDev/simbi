@@ -19,6 +19,7 @@
 #include <iomanip>
 
 using namespace simbi;
+using namespace simbi::util;
 using namespace std::chrono;
 
 // Default Constructor
@@ -216,7 +217,7 @@ void SRHD2D::adapt_dt()
         {
             dx2 = coord_lattice.dx2[jj];
             shift_j = jj + idx_active;
-            #pragma omp for schedule(static)
+            #pragma omp for nowait schedule(static) reduction(min:min_dt)
             for (luint ii = 0; ii < xphysical_grid; ii++)
             {
                 shift_i  = ii + idx_active;
@@ -633,7 +634,6 @@ Conserved SRHD2D::calc_hllc_flux(
 //===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
-
 void SRHD2D::cons2prim(
     ExecutionPolicy<> p, 
     SRHD2D *dev, 
@@ -667,12 +667,12 @@ void SRHD2D::cons2prim(
             
                 
             luint iter  = 0;
-            real D    = conserved_buff[tid].D;
-            real S1   = conserved_buff[tid].S1;
-            real S2   = conserved_buff[tid].S2;
-            real tau  = conserved_buff[tid].tau;
-            real Dchi = conserved_buff[tid].chi; 
-            real S    = std::sqrt(S1 * S1 + S2 * S2);
+            const real D    = conserved_buff[tid].D;
+            const real S1   = conserved_buff[tid].S1;
+            const real S2   = conserved_buff[tid].S2;
+            const real tau  = conserved_buff[tid].tau;
+            const real Dchi = conserved_buff[tid].chi; 
+            const real S    = std::sqrt(S1 * S1 + S2 * S2);
 
             #if GPU_CODE
             real peq = self->gpu_pressure_guess[gid];
@@ -680,7 +680,7 @@ void SRHD2D::cons2prim(
             real peq = pressure_guess[gid];
             #endif
 
-            real tol = D * tol_scale;
+            const real tol = D * tol_scale;
             do
             {
                 pre = peq;
@@ -804,7 +804,6 @@ void SRHD2D::advance(
         Conserved f_l, f_r, g_l, g_r, frf, flf, grf, glf;
         Primitive xprims_l, xprims_r, yprims_l, yprims_r;
 
-        // do column-major index if on GPU
         const luint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
         #if GPU_CODE
             luint txl = xextent;
@@ -1225,7 +1224,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->dt             = init_dt;
     this->xphysical_grid = (first_order) ? nx - 2 : nx - 4;
     this->yphysical_grid = (first_order) ? ny - 2 : ny - 4;
-    this->idx_active     = (first_order) ? 1      :      2;
+    this->idx_active     = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->active_zones   = xphysical_grid * yphysical_grid;
 
     //--------Config the System Enums
@@ -1281,7 +1280,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         auto S2           = state2D[2][i];
         auto E            = state2D[3][i];
         auto Dchi         = state2D[4][i];
-        auto S            = sqrt(S1 * S1 + S2 * S2);
+        auto S            = std::sqrt(S1 * S1 + S2 * S2);
         cons[i]           = Conserved(D, S1, S2, E, Dchi);
         pressure_guess[i] = std::abs(S - D - E);
     }
@@ -1289,7 +1288,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::vector<int> state2D;
 
     // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_const = 1 / (1 + exp((real)10.0 * (tstart - engine_duration)));
+    decay_const = 1 / (1 + std::exp((real)10.0 * (tstart - engine_duration)));
 
     // Declare I/O variables for Read/Write capability
     PrimData prods;
@@ -1327,7 +1326,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
     // // Setup the system
     const luint xblockdim       = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
-    const luint yblockdim       = yphysical_grid > BLOCK_SIZE2D  ? BLOCK_SIZE2D  : yphysical_grid;
+    const luint yblockdim       = yphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : yphysical_grid;
     const luint radius          = (periodic) ? 0 : (first_order) ? 1 : 2;
     const luint bx              = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
     const luint by              = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
@@ -1340,9 +1339,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     {
         if constexpr(BuildPlatform == Platform::GPU)
         {
-            config_ghosts2DGPU(fullP, device_self, nx, ny, true);
+            config_ghosts2DGPU(fullP, device_self, nx, ny, first_order);
         } else {
-            config_ghosts2DGPU(fullP, this, nx, ny, true);
+            config_ghosts2DGPU(fullP, this, nx, ny, first_order);
         }
     }
 
@@ -1351,13 +1350,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     {
         cons2prim(fullP, device_self, simbi::MemSide::Dev);
         adapt_dt(device_self, geometry[coord_system], activeP, dtShBytes);
-    } else
-    {
+    } else {
         cons2prim(fullP);
         adapt_dt();
     }
-
-    simbi::gpu::api::deviceSynch();
     
     // Some benchmarking tools 
     luint      n   = 0;
@@ -1367,22 +1363,17 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;
     
+    const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
+    const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
     // Simulate :)
     if (first_order)
     {  
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Dev);
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts2DGPU(fullP, device_self, nx, ny, true);
-            } else {
-                advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Host);
-                cons2prim(fullP);
-                config_ghosts2DGPU(fullP, this, nx, ny, true);
-            }
+            advance(self, activeP, bx, by, radius, geometry[coord_system], memside);
+            cons2prim(fullP, self, memside);
+            config_ghosts2DGPU(fullP, self, nx, ny, true);
             t += dt; 
             
             if (n >= nfold){
@@ -1391,16 +1382,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones / delta_t.count();
-                std::cout << std::fixed << std::setprecision(3) << std::scientific;
-                // simbi::util::writeln("Iteration: {0} \t dt: {1} \t time: {2} \t Zones/sec: {3}", n, dt, t, total_zones / delta_t.count());
-                    std::cout << "\r"
-                        << "Iteration: " << std::setw(5) << n 
-                        << "\t"
-                        << "dt: " << std::setw(5) << dt 
-                        << "\t"
-                        << "Time: " << std::setw(10) <<  t
-                        << "\t"
-                        << "Zones/sec: "<< total_zones / delta_t.count() << std::flush;
+                writefl("\r Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, total_zones/delta_t.count());
                 nfold += 100;
             }
 
@@ -1441,29 +1423,15 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                // First Half Step
-                advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Dev);
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts2DGPU(fullP, device_self, nx, ny, false);
+            // First Half Step
+            advance(self, activeP, bx, by, radius, geometry[coord_system], memside);
+            cons2prim(fullP, self, memside);
+            config_ghosts2DGPU(fullP, self, nx, ny, false);
 
-                // Final Half Step
-                advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Dev);
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts2DGPU(fullP, device_self, nx, ny, false);
-            } else {
-                // First Half Step
-                advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Host);
-                cons2prim(fullP);
-                config_ghosts2DGPU(fullP, this, nx, ny, false);
-
-                // Final Half Step
-                advance(device_self, activeP, bx, by, radius, geometry[coord_system], simbi::MemSide::Host);
-                cons2prim(fullP);
-                config_ghosts2DGPU(fullP, this, nx, ny, false);
-            }
-            
+            // Final Half Step
+            advance(self, activeP, bx, by, radius, geometry[coord_system], memside);
+            cons2prim(fullP, self, memside);
+            config_ghosts2DGPU(fullP, self, nx, ny, false);
 
             t += dt; 
 
@@ -1473,15 +1441,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones/ delta_t.count();
-                std::cout << std::fixed << std::setprecision(3) << std::scientific;
-                    std::cout << "\r"
-                        << "Iteration: " << std::setw(5) << n 
-                        << "\t"
-                        << "dt: " << std::setw(5) << dt 
-                        << "\t"
-                        << "Time: " << std::setw(10) <<  t
-                        << "\t"
-                        << "Zones/sec: "<< total_zones/ delta_t.count() << std::flush;
+                writefl("Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {} \t\r", n, dt, t, total_zones/delta_t.count());
                 nfold += 100;
             }
             
@@ -1505,7 +1465,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 t_interval += chkpt_interval;
             }
             n++;
-
             // Update decay constant
             decay_const = (real)1.0 / ((real)1.0 + exp((real)10.0 * (t - engine_duration)));
 
@@ -1532,7 +1491,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         simbi::gpu::api::gpuFree(device_self);
     }
 
-    // cons2prim2D();
     transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
 
     std::vector<std::vector<real>> solution(5, std::vector<real>(nzones));

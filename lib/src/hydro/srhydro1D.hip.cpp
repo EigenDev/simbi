@@ -11,6 +11,7 @@
 #include "helpers.hip.hpp"
 #include "util/device_api.hpp"
 #include "util/dual.hpp"
+#include "util/printb.hpp"
 #include "common/helpers.hpp"
 #include "util/parallel_for.hpp"
 #include <algorithm>
@@ -19,6 +20,7 @@
 #include <iomanip>
 
 using namespace simbi;
+using namespace simbi::util;
 using namespace std::chrono;
 
 //================================================
@@ -265,7 +267,7 @@ void SRHD::advance(
                         rmean = coord_lattice->gpu_x1mean[ii];
                         const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
                         const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
-                        self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * (real)0.5 * self->dt;
+                        self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * (real)0.5 * dt;
                     #else 
                         pc    = prim_buff[txa].p;
                         sL    = coord_lattice->face_areas[ii + 0];
@@ -275,7 +277,7 @@ void SRHD::advance(
                         
                         const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
                         const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
-                        cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * (real)0.5 * self->dt;
+                        cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * (real)0.5 * dt;
                     #endif 
                     
                     break;
@@ -297,11 +299,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         #endif 
         __shared__ volatile bool found_failure;
         luint tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
-        #if GPU_CODE
         if (tx == 0) found_failure = self->inFailureState;
-        #else
-        found_failure = inFailureState;
-        #endif
 
         simbi::gpu::api::synchronize();
         
@@ -334,7 +332,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 eps = (tau + ((real)1.0 - W) * D + ((real)1.0 - W * W) * pre) / (D * W);
 
                 h  = (real)1.0 + eps + pre / rho;
-                c2 = self->gamma * pre / (h * rho); 
+                c2 = self->gamma *pre / (h * rho); 
 
                 g = c2 * v2 - (real)1.0;
                 f = (self->gamma - (real)1) * rho * eps - pre;
@@ -440,7 +438,7 @@ void SRHD::adapt_dt()
         real h, rho, p, v, vPLus, vMinus;
 
         // Compute the minimum timestep given CFL
-        #pragma omp for schedule(static)
+        #pragma omp for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++)
         {
             dr  = coord_lattice.dx1[ii];
@@ -449,7 +447,7 @@ void SRHD::adapt_dt()
             v   = prims[ii + idx_active].v;
 
             h = (real)1.0 + gamma * p / (rho * (gamma - 1));
-            cs = sqrt(gamma * p / (rho * h));
+            cs = std::sqrt(gamma * p / (rho * h));
 
             vPLus  = (v + cs) / (1 + v * cs);
             vMinus = (v - cs) / (1 - v * cs);
@@ -689,33 +687,10 @@ SRHD::simulate1D(
     // Define the swap vector for the integrated state
     this->nx = state[0].size();
 
-    if (periodic)
-    {
-        this->idx_active   = 0;
-        this->i_start      = 0;
-        this->i_bound      = nx;
-        this->active_zones = nx;
-    }
-    else
-    {
-        if (first_order)
-        {
-            this->idx_active  = 1;
-            this->active_zones = nx - 2;
-            this->i_start    = 1;
-            this->i_bound    = nx - 1;
-        }
-        else
-        {
-            this->idx_active  = 2;
-            this->active_zones = nx - 4;
-            this->i_start    = 2;
-            this->i_bound    = nx - 2;
-        }
-    }
+    this->idx_active   = (periodic) ? 0  : (first_order) ? 1 : 2;
+    this->active_zones = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
     config_system();
     n = 0;
-    std::vector<Conserved> u, u1, udot, udot1;
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
     PrimData prods;
@@ -723,6 +698,7 @@ SRHD::simulate1D(
     real t_interval =
         t == 0 ? floor(tstart * round_place + (real)0.5) / round_place
                : floor(tstart * round_place + (real)0.5) / round_place + chkpt_interval;
+
     DataWriteMembers setup;
     setup.xmax = r[active_zones - 1];
     setup.xmin = r[0];
@@ -741,11 +717,7 @@ SRHD::simulate1D(
     // Copy the state array into real & profile variables
     for (luint ii = 0; ii < nx; ii++)
     {
-
-        cons[ii] = Conserved{state[0][ii],
-                          state[1][ii],
-                          state[2][ii]};
-
+        cons[ii] = Conserved{state[0][ii], state[1][ii], state[2][ii]};
         // initial pressure guess is | |S| - D - tau|
         pressure_guess[ii] = std::abs((state[1][ii]) - state[0][ii] - state[2][ii]);
     }
@@ -803,23 +775,20 @@ SRHD::simulate1D(
     real     zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;
-    
+
+    // Determine the memory side and state position
+    const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
+    const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
     // Simulate :)
     if (first_order)
     {  
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                advance(device_self, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Dev);
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                if (!periodic) config_ghosts1DGPU(fullP, device_self, nx, true);
-            } else {
-                advance(device_self, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Host);
-                cons2prim(fullP);
-                if (!periodic) config_ghosts1DGPU(fullP, this, nx, true);
-            }
+            
+            advance(self, shBlockSize, radius, geometry[coord_system], memside);
+            cons2prim(fullP, device_self, memside);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true);
             simbi::gpu::api::deviceSynch();
             t += dt; 
             
@@ -828,19 +797,11 @@ SRHD::simulate1D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += nx / delta_t.count();
-                std::cout << std::fixed << std::setprecision(3) << std::scientific;
-                    std::cout << "\r"
-                        << "Iteration: " << std::setw(5) << n 
-                        << "\t"
-                        << "dt: " << std::setw(5) << dt 
-                        << "\t"
-                        << "Time: " << std::setw(10) <<  t
-                        << "\t"
-                        << "Zones/sec: "<< nx / delta_t.count() << std::flush;
+                writefl("Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {} \t\r", n, dt, t, nx/delta_t.count());
                 nfold += 100;
             }
 
-            /* Write to a File every tenth of a second */
+            /* Write to a file every nth of a second */
             if (t >= t_interval)
             {
                 if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
@@ -852,10 +813,10 @@ SRHD::simulate1D(
                 }
                 transfer_prims = vec2struct<sr1d::PrimitiveArray, Primitive>(prims);
                 writeToProd<sr1d::PrimitiveArray, Primitive>(&transfer_prims, &prods);
-                tnow = create_step_str(t_interval, tchunk);
-                filename = string_format("%d.chkpt." + tnow + ".h5", active_zones);
-                setup.t = t;
-                setup.dt = dt;
+                tnow      = create_step_str(t_interval, tchunk);
+                filename  = string_format("%lu.chkpt." + tnow + ".h5", active_zones);
+                setup.t   = t;
+                setup.dt  = dt;
                 write_hdf5(data_directory, filename, prods, setup, 1, nx);
                 t_interval += chkpt_interval;
             }
@@ -873,44 +834,25 @@ SRHD::simulate1D(
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
+
             // First Half Step
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                advance(device_self, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Dev);
-                if (!periodic) config_ghosts1DGPU(fullP, device_self, nx, false);
+            cons2prim(fullP, self, memside);
+            advance(self, shBlockSize, radius, geometry[coord_system], memside);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false);
 
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                advance(device_self, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Dev);
-                 if (!periodic)  config_ghosts1DGPU(fullP, device_self, nx, false);
-            } else {
-                advance(device_self, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Host);
-                cons2prim(fullP);
-                if (!periodic) config_ghosts1DGPU(fullP, this, nx, false);
+            // Final Half Step
+            cons2prim(fullP, self, memside);
+            advance(self, shBlockSize, radius, geometry[coord_system], memside);
+            if (!periodic)  config_ghosts1DGPU(fullP, self, nx, false);
 
-                advance(device_self, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Host);
-                cons2prim(fullP);
-                if (!periodic)  config_ghosts1DGPU(fullP, this, nx, false);
-            }
-            simbi::gpu::api::deviceSynch();
             t += dt; 
-            
-
             if (n >= nfold){
-                // simbi::gpu::api::deviceSynch();
+                simbi::gpu::api::deviceSynch();
                 ncheck += 1;
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += nx / delta_t.count();
-                std::cout << std::fixed << std::setprecision(3) << std::scientific;
-                    std::cout << "\r"
-                        << "Iteration: " << std::setw(5) << n 
-                        << "\t"
-                        << "dt: " << std::setw(5) << dt 
-                        << "\t"
-                        << "Time: " << std::setw(10) <<  t
-                        << "\t"
-                        << "Zones/sec: "<< nx / delta_t.count() << std::flush;
+                writefl("Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {} \t\r", n, dt, t, nx/delta_t.count());
                 nfold += 100;
             }
             
@@ -928,7 +870,7 @@ SRHD::simulate1D(
                 writeToProd<sr1d::PrimitiveArray, Primitive>(&transfer_prims, &prods);
                 tnow = create_step_str(t_interval, tchunk);
                 filename = string_format("%d.chkpt." + tnow + ".h5", active_zones);
-                setup.t = t;
+                setup.t  = t;
                 setup.dt = dt;
                 write_hdf5(data_directory, filename, prods, setup, 1, nx);
                 t_interval += chkpt_interval;
