@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.1)
-project(pysimbi VERSION 0.5.0)
+project(pysimbi VERSION 0.6.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -130,21 +130,21 @@ file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/pysimbi DESTINATION ${CMAKE_CURRENT_BINARY
 if(PYTHON3)
     set(SETUP_PY_IN  "${CMAKE_CURRENT_SOURCE_DIR}/setup.py.in")
     set(SETUP_PY     "${CMAKE_CURRENT_BINARY_DIR}/setup.py")
-    set(GDEPS        "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/gpu/__init__.py")
-    set(CDEPS        "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/core/__init__.py")
+    set(DEPS         "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/__init__.py")
+    # set(DEPS        "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/core/__init__.py")
     set(OUTPUT       "${CMAKE_CURRENT_BINARY_DIR}/build")
 
     
     configure_file(${SETUP_PY_IN} ${SETUP_PY})
     # Custom make command for building default cpu instance in place
     if(HIP_FOUND)
-        list(APPEND GDEPS ${SRCS})
+        list(APPEND DEPS ${SRCS})
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_gpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace && rm -f 
                                         ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_gpu
-            DEPENDS ${GDEPS}
+            DEPENDS ${DEPS}
         )
         add_custom_target(gpu ALL DEPENDS ${OUTPUT}/pytimestamp_gpu)
 
@@ -153,7 +153,7 @@ if(PYTHON3)
             COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
                                         ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
-            DEPENDS ${GDEPS}
+            DEPENDS ${DEPS}
         )
         add_custom_target(cpu DEPENDS ${OUTPUT}/pytimestamp_cpu)
         install(CODE "execute_process(COMMAND pip install ${_pip_args} -e ${CMAKE_CURRENT_BINARY_DIR})")
@@ -164,13 +164,13 @@ if(PYTHON3)
         # add_dependencies(cpu gpu copy_assets)
 
     else()
-        list(APPEND CDEPS ${SRCS})
+        list(APPEND DEPS ${SRCS})
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_cpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
                                         ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
-            DEPENDS ${CDEPS}
+            DEPENDS ${DEPS}
         )
         add_custom_target(cpu ALL DEPENDS ${OUTPUT}/pytimestamp_cpu)
         install(CODE "execute_process(COMMAND pip install ${_pip_args} -e ${CMAKE_CURRENT_BINARY_DIR} --install-option=--cpu)")
