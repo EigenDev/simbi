@@ -58,7 +58,7 @@ def prims2cons(fields, cons):
 
 def plot_profile(args, field_dict, ax = None, overplot = False, subplot = False, case = 0):
     
-    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
+    colors = plt.cm.twilight_shifted(np.linspace(0.25, 0.75, len(args.filename)))
     r = field_dict["r"]
     tend = field_dict['t']
     if not overplot:
@@ -129,7 +129,7 @@ def plot_profile(args, field_dict, ax = None, overplot = False, subplot = False,
         return fig
     
 def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
-    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
+    colors = plt.cm.twilight_shifted(np.linspace(0.25, 0.75, len(args.filename)))
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
@@ -146,25 +146,30 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
     rvertices = np.insert(rvertices,  0, r[0])
     rvertices = np.insert(rvertices, rvertices.shape[0], r[-1])
     dr = rvertices[1:] - rvertices[:-1]
-    dV          =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
+    dV =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
     
     etotal = edens_total * (4 * np.pi * dV) * e_scale.value
-    mass   = dV * fields["W"] * fields["rho"]
+    mass   = 4.0 * np.pi * dV * fields["W"] * fields["rho"]
     e_k    = (fields['W'] - 1.0) * mass * e_scale.value
 
 
     u = fields['gamma_beta']
-    w = np.diff(u).max()*1e-1
+    w = 0.01 #np.diff(u).max()*1e-1
     n = int(np.ceil( (u.max() - u.min() ) / w ) )
     gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), n)
     eks = np.asarray([e_k[u > gb].sum() for gb in gbs])
     ets = np.asarray([etotal[u > gb].sum() for gb in gbs])
     
-    E_seg_rat  = ets[1:]/ets[:-1]
+    if args.eks:
+        energy = eks 
+    else:
+        energy = ets
+    
+    E_seg_rat  = ets[1:]/energy[:-1]
     gb_seg_rat = gbs[1:]/gbs[:-1]
     E_seg_rat[E_seg_rat == 0] = 1
     
-    slope = (ets[1:] - ets[:-1])/(gbs[1:] - gbs[:-1])
+    slope = (energy[1:] - energy[:-1])/(gbs[1:] - gbs[:-1])
     power_law_region = np.argmin(slope)
     up_min           = find_nearest(gbs, 2 * gbs[power_law_region: ][0])[0]
     upower           = gbs[up_min: ]
@@ -181,18 +186,21 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
     
     E_0 = ets[up_min] * upower[0] ** (alpha - 1)
     if args.labels is None:
-        hist = ax.hist(gbs, bins=gbs, weights=ets, label= r'$E_T$', histtype='step', color=colors[case], rwidth=1.0, linewidth=3.0)
+        hist = ax.hist(gbs, bins=gbs, weights=energy, label= r'$E_T$', histtype='step', color=colors[case], rwidth=1.0, linewidth=3.0)
         # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
     else:
-        hist = ax.hist(gbs, bins=gbs, weights=ets, label=r'${}$, t={:.2f}'.format(args.labels[case], tend), color=colors[case], histtype='step', rwidth=1.0, linewidth=3.0)
+        hist = ax.hist(gbs, bins=gbs, weights=energy, label=r'${}$, t={:.2f}'.format(args.labels[case], tend), color=colors[case], histtype='step', rwidth=1.0, linewidth=3.0)
         # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--', label = r'${}$ fit'.format(args.labels[case]))
 
-    sorted_energy = np.sort(ets)
+    sorted_energy = np.sort(energy)
     ax.set_xscale('log')
     ax.set_yscale('log')
     # ax.set_ylim(sorted_energy[1], 1.5*ets.max())
     ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
-    ax.set_ylabel(r'$E( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+    if args.eks:
+        ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+    else:
+        ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
     ax.tick_params('both', labelsize=15)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
@@ -233,12 +241,16 @@ def main():
                         default=False,
                         help='Plot the energy_vs_gb histogram')
     
+    parser.add_argument('--eks', dest='eks', action='store_true',
+                        default=False,
+                        help='Plot the kinetic energy on the histogram')
+    
     parser.add_argument('--labels', dest='labels', nargs='+',
                         help='map labels to filenames')
 
-    parser.add_argument('--save', dest='save', action='store_true',
-                        default=False,
-                        help='True if you want save the fig')
+    parser.add_argument('--save', dest='save',
+                        default=None,
+                        help='If you want save the fig')
     
     parser.add_argument('--first_order', dest='forder', action='store_true',
                         default=False,
@@ -257,7 +269,7 @@ def main():
     field_dict = {}
     for idx, file in enumerate(args.filename):
         field_dict[idx] = {}
-        with h5py.File(file, 'r+') as hf:
+        with h5py.File(file, 'r') as hf:
             
             ds = hf.get("sim_info")
             
@@ -362,8 +374,8 @@ def main():
         
     
     
-    if args.save:
-        fig.savefig("{}.png".format(args.setup[0]), bbox_inches='tight')
+    if args.save is not None:
+        fig.savefig("{}.png".format(args.save), bbox_inches='tight')
     else:
         plt.show()
     

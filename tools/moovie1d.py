@@ -58,7 +58,7 @@ def get_frames(dir):
 def plot_profile(fig, ax, filepath, filename, args):
     
     field_dict = {}
-    with h5py.File(filepath + filename, 'r+') as hf:
+    with h5py.File(filepath + filename, 'r') as hf:
         
         ds = hf.get("sim_info")
         

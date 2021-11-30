@@ -15,7 +15,13 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.animation import FuncAnimation
 import os, os.path
 
+try:
+    import cmasher as cmr 
+except:
+    print("No cmasher, so defaulting to matplotlib colormaps")
+    cmr = []
 
+cmar_maps = cmr
 cons = ['D', 'momentum', 'energy', 'energy_rst']
 field_choices = ['rho', 'v1', 'v2', 'pre', 'gamma_beta', 'temperature', 'gamma_beta_1', 'gamma_beta_2', 'energy', 'mass', 'chi', 'chi_dens'] + cons 
 lin_fields = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
@@ -90,7 +96,7 @@ def read_file(filepath, filename, args):
     is_cartesian = False
     field_dict = {}
     setup_dict = {}
-    with h5py.File(filepath + filename, 'r+') as hf:
+    with h5py.File(filepath + filename, 'r') as hf:
         ds = hf.get("sim_info")
         rho         = hf.get("rho")[:]
         v1          = hf.get("v1")[:]
@@ -229,11 +235,12 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
                 unit_scale[idx] = pre_scale.value
     
     units = unit_scale if args.units else np.ones(num_fields)
-     
+    
+    host = plt if args.cmap not in cmar_maps else cmr
     if args.rcmap:
-        color_map = (plt.cm.get_cmap(args.cmap)).reversed()
+        color_map = (host.cm.get_cmap(args.cmap)).reversed()
     else:
-        color_map = plt.cm.get_cmap(args.cmap)
+        color_map = host.cm.get_cmap(args.cmap)
         
     tend = ds["time"]
     if num_fields > 1:
