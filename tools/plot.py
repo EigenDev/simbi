@@ -695,14 +695,14 @@ def plot_max(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     if not overplot:
         return fig
     
-def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
+def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, case=0, ax_col=0):
     print("Computing histogram...")
     colors = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, len(args.filename)))
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
-
-    tend = ds[case]["time"]
+        
+    tend        = ds[case]["time"]
     edens_total = prims2cons(fields, "energy")
     theta       = mesh['theta']
     r           = mesh["rr"]
@@ -718,13 +718,11 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     w = 0.1 #np.diff(u).max()*1e-1
     n = int(np.ceil( (u.max() - u.min() ) / w ) )
     gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), 100)
-    eks = np.asarray([e_k[np.where(u > gb)].sum() for gb in gbs])
-    ets = np.asarray([etotal[np.where(u > gb)].sum() for gb in gbs])
-    
+    ax.yaxis.set_major_locator(plt.MaxNLocator(3))
     if args.eks:
-        energy = eks 
+        energy =  np.asarray([e_k[np.where(u > gb)].sum() for gb in gbs]) 
     else:
-        energy = ets
+        energy = np.asarray([etotal[np.where(u > gb)].sum() for gb in gbs])
         
     if args.norm:
         energy /= energy.max()
@@ -735,11 +733,34 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
         ax.hist(gbs, bins=gbs, weights=energy, label=r'${}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
         
     # fill_below_intersec(gbs, energy, 1e-6, colors[case])
-    if case == 0:
+    if case % args.subplots == 0:
         #1D Check 
         if args.oned_files is not None:
-            for file in args.oned_files:
-                ofield   = get_1d_equiv_file(file)
+            if args.subplots is None:
+                for file in args.oned_files:
+                    ofield   = get_1d_equiv_file(file)
+                    edens_1d = prims2cons(ofield, "energy")
+                    dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
+                    mass     = dV_1d * ofield["W"]**2 * ofield["rho"]
+                    e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
+                    etotal_1d = edens_1d * dV_1d * e_scale.value
+                    
+                    if args.eks:
+                        energy = e_k
+                    else:
+                        energy = etotal_1d
+                        
+                    u1d       = ofield['gamma_beta']
+                    w = 0.001
+                    n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
+                    gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
+                    energy_1d = np.asarray([energy[np.where(u1d > gb)].sum() for gb in gbs_1d])
+                    if args.norm:
+                        energy_1d /= energy_1d.max()
+                        fill_below_intersec(gbs_1d, energy_1d, 1e-6, colors[0])
+                    ax.hist(gbs_1d, bins=gbs_1d, weights=energy_1d, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
+            else:
+                ofield   = get_1d_equiv_file(args.oned_files[case // args.subplots])
                 edens_1d = prims2cons(ofield, "energy")
                 dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
                 mass     = dV_1d * ofield["W"]**2 * ofield["rho"]
@@ -758,33 +779,39 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
                 energy_1d = np.asarray([energy[np.where(u1d > gb)].sum() for gb in gbs_1d])
                 if args.norm:
                     energy_1d /= energy_1d.max()
-                fill_below_intersec(gbs_1d, energy_1d, 1e-6, colors[0])
+                    fill_below_intersec(gbs_1d, energy_1d, 1e-6, colors[0])
                 ax.hist(gbs_1d, bins=gbs_1d, weights=energy_1d, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
     
-    sorted_energy = np.sort(energy)
-    plt.xscale('log')
-    plt.yscale('log')
-    ordeer_of_mag = np.ceil(np.log10(energy.max()))
-    if ordeer_of_mag == 54.0:
-        ax.set_xlim(1e-3, 1e2)
-    elif ordeer_of_mag == 53.0:
-        ax.set_xlim(1e-3, 1e2)
-    elif ordeer_of_mag == 52.0:
-        ax.set_xlim(1e-3, 1e2)
-    elif ordeer_of_mag == 51.0:
-        ax.set_xlim(1e-3, 1e2)
-        
-    ax.set_ylim(1e-9*energy.max(), 1.5*energy.max())
-    ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
-    if args.eks:
-        ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    # ax.set_aspect(0.08)
+    nticks = 9
+    maj_loc = tkr.LogLocator(numticks=nticks)
+    min_loc = tkr.LogLocator(subs='all', numticks=nticks)
+    ax.yaxis.set_major_locator(maj_loc)
+    ax.yaxis.set_minor_locator(min_loc)
+    logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+    ax.xaxis.set_major_formatter(logfmt)
+    ax.yaxis.set_major_formatter(logfmt)
+
+    ax.set_xlim(1e-3, 1e2)
+    ax.set_ylim(1e-9*energy.max(), 5.0*energy.max())
+    if args.subplots is None:
+        ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
+        if args.eks:
+            ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+        else:
+            ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+    
+        ax.tick_params('both', labelsize=15)
     else:
-        ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
-    ax.tick_params('both', labelsize=15)
+        ax.tick_params('x', labelsize=15)
+        ax.tick_params('y', labelsize=10)
+        
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
 
-    if not args.pictorial:
+    if args.subplots is None:
         ax.set_title(r'{}, t ={:.2f} s'.format(args.setup[0], tend), fontsize=20)
     # ax.set_title(r'{}'.format(args.setup[0]), fontsize=20)
     # ax.legend(fontsize=15)
@@ -861,6 +888,7 @@ def main():
     parser.add_argument('--dbg', dest='dbg', default = False, action='store_true')
     parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
     parser.add_argument('--pictorial', dest='pictorial', default = False, action='store_true')
+    parser.add_argument('--subplots', dest='subplots', default = None, type=int)
     
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
@@ -1012,15 +1040,27 @@ def main():
     
     
     if len(args.filename) > 1:
-        fig, ax = plt.subplots(1, 1, figsize=(8,8))
-        # if args.x is not None: plt.xlim(, max(args.x))
+        if args.subplots is None:
+            fig, ax = plt.subplots(1, 1, figsize=(8,8))
+        else:
+            fig,axs = plt.subplots(args.subplots, 1, figsize=(8,4 * args.subplots), sharex=True, tight_layout=True)
+            fig.suptitle(f"{args.setup[0]}")
+            axs[-1].set_xlabel(r"$\log \Gamma \beta$", fontsize=20)
+
         for idx, file in enumerate(args.filename):
             if args.ehist:
-                plot_hist(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
+                if args.subplots is None:
+                    plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx)
+                else:
+                    plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=axs[idx//args.subplots], case=idx, ax_col=idx % args.subplots)
             elif args.x is not None:
                 plot_max(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
             else:
                 plot_1d_curve(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
+                
+        if args.subplots is not None:
+            for ax in axs:
+                ax.label_outer()
     else:
         if args.ehist:
             plot_hist(field_dict[0], args, mesh, setup_dict)
@@ -1034,7 +1074,11 @@ def main():
                 plot_polar_plot(field_dict[0], args, mesh, setup_dict)
                 
     if args.labels is not None:
-        plt.legend()
+        if args.subplots is not None:
+            for ax in axs:
+                ax.legend(fontsize=7)
+        else:
+            plt.legend()
     if not args.save:
         plt.show()
     else:
