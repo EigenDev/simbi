@@ -774,7 +774,7 @@ def main():
         fargs=[args],
         # repeat=False,
         # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
-        interval= 1000 / 5
+        interval= 1000 / 10
     )
 
     if not args.save:
