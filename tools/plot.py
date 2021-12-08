@@ -26,8 +26,8 @@ def fill_below_intersec(x, y, constraint, color):
     ind = find_nearest(y, constraint)[0]
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
     
-def get_1d_equiv_file(rzones: int):
-    file = 'simbi/build/data/54/am1/4142.chkpt.002_000.h5'.format(rzones)
+def get_1d_equiv_file(filename: str):
+    file = filename
     ofield = {}
     with h5py.File(file, 'r') as hf:
             
@@ -69,7 +69,7 @@ def get_1d_equiv_file(rzones: int):
             ofield["r"]           = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
     return ofield
     
-cons = ['D', 'momentum', 'energy', 'energy_rst']
+cons = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy']
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'gamma_beta_1', 'gamma_beta_2', 'energy', 'mass', 'chi', 'chi_dens'] + cons 
 lin_fields = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
 col = plt.cm.jet([0.25,0.75])  
@@ -168,6 +168,8 @@ def prims2cons(fields, cons):
         return fields['rho']*fields['enthalpy']*fields['W']**2 - fields["p"] - fields['rho']*fields['W']
     elif cons == "energy_rst":
         return fields['rho']*fields['enthalpy']*fields['W']**2 - fields["p"]
+    elif cons =='enthalpy':
+        return fields[cons] - 1.0
 
 
 def plot_polar_plot(field_dict, args, mesh, ds, subplots = False, fig = None, axs = None, fidx = 0):
@@ -655,20 +657,22 @@ def plot_max(fields, args, mesh, ds, overplot=False, ax=None, case=0):
         ax.scatter(args.x[case], np.max(fields[args.field]))
         
     if case == 0:
-        #1D Check 
-        ofield = get_1d_equiv_file(16384)
-        edens_1d = prims2cons(ofield, "energy")
-        dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
-        etotal_1d = edens_1d * dV_1d * e_scale.value
-        u1d       = ofield['gamma_beta']
-        w = 0.001
-        n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
-        gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
-        ets_1d = np.asarray([etotal_1d[np.where(u1d > gb)].sum() for gb in gbs_1d])
-        ets_1d /= ets_1d.max()
-        expl_ind = find_nearest(ets_1d, 1e-6)[0]
-        
-        ax.scatter(0.0, gbs_1d[expl_ind])
+        #1D Check
+        if args.oned_files is not None:
+            for file in args.oned_files:
+                ofield = get_1d_equiv_file(file)
+                edens_1d = prims2cons(ofield, "energy")
+                dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
+                etotal_1d = edens_1d * dV_1d * e_scale.value
+                u1d       = ofield['gamma_beta']
+                w = 0.001
+                n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
+                gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
+                ets_1d = np.asarray([etotal_1d[np.where(u1d > gb)].sum() for gb in gbs_1d])
+                ets_1d /= ets_1d.max()
+                expl_ind = find_nearest(ets_1d, 1e-6)[0]
+                
+                ax.scatter(0.0, gbs_1d[expl_ind])
     
         
     
@@ -705,7 +709,7 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     dV          = calc_cell_volume(r, theta)
     
     etotal = edens_total * 2.0 * np.pi * dV * e_scale.value
-    mass   = 2.0 * np.pi * dV * fields["W"] * fields["rho"]
+    mass   = 2.0 * np.pi * dV * fields["W"]**2 * fields["rho"]
     e_k    = (fields['W'] - 1.0) * mass * e_scale.value
     
     
@@ -729,35 +733,48 @@ def plot_hist(fields, args, mesh, ds, overplot=False, ax=None, case=0):
         ax.hist(gbs, bins=gbs, weights=energy, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
     else:
         ax.hist(gbs, bins=gbs, weights=energy, label=r'${}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
-    fill_below_intersec(gbs, energy, 1e-6, colors[case])
+        
+    # fill_below_intersec(gbs, energy, 1e-6, colors[case])
     if case == 0:
         #1D Check 
-        ofield   = get_1d_equiv_file(4096)
-        edens_1d = prims2cons(ofield, "energy")
-        dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
-        mass     = dV_1d * ofield["W"] * ofield["rho"]
-        e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
-        etotal_1d = edens_1d * dV_1d * e_scale.value
-        
-        if args.eks:
-            energy = e_k
-        else:
-            energy = etotal_1d
-            
-        u1d       = ofield['gamma_beta']
-        w = 0.001
-        n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
-        gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
-        energy_1d = np.asarray([energy[np.where(u1d > gb)].sum() for gb in gbs_1d])
-        if args.norm:
-            energy_1d /= energy_1d.max()
-        fill_below_intersec(gbs_1d, energy_1d, 1e-6, colors[0])
-        ax.hist(gbs_1d, bins=gbs_1d, weights=energy_1d, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
+        if args.oned_files is not None:
+            for file in args.oned_files:
+                ofield   = get_1d_equiv_file(file)
+                edens_1d = prims2cons(ofield, "energy")
+                dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
+                mass     = dV_1d * ofield["W"]**2 * ofield["rho"]
+                e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
+                etotal_1d = edens_1d * dV_1d * e_scale.value
+                
+                if args.eks:
+                    energy = e_k
+                else:
+                    energy = etotal_1d
+                    
+                u1d       = ofield['gamma_beta']
+                w = 0.001
+                n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
+                gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
+                energy_1d = np.asarray([energy[np.where(u1d > gb)].sum() for gb in gbs_1d])
+                if args.norm:
+                    energy_1d /= energy_1d.max()
+                fill_below_intersec(gbs_1d, energy_1d, 1e-6, colors[0])
+                ax.hist(gbs_1d, bins=gbs_1d, weights=energy_1d, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
     
     sorted_energy = np.sort(energy)
     plt.xscale('log')
     plt.yscale('log')
-    #ax.set_ylim(sorted_energy[1], 1.5*ets.max())
+    ordeer_of_mag = np.ceil(np.log10(energy.max()))
+    if ordeer_of_mag == 54.0:
+        ax.set_xlim(1e-3, 1e2)
+    elif ordeer_of_mag == 53.0:
+        ax.set_xlim(1e-3, 1e2)
+    elif ordeer_of_mag == 52.0:
+        ax.set_xlim(1e-3, 1e2)
+    elif ordeer_of_mag == 51.0:
+        ax.set_xlim(1e-3, 1e2)
+        
+    ax.set_ylim(1e-9*energy.max(), 1.5*energy.max())
     ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
     if args.eks:
         ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
@@ -789,6 +806,9 @@ def main():
     parser.add_argument('--field', dest = "field", metavar='Field Variable', nargs='+',
                         help='The name of the field variable you\'d like to plot',
                         choices=field_choices, default=["rho"])
+    
+    parser.add_argument('--1d_files', dest='oned_files', nargs='+', help='1D files to check against', default=None)
+    
     parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',
                         default = 0.0, help='The domain range')
     

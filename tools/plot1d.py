@@ -117,7 +117,7 @@ def plot_profile(args, field_dict, ax = None, overplot = False, subplot = False,
     dr = rvertices[1:] - rvertices[:-1]
     dV          =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
     mout    = (4./3.) * np.pi * np.sum(dV[r_outer:r_slow] * field_dict["rho"][r_outer: r_slow])
-    print(mout)
+    # print(mout)
     # zzz = input('')
     ########################
     
