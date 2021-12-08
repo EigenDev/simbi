@@ -697,7 +697,6 @@ def plot_max(fields, args, mesh, ds, overplot=False, ax=None, case=0):
     
 def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, case=0, ax_col=0):
     print("Computing histogram...")
-    colors = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, len(args.filename)))
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
@@ -713,7 +712,9 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
     e_k    = (fields['W'] - 1.0) * mass * e_scale.value
     
     
-    
+    col = case % args.subplots if args.subplots is not None else case
+    color_len = args.subplots if args.subplots is not None else len(args.filename)
+    colors = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
     u = fields['gamma_beta']
     w = 0.1 #np.diff(u).max()*1e-1
     n = int(np.ceil( (u.max() - u.min() ) / w ) )
@@ -728,12 +729,12 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
         energy /= energy.max()
 
     if args.labels is None:
-        ax.hist(gbs, bins=gbs, weights=energy, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
+        ax.hist(gbs, bins=gbs, weights=energy, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0, color=colors[col], alpha=0.7)
     else:
-        ax.hist(gbs, bins=gbs, weights=energy, label=r'${}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
+        ax.hist(gbs, bins=gbs, weights=energy, label=r'${}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0, color=colors[col], alpha=0.7)
         
     # fill_below_intersec(gbs, energy, 1e-6, colors[case])
-    if case % args.subplots == 0:
+    if ax_col == 0:
         #1D Check 
         if args.oned_files is not None:
             if args.subplots is None:
@@ -785,17 +786,17 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
     ax.set_xscale('log')
     ax.set_yscale('log')
     # ax.set_aspect(0.08)
-    nticks = 9
-    maj_loc = tkr.LogLocator(numticks=nticks)
-    min_loc = tkr.LogLocator(subs='all', numticks=nticks)
-    ax.yaxis.set_major_locator(maj_loc)
-    ax.yaxis.set_minor_locator(min_loc)
-    logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-    ax.xaxis.set_major_formatter(logfmt)
-    ax.yaxis.set_major_formatter(logfmt)
+    # nticks = 9
+    # maj_loc = tkr.LogLocator(numticks=nticks)
+    # min_loc = tkr.LogLocator(subs='all', numticks=nticks)
+    # ax.yaxis.set_major_locator(maj_loc)
+    # ax.yaxis.set_minor_locator(min_loc)
+    # logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+    # ax.xaxis.set_major_formatter(logfmt)
+    # ax.yaxis.set_major_formatter(logfmt)
 
     ax.set_xlim(1e-3, 1e2)
-    ax.set_ylim(1e-9*energy.max(), 5.0*energy.max())
+    ax.set_ylim(1e-9*energy.max(), 10.0*energy.max())
     if args.subplots is None:
         ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
         if args.eks:
