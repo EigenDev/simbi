@@ -11,18 +11,18 @@ namespace simbi{
         if (blockSize >=  2) smem[tid] = (smem[tid] < smem[tid +  1]) ? smem[tid] : smem[tid +  1];
     };
 
-    template<typename T, typename N, unsigned int blockSize>
-    GPU_LAUNCHABLE typename std::enable_if<is_1D_primitive<N>::value>::type 
-    dtWarpReduce(T *s)
+    template<typename T, typename N>
+    GPU_LAUNCHABLE  typename std::enable_if<is_1D_primitive<N>::value>::type 
+    compute_dt(T *s)
     {
-        const real gamma     = s->gamma;
-        real cfl_dt, vPlus, vMinus;
-        __shared__ volatile real dt_buff[BLOCK_SIZE];
+        #if GPU_CODE
         __shared__  N prim_buff[BLOCK_SIZE];
-
-        int tid = threadIdx.x;
-        int ii  = blockDim.x * blockIdx.x + threadIdx.x;
-        int aid = ii + s->idx_active;
+        real vPlus, vMinus;
+        const real gamma     = s->gamma;
+        int tid  = threadIdx.x;
+        int ii   = blockDim.x * blockIdx.x + threadIdx.x;
+        int aid  = ii + s->idx_active;
+        real val;
         if (ii < s->active_zones)
         {
             prim_buff[tid] = s->gpu_prims[aid];
@@ -32,29 +32,60 @@ namespace simbi{
             real rho = prim_buff[tid].rho;
             real p   = prim_buff[tid].p;
             real v   = prim_buff[tid].v;
-
-            real h = 1. + gamma * p / (rho * (gamma - 1.));
         
             if constexpr(is_relativistic<N>::value)
             {
-                real cs = sqrt(gamma * p / (rho * h));
+                real h = 1. + gamma * p / (rho * (gamma - 1.));
+                real cs = std::sqrt(gamma * p / (rho * h));
                 vPlus  = (v + cs) / (1 + v * cs);
                 vMinus = (v - cs) / (1 - v * cs);
             } else {
-                real cs = sqrt(gamma * p / rho );
+                real cs = std::sqrt(gamma * p / rho );
                 vPlus  = (v + cs);
                 vMinus = (v - cs);
             }
 
-            cfl_dt = dr / (my_max(std::abs(vPlus), std::abs(vMinus)));
-            dt_buff[tid] = s->CFL * cfl_dt;
-            __syncthreads();
-            
-            for (unsigned int stride=blockDim.x/2; stride>32; stride>>=1) 
-            {   
-                if (tid < stride) dt_buff[tid] = dt_buff[tid] < dt_buff[tid + stride] ? dt_buff[tid] : dt_buff[tid + stride]; 
-                __syncthreads();
+            real cfl_dt = dr / (my_max(std::abs(vPlus), std::abs(vMinus)));
+            s->dt_min[ii] = s->CFL * cfl_dt;
+        }
+        #endif
+    }
+    template<typename T, typename N, unsigned int blockSize>
+    GPU_LAUNCHABLE typename std::enable_if<is_1D_primitive<N>::value>::type 
+    dtWarpReduce(T *s)
+    {
+        #if GPU_CODE
+        real min = INFINITY;
+        __shared__ volatile real dt_buff[BLOCK_SIZE];
+
+        int tid = threadIdx.x;
+        int ii  = blockDim.x * blockIdx.x + threadIdx.x;
+        int aid = ii + s->idx_active;
+        real val;
+        if (ii < s->active_zones)
+        {
+            // tail part
+            int bidx = 0;
+            for(int i = 1; bidx + tid < s->active_zones; i++)
+            {
+                val = s->dt_min[tid + bidx];
+                min = (val ==0 || val > min) ? min : val;
+                bidx = i * blockDim.x;
             }
+
+            // previously reduced MIN part
+            bidx = 0;
+            int i;
+            // real min = dt_buff[tid];
+            for(i = 1; bidx + tid < gridDim.x; i++)
+            {
+                val  = s->dt_min[tid + bidx];
+                min  = (val == 0 || val > min) ? min : val;
+                bidx = i * blockDim.x;
+            }
+
+            dt_buff[tid] = min;
+            __syncthreads();
 
             if (tid < 32)
             {
@@ -63,31 +94,32 @@ namespace simbi{
             if(tid == 0) 
             {
                 s->dt_min[blockIdx.x] = dt_buff[0]; // dt_min[0] == minimum
-                s->dt = s->dt_min[0];
+                s->dt                 = s->dt_min[0];
             }
         }
+        #endif
     }; // end dtWarpReduce
 
     
-    template<typename T, typename N, unsigned int blockSize>
-    GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
-    dtWarpReduce(T *s, 
-        const simbi::Geometry geometry,
-        luint bytes, 
-        real dx, 
-        real dy, 
-        real rmin, 
-        real rmax,
-        real ymin,
-        real ymax)
+
+    template<typename T, typename N>
+    GPU_LAUNCHABLE  typename std::enable_if<is_2D_primitive<N>::value>::type 
+    compute_dt(T *s, 
+    const simbi::Geometry geometry, 
+    luint bytes,
+    real dx, 
+    real dy, 
+    real rmin, 
+    real rmax,
+    real ymin,
+    real ymax)
     {
         #if GPU_CODE
-        const real gamma     = s->gamma;
-        extern __shared__ real arr[];
-        volatile real* dt_buff = (real*)arr;
-        N* prim_buff = (N*)&dt_buff[bytes];
+        extern __shared__ N prim_buff[];
+        real cfl_dt;
+        const real gamma = s->gamma;
+        real val;
 
-        real cfl_dt, rmean, rl, rr, dr, tl, tr;
         const luint tx  = threadIdx.x;
         const luint ty  = threadIdx.y;
         const luint tid = blockDim.x * ty + tx;
@@ -96,13 +128,10 @@ namespace simbi{
         const luint ia  = ii + s->idx_active;
         const luint ja  = jj + s->idx_active;
         const luint aid = (col_maj) ? ia * s-> ny + ja : ja * s->nx + ia;
-
         if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid))
         {
-            
             prim_buff[tid] = s->gpu_prims[aid];
             __syncthreads();
-
             real plus_v1 , plus_v2 , minus_v1, minus_v2;
 
             real rho  = prim_buff[tid].rho;
@@ -125,9 +154,7 @@ namespace simbi{
                 minus_v1 = (v1 - cs);
                 minus_v2 = (v2 - cs);
             }
-
-            
-
+        
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
@@ -141,23 +168,54 @@ namespace simbi{
                     const real rr           = my_min(rl * pow(10, dx * (ii == 0 ? 0.5 : 1.0)), rmax);
                     const real tl           = my_max(ymin + (jj - (real)0.5) * dy, ymin);
                     const real tr           = my_min(tl + dy * (jj == 0 ? 0.5 : 1.0), ymax); 
-                    rmean = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
+                    const real rmean        = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
                     cfl_dt = my_min((rr - rl) / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
                             rmean * (tr - tl) / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
                     break;
             } // end switch
 
-            dt_buff[tid] = s->CFL * cfl_dt;
-            __syncthreads();
-
-            for (luint stride=(blockDim.x*blockDim.y)/2; stride > 32; stride>>=1) 
-            {   
-                __syncthreads();
-                if (tid < stride) 
-                    dt_buff[tid] = dt_buff[tid] < dt_buff[tid + stride] ? dt_buff[tid] : dt_buff[tid + stride];
+            s->dt_min[jj * s->xphysical_grid + ii] = s->CFL * cfl_dt;
+        }
+        #endif
+    }
+    template<typename T, typename N, unsigned int blockSize>
+    GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
+    dtWarpReduce(T *s)
+    {
+        #if GPU_CODE
+        real val;
+        const real gamma     = s->gamma;
+        extern __shared__ volatile real dt_buff[];
+        real min = INFINITY;
+        const luint tx  = threadIdx.x;
+        const luint ty  = threadIdx.y;
+        const luint tid = blockDim.x * ty + tx;
+        const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
+        const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
+        const luint zones = s->xphysical_grid * s->yphysical_grid;
+        if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid))
+        {
+            // tail part
+            // int bidx = 0;
+            // for(int i = 1; bidx + tid  < zones; i++)
+            // {
+            //     val = s->dt_min[tid + bidx];
+            //     min = (val <= 0 || val > min) ? min : val;
+            //     bidx = i * blockDim.x * blockDim.y;
+            // }
+            // previously reduced MIN part
+            int bidx = 0;
+            int i;
+            for(i = 1; bidx + tid < gridDim.x*gridDim.y; i++)
+            {
+                val  = s->dt_min[tid + bidx];
+                min  = (val <= 0 || val > min) ? min : val;
+                bidx = i * blockDim.x * blockDim.y;
             }
 
-            
+            dt_buff[tid] = min;
+            __syncthreads();
+
             if (tid < 32)
             {
                 warpReduceMin<blockSize>(dt_buff, tid);

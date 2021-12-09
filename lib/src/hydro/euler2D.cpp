@@ -332,13 +332,17 @@ void Newtonian2D::adapt_dt(Newtonian2D *dev, const simbi::Geometry geometry, con
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
-            dtWarpReduce<Newtonian2D, Primitive, 128><<<p.gridSize,p.blockSize, bytes>>>
+            compute_dt<Newtonian2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
             (dev, geometry, psize, dx1, dx2);
+            dtWarpReduce<Newtonian2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+            (dev);
             break;
         
         case simbi::Geometry::SPHERICAL:
-            dtWarpReduce<Newtonian2D, Primitive, 128><<<p.gridSize,p.blockSize, bytes>>>
+            compute_dt<Newtonian2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
             (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
+            dtWarpReduce<Newtonian2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+            (dev);
             break;
         }
         

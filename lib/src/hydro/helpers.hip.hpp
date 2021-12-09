@@ -17,20 +17,29 @@ namespace simbi
     template <unsigned int blockSize>
     GPU_DEV void warpReduceMin(volatile real* smem, unsigned int tid);
 
+    template<typename T, typename N>
+    GPU_LAUNCHABLE  typename std::enable_if<is_1D_primitive<N>::value>::type 
+    compute_dt(T *s);
+
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_1D_primitive<N>::value>::type 
     dtWarpReduce(T *s);
 
+    template<typename T, typename N>
+    GPU_LAUNCHABLE  typename std::enable_if<is_2D_primitive<N>::value>::type 
+    compute_dt(T *s, 
+    const simbi::Geometry geometry, 
+    luint bytes,
+    real dx, 
+    real dy, 
+    real rmin = 0, 
+    real rmax = 1,
+    real ymin = 0,
+    real ymax = 1);
+
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
-    dtWarpReduce(T *s, const simbi::Geometry geometry, 
-        luint bytes,
-        real dx, 
-        real dy, 
-        real rmin = 0, 
-        real rmax = 1,
-        real ymin = 0,
-        real ymax = 1);
+    dtWarpReduce(T *s);
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_3D_primitive<N>::value>::type 

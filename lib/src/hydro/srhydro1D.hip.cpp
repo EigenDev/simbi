@@ -174,7 +174,7 @@ void SRHD::advance(
                     dV    = coord_lattice->gpu_dV[ii];
                     rmean = coord_lattice->gpu_x1mean[ii];
 
-                    const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
+                    const auto geom_sources = Conserved{0.0,pc * (sR - sL) / dV, 0.0};
                     const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
                     self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * dt;
                 #else
@@ -184,8 +184,8 @@ void SRHD::advance(
                     dV    = self->coord_lattice.dV[ii];
                     rmean = self->coord_lattice.x1mean[ii];
 
-                    const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
-                    const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
+                    const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
+                    const auto sources      = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
                     cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * dt;
                 #endif
                 break;
@@ -265,7 +265,7 @@ void SRHD::advance(
                         sR    = coord_lattice->gpu_face_areas[ii + 1];
                         dV    = coord_lattice->gpu_dV[ii];
                         rmean = coord_lattice->gpu_x1mean[ii];
-                        const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
+                        const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                         const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
                         self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * (real)0.5 * dt;
                     #else 
@@ -275,7 +275,7 @@ void SRHD::advance(
                         dV    = coord_lattice->dV[ii];
                         rmean = coord_lattice->x1mean[ii];
                         
-                        const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
+                        const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                         const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
                         cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * (real)0.5 * dt;
                     #endif 
@@ -300,7 +300,6 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         __shared__ volatile bool found_failure;
         luint tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
         if (tx == 0) found_failure = self->inFailureState;
-
         simbi::gpu::api::synchronize();
         
         bool workLeftToDo = true;
@@ -340,8 +339,9 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 peq = pre - f / g;
                 if (iter >= MAX_ITER)
                 {
+                
                     printf("\nCons2Prim cannot converge\n");
-                    printf("Density: %.3e, Pressure: %.3e, vsq: %.3e\n", rho, peq, v2);
+                    printf("Density: %.3e, Pressure: %.3e, vsq: %.3e, coord: %lu\n", rho, peq, v2, ii);
                     self->dt             = INFINITY;
                     self->inFailureState = true;
                     found_failure        = true;
@@ -352,8 +352,16 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 
             } while (std::abs(peq - pre) >= tol);
 
-            real v = S / (tau + D + peq);
 
+            real v = S / (tau + D + peq);
+            // real mach_ceiling = 100.0;
+            // real u = v /std::sqrt(1 - v * v);
+            // real e = peq / rho * 3.0;
+            // real emin = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
+
+            // if (e < emin) {
+            //     peq = rho * emin * (gamma - 1.0);
+            // }
             #if GPU_CODE
                 self->gpu_pressure_guess[ii] = peq;
                 self->gpu_prims[ii]          = Primitive{D * sqrt(1 - v * v), v, peq};
@@ -452,9 +460,8 @@ void SRHD::adapt_dt()
             vPLus  = (v + cs) / (1 + v * cs);
             vMinus = (v - cs) / (1 - v * cs);
 
-            cfl_dt = dr / (std::max(std::abs(vPLus), std::abs(vMinus)));
-
-            min_dt = std::min(min_dt, cfl_dt);
+            cfl_dt = dr / (my_max(std::abs(vPLus), std::abs(vMinus)));
+            min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
         }
     }   
 
@@ -464,11 +471,10 @@ void SRHD::adapt_dt()
 void SRHD::adapt_dt(SRHD *dev, luint blockSize)
 {   
     #if GPU_CODE
-    {
-        dtWarpReduce<SRHD, Primitive, 128><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
+        compute_dt<SRHD, Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
+        dtWarpReduce<SRHD, Primitive, 16><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
         simbi::gpu::api::deviceSynch();
-        simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
-    }
+        simbi::gpu::api::copyDevToHost(&dt, &(dev->dt), sizeof(real));
     #endif
 };
 
@@ -546,7 +552,7 @@ Conserved SRHD::prims2flux(const Primitive &prim)
     return Conserved{D*v, S*v + pre, S - D*v};
 };
 
-GPU_CALLABLE_MEMBER
+GPU_CALLABLE_MEMBER 
 Conserved
 SRHD::calc_hll_flux(
     const Primitive &left_prims, 
@@ -568,9 +574,7 @@ SRHD::calc_hll_flux(
     return (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
 };
 
-GPU_CALLABLE_MEMBER
-Conserved
-SRHD::calc_hllc_flux(
+GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const Primitive &left_prims, 
     const Primitive &right_prims,
     const Conserved &left_state, 
@@ -763,8 +767,7 @@ SRHD::simulate1D(
         adapt_dt();
     }
 
-    // Some variables to handle file automatic file string
-    // formatting 
+    // Some variables to handle file automatic file string formatting 
     tchunk = "000000";
     lint tchunk_order_of_mag = 2;
     lint time_order_of_mag;
@@ -804,7 +807,9 @@ SRHD::simulate1D(
             /* Write to a file every nth of a second */
             if (t >= t_interval)
             {
-                if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
+                if constexpr(BuildPlatform == Platform::GPU) 
+                    dualMem.copyDevToHost(device_self, *this);
+
                 time_order_of_mag = std::floor(std::log10(t));
                 if (time_order_of_mag > tchunk_order_of_mag)
                 {
@@ -829,6 +834,9 @@ SRHD::simulate1D(
             } else {
                 adapt_dt();
             }
+
+            if (inFailureState)
+                simbi::gpu::api::deviceSynch();
         }
     } else {
         while (t < tend && !inFailureState)
@@ -884,14 +892,13 @@ SRHD::simulate1D(
             } else {
                 adapt_dt();
             }
+
+            if (inFailureState)
+                simbi::gpu::api::deviceSynch();
         }
 
     }
-    
-    std::cout << "\n";
-    std::cout << "Average zone_updates/sec for: " 
-    << n << " iterations was " 
-    << zu_avg / ncheck << " zones/sec" << "\n";
+    writeln("Average zone update/sec for:{} iterations was {} zones/sec", n, zu_avg/ncheck);
 
     if constexpr (BuildPlatform == Platform::GPU)
     {

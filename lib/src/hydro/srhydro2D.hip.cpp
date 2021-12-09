@@ -266,13 +266,17 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
-            dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize, bytes>>>
+            compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
             (dev, geometry, psize, dx1, dx2);
+            dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+            (dev);
             break;
         
         case simbi::Geometry::SPHERICAL:
-            dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize, bytes>>>
+            compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
             (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
+            dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+            (dev);
             break;
         }
         
@@ -987,7 +991,7 @@ void SRHD2D::advance(
                     const real hc   = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
                     const real gam2 = (real)1.0/((real)1.0 - (uc * uc + vc * vc));
 
-                    const Conserved geom_source  = {(real)0.0, (rhoc * hc * gam2 * vc * vc + (real)2.0 * pc) / rmean, - (rhoc * hc * gam2 * uc * vc - pc * cot) / rmean , (real)0.0};
+                    const Conserved geom_source  = {(real)0.0, (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , (real)0.0};
                     const Conserved source_terms = {d_source, s1_source, s2_source, e_source};
                     #if GPU_CODE 
                         self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 - geom_source - source_terms) * dt;
@@ -1174,7 +1178,7 @@ void SRHD2D::advance(
                     const real hc   = (real)1.0 + gamma * pc/(rhoc * (gamma - (real)1.0));
                     const real gam2 = (real)1.0/((real)1.0 - (uc * uc + vc * vc));
 
-                    const Conserved geom_source  = {(real)0.0, (rhoc * hc * gam2 * vc * vc + (real)2.0 * pc) / rmean, - (rhoc * hc * gam2 * uc * vc - pc * cot) / rmean , (real)0.0};
+                    const Conserved geom_source  = {(real)0.0, (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , (real)0.0};
                     const Conserved source_terms = {d_source, s1_source, s2_source, e_source};
                     #if GPU_CODE 
                         self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 - geom_source - source_terms) * dt * (real)0.5;
