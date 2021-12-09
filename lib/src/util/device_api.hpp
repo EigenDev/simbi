@@ -97,6 +97,8 @@ namespace simbi
             void gpuMalloc(void *obj, size_t bytes);
             void gpuFree(void *obj);
 
+            void gpuMemset(void *obj, int val, size_t bytes);
+
             inline GPU_DEV void synchronize() {
                 if constexpr(BuildPlatform == Platform::GPU)
                 {
