@@ -45,6 +45,8 @@ namespace simbi
             real            *host_x1m; 
             real            *host_fas; 
             real            *host_dV;
+
+            luint n, nreal, cbytes, pbytes, rbytes, rrbytes, fabytes;
             CLattice1D      *host_clattice;
 
             real host_dt;
@@ -53,6 +55,8 @@ namespace simbi
 
             void copyHostToDev(const U &host, U *device);
             void copyDevToHost(const U *device, U &host);
+            void reset_dt();
+            real get_dt();
         }; // End GPU/CPU 1D DualSpace
 
         template <typename T, typename C> 
@@ -84,13 +88,15 @@ namespace simbi
             real            *host_fas; 
             real            *host_dV;
             CLattice1D      *host_clattice;
-
+            luint n, nreal, cbytes, pbytes, rbytes, rrbytes, fabytes;
             real host_dt;
             real host_xmin;
             real host_xmax;
 
             void copyHostToDev(const Newtonian1D &host,   Newtonian1D *device);
             void copyDevToHost(const Newtonian1D *device, Newtonian1D &host);
+            void reset_dt();
+            real get_dt();
         }; // End GPU/CPU 1D DualSpace
 
         template <typename T, typename C, typename U>

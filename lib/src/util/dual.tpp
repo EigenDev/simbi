@@ -6,17 +6,17 @@ namespace simbi
         template<typename T, typename C, typename U>
         void DualSpace1D<T, C, U>::copyHostToDev(const U &host, U *device)
         {
-            luint nz     = host.nx;
-            luint nzreal = host.active_zones; 
+            n     = host.nx;
+            nreal = host.active_zones; 
 
             // Precompute byes
-            luint cbytes  = nz * sizeof(C);
-            luint pbytes  = nz * sizeof(T);
-            luint rbytes  = nz * sizeof(real);
+            cbytes  = n * sizeof(C);
+            pbytes  = n * sizeof(T);
+            rbytes  = n * sizeof(real);
 
 
-            luint rrbytes = nzreal * sizeof(real);
-            luint fabytes = host.coord_lattice.face_areas.size() * sizeof(real);
+            rrbytes = nreal * sizeof(real);
+            fabytes = host.coord_lattice.face_areas.size() * sizeof(real);
 
             //--------Allocate the memory for pointer objects-------------------------
             simbi::gpu::api::gpuMalloc(&host_u0,               cbytes);
@@ -69,27 +69,26 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(&(device->idx_active),        &host.idx_active,            sizeof(int) );
             simbi::gpu::api::copyHostToDevice(&(device->active_zones),&host.active_zones,      sizeof(int) );
             simbi::gpu::api::copyHostToDevice(&(device->decay_constant), &host.decay_constant, sizeof(real));
+
+            reset_dt();
         };
 
         template<typename T, typename C>
         void DualSpace1D<T, C, Newtonian1D>::copyHostToDev(const Newtonian1D &host, Newtonian1D *device)
         {
-            luint nz     = host.nx;
-            luint nzreal = host.active_zones; 
+            n     = host.nx;
+            nreal = host.active_zones; 
 
             // Precompute byes
-            luint cbytes  = nz * sizeof(C);
-            luint pbytes  = nz * sizeof(T);
-            luint rbytes  = nz * sizeof(real);
-
-
-            luint rrbytes = nzreal * sizeof(real);
-            luint fabytes = host.coord_lattice.face_areas.size() * sizeof(real);
+            cbytes  = n * sizeof(C);
+            pbytes  = n * sizeof(T);
+            rbytes  = n * sizeof(real);
+            rrbytes = nreal * sizeof(real);
+            fabytes = host.coord_lattice.face_areas.size() * sizeof(real);
 
             //--------Allocate the memory for pointer objects-------------------------
             simbi::gpu::api::gpuMalloc(&host_u0,               cbytes);
             simbi::gpu::api::gpuMalloc(&host_prims,            pbytes);
-            // simbi::gpu::api::gpuMalloc(&host_pressure_guess,   rbytes);
             simbi::gpu::api::gpuMalloc(&host_dx1,             rrbytes);
             simbi::gpu::api::gpuMalloc(&host_dV ,             rrbytes);
             simbi::gpu::api::gpuMalloc(&host_x1m,             rrbytes);
@@ -131,12 +130,23 @@ namespace simbi
         };
         
         template<typename T, typename C, typename U>
+        void DualSpace1D<T,C,U>::reset_dt()
+        {
+            std::vector<real> null_vec(n);
+            simbi::gpu::api::copyHostToDevice(host_dtmin, null_vec.data(), rbytes);
+        };
+
+        template<typename T, typename C, typename U>
+        real DualSpace1D<T,C,U>::get_dt()
+        {
+            std::vector<real> dts(n, 1000.0);
+            simbi::gpu::api::copyDevToHost(dts.data(), host_dtmin, rbytes);
+            return dts[0];
+        };
+
+        template<typename T, typename C, typename U>
         void DualSpace1D<T, C, U>::copyDevToHost(const U *device, U &host)
         {
-            const luint nz     = host.nx;
-            const luint cbytes = nz * sizeof(C); 
-            const luint pbytes = nz * sizeof(T); 
-
             simbi::gpu::api::copyDevToHost(host.cons.data(),  host_u0,    cbytes);
             simbi::gpu::api::copyDevToHost(host.prims.data(), host_prims, pbytes);
         };
@@ -144,9 +154,6 @@ namespace simbi
         template<typename T, typename C>
         void DualSpace1D<T, C, Newtonian1D>::copyDevToHost(const Newtonian1D *device, Newtonian1D &host)
         {
-            const luint nz     = host.nx;
-            const luint cbytes = nz * sizeof(C); 
-            const luint pbytes = nz * sizeof(T); 
 
             simbi::gpu::api::copyDevToHost(host.cons.data(),  host_u0,    cbytes);
             simbi::gpu::api::copyDevToHost(host.prims.data(), host_prims, pbytes);
@@ -188,7 +195,7 @@ namespace simbi
             simbi::gpu::api::gpuMalloc(&host_u0,              cbytes  );
             simbi::gpu::api::gpuMalloc(&host_prims,           pbytes  );
             simbi::gpu::api::gpuMalloc(&host_pressure_guess,  rbytes  );
-            simbi::gpu::api::gpuMalloc(&host_dtmin,            rbytes );
+            simbi::gpu::api::gpuMalloc(&host_dtmin,           rrbytes );
             simbi::gpu::api::gpuMalloc(&host_clattice, sizeof(CLattice2D));
 
             //--------Copy the host resources to pointer variables on host
