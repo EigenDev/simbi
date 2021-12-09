@@ -109,7 +109,12 @@ namespace simbi {
     inline int hipMalloc(void** ptr , size_t size) {
         return 0;
     }
-    template <class T> inline int hipFree(T * ptr) {return 0;}
+
+    inline int hipMemset(void* ptr, int val, size_t size){
+        return 0;
+    }
+
+    template <typename T> inline int hipFree(T * ptr) {return 0;}
     inline int hipMemcpy( void* dest , const void* src , size_t size, hipMemcpyType tt) {
         return 0;
     }
@@ -125,6 +130,8 @@ using namespace simbi;
 
 #endif
 
+constexpr int inf      = std::numeric_limits<int>::max();
+constexpr int dt_inf   = 100000;
 // #if FLOAT_PRECISION
 // const auto sqrt = sqrtf;
 // #else 
