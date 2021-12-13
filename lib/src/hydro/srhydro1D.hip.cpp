@@ -339,7 +339,6 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 peq = pre - f / g;
                 if (iter >= MAX_ITER)
                 {
-                
                     printf("\nCons2Prim cannot converge\n");
                     printf("Density: %.3e, Pressure: %.3e, vsq: %.3e, coord: %lu\n", rho, peq, v2, ii);
                     self->dt             = INFINITY;
@@ -353,13 +352,21 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             } while (std::abs(peq - pre) >= tol);
 
 
-            real v = S / (tau + D + peq);
+            real v    = S / (tau + D + peq);
+            // real pmin = std::abs(std::abs(S) - D - tau);
+            // if (peq < pmin)
+            // {
+            //     // writeln("uh oh: pmin = {} while peq = {}", pmin, peq);
+            //     std::cin.get();
+            //     peq = pmin;
+            // } 
             // real mach_ceiling = 100.0;
-            // real u = v /std::sqrt(1 - v * v);
-            // real e = peq / rho * 3.0;
-            // real emin = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
+            // real u            = v /std::sqrt(1 - v * v);
+            // real e            = peq / rho * 3.0;
+            // real emin         = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
 
             // if (e < emin) {
+            //     printf("peq: %f, npew: %f\n", rho * emin * (gamma - 1.0));
             //     peq = rho * emin * (gamma - 1.0);
             // }
             #if GPU_CODE

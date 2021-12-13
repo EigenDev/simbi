@@ -265,21 +265,21 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
         luint psize = p.blockSize.x*p.blockSize.y;
         switch (geometry)
         {
-        case simbi::Geometry::CARTESIAN:
-            compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
-            (dev, geometry, psize, dx1, dx2);
-            dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
-            (dev);
-            break;
-        
-        case simbi::Geometry::SPHERICAL:
-            compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
-            (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
-            dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
-            (dev);
-            break;
+            case simbi::Geometry::CARTESIAN:
+                compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
+                (dev, geometry, psize, dx1, dx2);
+                dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+                (dev);
+                break;
+            
+            case simbi::Geometry::SPHERICAL:
+                compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
+                (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
+                dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+                (dev);
+                break;
         }
-        
+
         simbi::gpu::api::deviceSynch();
         simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
     }
