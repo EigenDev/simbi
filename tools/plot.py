@@ -707,10 +707,14 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
     r           = mesh["rr"]
     dV          = calc_cell_volume(r, theta)
     
-    etotal = edens_total * 2.0 * np.pi * dV * e_scale.value
-    mass   = 2.0 * np.pi * dV * fields["W"]**2 * fields["rho"]
-    e_k    = (fields['W'] - 1.0) * mass * e_scale.value
-    
+    if args.eks:
+        mass   = 2.0 * np.pi * dV * fields["rho"]
+        energy    = (fields['W'] - 1.0) * mass * e_scale.value
+    elif args.hhist:
+        energy = (fields['enthalpy'] - 1.0) *  2.0 * np.pi * dV * e_scale.value
+    else:
+        energy = edens_total * 2.0 * np.pi * dV * e_scale.value
+
     
     col = case % args.subplots if args.subplots is not None else case
     color_len = args.subplots if args.subplots is not None else len(args.filename)
@@ -720,10 +724,8 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
     n = int(np.ceil( (u.max() - u.min() ) / w ) )
     gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), 100)
     ax.yaxis.set_major_locator(plt.MaxNLocator(3))
-    if args.eks:
-        energy =  np.asarray([e_k[np.where(u > gb)].sum() for gb in gbs]) 
-    else:
-        energy = np.asarray([etotal[np.where(u > gb)].sum() for gb in gbs])
+
+    energy =  np.asarray([energy[np.where(u > gb)].sum() for gb in gbs]) 
         
     if args.norm:
         energy /= energy.max()
@@ -742,7 +744,7 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
                     ofield   = get_1d_equiv_file(file)
                     edens_1d = prims2cons(ofield, "energy")
                     dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
-                    mass     = dV_1d * ofield["W"]**2 * ofield["rho"]
+                    mass     = dV_1d * ofield["rho"]
                     e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
                     etotal_1d = edens_1d * dV_1d * e_scale.value
                     
@@ -764,7 +766,7 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
                 ofield   = get_1d_equiv_file(args.oned_files[case // args.subplots])
                 edens_1d = prims2cons(ofield, "energy")
                 dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
-                mass     = dV_1d * ofield["W"]**2 * ofield["rho"]
+                mass     = dV_1d * ofield["rho"]
                 e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
                 etotal_1d = edens_1d * dV_1d * e_scale.value
                 
@@ -801,6 +803,8 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
         ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
         if args.eks:
             ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+        elif args.hhist:
+            ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
         else:
             ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
     
@@ -872,6 +876,10 @@ def main():
     
     parser.add_argument('--eks', dest='eks', action='store_true', default=False,
                         help='Plot the kinetic energy on the histogram')
+    
+    parser.add_argument('--hhist', dest='hhist', action='store_true',
+                        default=False,
+                        help='Plot the enthalpy on the histogram')
     
     parser.add_argument('--norm', dest='norm', action='store_true',
                         default=False, help='True if you want the plot normalized to max value')
@@ -1049,10 +1057,11 @@ def main():
             axs[-1].set_xlabel(r"$\log \Gamma \beta$", fontsize=20)
 
         for idx, file in enumerate(args.filename):
-            if args.ehist:
+            if args.ehist or args.hhist or args.eks:
                 if args.subplots is None:
                     plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx)
                 else:
+                    print(idx//args.subplots)
                     plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=axs[idx//args.subplots], case=idx, ax_col=idx % args.subplots)
             elif args.x is not None:
                 plot_max(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
@@ -1063,7 +1072,7 @@ def main():
             for ax in axs:
                 ax.label_outer()
     else:
-        if args.ehist:
+        if args.ehist or args.hhist or args.eks:
             plot_hist(field_dict[0], args, mesh, setup_dict)
         elif args.tidx != None:
             plot_1d_curve(field_dict[0], args, mesh, setup_dict)
