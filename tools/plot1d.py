@@ -34,6 +34,11 @@ def find_nearest(arr, val):
     idx = np.argmin(np.abs(arr - val))
     return idx, arr[idx]
  
+def fill_below_intersec(x, y, constraint, color):
+    # colors = plt.cm.plasma(np.linspace(0.25, 0.75, len(x)))
+    ind = find_nearest(y, constraint)[0]
+    plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
+    
 def get_field_str(args):
     if args.field == "rho":
         if args.units:
@@ -82,7 +87,6 @@ def plot_profile(args, field_dict, ax = None, overplot = False, subplot = False,
         ax.plot(r, var * unit_scale, color=colors[case], label=r'${}$, t={:.2f}'.format(args.labels[case], tend))
 
     ax.tick_params(axis='both', labelsize=15)
-    
     if (args.log):
         ax.set_xscale('log')
         ax.set_yscale('log')
@@ -148,24 +152,23 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
     dr = rvertices[1:] - rvertices[:-1]
     dV =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
     
-    etotal = edens_total * (4 * np.pi * dV) * e_scale.value
-    mass   = 4.0 * np.pi * dV * fields["W"] * fields["rho"]
-    e_k    = (fields['W'] - 1.0) * mass * e_scale.value
+    if args.eks:
+        mass   = 4.0 * np.pi * dV * fields["W"]**2 * fields["rho"]
+        energy = (fields['W'] - 1.0) * mass * e_scale.value
+    elif args.hhist:
+        energy = (fields['enthalpy'] - 1.0) *  4.0 * np.pi * dV * e_scale.value
+    else:
+        energy = edens_total * 4.0 * np.pi * dV * e_scale.value
 
 
     u = fields['gamma_beta']
     w = 0.01 #np.diff(u).max()*1e-1
     n = int(np.ceil( (u.max() - u.min() ) / w ) )
     gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), n)
-    eks = np.asarray([e_k[u > gb].sum() for gb in gbs])
-    ets = np.asarray([etotal[u > gb].sum() for gb in gbs])
     
-    if args.eks:
-        energy = eks 
-    else:
-        energy = ets
+    energy = np.asarray([energy[u > gb].sum() for gb in gbs])
     
-    E_seg_rat  = ets[1:]/energy[:-1]
+    E_seg_rat  = energy[1:]/energy[:-1]
     gb_seg_rat = gbs[1:]/gbs[:-1]
     E_seg_rat[E_seg_rat == 0] = 1
     
@@ -184,13 +187,14 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
     bins    = np.arange(min(gbs), max(gbs) + w, w)
     logbins = np.logspace(np.log10(bins[0]),np.log10(bins[-1]), len(bins))
     
-    E_0 = ets[up_min] * upower[0] ** (alpha - 1)
+    E_0 = energy[up_min] * upower[0] ** (alpha - 1)
     if args.labels is None:
         hist = ax.hist(gbs, bins=gbs, weights=energy, label= r'$E_T$', histtype='step', color=colors[case], rwidth=1.0, linewidth=3.0)
         # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
     else:
         hist = ax.hist(gbs, bins=gbs, weights=energy, label=r'${}$, t={:.2f}'.format(args.labels[case], tend), color=colors[case], histtype='step', rwidth=1.0, linewidth=3.0)
         # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--', label = r'${}$ fit'.format(args.labels[case]))
+
 
     sorted_energy = np.sort(energy)
     ax.set_xscale('log')
@@ -199,12 +203,17 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
     ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
     if args.eks:
         ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+    elif args.hhist:
+        ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
     else:
         ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
     ax.tick_params('both', labelsize=15)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     
+
+    if args.fill_scale is not None:
+        fill_below_intersec(gbs, energy, args.fill_scale*energy.max(), colors[case])
     if not subplot:
         ax.set_title(r'setup: {}'.format(args.setup[0]), fontsize=20)
         # ax.legend(fontsize=15)
@@ -233,6 +242,9 @@ def main():
     parser.add_argument('--xlim', dest = "xlim", metavar='Domain',
                         default = None, help='The domain range')
     
+    parser.add_argument('--fill_scale', dest = "fill_scale", metavar='Filler maximum', type=float,
+                        default = None, help='Set the y-scale to start plt.fill_between')
+    
     parser.add_argument('--log', dest='log', action='store_true',
                         default=False,
                         help='Logarithmic Radial Grid Option')
@@ -244,6 +256,10 @@ def main():
     parser.add_argument('--eks', dest='eks', action='store_true',
                         default=False,
                         help='Plot the kinetic energy on the histogram')
+    
+    parser.add_argument('--hhist', dest='hhist', action='store_true',
+                        default=False,
+                        help='Plot the enthalpy on the histogram')
     
     parser.add_argument('--labels', dest='labels', nargs='+',
                         help='map labels to filenames')
@@ -350,7 +366,7 @@ def main():
             fig = plt.figure(figsize=(10,10))
             ax = fig.add_subplot(1, 1, 1)
             for idx, file in enumerate(args.filename):
-                if args.ehist:
+                if args.ehist or args.eks or args.hhist:
                     plot_hist(args, field_dict[idx], ax = ax, overplot= True, case = idx)
                 else:
                     plot_profile(args, field_dict[idx], ax = ax, overplot=True, case = idx)
@@ -367,7 +383,7 @@ def main():
             ax.legend(fontsize = 15)
             
     else:
-        if args.ehist:
+        if args.ehist or args.hhist or args.eks:
             fig = plot_hist(args, field_dict[0])
         else:
             fig = plot_profile(args, field_dict[0])

@@ -734,8 +734,10 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
         ax.hist(gbs, bins=gbs, weights=energy, label= r'$E_T$', histtype='step', rwidth=1.0, linewidth=3.0, color=colors[col], alpha=0.7)
     else:
         ax.hist(gbs, bins=gbs, weights=energy, label=r'${}$'.format(args.labels[case]), histtype='step', rwidth=1.0, linewidth=3.0, color=colors[col], alpha=0.7)
-        
-    # fill_below_intersec(gbs, energy, 1e-6, colors[case])
+    
+    if args.fill_scale is not None:
+        fill_below_intersec(gbs, energy, args.fill_scale*energy.max(), colors[case])
+
     if ax_col == 0:
         #1D Check 
         if args.oned_files is not None:
@@ -880,6 +882,9 @@ def main():
     parser.add_argument('--hhist', dest='hhist', action='store_true',
                         default=False,
                         help='Plot the enthalpy on the histogram')
+    
+    parser.add_argument('--fill_scale', dest = "fill_scale", metavar='Filler maximum', type=float,
+                        default = None, help='Set the y-scale to start plt.fill_between')
     
     parser.add_argument('--norm', dest='norm', action='store_true',
                         default=False, help='True if you want the plot normalized to max value')
