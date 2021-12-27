@@ -888,8 +888,8 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     
                     dtheta          = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
                     domega          = 4 * np.pi
-                    n               = int(10 / dtheta)
-                    total_e         = sum(energy[ofield['gamma_beta'] != 0])
+                    n               = int(3 / dtheta)
+                    total_e         = sum(energy[ofield['gamma_beta'] > 1])
                     de_cone         = np.repeat(total_e, n)
                     de_domega       = de_cone / domega
                     theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
