@@ -853,7 +853,6 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     color_len = args.subplots if args.subplots is not None else len(args.filename)
     colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
     
-    print(energy.sum())
     u                = fields['gamma_beta']
     dtheta           = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
     domega           = np.sin(theta) *(tv[1:] - tv[:-1])* 2 * np.pi
@@ -863,7 +862,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     n                = int(3 / dtheta) # degrees in wedge 
     domega_cone      = np.array([sum(domega[i:i+n]) for i in range(0, len(domega), n)])
     de_cone          = np.array([sum(erg[i:i+n]) for i in range(0, len(erg), n)])
-    de_domega        = 4.0 * np.pi * np.sum(de_cone, axis=1) / np.sum(domega_cone, axis=1)
+    de_domega        = 4.0 * np.pi * np.sum(de_cone, axis=1) / domega[:, 0]
     
     theta_bins       = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
     theta_bin_edges  = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
