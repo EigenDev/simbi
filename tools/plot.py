@@ -852,16 +852,20 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     col       = case % args.subplots if args.subplots is not None else case
     color_len = args.subplots if args.subplots is not None else len(args.filename)
     colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
-    # ax.yaxis.set_major_locator(plt.MaxNLocator(3))
-
-    dtheta          = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
-    domega          = np.sin(theta[:,0]) *(tv[1:,0] - tv[:-1,0])* 2 * np.pi
-    n               = int(10 / dtheta)
-    domega_cone     = np.array([sum(domega[i:i+n]) for i in range(0, len(domega), n)])
-    de_cone         = np.array([sum(energy[i:i+n]) for i in range(0, len(energy), n)])
-    de_domega       = np.sum(de_cone, axis=1) / domega_cone
-    theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
-    theta_bin_edges = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
+    
+    u                = fields['gamma_beta']
+    dtheta           = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
+    domega           = np.sin(theta) *(tv[1:] - tv[:-1])* 2 * np.pi
+    erg              = energy.copy()
+    erg   [u < 1]    = 0
+    domega[u < 1]    = 0
+    n                = int(3 / dtheta) # degrees in wedge 
+    domega_cone      = np.array([sum(domega[i:i+n]) for i in range(0, len(domega), n)])
+    de_cone          = np.array([sum(erg[i:i+n]) for i in range(0, len(erg), n)])
+    de_domega        = np.sum(de_cone, axis=1) / np.sum(domega_cone, axis=1)
+    
+    theta_bins       = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
+    theta_bin_edges  = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
     label = f"{args.labels[case]}" if args.labels is not None else None
     ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label = label, histtype='step', color=colors[case], linewidth=2.0)
     
@@ -885,7 +889,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     dtheta          = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
                     domega          = 4 * np.pi
                     n               = int(10 / dtheta)
-                    total_e         = sum(energy)
+                    total_e         = sum(energy[ofield['gamma_beta'] != 0])
                     de_cone         = np.repeat(total_e, n)
                     de_domega       = de_cone / domega
                     theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
