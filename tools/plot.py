@@ -862,7 +862,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     n                = int(3 / dtheta) # degrees in wedge 
     domega_cone      = np.array([sum(domega[i:i+n]) for i in range(0, len(domega), n)])
     de_cone          = np.array([sum(erg[i:i+n]) for i in range(0, len(erg), n)])
-    de_domega        = np.sum(de_cone, axis=1) / np.sum(domega_cone, axis=1)
+    de_domega        = 4.0 * np.pi * np.sum(de_cone, axis=1) / np.sum(domega_cone, axis=1)
     
     theta_bins       = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
     theta_bin_edges  = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
@@ -891,7 +891,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     n               = int(3 / dtheta)
                     total_e         = sum(energy[ofield['gamma_beta'] > 1])
                     de_cone         = np.repeat(total_e, n)
-                    de_domega       = de_cone / domega
+                    de_domega       = de_cone
                     theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
                     theta_bin_edges = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
                     
