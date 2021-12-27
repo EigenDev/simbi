@@ -825,6 +825,132 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
     if not overplot:
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
         return fig
+
+def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, case=0, ax_col=0):
+    if not overplot:
+        fig = plt.figure(figsize=[9, 9], constrained_layout=False)
+        ax = fig.add_subplot(1, 1, 1)
+        
+    color_len = args.subplots if args.subplots is not None else len(args.filename)
+    colors    = plt.cm.plasma(np.linspace(0.1, 0.8, color_len))
+    
+    tend        = ds[case]["time"]
+    edens_total = prims2cons(fields, "energy")
+    theta       = mesh['theta']
+    tv          = compute_theta_verticies(theta)
+    r           = mesh["rr"]
+    dV          = calc_cell_volume(r, theta)
+    
+    if args.eks:
+        mass   = 2.0 * np.pi * dV * fields["rho"]
+        energy    = (fields['W'] - 1.0) * mass * e_scale.value
+    elif args.hhist:
+        energy = (fields['enthalpy'] - 1.0) *  2.0 * np.pi * dV * e_scale.value
+    else:
+        energy = edens_total * 2.0 * np.pi * dV * e_scale.value
+
+    col       = case % args.subplots if args.subplots is not None else case
+    color_len = args.subplots if args.subplots is not None else len(args.filename)
+    colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
+    ax.yaxis.set_major_locator(plt.MaxNLocator(3))
+
+    dtheta          = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
+    domega          = np.sin(theta[:,0]) *(tv[1:,0] - tv[:-1,0])* 2 * np.pi
+    n               = int(10 / dtheta)
+    domega_cone     = np.array([sum(domega[i:i+n]) for i in range(0, len(domega), n)])
+    de_cone         = np.array([sum(energy[i:i+n]) for i in range(0, len(energy), n)])
+    de_domega       = np.sum(de_cone, axis=1) / domega_cone
+    theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
+    theta_bin_edges = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
+    label = f"{args.labels[case]}" if args.labels is not None else None
+    ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label = label, histtype='step', color=colors[case], linewidth=2.0)
+    
+    
+    if ax_col == 0:
+        #1D Check 
+        if args.oned_files is not None:
+            if args.subplots is None:
+                for file in args.oned_files:
+                    ofield   = get_1d_equiv_file(file)
+                    edens_1d = prims2cons(ofield, "energy")
+                    dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
+                    mass     = dV_1d * ofield["rho"]
+                    e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
+                    etotal_1d = edens_1d * dV_1d * e_scale.value
+                    if args.eks:
+                        energy = e_k
+                    else:
+                        energy = etotal_1d
+                    
+                    dtheta          = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
+                    domega          = 4 * np.pi
+                    n               = int(10 / dtheta)
+                    total_e         = sum(energy)
+                    de_cone         = np.repeat(total_e, n)
+                    de_domega       = de_cone / domega
+                    theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
+                    theta_bin_edges = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
+                    
+
+                        
+                    if args.norm:
+                        energy_1d /= energy_1d.max()
+                        fill_below_intersec(gbs_1d, energy_1d, 1e-6, colors[0])
+                    ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
+            else:
+                ofield   = get_1d_equiv_file(args.oned_files[case // args.subplots])
+                edens_1d = prims2cons(ofield, "energy")
+                dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
+                mass     = dV_1d * ofield["rho"]
+                e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
+                etotal_1d = edens_1d * dV_1d * e_scale.value
+                
+                if args.eks:
+                    energy = e_k
+                else:
+                    energy = etotal_1d
+                    
+                dtheta          = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
+                domega          = 4 * np.pi
+                n               = int(10 / dtheta)
+                de_cone         = np.array([sum(energy[i:i+n]) for i in range(0, len(energy), n)])
+                de_domega       = de_cone / domega
+                theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
+                theta_bin_edges = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
+                
+                
+                    
+                if args.norm:
+                    energy_1d /= energy_1d.max()
+                    fill_below_intersec(gbs_1d, energy_1d, 1e-6, colors[0])
+                ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
+                
+    ax.set_yscale('log')
+
+    ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
+    if args.subplots is None:
+        ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
+        if args.eks:
+            ax.set_ylabel(r'$dE_{\rm K}/d\Omega\ [\rm{erg} \ \rm{sr}^{-1}]$', fontsize=15)
+        elif args.hhist:
+            ax.set_ylabel(r'$dH/d\Omega \ [\rm{erg} \ \rm{sr}^{-1}]$', fontsize=15)
+        else:
+            ax.set_ylabel(r'$dE_{\rm T}/d\Omega\ [\rm{erg} \ \rm{sr}^{-1}]$', fontsize=15)
+    
+        ax.tick_params('both', labelsize=15)
+    else:
+        ax.tick_params('x', labelsize=15)
+        ax.tick_params('y', labelsize=10)
+        
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+
+    if args.subplots is None:
+        ax.set_title(r'{}, t ={:.2f} s'.format(args.setup[0], tend), fontsize=20)
+        
+    if not overplot:
+        ax.set_title(r'{}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
+        return fig
     
 def main():
     parser = argparse.ArgumentParser(
@@ -882,6 +1008,10 @@ def main():
     parser.add_argument('--hhist', dest='hhist', action='store_true',
                         default=False,
                         help='Plot the enthalpy on the histogram')
+    
+    parser.add_argument('--de_domega', dest='de_domega', action='store_true',
+                        default=False,
+                        help='Plot the dE/dOmega plot')
     
     parser.add_argument('--fill_scale', dest = "fill_scale", metavar='Filler maximum', type=float,
                         default = None, help='Set the y-scale to start plt.fill_between')
@@ -1070,6 +1200,8 @@ def main():
                     plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=axs[idx//args.subplots], case=idx, ax_col=idx % args.subplots)
             elif args.x is not None:
                 plot_max(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
+            elif args.de_domega:
+                plot_dE_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx, ax_col=idx)
             else:
                 plot_1d_curve(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
                 
@@ -1081,6 +1213,8 @@ def main():
             plot_hist(field_dict[0], args, mesh, setup_dict)
         elif args.tidx != None:
             plot_1d_curve(field_dict[0], args, mesh, setup_dict)
+        elif args.de_domega:
+            plot_dE_domega(field_dict[0], args, mesh, setup_dict)
         else:
             if is_cartesian:
                 plot_cartesian_plot(field_dict[0], args, mesh, setup_dict)
