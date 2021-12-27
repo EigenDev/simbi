@@ -852,7 +852,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     col       = case % args.subplots if args.subplots is not None else case
     color_len = args.subplots if args.subplots is not None else len(args.filename)
     colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
-    ax.yaxis.set_major_locator(plt.MaxNLocator(3))
+    # ax.yaxis.set_major_locator(plt.MaxNLocator(3))
 
     dtheta          = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
     domega          = np.sin(theta[:,0]) *(tv[1:,0] - tv[:-1,0])* 2 * np.pi
