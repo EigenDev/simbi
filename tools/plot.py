@@ -853,16 +853,16 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     color_len = args.subplots if args.subplots is not None else len(args.filename)
     colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
     
-    u                = fields['gamma_beta']
-    dtheta           = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
-    domega           = np.sin(theta) *(tv[1:] - tv[:-1])* 2 * np.pi
-    erg              = energy.copy()
-    erg   [u < 0]    = 0
-    domega[u < 0]    = 0
-    n                = int(3 / dtheta) # degrees in wedge 
-    domega_cone      = np.array([sum(domega[i:i+n]) for i in range(0, len(domega), n)])
-    de_cone          = np.array([sum(erg[i:i+n]) for i in range(0, len(erg), n)])
-    de_domega        = 4.0 * np.pi * np.sum(de_cone, axis=1) / domega[:, 0]
+    u                          = fields['gamma_beta']
+    dtheta                     = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
+    domega                     = np.sin(theta) *(tv[1:] - tv[:-1])* 2 * np.pi
+    erg                        = energy.copy()
+    erg   [u < args.cutoff]    = 0
+    n                          = int(3 / dtheta) # degrees in wedge 
+    domega_cone                = np.array([sum(domega[i:i+n]) for i in range(0, len(domega), n)])
+    de_cone                    = np.array([sum(erg[i:i+n]) for i in range(0, len(erg), n)])
+    de_domega                  = 4.0 * np.pi * np.sum(de_cone, axis=1) / domega_cone[:,0]
+
     
     theta_bins       = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
     theta_bin_edges  = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
@@ -889,7 +889,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     dtheta          = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
                     domega          = 4 * np.pi
                     n               = int(3 / dtheta)
-                    total_e         = sum(energy)
+                    total_e         = sum(energy[ofield['gamma_beta'] > args.cutoff])
                     de_cone         = np.repeat(total_e, n)
                     de_domega       = de_cone
                     theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
@@ -916,9 +916,9 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     
                 dtheta          = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
                 domega          = 4 * np.pi
-                n               = int(10 / dtheta)
-                de_cone         = np.array([sum(energy[i:i+n]) for i in range(0, len(energy), n)])
-                de_domega       = de_cone / domega
+                total_e         = sum(energy[ofield['gamma_beta'] < args.cutoff])
+                de_cone         = np.repeat(total_e, n)
+                de_domega       = de_cone
                 theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
                 theta_bin_edges = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
                 
@@ -935,11 +935,11 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     if args.subplots is None:
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
         if args.eks:
-            ax.set_ylabel(r'$dE_{\rm K}/d\Omega\ [\rm{erg} \ \rm{sr}^{-1}]$', fontsize=15)
+            ax.set_ylabel(r'$dE_{\rm K}/{d\Omega}\ [\rm{erg}]$', fontsize=15)
         elif args.hhist:
-            ax.set_ylabel(r'$dH/d\Omega \ [\rm{erg} \ \rm{sr}^{-1}]$', fontsize=15)
+            ax.set_ylabel(r'$dH/{d\Omega} \ [\rm{erg}]$', fontsize=15)
         else:
-            ax.set_ylabel(r'$dE_{\rm T}/d\Omega\ [\rm{erg} \ \rm{sr}^{-1}]$', fontsize=15)
+            ax.set_ylabel(r'$dE_{\rm T}/{d\Omega}\ [\rm{erg}]$', fontsize=15)
     
         ax.tick_params('both', labelsize=15)
     else:
@@ -1016,6 +1016,9 @@ def main():
     parser.add_argument('--de_domega', dest='de_domega', action='store_true',
                         default=False,
                         help='Plot the dE/dOmega plot')
+    
+    parser.add_argument('--cutoff', dest='cutoff', default=0.0, type=float,
+                        help='The 4-velocity cutoff value for the dE/dOmega plot')
     
     parser.add_argument('--fill_scale', dest = "fill_scale", metavar='Filler maximum', type=float,
                         default = None, help='Set the y-scale to start plt.fill_between')
