@@ -862,12 +862,15 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     domega_cone                = np.array([sum(domega[i:i+n]) for i in range(0, len(domega), n)])
     de_cone                    = np.array([sum(erg[i:i+n]) for i in range(0, len(erg), n)])
     de_domega                  = 4.0 * np.pi * np.sum(de_cone, axis=1) / domega_cone[:,0]
-
+    erg_per_theta              = np.sum(erg, axis=1)
     
     theta_bins       = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
     theta_bin_edges  = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
     label = f"{args.labels[case]}" if args.labels is not None else None
-    ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label = label, histtype='step', color=colors[case], linewidth=2.0)
+    if args.hist:
+        ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label = label, histtype='step', color=colors[case], linewidth=2.0)
+    else:
+        ax.plot(theta[:, 0]*(180/np.pi), erg_per_theta, color=colors[case], label=label)
     
     
     if ax_col == 0:
@@ -886,21 +889,21 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     else:
                         energy = etotal_1d
                     
-                    dtheta          = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
-                    domega          = 4 * np.pi
-                    n               = int(3 / dtheta)
                     total_e         = sum(energy[ofield['gamma_beta'] > args.cutoff])
                     de_cone         = np.repeat(total_e, n)
+                    de_sphere       = np.repeat(total_e, theta[:,0].size)
                     de_domega       = de_cone
                     theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
                     theta_bin_edges = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
                     
-
-                        
                     if args.norm:
                         energy_1d /= energy_1d.max()
                         fill_below_intersec(gbs_1d, energy_1d, 1e-6, colors[0])
-                    ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
+                        
+                    if args.hist:
+                        ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label= r'sphere', histtype='step', linewidth=2.0)
+                    else:
+                        ax.plot(theta[:, 0]*(180/np.pi), de_sphere, label='sphere')
             else:
                 ofield   = get_1d_equiv_file(args.oned_files[case // args.subplots])
                 edens_1d = prims2cons(ofield, "energy")
@@ -935,11 +938,11 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     if args.subplots is None:
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
         if args.eks:
-            ax.set_ylabel(r'$dE_{\rm K}/{d\Omega}\ [\rm{erg}]$', fontsize=15)
+            ax.set_ylabel(r'$dE_{\rm K} \ (\Gamma \beta > {})\ [\rm{erg}]$'.format(args.cutoff), fontsize=15)
         elif args.hhist:
-            ax.set_ylabel(r'$dH/{d\Omega} \ [\rm{erg}]$', fontsize=15)
+            ax.set_ylabel(r'$dH \ (\Gamma \beta > {}) \ [\rm{erg}]$'.format(args.cutoff), fontsize=15)
         else:
-            ax.set_ylabel(r'$dE_{\rm T}/{d\Omega}\ [\rm{erg}]$', fontsize=15)
+            ax.set_ylabel(r'$dE_{{\rm T}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
     
         ax.tick_params('both', labelsize=15)
     else:
@@ -1012,6 +1015,10 @@ def main():
     parser.add_argument('--hhist', dest='hhist', action='store_true',
                         default=False,
                         help='Plot the enthalpy on the histogram')
+    
+    parser.add_argument('--hist', dest='hist', action='store_true',
+                        default=False,
+                        help='Convert plot to histogram')
     
     parser.add_argument('--de_domega', dest='de_domega', action='store_true',
                         default=False,
