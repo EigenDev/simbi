@@ -869,6 +869,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     theta_bin_edges  = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
     label = f"{args.labels[case]}" if args.labels is not None else None
     
+    print(f"2D energy sum: {energy.sum()}")
     if args.hist:
         ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label = label, histtype='step', color=colors[case], linewidth=2.0)
     else:
@@ -898,6 +899,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     theta_bins      = np.linspace(theta[0,0], theta[-1,0], de_domega.size) * (180/np.pi)
                     theta_bin_edges = np.linspace(theta[0,0], theta[-1,0], de_domega.size + 1) * (180/np.pi)
                     
+                    print(f"1D energy sum: {energy.sum()}")
                     if args.norm:
                         energy_1d /= energy_1d.max()
                         fill_below_intersec(gbs_1d, energy_1d, 1e-6, colors[0])
