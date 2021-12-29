@@ -726,7 +726,6 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
     ax.yaxis.set_major_locator(plt.MaxNLocator(3))
 
     energy =  np.asarray([energy[np.where(u > gb)].sum() for gb in gbs]) 
-        
     if args.norm:
         energy /= energy.max()
 
@@ -843,7 +842,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     
     if args.eks:
         mass   = 2.0 * np.pi * dV * fields["rho"]
-        energy    = (fields['W'] - 1.0) * mass * e_scale.value
+        energy = (fields['W'] - 1.0) * mass * e_scale.value
     elif args.hhist:
         energy = (fields['enthalpy'] - 1.0) *  2.0 * np.pi * dV * e_scale.value
     else:
@@ -858,7 +857,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     dtheta                     = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
     domega                     = np.sin(tcenter) *(tv[1:] - tv[:-1])* 2 * np.pi
     erg                        = energy.copy()
-    # erg[u < args.cutoff]       = 0
+    erg[u < args.cutoff]       = 0
     n                          = int(3 / dtheta) # degrees in wedge 
     domega_cone                = np.array([sum(domega[i:i+n]) for i in range(0, len(domega), n)])
     de_cone                    = np.array([sum(erg[i:i+n]) for i in range(0, len(erg), n)])
@@ -870,6 +869,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     label = f"{args.labels[case]}" if args.labels is not None else None
     
     print(f"2D energy sum: {energy.sum()}")
+    zzz = input('')
     if args.hist:
         ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label = label, histtype='step', color=colors[case], linewidth=2.0)
     else:
@@ -892,7 +892,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     else:
                         energy = etotal_1d
                     
-                    total_e         = sum(energy)
+                    total_e         = sum(energy[ofield['gamma_beta'] < args.cutoff])
                     de_cone         = np.repeat(total_e, n)
                     de_sphere       = np.repeat(total_e, theta[:,0].size)
                     de_domega       = de_cone
@@ -1157,7 +1157,7 @@ def main():
             if coord_sysem == "cartesian":
                 is_cartesian = True
             
-            W    = 1/np.sqrt(1 -(v1**2 + v2**2))
+            W    = 1/np.sqrt(1.0 -(v1**2 + v2**2))
             beta = np.sqrt(v1**2 + v2**2)
             
             
