@@ -869,7 +869,6 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     label = f"{args.labels[case]}" if args.labels is not None else None
     
     print(f"2D energy sum: {energy.sum()}")
-    zzz = input('')
     if args.hist:
         ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label = label, histtype='step', color=colors[case], linewidth=2.0)
     else:
