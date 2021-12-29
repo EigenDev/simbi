@@ -891,7 +891,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     else:
                         energy = etotal_1d
                     
-                    total_e         = sum(energy[ofield['gamma_beta'] < args.cutoff])
+                    total_e         = sum(energy[ofield['gamma_beta'] > args.cutoff])
                     de_cone         = np.repeat(total_e, n)
                     de_sphere       = np.repeat(total_e, theta[:,0].size)
                     de_domega       = de_cone
