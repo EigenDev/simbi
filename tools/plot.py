@@ -935,7 +935,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     fill_below_intersec(gbs_1d, energy_1d, 1e-6, colors[0])
                 ax.hist(theta_bins, bins=theta_bin_edges, weights=de_domega, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
                 
-    ax.set_yscale('log')
+    # ax.set_yscale('log')
 
     ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
     if args.subplots is None:
