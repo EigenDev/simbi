@@ -1215,7 +1215,7 @@ def main():
         mesh["r"]     = setup_dict[0]["x1"]
         mesh["th"]    = setup_dict[0]["x2"]
     
-    num_subplots   = len(args.sub_split)
+    num_subplots   = len(args.sub_split) if args.sub_split is not None else 1
     if len(args.filename) > 1:
         if num_subplots == 1:
             fig, ax = plt.subplots(1, 1, figsize=(8,8))
