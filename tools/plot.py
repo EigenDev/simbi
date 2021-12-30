@@ -877,8 +877,6 @@ def plot_dx_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     else:
         ax.plot(theta[:, 0]*(180/np.pi), erg_per_theta, color=colors[case], label=label)
     
-    one_file_iter = iters(args.one_files)
-    
     if ax_col == 0:
         #1D Check 
         if args.oned_files is not None:
