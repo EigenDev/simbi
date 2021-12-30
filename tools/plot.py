@@ -1259,7 +1259,8 @@ def main():
                 ax_num  += 1
                 ax_shift = True
                 try:
-                    lines_per_plot = next(subplot_iter)
+                    if num_subplots > 1:
+                        lines_per_plot = next(subplot_iter)
                 except StopIteration:
                     break
                 
