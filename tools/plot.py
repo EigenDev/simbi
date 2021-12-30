@@ -1231,9 +1231,10 @@ def main():
             subplot_iter   = iter(args.sub_split) 
             lines_per_plot = next(subplot_iter)
             
-        i = 0
+        i        = 0
+        ax_col   = 0
         ax_shift = True
-        ax_num = 0
+        ax_num   = 0
         for idx, file in enumerate(args.filename):
             i += 1
             if args.hist:
