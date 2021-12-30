@@ -16,6 +16,21 @@ try:
 except:
     print("No Cmasher module, so defaulting to matplotlib colors")
 
+
+#================================
+#   constants of nature
+#================================
+R_0 = const.R_sun.cgs 
+c   = const.c.cgs
+m   = const.M_sun.cgs
+ 
+rho_scale  = m / (4./3. * np.pi * R_0 ** 3) 
+e_scale    = m * const.c.cgs.value**2
+pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
+vel_scale  = c 
+time_scale = R_0 / c
+
+
 def find_nearest(arr, val):
     arr = np.asarray(arr)
     idx = np.argmin(np.abs(arr - val))
@@ -72,17 +87,6 @@ def get_1d_equiv_file(filename: str):
 cons = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy']
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'gamma_beta_1', 'gamma_beta_2', 'energy', 'mass', 'chi', 'chi_dens'] + cons 
 lin_fields = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
-col = plt.cm.jet([0.25,0.75])  
-
-R_0 = const.R_sun.cgs 
-c   = const.c.cgs
-m   = const.M_sun.cgs
- 
-rho_scale  = m / (4./3. * np.pi * R_0 ** 3) 
-e_scale    = m * const.c.cgs.value**2
-pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
-vel_scale  = c 
-time_scale = R_0 / c
 
 def compute_rverticies(r):
     rvertices = np.sqrt(r[1:] * r[:-1])
@@ -712,6 +716,8 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
         energy    = (fields['W'] - 1.0) * mass * e_scale.value
     elif args.hhist:
         energy = (fields['enthalpy'] - 1.0) *  2.0 * np.pi * dV * e_scale.value
+    elif args.mass:
+        energy = 2.0 * np.pi * dV * fields["rho"] * m.value
     else:
         energy = edens_total * 2.0 * np.pi * dV * e_scale.value
 
@@ -825,7 +831,7 @@ def plot_hist(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, ca
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
         return fig
 
-def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, case=0, ax_col=0):
+def plot_dx_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=None, case=0, ax_col=0):
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
@@ -840,13 +846,16 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     r           = mesh["rr"]
     dV          = calc_cell_volume(r, theta)
     
-    if args.eks:
-        mass   = 2.0 * np.pi * dV * fields["rho"]
-        energy = (fields['W'] - 1.0) * mass * e_scale.value
-    elif args.hhist:
-        energy = (fields['enthalpy'] - 1.0) *  2.0 * np.pi * dV * e_scale.value
-    else:
-        energy = edens_total * 2.0 * np.pi * dV * e_scale.value
+    if args.de_domega:
+        if args.eks:
+            mass   = 2.0 * np.pi * dV * fields["rho"]
+            energy = (fields['W'] - 1.0) * mass * e_scale.value
+        elif args.hhist:
+            energy = (fields['enthalpy'] - 1.0) *  2.0 * np.pi * dV * e_scale.value
+        else:
+            energy = edens_total * 2.0 * np.pi * dV * e_scale.value
+    elif args.dm_domega:
+        energy = 2.0 * np.pi * dV * fields["rho"] * m.value
 
     col       = case % args.subplots if args.subplots is not None else case
     color_len = args.subplots if args.subplots is not None else len(args.filename)
@@ -886,8 +895,11 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
                     mass     = dV_1d * ofield["rho"]
                     e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
                     etotal_1d = edens_1d * dV_1d * e_scale.value
+                    
                     if args.eks:
                         energy = e_k
+                    elif args.dm_domega:
+                        energy = mass * m.value
                     else:
                         energy = etotal_1d
                     
@@ -944,8 +956,11 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
             ax.set_ylabel(r'$dE_{\rm K} \ (\Gamma \beta > {})\ [\rm{erg}]$'.format(args.cutoff), fontsize=15)
         elif args.hhist:
             ax.set_ylabel(r'$dH \ (\Gamma \beta > {}) \ [\rm{erg}]$'.format(args.cutoff), fontsize=15)
+        elif args.dm_domega:
+            ax.set_ylabel(r'$dM \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoff), fontsize=15)
         else:
             ax.set_ylabel(r'$dE_{{\rm T}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
+        
     
         ax.tick_params('both', labelsize=15)
     else:
@@ -956,7 +971,7 @@ def plot_dE_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     ax.spines['top'].set_visible(False)
 
     if args.subplots is None:
-        ax.set_title(r'{}, t ={:.2f} s'.format(args.setup[0], tend), fontsize=20)
+        ax.set_title(r'{}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
         
     if not overplot:
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
@@ -1026,6 +1041,10 @@ def main():
     parser.add_argument('--de_domega', dest='de_domega', action='store_true',
                         default=False,
                         help='Plot the dE/dOmega plot')
+    
+    parser.add_argument('--dm_domega', dest='dm_domega', action='store_true',
+                        default=False,
+                        help='Plot the dM/dOmega plot')
     
     parser.add_argument('--cutoff', dest='cutoff', default=0.0, type=float,
                         help='The 4-velocity cutoff value for the dE/dOmega plot')
@@ -1211,14 +1230,14 @@ def main():
         for idx, file in enumerate(args.filename):
             if args.ehist or args.hhist or args.eks:
                 if args.subplots is None:
-                    plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx)
+                    plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx, ax_col=idx)
                 else:
                     print(idx//args.subplots)
                     plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=axs[idx//args.subplots], case=idx, ax_col=idx % args.subplots)
             elif args.x is not None:
                 plot_max(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
-            elif args.de_domega:
-                plot_dE_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx, ax_col=idx)
+            elif args.de_domega or args.dm_domega:
+                plot_dx_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx, ax_col=idx)
             else:
                 plot_1d_curve(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
                 
@@ -1230,8 +1249,8 @@ def main():
             plot_hist(field_dict[0], args, mesh, setup_dict)
         elif args.tidx != None:
             plot_1d_curve(field_dict[0], args, mesh, setup_dict)
-        elif args.de_domega:
-            plot_dE_domega(field_dict[0], args, mesh, setup_dict)
+        elif args.de_domega or args.dm_domega:
+            plot_dx_domega(field_dict[0], args, mesh, setup_dict)
         else:
             if is_cartesian:
                 plot_cartesian_plot(field_dict[0], args, mesh, setup_dict)
