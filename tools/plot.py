@@ -946,9 +946,9 @@ def plot_dx_domega(fields, args, mesh, ds, overplot=False, subplot=False, ax=Non
     if args.subplots is None:
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
         if args.kinetic:
-            ax.set_ylabel(r'$dE_{\rm K} \ (\Gamma \beta > {})\ [\rm{erg}]$'.format(args.cutoff), fontsize=15)
+            ax.set_ylabel(r'$dE_{{\rm K}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
         elif args.enthalpy:
-            ax.set_ylabel(r'$dH \ (\Gamma \beta > {}) \ [\rm{erg}]$'.format(args.cutoff), fontsize=15)
+            ax.set_ylabel(r'$dH \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
         elif args.dm_domega:
             ax.set_ylabel(r'$dM \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoff), fontsize=15)
         else:
