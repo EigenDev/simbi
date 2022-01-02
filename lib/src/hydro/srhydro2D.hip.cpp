@@ -1259,13 +1259,14 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     }
     // Write some info about the setup for writeup later
     DataWriteMembers setup;
-    setup.xmax = x1[xphysical_grid - 1];
-    setup.xmin = x1[0];
-    setup.ymax = x2[yphysical_grid - 1];
-    setup.ymin = x2[0];
-    setup.nx   = nx;
-    setup.ny   = ny;
+    setup.xmax     = x1[xphysical_grid - 1];
+    setup.xmin     = x1[0];
+    setup.ymax     = x2[yphysical_grid - 1];
+    setup.ymin     = x2[0];
+    setup.nx       = nx;
+    setup.ny       = ny;
     setup.linspace = linspace;
+    setup.ad_gamma = gamma;
 
     cons.resize(nzones);
     prims.resize(nzones);
@@ -1277,6 +1278,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     sourceTau  = sources[3];
 
     // Copy the state array into real & profile variables
+    auto e_sum = 0.0;
     for (size_t i = 0; i < state2D[0].size(); i++)
     {
         auto D            = state2D[0][i];
@@ -1287,6 +1289,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         auto S            = std::sqrt(S1 * S1 + S2 * S2);
         cons[i]           = Conserved(D, S1, S2, E, Dchi);
         pressure_guess[i] = std::abs(S - D - E);
+        e_sum += E;
     }
     // deallocate initial state vector
     std::vector<int> state2D;
@@ -1359,6 +1362,17 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         adapt_dt();
     }
     
+    if (t == 0)
+    {
+        transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
+        writeToProd<sr2d::PrimitiveData, Primitive>(&transfer_prims, &prods);
+        tnow = create_step_str(t_interval, tchunk);
+        filename = string_format("%d.chkpt." + tnow + ".h5", yphysical_grid);
+        setup.t = t;
+        setup.dt = dt;
+        write_hdf5(data_directory, filename, prods, setup, 2, total_zones);
+        t_interval += chkpt_interval;
+    }
     // Some benchmarking tools 
     luint      n   = 0;
     luint  nfold   = 0;

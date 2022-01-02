@@ -603,6 +603,7 @@ void Newtonian1D::advance(
     setup.nx            = nx;
     setup.linspace      = linspace;
     setup.coord_system  = coord_system;
+    setup.ad_gamma      = gamma;
 
 
     cons.resize(nx);

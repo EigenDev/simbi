@@ -995,13 +995,14 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
 
     // Write some info about the setup for writeup later
     DataWriteMembers setup;
-    setup.xmax = x1[xphysical_grid - 1];
-    setup.xmin = x1[0];
-    setup.ymax = x2[yphysical_grid - 1];
-    setup.ymin = x2[0];
-    setup.nx   = nx;
-    setup.ny   = ny;
+    setup.xmax     = x1[xphysical_grid - 1];
+    setup.xmin     = x1[0];
+    setup.ymax     = x2[yphysical_grid - 1];
+    setup.ymin     = x2[0];
+    setup.nx       = nx;
+    setup.ny       = ny;
     setup.linspace = linspace;
+    setup.ad_gamma = gamma;
 
     cons.resize(nzones);
     prims.resize(nzones);

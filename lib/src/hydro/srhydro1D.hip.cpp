@@ -139,7 +139,6 @@ void SRHD::advance(
 
             u_l = self->prims2cons(prims_l);
             u_r = self->prims2cons(prims_r);
-
             f_l = self->prims2flux(prims_l);
             f_r = self->prims2flux(prims_r);
 
@@ -197,7 +196,6 @@ void SRHD::advance(
             Primitive left_most, right_most, left_mid, right_mid, center;
             // if ( (unsigned)(ii - istart) < (ibound - istart))
             {
-
                 left_most  = prim_buff[(txa - 2) % bx];
                 left_mid   = prim_buff[(txa - 1) % bx];
                 center     = prim_buff[(txa + 0) % bx];
@@ -220,15 +218,13 @@ void SRHD::advance(
                 if (self->hllc)
                 {
                     frf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-                }
-                else
-                {
+                } else {
                     frf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                 }
                 
                 // Do the same thing, but for the right side interface [i - 1/2]
                 prims_l = left_mid + minmod((left_mid - left_most)*plm_theta, (center - left_most)*(real)0.5, (center - left_mid)*plm_theta)*(real)0.5;
-                prims_r = center - minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*(real)0.5, (right_mid - center)*plm_theta)*(real)0.5;
+                prims_r = center   - minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*(real)0.5, (right_mid - center)*plm_theta)*(real)0.5;
 
                 // Calculate the left and right states using the reconstructed PLM
                 // primitives
@@ -240,9 +236,7 @@ void SRHD::advance(
                 if (self->hllc)
                 {
                     flf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-                }
-                else
-                {
+                } else {
                     flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                 }
 
@@ -314,7 +308,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             const real S       = conserved_buff[tx].S;
             const real tau     = conserved_buff[tx].tau;
             #if GPU_CODE
-            real peq           =  self->gpu_pressure_guess[ii];
+            real peq           = self->gpu_pressure_guess[ii];
             #else 
             real peq           = self->pressure_guess[ii];
             #endif
@@ -352,23 +346,16 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             } while (std::abs(peq - pre) >= tol);
 
 
-            real v    = S / (tau + D + peq);
-            // real pmin = std::abs(std::abs(S) - D - tau);
-            // if (peq < pmin)
-            // {
-            //     // writeln("uh oh: pmin = {} while peq = {}", pmin, peq);
-            //     std::cin.get();
-            //     peq = pmin;
-            // } 
-            // real mach_ceiling = 100.0;
-            // real u            = v /std::sqrt(1 - v * v);
-            // real e            = peq / rho * 3.0;
-            // real emin         = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
+            real v            = S / (tau + D + peq);
+            real mach_ceiling = 100.0;
+            real u            = v /std::sqrt(1 - v * v);
+            real e            = peq / rho * 3.0;
+            real emin         = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
 
-            // if (e < emin) {
-            //     printf("peq: %f, npew: %f\n", rho * emin * (gamma - 1.0));
-            //     peq = rho * emin * (gamma - 1.0);
-            // }
+            if (e < emin) {
+                printf("peq: %f, npew: %f\n", rho * emin * (gamma - 1.0));
+                peq = rho * emin * (gamma - 1.0);
+            }
             #if GPU_CODE
                 self->gpu_pressure_guess[ii] = peq;
                 self->gpu_prims[ii]          = Primitive{D * sqrt(1 - v * v), v, peq};
@@ -443,7 +430,6 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
 };
 
 // Adapt the CFL conditonal timestep
-// Adapt the timestep on the Host
 void SRHD::adapt_dt()
 {   
     real min_dt = INFINITY;
@@ -497,8 +483,8 @@ Conserved SRHD::prims2cons(const Primitive &prim)
     const real rho = prim.rho;
     const real v   = prim.v;
     const real pre = prim.p;  
-    const real h = (real)1.0 + gamma * pre / (rho * (gamma - 1));
-    const real W = (real)1.0 / sqrt(1 - v * v);
+    const real h   = (real)1.0 + gamma * pre / (rho * (gamma - 1));
+    const real W   = (real)1.0 / std::sqrt(1 - v * v);
 
     return Conserved{rho * W, rho * h * W * W * v, rho * h * W * W - pre - rho * W};
 };
@@ -519,9 +505,12 @@ Conserved SRHD::calc_hll_state(const Conserved &left_state,
     return (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
 }
 
-Conserved SRHD::calc_intermed_state(const Primitive &prims,
-                                    const Conserved &state, const real a,
-                                    const real aStar, const real pStar)
+Conserved SRHD::calc_intermed_state(
+    const Primitive &prims,
+    const Conserved &state, 
+    const real a,
+    const real aStar, 
+    const real pStar)
 {
     const real pressure = prims.p;
     const real v = prims.v;
@@ -531,9 +520,9 @@ Conserved SRHD::calc_intermed_state(const Primitive &prims,
     const real tau = state.tau;
     const real E = tau + D;
 
-    const real DStar = ((a - v) / (a - aStar)) * D;
-    const real Sstar = ((real)1.0 / (a - aStar)) * (S * (a - v) - pressure + pStar);
-    const real Estar = ((real)1.0 / (a - aStar)) * (E * (a - v) + pStar * aStar - pressure * v);
+    const real DStar   = ((a - v)   / (a - aStar)) * D;
+    const real Sstar   = ((real)1.0 / (a - aStar)) * (S * (a - v) - pressure + pStar);
+    const real Estar   = ((real)1.0 / (a - aStar)) * (E * (a - v) + pStar * aStar - pressure * v);
     const real tauStar = Estar - DStar;
 
     return Conserved{DStar, Sstar, tauStar};
@@ -551,7 +540,7 @@ Conserved SRHD::prims2flux(const Primitive &prim)
     const real pre = prim.p;
     const real v   = prim.v;
 
-    const real W = (real)1.0 / sqrt(1 - v * v);
+    const real W = (real)1.0 / std::sqrt(1 - v * v);
     const real h = (real)1.0 + gamma * pre / (rho * (gamma - 1));
     const real D = rho * W;
     const real S = rho * h * W * W * v;
@@ -608,8 +597,8 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const Conserved hll_state = calc_hll_state(left_state, right_state, left_flux, right_flux,
                                left_prims, right_prims);
 
-    const real e = hll_state.tau + hll_state.D;
-    const real s = hll_state.S;
+    const real e  = hll_state.tau + hll_state.D;
+    const real s  = hll_state.S;
     const real fs = hll_flux.S;
     const real fe = hll_flux.tau + hll_flux.D;
     
@@ -629,6 +618,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         const real tau      = left_state.tau;
         const real E        = tau + D;
         const real cofactor = (real)1.0 / (aL - aStar);
+
         //--------------Compute the L Star State----------
         const real v = left_prims.v;
         // Left Star State in x-direction of coordinate lattice
@@ -650,7 +640,8 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         const real tau       = right_state.tau;
         const real E         = tau + D;
         const real cofactor  = (real)1.0 / (aR - aStar);
-        //--------------Compute the L Star State----------
+
+        //--------------Compute the R Star State----------
         const real v = right_prims.v;
         // Left Star State in x-direction of coordinate lattice
         const real Dstar    = cofactor * (aR - v) * D;
@@ -711,11 +702,12 @@ SRHD::simulate1D(
                : floor(tstart * round_place + (real)0.5) / round_place + chkpt_interval;
 
     DataWriteMembers setup;
-    setup.xmax = r[active_zones - 1];
-    setup.xmin = r[0];
+    setup.xmax          = r[active_zones - 1];
+    setup.xmin          = r[0];
     setup.xactive_zones = active_zones;
-    setup.nx = nx;
-    setup.linspace = linspace;
+    setup.nx            = nx;
+    setup.linspace      = linspace;
+    setup.ad_gamma       = gamma;
 
     // Create Structure of Vectors (SoV) for trabsferring
     // data to files once ready
