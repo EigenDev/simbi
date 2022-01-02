@@ -353,8 +353,8 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             real emin         = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
 
             if (e < emin) {
-                printf("peq: %f, npew: %f\n", rho * emin * (gamma - 1.0));
-                peq = rho * emin * (gamma - 1.0);
+                // printf("peq: %f, npew: %f\n", rho * emin * (self->gamma - 1.0));
+                peq = rho * emin * (self->gamma - 1.0);
             }
             #if GPU_CODE
                 self->gpu_pressure_guess[ii] = peq;
