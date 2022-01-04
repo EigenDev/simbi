@@ -888,7 +888,7 @@ def plot_dx_domega(
 
     label = f'{args.labels[case]}' if args.labels is not None else None
     
-    print(f'2D energy sum: {var.sum()}')
+    print(f'2D var sum with GB > {args.cutoff}: {var.sum()}')
     if args.hist:
         deg_per_bin      = 3 # degrees in bin 
         num_bins         = int(deg_per_bin / dtheta) 
@@ -927,7 +927,8 @@ def plot_dx_domega(
                         var = etotal_1d
                     
                     total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
-                    ax.axhline(total_var)
+                    print(f"1D total Var with GB > {args.cutoff}: {total_var}")
+                    ax.axhline(total_var, linestyle='--', color='black')
             else:
                 ofield   = get_1d_equiv_file(args.oned_files[case // args.subplots])
                 edens_1d = prims2cons(ofield, 'energy')
@@ -944,7 +945,8 @@ def plot_dx_domega(
                     var = etotal_1d
                 
                 total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
-                ax.axhline(total_var)
+                print(f"1D total Var with GB > {args.cutoff}: {total_var}")
+                ax.axhline(total_var, linestyle='--', color='black')
                     
                 
 
@@ -1242,7 +1244,7 @@ def main():
         ax_num   = 0     
         for idx, file in enumerate(args.filename):
             i += 1
-            if args.hist and not args.de_domega:
+            if args.hist and (not args.de_domega and not args.dm_domega):
                 if args.sub_split is None:
                     plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx, ax_col=idx)
                 else:
@@ -1274,7 +1276,7 @@ def main():
             for ax in axs:
                 ax.label_outer()
     else:
-        if args.hist:
+        if args.hist and (not args.de_domega and not args.dm_domega):
             plot_hist(field_dict[0], args, mesh, setup_dict)
         elif args.tidx != None:
             plot_1d_curve(field_dict[0], args, mesh, setup_dict)
