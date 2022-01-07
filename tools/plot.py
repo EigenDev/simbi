@@ -790,7 +790,7 @@ def plot_hist(
     if ax_col == 0:
         #1D Comparison 
         if args.oned_files is not None:
-            if args.subplots is None:
+            if args.sub_split is None:
                 for file in args.oned_files:
                     oned_field   = get_1d_equiv_file(file)
                     calc_1d_hist(oned_field)
@@ -876,8 +876,8 @@ def plot_dx_domega(
     elif args.dm_domega:
         var = 2.0 * np.pi * dV * fields['rho'] * m.value
 
-    col       = case % args.subplots if args.subplots is not None else case
-    color_len = args.subplots if args.subplots is not None else len(args.filename)
+    col       = case % args.sub_split if args.sub_split is not None else case
+    color_len = args.sub_split if args.sub_split is not None else len(args.filename)
     colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
     
     u                          = fields['gamma_beta']
@@ -910,7 +910,7 @@ def plot_dx_domega(
     if ax_col == 0:
         #1D Check 
         if args.oned_files is not None:
-            if args.subplots is None:
+            if args.sub_split is None:
                 for file in args.oned_files:
                     ofield   = get_1d_equiv_file(file)
                     edens_1d = prims2cons(ofield, 'energy')
@@ -927,10 +927,10 @@ def plot_dx_domega(
                         var = etotal_1d
                     
                     total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
-                    print(f"1D total Var with GB > {args.cutoff}: {total_var}")
+                    print(f"1D var sum with GB > {args.cutoff}: {total_var}")
                     ax.axhline(total_var, linestyle='--', color='black')
             else:
-                ofield   = get_1d_equiv_file(args.oned_files[case // args.subplots])
+                ofield   = get_1d_equiv_file(args.oned_files[case // args.sub_split])
                 edens_1d = prims2cons(ofield, 'energy')
                 dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
                 mass     = dV_1d * ofield['rho'] * ofield['W']
@@ -945,13 +945,13 @@ def plot_dx_domega(
                     var = etotal_1d
                 
                 total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
-                print(f"1D total Var with GB > {args.cutoff}: {total_var}")
+                print(f"1D var sum with GB > {args.cutoff}: {total_var}")
                 ax.axhline(total_var, linestyle='--', color='black')
                     
                 
 
     ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
-    if args.subplots is None:
+    if args.sub_split is None:
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
         if args.kinetic:
             ax.set_ylabel(r'$dE_{{\rm K}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
@@ -971,7 +971,7 @@ def plot_dx_domega(
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
 
-    if args.subplots is None:
+    if args.sub_split is None:
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
         
     if not overplot:
