@@ -288,7 +288,7 @@ def plot_polar_plot(
             if idx == 0:
                 kwargs[field] =  {'vmin': vmin, 'vmax': vmax} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)} 
             else:
-                if field3 == field4 and field == field3:
+                if field == field3 == field4:
                     ovmin = quadr[field][0].min()
                     ovmax = quadr[field][0].max()
                 else:
@@ -305,15 +305,19 @@ def plot_polar_plot(
                 cs[2] = ax.pcolormesh(tt[:: 1] + np.pi/2, rr,  var[0], cmap=color_map, shading='auto', **kwargs[field1])
                 cs[3] = ax.pcolormesh(t2[::-1] + np.pi/2, rr,  var[1], cmap=color_map, shading='auto', **kwargs[field2])
         else:
-            cs[0] = ax.pcolormesh(tchop[0], rchop[0],  quadr[field1], cmap=color_map, shading='auto', **kwargs[field1])
-            cs[1] = ax.pcolormesh(tchop[1], rchop[0],  quadr[field2], cmap=color_map, shading='auto', **kwargs[field2])
-            
-            if field3 == field4:
-                cs[2] = ax.pcolormesh(trchop[1][::-1], rchop[0],  quadr[field3][0], cmap=color_map, shading='auto', **kwargs[field3])
-                cs[3] = ax.pcolormesh(trchop[0][::-1], rchop[0],  quadr[field4][1], cmap=color_map, shading='auto', **kwargs[field4])
+            if num_fields == 2:
+                cs[0] = ax.pcolormesh(tt[:: 1], rr,  np.vstack((var[0],var[1])), cmap=color_map, shading='auto', **kwargs[field1])
+                cs[1] = ax.pcolormesh(t2[::-1], rr,  np.vstack((var[2],var[3])), cmap=color_map, shading='auto', **kwargs[field2])
             else:
-                cs[2] = ax.pcolormesh(trchop[1][::-1], rchop[0],  quadr[field3], cmap=color_map, shading='auto', **kwargs[field3])
-                cs[3] = ax.pcolormesh(trchop[0][::-1], rchop[0],  quadr[field4], cmap=color_map, shading='auto', **kwargs[field4])
+                cs[0] = ax.pcolormesh(tchop[0], rchop[0],  quadr[field1], cmap=color_map, shading='auto', **kwargs[field1])
+                cs[1] = ax.pcolormesh(tchop[1], rchop[0],  quadr[field2], cmap=color_map, shading='auto', **kwargs[field2])
+                
+                if field3 == field4:
+                    cs[2] = ax.pcolormesh(trchop[1][::-1], rchop[0],  quadr[field3][0], cmap=color_map, shading='auto', **kwargs[field3])
+                    cs[3] = ax.pcolormesh(trchop[0][::-1], rchop[0],  quadr[field4][1], cmap=color_map, shading='auto', **kwargs[field4])
+                else:
+                    cs[2] = ax.pcolormesh(trchop[1][::-1], rchop[0],  quadr[field3], cmap=color_map, shading='auto', **kwargs[field3])
+                    cs[3] = ax.pcolormesh(trchop[0][::-1], rchop[0],  quadr[field4], cmap=color_map, shading='auto', **kwargs[field4])
             
     else:
         if args.log:
@@ -360,8 +364,8 @@ def plot_polar_plot(
         else:
             if num_fields > 1:
                 if num_fields == 2:
-                    ycoord  = [0.1, 0.1 ]
-                    xcoord  = [0.1, 0.85]
+                    ycoord  = [0.1, 0.08] if ymax < np.pi else [0.08, 0.1]
+                    xcoord  = [0.1, 0.85] if ymax < np.pi else [0.85, 0.1]
                     cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
                     
                 if num_fields == 3:
@@ -382,7 +386,7 @@ def plot_polar_plot(
         if args.log:
             if num_fields > 1:
                 fmt  = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.field]
-                cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i],       format=fmt[i]) for i in range(num_fields)]
+                cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i], format=fmt[i]) for i in range(num_fields)]
                 for cb in cbar:
                     cb.outline.set_visible(False)                                 
             else:
@@ -430,7 +434,7 @@ def plot_polar_plot(
             wedge.set_position( [0.5, -0.5, 0.3, 2])
             ax.set_position( [0.05, -0.5, 0.46, 2])
         else:
-            ax.set_position( [0.16, -0.5, 0.46, 2])
+            ax.set_position( [0.19, -0.5, 0.46, 2])
             wedge.set_position( [0.58, -0.5, 0.3, 2])
             
         if len(args.field) > 1:
