@@ -928,7 +928,7 @@ def plot_dx_domega(
         ax.step(theta_bin_edges[:-1], iso_var, label=label)
     else:
         var_per_theta = 4.0 * np.pi * np.sum(var, axis=1) / domega[:,0]
-        ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[case], label=label)
+        ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[col], label=label)
     
     if ax_col == 0:
         #1D Comparison 
