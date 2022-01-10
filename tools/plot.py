@@ -364,8 +364,8 @@ def plot_polar_plot(
         else:
             if num_fields > 1:
                 if num_fields == 2:
-                    ycoord  = [0.1, 0.08] if ymax < np.pi else [0.08, 0.1]
-                    xcoord  = [0.1, 0.85] if ymax < np.pi else [0.85, 0.1]
+                    ycoord  = [0.1, 0.08] if ymax < np.pi else [0.1, 0.1]
+                    xcoord  = [0.1, 0.85] if ymax < np.pi else [0.85, 0.05]
                     cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
                     
                 if num_fields == 3:
@@ -434,7 +434,7 @@ def plot_polar_plot(
             wedge.set_position( [0.5, -0.5, 0.3, 2])
             ax.set_position( [0.05, -0.5, 0.46, 2])
         else:
-            ax.set_position( [0.19, -0.5, 0.46, 2])
+            ax.set_position( [0.15, -0.5, 0.46, 2])
             wedge.set_position( [0.58, -0.5, 0.3, 2])
             
         if len(args.field) > 1:
