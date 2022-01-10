@@ -557,8 +557,9 @@ def plot_cartesian_plot(
         cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
     else:
         cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
-        
-    fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20, y=0.95)
+    
+    if args.setup != "":
+        fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20, y=0.95)
     
 def plot_1d_curve(
     field_dict: dict, 
@@ -628,7 +629,8 @@ def plot_1d_curve(
         else:
             ax.legend()
     
-    ax.set_title(r'$\theta = {:.2f}$ time: {:.3f}'.format(mesh['th'][args.tidx] * 180 / np.pi, tend))
+    if args.setup != "":
+        ax.set_title(r'$\theta = {:.2f}$ time: {:.3f}'.format(mesh['th'][args.tidx] * 180 / np.pi, tend))
     if not overplot:
         return fig
     # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup,theta[args.tidx], tend), fontsize=20, y=0.95)
@@ -822,19 +824,17 @@ def plot_hist(
             ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
             
         ax.tick_params('both', labelsize=15)
-    else:
+    else:        
         ax.tick_params('x', labelsize=15)
         ax.tick_params('y', labelsize=10)
         
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
 
-    if args.sub_split is None:
+    if args.setup != "":
         ax.set_title(r'{}, t ={:.2f} s'.format(args.setup, tend), fontsize=20)
-    # ax.set_title(r'{}'.format(args.setup), fontsize=20)
-    # ax.legend(fontsize=15)
+        
     if not overplot:
-        ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
         return fig
 
 def plot_dx_domega(
@@ -1230,12 +1230,19 @@ def main():
             fig, ax = plt.subplots(1, 1, figsize=(8,8))
             lines_per_plot = len(args.filename)
         else:
-            fig,axs = plt.subplots(num_subplots, 1, figsize=(8,4 * num_subplots), sharex=True, tight_layout=True)
-            fig.suptitle(f'{args.setup}')
+            fig,axs = plt.subplots(num_subplots, 1, figsize=(8,4 * num_subplots), sharex=True, tight_layout=False)
+            if args.setup != "":
+                fig.suptitle(f'{args.setup}')
             if args.de_domega or args.dm_domega:
                 axs[-1].set_xlabel(r'$\theta \ \rm[deg]', fontsize=20)
             else:
                 axs[-1].set_xlabel(r'$\log \Gamma \beta$', fontsize=20)
+            if args.kinetic:
+                fig.text(0.030, 0.5, r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+            elif args.enthalpy:
+                fig.text(0.030, 0.5, r'$H( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+            else:
+                fig.text(0.030, 0.5, r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
             axs_iter       = iter(axs)            # iterators for the multi-plot
             subplot_iter   = iter(args.sub_split) # iterators for the subplot splitting
             
