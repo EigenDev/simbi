@@ -846,12 +846,31 @@ def plot_dx_domega(
     subplot:       bool=False, 
     ax:            Union[None,plt.Axes]=None, 
     case:          int=0, 
-    ax_col:        int=0) -> None:
+    ax_col:        int=0,
+    ax_num:        int=0) -> None:
     
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
     
+    def calc_1d_dx_domega(ofield: dict) -> None:
+        edens_1d = prims2cons(ofield, 'energy')
+        dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
+        mass     = dV_1d * ofield['rho'] * ofield['W']
+        e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
+        etotal_1d = edens_1d * dV_1d * e_scale.value
+        
+        if args.kinetic:
+            var = e_k
+        elif args.dm_domega:
+            var = mass * m.value
+        else:
+            var = etotal_1d
+        
+        total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
+        print(f"1D var sum with GB > {args.cutoff}: {total_var}")
+        ax.axhline(total_var, linestyle='--', color='black')
+                
     def de_domega(var, gamma_beta, gamma_beta_cut, tz, domega, bin_edges):
         var = var.copy()
         var[gamma_beta < gamma_beta_cut] = 0.0
@@ -880,8 +899,8 @@ def plot_dx_domega(
     elif args.dm_domega:
         var = 2.0 * np.pi * dV * fields['rho'] * m.value
 
-    col       = case % args.sub_split if args.sub_split is not None else case
-    color_len = args.sub_split if args.sub_split is not None else len(args.filename)
+    col       = case % len(args.sub_split) if args.sub_split is not None else case
+    color_len = len(args.sub_split) if args.sub_split is not None else len(args.filename)
     colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
     
     u                          = fields['gamma_beta']
@@ -912,59 +931,27 @@ def plot_dx_domega(
         ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[case], label=label)
     
     if ax_col == 0:
-        #1D Check 
+        #1D Comparison 
         if args.oned_files is not None:
             if args.sub_split is None:
                 for file in args.oned_files:
-                    ofield   = get_1d_equiv_file(file)
-                    edens_1d = prims2cons(ofield, 'energy')
-                    dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
-                    mass     = dV_1d * ofield['rho'] * ofield['W']
-                    e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
-                    etotal_1d = edens_1d * dV_1d * e_scale.value
-                    
-                    if args.kinetic:
-                        var = e_k
-                    elif args.dm_domega:
-                        var = mass * m.value
-                    else:
-                        var = etotal_1d
-                    
-                    total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
-                    print(f"1D var sum with GB > {args.cutoff}: {total_var}")
-                    ax.axhline(total_var, linestyle='--', color='black')
+                    oned_field   = get_1d_equiv_file(file%len(args.oned_files))
+                    calc_1d_dx_domega(oned_field)
             else:
-                ofield   = get_1d_equiv_file(args.oned_files[case // args.sub_split])
-                edens_1d = prims2cons(ofield, 'energy')
-                dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
-                mass     = dV_1d * ofield['rho'] * ofield['W']
-                e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
-                etotal_1d = edens_1d * dV_1d * e_scale.value
+                oned_field   = get_1d_equiv_file(args.oned_files[ax_num%len(args.oned_files)])
+                calc_1d_dx_domega(oned_field)      
                 
-                if args.kinetic:
-                    var = e_k
-                elif args.dm_domega:
-                    var = mass * m.value
-                else:
-                    var = etotal_1d
-                
-                total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
-                print(f"1D var sum with GB > {args.cutoff}: {total_var}")
-                ax.axhline(total_var, linestyle='--', color='black')
-                    
-                
-
     ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
     if args.sub_split is None:
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
         if args.kinetic:
-            ax.set_ylabel(r'$dE_{{\rm K}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
+            ax.set_ylabel(r'$E_{{\rm K, iso}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
         elif args.enthalpy:
-            ax.set_ylabel(r'$dH \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
+            ax.set_ylabel(r'$H_{\rm iso} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
         elif args.dm_domega:
-            ax.set_ylabel(r'$dM \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoff), fontsize=15)
+            ax.set_ylabel(r'$M_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoff), fontsize=15)
         else:
-            ax.set_ylabel(r'$dE_{{\rm T}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
+            ax.set_ylabel(r'$E_{{\rm T, iso}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
         
     
         ax.tick_params('both', labelsize=15)
@@ -1230,19 +1217,27 @@ def main():
             fig, ax = plt.subplots(1, 1, figsize=(8,8))
             lines_per_plot = len(args.filename)
         else:
-            fig,axs = plt.subplots(num_subplots, 1, figsize=(8,4 * num_subplots), sharex=True, tight_layout=False)
+            fig,axs = plt.subplots(num_subplots, 1, figsize=(8,2 * num_subplots), sharex=True, tight_layout=False)
             if args.setup != "":
                 fig.suptitle(f'{args.setup}')
             if args.de_domega or args.dm_domega:
-                axs[-1].set_xlabel(r'$\theta \ \rm[deg]', fontsize=20)
+                axs[-1].set_xlabel(r'$\theta \ \rm[deg]$', fontsize=20)
             else:
                 axs[-1].set_xlabel(r'$\log \Gamma \beta$', fontsize=20)
-            if args.kinetic:
-                fig.text(0.030, 0.5, r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
-            elif args.enthalpy:
-                fig.text(0.030, 0.5, r'$H( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+            if args.de_domega or args.dm_domega:
+                if args.kinetic:
+                    fig.text(0.030, 0.5, r'$E_{{\rm K, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=20, va='center', rotation='vertical')
+                elif args.dm_domega:
+                    fig.text(0.030, 0.5, r'$M_{{\rm iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=20, va='center', rotation='vertical')
+                else:
+                    fig.text(0.030, 0.5, r'$E_{{\rm T, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=20, va='center', rotation='vertical')
             else:
-                fig.text(0.030, 0.5, r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+                if args.kinetic:
+                    fig.text(0.030, 0.5, r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+                elif args.enthalpy:
+                    fig.text(0.030, 0.5, r'$H( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+                else:
+                    fig.text(0.030, 0.5, r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
             axs_iter       = iter(axs)            # iterators for the multi-plot
             subplot_iter   = iter(args.sub_split) # iterators for the subplot splitting
             
@@ -1259,16 +1254,22 @@ def main():
                 if args.sub_split is None:
                     plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx, ax_col=idx)
                 else:
-                    # if 
                     if ax_shift:
                         ax_col   = 0
                         ax       = next(axs_iter)   
                         ax_shift = False
                     plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
+            elif args.de_domega or args.dm_domega:
+                if args.sub_split is None:
+                    plot_dx_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx, ax_col=idx)
+                else:
+                    if ax_shift:
+                        ax_col   = 0
+                        ax       = next(axs_iter)   
+                        ax_shift = False
+                    plot_dx_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
             elif args.x is not None:
                 plot_max(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
-            elif args.de_domega or args.dm_domega:
-                plot_dx_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx, ax_col=idx)
             else:
                 plot_1d_curve(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
             
@@ -1303,7 +1304,7 @@ def main():
     if args.labels is not None:
         if args.sub_split is not None:
             for ax in axs:
-                ax.legend(fontsize=7)
+                ax.legend(fontsize=7, loc='upper right')
         else:
             plt.legend()
             
