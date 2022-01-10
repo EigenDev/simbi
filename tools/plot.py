@@ -365,7 +365,7 @@ def plot_polar_plot(
             if num_fields > 1:
                 if num_fields == 2:
                     ycoord  = [0.1, 0.08] if ymax < np.pi else [0.1, 0.1]
-                    xcoord  = [0.1, 0.85] if ymax < np.pi else [0.85, 0.05]
+                    xcoord  = [0.1, 0.85] if ymax < np.pi else [0.87, 0.05]
                     cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
                     
                 if num_fields == 3:
