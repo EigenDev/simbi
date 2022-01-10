@@ -935,7 +935,7 @@ def plot_dx_domega(
         if args.oned_files is not None:
             if args.sub_split is None:
                 for file in args.oned_files:
-                    oned_field   = get_1d_equiv_file(file%len(args.oned_files))
+                    oned_field   = get_1d_equiv_file(file)
                     calc_1d_dx_domega(oned_field)
             else:
                 oned_field   = get_1d_equiv_file(args.oned_files[ax_num%len(args.oned_files)])
