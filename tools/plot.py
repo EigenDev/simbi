@@ -507,8 +507,8 @@ def plot_polar_plot(
                 cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
             else:
                 cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
-        
-        fig.suptitle('{} at t = {:.2f}'.format(args.setup[0], tend), fontsize=20, y=1)
+        if args.setup != "":
+            fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20, y=1)
 
 def plot_cartesian_plot(
     field_dict: dict, 
@@ -558,7 +558,7 @@ def plot_cartesian_plot(
     else:
         cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
         
-    fig.suptitle('{} at t = {:.2f}'.format(args.setup[0], tend), fontsize=20, y=0.95)
+    fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20, y=0.95)
     
 def plot_1d_curve(
     field_dict: dict, 
@@ -631,7 +631,7 @@ def plot_1d_curve(
     ax.set_title(r'$\theta = {:.2f}$ time: {:.3f}'.format(mesh['th'][args.tidx] * 180 / np.pi, tend))
     if not overplot:
         return fig
-    # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup[0],theta[args.tidx], tend), fontsize=20, y=0.95)
+    # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup,theta[args.tidx], tend), fontsize=20, y=0.95)
     
 def plot_max(
     fields:    dict, 
@@ -660,7 +660,7 @@ def plot_max(
     ofield = get_1d_equiv_file(16384)
     #1D test 
     tend = dset[0]['time']
-    ax.set_title(r'{} at t={:.3f}'.format(args.setup[0], tend), fontsize=20)
+    ax.set_title(r'{} at t={:.3f}'.format(args.setup, tend), fontsize=20)
     
     if args.field == 'gamma_beta':
         edens_total = prims2cons(fields, 'energy')
@@ -830,11 +830,11 @@ def plot_hist(
     ax.spines['top'].set_visible(False)
 
     if args.sub_split is None:
-        ax.set_title(r'{}, t ={:.2f} s'.format(args.setup[0], tend), fontsize=20)
-    # ax.set_title(r'{}'.format(args.setup[0]), fontsize=20)
+        ax.set_title(r'{}, t ={:.2f} s'.format(args.setup, tend), fontsize=20)
+    # ax.set_title(r'{}'.format(args.setup), fontsize=20)
     # ax.legend(fontsize=15)
     if not overplot:
-        ax.set_title(r'{}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
+        ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
         return fig
 
 def plot_dx_domega(
@@ -976,10 +976,10 @@ def plot_dx_domega(
     ax.spines['top'].set_visible(False)
 
     if args.sub_split is None:
-        ax.set_title(r'{}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
+        ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
         
     if not overplot:
-        ax.set_title(r'{}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
+        ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
         return fig
     
 def main():
@@ -990,7 +990,7 @@ def main():
     parser.add_argument('filename', metavar='Filename', nargs='+',
                         help='A Data Source to Be Plotted')
     
-    parser.add_argument('setup', metavar='Setup', nargs='+', type=str,
+    parser.add_argument('setup', metavar='Setup', type=str,
                         help='The name of the setup you are plotting (e.g., Blandford McKee)')
     
     parser.add_argument('--field', dest = 'field', metavar='Field Variable', nargs='+',
@@ -1231,7 +1231,7 @@ def main():
             lines_per_plot = len(args.filename)
         else:
             fig,axs = plt.subplots(num_subplots, 1, figsize=(8,4 * num_subplots), sharex=True, tight_layout=True)
-            fig.suptitle(f'{args.setup[0]}')
+            fig.suptitle(f'{args.setup}')
             if args.de_domega or args.dm_domega:
                 axs[-1].set_xlabel(r'$\theta \ \rm[deg]', fontsize=20)
             else:
