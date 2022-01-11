@@ -779,7 +779,7 @@ def plot_hist(
 
     # Check if subplots are split amonst the file inputs. If so, roll the colors
     # to reset when on a different axes object
-    color_len = len(args.sub_split[ax_num]) if args.sub_split is not None else len(args.filename)
+    color_len = args.sub_split[ax_num] if args.sub_split is not None else len(args.filename)
     colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
     
     # Create 4-Velocity bins as well as the Y-value bins directly
