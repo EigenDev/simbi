@@ -1387,7 +1387,7 @@ def main():
     if not args.save:
         plt.show()
     else:
-         plt.savefig('{}.png'.format(args.save.replace(' ', '_')), dpi=500)
+         plt.savefig('{}.pdf'.format(args.save.replace(' ', '_')), dpi=500)
     
 if __name__ == '__main__':
     main()
