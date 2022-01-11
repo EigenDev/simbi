@@ -1289,7 +1289,7 @@ def main():
                     plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
             elif args.de_domega or args.dm_domega:
                 if args.sub_split is None:
-                    plot_dx_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=i, ax_col=idx)
+                    plot_dx_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=i-1, ax_col=idx)
                 else:
                     if ax_shift:
                         ax_col   = 0
