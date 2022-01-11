@@ -955,7 +955,7 @@ def plot_dx_domega(
 
     col       = case % len(args.sub_split) if args.sub_split is not None else case
     color_len = len(args.sub_split) if args.sub_split is not None else len(args.filename)
-    colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
+    colors    = plt.cm.inferno(np.linspace(0.0, 0.75, color_len))
     
     u                          = fields['gamma_beta']
     tcenter                    = 0.5 * (tv[1:] + tv[:-1])
@@ -989,13 +989,29 @@ def plot_dx_domega(
             ax.step(theta_bin_edges[:-1], iso_var, label=label)
         else:
             var_per_theta = 4.0 * np.pi * np.sum(var, axis=1) / domega[:,0]
-            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[col], label=label+r" ($\Gamma \beta > {})$".format(cutoff))
+            
+            if args.labels[0] == "":
+                label=r"$\Gamma \beta > {}$".format(cutoff)
+                if args.norm:
+                    label += r" (scaled by {:.1e} ergs)".format(var_per_theta.max())
+            else:
+                label=label+r"$\Gamma \beta > {}$.format(cutoff)"
+                
+            if args.norm:
+                var_per_theta /= var_per_theta.max()
+            
+            
+
+            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[col], linestyle=next(linecycler), label=label)
         
                 
     ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
+    
+    if args.ylims is not None:
+        ax.set_ylim(args.ylims[0], args.ylims[1])
     if args.sub_split is None:
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
-        if len(args.cutoff):
+        if len(args.cutoff) == 1:
             if args.kinetic:
                 ax.set_ylabel(r'$E_{{\rm K, iso}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=15)
             elif args.enthalpy:
@@ -1005,14 +1021,16 @@ def plot_dx_domega(
             else:
                 ax.set_ylabel(r'$E_{{\rm T, iso}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=15)
         else:
+            units = r'[\rm{{erg}}]' if not args.norm else ''
             if args.kinetic:
-                ax.set_ylabel(r'$E_{{\rm K, iso}} \ (> \Gamma \beta)\ [\rm{{erg}}]$', fontsize=15)
+                ax.set_ylabel(r'$E_{{\rm K, iso}} \ (> \Gamma \beta)\ %s$'%(units), fontsize=15)
             elif args.enthalpy:
-                ax.set_ylabel(r'$H_{\rm iso} \ (>\Gamma \beta) \ [\rm{{erg}}]$', fontsize=15)
+                ax.set_ylabel(r'$H_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
             elif args.dm_domega:
-                ax.set_ylabel(r'$M_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{g}}]$', fontsize=15)
+                units = r'[\rm{{g}}]' if not args.norm else ''
+                ax.set_ylabel(r'$M_{\rm{iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
             else:
-                ax.set_ylabel(r'$E_{{\rm T, iso}} \ (>\Gamma \beta) \ [\rm{{erg}}]$', fontsize=15)
+                ax.set_ylabel(r'$E_{{\rm T, iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
         
     
         ax.tick_params('both', labelsize=15)
@@ -1304,12 +1322,13 @@ def main():
                     else:
                         fig.text(0.030, 0.5, r'$E_{{\rm T, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=20, va='center', rotation='vertical')
             else:
+                units = "[\rm{erg}]" if not args.norm else ""
                 if args.kinetic:
-                    fig.text(0.030, 0.5, r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+                    fig.text(0.030, 0.5, r'$E_{\rm K}( > \Gamma \beta) \ %s$'%(units), fontsize=20, va='center', rotation='vertical')
                 elif args.enthalpy:
-                    fig.text(0.030, 0.5, r'$H( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+                    fig.text(0.030, 0.5, r'$H( > \Gamma \beta) \ %s$'%(units), fontsize=20, va='center', rotation='vertical')
                 else:
-                    fig.text(0.030, 0.5, r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+                    fig.text(0.030, 0.5, r'$E_{\rm T}( > \Gamma \beta) \ %s$'%(units), fontsize=20, va='center', rotation='vertical')
             axs_iter       = iter(axs)            # iterators for the multi-plot
             subplot_iter   = iter(args.sub_split) # iterators for the subplot splitting
             
