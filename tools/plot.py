@@ -1252,7 +1252,7 @@ def main():
             if args.de_domega or args.dm_domega:
                 axs[-1].set_xlabel(r'$\theta \ \rm[deg]$', fontsize=20)
             else:
-                axs[-1].set_xlabel(r'$\log \Gamma \beta$', fontsize=20)
+                axs[-1].set_xlabel(r'$\Gamma \beta$', fontsize=20)
             if args.de_domega or args.dm_domega:
                 if args.kinetic:
                     fig.text(0.030, 0.5, r'$E_{{\rm K, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=20, va='center', rotation='vertical')
