@@ -1375,7 +1375,7 @@ def main():
                 
     if args.labels is not None:
         if args.sub_split is not None:
-            axs[0].legend(fontsize=7, loc='upper right')
+            axs[0].legend(fontsize=15, loc='upper right')
             # for ax in axs:
             #     ax.legend(fontsize=7, loc='upper right')
         else:
