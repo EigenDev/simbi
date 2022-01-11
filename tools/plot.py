@@ -993,7 +993,7 @@ def plot_dx_domega(
             if args.labels[0] == "":
                 label=r"$\Gamma \beta > {}$".format(cutoff)
                 if args.norm:
-                    label += r" (scaled by {:.1e} ergs)".format(var_per_theta.max())
+                    label += r" (scaled by E_k = {:.1e} ergs)".format(var.sum())
             else:
                 label=label+r"$\Gamma \beta > {}$.format(cutoff)"
                 
