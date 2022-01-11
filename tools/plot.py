@@ -753,7 +753,7 @@ def plot_hist(
             var /= var.max()
             fill_below_intersec(gbs_1d, var, 1e-6, colors[0])
             
-        ax.hist(gbs_1d, bins=gbs_1d, weights=var, alpha=0.8, label= r'sphere', color='black', histtype='step', linewidth=3.0)
+        ax.hist(gbs_1d, bins=gbs_1d, weights=var, alpha=0.8, label= r'$\epsilon = 0$', color='black', histtype='step', linewidth=3.0)
         
         
     if not overplot:
@@ -900,7 +900,7 @@ def plot_dx_domega(
         
         total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
         print(f"1D var sum with GB > {args.cutoff}: {total_var}")
-        ax.axhline(total_var, linestyle='--', color='black', label='sphere')
+        ax.axhline(total_var, linestyle='--', color='black', label='$\epsilon = 0$')
                 
     def de_domega(var, gamma_beta, gamma_beta_cut, tz, domega, bin_edges):
         var = var.copy()
@@ -1015,6 +1015,8 @@ def plot_dx_domega(
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
     if args.log:
         ax.set_yscale('log')
+        # logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+        # ax.yaxis.set_major_formatter(logfmt)
         
     if not overplot:
         return fig
@@ -1119,6 +1121,7 @@ def main():
     parser.add_argument('--subplots', dest='subplots', default = None, type=int)
     parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
     parser.add_argument('--anot_anchor', dest='anot_anchor', default = 'upper center', type=str)
+    parser.add_argument('--legend_loc', dest='legend_loc', default = None, type=str)
     
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
@@ -1363,7 +1366,10 @@ def main():
             # for ax in axs:
             #     ax.legend(fontsize=7, loc='upper right')
         else:
-            plt.legend()
+            if args.legend_loc is None:
+                plt.legend()
+            else:
+                plt.legend(loc=args.legend_loc)
             
     if not args.save:
         plt.show()
