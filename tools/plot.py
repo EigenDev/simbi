@@ -1393,14 +1393,14 @@ def main():
                 
     if args.labels is not None:
         if args.sub_split is not None:
-            axs[0].legend(fontsize=15, loc='upper right')
+            axs[0].legend(fontsize=20, loc='upper right')
             # for ax in axs:
             #     ax.legend(fontsize=7, loc='upper right')
         else:
             if args.legend_loc is None:
-                plt.legend()
+                plt.legend(fontsize=15)
             else:
-                plt.legend(loc=args.legend_loc)
+                plt.legend(loc=args.legend_loc, fontsize=15)
             
     if not args.save:
         plt.show()
