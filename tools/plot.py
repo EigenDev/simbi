@@ -955,7 +955,7 @@ def plot_dx_domega(
         ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[col], label=label)
     
     if ax_col == 0:
-        etot = np.sum(edens_total * 2.0 * np.pi * dV * e_scale.value)
+        etot = np.sum(prims2cons(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
         order_of_mag = np.floor(np.log10(etot))
         front_factor = int(etot / 10**order_of_mag)
         if front_factor != 1:
