@@ -806,7 +806,7 @@ def plot_hist(
         else:
             anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)     
         at = AnchoredText(
-        anchor_text, prop=dict(size=15), frameon=False, loc='upper center')
+        anchor_text, prop=dict(size=15), frameon=False, loc='upper left')
         at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
         ax.add_artist(at)
         
@@ -933,7 +933,7 @@ def plot_dx_domega(
     domega                     = 2 * np.pi * np.sin(tcenter) *(tv[1:] - tv[:-1])
     var[u < args.cutoff]       = 0
 
-    label = f'{args.labels[case]}' if args.labels is not None else None
+    label = '$%s$'%(args.labels[case]) if args.labels is not None else None
     
     print(f'2D var sum with GB > {args.cutoff}: {var.sum()}')
     if args.hist:
