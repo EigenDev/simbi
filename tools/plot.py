@@ -11,6 +11,7 @@ import astropy.units as u
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from typing import Union
 from matplotlib.offsetbox import AnchoredText
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from itertools import cycle
 
 try:
@@ -815,7 +816,7 @@ def plot_hist(
         var /= var.max()
 
     if args.labels:
-        if args.tex_label:
+        if args.tex:
             label = '$\%s$'%(args.labels[case])
         else:
             label = '$%s$'%(args.labels[case])
@@ -880,8 +881,7 @@ def plot_dx_domega(
     ax_col:        int=0,
     ax_num:        int=0) -> None:
     
-    plt.style.use('seaborn-paper')
-    
+    plt.style.use('seaborn-colorblind')
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
@@ -913,7 +913,7 @@ def plot_dx_domega(
     
     col       = case % len(args.sub_split) if args.sub_split is not None else case
     color_len = len(args.sub_split) if args.sub_split is not None else len(args.filename)
-    colors    = plt.cm.plasma(np.linspace(0.25, 0.75, color_len))
+    colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.80, color_len if color_len > 1 else len(args.cutoff)))
     coloriter = cycle(colors)
     
     tend        = dset[case]['time']
@@ -931,6 +931,12 @@ def plot_dx_domega(
         else:
             anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)
         
+        if args.anch_text is not None:
+            if args.tex:
+                anchor_text += "\n     $\%s$"%(args.anch_text)
+            else:
+                anchor_text += "\n %s"%(args.anch_text)
+                
         at = AnchoredText(
         anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_anchor)
         at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
@@ -962,11 +968,14 @@ def plot_dx_domega(
     dtheta                     = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
     domega                     = 2 * np.pi * np.sin(tcenter) *(tv[1:] - tv[:-1])
 
+    # Create inset of width 1.3 inches and height 0.9 inches
+    # at the default upper right location
+    axins = inset_axes(ax, width="30%", height="30%",loc='center right')
     
     for cutoff in args.cutoff:
         var[u < cutoff]       = 0
         if args.labels:
-            if args.tex_label:
+            if args.tex:
                 label = '$\%s$'%(args.labels[case])
             else:
                 label = '$%s$'%(args.labels[case])
@@ -1000,14 +1009,20 @@ def plot_dx_domega(
                 
             if args.norm:
                 var_per_theta /= var_per_theta.max()
-
-            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta,linestyle=next(linecycler), label=label)
-        
                 
+            axins.plot(np.rad2deg(theta[:, 0]), var_per_theta, linestyle=next(linecycler))
+            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, linestyle=next(linecycler), label=label)
+        
+    
     ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
+    
     
     if args.ylims is not None:
         ax.set_ylim(args.ylims[0], args.ylims[1])
+        axins.set_ylim(args.ylims[0],args.ylims[1])
+        axins.set_xlim(80,100)
+        # axins.set_xticklabels([])
+        # axins.set_yticklabels([])
     if args.sub_split is None:
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
         if len(args.cutoff) == 1:
@@ -1039,6 +1054,11 @@ def plot_dx_domega(
         
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
+    
+    axins.spines['right'].set_visible(False)
+    axins.spines['top'].set_visible(False)
+    axins.spines['left'].set_visible(False)
+    axins.spines['bottom'].set_visible(False)
 
     if args.setup != "":
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
@@ -1047,8 +1067,10 @@ def plot_dx_domega(
         # logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
         # ax.yaxis.set_major_formatter(logfmt)
         
-    if not overplot:
-        return fig
+    if not args.sub_split:
+        if args.labels:
+            ax.legend(fontsize=10, loc=args.legend_loc)
+            
     
 def main():
     parser = argparse.ArgumentParser(
@@ -1144,13 +1166,14 @@ def main():
     parser.add_argument('--ylims', dest='ylims', default = None, type=float, nargs=2)
     parser.add_argument('--units', dest='units', default = False, action='store_true')
     parser.add_argument('--dbg', dest='dbg', default = False, action='store_true')
-    parser.add_argument('--tex_label', dest='tex_label', default = False, action='store_true')
+    parser.add_argument('--tex', dest='tex', default = False, action='store_true')
     parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
     parser.add_argument('--pictorial', dest='pictorial', default = False, action='store_true')
     parser.add_argument('--subplots', dest='subplots', default = None, type=int)
     parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
     parser.add_argument('--anot_anchor', dest='anot_anchor', default = 'upper center', type=str)
     parser.add_argument('--legend_loc', dest='legend_loc', default = None, type=str)
+    parser.add_argument('--anch_text', dest='anch_text', default = None, type=str)
     
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
@@ -1397,10 +1420,11 @@ def main():
             # for ax in axs:
             #     ax.legend(fontsize=7, loc='upper right')
         else:
-            if args.legend_loc is None:
-                plt.legend(fontsize=10)
-            else:
-                plt.legend(loc=args.legend_loc, fontsize=10)
+            pass
+            # if args.legend_loc is None:
+            #     plt.legend(fontsize=10)
+            # else:
+            #     plt.legend(loc=args.legend_loc, fontsize=10)
             
     if not args.save:
         plt.show()
