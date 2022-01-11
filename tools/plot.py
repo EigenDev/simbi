@@ -1020,7 +1020,7 @@ def plot_dx_domega(
     if args.ylims is not None:
         ax.set_ylim(args.ylims[0], args.ylims[1])
         axins.set_ylim(args.ylims[0],args.ylims[1])
-        axins.set_xlim(80,100)
+        axins.set_xlim(84,95)
         # axins.set_xticklabels([])
         # axins.set_yticklabels([])
     if args.sub_split is None:
