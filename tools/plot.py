@@ -813,8 +813,8 @@ def plot_hist(
         else:
             anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)     
         at = AnchoredText(
-        anchor_text, prop=dict(size=15), frameon=False, loc='upper left')
-        at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
+        anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_anchor)
+        at.patch.set_boxstyle("round,pad=0.1,rounding_size=0.2")
         ax.add_artist(at)
         
         #1D Comparison 
@@ -975,9 +975,9 @@ def plot_dx_domega(
             anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ erg"%(front_factor, order_of_mag)     
         else:
             anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)
-            
+        
         at = AnchoredText(
-        anchor_text, prop=dict(size=15), frameon=False, loc='upper center')
+        anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_anchor)
         at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
         ax.add_artist(at)
         #1D Comparison 
@@ -1118,6 +1118,7 @@ def main():
     parser.add_argument('--pictorial', dest='pictorial', default = False, action='store_true')
     parser.add_argument('--subplots', dest='subplots', default = None, type=int)
     parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
+    parser.add_argument('--anot_anchor', dest='anot_anchor', default = 'upper center', type=str)
     
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
