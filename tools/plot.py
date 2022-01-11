@@ -986,11 +986,10 @@ def plot_dx_domega(
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
 
-    if args.sub_split is None:
+    if args.setup != "":
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
         
     if not overplot:
-        ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
         return fig
     
 def main():
