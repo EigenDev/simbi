@@ -883,8 +883,8 @@ def plot_dx_domega(
     
     plt.style.use('seaborn-colorblind')
     if not overplot:
-        fig = plt.figure(figsize=[9, 9], constrained_layout=False)
-        ax = fig.add_subplot(1, 1, 1)
+        fig = plt.figure(figsize=[9, 9])
+        ax  = fig.add_subplot(1, 1, 1)
     
     def calc_1d_dx_domega(ofield: dict) -> None:
         edens_1d = prims2cons(ofield, 'energy')
@@ -970,7 +970,7 @@ def plot_dx_domega(
 
     # Create inset of width 1.3 inches and height 0.9 inches
     # at the default upper right location
-    axins = inset_axes(ax, width="30%", height="30%",loc='center right')
+    axins = inset_axes(ax, width="30%", height="30%",loc='upper left', borderpad=3.25)
     
     for cutoff in args.cutoff:
         var[u < cutoff]       = 0
@@ -1009,9 +1009,10 @@ def plot_dx_domega(
                 
             if args.norm:
                 var_per_theta /= var_per_theta.max()
-                
-            axins.plot(np.rad2deg(theta[:, 0]), var_per_theta, linestyle=next(linecycler))
-            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, linestyle=next(linecycler), label=label)
+            
+            linestyle = next(linecycler)
+            axins.plot(np.rad2deg(theta[:, 0]), var_per_theta, linestyle=linestyle)
+            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, linestyle=linestyle, label=label)
         
     
     ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
@@ -1020,7 +1021,7 @@ def plot_dx_domega(
     if args.ylims is not None:
         ax.set_ylim(args.ylims[0], args.ylims[1])
         axins.set_ylim(args.ylims[0],args.ylims[1])
-        axins.set_xlim(84,95)
+        axins.set_xlim(85,95)
         # axins.set_xticklabels([])
         # axins.set_yticklabels([])
     if args.sub_split is None:
@@ -1057,8 +1058,8 @@ def plot_dx_domega(
     
     axins.spines['right'].set_visible(False)
     axins.spines['top'].set_visible(False)
-    axins.spines['left'].set_visible(False)
-    axins.spines['bottom'].set_visible(False)
+    # axins.spines['left'].set_visible(False)
+    # axins.spines['bottom'].set_visible(False)
 
     if args.setup != "":
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
