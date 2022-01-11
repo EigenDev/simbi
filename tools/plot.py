@@ -787,23 +787,6 @@ def plot_hist(
     gbs       = np.logspace(np.log10(1.e-3), np.log10(u.max()), 128)
     var       = np.asarray([var[u > gb].sum() for gb in gbs]) 
     
-    
-    if args.norm:
-        var /= var.max()
-
-    if args.labels:
-        if args.tex_label:
-            label = '$\%s$'%(args.labels[case])
-        else:
-            label = '$%s$'%(args.labels[case])
-    else:
-        label = None
-        
-    ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
-    
-    if args.fill_scale is not None:
-        fill_below_intersec(gbs, var, args.fill_scale*var.max(), colors[case])
-
     if ax_col == 0:
         etot = np.sum(edens_total * 2.0 * np.pi * dV * e_scale.value)
         order_of_mag = np.floor(np.log10(etot))
@@ -826,6 +809,23 @@ def plot_hist(
             else:
                 oned_field   = get_1d_equiv_file(args.oned_files[ax_num])
                 calc_1d_hist(oned_field)
+                
+    
+    if args.norm:
+        var /= var.max()
+
+    if args.labels:
+        if args.tex_label:
+            label = '$\%s$'%(args.labels[case])
+        else:
+            label = '$%s$'%(args.labels[case])
+    else:
+        label = None
+        
+    ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
+    
+    if args.fill_scale is not None:
+        fill_below_intersec(gbs, var, args.fill_scale*var.max(), colors[case])
                     
     
     ax.set_xscale('log')
@@ -918,6 +918,29 @@ def plot_dx_domega(
     r           = mesh['rr']
     dV          = calc_cell_volume(r, theta)
     
+    if ax_col == 0:
+        etot = np.sum(prims2cons(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
+        order_of_mag = np.floor(np.log10(etot))
+        front_factor = int(etot / 10**order_of_mag)
+        if front_factor != 1:
+            anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ erg"%(front_factor, order_of_mag)     
+        else:
+            anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)
+        
+        at = AnchoredText(
+        anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_anchor)
+        at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
+        ax.add_artist(at)
+        #1D Comparison 
+        if args.oned_files is not None:
+            if args.sub_split is None:
+                for file in args.oned_files:
+                    oned_field   = get_1d_equiv_file(file)
+                    calc_1d_dx_domega(oned_field)
+            else:
+                oned_field   = get_1d_equiv_file(args.oned_files[ax_num%len(args.oned_files)])
+                calc_1d_dx_domega(oned_field)  
+                
     if args.de_domega:
         if args.kinetic:
             mass   = 2.0 * np.pi * dV * fields['rho'] * fields['W']
@@ -966,29 +989,7 @@ def plot_dx_domega(
     else:
         var_per_theta = 4.0 * np.pi * np.sum(var, axis=1) / domega[:,0]
         ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[col], label=label)
-    
-    if ax_col == 0:
-        etot = np.sum(prims2cons(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
-        order_of_mag = np.floor(np.log10(etot))
-        front_factor = int(etot / 10**order_of_mag)
-        if front_factor != 1:
-            anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ erg"%(front_factor, order_of_mag)     
-        else:
-            anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)
         
-        at = AnchoredText(
-        anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_anchor)
-        at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
-        ax.add_artist(at)
-        #1D Comparison 
-        if args.oned_files is not None:
-            if args.sub_split is None:
-                for file in args.oned_files:
-                    oned_field   = get_1d_equiv_file(file)
-                    calc_1d_dx_domega(oned_field)
-            else:
-                oned_field   = get_1d_equiv_file(args.oned_files[ax_num%len(args.oned_files)])
-                calc_1d_dx_domega(oned_field)      
                 
     ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
     if args.sub_split is None:
