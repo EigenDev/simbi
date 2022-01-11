@@ -10,6 +10,7 @@ import astropy.constants as const
 import astropy.units as u 
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from typing import Union
+from matplotlib.offsetbox import AnchoredText
 
 try:
     import cmasher as cmr 
@@ -28,6 +29,9 @@ rho_scale  = m / (4./3. * np.pi * R_0 ** 3)
 e_scale    = m * c **2
 pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
 time_scale = R_0 / c
+
+lines = ["-","--","-.",":"]
+linecycler = iter(lines)
 
 def find_nearest(arr: list, val: float) -> Union[int, float]:
     arr = np.asarray(arr)
@@ -748,7 +752,7 @@ def plot_hist(
             var /= var.max()
             fill_below_intersec(gbs_1d, var, 1e-6, colors[0])
             
-        ax.hist(gbs_1d, bins=gbs_1d, weights=var, alpha=0.8, label= r'Sphere', histtype='step', linewidth=3.0)
+        ax.hist(gbs_1d, bins=gbs_1d, weights=var, alpha=0.8, label= r'sphere', color='black', histtype='step', linewidth=3.0)
         
         
     if not overplot:
@@ -788,12 +792,23 @@ def plot_hist(
         var /= var.max()
 
     label = None if args.labels is None else r'${}$'.format(args.labels[case])
-    ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', rwidth=1.0, linewidth=3.0, color=colors[col], alpha=0.7)
+    ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step',linestyle=next(linecycler), rwidth=1.0, linewidth=3.0, color=colors[col], alpha=0.7)
     
     if args.fill_scale is not None:
         fill_below_intersec(gbs, var, args.fill_scale*var.max(), colors[case])
 
     if ax_col == 0:
+        order_of_mag = np.floor(np.log10(var.max()))
+        front_factor = int(var.max() / 10**order_of_mag)
+        if front_factor != 1:
+            anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ erg"%(front_factor, order_of_mag)     
+        else:
+            anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)     
+        at = AnchoredText(
+        anchor_text, prop=dict(size=15), frameon=False, loc='upper center')
+        at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
+        ax.add_artist(at)
+        
         #1D Comparison 
         if args.oned_files is not None:
             if args.sub_split is None:
@@ -808,11 +823,18 @@ def plot_hist(
     ax.set_xscale('log')
     ax.set_yscale('log')
 
-    ax.set_xlim(1e-3, 1e2)
-    if args.mass:
-        ax.set_ylim(1e-3*var.max(), 10.0*var.max())
+    if args.xlims is None:
+        ax.set_xlim(1e-3, 1e2)
     else:
-        ax.set_ylim(1e-9*var.max(), 10.0*var.max())
+        ax.set_xlim(args.xlims[0], args.xlims[1])
+    
+    if args.ylims is None:
+        if args.mass:
+            ax.set_ylim(1e-3*var.max(), 10.0*var.max())
+        else:
+            ax.set_ylim(1e-9*var.max(), 10.0*var.max())
+    else:
+        ax.set_ylim(args.ylims[0],args.ylims[1])
         
     if args.sub_split is None:
         ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
@@ -831,6 +853,7 @@ def plot_hist(
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
 
+    
     if args.setup != "":
         ax.set_title(r'{}, t ={:.2f} s'.format(args.setup, tend), fontsize=20)
         
@@ -869,7 +892,7 @@ def plot_dx_domega(
         
         total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
         print(f"1D var sum with GB > {args.cutoff}: {total_var}")
-        ax.axhline(total_var, linestyle='--', color='black')
+        ax.axhline(total_var, linestyle='--', color='black', label='sphere')
                 
     def de_domega(var, gamma_beta, gamma_beta_cut, tz, domega, bin_edges):
         var = var.copy()
@@ -1042,8 +1065,11 @@ def main():
     parser.add_argument('--cutoff', dest='cutoff', default=0.0, type=float,
                         help='The 4-velocity cutoff value for the dE/dOmega plot')
     
-    parser.add_argument('--fill_scale', dest = 'fill_scale', metavar='Filler maximum', type=float,
+    parser.add_argument('--fill_scale', dest ='fill_scale', metavar='Filler maximum', type=float,
                         default = None, help='Set the y-scale to start plt.fill_between')
+    
+    parser.add_argument('--ax_anchor', dest='ax_anchor', type=str, nargs='+', default=None, 
+                        help='Anchor annotation text for each plot')
     
     parser.add_argument('--norm', dest='norm', action='store_true',
                         default=False, help='True if you want the plot normalized to max value')
@@ -1056,7 +1082,8 @@ def main():
     
     parser.add_argument('--wedge', dest='wedge', default=False, action='store_true')
     parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 80, 110], type=float, nargs=4)
-
+    parser.add_argument('--xlims', dest='xlims', default = None, type=float, nargs=2)
+    parser.add_argument('--ylims', dest='ylims', default = None, type=float, nargs=2)
     parser.add_argument('--units', dest='units', default = False, action='store_true')
     parser.add_argument('--dbg', dest='dbg', default = False, action='store_true')
     parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
@@ -1217,7 +1244,7 @@ def main():
             fig, ax = plt.subplots(1, 1, figsize=(8,8))
             lines_per_plot = len(args.filename)
         else:
-            fig,axs = plt.subplots(num_subplots, 1, figsize=(8,2 * num_subplots), sharex=True, tight_layout=False)
+            fig,axs = plt.subplots(num_subplots, 1, figsize=(8,4 * num_subplots), sharex=True, tight_layout=False)
             if args.setup != "":
                 fig.suptitle(f'{args.setup}')
             if args.de_domega or args.dm_domega:
