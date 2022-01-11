@@ -799,10 +799,9 @@ def plot_hist(
         fill_below_intersec(gbs, var, args.fill_scale*var.max(), colors[case])
 
     if ax_col == 0:
-        order_of_mag = np.floor(np.log10(var.max()))
-        front_factor = int(var.max() / 10**order_of_mag)
-        print(var.max())
-        zzz = input('Press enter to continue')
+        etot = np.sum(edens_total * 2.0 * np.pi * dV * e_scale.value)
+        order_of_mag = np.floor(np.log10(etot))
+        front_factor = int(etot / 10**order_of_mag)
         if front_factor != 1:
             anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ erg"%(front_factor, order_of_mag)     
         else:
