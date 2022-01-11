@@ -11,6 +11,7 @@ import astropy.units as u
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from typing import Union
 from matplotlib.offsetbox import AnchoredText
+from itertools import cycle
 
 try:
     import cmasher as cmr 
@@ -31,7 +32,7 @@ pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
 time_scale = R_0 / c
 
 lines = ["-","--","-.",":"]
-linecycler = iter(lines)
+linecycler = cycle(lines)
 
 def find_nearest(arr: list, val: float) -> Union[int, float]:
     arr = np.asarray(arr)
@@ -792,7 +793,7 @@ def plot_hist(
         var /= var.max()
 
     label = None if args.labels is None else r'${}$'.format(args.labels[case])
-    ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step',linestyle=next(linecycler), rwidth=1.0, linewidth=3.0, color=colors[col], alpha=0.7)
+    ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', rwidth=1.0, linewidth=3.0, color=colors[col], alpha=0.7)
     
     if args.fill_scale is not None:
         fill_below_intersec(gbs, var, args.fill_scale*var.max(), colors[case])
