@@ -899,7 +899,7 @@ def plot_dx_domega(
             var = etotal_1d
         
         total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
-        print(f"1D var sum with GB > {args.cutoff}: {total_var}")
+        print(f"1D var sum with GB > {args.cutoff[0]}: {total_var}")
         ax.axhline(total_var, linestyle='--', color='black', label='$\epsilon = 0$')
                 
     def de_domega(var, gamma_beta, gamma_beta_cut, tz, domega, bin_edges):
@@ -961,47 +961,58 @@ def plot_dx_domega(
     tcenter                    = 0.5 * (tv[1:] + tv[:-1])
     dtheta                     = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
     domega                     = 2 * np.pi * np.sin(tcenter) *(tv[1:] - tv[:-1])
-    var[u < args.cutoff]       = 0
-
-    if args.labels:
-        if args.tex_label:
-            label = '$\%s$'%(args.labels[case])
-        else:
-            label = '$%s$'%(args.labels[case])
-    else:
-        label = None
     
-    print(f'2D var sum with GB > {args.cutoff}: {var.sum()}')
-    if args.hist:
-        deg_per_bin      = 3 # degrees in bin 
-        num_bins         = int(deg_per_bin / dtheta) 
-        theta_bin_edges  = np.linspace(theta[0,0], theta[-1,0], num_bins + 1)
-        dx, _            = np.histogram(tcenter, weights=var,    bins=theta_bin_edges)
-        dw, _            = np.histogram(tcenter[:,0], weights=domega[:,0], bins=theta_bin_edges)
-
-        domega_cone = np.array([sum(domega[i:i+num_bins]) for i in range(0, len(domega), num_bins)])
-        dx_cone     = np.array([sum(var[i:i+num_bins]) for i in range(0, len(var), num_bins)])
-        dx_domega   = 4.0 * np.pi * np.sum(dx_cone, axis=1) / domega_cone[:,0]
+    for cutoff in args.cutoff:
+        var[u < cutoff]       = 0
+        if args.labels:
+            if args.tex_label:
+                label = '$\%s$'%(args.labels[case])
+            else:
+                label = '$%s$'%(args.labels[case])
+        else:
+            label = None
         
-        iso_var         = 4.0 * np.pi * dx/dw
-        theta_bin_edges = np.rad2deg(theta_bin_edges)
-        ax.step(theta_bin_edges[:-1], iso_var, label=label)
-    else:
-        var_per_theta = 4.0 * np.pi * np.sum(var, axis=1) / domega[:,0]
-        ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[col], label=label)
+        print(f'2D var sum with GB > {cutoff}: {var.sum()}')
+        if args.hist:
+            deg_per_bin      = 3 # degrees in bin 
+            num_bins         = int(deg_per_bin / dtheta) 
+            theta_bin_edges  = np.linspace(theta[0,0], theta[-1,0], num_bins + 1)
+            dx, _            = np.histogram(tcenter, weights=var,    bins=theta_bin_edges)
+            dw, _            = np.histogram(tcenter[:,0], weights=domega[:,0], bins=theta_bin_edges)
+
+            domega_cone = np.array([sum(domega[i:i+num_bins]) for i in range(0, len(domega), num_bins)])
+            dx_cone     = np.array([sum(var[i:i+num_bins]) for i in range(0, len(var), num_bins)])
+            dx_domega   = 4.0 * np.pi * np.sum(dx_cone, axis=1) / domega_cone[:,0]
+            
+            iso_var         = 4.0 * np.pi * dx/dw
+            theta_bin_edges = np.rad2deg(theta_bin_edges)
+            ax.step(theta_bin_edges[:-1], iso_var, label=label)
+        else:
+            var_per_theta = 4.0 * np.pi * np.sum(var, axis=1) / domega[:,0]
+            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[col], label=label+r" ($\Gamma \beta > {})$".format(cutoff))
         
                 
     ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
     if args.sub_split is None:
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
-        if args.kinetic:
-            ax.set_ylabel(r'$E_{{\rm K, iso}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
-        elif args.enthalpy:
-            ax.set_ylabel(r'$H_{\rm iso} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
-        elif args.dm_domega:
-            ax.set_ylabel(r'$M_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoff), fontsize=15)
+        if len(args.cutoff):
+            if args.kinetic:
+                ax.set_ylabel(r'$E_{{\rm K, iso}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=15)
+            elif args.enthalpy:
+                ax.set_ylabel(r'$H_{\rm iso} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=15)
+            elif args.dm_domega:
+                ax.set_ylabel(r'$M_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoff[0]), fontsize=15)
+            else:
+                ax.set_ylabel(r'$E_{{\rm T, iso}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=15)
         else:
-            ax.set_ylabel(r'$E_{{\rm T, iso}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=15)
+            if args.kinetic:
+                ax.set_ylabel(r'$E_{{\rm K, iso}} \ (> \Gamma \beta)\ [\rm{{erg}}]$', fontsize=15)
+            elif args.enthalpy:
+                ax.set_ylabel(r'$H_{\rm iso} \ (>\Gamma \beta) \ [\rm{{erg}}]$', fontsize=15)
+            elif args.dm_domega:
+                ax.set_ylabel(r'$M_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{g}}]$', fontsize=15)
+            else:
+                ax.set_ylabel(r'$E_{{\rm T, iso}} \ (>\Gamma \beta) \ [\rm{{erg}}]$', fontsize=15)
         
     
         ax.tick_params('both', labelsize=15)
@@ -1092,7 +1103,7 @@ def main():
                         default=False,
                         help='Plot the dM/dOmega plot')
     
-    parser.add_argument('--cutoff', dest='cutoff', default=0.0, type=float,
+    parser.add_argument('--cutoff', dest='cutoff', default=[0.0], type=float, nargs='+',
                         help='The 4-velocity cutoff value for the dE/dOmega plot')
     
     parser.add_argument('--fill_scale', dest ='fill_scale', metavar='Filler maximum', type=float,
@@ -1285,12 +1296,13 @@ def main():
             else:
                 axs[-1].set_xlabel(r'$\Gamma \beta$', fontsize=20)
             if args.de_domega or args.dm_domega:
-                if args.kinetic:
-                    fig.text(0.030, 0.5, r'$E_{{\rm K, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=20, va='center', rotation='vertical')
-                elif args.dm_domega:
-                    fig.text(0.030, 0.5, r'$M_{{\rm iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=20, va='center', rotation='vertical')
-                else:
-                    fig.text(0.030, 0.5, r'$E_{{\rm T, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff), fontsize=20, va='center', rotation='vertical')
+                if len(args.cuotff) == 1:
+                    if args.kinetic:
+                        fig.text(0.030, 0.5, r'$E_{{\rm K, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=20, va='center', rotation='vertical')
+                    elif args.dm_domega:
+                        fig.text(0.030, 0.5, r'$M_{{\rm iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=20, va='center', rotation='vertical')
+                    else:
+                        fig.text(0.030, 0.5, r'$E_{{\rm T, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=20, va='center', rotation='vertical')
             else:
                 if args.kinetic:
                     fig.text(0.030, 0.5, r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
