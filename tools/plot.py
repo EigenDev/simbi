@@ -1398,9 +1398,9 @@ def main():
             #     ax.legend(fontsize=7, loc='upper right')
         else:
             if args.legend_loc is None:
-                plt.legend(fontsize=15)
+                plt.legend(fontsize=10)
             else:
-                plt.legend(loc=args.legend_loc, fontsize=15)
+                plt.legend(loc=args.legend_loc, fontsize=10)
             
     if not args.save:
         plt.show()
