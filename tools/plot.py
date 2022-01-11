@@ -791,7 +791,14 @@ def plot_hist(
     if args.norm:
         var /= var.max()
 
-    label = None if args.labels is None else r'${}$'.format(args.labels[case])
+    if args.labels:
+        if args.tex_label:
+            label = '$\%s$'%(args.labels[case])
+        else:
+            label = '$%s$'%(args.labels[case])
+    else:
+        label = None
+        
     ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
     
     if args.fill_scale is not None:
@@ -933,7 +940,13 @@ def plot_dx_domega(
     domega                     = 2 * np.pi * np.sin(tcenter) *(tv[1:] - tv[:-1])
     var[u < args.cutoff]       = 0
 
-    label = '$%s$'%(args.labels[case]) if args.labels is not None else None
+    if args.labels:
+        if args.tex_label:
+            label = '$\%s$'%(args.labels[case])
+        else:
+            label = '$%s$'%(args.labels[case])
+    else:
+        label = None
     
     print(f'2D var sum with GB > {args.cutoff}: {var.sum()}')
     if args.hist:
@@ -1100,6 +1113,7 @@ def main():
     parser.add_argument('--ylims', dest='ylims', default = None, type=float, nargs=2)
     parser.add_argument('--units', dest='units', default = False, action='store_true')
     parser.add_argument('--dbg', dest='dbg', default = False, action='store_true')
+    parser.add_argument('--tex_label', dest='tex_label', default = False, action='store_true')
     parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
     parser.add_argument('--pictorial', dest='pictorial', default = False, action='store_true')
     parser.add_argument('--subplots', dest='subplots', default = None, type=int)
