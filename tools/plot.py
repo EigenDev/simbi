@@ -955,6 +955,18 @@ def plot_dx_domega(
         ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[col], label=label)
     
     if ax_col == 0:
+        etot = np.sum(edens_total * 2.0 * np.pi * dV * e_scale.value)
+        order_of_mag = np.floor(np.log10(etot))
+        front_factor = int(etot / 10**order_of_mag)
+        if front_factor != 1:
+            anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ erg"%(front_factor, order_of_mag)     
+        else:
+            anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)
+            
+        at = AnchoredText(
+        anchor_text, prop=dict(size=15), frameon=False, loc='upper center')
+        at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
+        ax.add_artist(at)
         #1D Comparison 
         if args.oned_files is not None:
             if args.sub_split is None:
@@ -988,6 +1000,8 @@ def plot_dx_domega(
 
     if args.setup != "":
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
+    if args.log:
+        ax.set_yscale('log')
         
     if not overplot:
         return fig
