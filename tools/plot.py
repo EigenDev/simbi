@@ -933,7 +933,7 @@ def plot_dx_domega(
         
         if args.anch_text is not None:
             if args.tex:
-                anchor_text += "\n     $\%s$"%(args.anch_text)
+                anchor_text += "\n    $\%s$"%(args.anch_text)
             else:
                 anchor_text += "\n %s"%(args.anch_text)
                 
