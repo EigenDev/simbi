@@ -880,6 +880,8 @@ def plot_dx_domega(
     ax_col:        int=0,
     ax_num:        int=0) -> None:
     
+    plt.style.use('seaborn-paper')
+    
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
@@ -909,8 +911,10 @@ def plot_dx_domega(
         dw = np.hist(tz, weights=domega, bins=theta_bin_edges)
         return de / dw
     
+    col       = case % len(args.sub_split) if args.sub_split is not None else case
     color_len = len(args.sub_split) if args.sub_split is not None else len(args.filename)
-    colors    = plt.cm.plasma(np.linspace(0.1, 0.8, color_len))
+    colors    = plt.cm.plasma(np.linspace(0.25, 0.75, color_len))
+    coloriter = cycle(colors)
     
     tend        = dset[case]['time']
     theta       = mesh['theta']
@@ -952,15 +956,12 @@ def plot_dx_domega(
             var = edens_total * 2.0 * np.pi * dV * e_scale.value
     elif args.dm_domega:
         var = 2.0 * np.pi * dV * fields['rho'] * m.value
-
-    col       = case % len(args.sub_split) if args.sub_split is not None else case
-    color_len = len(args.sub_split) if args.sub_split is not None else len(args.filename)
-    colors    = plt.cm.inferno(np.linspace(0.0, 0.75, color_len))
     
     u                          = fields['gamma_beta']
     tcenter                    = 0.5 * (tv[1:] + tv[:-1])
     dtheta                     = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
     domega                     = 2 * np.pi * np.sin(tcenter) *(tv[1:] - tv[:-1])
+
     
     for cutoff in args.cutoff:
         var[u < cutoff]       = 0
@@ -993,16 +994,14 @@ def plot_dx_domega(
             if args.labels[0] == "":
                 label=r"$E_k(\Gamma \beta > {})$".format(cutoff)
                 if args.norm:
-                    label += r"/ {:.1e} ergs)".format(var.sum())
+                    label += r" / {:.1e} ergs)".format(var.sum())
             else:
                 label=label+r"$\Gamma \beta > {}$.format(cutoff)"
                 
             if args.norm:
                 var_per_theta /= var_per_theta.max()
-            
-            
 
-            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, color=colors[col], linestyle=next(linecycler), label=label)
+            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta,linestyle=next(linecycler), label=label)
         
                 
     ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
@@ -1023,7 +1022,7 @@ def plot_dx_domega(
         else:
             units = r'[\rm{{erg}}]' if not args.norm else ''
             if args.kinetic:
-                ax.set_ylabel(r'$E_{{\rm K, iso}} \ (> \Gamma \beta)\ %s$'%(units), fontsize=15)
+                ax.set_ylabel(r'$\tilde{E}_{{\rm K, iso}} \ (> \Gamma \beta)\ %s$'%(units), fontsize=15)
             elif args.enthalpy:
                 ax.set_ylabel(r'$H_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
             elif args.dm_domega:
