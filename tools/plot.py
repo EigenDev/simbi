@@ -992,11 +992,11 @@ def plot_dx_domega(
             var_per_theta = 4.0 * np.pi * np.sum(var, axis=1) / domega[:,0]
             
             if args.labels[0] == "":
-                label=r"$E_k(\Gamma \beta > {})$".format(cutoff)
+                label=r"$E_k( > {})$".format(cutoff)
                 if args.norm:
                     label += r" / {:.1e} ergs)".format(var.sum())
             else:
-                label=label+r"$\Gamma \beta > {}$.format(cutoff)"
+                label=label+r"$ > {}$.format(cutoff)"
                 
             if args.norm:
                 var_per_theta /= var_per_theta.max()
