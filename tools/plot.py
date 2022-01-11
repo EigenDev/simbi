@@ -779,8 +779,7 @@ def plot_hist(
 
     # Check if subplots are split amonst the file inputs. If so, roll the colors
     # to reset when on a different axes object
-    col       = case % args.sub_split[ax_num] if args.sub_split is not None else case
-    color_len = len(args.sub_split) if args.sub_split is not None else len(args.filename)
+    color_len = len(args.sub_split[ax_num]) if args.sub_split is not None else len(args.filename)
     colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
     
     # Create 4-Velocity bins as well as the Y-value bins directly
@@ -793,7 +792,7 @@ def plot_hist(
         var /= var.max()
 
     label = None if args.labels is None else r'${}$'.format(args.labels[case])
-    ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', rwidth=1.0, linewidth=3.0, color=colors[col], alpha=0.7)
+    ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
     
     if args.fill_scale is not None:
         fill_below_intersec(gbs, var, args.fill_scale*var.max(), colors[case])
@@ -1290,7 +1289,7 @@ def main():
                     plot_hist(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
             elif args.de_domega or args.dm_domega:
                 if args.sub_split is None:
-                    plot_dx_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx, ax_col=idx)
+                    plot_dx_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=i, ax_col=idx)
                 else:
                     if ax_shift:
                         ax_col   = 0
