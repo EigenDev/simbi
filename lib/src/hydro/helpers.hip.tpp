@@ -31,22 +31,26 @@ namespace simbi{
             real dr  = s->coord_lattice.gpu_dx1[ii];
             real rho = prim_buff[tid].rho;
             real p   = prim_buff[tid].p;
-            real v   = prim_buff[tid].v;
         
             if constexpr(is_relativistic<N>::value)
             {
+                // real gb  = prim_buff[tid].v;
+                // real w   = std::sqrt(1 + gb * gb);
+                // real v   = gb / w;
+                real v = prim_buff[tid].v;
                 real h = 1. + gamma * p / (rho * (gamma - 1.));
                 real cs = std::sqrt(gamma * p / (rho * h));
                 vPlus  = (v + cs) / (1 + v * cs);
                 vMinus = (v - cs) / (1 - v * cs);
             } else {
+                real v  = prim_buff[tid].v;
                 real cs = std::sqrt(gamma * p / rho );
-                vPlus  = (v + cs);
-                vMinus = (v - cs);
+                vPlus   = (v + cs);
+                vMinus  = (v - cs);
             }
 
             real cfl_dt = dr / (my_max(std::abs(vPlus), std::abs(vMinus)));
-            s->dt_min[ii] = s->CFL * cfl_dt;
+            s->dt_min[ii] = s->cfl * cfl_dt;
         }
         #endif
     }
@@ -174,7 +178,7 @@ namespace simbi{
                     break;
             } // end switch
 
-            s->dt_min[jj * s->xphysical_grid + ii] = s->CFL * cfl_dt;
+            s->dt_min[jj * s->xphysical_grid + ii] = s->cfl * cfl_dt;
         }
         #endif
     }
@@ -304,7 +308,7 @@ namespace simbi{
                     break;
             }
 
-        dt_buff[tid] = s->CFL * cfl_dt;
+        dt_buff[tid] = s->cfl * cfl_dt;
         __syncthreads();
 
         for (unsigned int stride=(blockDim.x*blockDim.y*blockDim.z)/2; stride>32; stride>>=1) 
