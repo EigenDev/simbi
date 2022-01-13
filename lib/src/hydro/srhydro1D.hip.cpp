@@ -34,7 +34,7 @@ typedef sr1d::Eigenvals Eigenvals;
 SRHD::SRHD(){}
 
 // Overloaded Constructor
-SRHD::SRHD(std::vector<std::vector<real>> u_state, real gamma, real CFL,
+SRHD::SRHD(std::vector<std::vector<real>> u_state, real gamma, real cfl,
            std::vector<real> r, std::string coord_system = "cartesian") :
 
     inFailureState(false),
@@ -42,7 +42,7 @@ SRHD::SRHD(std::vector<std::vector<real>> u_state, real gamma, real CFL,
     gamma(gamma),
     r(r),
     coord_system(coord_system),
-    CFL(CFL)
+    cfl(cfl)
 {
 
 }
@@ -291,7 +291,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         #else 
         auto* const conserved_buff = &cons[0];
         #endif 
-        __shared__ volatile bool found_failure;
+        volatile __shared__ bool found_failure;
         luint tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
         if (tx == 0) found_failure = self->inFailureState;
         simbi::gpu::api::synchronize();
@@ -299,6 +299,10 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         bool workLeftToDo = true;
         while (!found_failure && workLeftToDo)
         {
+            if (tx == 0 && self->inFailureState) 
+                found_failure = true;
+            simbi::gpu::api::synchronize();
+            
             // Compile time thread selection
             #if GPU_CODE
                 conserved_buff[tx] = self->gpu_cons[ii];
@@ -429,7 +433,7 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     
 };
 
-// Adapt the CFL conditonal timestep
+// Adapt the cfl conditonal timestep
 void SRHD::adapt_dt()
 {   
     real min_dt = INFINITY;
@@ -438,7 +442,7 @@ void SRHD::adapt_dt()
         real dr, cs, cfl_dt;
         real h, rho, p, v, vPLus, vMinus;
 
-        // Compute the minimum timestep given CFL
+        // Compute the minimum timestep given cfl
         #pragma omp for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++)
         {
@@ -458,7 +462,7 @@ void SRHD::adapt_dt()
         }
     }   
 
-    dt = CFL * min_dt;
+    dt = cfl * min_dt;
 };
 
 void SRHD::adapt_dt(SRHD *dev, luint blockSize)
