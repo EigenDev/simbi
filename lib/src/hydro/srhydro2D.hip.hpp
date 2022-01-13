@@ -24,7 +24,7 @@ namespace simbi
         std::vector<std::vector<real>> state2D;
         real plm_theta, gamma, bipolar;
         bool first_order, periodic, hllc, linspace, inFailureState;
-        real CFL, dt, decay_const;
+        real cfl, dt, decay_const;
         luint nx, ny, nzones, n, block_size, xphysical_grid, yphysical_grid;
         luint active_zones, idx_active, x_bound, y_bound;
         luint i_start, i_bound, j_start, j_bound;
@@ -49,7 +49,7 @@ namespace simbi
             real gamma, 
             std::vector<real> x1,
             std::vector<real> x2,
-            real CFL, 
+            real cfl, 
             std::string coord_system);
         ~SRHD2D();
 

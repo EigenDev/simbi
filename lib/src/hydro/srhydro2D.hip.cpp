@@ -27,7 +27,7 @@ SRHD2D::SRHD2D() {}
 
 // Overloaded Constructor
 SRHD2D::SRHD2D(std::vector<std::vector<real>> state2D, luint nx, luint ny, real gamma,
-               std::vector<real> x1, std::vector<real> x2, real CFL,
+               std::vector<real> x1, std::vector<real> x2, real cfl,
                std::string coord_system = "cartesian")
 :
 
@@ -38,7 +38,7 @@ SRHD2D::SRHD2D(std::vector<std::vector<real>> state2D, luint nx, luint ny, real 
     gamma(gamma),
     x1(x1),
     x2(x2),
-    CFL(CFL),
+    cfl(cfl),
     coord_system(coord_system),
     inFailureState(false)
 {
@@ -200,7 +200,7 @@ Conserved SRHD2D::calc_intermed_statesSR2D(const Primitive &prims,
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
 
-// Adapt the CFL conditonal timestep
+// Adapt the cfl conditonal timestep
 void SRHD2D::adapt_dt()
 {
     real min_dt = INFINITY;
@@ -212,7 +212,7 @@ void SRHD2D::adapt_dt()
         real plus_v1, plus_v2, minus_v1, minus_v2;
         luint aid; // active index id
 
-        // Compute the minimum timestep given CFL
+        // Compute the minimum timestep given cfl
         for (luint jj = 0; jj < yphysical_grid; jj++)
         {
             dx2 = coord_lattice.dx2[jj];
@@ -255,7 +255,7 @@ void SRHD2D::adapt_dt()
         } // end jj
     } // end parallel region
 
-    dt = CFL * min_dt;
+    dt = cfl * min_dt;
 };
 
 void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, luint bytes)
@@ -659,6 +659,9 @@ void SRHD2D::cons2prim(
             
         while (!found_failure && workLeftToDo)
         {
+            if (tid == 0 && self->inFailureState) 
+                found_failure = true;
+                
             #if GPU_CODE
             extern __shared__ Conserved  conserved_buff[];
             // load shared memory
