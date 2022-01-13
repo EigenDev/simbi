@@ -32,7 +32,7 @@ Newtonian2D::Newtonian2D(
     real gamma, 
     std::vector<real> x1, 
     std::vector<real> x2, 
-    real CFL, 
+    real cfl, 
     std::string coord_system = "cartesian")
 :
     init_state(init_state),
@@ -42,7 +42,7 @@ Newtonian2D::Newtonian2D(
     gamma(gamma),
     x1(x1),
     x2(x2),
-    CFL(CFL),
+    cfl(cfl),
     coord_system(coord_system),
     inFailureState(false)
 {}
@@ -273,7 +273,7 @@ Conserved Newtonian2D::prims2cons(const Primitive &prims)
 //---------------------------------------------------------------------
 
 
-// Adapt the CFL conditonal timestep
+// Adapt the cfl conditonal timestep
 void Newtonian2D::adapt_dt()
 {
     real min_dt = INFINITY;
@@ -321,7 +321,7 @@ void Newtonian2D::adapt_dt()
         } // end jj
     }// end parallel region
 
-    dt =  CFL * min_dt;
+    dt =  cfl * min_dt;
 };
 
 void Newtonian2D::adapt_dt(Newtonian2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, luint bytes)

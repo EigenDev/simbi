@@ -64,7 +64,7 @@ namespace simbi
 
             simbi::gpu::api::copyHostToDevice(&(device->dt),        &host.dt      ,            sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->gamma),     &host.gamma   ,            sizeof(real));
-            simbi::gpu::api::copyHostToDevice(&(device->CFL)  ,     &host.CFL     ,            sizeof(real));
+            simbi::gpu::api::copyHostToDevice(&(device->cfl)  ,     &host.cfl     ,            sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->nx),        &host.nx      ,            sizeof(int) );
             simbi::gpu::api::copyHostToDevice(&(device->idx_active),        &host.idx_active,            sizeof(int) );
             simbi::gpu::api::copyHostToDevice(&(device->active_zones),&host.active_zones,      sizeof(int) );
@@ -122,7 +122,7 @@ namespace simbi
 
             simbi::gpu::api::copyHostToDevice(&(device->dt),        &host.dt      ,            sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->gamma),     &host.gamma   ,            sizeof(real));
-            simbi::gpu::api::copyHostToDevice(&(device->CFL)  ,     &host.CFL     ,            sizeof(real));
+            simbi::gpu::api::copyHostToDevice(&(device->cfl)  ,     &host.cfl     ,            sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->nx),        &host.nx      ,            sizeof(int) );
             simbi::gpu::api::copyHostToDevice(&(device->idx_active),        &host.idx_active,  sizeof(int) );
             simbi::gpu::api::copyHostToDevice(&(device->active_zones),&host.active_zones,      sizeof(int) );
@@ -244,7 +244,7 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(&(device->dt),          &host.dt      ,    sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->plm_theta),   &host.plm_theta,   sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->gamma),       &host.gamma   ,    sizeof(real));
-            simbi::gpu::api::copyHostToDevice(&(device->CFL)  ,       &host.CFL     ,    sizeof(real));
+            simbi::gpu::api::copyHostToDevice(&(device->cfl)  ,       &host.cfl     ,    sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->nx),          &host.nx      ,    sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->ny),          &host.ny      ,    sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->i_bound),     &host.i_bound,     sizeof(int));
@@ -334,7 +334,7 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(&(device->dt),          &host.dt      ,    sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->plm_theta),   &host.plm_theta,   sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->gamma),       &host.gamma   ,    sizeof(real));
-            simbi::gpu::api::copyHostToDevice(&(device->CFL)  ,       &host.CFL     ,    sizeof(real));
+            simbi::gpu::api::copyHostToDevice(&(device->cfl)  ,       &host.cfl     ,    sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->nx),          &host.nx      ,    sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->ny),          &host.ny      ,    sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->idx_active),  &host.idx_active,  sizeof(int));
@@ -485,7 +485,7 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(&(device->dt),            &host.dt      ,        sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->plm_theta),     &host.plm_theta,       sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->gamma),         &host.gamma   ,        sizeof(real));
-            simbi::gpu::api::copyHostToDevice(&(device->CFL)  ,         &host.CFL     ,        sizeof(real));
+            simbi::gpu::api::copyHostToDevice(&(device->cfl)  ,         &host.cfl     ,        sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->nx),            &host.nx      ,        sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->ny),            &host.ny      ,        sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->nz),            &host.nz      ,        sizeof(int));

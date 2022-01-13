@@ -32,7 +32,7 @@ SRHD3D::SRHD3D(
     std::vector<real> x1, 
     std::vector<real> x2,
     std::vector<real> x3, 
-    real CFL,
+    real cfl,
     std::string coord_system = "cartesian")
 :
     nx(nx),
@@ -44,7 +44,7 @@ SRHD3D::SRHD3D(
     x1(x1),
     x2(x2),
     x3(x3),
-    CFL(CFL),
+    cfl(cfl),
     coord_system(coord_system)
 {
 
@@ -410,7 +410,7 @@ Conserved SRHD3D::prims2cons(const Primitive &prims)
 //---------------------------------------------------------------------
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
-// Adapt the CFL conditonal timestep
+// Adapt the cfl conditonal timestep
 void SRHD3D::adapt_dt()
 {
     real min_dt = INFINITY;
@@ -422,7 +422,7 @@ void SRHD3D::adapt_dt()
         real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
         luint aid; // active index id
 
-        // Compute the minimum timestep given CFL
+        // Compute the minimum timestep given cfl
         for (luint kk = 0; kk < zphysical_grid; kk++)
         {
             dx3  = coord_lattice.dx3[kk];
@@ -487,7 +487,7 @@ void SRHD3D::adapt_dt()
         } // end kk
     } // end parallel region
 
-    dt = CFL * min_dt;
+    dt = cfl * min_dt;
 };
 
 void SRHD3D::adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p)

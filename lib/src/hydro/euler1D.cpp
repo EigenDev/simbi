@@ -32,7 +32,7 @@ Newtonian1D::Newtonian1D () {}
 Newtonian1D::Newtonian1D(
     std::vector< std::vector<real> > init_state, 
     real gamma, 
-    real CFL, 
+    real cfl, 
     std::vector<real> r,
     std::string coord_system = "cartesian") :
 
@@ -40,7 +40,7 @@ Newtonian1D::Newtonian1D(
     gamma(gamma),
     r(r),
     coord_system(coord_system),
-    CFL(CFL),
+    cfl(cfl),
     inFailureState(false)
     {
 
@@ -155,7 +155,7 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
 
 };
 
-// Adapt the CFL conditonal timestep
+// Adapt the cfl conditonal timestep
 void Newtonian1D::adapt_dt(){
     real min_dt = INFINITY;
     #pragma omp parallel 
@@ -164,7 +164,7 @@ void Newtonian1D::adapt_dt(){
         real v, pre, rho;
         luint shift_i;
 
-        // Compute the minimum timestep given CFL
+        // Compute the minimum timestep given cfl
         #pragma omp for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++){
             shift_i = ii + idx_active;
@@ -182,7 +182,7 @@ void Newtonian1D::adapt_dt(){
         }
     }
 
-    dt = CFL * min_dt;
+    dt = cfl * min_dt;
 };
 
 void Newtonian1D::adapt_dt(Newtonian1D *dev, luint blockSize, luint tblock)
@@ -325,13 +325,15 @@ void Newtonian1D::advance(
 )
 {
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
-    
+    #if GPU_CODE
     const real dt                   = this->dt;
     const real plm_theta            = this->plm_theta;
     const auto nx                   = this->nx;
-    const auto bx                   = (BuildPlatform == Platform::GPU) ? sh_block_size : this->nx;
     const real decay_constant       = this->decay_constant;
     const CLattice1D *coord_lattice = &(self->coord_lattice);
+    #endif 
+
+    const auto bx                   = (BuildPlatform == Platform::GPU) ? sh_block_size : this->nx;
     const auto pseudo_radius        = (first_order) ? 1 : 2;
     simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (luint ii) {
         #if GPU_CODE
@@ -364,7 +366,6 @@ void Newtonian1D::advance(
 
         if (self->first_order)
         {
-            real rho_l, rho_r, v_l, v_r, p_l, p_r;
             prims_l = prim_buff[(txa + 0) % bx];
             prims_r = prim_buff[(txa + 1) % bx];
             
@@ -636,7 +637,7 @@ void Newtonian1D::advance(
     // Tools for file string formatting
     tchunk = "000000";
     int tchunk_order_of_mag = 2;
-    int time_order_of_mag, num_zeros;
+    int time_order_of_mag;
 
     // Some benchmarking tools 
     luint   nfold   = 0;

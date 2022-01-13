@@ -23,7 +23,7 @@ namespace simbi {
         std::vector<hydro2d::Conserved> cons, cons_n;
         std::vector<hydro2d::Primitive> prims;
         std::vector<real> sourceRho, sourceM1, sourceM2, sourceE;
-        real plm_theta, gamma, tend, CFL, dt, decay_const;
+        real plm_theta, gamma, tend, cfl, dt, decay_const;
         bool first_order, periodic, hllc, linspace, inFailureState;
         std::string coord_system;
         std::vector<real> x1, x2;
@@ -48,7 +48,7 @@ namespace simbi {
             real gamma, 
             std::vector<real> x1,
             std::vector<real> x2, 
-            real CFL, 
+            real cfl, 
             std::string coord_system);
 
         ~Newtonian2D();

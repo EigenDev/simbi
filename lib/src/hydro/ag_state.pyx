@@ -20,11 +20,11 @@ cdef class PyState:
     def __cinit__(self, 
         np.ndarray[np.double_t, ndim=2] state, 
         real gamma, 
-        real CFL=0.4,
+        real cfl=0.4,
         vector[real] r = [0], 
         string coord_system = "cartesian".encode('ascii')):
 
-        self.c_state = Newtonian1D(state, gamma,CFL, r, coord_system)
+        self.c_state = Newtonian1D(state, gamma,cfl, r, coord_system)
 
     def simulate(self, 
         vector[vector[real]] sources,
@@ -64,10 +64,10 @@ cdef class PyStateSR:
     def __cinit__(self, 
         np.ndarray[np.double_t, ndim=2] state, 
         real gamma, 
-        real CFL=0.4,
+        real cfl=0.4,
         vector[real] r = [0], 
         string coord_system = "cartesian".encode('ascii')):
-        self.c_state = SRHD(state, gamma,CFL, r, coord_system)
+        self.c_state = SRHD(state, gamma,cfl, r, coord_system)
         
     def simulate(self,
         vector[vector[real]] sources,

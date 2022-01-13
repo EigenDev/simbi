@@ -25,7 +25,7 @@ namespace simbi
         float tend, tstart;
         real plm_theta, gamma, bipolar;
         bool first_order, periodic, hllc, linspace;
-        real CFL, dt, decay_const;
+        real cfl, dt, decay_const;
         luint nx, ny, nz, nzones, n, block_size, xphysical_grid, yphysical_grid, zphysical_grid;
         luint active_zones, idx_active, x_bound, y_bound;
         luint i_start, i_bound, j_start, j_bound, k_start, k_bound;
@@ -50,7 +50,7 @@ namespace simbi
             std::vector<real> x1,
             std::vector<real> x2, 
             std::vector<real> x3,
-            real CFL, 
+            real cfl, 
             std::string coord_system);
         ~SRHD3D();
 
