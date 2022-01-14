@@ -686,7 +686,7 @@ def plot_max_or_mean(
     
     print('plotting max values along as functions of theta...')
     
-    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
+    colors = plt.cm.viridis(np.linspace(0.1, 0.90, len(args.filename)))
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
@@ -698,11 +698,11 @@ def plot_max_or_mean(
             var = prims2var(fields, field)
         else:
             var = fields[field]
-    if args.units:
-        if args.field == 'p' or args.field == 'energy':
-            var *= pre_scale.value
-        elif args.field == 'D' or args.field == 'rho':
-            var *= rho_scale.value
+        if args.units:
+            if field== 'p' or field== 'energy':
+                var *= pre_scale.value
+            elif field== 'D' or field== 'rho':
+                var *= rho_scale.value
     
     pts  = []
     for idx, angle in enumerate(theta):
