@@ -19,7 +19,6 @@ try:
 except:
     print('No Cmasher module, so defaulting to matplotlib colors')
 
-
 #================================
 #   constants of nature
 #================================
@@ -66,28 +65,30 @@ def get_1d_equiv_file(filename: str) -> dict:
         W    = 1/np.sqrt(1 - v**2)
         beta = v
         
-        e = 3*p/rho 
-        c = const.c.cgs.value
-        a = (4 * const.sigma_sb.cgs.value / c)
-        k = const.k_B.cgs.value
-        m = const.m_p.cgs.value
-        me = const.m_e.cgs.value
-        T = (3 * p * c ** 2  / a)**(1./4.)
+
+        a    = (4 * const.sigma_sb.cgs / c)
+        k    = const.k_B.cgs
+        T    = (3 * p * pre_scale  / a)**(1./4.)
+        T_eV = (k * T).to(u.eV)
+        print(T_eV)
+        zzz = input('')
         
         h = 1.0 + 4/3 * p / (rho * (4/3 - 1))
         
+        ofield['ad_gamma']    = 4./3.
         ofield['rho']         = rho
         ofield['v']           = v
         ofield['p']           = p
         ofield['W']           = W
         ofield['enthalpy']    = h
         ofield['gamma_beta']  = W*beta
-        ofield['temperature'] = T
+        ofield['temperature'] = T_eV
         ofield['r']           = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
     return ofield
     
-cons          = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy']
-field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'gamma_beta_1', 'gamma_beta_2', 'energy', 'mass', 'chi', 'chi_dens'] + cons 
+derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'chi_dens',
+                 'gamma_beta_1', 'gamma_beta_2']
+field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'chi'] + derived
 lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
 
 def compute_rverticies(r: np.ndarray) -> np.ndarray:
@@ -112,15 +113,13 @@ def calc_cell_volume(r: np.ndarray, theta: np.ndarray) -> np.ndarray:
     tvertices = 0.5 * (theta[1:] + theta[:-1])
     tvertices = np.insert(tvertices, 0, theta[0], axis=0)
     tvertices = np.insert(tvertices, tvertices.shape[0], theta[-1], axis=0)
-    dcos = np.cos(tvertices[:-1]) - np.cos(tvertices[1:])
+    dcos      = np.cos(tvertices[:-1]) - np.cos(tvertices[1:])
     
     rvertices = np.sqrt(r[:, 1:] * r[:, :-1])
     rvertices = np.insert(rvertices,  0, r[:, 0], axis=1)
     rvertices = np.insert(rvertices, rvertices.shape[1], r[:, -1], axis=1)
-    dr = rvertices[:, 1:] - rvertices[:, :-1]
+    dr        = rvertices[:, 1:] - rvertices[:, :-1]
     
-    theta_mean  = 0.5 * (tvertices[1:] + tvertices[:-1])
-    dtheta      = tvertices[1:] - tvertices[:-1]
     return ( (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos )
         
 def get_field_str(args: argparse.ArgumentParser) -> str:
@@ -159,31 +158,64 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
             field_str_list.append( r'$\chi$')
         elif field == 'chi_dens':
             field_str_list.append( r'$D \cdot \chi$')
+        elif field == 'temperature':
+            field_str_list.append("T [eV]" if args.units else "T")
         else:
             field_str_list.append( field)
     
     
     return field_str_list if len(args.field) > 1 else field_str_list[0]
+
+def calc_enthalpy(fields: dict) -> np.ndarray:
+    return 1.0 + fields['p']*fields['ad_gamma'] / (fields['rho'] * (fields['ad_gamma'] - 1.0))
     
-    
-def prims2cons(fields: dict, cons: str) -> np.ndarray:
-    if cons == 'D':
+def calc_lorentz_gamma(fields: dict) -> np.ndarray:
+    return (1.0 + fields['gamma_beta']**2)**0.5
+
+
+def prims2var(fields: dict, var: str) -> np.ndarray:
+    h = calc_enthalpy(fields)
+    W = calc_lorentz_gamma(fields)
+    if var == 'D':
         # Lab frame density
-        return fields['rho'] * fields['W']
-    elif cons == 'S':
+        return fields['rho'] * W
+    elif var == 'S':
         # Lab frame momentum density
-        return fields['rho'] * fields['W']**2 * fields['enthalpy'] * fields['v']
-    elif cons == 'energy':
+        return fields['rho'] * W**2 * calc_enthalpy(fields) * fields['v']
+    elif var == 'energy':
         # Energy minus rest mass energy
-        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p'] - fields['rho']*fields['W']
-    elif cons == 'energy_rst':
+        return fields['rho']*h*W**2 - fields['p'] - fields['rho']*W
+    elif var == 'energy_rst':
         # Total Energy
-        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p']
-    elif cons =='enthalpy':
+        return fields['rho']*h*W**2 - fields['p']
+    elif var == 'temperature':
+        a = (4.0 * const.sigma_sb.cgs / c)
+        T = (3.0 * fields['p'] * pre_scale  / a)**0.25
+        T_eV = (const.k_B.cgs * T).to(u.eV)
+        return T_eV.value
+    elif var == 'chi_dens':
+        return fields['chi'] * fields['rho'] * W
+    elif var == 'gamma_beta_1':
+        return abs(W * fields['v1'])
+    elif var == 'gamma_beta_2':
+        return abs(W * fields['v2'])
+    elif var =='sp_enthalpy':
         # Specific enthalpy
-        return fields['enthalpy'] - 1.0
+        return h - 1.0  
 
-
+def place_anotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, etot: float) -> None:
+    order_of_mag = np.floor(np.log10(etot))
+    front_factor = int(etot / 10**order_of_mag)
+    if front_factor != 1:
+        anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ ergs"%(front_factor, order_of_mag)     
+    else:
+        anchor_text = r"$E_{\rm exp} = 10^{%i}$ ergs"%(order_of_mag)
+    
+    at = AnchoredText(
+    anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_loc)
+    at.patch.set_boxstyle("round,pad=0.1,rounding_size=0.2")
+    ax.add_artist(at)
+    
 def plot_polar_plot(
     field_dict: dict,                            # Field dict
     args:       argparse.ArgumentParser,         # argparse object
@@ -245,11 +277,11 @@ def plot_polar_plot(
         var = []
         kwargs = []
         for field in args.field:
-            if field in cons:
+            if field in derived:
                 if ymax == np.pi:
-                    var += np.split(prims2cons(field_dict, field), 2)
+                    var += np.split(prims2var(field_dict, field), 2)
                 else:
-                    var.append(prims2cons(field_dict, field))
+                    var.append(prims2var(field_dict, field))
             else:
                 if ymax == np.pi:
                     var += np.split(field_dict[field], 2)
@@ -333,8 +365,8 @@ def plot_polar_plot(
             
         cs = np.zeros(len(args.field), dtype=object)
         
-        if args.field[0] in cons:
-            var = units * prims2cons(field_dict, args.field[0])
+        if args.field[0] in derived:
+            var = units * prims2var(field_dict, args.field[0])
         else:
             var = units * field_dict[args.field[0]]
             
@@ -510,7 +542,9 @@ def plot_polar_plot(
                     cbar.ax.set_xlabel(r'$\log$ {}'.format(field_str), fontsize=20)
         else:
             if ymax >= np.pi:
-                cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
+                if num_fields > 1:
+                    for i in range(num_fields):
+                        cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
             else:
                 cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
         if args.setup != "":
@@ -608,8 +642,8 @@ def plot_1d_curve(
         ax.axvline(1.00, linestyle='--', color='blue')
     else:
         for idx, field in enumerate(args.field):
-            if field in cons:
-                var = prims2cons(field_dict, field)
+            if field in derived:
+                var = prims2var(field_dict, field)
             else:
                 var = field_dict[field]
                 
@@ -641,7 +675,7 @@ def plot_1d_curve(
         return fig
     # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup,theta[args.tidx], tend), fontsize=20, y=0.95)
     
-def plot_max(
+def plot_max_or_mean(
     fields:    dict, 
     args:      argparse.ArgumentParser, 
     mesh:      dict , 
@@ -650,76 +684,50 @@ def plot_max(
     ax:        bool=None, 
     case:      int =0) -> None:
     
-    print('plotting max values along x...')
+    print('plotting max values along as functions of theta...')
     
     colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
     r, theta = mesh['r'], mesh['th']
-    theta    = theta * 180 / np.pi 
+    theta    = theta * 180 / np.pi
     
-    xmax        = dset[0]['xmax']
-    xmin        = dset[0]['xmin']
-    ymax        = dset[0]['ymax']
-    ymin        = dset[0]['ymin']
+    for field in args.field:
+        if field in derived:
+            var = prims2var(fields, field)
+        else:
+            var = fields[field]
     
-    vmin,vmax = args.cbar
-    ofield = get_1d_equiv_file(16384)
-    #1D test 
-    tend = dset[0]['time']
-    ax.set_title(r'{} at t={:.3f}'.format(args.setup, tend), fontsize=20)
+    pts  = []
+    for idx, angle in enumerate(theta):
+        pts += [[angle, np.max(var[idx])]]
+            
+    pts = np.asarray(pts)
     
-    if args.field == 'gamma_beta':
-        edens_total = prims2cons(fields, 'energy')
-        theta       = mesh['theta']
-        r           = mesh['rr']
-        dV          = calc_cell_volume(r, theta)
-        etotal      = edens_total * 2.0 * np.pi * dV * e_scale.value
-        
-        u = fields['gamma_beta']
-        w = 0.001 #np.diff(u).max()*1e-1
-        n = int(np.ceil( (u.max() - u.min() ) / w ) )
-        gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), n)
-        ets = np.asarray([etotal[np.where(u > gb)].sum() for gb in gbs])
-        ets /= ets.max()
-        expl_ind = find_nearest(ets, 1e-6)[0]
-        ax.scatter(args.x[case], gbs[expl_ind])
-    else:
-        ax.scatter(args.x[case], np.max(fields[args.field]))
-        
-    if case == 0:
-        #1D Check
-        if args.oned_files is not None:
-            for file in args.oned_files:
-                ofield = get_1d_equiv_file(file)
-                edens_1d = prims2cons(ofield, 'energy')
-                dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
-                etotal_1d = edens_1d * dV_1d * e_scale.value
-                u1d       = ofield['gamma_beta']
-                w = 0.001
-                n = int(np.ceil( (u1d.max() - u1d.min() ) / w ) )
-                gbs_1d = np.logspace(np.log10(1.e-4), np.log10(u1d.max()), n)
-                ets_1d = np.asarray([etotal_1d[np.where(u1d > gb)].sum() for gb in gbs_1d])
-                ets_1d /= ets_1d.max()
-                expl_ind = find_nearest(ets_1d, 1e-6)[0]
-                
-                ax.scatter(0.0, gbs_1d[expl_ind])
-    
+    label = args.labels[case] if args.labels is not None else None
+    if args.tex:
+        label = f"$\{label}$"
         
     
-    ax.set_xlabel(f'{args.xlabel[0]}', fontsize=20)
-    ax.tick_params(axis='both', labelsize=8)
-    
-    # Change the format of the field
-    field_str = get_field_str(args)
+    ax.plot(pts[:, 0], pts[:, 1],label=label)
     
     if args.log:
-        ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
-    else:
-        ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
-    if not overplot:
-        return fig
+        ax.set_yscale('log')
+    
+    ylabel = get_field_str(args)
+    # Aesthetic 
+    if case == 0:
+        if args.anot_loc is not None:
+            dV = calc_cell_volume(mesh['rr'], mesh['theta'])
+            etot = np.sum(prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
+            place_anotation(args, fields, ax, etot)
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=15)
+    ax.set_ylabel(ylabel, fontsize=15)
+    ax.set_ylabel(r'T [eV]', fontsize=15)
+    ax.set_xlim(theta[0], theta[-1])
     
 def plot_hist(
     fields:      dict, 
@@ -732,79 +740,98 @@ def plot_hist(
     case:        int =0, 
     ax_col:      int =0) -> None:
     print('Computing histogram...')
-    
+
     def calc_1d_hist(fields):
         dV_1d    = 4.0 * np.pi * calc_cell_volume1D(fields['r'])
         
         if args.kinetic:
-            mass     = dV_1d * fields['rho'] * fields['W']
-            var      = (fields['W'] - 1.0) * mass * e_scale.value # Kinetic Energy in [erg]
+            W        = calc_lorentz_gamma(fields)
+            mass     = dV_1d * fields['rho'] * W
+            var      = (W - 1.0) * mass * e_scale.value # Kinetic Energy in [erg]
         elif args.mass:
             var = mass * m.value                                  # Mass in [g]
         elif args.enthalpy:
-            var = (fields['enthalpy'] - 1.0) * e_scale.value      # Specific Enthalpy in [erg]
+            h   = calc_enthalpy(fields)
+            var = (h - 1.0) * e_scale.value      # Specific Enthalpy in [erg]
         else:
-            edens_1d  = prims2cons(fields, 'energy')
+            edens_1d  = prims2var(fields, 'energy')
             var       = edens_1d * dV_1d * e_scale.value          # Total Energy in [erg]
             
         u1d       = fields['gamma_beta']
         gbs_1d    = np.logspace(np.log10(1.e-3), np.log10(u1d.max()), 128)
         var       = np.asarray([var[np.where(u1d > gb)].sum() for gb in gbs_1d])
+        
+        label = r'$\epsilon = 0$'
+        if len(args.labels) == len(args.filename) and not args.sub_split:
+            etot         = np.sum(prims2var(fields, "energy") * dV_1d * e_scale.value)
+            order_of_mag = np.floor(np.log10(etot))
+            scale        = int(etot / 1e51)
+            if scale % 10 != 0 and scale != 1:
+                scale += 1
+            front_factor = int(etot / 10**order_of_mag)
+            if front_factor != 1:
+                label = r"${}E_{{51}}$".format(scale) + f"({label})"     
+            else:
+                label = r"$E_{51}$" + f"({label})" 
+                
         if args.norm:
             var /= var.max()
             fill_below_intersec(gbs_1d, var, 1e-6, colors[0])
             
-        ax.hist(gbs_1d, bins=gbs_1d, weights=var, alpha=0.8, label= r'$\epsilon = 0$', color='black', histtype='step', linewidth=3.0)
+        ax.hist(gbs_1d, bins=gbs_1d, weights=var, alpha=0.8, label= label, color='black', histtype='step', linewidth=2.5 + 1.1*case)
         
         
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
-        
+    
     tend        = dset[case]['time']
-    edens_total = prims2cons(fields, 'energy')
     theta       = mesh['theta']
     r           = mesh['rr']
     dV          = calc_cell_volume(r, theta)
     
-    
     if args.kinetic:
-        mass = 2.0 * np.pi * dV * fields['rho'] * fields['W']
-        var  = (fields['W'] - 1.0) * mass * e_scale.value
+        W    = calc_lorentz_gamma(fields)
+        mass = 2.0 * np.pi * dV * fields['rho'] * W
+        var  = (W - 1.0) * mass * e_scale.value
     elif args.enthalpy:
-        var = (fields['enthalpy'] - 1.0) *  2.0 * np.pi * dV * e_scale.value
+        h   = calc_enthalpy(fields)
+        var = (h - 1.0) *  2.0 * np.pi * dV * e_scale.value
     elif args.mass:
-        var = 2.0 * np.pi * dV * fields['rho'] * fields['W'] * m.value
+        W = calc_lorentz_gamma(fields)
+        var = 2.0 * np.pi * dV * fields['rho'] * W * m.value
     else:
-        var = edens_total * 2.0 * np.pi * dV * e_scale.value
+        var = prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value
 
     # Check if subplots are split amonst the file inputs. If so, roll the colors
     # to reset when on a different axes object
     color_len = args.sub_split[ax_num] if args.sub_split is not None else len(args.filename)
-    colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.8, color_len))
+    if args.cmap == 'grayscale':
+        colors    = plt.cm.Greys(np.linspace(0.25, 0.65, color_len))[::-1]
+    else:
+        colors    = plt.cm.viridis(np.linspace(0.25, 0.65, color_len))[::-1]
     
+        
     # Create 4-Velocity bins as well as the Y-value bins directly
     u         = fields['gamma_beta']
     gbs       = np.logspace(np.log10(1.e-3), np.log10(u.max()), 128)
     var       = np.asarray([var[u > gb].sum() for gb in gbs]) 
     
-    if ax_col == 0:
-        etot = np.sum(edens_total * 2.0 * np.pi * dV * e_scale.value)
-        order_of_mag = np.floor(np.log10(etot))
-        front_factor = int(etot / 10**order_of_mag)
-        if front_factor != 1:
-            anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ erg"%(front_factor, order_of_mag)     
-        else:
-            anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)     
-        at = AnchoredText(
-        anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_anchor)
-        at.patch.set_boxstyle("round,pad=0.1,rounding_size=0.2")
-        ax.add_artist(at)
+    # if case == 0:
+    #     oned_field   = get_1d_equiv_file(args.oned_files[0])
+    #     calc_1d_hist(oned_field)
+    # if case == 2:
+    #     oned_field   = get_1d_equiv_file(args.oned_files[1])
+    #     calc_1d_hist(oned_field)
+    if ax_col == 0:     
+        if args.anot_loc is not None:
+            etot = np.sum(prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
+            place_anotation(args, fields, ax, etot)
         
         #1D Comparison 
         if args.oned_files is not None:
             if args.sub_split is None:
-                for file in args.oned_files:
+                for file in enumerate(args.oned_files):
                     oned_field   = get_1d_equiv_file(file)
                     calc_1d_hist(oned_field)
             else:
@@ -820,15 +847,27 @@ def plot_hist(
             label = '$\%s$'%(args.labels[case])
         else:
             label = '$%s$'%(args.labels[case])
+            
+        if len(args.labels) == len(args.filename) and not args.sub_split:
+            etot         = np.sum(prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
+            order_of_mag = np.floor(np.log10(etot))
+            scale        = int(etot / 1e51)
+            if scale % 10 != 0 and scale != 1:
+                scale += 1
+            front_factor = int(etot / 10**order_of_mag)
+            if front_factor != 1:
+                label = r"${}E_{{51}}$".format(scale) + f"({label})"     
+            else:
+                label = r"$E_{51}$" + f"({label})"   
     else:
         label = None
         
-    ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', rwidth=1.0, linewidth=3.0, color=colors[case], alpha=0.7)
+    ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', 
+            rwidth=1.0, linewidth=3.0 + np.log10(case + 1), color=colors[case], alpha=0.9)
     
     if args.fill_scale is not None:
         fill_below_intersec(gbs, var, args.fill_scale*var.max(), colors[case])
                     
-    
     ax.set_xscale('log')
     ax.set_yscale('log')
 
@@ -861,13 +900,14 @@ def plot_hist(
         
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
-
     
     if args.setup != "":
         ax.set_title(r'{}, t ={:.2f} s'.format(args.setup, tend), fontsize=20)
+    
+    # if overplot:
+    #     if args.labels is not None:
+    #             ax.legend(fontsize=10)
         
-    if not overplot:
-        return fig
 
 def plot_dx_domega(
     fields:        dict, 
@@ -881,13 +921,14 @@ def plot_dx_domega(
     ax_col:        int=0,
     ax_num:        int=0) -> None:
     
-    plt.style.use('seaborn-colorblind')
     if not overplot:
         fig = plt.figure(figsize=[9, 9])
         ax  = fig.add_subplot(1, 1, 1)
     
+
+        
     def calc_1d_dx_domega(ofield: dict) -> None:
-        edens_1d = prims2cons(ofield, 'energy')
+        edens_1d = prims2var(ofield, 'energy')
         dV_1d    = 4.0 * np.pi * calc_cell_volume1D(ofield['r'])
         mass     = dV_1d * ofield['rho'] * ofield['W']
         e_k      = (ofield['W'] - 1.0) * mass * e_scale.value
@@ -900,9 +941,10 @@ def plot_dx_domega(
         else:
             var = etotal_1d
         
-        total_var = sum(var[ofield['gamma_beta'] > args.cutoff])
-        print(f"1D var sum with GB > {args.cutoff[0]}: {total_var}")
-        ax.axhline(total_var, linestyle='--', color='black', label='$\epsilon = 0$')
+        for cutoff in args.cutoff:
+            total_var = sum(var[ofield['gamma_beta'] > cutoff])
+            print(f"1D var sum with GB > {cutoff}: {total_var:.2e}")
+            ax.axhline(total_var, linestyle='--', color='black', label='$\epsilon = 0$')
                 
     def de_domega(var, gamma_beta, gamma_beta_cut, tz, domega, bin_edges):
         var = var.copy()
@@ -913,7 +955,7 @@ def plot_dx_domega(
     
     col       = case % len(args.sub_split) if args.sub_split is not None else case
     color_len = len(args.sub_split) if args.sub_split is not None else len(args.filename)
-    colors    = plt.cm.twilight_shifted(np.linspace(0.1, 0.80, color_len if color_len > 1 else len(args.cutoff)))
+    colors    = plt.cm.viridis(np.linspace(0.1, 0.80, color_len if color_len > 1 else len(args.cutoff)))
     coloriter = cycle(colors)
     
     tend        = dset[case]['time']
@@ -923,24 +965,10 @@ def plot_dx_domega(
     dV          = calc_cell_volume(r, theta)
     
     if ax_col == 0:
-        etot = np.sum(prims2cons(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
-        order_of_mag = np.floor(np.log10(etot))
-        front_factor = int(etot / 10**order_of_mag)
-        if front_factor != 1:
-            anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ erg"%(front_factor, order_of_mag)     
-        else:
-            anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)
-        
-        if args.anch_text is not None:
-            if args.tex:
-                anchor_text += "\n    $\%s$"%(args.anch_text)
-            else:
-                anchor_text += "\n %s"%(args.anch_text)
-                
-        at = AnchoredText(
-        anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_anchor)
-        at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
-        ax.add_artist(at)
+        if args.anot_loc is not None:
+            etot = np.sum(prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
+            place_anotation(args, fields, ax, etot)
+            
         #1D Comparison 
         if args.oned_files is not None:
             if args.sub_split is None:
@@ -953,27 +981,33 @@ def plot_dx_domega(
                 
     if args.de_domega:
         if args.kinetic:
-            mass   = 2.0 * np.pi * dV * fields['rho'] * fields['W']
-            var = (fields['W'] - 1.0) * mass * e_scale.value
+            W = calc_lorentz_gamma(fields)
+            mass   = 2.0 * np.pi * dV * fields['rho'] * W
+            var = (W - 1.0) * mass * e_scale.value
         elif args.enthalpy:
-            var = (fields['enthalpy'] - 1.0) *  2.0 * np.pi * dV * e_scale.value
+            h   = calc_enthalpy(fields)
+            var = (h - 1.0) *  2.0 * np.pi * dV * e_scale.value
+        elif 'temperature' in args.field:
+            var = prims2var(fields, 'temperature')
         else:
-            edens_total = prims2cons(fields, 'energy')
+            edens_total = prims2var(fields, 'energy')
             var = edens_total * 2.0 * np.pi * dV * e_scale.value
     elif args.dm_domega:
         var = 2.0 * np.pi * dV * fields['rho'] * m.value
     
-    u                          = fields['gamma_beta']
-    tcenter                    = 0.5 * (tv[1:] + tv[:-1])
-    dtheta                     = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
-    domega                     = 2 * np.pi * np.sin(tcenter) *(tv[1:] - tv[:-1])
+    u       = fields['gamma_beta']
+    tcenter = 0.5 * (tv[1:] + tv[:-1])
+    dtheta  = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
+    domega  = 2 * np.pi * np.sin(tcenter) *(tv[1:] - tv[:-1])
 
     # Create inset of width 1.3 inches and height 0.9 inches
     # at the default upper right location
-    axins = inset_axes(ax, width="30%", height="30%",loc='upper left', borderpad=3.25)
+    if args.inset:
+        axins = inset_axes(ax, width="25%", height="30%",loc='upper left', borderpad=3.25)
     
+    lw = 1
     for cutoff in args.cutoff:
-        var[u < cutoff]       = 0
+        var[u < cutoff] = 0
         if args.labels:
             if args.tex:
                 label = '$\%s$'%(args.labels[case])
@@ -982,7 +1016,7 @@ def plot_dx_domega(
         else:
             label = None
         
-        print(f'2D var sum with GB > {cutoff}: {var.sum()}')
+        print(f'2D var sum with GB > {cutoff}: {var.sum():.2e}')
         if args.hist:
             deg_per_bin      = 3 # degrees in bin 
             num_bins         = int(deg_per_bin / dtheta) 
@@ -998,30 +1032,42 @@ def plot_dx_domega(
             theta_bin_edges = np.rad2deg(theta_bin_edges)
             ax.step(theta_bin_edges[:-1], iso_var, label=label)
         else:
-            var_per_theta = 4.0 * np.pi * np.sum(var, axis=1) / domega[:,0]
+            quant_func = np.sum if args.field[0] != 'temperature' else np.mean
+            var_per_theta = 4.0 * np.pi * quant_func(var, axis=1) / domega[:,0]
             
+            if cutoff.is_integer():
+                cut_fmt = int(cutoff)
+            else:
+                cut_fmt = cutoff
             if args.labels[0] == "":
-                label=r"$E_k( > {})$".format(cutoff)
+                label=r"$E_k( > {})$".format(cut_fmt)
                 if args.norm:
                     label += r" / {:.1e} ergs)".format(var.sum())
             else:
-                label=label+r"$ > {}$.format(cutoff)"
+                label=label+r"$ > {}$".format(cut_fmt)
                 
             if args.norm:
                 var_per_theta /= var_per_theta.max()
             
             linestyle = next(linecycler)
-            axins.plot(np.rad2deg(theta[:, 0]), var_per_theta, linestyle=linestyle)
-            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, linestyle=linestyle, label=label)
-        
+            ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, lw=lw, label=label)
+            if args.inset:
+                axins.plot(np.rad2deg(theta[:, 0]), var_per_theta, lw=lw)
+            lw *= 1.5
     
-    ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
-    
+    if args.xlims is None:
+        ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
+    else:
+        ax.set_xlim(args.xlims[0], args.xlims[1])
+    if args.inset:
+        axins.set_xlim(80,100)
     
     if args.ylims is not None:
         ax.set_ylim(args.ylims[0], args.ylims[1])
-        axins.set_ylim(args.ylims[0],args.ylims[1])
-        axins.set_xlim(85,95)
+        
+        if args.inset:
+            axins.set_ylim(args.ylims[0],args.ylims[1])
+    
         # axins.set_xticklabels([])
         # axins.set_yticklabels([])
     if args.sub_split is None:
@@ -1033,17 +1079,21 @@ def plot_dx_domega(
                 ax.set_ylabel(r'$H_{\rm iso} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=15)
             elif args.dm_domega:
                 ax.set_ylabel(r'$M_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoff[0]), fontsize=15)
+            elif args.field[0] == 'temperature':
+                ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{eV}}]$'.format(args.cutoff[0]), fontsize=15)
             else:
                 ax.set_ylabel(r'$E_{{\rm T, iso}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=15)
         else:
             units = r'[\rm{{erg}}]' if not args.norm else ''
             if args.kinetic:
-                ax.set_ylabel(r'$\tilde{E}_{{\rm K, iso}} \ (> \Gamma \beta)\ %s$'%(units), fontsize=15)
+                ax.set_ylabel(r'$E_{{\rm K, iso}} \ (> \Gamma \beta)\ %s$'%(units), fontsize=15)
             elif args.enthalpy:
                 ax.set_ylabel(r'$H_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
             elif args.dm_domega:
                 units = r'[\rm{{g}}]' if not args.norm else ''
                 ax.set_ylabel(r'$M_{\rm{iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
+            elif args.field[0] == 'temperature':
+                ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{eV}}]$', fontsize=15)
             else:
                 ax.set_ylabel(r'$E_{{\rm T, iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
         
@@ -1056,21 +1106,22 @@ def plot_dx_domega(
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     
-    axins.spines['right'].set_visible(False)
-    axins.spines['top'].set_visible(False)
-    # axins.spines['left'].set_visible(False)
-    # axins.spines['bottom'].set_visible(False)
+    if args.inset:
+        axins.spines['right'].set_visible(False)
+        axins.spines['top'].set_visible(False)
 
     if args.setup != "":
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
     if args.log:
         ax.set_yscale('log')
+        if args.inset:
+            axins.set_yscale('log')
         # logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
         # ax.yaxis.set_major_formatter(logfmt)
         
     if not args.sub_split:
         if args.labels:
-            ax.legend(fontsize=10, loc=args.legend_loc)
+            ax.legend(fontsize=15, loc=args.legend_loc)
             
     
 def main():
@@ -1172,9 +1223,10 @@ def main():
     parser.add_argument('--pictorial', dest='pictorial', default = False, action='store_true')
     parser.add_argument('--subplots', dest='subplots', default = None, type=int)
     parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
-    parser.add_argument('--anot_anchor', dest='anot_anchor', default = 'upper center', type=str)
+    parser.add_argument('--anot_loc', dest='anot_loc', default = None, type=str)
     parser.add_argument('--legend_loc', dest='legend_loc', default = None, type=str)
     parser.add_argument('--anch_text', dest='anch_text', default = None, type=str)
+    parser.add_argument('--inset', dest='inset', action= 'store_true', default=False)
     
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
@@ -1185,6 +1237,11 @@ def main():
     vmin, vmax = args.cbar
     field_dict = {}
     setup_dict = {}
+    
+    if args.cmap == 'grayscale':
+        plt.style.use('grayscale')
+    else:
+        plt.style.use('seaborn-colorblind')
     
     if args.dbg:
         plt.style.use('dark_background')
@@ -1286,25 +1343,16 @@ def main():
             beta = np.sqrt(v1**2 + v2**2)
             
             
-            e = 3*p/rho 
-            c = const.c.cgs.value
-            a = (4 * const.sigma_sb.cgs.value / c)
-            k = const.k_B.cgs
-            m = const.m_p.cgs.value
-            T = (3 * p * c ** 2  / a)**(1./4.)
-            h = 1.0 + gamma*p/(rho*(gamma - 1.0))
+            
             field_dict[idx]['rho']          = rho
             field_dict[idx]['v1']           = v1 
             field_dict[idx]['v2']           = v2 
             field_dict[idx]['p']            = p
             field_dict[idx]['chi']          = chi
-            field_dict[idx]['chi_dens']     = chi * rho * W
             field_dict[idx]['gamma_beta']   = W*beta
-            field_dict[idx]['gamma_beta_1'] = abs(W*v1)
-            field_dict[idx]['gamma_beta_2'] = abs(W*v2)
-            field_dict[idx]['temperature']  = T
-            field_dict[idx]['enthalpy']     = h
-            field_dict[idx]['W']            = W
+            field_dict[idx]['ad_gamma']     = gamma
+            # field_dict[idx]['gamma_beta_1'] = abs(W*v1)
+            # field_dict[idx]['gamma_beta_2'] = abs(W*v2)
         
         
     ynpts, xnpts = rho.shape 
@@ -1345,7 +1393,7 @@ def main():
                     else:
                         fig.text(0.030, 0.5, r'$E_{{\rm T, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoff[0]), fontsize=20, va='center', rotation='vertical')
             else:
-                units = "[\rm{erg}]" if not args.norm else ""
+                units = r"[\rm{erg}]" if not args.norm else ""
                 if args.kinetic:
                     fig.text(0.030, 0.5, r'$E_{\rm K}( > \Gamma \beta) \ %s$'%(units), fontsize=20, va='center', rotation='vertical')
                 elif args.enthalpy:
@@ -1383,7 +1431,7 @@ def main():
                         ax_shift = False
                     plot_dx_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
             elif args.x is not None:
-                plot_max(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
+                plot_max_or_mean(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
             else:
                 plot_1d_curve(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
             
@@ -1408,6 +1456,8 @@ def main():
             plot_1d_curve(field_dict[0], args, mesh, setup_dict)
         elif args.de_domega or args.dm_domega:
             plot_dx_domega(field_dict[0], args, mesh, setup_dict)
+        elif args.x is not None:
+            plot_max_or_mean(field_dict[0], args, mesh, setup_dict, overplot=False)
         else:
             if is_cartesian:
                 plot_cartesian_plot(field_dict[0], args, mesh, setup_dict)
@@ -1417,11 +1467,16 @@ def main():
                 
     if args.labels is not None:
         if args.sub_split is not None:
-            axs[0].legend(fontsize=20, loc='upper right')
-            # for ax in axs:
-            #     ax.legend(fontsize=7, loc='upper right')
+            if not args.legend_loc:
+                axs[0].legend(fontsize=15, loc='upper right')
+            else:
+                axs[0].legend(fontsize=15, loc=args.legend_loc)
+            
         else:
-            pass
+            if not args.legend_loc:
+                plt.legend(fontsize=15)
+            else:
+                plt.legend(fontsize=15, loc=args.legend_loc)
             # if args.legend_loc is None:
             #     plt.legend(fontsize=10)
             # else:
