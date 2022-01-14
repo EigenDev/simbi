@@ -686,9 +686,7 @@ def plot_max_or_mean(
     overplot:  bool=False, 
     ax:        bool=None, 
     case:      int =0) -> None:
-    
-    print('plotting max values along as functions of theta...')
-    
+    print('plotting max...')
     colors = plt.cm.viridis(np.linspace(0.1, 0.90, len(args.filename)))
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
@@ -736,7 +734,7 @@ def plot_max_or_mean(
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=15)
-    ax.set_ylabel(ylabel, fontsize=15)
+    ax.set_ylabel(ylabel+r"$_{\rm max}$", fontsize=15)
     ax.set_xlim(theta[0], theta[-1])
     
 def plot_hist(
