@@ -729,7 +729,7 @@ def plot_max_or_mean(
             if char == "[":
                 unit_idx = idx
                 
-        ylabel = ylabel[:unit_idx]+r"$_{\rm max}$" + ylabel[unit_idx:]
+        ylabel = ylabel[:unit_idx-1]+r"$_{\rm max}$" + ylabel[unit_idx:]
         
     else:
         ylabel = ylabel + r"$_{\rm max}$"
