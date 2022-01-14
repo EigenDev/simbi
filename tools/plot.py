@@ -709,7 +709,7 @@ def plot_max_or_mean(
     if args.tex:
         label = f"$\{label}$"
         
-    if args.cmap != 'graysclae':
+    if args.cmap != 'grayscale':
         ax.plot(pts[:, 0], pts[:, 1],label=label, color=colors[case])
     else:
         ax.plot(pts[:, 0], pts[:, 1],label=label)
