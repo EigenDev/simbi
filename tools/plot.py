@@ -724,6 +724,16 @@ def plot_max_or_mean(
         ax.set_yscale('log')
     
     ylabel = get_field_str(args)
+    if args.units:
+        for idx, char in enumerate(ylabel):
+            if char == "[":
+                unit_idx = idx
+                
+        ylabel = ylabel[:unit_idx]+r"$_{\rm max}$" + ylabel[unit_idx:]
+        
+    else:
+        ylabel = ylabel + r"$_{\rm max}$"
+        
     # Aesthetic 
     if case == 0:
         if args.anot_loc is not None:
@@ -734,7 +744,7 @@ def plot_max_or_mean(
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=15)
-    ax.set_ylabel(ylabel+r"$_{\rm max}$", fontsize=15)
+    ax.set_ylabel(ylabel, fontsize=15)
     ax.set_xlim(theta[0], theta[-1])
     
 def plot_hist(
