@@ -70,8 +70,6 @@ def get_1d_equiv_file(filename: str) -> dict:
         k    = const.k_B.cgs
         T    = (3 * p * pre_scale  / a)**(1./4.)
         T_eV = (k * T).to(u.eV)
-        print(T_eV)
-        zzz = input('')
         
         h = 1.0 + 4/3 * p / (rho * (4/3 - 1))
         
@@ -161,7 +159,7 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
         elif field == 'temperature':
             field_str_list.append("T [eV]" if args.units else "T")
         else:
-            field_str_list.append( field)
+            field_str_list.append(field)
     
     
     return field_str_list if len(args.field) > 1 else field_str_list[0]
@@ -172,6 +170,13 @@ def calc_enthalpy(fields: dict) -> np.ndarray:
 def calc_lorentz_gamma(fields: dict) -> np.ndarray:
     return (1.0 + fields['gamma_beta']**2)**0.5
 
+def calc_beta(fields: dict) -> np.ndarray:
+    W = calc_lorentz_gamma(fields)
+    return (1.0 - 1.0 / W**2)**0.5
+
+def running_mean(x, N):
+    cumsum = np.cumsum(np.insert(x, 0, 0)) 
+    return (cumsum[N:] - cumsum[:-N]) / float(N)
 
 def prims2var(fields: dict, var: str) -> np.ndarray:
     h = calc_enthalpy(fields)
@@ -211,8 +216,8 @@ def place_anotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, e
     else:
         anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)
     
-    if args.anch_text is not None:
-        extra_text = args.anch_text if not args.tex else "$\%s$"%(args.anch_text)
+    if args.anot_text is not None:
+        extra_text = args.anot_text if not args.tex else "$\%s$"%(args.anot_text)
         anchor_text += f"\n     {extra_text}"
     at = AnchoredText(
     anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_loc)
@@ -678,7 +683,7 @@ def plot_1d_curve(
         return fig
     # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup,theta[args.tidx], tend), fontsize=20, y=0.95)
     
-def plot_max_or_mean(
+def plot_per_theta(
     fields:    dict, 
     args:      argparse.ArgumentParser, 
     mesh:      dict , 
@@ -686,53 +691,72 @@ def plot_max_or_mean(
     overplot:  bool=False, 
     ax:        bool=None, 
     case:      int =0) -> None:
-    print('plotting max...')
+    print('plotting vs theta...')
+    
     colors = plt.cm.viridis(np.linspace(0.1, 0.90, len(args.filename)))
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
     theta = mesh['th']
-    theta = theta * 180 / np.pi
     
+
     for field in args.field:
+        fields = fields if args.oned_files is None else get_1d_equiv_file(args.oned_files[0])
         if field in derived:
             var = prims2var(fields, field)
         else:
             var = fields[field].copy()
         if args.units:
-            if field== 'p' or field== 'energy':
+            if field == 'p' or field == 'energy':
                 var *= pre_scale.value
-            elif field== 'D' or field== 'rho':
+            elif field == 'D' or field == 'rho':
                 var *= rho_scale.value
+
+    theta = theta * 180 / np.pi
     
-    pts  = []
-    for idx, angle in enumerate(theta):
-        pts += [[angle, np.max(var[idx])]]
-            
-    pts = np.asarray(pts)
+    if var.ndim > 1:
+        if not args.tau_s:
+            pts = np.max(var, axis=0)
+        else:
+            beta  = calc_beta(fields)
+            pts   = 1.0 / np.max(beta, axis=1)
+            pts   = running_mean(pts, 50)
+            theta = running_mean(theta, 50)
+    else:
+        if not tau_s:
+            pts   = np.max(var)
+            pts   = running_mean(pts, 50)
+            theta = running_mean(theta, 50)
+        else:
+            beta = calc_beta(fields)
+            pts = 1.0 / np.max(beta)
     
     label = args.labels[case] if args.labels is not None else None
     if args.tex:
         label = f"$\{label}$"
-        
+    
     if args.cmap != 'grayscale':
-        ax.plot(pts[:, 0], pts[:, 1],label=label, color=colors[case])
+        ax.plot(theta, pts,label=label, color=colors[case])
     else:
-        ax.plot(pts[:, 0], pts[:, 1],label=label)
+        ax.plot(theta, pts,label=label)
     
     if args.log:
         ax.set_yscale('log')
     
-    ylabel = get_field_str(args)
-    if args.units:
-        for idx, char in enumerate(ylabel):
-            if char == "[":
-                unit_idx = idx
-                
-        ylabel = ylabel[:unit_idx-1]+r"$_{\rm max}$" + ylabel[unit_idx:]
-        
+    if not args.tau_s:
+        ylabel = get_field_str(args)
+        if args.units:
+            for idx, char in enumerate(ylabel):
+                if char == "[":
+                    unit_idx = idx
+            
+            ylabel = ylabel[:unit_idx-1]+r"$_{\rm max}$" + ylabel[unit_idx:]
+            
+        else:
+            ylabel = ylabel + r"$_{\rm max}$"
     else:
-        ylabel = ylabel + r"$_{\rm max}$"
+        ylabel = r'$\tau_s$'
+
         
     # Aesthetic 
     if case == 0:
@@ -746,6 +770,90 @@ def plot_max_or_mean(
     ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=15)
     ax.set_ylabel(ylabel, fontsize=15)
     ax.set_xlim(theta[0], theta[-1])
+    
+def plot_dec_rad(
+    fields:    dict, 
+    args:      argparse.ArgumentParser, 
+    mesh:      dict , 
+    dset:      dict, 
+    overplot:  bool=False, 
+    ax:        bool=None, 
+    case:      int =0) -> None:
+    print('plotting max...')
+    
+    file_num = len(args.filename)
+    
+    if not overplot:
+        fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
+
+    theta = mesh['th']
+    mdots = np.logspace(np.log10(1e-6), np.log10(24e-4),128)
+
+    colors = plt.cm.viridis(np.linspace(0.1, 0.90, file_num if file_num > 1 else len(mdots)))
+    
+    tvert  = compute_theta_verticies(mesh['theta'])
+    dtheta = tvert[1:,0] - tvert[:-1,0]
+    vw     = 1e8 * u.cm 
+    mdots  = (mdots * u.M_sun / u.yr).to(u.g/u.s)
+    factor = np.array([0.75 * vw / mdot / dtheta for mdot in mdots])
+    gb     = fields['gamma_beta']
+    W      = calc_lorentz_gamma(fields)
+    dV     = 2.0 * np.pi * calc_cell_volume(mesh['rr'], mesh['theta'])
+    mass   = W * dV * fields['rho'] * m.value
+
+    theta = theta * 180 / np.pi
+    
+    if file_num > 1:
+        pts   = np.zeros(shape=(1, theta.size))
+    else:
+        pts   = np.zeros(shape=(len(mdots), theta.size))
+    
+    label = args.labels[case] if args.labels is not None else None
+    if args.tex:
+        label = f"$\{label}$"
+    
+    window     = 100
+    mean_theta = running_mean(theta, window)
+    
+    for midx, val in enumerate(mdots):
+        if file_num > 1 and midx > 0:
+            break
+        
+        for idx, angle in enumerate(theta):
+            ridx_max         = np.argmax(gb[idx])
+            r                = mass[idx][ridx_max] / gb[idx][ridx_max] * factor[midx][idx]
+            pts[midx][idx]   = r
+        
+        mean_r     = running_mean(pts[midx],   window)
+        if args.cmap != 'grayscale':
+            ax.plot(mean_theta, mean_r, label=label, color = colors[case if file_num > 1 else midx])
+        else:
+            ax.plot(mean_theta, mean_r, label=label)
+    
+    if args.log:
+        ax.set_yscale('log')
+    
+    ylabel = r'$r_{\rm dec} [\rm cm]$'
+        
+    # Aesthetic 
+    if case == 0:
+        if args.anot_loc is not None:
+            dV = calc_cell_volume(mesh['rr'], mesh['theta'])
+            etot = np.sum(prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
+            place_anotation(args, fields, ax, etot)
+            
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=15)
+    ax.set_ylabel(ylabel, fontsize=15)
+    
+    if not args.xlims:
+        ax.set_xlim(mean_theta[0], mean_theta[-1])
+    else:
+        ax.set_xlim(*args.xlims)
+        
+    if args.ylims is not None:
+        ax.set_ylim(*args.ylims)
     
 def plot_hist(
     fields:      dict, 
@@ -771,6 +879,9 @@ def plot_hist(
         elif args.enthalpy:
             h   = calc_enthalpy(fields)
             var = (h - 1.0) * e_scale.value      # Specific Enthalpy in [erg]
+        elif args.dm_du:
+            u   = fields['gamma_beta']
+            var = u* fields['rho'] * dV_1d   / (1 + u**2)**0.5 
         else:
             edens_1d  = prims2var(fields, 'energy')
             var       = edens_1d * dV_1d * e_scale.value          # Total Energy in [erg]
@@ -806,20 +917,23 @@ def plot_hist(
     tend        = dset[case]['time']
     theta       = mesh['theta']
     r           = mesh['rr']
-    dV          = calc_cell_volume(r, theta)
+    dV          = 2.0 * np.pi * calc_cell_volume(r, theta)
     
     if args.kinetic:
         W    = calc_lorentz_gamma(fields)
-        mass = 2.0 * np.pi * dV * fields['rho'] * W
+        mass = dV * fields['rho'] * W
         var  = (W - 1.0) * mass * e_scale.value
     elif args.enthalpy:
         h   = calc_enthalpy(fields)
-        var = (h - 1.0) *  2.0 * np.pi * dV * e_scale.value
+        var = (h - 1.0) *  dV * e_scale.value
     elif args.mass:
         W = calc_lorentz_gamma(fields)
-        var = 2.0 * np.pi * dV * fields['rho'] * W * m.value
+        var = dV * fields['rho'] * W * m.value
+    elif args.dm_du:
+        u   = fields['gamma_beta']
+        var = u * fields['rho'] * dV / (1 + u**2)**0.5 * m.value
     else:
-        var = prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value
+        var = prims2var(fields, "energy") * dV * e_scale.value
 
     # Check if subplots are split amonst the file inputs. If so, roll the colors
     # to reset when on a different axes object
@@ -843,7 +957,7 @@ def plot_hist(
     #     calc_1d_hist(oned_field)
     if ax_col == 0:     
         if args.anot_loc is not None:
-            etot = np.sum(prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
+            etot = np.sum(prims2var(fields, "energy") * dV * e_scale.value)
             place_anotation(args, fields, ax, etot)
         
         #1D Comparison 
@@ -867,7 +981,7 @@ def plot_hist(
             label = '$%s$'%(args.labels[case])
             
         if len(args.labels) == len(args.filename) and not args.sub_split:
-            etot         = np.sum(prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
+            etot         = np.sum(prims2var(fields, "energy") * dV * e_scale.value)
             order_of_mag = np.floor(np.log10(etot))
             scale        = int(etot / 1e51)
             if scale % 10 != 0 and scale != 1:
@@ -908,6 +1022,10 @@ def plot_hist(
             ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
         elif args.enthalpy:
             ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+        elif args.dm_du:
+            ax.set_ylabel(r'$dM/d\Gamma\beta ( > \Gamma \beta) \ [\rm{g}]$', fontsize=20)
+        elif args.mass:
+            ax.set_ylabel(r'$M(> \Gamma \beta) \ [\rm{g}]$', fontsize=20)
         else:
             ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
             
@@ -984,7 +1102,7 @@ def plot_dx_domega(
     
     if ax_col == 0:
         if args.anot_loc is not None:
-            etot = np.sum(prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
+            etot = np.sum(prims2var(fields, "energy") * dV * e_scale.value)
             place_anotation(args, fields, ax, etot)
             
         #1D Comparison 
@@ -1141,7 +1259,6 @@ def plot_dx_domega(
         if args.labels:
             ax.legend(fontsize=15, loc=args.legend_loc)
             
-    
 def main():
     parser = argparse.ArgumentParser(
         description='Plot a 2D Figure From a File (H5).',
@@ -1204,6 +1321,9 @@ def main():
                         default=False,
                         help='Compute mass histogram')
     
+    parser.add_argument('--dm_du', dest='dm_du', default = False, action='store_true',
+                        help='Compute dM/dU over whole domain')
+    
     parser.add_argument('--de_domega', dest='de_domega', action='store_true',
                         default=False,
                         help='Plot the dE/dOmega plot')
@@ -1211,6 +1331,9 @@ def main():
     parser.add_argument('--dm_domega', dest='dm_domega', action='store_true',
                         default=False,
                         help='Plot the dM/dOmega plot')
+    
+    parser.add_argument('--dec_rad', dest='dec_rad', default = False, action='store_true',
+                        help='Compute dr as function of angle')
     
     parser.add_argument('--cutoff', dest='cutoff', default=[0.0], type=float, nargs='+',
                         help='The 4-velocity cutoff value for the dE/dOmega plot')
@@ -1243,8 +1366,10 @@ def main():
     parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
     parser.add_argument('--anot_loc', dest='anot_loc', default = None, type=str)
     parser.add_argument('--legend_loc', dest='legend_loc', default = None, type=str)
-    parser.add_argument('--anch_text', dest='anch_text', default = None, type=str)
+    parser.add_argument('--anot_text', dest='anot_text', default = None, type=str)
     parser.add_argument('--inset', dest='inset', action= 'store_true', default=False)
+    parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, 
+                        help='The shock optical depth')
     
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
@@ -1449,7 +1574,9 @@ def main():
                         ax_shift = False
                     plot_dx_domega(field_dict[idx], args, mesh, setup_dict, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
             elif args.x is not None:
-                plot_max_or_mean(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
+                plot_per_theta(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
+            elif args.dec_rad:
+                plot_dec_rad(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
             else:
                 plot_1d_curve(field_dict[idx], args, mesh, setup_dict, True, ax, idx)
             
@@ -1475,7 +1602,9 @@ def main():
         elif args.de_domega or args.dm_domega:
             plot_dx_domega(field_dict[0], args, mesh, setup_dict)
         elif args.x is not None:
-            plot_max_or_mean(field_dict[0], args, mesh, setup_dict, overplot=False)
+            plot_per_theta(field_dict[0], args, mesh, setup_dict, overplot=False)
+        elif args.dec_rad:
+            plot_dec_rad(field_dict[0], args, mesh, setup_dict, overplot=False)
         else:
             if is_cartesian:
                 plot_cartesian_plot(field_dict[0], args, mesh, setup_dict)
