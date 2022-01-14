@@ -690,8 +690,8 @@ def plot_max_or_mean(
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
-    r, theta = mesh['r'], mesh['th']
-    theta    = theta * 180 / np.pi
+    theta = mesh['th']
+    theta = theta * 180 / np.pi
     
     for field in args.field:
         if field in derived:
@@ -728,7 +728,9 @@ def plot_max_or_mean(
         if args.anot_loc is not None:
             dV = calc_cell_volume(mesh['rr'], mesh['theta'])
             etot = np.sum(prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
+            print(f'etot = {etot:.2e}')
             place_anotation(args, fields, ax, etot)
+            
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=15)
