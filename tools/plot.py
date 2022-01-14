@@ -698,6 +698,11 @@ def plot_max_or_mean(
             var = prims2var(fields, field)
         else:
             var = fields[field]
+    if args.units:
+        if args.field == 'p' or args.field == 'energy':
+            var *= pre_scale.value
+        elif args.field == 'D' or args.field == 'rho':
+            var *= rho_scale.value
     
     pts  = []
     for idx, angle in enumerate(theta):
@@ -728,7 +733,6 @@ def plot_max_or_mean(
     ax.spines['top'].set_visible(False)
     ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=15)
     ax.set_ylabel(ylabel, fontsize=15)
-    ax.set_ylabel(r'T [eV]', fontsize=15)
     ax.set_xlim(theta[0], theta[-1])
     
 def plot_hist(
