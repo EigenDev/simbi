@@ -207,9 +207,9 @@ def place_anotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, e
     order_of_mag = np.floor(np.log10(etot))
     front_factor = int(etot / 10**order_of_mag)
     if front_factor != 1:
-        anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ ergs"%(front_factor, order_of_mag)     
+        anchor_text = r"$E_{\rm exp} = %i \times 10^{%i}$ erg"%(front_factor, order_of_mag)     
     else:
-        anchor_text = r"$E_{\rm exp} = 10^{%i}$ ergs"%(order_of_mag)
+        anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)
     
     at = AnchoredText(
     anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_loc)
@@ -697,7 +697,7 @@ def plot_max_or_mean(
         if field in derived:
             var = prims2var(fields, field)
         else:
-            var = fields[field]
+            var = fields[field].copy()
         if args.units:
             if field== 'p' or field== 'energy':
                 var *= pre_scale.value
@@ -728,7 +728,6 @@ def plot_max_or_mean(
         if args.anot_loc is not None:
             dV = calc_cell_volume(mesh['rr'], mesh['theta'])
             etot = np.sum(prims2var(fields, "energy") * 2.0 * np.pi * dV * e_scale.value)
-            print(f'etot = {etot:.2e}')
             place_anotation(args, fields, ax, etot)
             
     ax.spines['right'].set_visible(False)
