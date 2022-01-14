@@ -189,8 +189,8 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
         # Total Energy
         return fields['rho']*h*W**2 - fields['p']
     elif var == 'temperature':
-        a = (4.0 * const.sigma_sb.cgs / c)
-        T = (3.0 * fields['p'] * pre_scale  / a)**0.25
+        a    = (4.0 * const.sigma_sb.cgs / c)
+        T    = (3.0 * fields['p'] * pre_scale  / a)**0.25
         T_eV = (const.k_B.cgs * T).to(u.eV)
         return T_eV.value
     elif var == 'chi_dens':
@@ -211,6 +211,9 @@ def place_anotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, e
     else:
         anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)
     
+    if args.anch_text is not None:
+        extra_text = args.anch_text if not args.tex else "$\%s$"%(args.anch_text)
+        anchor_text += f"\n     {extra_text}"
     at = AnchoredText(
     anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_loc)
     at.patch.set_boxstyle("round,pad=0.1,rounding_size=0.2")
