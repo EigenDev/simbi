@@ -716,7 +716,7 @@ def plot_per_theta(
     
     if var.ndim > 1:
         if not args.tau_s:
-            pts = np.max(var, axis=0)
+            pts = np.max(var, axis=1)
         else:
             beta  = calc_beta(fields)
             pts   = 1.0 / np.max(beta, axis=1)
@@ -743,6 +743,21 @@ def plot_per_theta(
     if args.log:
         ax.set_yscale('log')
     
+    inds   = np.argmax(fields['gamma_beta'], axis=1)
+    vw     = 1e8 * u.cm/u.s
+    mdot   = (1e-6 * u.M_sun / u.yr).to(u.g/u.s)
+    a_star = mdot / (4.0 * np.pi * vw)
+    x      = 0.5
+    kappa  = 0.2 * (1.0 + x) * u.cm**2 / u.g
+    
+    # if args.tau_s:
+    #     tau = np.zeros_like(mesh['th'])
+    #     for tidx, t in enumerate(mesh['th']):
+    #         ridx      = np.argmax(fields['gamma_beta'][tidx])
+    #         tau[tidx] = kappa * a_star / (mesh['rr'][tidx,ridx] * R_0)
+        
+    #     mean_tau = running_mean(tau, 50)
+    #     ax.plot(theta, 32*mean_tau, linestyle='--', label=label+"(x32)")
     if not args.tau_s:
         ylabel = get_field_str(args)
         if args.units:
