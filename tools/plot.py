@@ -434,7 +434,8 @@ def plot_polar_plot(
                     
                 cbar_orientation = 'vertical'
             else:
-                plt.tight_layout()
+                if not args.wedge:
+                    plt.tight_layout()
                 cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85]) 
                 cbar_orientation = 'vertical'
         
