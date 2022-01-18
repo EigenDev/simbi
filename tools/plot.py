@@ -260,7 +260,7 @@ def plot_polar_plot(
     ymax        = dset[0]['ymax']
     ymin        = dset[0]['ymin']
     
-    vmin,vmax = args.cbar
+    vmin,vmax = args.cbar[:2]
 
     unit_scale = np.ones(num_fields)
     if (args.units):
@@ -335,11 +335,11 @@ def plot_polar_plot(
                 kwargs[field] =  {'vmin': vmin, 'vmax': vmax} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)} 
             else:
                 if field == field3 == field4:
-                    ovmin = quadr[field][0].min()
-                    ovmax = quadr[field][0].max()
+                    ovmin = None if len(args.cbar) == 2 else args.cbar[2]
+                    ovmax = None if len(args.cbar) == 2 else args.cbar[3]
                 else:
-                    ovmin = quadr[field].min()
-                    ovmax = quadr[field].max()
+                    ovmin = None if len(args.cbar) == 2 else args.cbar[idx+1]
+                    ovmax = None if len(args.cbar) == 2 else args.cbar[idx+2]
                 kwargs[field] =  {'vmin': ovmin, 'vmax': ovmax} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
 
         if ymax < np.pi:
@@ -1372,7 +1372,7 @@ def main():
     parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max',
                         default = 0.0, help='The domain range')
     
-    parser.add_argument('--cbar_range', dest = 'cbar', metavar='Range of Color Bar', nargs=2,
+    parser.add_argument('--cbar_range', dest = 'cbar', metavar='Range of Color Bar', nargs='+',
                         default = [None, None], help='The colorbar range you\'d like to plot')
     
     parser.add_argument('--cbar_sub', dest = 'cbar2', metavar='Range of Color Bar for secondary plot',nargs='+',type=float,
@@ -1471,7 +1471,7 @@ def main():
 
     is_cartesian = False
     args = parser.parse_args()
-    vmin, vmax = args.cbar
+    vmin, vmax = args.cbar[:2]
     fields = {}
     setup_dict = {}
     
