@@ -8,6 +8,8 @@ import argparse
 import h5py 
 import astropy.constants as const
 import astropy.units as u 
+import mpl_toolkits.axisartist.floating_axes as floating_axes
+from matplotlib.transforms import Affine2D
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from typing import Union
 from matplotlib.offsetbox import AnchoredText
@@ -128,7 +130,7 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
             if args.units:
                 field_str_list.append( r'${}$ [g cm$^{{-3}}$]'.format(var))
             else:
-                field_str_list.append( r'${}$'.format(var))
+                field_str_list.append( r'${}/{}_0$'.format(var,var))
             
         elif field == 'gamma_beta':
             field_str_list.append( r'$\Gamma \beta$')
@@ -144,9 +146,9 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
                     field_str_list.append( r'$p [\rm erg \ cm^{{-3}}]$')
             else:
                 if field == 'energy':
-                    field_str_list.append( r'$\tau$')
+                    field_str_list.append( r'$\tau/\tau_0$')
                 else:
-                    field_str_list.append( r'$p$')
+                    field_str_list.append( r'$p/p_0$')
         elif field == 'energy_rst':
             if args.units:
                 field_str_list.append( r'$\tau + D \  [\rm erg \ cm^{-3}]$')
@@ -217,15 +219,15 @@ def place_anotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, e
         anchor_text = r"$E_{\rm exp} = 10^{%i}$ erg"%(order_of_mag)
     
     if args.anot_text is not None:
-        extra_text = args.anot_text if not args.tex else "$\%s$"%(args.anot_text)
-        anchor_text += f"\n     {extra_text}"
+        extra_text   = args.anot_text
+        anchor_text += "\n     %s"%(extra_text)
     at = AnchoredText(
     anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_loc)
     at.patch.set_boxstyle("round,pad=0.1,rounding_size=0.2")
     ax.add_artist(at)
     
 def plot_polar_plot(
-    fields: dict,                            # Field dict
+    fields:     dict,                            # Field dict
     args:       argparse.ArgumentParser,         # argparse object
     mesh:       dict,                            # Mesh dict
     dset:       dict,                            # Sim Params dict
@@ -237,17 +239,19 @@ def plot_polar_plot(
     Plot the given data on a polar projection plot. 
     '''
     num_fields = len(args.field)
+    is_wedge   = args.nwedge > 0
     if not subplots:
-        if args.wedge:
-            fig, axes = plt.subplots(1, 2, subplot_kw={'projection': 'polar'},
-                                figsize=(15, 10), constrained_layout=True)
+        if is_wedge != 0:
+            nplots = args.nwedge + 1
+            fig, axes = plt.subplots(1, nplots, subplot_kw={'projection': 'polar'},
+                                figsize=(15, 12), constrained_layout=True)
             ax    = axes[0]
             wedge = axes[1]
         else:
             fig, ax = plt.subplots(1, 1, subplot_kw={'projection': 'polar'},
                                 figsize=(10, 8), constrained_layout=False)
     else:
-        if args.wedge:
+        if is_wedge:
             ax    = axs[0]
             wedge = axs[1]
         else:
@@ -352,8 +356,8 @@ def plot_polar_plot(
                 cs[3] = ax.pcolormesh(t2[::-1] + np.pi/2, rr,  var[1], cmap=color_map, shading='auto', **kwargs[field2])
         else:
             if num_fields == 2:
-                cs[0] = ax.pcolormesh(tt[:: 1], rr,  np.vstack((var[0],var[1])), cmap=color_map, shading='auto', **kwargs[field1])
-                cs[1] = ax.pcolormesh(t2[::-1], rr,  np.vstack((var[2],var[3])), cmap=color_map, shading='auto', **kwargs[field2])
+                cs[0] = ax.pcolormesh(tt[:: 1], rr,  np.vstack((var[0],var[1])), cmap=args.cmap, shading='auto', **kwargs[field1])
+                cs[1] = ax.pcolormesh(t2[::-1], rr,  np.vstack((var[2],var[3])), cmap=args.cmap2, shading='auto', **kwargs[field2])
             else:
                 cs[0] = ax.pcolormesh(tchop[0], rchop[0],  quadr[field1], cmap=color_map, shading='auto', **kwargs[field1])
                 cs[1] = ax.pcolormesh(tchop[1], rchop[0],  quadr[field2], cmap=color_map, shading='auto', **kwargs[field2])
@@ -410,18 +414,26 @@ def plot_polar_plot(
                 cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
                 cbar_orientation = 'vertical'
             else:
-                cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
                 cbar_orientation = 'horizontal'
-                
-            
-        else:
+                if cbar_orientation == 'horizontal':
+                    cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
+        else:           
+            cbar_orientation = 'horizontal'
             # ax.set_position([0.1, -0.18, 0.7, 1.3])
             if num_fields > 1:
                 if num_fields == 2:
-                    ycoord  = [0.1, 0.08] if ymax < np.pi else [0.1, 0.1]
-                    xcoord  = [0.1, 0.85] if ymax < np.pi else [0.87, 0.05]
-                    cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
-                    
+                    if cbar_orientation == 'vertical':
+                        ycoord  = [0.1, 0.08] if ymax < np.pi else [0.10, 0.10]
+                        xcoord  = [0.1, 0.85] if ymax < np.pi else [0.86, 0.05]
+                        cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
+                    else:
+                        if not is_wedge:
+                            ycoord  = [0.2, 0.20] if ymax < np.pi else [0.10, 0.10]
+                            xcoord  = [0.1, 0.50] if ymax < np.pi else [0.51, 0.20]
+                        else:
+                            ycoord  = [0.2, 0.20] if ymax < np.pi else [0.10, 0.10]
+                            xcoord  = [0.1, 0.50] if ymax < np.pi else [0.51, 0.20]
+                        cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.3, 0.04]) for i in range(num_fields)]
                 if num_fields == 3:
                     ycoord  = [0.1, 0.5, 0.1]
                     xcoord  = [0.07, 0.85, 0.85]
@@ -431,13 +443,16 @@ def plot_polar_plot(
                     ycoord  = [0.5, 0.1, 0.5, 0.1]
                     xcoord  = [0.85, 0.85, 0.07, 0.07]
                     cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8/(0.5 * num_fields)]) for i in range(num_fields)]
-                    
-                cbar_orientation = 'vertical'
             else:
-                if not args.wedge:
+                if not is_wedge:
                     plt.tight_layout()
-                cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85]) 
-                cbar_orientation = 'vertical'
+                    
+                if cbar_orientation == 'vertical':
+                    cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85])
+                else:
+                    cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85])
+                 
+                
         
         if args.log:
             if num_fields > 1:
@@ -456,7 +471,7 @@ def plot_polar_plot(
         ax.yaxis.grid(True, alpha=0.05)
         ax.xaxis.grid(True, alpha=0.05)
     
-    if args.wedge:
+    if is_wedge:
         wedge_min = args.wedge_lims[0]
         wedge_max = args.wedge_lims[1]
         ang_min   = args.wedge_lims[2]
@@ -467,6 +482,13 @@ def plot_polar_plot(
         ax.plot(np.radians(np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color='white')
         ax.plot(np.radians(np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color='white')
         ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=2, color='white')
+        
+        if args.nwedge == 2:
+            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=2, color='white')
+            ax.plot(np.radians(-np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color='white')
+            ax.plot(np.radians(-np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color='white')
+            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=2, color='white')
+            
     
     
     ax.set_theta_zero_location('N')
@@ -485,13 +507,18 @@ def plot_polar_plot(
     
     field_str = get_field_str(args)
     
-    if args.wedge:
+    if is_wedge:
         if num_fields == 1:
-            wedge.set_position( [0.5, -0.5, 0.3, 2])
-            ax.set_position( [0.05, -0.5, 0.46, 2])
+            wedge.set_position([0.5, -0.5, 0.3, 2])
+            ax.set_position([0.05, -0.5, 0.46, 2])
         else:
-            ax.set_position( [0.15, -0.5, 0.46, 2])
-            wedge.set_position( [0.58, -0.5, 0.3, 2])
+            if args.nwedge == 1:
+                ax.set_position([0.15, -0.5, 0.46, 2])
+                wedge.set_position([0.58, -0.5, 0.3, 2])
+            elif args.nwedge == 2:
+                ax.set_position([0.305, -0.5, 0.40, 2.1])
+                wedge.set_position([0.70, -0.5, 0.3, 2])
+                axes[2].set_position([0.01, -0.5, 0.3, 2])
             
         if len(args.field) > 1:
             if len(args.cbar2) == 4:
@@ -510,16 +537,18 @@ def plot_polar_plot(
                     kwargs[field] =  {'vmin': vmin3, 'vmax': vmax3} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin3, vmax = vmax3)} 
                 else:
                     continue
-                
-            wedge.pcolormesh(tchop[0], rchop[0], quadr[field1], cmap=color_map, shading='nearest', **kwargs[field1])
-            wedge.pcolormesh(tchop[1], rchop[1], quadr[field2], cmap=color_map, shading='nearest', **kwargs[field2])
+
+            wedge.pcolormesh(tt[:: 1], rr,  np.vstack((var[0],var[1])), cmap=args.cmap, shading='auto', **kwargs[field1])
+            if args.nwedge == 2:
+                axes[2].pcolormesh(t2[::-1], rr,  np.vstack((var[2],var[3])), cmap=args.cmap2, shading='auto', **kwargs[field2])
+            
         else:
             vmin2, vmax2 = args.cbar2
             if args.log:
                 kwargs = {'norm': mcolors.LogNorm(vmin = vmin2, vmax = vmax2)}
             else:
                 kwargs = {'vmin': vmin2, 'vmax': vmax2}
-            wedge.pcolormesh(tt, rr, var, cmap=color_map, shading='nearest', **kwargs)
+            w1 = wedge.pcolormesh(tt, rr, var, cmap=color_map, shading='nearest', **kwargs)
             
         wedge.set_theta_zero_location('N')
         wedge.set_theta_direction(-1)
@@ -537,16 +566,31 @@ def plot_polar_plot(
         wedge.set_thetamax(ang_max)
         wedge.set_aspect(1.)
         
+        if args.nwedge > 1:
+            axes[2].set_theta_zero_location('N')
+            axes[2].set_theta_direction(-1)
+            axes[2].yaxis.grid(False)
+            axes[2].xaxis.grid(False)
+            axes[2].tick_params(axis='both', labelsize=6)                
+            axes[2].axes.xaxis.set_ticklabels([])
+            axes[2].set_ylim([wedge_min, wedge_max])
+            axes[2].set_rorigin(-wedge_min)
+            axes[2].set_thetamin(-ang_min)
+            axes[2].set_thetamax(-ang_max)
+            axes[2].set_aspect(1.)
+            
+        
         
     if not args.pictorial:
         if args.log:
             if ymax == np.pi:
+                set_label = ax.set_ylabel if cbar_orientation == 'vertical' else ax.set_xlabel
                 if num_fields > 1:
                     for i in range(num_fields):
                         if args.field[i] in lin_fields:
-                            cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
+                            cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=20)
                         else:
-                            cbar[i].ax.set_ylabel(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+                            cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=20)
                 else:
                     cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
             else:
@@ -957,10 +1001,8 @@ def plot_hist(
                 etot         = np.sum(prims2var(fields, "energy") * dV_1d * e_scale.value)
                 order_of_mag = np.floor(np.log10(etot))
                 scale        = int(etot / 1e51)
-                if scale % 10 != 0 and scale != 1:
-                    scale += 1
                 front_factor = int(etot / 10**order_of_mag)
-                if front_factor != 1:
+                if front_factor != 1 or scale != 1:
                     label = r"${}E_{{51}}$".format(scale) + f"({label})"     
                 else:
                     label = r"$E_{51}$" + f"({label})" 
@@ -1006,26 +1048,26 @@ def plot_hist(
     gbs       = np.logspace(np.log10(1.e-3), np.log10(u.max()), 128)
     var       = np.asarray([var[u > gb].sum() for gb in gbs]) 
     
-    if case == 0:
-        oned_field   = get_1d_equiv_file(args.oned_files[0])
-        calc_1d_hist(oned_field)
-    if case == 2:
-        oned_field   = get_1d_equiv_file(args.oned_files[1])
-        calc_1d_hist(oned_field)
-    # if ax_col == 0:     
-    #     if args.anot_loc is not None:
-    #         etot = np.sum(prims2var(fields, "energy") * dV * e_scale.value)
-    #         place_anotation(args, fields, ax, etot)
+    # if case == 0:
+    #     oned_field   = get_1d_equiv_file(args.oned_files[0])
+    #     calc_1d_hist(oned_field)
+    # if case == 2:
+    #     oned_field   = get_1d_equiv_file(args.oned_files[1])
+    #     calc_1d_hist(oned_field)
+    if ax_col == 0:     
+        if args.anot_loc is not None:
+            etot = np.sum(prims2var(fields, "energy") * dV * e_scale.value)
+            place_anotation(args, fields, ax, etot)
         
-    #     #1D Comparison 
-    #     if args.oned_files is not None:
-    #         if args.sub_split is None:
-    #             for file in args.oned_files:
-    #                 oned_field   = get_1d_equiv_file(file)
-    #                 calc_1d_hist(oned_field)
-    #         else:
-    #             oned_field = get_1d_equiv_file(args.oned_files[ax_num])
-    #             calc_1d_hist(oned_field)
+        #1D Comparison 
+        if args.oned_files is not None:
+            if args.sub_split is None:
+                for file in args.oned_files:
+                    oned_field   = get_1d_equiv_file(file)
+                    calc_1d_hist(oned_field)
+            else:
+                oned_field = get_1d_equiv_file(args.oned_files[ax_num])
+                calc_1d_hist(oned_field)
                 
     
     if args.norm:
@@ -1035,26 +1077,25 @@ def plot_hist(
         if args.tex:
             label = '$\%s$'%(args.labels[case])
         else:
-            label = '$%s$'%(args.labels[case])
+            label = '%s'%(args.labels[case])
             
         if len(args.labels) == len(args.filename) and not args.sub_split:
             etot         = np.sum(prims2var(fields, "energy") * dV * e_scale.value)
             order_of_mag = np.floor(np.log10(etot))
             scale        = int(etot / 1e51)
-            if scale % 10 != 0 and scale != 1:
-                scale += 1
             front_factor = int(etot / 10**order_of_mag)
-            if front_factor != 1:
-                label = r"${}E_{{51}}$".format(scale) + f"({label})"     
+            if front_factor != 1 or scale != 1:
+                label = r"${}E_{{51}}$".format(scale) + "(%s)"%(label)     
             else:
-                label = r"$E_{51}$" + f"({label})"   
+                label = r"$E_{51}$" + "(%s)"%(label)  
     else:
         label = None
     
-    if case % 2 == 0:
-        c = colors[1]
-    else:
-        c = colors[-1]
+    c = colors[case]
+    # if case % 2 == 0:
+    #     c = colors[1]
+    # else:
+    #     c = colors[-1]
     ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', 
             rwidth=1.0, linewidth=lw, color=c, alpha=0.9)
     
@@ -1119,9 +1160,13 @@ def plot_dx_domega(
     ax_num:        int=0) -> None:
     
     if not overplot:
-        fig = plt.figure(figsize=[9, 9])
-        ax  = fig.add_subplot(1, 1, 1)
-    
+        if 0 in args.cutoffs:
+            fig, (ax0, ax) = plt.subplots(2, 1, gridspec_kw={'height_ratios': [1, 3]}, 
+                                        figsize=(9,9), sharex=True)
+        else:
+            fig = plt.figure(figsize=[9, 9])
+            ax  = fig.add_subplot(1, 1, 1)
+        
     def calc_dec_rad(gb: float, M_ej: float):
         vw   = 1e8 * u.cm / u.s 
         mdot = (1e-6 * u.M_sun / u.yr).to(u.g/u.s)
@@ -1215,10 +1260,7 @@ def plot_dx_domega(
     for cidx, cutoff in enumerate(args.cutoffs):
         var[gb < cutoff] = 0
         if args.labels:
-            if args.tex:
-                label = '$\%s$'%(args.labels[case])
-            else:
-                label = '$%s$'%(args.labels[case])
+            label = '%s'%(args.labels[case])
         else:
             label = None
         
@@ -1246,10 +1288,10 @@ def plot_dx_domega(
             else:
                 cut_fmt = cutoff
             if args.labels[0] == "":
-                if args.kinetic:
-                    label=r"$E_k( > {})$".format(cut_fmt)
-                elif args.dm_domega:
+                if args.dm_domega:
                     label=r"$M( > {})$".format(cut_fmt)
+                elif args.kinetic:
+                    label=r"$E_k( > {})$".format(cut_fmt)
                 else:
                     label=r"$E_T( > {})$".format(cut_fmt)
                 if args.norm:
@@ -1260,11 +1302,19 @@ def plot_dx_domega(
             if args.norm:
                 var_per_theta /= var_per_theta.max()
             
+            axes = ax if cutoff != 0 else ax0
+            linestyle = '-' if cutoff != 0 else '--'
+            if cutoff == 0:
+                ax0_ylims = [var_per_theta.min(), var_per_theta.max()]
             if args.cmap == 'grayscale':
-                ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, lw=lw, label=label)
+                axes.plot(np.rad2deg(theta[:, 0]), var_per_theta, lw=lw, label=label, linestyle=linestyle)
             else:
-                ax.plot(np.rad2deg(theta[:, 0]), var_per_theta, lw=lw, label=label, color=colors[cidx])
+                axes.plot(np.rad2deg(theta[:, 0]), var_per_theta, lw=lw, label=label, color=colors[cidx], linestyle=linestyle)
 
+            # window = 50
+            # mean_theta = running_mean(theta[:,0], window)
+            # mean_vpt   = running_mean(var_per_theta, window)
+            # ax.plot(np.rad2deg(mean_theta), mean_vpt, lw=lw, color=colors[cidx], linestyle='--')
             # if args.dec_rad:
             #     r = calc_dec_rad(cutoff, var_per_theta)
             #     ax2.plot(np.rad2deg(theta[:, 0]), r, linestyle='--', color='black')
@@ -1274,7 +1324,7 @@ def plot_dx_domega(
             lw *= 1.5
     
     if args.dec_rad:
-        ax2.set_ylabel(r'$r_{\rm dec} [\rm{cm}]$', fontsize=20)  # we already handled the x-label with ax
+        ax2.set_ylabel(r'$r_{\rm dec} [\rm{cm}]$', fontsize=15)  # we already handled the x-label with ax
         
     if args.xlims is None:
         ax.set_xlim(np.rad2deg(theta[0,0]), np.rad2deg(theta[-1,0]))
@@ -1295,31 +1345,39 @@ def plot_dx_domega(
         # axins.set_yticklabels([])
     if args.sub_split is None:
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
-        if len(args.cutoffs) == 1:
+        if 'ax0' in locals():
             if args.kinetic:
-                ax.set_ylabel(r'$E_{{\rm K, iso}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
-            elif args.enthalpy:
-                ax.set_ylabel(r'$H_{\rm iso} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
+                fig.text(0.00, 0.5, r'$E_{\rm K, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
             elif args.dm_domega:
-                ax.set_ylabel(r'$M_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoffs[0]), fontsize=15)
-            elif args.field[0] == 'temperature':
-                ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{eV}}]$'.format(args.cutoffs[0]), fontsize=15)
+                fig.text(0.010, 0.5, r'$M_{\rm iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
             else:
-                ax.set_ylabel(r'$E_{{\rm T, iso}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
+                fig.text(0.010, 0.5, r'$E_{\rm T, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
         else:
-            units = r'[\rm{{erg}}]' if not args.norm else ''
-            if not args.dm_domega:
+            if len(args.cutoffs) == 1:
                 if args.kinetic:
-                    ax.set_ylabel(r'$E_{{\rm K, iso}} \ (> \Gamma \beta)\ %s$'%(units), fontsize=15)
+                    ax.set_ylabel(r'$E_{{\rm K, iso}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
                 elif args.enthalpy:
-                    ax.set_ylabel(r'$H_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
+                    ax.set_ylabel(r'$H_{\rm iso} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
+                elif args.dm_domega:
+                    ax.set_ylabel(r'$M_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoffs[0]), fontsize=15)
+                elif args.field[0] == 'temperature':
+                    ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{eV}}]$'.format(args.cutoffs[0]), fontsize=15)
                 else:
-                    ax.set_ylabel(r'$E_{{\rm T, iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
-            elif args.dm_domega:
-                units = r'[\rm{{g}}]' if not args.norm else ''
-                ax.set_ylabel(r'$M_{\rm{iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
-            elif args.field[0] == 'temperature':
-                ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{eV}}]$', fontsize=15)
+                    ax.set_ylabel(r'$E_{{\rm T, iso}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
+            else:
+                units = r'[\rm{{erg}}]' if not args.norm else ''
+                if not args.dm_domega:
+                    if args.kinetic:
+                        ax.set_ylabel(r'$E_{{\rm K, iso}} \ (> \Gamma \beta)\ %s$'%(units), fontsize=15)
+                    elif args.enthalpy:
+                        ax.set_ylabel(r'$H_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
+                    else:
+                        ax.set_ylabel(r'$E_{{\rm T, iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
+                elif args.dm_domega:
+                    units = r'[\rm{{g}}]' if not args.norm else ''
+                    ax.set_ylabel(r'$M_{\rm{iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
+                elif args.field[0] == 'temperature':
+                    ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{eV}}]$', fontsize=15)
         
     
         ax.tick_params('both', labelsize=15)
@@ -1338,6 +1396,20 @@ def plot_dx_domega(
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
     if args.log:
         ax.set_yscale('log')
+        logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+        # ax0.set_yscale('log')
+        if 'ax0' in locals():
+            # ax0.set_yscale('log')
+            ax0.spines['top'].set_visible(False)
+            ax0.spines['right'].set_visible(False)
+            ax0.spines['bottom'].set_linewidth(2)
+            # ax0.axes.get_xaxis().set_ticks([])
+            ax0.set_ylim(ax0_ylims)
+            plt.subplots_adjust(hspace=0)
+            ax0.yaxis.set_minor_locator(plt.MaxNLocator(1))
+            ax0.tick_params('both',which='major', labelsize=15)
+            #ax.set_xlim(theta[0,0], theta[-1,0])
+            
         if args.inset:
             axins.set_yscale('log')
         if args.dec_rad:
@@ -1345,13 +1417,102 @@ def plot_dx_domega(
             ticks = calc_dec_rad(0.0, np.array(ax.axes.get_ylim())) 
             ax2.set_ylim(ticks[0],ticks[-1])
             
-        # logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        # ax.yaxis.set_major_formatter(logfmt)
+        
+        
+        # ax0.yaxis.set_major_formatter(logfmt)
+        # ax0.set_ylim(1e52,5e52)
         
     if not args.sub_split:
         if args.labels:
             ax.legend(fontsize=15, loc=args.legend_loc)
-            
+            if 'ax0' in locals():
+                ax0.legend(fontsize=15, loc='best')
+                
+def plot_ligthcurve(
+    fields:        dict, 
+    args:          argparse.ArgumentParser, 
+    mesh:          dict, 
+    dset:          dict, 
+    points:        np.ndarray,
+    overplot:      bool=False, 
+    subplot:       bool=False, 
+    ax:            Union[None,plt.Axes]=None, 
+    case:          int=0, 
+    ax_col:        int=0,
+    ax_num:        int=0) -> None:
+        
+    if not overplot:
+        fig, ax = plt.subplots(1,1,figsize=(9,9))
+        
+    eb      = 0.1 
+    ec      = 0.1
+    tday    = dset['time'].to(u.day)
+    dV      = calc_cell_volume(mesh['rr'], mesh['theta'])
+    etot    = 1e51 * u.erg # np.sum(prims2var(fields, "energy") * dV * e_scale)
+    r       = mesh['rr'] * R_0
+    R3      = 0.65 * R_0
+    mdot    = (1e-6 * u.M_sun/u.yr).to(u.g/u.s)
+    vw      = 1e8 * u.cm/u.s
+    nwind   = mdot / (4 * np.pi * vw * r**2) / const.m_p.cgs
+    e52     = etot.to(u.erg) / (1e52 * u.erg)
+    td      = tday / u.day 
+    eb_m1   = eb / 0.1 
+    ec_m1   = ec / 0.1 
+    d_28    = (r / (1e28 * u.cm))
+    n1      = nwind / (1 * u.cm**(-3))
+    
+    # print(td)
+    # print(e52)
+    # zzz = input('')
+    
+    nu_c_sphere = 2.70e12 * eb_m1**(-3/2) * e52 **(-1/2) * n1**(-1)  * td  **(-1/2) * u.Hz
+    nu_m_sphere = 5.70e14 * eb_m1**( 1/2) * e52 **( 1/2) * ec_m1**2  * td  **(-3/2) * u.Hz
+    fnu_max     = 1.1e5   * eb_m1**( 1/2) * e52  *         n1**(1/2) * d_28**(-2)  
+
+    p = 2.5
+    def flux(nu, tidx, r_shock):
+        nu_c     = nu_c_sphere[tidx][r_shock]
+        nu_m     = nu_m_sphere
+        
+        gtr_crit = nu > nu_c 
+        between  = (nu < nu_m) & (nu > nu_c) 
+        gtr_sync = nu > nu_c
+        
+        if nu < nu_c:
+            print("1")
+            zzz = input('')
+            return (nu/nu_c)**( 1/3)*fnu_max[tidx][r_shock] 
+        elif (nu < nu_m) & (nu > nu_c):
+            return (nu/nu_c) **(-1/2)*fnu_max[tidx][r_shock]
+        elif nu > nu_m:
+            print("3")
+            zzz = input('')
+            return (nu_m/nu_c)**(-1/2)*(nu/nu_m)**(-p/2)*fnu_max[tidx][r_shock]     
+        # fnu[gtr_crit] = (nu[gtr_crit]/nu_c[gtr_crit])**( 1/3)*fnu_max[tidx][gtr_crit] 
+        # fnu[between]  = (nu[between]/nu_c[between]) **(-1/2)*fnu_max[tidx][between]
+        # fnu[gtr_sync] = (nu_m/nu_c[gtr_sync])**(-1/2)*(nu[gtr_sync]/nu_m)**(-p/2)*fnu_max[tidx][gtr_sync]
+        # return fnu
+
+    theta1    = 0
+    theta2    = int(mesh['theta'].shape[0]/2)
+    r_shock   = np.argmax(fields['gamma_beta'][theta2])
+    wshock    = calc_lorentz_gamma(fields)[theta2][r_shock]
+    b_field   = (32 * eb * nwind[theta2][r_shock] * const.m_p.cgs)**0.5 * wshock * const.c.cgs 
+    nu        = 2.80e6 * b_field.value * wshock**2 * u.Hz
+    
+    f       = flux(nu, theta1, r_shock)
+    f2      = flux(nu, theta2, r_shock)
+    points += [[nu.value, f2]] 
+    
+    if args.log:
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        
+    ax.set_xlabel(r'$\nu [\rm{Hz}]$', fontsize=15)
+    ax.set_ylabel(r'Flux $[\mu \rm{J}]$', fontsize=15)
+    # ax.legend()
+    
+    
 def main():
     parser = argparse.ArgumentParser(
         description='Plot a 2D Figure From a File (H5).',
@@ -1378,8 +1539,10 @@ def main():
     parser.add_argument('--cbar_sub', dest = 'cbar2', metavar='Range of Color Bar for secondary plot',nargs='+',type=float,
                         default =[None, None], help='The colorbar range you\'d like to plot')
     
-    parser.add_argument('--cmap', dest = 'cmap', metavar='Color Bar Colarmap',
+    parser.add_argument('--cmap', dest ='cmap', metavar='Color Bar Colarmap',
                         default = 'magma', help='The colorbar cmap you\'d like to plot')
+    parser.add_argument('--cmap2', dest ='cmap2', metavar='Color Bar Colarmap 2',
+                        default = 'magma', help='The secondary colorbar cmap you\'d like to plot')
     
     parser.add_argument('--log', dest='log', action='store_true',
                         default=False,
@@ -1446,8 +1609,8 @@ def main():
     parser.add_argument('--tidx', dest='tidx', type=int, default = None,
                         help='Set to a value if you wish to plot a 1D curve about some angle')
     
-    parser.add_argument('--wedge', dest='wedge', default=False, action='store_true')
-    parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 80, 110], type=float, nargs=4)
+    parser.add_argument('--nwedge', dest='nwedge', default=0, type=int)
+    parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 70, 110], type=float, nargs=4)
     parser.add_argument('--xlims', dest='xlims', default = None, type=float, nargs=2)
     parser.add_argument('--ylims', dest='ylims', default = None, type=float, nargs=2)
     parser.add_argument('--units', dest='units', default = False, action='store_true')
@@ -1464,6 +1627,7 @@ def main():
     parser.add_argument('--png', dest='png', action= 'store_true', default=False)
     parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, 
                         help='The shock optical depth')
+    parser.add_argument('--light_curve', dest='light_curve', action='store_true',default=False)
     
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
@@ -1646,7 +1810,11 @@ def main():
         i        = 0       
         ax_col   = 0
         ax_shift = True
-        ax_num   = 0     
+        ax_num   = 0    
+        
+        if args.light_curve:
+            points = [] 
+            t = []
         for idx, file in enumerate(args.filename):
             i += 1
             if args.hist and (not args.de_domega and not args.dm_domega):
@@ -1671,6 +1839,9 @@ def main():
                 plot_per_theta(fields[idx], args, mesh, setup_dict, True, ax, idx)
             elif args.dec_rad:
                 plot_dec_rad(fields[idx], args, mesh, setup_dict, True, ax, idx)
+            elif args.light_curve:
+                plot_ligthcurve(fields[idx], args, mesh, setup_dict[idx],points, overplot=True, ax=ax)
+                t += [setup_dict[idx]['time'].value]
             else:
                 plot_1d_curve(fields[idx], args, mesh, setup_dict, True, ax, idx)
             
@@ -1685,6 +1856,9 @@ def main():
                 except StopIteration:
                     break
                 
+        if args.light_curve:
+            points = np.asarray(points)
+            ax.plot(points[:,0], points[:,1])
         if args.sub_split is not None:
             for ax in axs:
                 ax.label_outer()
@@ -1699,6 +1873,8 @@ def main():
             plot_per_theta(fields[0], args, mesh, setup_dict, overplot=False)
         elif args.dec_rad:
             plot_dec_rad(fields[0], args, mesh, setup_dict, overplot=False)
+        elif args.light_curve:
+            plot_ligthcurve(fields[0], args, mesh, setup_dict[0])
         else:
             if is_cartesian:
                 plot_cartesian_plot(fields[0], args, mesh, setup_dict)
@@ -1715,7 +1891,8 @@ def main():
             
         else:
             if not args.legend_loc:
-                plt.legend(fontsize=15)
+                pass
+                # plt.legend(fontsize=15)
             else:
                 pass
                 # plt.legend(fontsize=15, loc=args.legend_loc)
@@ -1727,6 +1904,13 @@ def main():
     if not args.save:
         plt.show()
     else:
+        plt.rcParams.update(
+            {
+                "text.usetex": True,
+                "font.family": "serif",
+                "font.serif": "Times New Roman",
+            }
+        )
         ext = 'pdf' if not args.png else 'png'
         plt.savefig('{}.{}'.format(args.save.replace(' ', '_'), ext), dpi=500, bbox_inches='tight')
     
