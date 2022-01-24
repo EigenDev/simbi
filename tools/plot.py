@@ -1906,7 +1906,7 @@ def main():
     else:
         plt.rcParams.update(
             {
-                "text.usetex": True,
+                #"text.usetex": True,
                 "font.family": "serif",
                 "font.serif": "Times New Roman",
             }
