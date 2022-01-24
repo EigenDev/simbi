@@ -516,7 +516,7 @@ def plot_polar_plot(
                 ax.set_position([0.15, -0.5, 0.46, 2])
                 wedge.set_position([0.58, -0.5, 0.3, 2])
             elif args.nwedge == 2:
-                ax.set_position([0.305, -0.5, 0.40, 2.1])
+                ax.set_position([0.28, -0.5, 0.45, 2.0])
                 wedge.set_position([0.70, -0.5, 0.3, 2])
                 axes[2].set_position([0.01, -0.5, 0.3, 2])
             
@@ -614,7 +614,7 @@ def plot_polar_plot(
         if args.setup != "":
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20, y=1)
         else:
-            fig.suptitle('t = {:.2f}'.format(tend), fontsize=20, y=1)
+            fig.suptitle('t = {:.2f}'.format(tend), fontsize=20, y=0.9)
 
 def plot_cartesian_plot(
     fields: dict, 
@@ -1757,8 +1757,6 @@ def main():
         
         
     ynpts, xnpts = rho.shape 
-    cdict = {}
-    
     mesh = {}
     if is_cartesian:
         xx, yy = np.meshgrid(setup_dict[0]['x1'], setup_dict[0]['x2'])
@@ -1904,13 +1902,13 @@ def main():
     if not args.save:
         plt.show()
     else:
-        plt.rcParams.update(
-            {
-                #"text.usetex": True,
-                "font.family": "serif",
-                "font.serif": "Times New Roman",
-            }
-        )
+        # plt.rcParams.update(
+        #     {
+        #         "text.usetex": True,
+        #         "font.family": "serif",
+        #         "font.serif": "Times New Roman",
+        #     }
+        # )
         ext = 'pdf' if not args.png else 'png'
         plt.savefig('{}.{}'.format(args.save.replace(' ', '_'), ext), dpi=500, bbox_inches='tight')
     
