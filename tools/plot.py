@@ -610,7 +610,7 @@ def plot_polar_plot(
         if args.setup != "":
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=25, y=1)
         else:
-            fig.suptitle('t = {:.2f}'.format(tend), fontsize=25, y=0.9)
+            fig.suptitle('t = {:.2f}'.format(tend), fontsize=25, y=0.83)
 
 def plot_cartesian_plot(
     fields: dict, 
