@@ -417,57 +417,57 @@ def plot_polar_plot(
                 cbar_orientation = 'horizontal'
                 if cbar_orientation == 'horizontal':
                     cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
-        else:           
-            cbar_orientation = 'horizontal'
-            # ax.set_position([0.1, -0.18, 0.7, 1.3])
-            if num_fields > 1:
-                if num_fields == 2:
-                    if cbar_orientation == 'vertical':
-                        ycoord  = [0.1, 0.08] if ymax < np.pi else [0.10, 0.10]
-                        xcoord  = [0.1, 0.85] if ymax < np.pi else [0.86, 0.05]
-                        cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
-                    else:
-                        if not is_wedge:
-                            ycoord  = [0.2, 0.20] if ymax < np.pi else [0.10, 0.10]
-                            xcoord  = [0.1, 0.50] if ymax < np.pi else [0.51, 0.20]
+        else:  
+            if not args.no_cbar:         
+                cbar_orientation = 'horizontal'
+                # ax.set_position([0.1, -0.18, 0.7, 1.3])
+                if num_fields > 1:
+                    if num_fields == 2:
+                        if cbar_orientation == 'vertical':
+                            ycoord  = [0.1, 0.08] if ymax < np.pi else [0.10, 0.10]
+                            xcoord  = [0.1, 0.85] if ymax < np.pi else [0.86, 0.05]
+                            cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
                         else:
-                            ycoord  = [0.2, 0.20] if ymax < np.pi else [0.10, 0.10]
-                            xcoord  = [0.1, 0.50] if ymax < np.pi else [0.51, 0.20]
-                        cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.3, 0.04]) for i in range(num_fields)]
-                if num_fields == 3:
-                    ycoord  = [0.1, 0.5, 0.1]
-                    xcoord  = [0.07, 0.85, 0.85]
-                    cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8 * 0.5]) for i in range(1, num_fields)]
-                    cbaxes.append(fig.add_axes([xcoord[0], ycoord[0] ,0.03, 0.8]))
-                if num_fields == 4:
-                    ycoord  = [0.5, 0.1, 0.5, 0.1]
-                    xcoord  = [0.85, 0.85, 0.07, 0.07]
-                    cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8/(0.5 * num_fields)]) for i in range(num_fields)]
-            else:
-                if not is_wedge:
-                    plt.tight_layout()
-                    
-                if cbar_orientation == 'vertical':
-                    cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85])
+                            if not is_wedge:
+                                ycoord  = [0.2, 0.20] if ymax < np.pi else [0.10, 0.10]
+                                xcoord  = [0.1, 0.50] if ymax < np.pi else [0.51, 0.20]
+                            else:
+                                ycoord  = [0.2, 0.20] if ymax < np.pi else [0.10, 0.10]
+                                xcoord  = [0.1, 0.50] if ymax < np.pi else [0.51, 0.20]
+                            cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.3, 0.04]) for i in range(num_fields)]
+                    if num_fields == 3:
+                        ycoord  = [0.1, 0.5, 0.1]
+                        xcoord  = [0.07, 0.85, 0.85]
+                        cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8 * 0.5]) for i in range(1, num_fields)]
+                        cbaxes.append(fig.add_axes([xcoord[0], ycoord[0] ,0.03, 0.8]))
+                    if num_fields == 4:
+                        ycoord  = [0.5, 0.1, 0.5, 0.1]
+                        xcoord  = [0.85, 0.85, 0.07, 0.07]
+                        cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8/(0.5 * num_fields)]) for i in range(num_fields)]
                 else:
-                    cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85])
-                 
-                
-        
+                    if not is_wedge:
+                        plt.tight_layout()
+                        
+                    if cbar_orientation == 'vertical':
+                        cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85])
+                    else:
+                        cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85])
         if args.log:
-            if num_fields > 1:
-                fmt  = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.field]
-                cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i], format=fmt[i]) for i in range(num_fields)]
-                for cb in cbar:
-                    cb.outline.set_visible(False)                                 
-            else:
-                logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-                cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes, format=logfmt)
+            if not args.no_cbar:
+                if num_fields > 1:
+                    fmt  = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.field]
+                    cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i], format=fmt[i]) for i in range(num_fields)]
+                    for cb in cbar:
+                        cb.outline.set_visible(False)                                 
+                else:
+                    logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+                    cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes, format=logfmt)
         else:
-            if num_fields > 1:
-                cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i]) for i in range(num_fields)]
-            else:
-                cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes)
+            if not args.no_cbar:
+                if num_fields > 1:
+                    cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i]) for i in range(num_fields)]
+                else:
+                    cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes)
         ax.yaxis.grid(True, alpha=0.05)
         ax.xaxis.grid(True, alpha=0.05)
     
@@ -582,35 +582,36 @@ def plot_polar_plot(
         
         
     if not args.pictorial:
-        if args.log:
-            if ymax == np.pi:
-                set_label = ax.set_ylabel if cbar_orientation == 'vertical' else ax.set_xlabel
-                if num_fields > 1:
-                    for i in range(num_fields):
-                        if args.field[i] in lin_fields:
-                            cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=20)
-                        else:
-                            cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+        if not args.no_cbar:
+            if args.log:
+                if ymax == np.pi:
+                    set_label = ax.set_ylabel if cbar_orientation == 'vertical' else ax.set_xlabel
+                    if num_fields > 1:
+                        for i in range(num_fields):
+                            if args.field[i] in lin_fields:
+                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=20)
+                            else:
+                                cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+                    else:
+                        cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
                 else:
-                    cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
+                    if num_fields > 1:
+                        for i in range(num_fields):
+                            if args.field[i] in lin_fields:
+                                cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
+                            else:
+                                cbar[i].ax.set_ylabel(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+                    else:
+                        cbar.ax.set_xlabel(r'$\log$ {}'.format(field_str), fontsize=20)
             else:
-                if num_fields > 1:
-                    for i in range(num_fields):
-                        if args.field[i] in lin_fields:
+                if ymax >= np.pi:
+                    if num_fields > 1:
+                        for i in range(num_fields):
                             cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
-                        else:
-                            cbar[i].ax.set_ylabel(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+                    else:
+                        cbar.ax.set_ylabel(f'{field_str}', fontsize=20)
                 else:
-                    cbar.ax.set_xlabel(r'$\log$ {}'.format(field_str), fontsize=20)
-        else:
-            if ymax >= np.pi:
-                if num_fields > 1:
-                    for i in range(num_fields):
-                        cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
-                else:
-                    cbar.ax.set_ylabel(f'{field_str}', fontsize=20)
-            else:
-                cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
+                    cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
         if args.setup != "":
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20, y=1)
         else:
@@ -647,11 +648,12 @@ def plot_cartesian_plot(
     divider = make_axes_locatable(ax)
     cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
     
-    if args.log:
-        logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes, format=logfmt)
-    else:
-        cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes)
+    if not args.no_cbar:
+        if args.log:
+            logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+            cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes, format=logfmt)
+        else:
+            cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes)
 
     ax.yaxis.grid(True, alpha=0.1)
     ax.xaxis.grid(True, alpha=0.1)
@@ -1538,6 +1540,9 @@ def main():
     
     parser.add_argument('--cbar_sub', dest = 'cbar2', metavar='Range of Color Bar for secondary plot',nargs='+',type=float,
                         default =[None, None], help='The colorbar range you\'d like to plot')
+    
+    parser.add_argument('--no_cbar', dest ='no_cbar',action='store_true',
+                        default=False, help='colobar visible siwtch')
     
     parser.add_argument('--cmap', dest ='cmap', metavar='Color Bar Colarmap',
                         default = 'magma', help='The colorbar cmap you\'d like to plot')
