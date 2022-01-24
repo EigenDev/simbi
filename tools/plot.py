@@ -387,11 +387,6 @@ def plot_polar_plot(
         cs[0] = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, 
                               linewidth=0,rasterized=True, shading='auto', **kwargs)
         
-        # if args.field[0] == 'gamma_beta':
-        #     gb1 = prims2var(fields, 'gamma_beta_1')
-        #     gb2 = prims2var(fields, 'gamma_beta_2')
-        #     ax.quiver(tt, rr, gb1, gb2)
-        
         if args.bipolar:
             cs[0] = ax.pcolormesh(tt[:: 1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
             cs[0] = ax.pcolormesh(t2[::-1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
@@ -489,11 +484,9 @@ def plot_polar_plot(
             ax.plot(np.radians(-np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color='white')
             ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=2, color='white')
             
-    
-    
     ax.set_theta_zero_location('N')
     ax.set_theta_direction(-1)
-    ax.tick_params(axis='both', labelsize=10)
+    ax.tick_params(axis='both', labelsize=15)
     rlabels = ax.get_ymajorticklabels()
     if not args.pictorial:
         for label in rlabels:
@@ -554,7 +547,7 @@ def plot_polar_plot(
         wedge.set_theta_direction(-1)
         wedge.yaxis.grid(False)
         wedge.xaxis.grid(False)
-        wedge.tick_params(axis='both', labelsize=6)
+        wedge.tick_params(axis='both', labelsize=10)
         rlabels = ax.get_ymajorticklabels()
         for label in rlabels:
             label.set_color('white')
@@ -567,11 +560,13 @@ def plot_polar_plot(
         wedge.set_aspect(1.)
         
         if args.nwedge > 1:
+            # force the rlabels to be outside plot area
+            axes[2].tick_params(axis="y",direction="out", pad=-22)
             axes[2].set_theta_zero_location('N')
             axes[2].set_theta_direction(-1)
             axes[2].yaxis.grid(False)
             axes[2].xaxis.grid(False)
-            axes[2].tick_params(axis='both', labelsize=6)                
+            axes[2].tick_params(axis='both', labelsize=10)                
             axes[2].axes.xaxis.set_ticklabels([])
             axes[2].set_ylim([wedge_min, wedge_max])
             axes[2].set_rorigin(-wedge_min)
@@ -613,9 +608,9 @@ def plot_polar_plot(
                 else:
                     cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
         if args.setup != "":
-            fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20, y=1)
+            fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=25, y=1)
         else:
-            fig.suptitle('t = {:.2f}'.format(tend), fontsize=20, y=0.9)
+            fig.suptitle('t = {:.2f}'.format(tend), fontsize=25, y=0.9)
 
 def plot_cartesian_plot(
     fields: dict, 
