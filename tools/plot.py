@@ -547,7 +547,7 @@ def plot_polar_plot(
         wedge.set_theta_direction(-1)
         wedge.yaxis.grid(False)
         wedge.xaxis.grid(False)
-        wedge.tick_params(axis='both', labelsize=10)
+        wedge.tick_params(axis='both', labelsize=17)
         rlabels = ax.get_ymajorticklabels()
         for label in rlabels:
             label.set_color('white')
@@ -561,12 +561,12 @@ def plot_polar_plot(
         
         if args.nwedge > 1:
             # force the rlabels to be outside plot area
-            axes[2].tick_params(axis="y",direction="out", pad=-22)
+            axes[2].tick_params(axis="y",direction="out", pad=-35)
             axes[2].set_theta_zero_location('N')
             axes[2].set_theta_direction(-1)
             axes[2].yaxis.grid(False)
             axes[2].xaxis.grid(False)
-            axes[2].tick_params(axis='both', labelsize=10)                
+            axes[2].tick_params(axis='both', labelsize=17)                
             axes[2].axes.xaxis.set_ticklabels([])
             axes[2].set_ylim([wedge_min, wedge_max])
             axes[2].set_rorigin(-wedge_min)
@@ -584,9 +584,9 @@ def plot_polar_plot(
                     if num_fields > 1:
                         for i in range(num_fields):
                             if args.field[i] in lin_fields:
-                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=20)
+                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=30)
                             else:
-                                cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+                                cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=30)
                     else:
                         cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
                 else:
