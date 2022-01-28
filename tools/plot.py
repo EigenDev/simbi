@@ -977,7 +977,9 @@ def plot_hist(
             mass     = dV_1d * fields['rho'] * W
             var      = (W - 1.0) * mass * e_scale.value # Kinetic Energy in [erg]
         elif args.mass:
-            var = mass * m.value                                  # Mass in [g]
+            W        = calc_lorentz_gamma(fields)
+            mass     = dV_1d * fields['rho'] * W
+            var      = mass * m.value            # Mass in [g]
         elif args.enthalpy:
             h   = calc_enthalpy(fields)
             var = (h - 1.0) * e_scale.value      # Specific Enthalpy in [erg]
@@ -1029,7 +1031,7 @@ def plot_hist(
         h   = calc_enthalpy(fields)
         var = (h - 1.0) *  dV * e_scale.value
     elif args.mass:
-        W = calc_lorentz_gamma(fields)
+        W   = calc_lorentz_gamma(fields)
         var = dV * fields['rho'] * W * m.value
     elif args.dm_du:
         u   = fields['gamma_beta']
@@ -1037,9 +1039,6 @@ def plot_hist(
     else:
         var = prims2var(fields, "energy") * dV * e_scale.value
 
-    
-    
-        
     # Create 4-Velocity bins as well as the Y-value bins directly
     u         = fields['gamma_beta']
     gbs       = np.logspace(np.log10(1.e-3), np.log10(u.max()), 128)
@@ -1065,8 +1064,7 @@ def plot_hist(
             else:
                 oned_field = get_1d_equiv_file(args.oned_files[ax_num])
                 calc_1d_hist(oned_field)
-                
-    
+
     if args.norm:
         var /= var.max()
 
@@ -1139,9 +1137,9 @@ def plot_hist(
     if args.setup != "":
         ax.set_title(r'{}, t ={:.2f} s'.format(args.setup, tend), fontsize=20)
     
-    # if overplot:
-    #     if args.labels is not None:
-    #             ax.legend(fontsize=10)
+    if overplot and args.sub_split is None:
+        if args.labels is not None:
+                ax.legend(fontsize=15, loc=args.legend_loc)
         
 
 def plot_dx_domega(
@@ -1159,9 +1157,9 @@ def plot_dx_domega(
     if not overplot:
         if 0 in args.cutoffs:
             fig, (ax0, ax) = plt.subplots(2, 1, gridspec_kw={'height_ratios': [1, 3]}, 
-                                        figsize=(9,9), sharex=True)
+                                        figsize=(10,9), sharex=True)
         else:
-            fig = plt.figure(figsize=[9, 9])
+            fig = plt.figure(figsize=[10, 9])
             ax  = fig.add_subplot(1, 1, 1)
         
     def calc_dec_rad(gb: float, M_ej: float):
@@ -1286,11 +1284,11 @@ def plot_dx_domega(
                 cut_fmt = cutoff
             if args.labels[0] == "":
                 if args.dm_domega:
-                    label=r"$M( > {})$".format(cut_fmt)
+                    label=r"$M~(\Gamma \beta > {})$".format(cut_fmt)
                 elif args.kinetic:
-                    label=r"$E_k( > {})$".format(cut_fmt)
+                    label=r"$E_k~(\Gamma \beta > {})$".format(cut_fmt)
                 else:
-                    label=r"$E_T( > {})$".format(cut_fmt)
+                    label=r"$E_T~(\Gamma \beta > {})$".format(cut_fmt)
                 if args.norm:
                     label += r" / {:.1e} ergs)".format(var.sum())
             else:
@@ -1344,11 +1342,11 @@ def plot_dx_domega(
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
         if 'ax0' in locals():
             if args.kinetic:
-                fig.text(0.00, 0.5, r'$E_{\rm K, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+                fig.text(0.030, 0.5, r'$E_{\rm K, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
             elif args.dm_domega:
-                fig.text(0.010, 0.5, r'$M_{\rm iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+                fig.text(0.010, 0.5, r'$M_{\rm iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
             else:
-                fig.text(0.010, 0.5, r'$E_{\rm T, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20, va='center', rotation='vertical')
+                fig.text(0.010, 0.5, r'$E_{\rm T, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
         else:
             if len(args.cutoffs) == 1:
                 if args.kinetic:
@@ -1376,7 +1374,6 @@ def plot_dx_domega(
                 elif args.field[0] == 'temperature':
                     ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{eV}}]$', fontsize=15)
         
-    
         ax.tick_params('both', labelsize=15)
     else:
         ax.tick_params('x', labelsize=15)
@@ -1886,7 +1883,6 @@ def main():
                 axs[0].legend(fontsize=15, loc='upper right')
             else:
                 axs[0].legend(fontsize=15, loc=args.legend_loc)
-            
         else:
             if not args.legend_loc:
                 pass
@@ -1902,13 +1898,13 @@ def main():
     if not args.save:
         plt.show()
     else:
-        # plt.rcParams.update(
-        #     {
-        #         "text.usetex": True,
-        #         "font.family": "serif",
-        #         "font.serif": "Times New Roman",
-        #     }
-        # )
+        plt.rcParams.update(
+            {
+                "text.usetex": True,
+                "font.family": "serif",
+                "font.serif": "Times New Roman",
+            }
+        )
         ext = 'pdf' if not args.png else 'png'
         plt.savefig('{}.{}'.format(args.save.replace(' ', '_'), ext), dpi=500, bbox_inches='tight')
     
