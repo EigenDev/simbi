@@ -964,9 +964,9 @@ def plot_hist(
     # to reset when on a different axes object
     color_len = args.sub_split[ax_num] if args.sub_split is not None else len(args.filename)
     if args.cmap == 'grayscale':
-        colors = plt.cm.gray(np.linspace(0.05, 0.75, color_len))
+        colors = plt.cm.gray(np.linspace(0.05, 0.75, color_len+1))
     else:
-        colors = plt.cm.viridis(np.linspace(0.25, 0.75, color_len))
+        colors = plt.cm.viridis(np.linspace(0.25, 0.75, color_len+1))
 
     lw = 3.0 + 1.5*(case // 2)
     def calc_1d_hist(fields):
@@ -1086,7 +1086,7 @@ def plot_hist(
     else:
         label = None
     
-    c = colors[case]
+    c = colors[case + 1]
     # if case % 2 == 0:
     #     c = colors[1]
     # else:
@@ -1739,8 +1739,6 @@ def main():
             
             W    = 1/np.sqrt(1.0 -(v1**2 + v2**2))
             beta = np.sqrt(v1**2 + v2**2)
-            
-            
             
             fields[idx]['rho']          = rho
             fields[idx]['v1']           = v1 
