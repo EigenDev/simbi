@@ -1895,7 +1895,7 @@ def main():
     if not args.save:
         plt.show()
     else:
-        try:
+        if args.tex:
             plt.rcParams.update(
                 {
                     "text.usetex": True,
@@ -1903,8 +1903,6 @@ def main():
                     "font.serif": "Times New Roman",
                 }
             )
-        except Exception:
-            pass 
         
         ext = 'pdf' if not args.png else 'png'
         plt.savefig('{}.{}'.format(args.save.replace(' ', '_'), ext), dpi=500, bbox_inches='tight')
