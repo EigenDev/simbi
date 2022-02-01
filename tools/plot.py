@@ -161,7 +161,6 @@ def get_2d_file(args: argparse.ArgumentParser, filename: str) -> dict:
         mesh['yy'] = yy
     else:      
         rr, tt = np.meshgrid(setup['x1'], setup['x2'])
-        rr, t2 = np.meshgrid(setup['x1'], -setup['x2'][::-1])
         mesh['theta'] = tt 
         mesh['rr']    = rr
         mesh['r']     = setup['x1']
@@ -382,7 +381,7 @@ def plot_polar_plot(
             ax = axs
         
     rr, tt      = mesh['rr'], mesh['theta']
-    t2          = mesh['t2']
+    t2          = - tt[::-1]
     xmax        = dset['xmax']
     xmin        = dset['xmin']
     ymax        = dset['ymax']
@@ -1882,7 +1881,6 @@ def main():
             if setup['is_cartesian']:
                 plot_cartesian_plot(fields, args, mesh, setup)
             else:
-                mesh['t2'] = t2
                 plot_polar_plot(fields, args, mesh, setup)
     
     if args.sub_split is not None:
