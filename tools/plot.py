@@ -45,6 +45,130 @@ def fill_below_intersec(x: np.ndarray, y: np.ndarray, constraint: float, color: 
     ind = find_nearest(y, constraint)[0]
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
     
+def get_2d_file(args: argparse.ArgumentParser, filename: str) -> dict:
+    setup  = {}
+    fields = {}
+    is_cartesian = False
+    with h5py.File(filename, 'r') as hf: 
+        ds          = hf.get('sim_info')
+        rho         = hf.get('rho')[:]
+        v1          = hf.get('v1')[:]
+        v2          = hf.get('v2')[:]
+        p           = hf.get('p')[:]
+        t           = ds.attrs['current_time']
+        xmax        = ds.attrs['xmax']
+        xmin        = ds.attrs['xmin']
+        ymax        = ds.attrs['ymax']
+        ymin        = ds.attrs['ymin']
+        
+        # New checkpoint files, so check if new attributes were
+        # implemented or not
+        try:
+            nx          = ds.attrs['nx']
+            ny          = ds.attrs['ny']
+        except:
+            nx          = ds.attrs['NX']
+            ny          = ds.attrs['NY']
+        
+        try:
+            chi = hf.get('chi')[:]
+        except:
+            chi = np.zeros((ny, nx))
+            
+        try:
+            gamma = ds.attrs['adiabatic_gamma']
+        except:
+            gamma = 4./3.
+        
+        # Check for garbage value
+        if gamma < 1:
+            gamma = 4./3. 
+            
+        try:
+            coord_sysem = ds.attrs['geometry'].decode('utf-8')
+        except:
+            coord_sysem = 'spherical'
+            
+        try:
+            is_linspace = ds.attrs['linspace']
+        except:
+            is_linspace = False
+        
+        setup['xmax'] = xmax 
+        setup['xmin'] = xmin 
+        setup['ymax'] = ymax 
+        setup['ymin'] = ymin 
+        setup['time'] = t * time_scale
+        
+        rho = rho.reshape(ny, nx)
+        v1  = v1.reshape(ny, nx)
+        v2  = v2.reshape(ny, nx)
+        p   = p.reshape(ny, nx)
+        chi = chi.reshape(ny, nx)
+        
+        
+        if args.forder:
+            rho = rho[1:-1, 1: -1]
+            v1  = v1 [1:-1, 1: -1]
+            v2  = v2 [1:-1, 1: -1]
+            p   = p  [1:-1, 1: -1]
+            chi = chi[1:-1, 1: -1]
+            xactive = nx - 2
+            yactive = ny - 2
+            setup['xactive'] = xactive
+            setup['yactive'] = yactive
+        else:
+            rho = rho[2:-2, 2: -2]
+            v1  = v1 [2:-2, 2: -2]
+            v2  = v2 [2:-2, 2: -2]
+            p   = p  [2:-2, 2: -2]
+            chi = chi[2:-2, 2: -2]
+            xactive = nx - 4
+            yactive = ny - 4
+            setup['xactive'] = xactive
+            setup['yactive'] = yactive
+        
+        if is_linspace:
+            setup['x1'] = np.linspace(xmin, xmax, xactive)
+            setup['x2'] = np.linspace(ymin, ymax, yactive)
+        else:
+            setup['x1'] = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
+            setup['x2'] = np.linspace(ymin, ymax, yactive)
+        
+        if coord_sysem == 'cartesian':
+            is_cartesian = True
+        
+        W    = 1/np.sqrt(1.0 -(v1**2 + v2**2))
+        beta = np.sqrt(v1**2 + v2**2)
+        
+        fields['rho']          = rho
+        fields['v1']           = v1 
+        fields['v2']           = v2 
+        fields['p']            = p
+        fields['chi']          = chi
+        fields['gamma_beta']   = W*beta
+        fields['ad_gamma']     = gamma
+        setup['is_cartesian']  = is_cartesian
+        # fields[idx]['gamma_beta_1'] = abs(W*v1)
+        # fields[idx]['gamma_beta_2'] = abs(W*v2)
+        
+        
+    ynpts, xnpts = rho.shape 
+    mesh = {}
+    if setup['is_cartesian']:
+        xx, yy = np.meshgrid(setup['x1'], setup['x2'])
+        mesh['xx'] = xx
+        mesh['yy'] = yy
+    else:      
+        rr, tt = np.meshgrid(setup['x1'], setup['x2'])
+        rr, t2 = np.meshgrid(setup['x1'], -setup['x2'][::-1])
+        mesh['theta'] = tt 
+        mesh['rr']    = rr
+        mesh['r']     = setup['x1']
+        mesh['th']    = setup['x2']
+        
+    return fields, setup, mesh 
+
 def get_1d_equiv_file(filename: str) -> dict:
     file = filename
     ofield = {}
@@ -259,10 +383,10 @@ def plot_polar_plot(
         
     rr, tt      = mesh['rr'], mesh['theta']
     t2          = mesh['t2']
-    xmax        = dset[0]['xmax']
-    xmin        = dset[0]['xmin']
-    ymax        = dset[0]['ymax']
-    ymin        = dset[0]['ymin']
+    xmax        = dset['xmax']
+    xmin        = dset['xmin']
+    ymax        = dset['ymax']
+    ymin        = dset['ymin']
     
     vmin,vmax = args.cbar[:2]
 
@@ -281,7 +405,7 @@ def plot_polar_plot(
     else:
         color_map = plt.get_cmap(args.cmap)
         
-    tend = dset[0]['time']
+    tend = dset['time']
     # If plotting multiple fields on single polar projection, split the 
     # field projections into their own quadrants
     if num_fields > 1:
@@ -557,22 +681,26 @@ def plot_polar_plot(
         wedge.set_rorigin(-wedge_min)
         wedge.set_thetamin(ang_min)
         wedge.set_thetamax(ang_max)
-        wedge.set_aspect(1.)
+        wedge.yaxis.set_minor_locator(plt.MaxNLocator(1))
+        wedge.yaxis.set_major_locator(plt.MaxNLocator(2))
+        # wedge.set_aspect(1.)
         
         if args.nwedge > 1:
             # force the rlabels to be outside plot area
-            axes[2].tick_params(axis="y",direction="out", pad=-35)
+            axes[2].tick_params(axis="y",direction="out", pad=-25)
             axes[2].set_theta_zero_location('N')
             axes[2].set_theta_direction(-1)
             axes[2].yaxis.grid(False)
             axes[2].xaxis.grid(False)
-            axes[2].tick_params(axis='both', labelsize=17)                
+            axes[2].tick_params(axis='both', labelsize=17)               
             axes[2].axes.xaxis.set_ticklabels([])
             axes[2].set_ylim([wedge_min, wedge_max])
             axes[2].set_rorigin(-wedge_min)
             axes[2].set_thetamin(-ang_min)
             axes[2].set_thetamax(-ang_max)
-            axes[2].set_aspect(1.)
+            axes[2].yaxis.set_minor_locator(plt.MaxNLocator(1))
+            axes[2].yaxis.set_major_locator(plt.MaxNLocator(2))
+            # axes[2].set_aspect(1.)
             
         
         
@@ -620,10 +748,10 @@ def plot_cartesian_plot(
     fig, ax = plt.subplots(1, 1, figsize=(10,10), constrained_layout=False)
 
     xx, yy = mesh['xx'], mesh['yy']
-    xmax        = dset[0]['xmax']
-    xmin        = dset[0]['xmin']
-    ymax        = dset[0]['ymax']
-    ymin        = dset[0]['ymin']
+    xmax        = dset['xmax']
+    xmin        = dset['xmin']
+    ymax        = dset['ymax']
+    ymin        = dset['ymin']
     
     vmin,vmax = args.cbar
 
@@ -637,7 +765,7 @@ def plot_cartesian_plot(
     else:
         color_map = plt.cm.get_cmap(args.cmap)
         
-    tend = dset[0]['time']
+    tend = dset['time']
     c = ax.pcolormesh(xx, yy, fields[args.field], cmap=color_map, shading='auto', **kwargs)
     
     divider = make_axes_locatable(ax)
@@ -681,15 +809,15 @@ def plot_1d_curve(
     r, theta = mesh['r'], mesh['th']
     theta    = theta * 180 / np.pi 
     
-    xmax        = dset[0]['xmax']
-    xmin        = dset[0]['xmin']
-    ymax        = dset[0]['ymax']
-    ymin        = dset[0]['ymin']
+    xmax        = dset['xmax']
+    xmin        = dset['xmin']
+    ymax        = dset['ymax']
+    ymin        = dset['ymin']
     
     vmin,vmax = args.cbar
     var = [field for field in args.field] if num_fields > 1 else args.field[0]
     
-    tend = dset[0]['time']
+    tend = dset['time']
     if args.mass:
         dV          = calc_cell_volume(mesh['rr'], mesh['theta'])
         mass        = dV * fields['W'] * fields['rho']
@@ -1018,7 +1146,7 @@ def plot_hist(
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
     
-    tend        = dset[case]['time']
+    tend        = dset['time']
     theta       = mesh['theta']
     r           = mesh['rr']
     dV          = calc_cell_volume(r, theta)
@@ -1200,7 +1328,7 @@ def plot_dx_domega(
     colors    = plt.cm.viridis(np.linspace(0.1, 0.80, color_len if color_len > 1 else len(args.cutoffs)))
     coloriter = cycle(colors)
     
-    tend        = dset[case]['time']
+    tend        = dset['time']
     theta       = mesh['theta']
     tv          = compute_theta_verticies(theta)
     r           = mesh['rr']
@@ -1275,8 +1403,9 @@ def plot_dx_domega(
             theta_bin_edges = np.rad2deg(theta_bin_edges)
             ax.step(theta_bin_edges[:-1], iso_var, label=label)
         else:
-            quant_func = np.sum if args.field[0] != 'temperature' else np.mean
-            var_per_theta = 4.0 * np.pi * quant_func(var, axis=1) / domega[:,0]
+            quant_func     = np.sum if args.field[0] != 'temperature' else np.mean
+            iso_correction = 4.0 * np.pi if dm_domega else 1.0
+            var_per_theta  = iso_correction * quant_func(var, axis=1) / domega[:,0]
             
             if cutoff.is_integer():
                 cut_fmt = int(cutoff)
@@ -1342,9 +1471,9 @@ def plot_dx_domega(
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
         if 'ax0' in locals():
             if args.kinetic:
-                fig.text(0.030, 0.5, r'$E_{\rm K, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
+                fig.text(0.030, 0.5, r'$E_{\rm K, \Omega}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
             elif args.dm_domega:
-                fig.text(0.010, 0.5, r'$M_{\rm iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
+                fig.text(0.010, 0.5, r'$M_{\theta}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
             else:
                 fig.text(0.010, 0.5, r'$E_{\rm T, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
         else:
@@ -1370,7 +1499,7 @@ def plot_dx_domega(
                         ax.set_ylabel(r'$E_{{\rm T, iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
                 elif args.dm_domega:
                     units = r'[\rm{{g}}]' if not args.norm else ''
-                    ax.set_ylabel(r'$M_{\rm{iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
+                    ax.set_ylabel(r'$M_{\Omega} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
                 elif args.field[0] == 'temperature':
                     ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{eV}}]$', fontsize=15)
         
@@ -1400,7 +1529,7 @@ def plot_dx_domega(
             # ax0.axes.get_xaxis().set_ticks([])
             ax0.set_ylim(ax0_ylims)
             plt.subplots_adjust(hspace=0)
-            ax0.yaxis.set_minor_locator(plt.MaxNLocator(1))
+            ax0.yaxis.set_minor_locator(plt.MaxNLocator(2))
             ax0.tick_params('both',which='major', labelsize=15)
             #ax.set_xlim(theta[0,0], theta[-1,0])
             
@@ -1630,11 +1759,10 @@ def main():
                         default=None,
                         help='Save the fig with some name')
 
-    is_cartesian = False
     args = parser.parse_args()
     vmin, vmax = args.cbar[:2]
     fields = {}
-    setup_dict = {}
+    setup = {}
     
     if args.cmap == 'grayscale':
         plt.style.use('grayscale')
@@ -1644,126 +1772,6 @@ def main():
     if args.dbg:
         plt.style.use('dark_background')
         
-    for idx, file in enumerate(args.filename):
-        fields[idx] = {}
-        setup_dict[idx] = {}
-        with h5py.File(file, 'r') as hf:
-            
-            ds          = hf.get('sim_info')
-            rho         = hf.get('rho')[:]
-            v1          = hf.get('v1')[:]
-            v2          = hf.get('v2')[:]
-            p           = hf.get('p')[:]
-            t           = ds.attrs['current_time']
-            xmax        = ds.attrs['xmax']
-            xmin        = ds.attrs['xmin']
-            ymax        = ds.attrs['ymax']
-            ymin        = ds.attrs['ymin']
-            
-            # New checkpoint files, so check if new attributes were
-            # implemented or not
-            try:
-                nx          = ds.attrs['nx']
-                ny          = ds.attrs['ny']
-            except:
-                nx          = ds.attrs['NX']
-                ny          = ds.attrs['NY']
-            
-            try:
-                chi = hf.get('chi')[:]
-            except:
-                chi = np.zeros((ny, nx))
-                
-            try:
-                gamma = ds.attrs['adiabatic_gamma']
-            except:
-                gamma = 4./3.
-            
-            # Check for garbage value
-            if gamma < 1:
-                gamma = 4./3. 
-                
-            try:
-                coord_sysem = ds.attrs['geometry'].decode('utf-8')
-            except:
-                coord_sysem = 'spherical'
-                
-            try:
-                is_linspace = ds.attrs['linspace']
-            except:
-                is_linspace = False
-            
-            setup_dict[idx]['xmax'] = xmax 
-            setup_dict[idx]['xmin'] = xmin 
-            setup_dict[idx]['ymax'] = ymax 
-            setup_dict[idx]['ymin'] = ymin 
-            setup_dict[idx]['time'] = t * time_scale
-            
-            rho = rho.reshape(ny, nx)
-            v1  = v1.reshape(ny, nx)
-            v2  = v2.reshape(ny, nx)
-            p   = p.reshape(ny, nx)
-            chi = chi.reshape(ny, nx)
-            
-            
-            if args.forder:
-                rho = rho[1:-1, 1: -1]
-                v1  = v1 [1:-1, 1: -1]
-                v2  = v2 [1:-1, 1: -1]
-                p   = p  [1:-1, 1: -1]
-                chi = chi[1:-1, 1: -1]
-                xactive = nx - 2
-                yactive = ny - 2
-                setup_dict[idx]['xactive'] = xactive
-                setup_dict[idx]['yactive'] = yactive
-            else:
-                rho = rho[2:-2, 2: -2]
-                v1  = v1 [2:-2, 2: -2]
-                v2  = v2 [2:-2, 2: -2]
-                p   = p  [2:-2, 2: -2]
-                chi = chi[2:-2, 2: -2]
-                xactive = nx - 4
-                yactive = ny - 4
-                setup_dict[idx]['xactive'] = xactive
-                setup_dict[idx]['yactive'] = yactive
-            
-            if is_linspace:
-                setup_dict[idx]['x1'] = np.linspace(xmin, xmax, xactive)
-                setup_dict[idx]['x2'] = np.linspace(ymin, ymax, yactive)
-            else:
-                setup_dict[idx]['x1'] = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
-                setup_dict[idx]['x2'] = np.linspace(ymin, ymax, yactive)
-            
-            if coord_sysem == 'cartesian':
-                is_cartesian = True
-            
-            W    = 1/np.sqrt(1.0 -(v1**2 + v2**2))
-            beta = np.sqrt(v1**2 + v2**2)
-            
-            fields[idx]['rho']          = rho
-            fields[idx]['v1']           = v1 
-            fields[idx]['v2']           = v2 
-            fields[idx]['p']            = p
-            fields[idx]['chi']          = chi
-            fields[idx]['gamma_beta']   = W*beta
-            fields[idx]['ad_gamma']     = gamma
-            # fields[idx]['gamma_beta_1'] = abs(W*v1)
-            # fields[idx]['gamma_beta_2'] = abs(W*v2)
-        
-        
-    ynpts, xnpts = rho.shape 
-    mesh = {}
-    if is_cartesian:
-        xx, yy = np.meshgrid(setup_dict[0]['x1'], setup_dict[0]['x2'])
-        mesh['xx'] = xx
-        mesh['yy'] = yy
-    else:      
-        rr, tt = np.meshgrid(setup_dict[0]['x1'], setup_dict[0]['x2'])
-        rr, t2 = np.meshgrid(setup_dict[0]['x1'], -setup_dict[0]['x2'][::-1])
-        mesh['theta'] = tt 
-        mesh['rr']    = rr
-        mesh['r']     = setup_dict[0]['x1']
-        mesh['th']    = setup_dict[0]['x2']
     
     num_subplots   = len(args.sub_split) if args.sub_split is not None else 1
     if len(args.filename) > 1:
@@ -1809,34 +1817,35 @@ def main():
             points = [] 
             t = []
         for idx, file in enumerate(args.filename):
+            fields, setup, mesh = get_2d_file(args, file)
             i += 1
             if args.hist and (not args.de_domega and not args.dm_domega):
                 if args.sub_split is None:
-                    plot_hist(fields[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=idx, ax_col=idx)
+                    plot_hist(fields, args, mesh, setup, overplot=True, ax=ax, case=idx, ax_col=idx)
                 else:
                     if ax_shift:
                         ax_col   = 0
                         ax       = next(axs_iter)   
                         ax_shift = False
-                    plot_hist(fields[idx], args, mesh, setup_dict, overplot=True, ax=ax, ax_num=ax_num, case=i-1, ax_col=ax_col)
+                    plot_hist(fields, args, mesh, setup, overplot=True, ax=ax, ax_num=ax_num, case=i-1, ax_col=ax_col)
             elif args.de_domega or args.dm_domega:
                 if args.sub_split is None:
-                    plot_dx_domega(fields[idx], args, mesh, setup_dict, overplot=True, ax=ax, case=i-1, ax_col=idx)
+                    plot_dx_domega(fields, args, mesh, setup, overplot=True, ax=ax, case=i-1, ax_col=idx)
                 else:
                     if ax_shift:
                         ax_col   = 0
                         ax       = next(axs_iter)   
                         ax_shift = False
-                    plot_dx_domega(fields[idx], args, mesh, setup_dict, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
+                    plot_dx_domega(fields, args, mesh, setup, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
             elif args.x is not None:
-                plot_per_theta(fields[idx], args, mesh, setup_dict, True, ax, idx)
+                plot_per_theta(fields, args, mesh, setup, True, ax, idx)
             elif args.dec_rad:
-                plot_dec_rad(fields[idx], args, mesh, setup_dict, True, ax, idx)
+                plot_dec_rad(fields, args, mesh, setup, True, ax, idx)
             elif args.light_curve:
-                plot_ligthcurve(fields[idx], args, mesh, setup_dict[idx],points, overplot=True, ax=ax)
-                t += [setup_dict[idx]['time'].value]
+                plot_ligthcurve(fields, args, mesh, setup,points, overplot=True, ax=ax)
+                t += [setup['time'].value]
             else:
-                plot_1d_curve(fields[idx], args, mesh, setup_dict, True, ax, idx)
+                plot_1d_curve(fields, args, mesh, setup, True, ax, idx)
             
             ax_col += 1
             if i == lines_per_plot:
@@ -1856,42 +1865,34 @@ def main():
             for ax in axs:
                 ax.label_outer()
     else:
+        fields, setup, mesh = get_2d_file(args, args.filename[0])
         if args.hist and (not args.de_domega and not args.dm_domega):
-            plot_hist(fields[0], args, mesh, setup_dict)
+            plot_hist(fields, args, mesh, setup)
         elif args.tidx != None:
-            plot_1d_curve(fields[0], args, mesh, setup_dict)
+            plot_1d_curve(fields, args, mesh, setup)
         elif args.de_domega or args.dm_domega:
-            plot_dx_domega(fields[0], args, mesh, setup_dict)
+            plot_dx_domega(fields, args, mesh, setup)
         elif args.x is not None:
-            plot_per_theta(fields[0], args, mesh, setup_dict, overplot=False)
+            plot_per_theta(fields, args, mesh, setup, overplot=False)
         elif args.dec_rad:
-            plot_dec_rad(fields[0], args, mesh, setup_dict, overplot=False)
+            plot_dec_rad(fields, args, mesh, setup, overplot=False)
         elif args.light_curve:
-            plot_ligthcurve(fields[0], args, mesh, setup_dict[0])
+            plot_ligthcurve(fields, args, mesh, setup)
         else:
-            if is_cartesian:
-                plot_cartesian_plot(fields[0], args, mesh, setup_dict)
+            if setup['is_cartesian']:
+                plot_cartesian_plot(fields, args, mesh, setup)
             else:
                 mesh['t2'] = t2
-                plot_polar_plot(fields[0], args, mesh, setup_dict)
-                
-    if args.labels is not None:
-        if args.sub_split is not None:
-            if not args.legend_loc:
-                axs[0].legend(fontsize=15, loc='upper right')
-            else:
-                axs[0].legend(fontsize=15, loc=args.legend_loc)
-        else:
-            if not args.legend_loc:
-                pass
-                # plt.legend(fontsize=15)
-            else:
-                pass
-                # plt.legend(fontsize=15, loc=args.legend_loc)
-            # if args.legend_loc is None:
-            #     plt.legend(fontsize=10)
-            # else:
-            #     plt.legend(loc=args.legend_loc, fontsize=10)
+                plot_polar_plot(fields, args, mesh, setup)
+    
+    if args.sub_split is not None:
+        if args.labels is not None:
+                if not args.legend_loc:
+                    axs[0].legend(fontsize=15, loc='upper right')
+                else:
+                    axs[0].legend(fontsize=15, loc=args.legend_loc)
+        plt.subplots_adjust(hspace=0.1)
+
             
     if not args.save:
         plt.show()
