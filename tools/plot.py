@@ -1903,7 +1903,7 @@ def main():
                     "font.serif": "Times New Roman",
                 }
             )
-        except RuntimeError:
+        except Exception:
             pass 
         
         ext = 'pdf' if not args.png else 'png'
