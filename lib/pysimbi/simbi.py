@@ -34,7 +34,7 @@ class Hydro:
             
             geometry (tuple):               The first starting point, the last, and an optional midpoint in the grid
                                             Ex. geometry = (0.0, 1.0, 0.5) for Sod Shock Tube
-                                            Ex. geometry = ((xmin, xmax), (ymin, ymax))
+                                            Ex. geometry = ((x1min, x1max), (x2min, x2max))
                                 
             n_vars (int):                   Number of primitives in the problem
             
@@ -309,7 +309,8 @@ class Hydro:
                  chkpt_interval:float = 0.1,
                  data_directory:str = "data/",
                  engine_duration: float = 10.0,
-                 compute_mode: str = 'cpu') -> np.ndarray:
+                 compute_mode: str = 'cpu',
+                 quirk_smoothing: bool = True) -> np.ndarray:
         """
         Simulate the Hydro Setup
         
@@ -398,22 +399,36 @@ class Hydro:
             
             if self.regime == "classical":
                 b = PyState2D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                u = b.simulate(
+                    sources         = sources,
+                    tstart          = start_time,
+                    tend            = tend,
+                    dt              = dt,
+                    plm_theta       = plm_theta,
+                    engine_duration = engine_duration,
+                    chkpt_interval  = chkpt_interval,
+                    data_directory  = data_directory,
+                    first_order     = first_order,
+                    periodic        = periodic,
+                    linspace        = linspace,
+                    hllc            = hllc) 
             else:
                 b = PyStateSR2D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
             
-            u = b.simulate(
-                sources         = sources,
-                tstart          = start_time,
-                tend            = tend,
-                dt              = dt,
-                plm_theta       = plm_theta,
-                engine_duration = engine_duration,
-                chkpt_interval  = chkpt_interval,
-                data_directory  = data_directory,
-                first_order     = first_order,
-                periodic        = periodic,
-                linspace        = linspace,
-                hllc            = hllc)  
+                u = b.simulate(
+                    sources         = sources,
+                    tstart          = start_time,
+                    tend            = tend,
+                    dt              = dt,
+                    plm_theta       = plm_theta,
+                    engine_duration = engine_duration,
+                    chkpt_interval  = chkpt_interval,
+                    data_directory  = data_directory,
+                    first_order     = first_order,
+                    periodic        = periodic,
+                    linspace        = linspace,
+                    hllc            = hllc,
+                    quirk_smoothing = quirk_smoothing)  
 
         else:
             if (linspace):

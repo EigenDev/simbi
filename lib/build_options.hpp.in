@@ -37,7 +37,7 @@ typedef hipStream_t simbiStream_t;
 #define GPU_CALLABLE_INLINE            __host__ __device__ inline
 #define GPU_CALLABLE_MEMBER            __host__ __device__
 #define GPU_CALLABLE_INLINE_MEMBER     __host__ __device__ inline
-#define EXRTERN_SHARED                 extern __shared__
+#define EXTERN_SHARED                 extern __shared__
 #define GPU_SHARED_DYN                 extern __shared__
 #define GPU_CAPTURE                    [=, *this]
 //  declaration of a function 

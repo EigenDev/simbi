@@ -85,7 +85,6 @@ class CompilerParams():
         if self.arch != "cpu":
             gpu_includes = '${HIP_INCLUDE_DIRS}'.split(';')
             self.extra_includes += gpu_includes
-        return self.extra_includes
     
     def set_sources(self):
         src_dir  = os.path.dirname("${CMAKE_CURRENT_SOURCE_DIR}/src/")

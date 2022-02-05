@@ -970,23 +970,23 @@ void SRHD3D::advance(
                 case simbi::Geometry::CARTESIAN:
                     {
                         #if GPU_CODE
-                            real dx = coord_lattice->gpu_dx1[ii];
-                            real dy = coord_lattice->gpu_dx2[jj];
+                            real dx1 = coord_lattice->gpu_dx1[ii];
+                            real dx2  = coord_lattice->gpu_dx2[jj];
                             real dz = coord_lattice->gpu_dx3[kk];
-                            self->gpu_cons[aid].D   += dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D )  / dy - (h1.D - h2.D)     / dz + self->gpu_sourceD   [real_loc] );
-                            self->gpu_cons[aid].S1  += dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1)  / dy - (h1.S1 - h2.S3)   / dz + self->gpu_sourceS1  [real_loc] );
-                            self->gpu_cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx  - (g1.S2  - g2.S2) / dy - (h1.S2 - h2.S3)   / dz + self->gpu_sourceS2  [real_loc] );
-                            self->gpu_cons[aid].S3  += dt * ( -(f1.S3 - f2.S3)   / dx  - (g1.S3  - g2.S3) / dy - (h1.S3 - h2.S3)   / dz + self->gpu_sourceS3  [real_loc] );
-                            self->gpu_cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau) / dy - (h1.tau - h2.tau) / dz + self->gpu_sourceTau [real_loc] );
+                            self->gpu_cons[aid].D   += dt * ( -(f1.D - f2.D)     / dx1 - (g1.D   - g2.D )  / dx2 - (h1.D - h2.D)     / dz + self->gpu_sourceD   [real_loc] );
+                            self->gpu_cons[aid].S1  += dt * ( -(f1.S1 - f2.S1)   / dx1 - (g1.S1  - g2.S1)  / dx2 - (h1.S1 - h2.S3)   / dz + self->gpu_sourceS1  [real_loc] );
+                            self->gpu_cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx1  - (g1.S2  - g2.S2) / dx2 - (h1.S2 - h2.S3)   / dz + self->gpu_sourceS2  [real_loc] );
+                            self->gpu_cons[aid].S3  += dt * ( -(f1.S3 - f2.S3)   / dx1  - (g1.S3  - g2.S3) / dx2 - (h1.S3 - h2.S3)   / dz + self->gpu_sourceS3  [real_loc] );
+                            self->gpu_cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + self->gpu_sourceTau [real_loc] );
                         #else
-                            real dx = coord_lattice->dx1[ii];
-                            real dy = coord_lattice->dx2[jj];
+                            real dx1 = coord_lattice->dx1[ii];
+                            real dx2  = coord_lattice->dx2[jj];
                             real dz = coord_lattice->dx3[kk];
-                            self->cons[aid].D   += dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D )  / dy - (h1.D - h2.D)     / dz + sourceD   [real_loc] );
-                            self->cons[aid].S1  += dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1)  / dy - (h1.S1 - h2.S3)   / dz + sourceS1  [real_loc] );
-                            self->cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx  - (g1.S2  - g2.S2) / dy - (h1.S2 - h2.S3)   / dz + sourceS2  [real_loc] );
-                            self->cons[aid].S3  += dt * ( -(f1.S3 - f2.S3)   / dx  - (g1.S3  - g2.S3) / dy - (h1.S3 - h2.S3)   / dz + sourceS3  [real_loc] );
-                            self->cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau) / dy - (h1.tau - h2.tau) / dz + sourceTau [real_loc] );
+                            self->cons[aid].D   += dt * ( -(f1.D - f2.D)     / dx1 - (g1.D   - g2.D )  / dx2 - (h1.D - h2.D)     / dz + sourceD   [real_loc] );
+                            self->cons[aid].S1  += dt * ( -(f1.S1 - f2.S1)   / dx1 - (g1.S1  - g2.S1)  / dx2 - (h1.S1 - h2.S3)   / dz + sourceS1  [real_loc] );
+                            self->cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx1  - (g1.S2  - g2.S2) / dx2 - (h1.S2 - h2.S3)   / dz + sourceS2  [real_loc] );
+                            self->cons[aid].S3  += dt * ( -(f1.S3 - f2.S3)   / dx1  - (g1.S3  - g2.S3) / dx2 - (h1.S3 - h2.S3)   / dz + sourceS3  [real_loc] );
+                            self->cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + sourceTau [real_loc] );
                         #endif
                         
                     break;
@@ -1525,23 +1525,23 @@ void SRHD3D::advance(
                 case simbi::Geometry::CARTESIAN:
                     {
                         #if GPU_CODE
-                            real dx = coord_lattice->gpu_dx1[ii];
-                            real dy = coord_lattice->gpu_dx2[jj];
+                            real dx1 = coord_lattice->gpu_dx1[ii];
+                            real dx2  = coord_lattice->gpu_dx2[jj];
                             real dz = coord_lattice->gpu_dx3[kk];
-                            self->gpu_cons[aid].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D )  / dy - (h1.D - h2.D)     / dz + self->gpu_sourceD   [real_loc] );
-                            self->gpu_cons[aid].S1  += (real)0.5 * dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1)  / dy - (h1.S1 - h2.S3)   / dz + self->gpu_sourceS1  [real_loc] );
-                            self->gpu_cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx  - (g1.S2  - g2.S2) / dy - (h1.S2 - h2.S3)   / dz + self->gpu_sourceS2  [real_loc] );
-                            self->gpu_cons[aid].S3  += (real)0.5 * dt * ( -(f1.S3 - f2.S3)   / dx  - (g1.S3  - g2.S3) / dy - (h1.S3 - h2.S3)   / dz + self->gpu_sourceS3  [real_loc] );
-                            self->gpu_cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau) / dy - (h1.tau - h2.tau) / dz + self->gpu_sourceTau [real_loc] );
+                            self->gpu_cons[aid].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx1 - (g1.D   - g2.D )  / dx2 - (h1.D - h2.D)     / dz + self->gpu_sourceD   [real_loc] );
+                            self->gpu_cons[aid].S1  += (real)0.5 * dt * ( -(f1.S1 - f2.S1)   / dx1 - (g1.S1  - g2.S1)  / dx2 - (h1.S1 - h2.S3)   / dz + self->gpu_sourceS1  [real_loc] );
+                            self->gpu_cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx1  - (g1.S2  - g2.S2) / dx2 - (h1.S2 - h2.S3)   / dz + self->gpu_sourceS2  [real_loc] );
+                            self->gpu_cons[aid].S3  += (real)0.5 * dt * ( -(f1.S3 - f2.S3)   / dx1  - (g1.S3  - g2.S3) / dx2 - (h1.S3 - h2.S3)   / dz + self->gpu_sourceS3  [real_loc] );
+                            self->gpu_cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + self->gpu_sourceTau [real_loc] );
                         #else
-                            real dx = self->coord_lattice.dx1[ii];
-                            real dy = self->coord_lattice.dx2[jj];
+                            real dx1 = self->coord_lattice.dx1[ii];
+                            real dx2  = self->coord_lattice.dx2[jj];
                             real dz = self->coord_lattice.dx3[kk];
-                            cons[aid].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx - (g1.D   - g2.D )  / dy - (h1.D - h2.D)     / dz + sourceD   [real_loc] );
-                            cons[aid].S1  += (real)0.5 * dt * ( -(f1.S1 - f2.S1)   / dx - (g1.S1  - g2.S1)  / dy - (h1.S1 - h2.S3)   / dz + sourceS1  [real_loc] );
-                            cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx  - (g1.S2  - g2.S2) / dy - (h1.S2 - h2.S3)   / dz + sourceS2  [real_loc] );
-                            cons[aid].S3  += (real)0.5 * dt * ( -(f1.S3 - f2.S3)   / dx  - (g1.S3  - g2.S3) / dy - (h1.S3 - h2.S3)   / dz + sourceS3  [real_loc] );
-                            cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx - (g1.tau - g2.tau) / dy - (h1.tau - h2.tau) / dz + sourceTau [real_loc] );
+                            cons[aid].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx1 - (g1.D   - g2.D )  / dx2 - (h1.D - h2.D)     / dz + sourceD   [real_loc] );
+                            cons[aid].S1  += (real)0.5 * dt * ( -(f1.S1 - f2.S1)   / dx1 - (g1.S1  - g2.S1)  / dx2 - (h1.S1 - h2.S3)   / dz + sourceS1  [real_loc] );
+                            cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx1  - (g1.S2  - g2.S2) / dx2 - (h1.S2 - h2.S3)   / dz + sourceS2  [real_loc] );
+                            cons[aid].S3  += (real)0.5 * dt * ( -(f1.S3 - f2.S3)   / dx1  - (g1.S3  - g2.S3) / dx2 - (h1.S3 - h2.S3)   / dz + sourceS3  [real_loc] );
+                            cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + sourceTau [real_loc] );
                         #endif
                         
                     break;
@@ -1746,10 +1746,10 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     }
     // Write some info about the setup for writeup later
     DataWriteMembers setup;
-    setup.xmax      = x1[xphysical_grid - 1];
-    setup.xmin      = x1[0];
-    setup.ymax      = x2[yphysical_grid - 1];
-    setup.ymin      = x2[0];
+    setup.x1max      = x1[xphysical_grid - 1];
+    setup.x1min      = x1[0];
+    setup.x2max      = x2[yphysical_grid - 1];
+    setup.x2min      = x2[0];
     setup.zmax      = x3[zphysical_grid - 1];
     setup.zmin      = x3[0];
     setup.nx        = nx;

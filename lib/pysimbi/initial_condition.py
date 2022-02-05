@@ -16,8 +16,13 @@ def load_checkpoint(model, filename, dim):
             p           = hf.get("p")[:]
             nx          = ds.attrs["Nx"]
             model.t     = ds.attrs["current_time"]
-            xmax        = ds.attrs["xmax"]
-            xmin        = ds.attrs["xmin"]
+            try:
+                x1max = ds.attrs["x1max"]
+                x1min = ds.attrs["x1min"]
+            except:
+                x1max = ds.attrs["xmax"]
+                x1min = ds.attrs["xmin"]
+                
             try:
                 ad_gamma = ds.attrs["ad_gamma"]
             except:
@@ -51,10 +56,16 @@ def load_checkpoint(model, filename, dim):
                 scalars    = np.zeros((ny, nx))
                 
             model.t     = ds.attrs["current_time"]
-            xmax        = ds.attrs["xmax"]
-            xmin        = ds.attrs["xmin"]
-            ymax        = ds.attrs["ymax"]
-            ymin        = ds.attrs["ymin"]
+            try:
+                x1max        = ds.attrs["x1max"]
+                x1min        = ds.attrs["x1min"]
+                x2max        = ds.attrs["x2max"]
+                x2min        = ds.attrs["x2min"]
+            except:
+                x1max        = ds.attrs["xmax"]
+                x1min        = ds.attrs["xmin"]
+                x2max        = ds.attrs["ymax"]
+                x2min        = ds.attrs["ymin"]
             try:
                 ad_gamma = ds.attrs["ad_gamma"]
             except:

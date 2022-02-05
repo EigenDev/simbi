@@ -160,7 +160,7 @@ void Newtonian1D::adapt_dt(){
     real min_dt = INFINITY;
     #pragma omp parallel 
     {
-        real dx, cs, cfl_dt;
+        real dx1, cs, cfl_dt;
         real v, pre, rho;
         luint shift_i;
 
@@ -168,14 +168,14 @@ void Newtonian1D::adapt_dt(){
         #pragma omp for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++){
             shift_i = ii + idx_active;
-            dx      = coord_lattice.dx1[ii];
+            dx1      = coord_lattice.dx1[ii];
 
             rho = prims[shift_i].rho;
             v   = prims[shift_i].v;
             pre = prims[shift_i].p;
 
             cs = std::sqrt(gamma * pre/rho);
-            cfl_dt = dx/(std::max({std::abs(v + cs), std::abs(v - cs)}));
+            cfl_dt = dx1/(std::max({std::abs(v + cs), std::abs(v - cs)}));
 
             min_dt = std::min(min_dt, cfl_dt);
     
@@ -345,7 +345,7 @@ void Newtonian1D::advance(
         Conserved u_l, u_r;
         Conserved f_l, f_r, frf, flf;
         Primitive prims_l, prims_r;
-        real dx, rmean, dV, sL, sR, pc;
+        real dx1, rmean, dV, sL, sR, pc;
 
         auto ia = ii + radius;
         auto txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
@@ -407,11 +407,11 @@ void Newtonian1D::advance(
             {
             case simbi::Geometry::CARTESIAN:
                 #if GPU_CODE
-                    dx = coord_lattice->gpu_dx1[ii];
-                    self->gpu_cons[ia] -= ((frf - flf)/ dx) * dt;
+                    dx1 = coord_lattice->gpu_dx1[ii];
+                    self->gpu_cons[ia] -= ((frf - flf)/ dx1) * dt;
                 #else
-                    dx = self->coord_lattice.dx1[ii];
-                    cons[ia] -= ((frf - flf)/ dx) * dt;
+                    dx1 = self->coord_lattice.dx1[ii];
+                    cons[ia] -= ((frf - flf)/ dx1) * dt;
                 #endif
                 
                 break;  
@@ -497,11 +497,11 @@ void Newtonian1D::advance(
             {
             case simbi::Geometry::CARTESIAN:
                 #if GPU_CODE
-                    dx = coord_lattice->gpu_dx1[ii];
-                    self->gpu_cons[ia] -= ( (frf - flf)/ dx) * dt * (real)0.5;
+                    dx1 = coord_lattice->gpu_dx1[ii];
+                    self->gpu_cons[ia] -= ( (frf - flf)/ dx1) * dt * (real)0.5;
                 #else
-                    dx = self->coord_lattice.dx1[ii];
-                    cons[ia] -= ( (frf - flf)/ dx) * dt * (real)0.5;
+                    dx1 = self->coord_lattice.dx1[ii];
+                    cons[ia] -= ( (frf - flf)/ dx1) * dt * (real)0.5;
                 #endif
                 
                 break;  
@@ -598,8 +598,8 @@ void Newtonian1D::advance(
         t == 0 ? floor(tstart * round_place + (real)0.5) / round_place
                : floor(tstart * round_place + (real)0.5) / round_place + chkpt_luinterval;
     DataWriteMembers setup;
-    setup.xmax          = r[active_zones - 1];
-    setup.xmin          = r[0];
+    setup.x1max          = r[active_zones - 1];
+    setup.x1min          = r[0];
     setup.xactive_zones = active_zones;
     setup.nx            = nx;
     setup.linspace      = linspace;

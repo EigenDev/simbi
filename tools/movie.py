@@ -103,10 +103,16 @@ def read_file(filepath, filename, args):
         v2          = hf.get("v2")[:]
         p           = hf.get("p")[:]
         t           = ds.attrs["current_time"] * time_scale
-        xmax        = ds.attrs["xmax"]
-        xmin        = ds.attrs["xmin"]
-        ymax        = ds.attrs["ymax"]
-        ymin        = ds.attrs["ymin"]
+        try:
+            x1max        = ds.attrs["x1max"]
+            x1min        = ds.attrs["x1min"]
+            x2max        = ds.attrs["x2max"]
+            x2min        = ds.attrs["x2min"]
+        except:
+            x1max        = ds.attrs["xmax"]
+            x1min        = ds.attrs["xmin"]
+            x2max        = ds.attrs["ymax"]
+            x2min        = ds.attrs["ymin"]
         
         # New checkpoint files, so check if new attributes were
         # implemented or not
@@ -136,10 +142,10 @@ def read_file(filepath, filename, args):
         except:
             chi = np.zeros((ny, nx))
         
-        setup_dict["xmax"] = xmax 
-        setup_dict["xmin"] = xmin 
-        setup_dict["ymax"] = ymax 
-        setup_dict["ymin"] = ymin 
+        setup_dict["x1max"] = x1max 
+        setup_dict["x1min"] = x1min 
+        setup_dict["x2max"] = x2max 
+        setup_dict["x2min"] = x2min 
         setup_dict["time"] = t
         
         rho = rho.reshape(ny, nx)
@@ -170,11 +176,11 @@ def read_file(filepath, filename, args):
             setup_dict["yactive"] = yactive
         
         if is_linspace:
-            setup_dict["x1"] = np.linspace(xmin, xmax, xactive)
-            setup_dict["x2"] = np.linspace(ymin, ymax, yactive)
+            setup_dict["x1"] = np.linspace(x1min, x1max, xactive)
+            setup_dict["x2"] = np.linspace(x2min, x2max, yactive)
         else:
-            setup_dict["x1"] = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
-            setup_dict["x2"] = np.linspace(ymin, ymax, yactive)
+            setup_dict["x1"] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
+            setup_dict["x2"] = np.linspace(x2min, x2max, yactive)
         
         if coord_sysem == "cartesian":
             is_cartesian = True
@@ -219,10 +225,10 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         
     rr, tt = mesh['rr'], mesh['theta']
     t2 = mesh['t2']
-    xmax        = ds["xmax"]
-    xmin        = ds["xmin"]
-    ymax        = ds["ymax"]
-    ymin        = ds["ymin"]
+    x1max        = ds["x1max"]
+    x1min        = ds["x1min"]
+    x2max        = ds["x2max"]
+    x2min        = ds["x2min"]
     
     vmin,vmax = args.cbar
 
@@ -248,17 +254,17 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         kwargs = []
         for field in args.field:
             if field in cons:
-                if ymax == np.pi:
+                if x2max == np.pi:
                     var += np.split(prims2cons(field_dict, field), 2)
                 else:
                     var.append(prims2cons(field_dict, field))
             else:
-                if ymax == np.pi:
+                if x2max == np.pi:
                     var += np.split(field_dict[field], 2)
                 else:
                     var.append(field_dict[field])
                 
-        if ymax == np.pi: 
+        if x2max == np.pi: 
             units  = np.repeat(units, 2)
             
         var    = np.asarray(var)
@@ -278,7 +284,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         quadr[field1] = var[0]
         quadr[field2] = var[3% num_fields]
         
-        if ymax == np.pi:
+        if x2max == np.pi:
             # Handle case of degenerate fields
             if field3 == field4:
                 quadr[field3] = {}
@@ -304,7 +310,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
                     ovmax = quadr[field].max()
                 kwargs[field] =  {'vmin': ovmin, 'vmax': ovmax} if field in lin_fields else {'norm': colors.LogNorm(vmin = ovmin, vmax = ovmax)} 
 
-        if ymax < np.pi:
+        if x2max < np.pi:
             cs[0] = ax.pcolormesh(tt[:: 1], rr,  var[0], cmap=color_map, shading='auto', **kwargs[field1])
             cs[1] = ax.pcolormesh(t2[::-1], rr,  var[1], cmap=color_map, shading='auto', **kwargs[field2])
             
@@ -346,8 +352,8 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         ax.set_position( [0.1, -0.15, 0.8, 1.30])
             
     if not args.pictorial:
-        if ymax < np.pi:
-            ymd = int( np.floor(ymax * 180/np.pi) )
+        if x2max < np.pi:
+            ymd = int( np.floor(x2max * 180/np.pi) )
             if not args.bipolar:                                                                                                                                                                                   
                 ax.set_thetamin(-ymd)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
                 ax.set_thetamax(ymd)
@@ -427,8 +433,8 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         ax.axes.yaxis.set_ticklabels([])
         
     ax.axes.xaxis.set_ticklabels([])
-    ax.set_rmax(xmax) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
-    ax.set_rmin(xmin)
+    ax.set_rmax(x1max) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
+    ax.set_rmin(x1min)
     
     field_str = get_field_str(args)
     
@@ -487,7 +493,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         
     if not args.pictorial:
         if args.log:
-            if ymax == np.pi:
+            if x2max == np.pi:
                 if num_fields > 1:
                     for i in range(num_fields):
                         if args.field[i] in lin_fields:
@@ -506,7 +512,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
                 else:
                     cbar.ax.set_xlabel(r'$\log$ {}'.format(field_str), fontsize=20)
         else:
-            if ymax >= np.pi:
+            if x2max >= np.pi:
                 cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
             else:
                 cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
@@ -515,10 +521,10 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
     
 def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     xx, yy = mesh['xx'], mesh['yy']
-    xmax        = ds["xmax"]
-    xmin        = ds["xmin"]
-    ymax        = ds["ymax"]
-    ymin        = ds["ymin"]
+    x1max        = ds["x1max"]
+    x1min        = ds["x1min"]
+    x2max        = ds["x2max"]
+    x2min        = ds["x2min"]
     
     vmin,vmax = args.cbar
 
@@ -696,7 +702,7 @@ def main():
             fig = plt.figure(figsize=(15,8), constrained_layout=False)
             ax  = fig.add_subplot(111, projection='polar')
             
-        if init_setup["ymax"] < np.pi:
+        if init_setup["x2max"] < np.pi:
             ax.set_position( [0.1, -0.18, 0.8, 1.43])
             if not args.pictorial:
                 cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 

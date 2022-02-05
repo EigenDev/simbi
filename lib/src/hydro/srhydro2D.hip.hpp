@@ -33,7 +33,7 @@ namespace simbi
         CLattice2D coord_lattice;
         simbi::Geometry sim_geom;
         real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
-        bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros;
+        bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
 
         //==============GPU Mirrors================
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceTau, *gpu_pressure_guess;
@@ -131,7 +131,8 @@ namespace simbi
             bool first_order,
             bool periodic,
             bool linspace,
-            bool hllc);
+            bool hllc,
+            bool quirk_smoothing=true);
     };
 }
 

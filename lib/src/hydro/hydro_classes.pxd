@@ -105,7 +105,8 @@ cdef extern from "srhydro2D.hip.hpp" namespace "simbi":
             bool first_order,
             bool periodic,
             bool linspace,
-            bool hllc)
+            bool hllc,
+            bool quirk_smoothing)
 
 cdef extern from "srhydro3D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD3D:

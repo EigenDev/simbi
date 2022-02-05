@@ -19,7 +19,7 @@ namespace simbi
 {
      struct SRHD
      {
-          lint xmin, xmax;
+          lint x1min, x1max;
           real dt;
           real gamma, cfl;
           std::string coord_system;

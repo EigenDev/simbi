@@ -21,6 +21,11 @@ try:
 except:
     print('No Cmasher module, so defaulting to matplotlib colors')
 
+# FONT SIZES
+SMALL_SIZE  = 8
+MEDIUM_SIZE = 10
+BIGGER_SIZE = 12
+
 #================================
 #   constants of nature
 #================================
@@ -56,10 +61,16 @@ def get_2d_file(args: argparse.ArgumentParser, filename: str) -> dict:
         v2          = hf.get('v2')[:]
         p           = hf.get('p')[:]
         t           = ds.attrs['current_time']
-        xmax        = ds.attrs['xmax']
-        xmin        = ds.attrs['xmin']
-        ymax        = ds.attrs['ymax']
-        ymin        = ds.attrs['ymin']
+        try:
+            x1max = ds.attrs['x1max']
+            x1min = ds.attrs['x1min']
+            x2max = ds.attrs['x2max']
+            x2min = ds.attrs['x2min']
+        except:
+            x1max = ds.attrs['xmax']
+            x1min = ds.attrs['xmin']
+            x2max = ds.attrs['ymax']
+            x2min = ds.attrs['ymin']  
         
         # New checkpoint files, so check if new attributes were
         # implemented or not
@@ -94,10 +105,10 @@ def get_2d_file(args: argparse.ArgumentParser, filename: str) -> dict:
         except:
             is_linspace = False
         
-        setup['xmax'] = xmax 
-        setup['xmin'] = xmin 
-        setup['ymax'] = ymax 
-        setup['ymin'] = ymin 
+        setup['x1max'] = x1max 
+        setup['x1min'] = x1min 
+        setup['x2max'] = x2max 
+        setup['x2min'] = x2min 
         setup['time'] = t * time_scale
         
         rho = rho.reshape(ny, nx)
@@ -129,11 +140,11 @@ def get_2d_file(args: argparse.ArgumentParser, filename: str) -> dict:
             setup['yactive'] = yactive
         
         if is_linspace:
-            setup['x1'] = np.linspace(xmin, xmax, xactive)
-            setup['x2'] = np.linspace(ymin, ymax, yactive)
+            setup['x1'] = np.linspace(x1min, x1max, xactive)
+            setup['x2'] = np.linspace(x2min, x2max, yactive)
         else:
-            setup['x1'] = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
-            setup['x2'] = np.linspace(ymin, ymax, yactive)
+            setup['x1'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
+            setup['x2'] = np.linspace(x2min, x2max, yactive)
         
         if coord_sysem == 'cartesian':
             is_cartesian = True
@@ -179,14 +190,17 @@ def get_1d_equiv_file(filename: str) -> dict:
         p           = hf.get('p')[:]
         nx          = ds.attrs['Nx']
         t           = ds.attrs['current_time']
-        xmax        = ds.attrs['xmax']
-        xmin        = ds.attrs['xmin']
+        x1max        = ds.attrs['x1max']
+        x1min        = ds.attrs['x1min']
 
         rho = rho[2:-2]
         v   = v  [2:-2]
         p   = p  [2:-2]
         xactive = nx - 4
-            
+        
+        if v.any() > 1:
+            print(v)
+            zzz = input('')
         W    = 1/np.sqrt(1 - v**2)
         beta = v
         
@@ -206,7 +220,7 @@ def get_1d_equiv_file(filename: str) -> dict:
         ofield['enthalpy']    = h
         ofield['gamma_beta']  = W*beta
         ofield['temperature'] = T_eV
-        ofield['r']           = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
+        ofield['r']           = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
     return ofield
     
 derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'chi_dens',
@@ -344,8 +358,12 @@ def place_anotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, e
     if args.anot_text is not None:
         extra_text   = args.anot_text
         anchor_text += "\n     %s"%(extra_text)
+    if args.print:
+        size = MEDIUM_SIZE 
+    else:
+        size = 15
     at = AnchoredText(
-    anchor_text, prop=dict(size=15), frameon=False, loc=args.anot_loc)
+    anchor_text, prop=dict(size=size), frameon=False, loc=args.anot_loc)
     at.patch.set_boxstyle("round,pad=0.1,rounding_size=0.2")
     ax.add_artist(at)
     
@@ -364,7 +382,7 @@ def plot_polar_plot(
     num_fields = len(args.field)
     is_wedge   = args.nwedge > 0
     if not subplots:
-        if is_wedge != 0:
+        if is_wedge:
             nplots = args.nwedge + 1
             fig, axes = plt.subplots(1, nplots, subplot_kw={'projection': 'polar'},
                                 figsize=(15, 12), constrained_layout=True)
@@ -382,10 +400,10 @@ def plot_polar_plot(
         
     rr, tt      = mesh['rr'], mesh['theta']
     t2          = - tt[::-1]
-    xmax        = dset['xmax']
-    xmin        = dset['xmin']
-    ymax        = dset['ymax']
-    ymin        = dset['ymin']
+    x1max        = dset['x1max']
+    x1min        = dset['x1min']
+    x2max        = dset['x2max']
+    x2min        = dset['x2min']
     
     vmin,vmax = args.cbar[:2]
 
@@ -413,17 +431,17 @@ def plot_polar_plot(
         kwargs = []
         for field in args.field:
             if field in derived:
-                if ymax == np.pi:
+                if x2max == np.pi:
                     var += np.split(prims2var(fields, field), 2)
                 else:
                     var.append(prims2var(fields, field))
             else:
-                if ymax == np.pi:
+                if x2max == np.pi:
                     var += np.split(fields[field], 2)
                 else:
                     var.append(fields[field])
                 
-        if ymax == np.pi: 
+        if x2max == np.pi: 
             units  = np.repeat(units, 2)
             
         var    = np.asarray(var)
@@ -443,7 +461,7 @@ def plot_polar_plot(
         quadr[field1] = var[0]
         quadr[field2] = var[3 % num_fields if num_fields != 3 else num_fields]
         
-        if ymax == np.pi:
+        if x2max == np.pi:
             # Handle case of degenerate fields
             if field3 == field4:
                 quadr[field3] = {}
@@ -459,7 +477,7 @@ def plot_polar_plot(
         for idx, key in enumerate(quadr.keys()):
             field = key
             if idx == 0:
-                kwargs[field] =  {'vmin': vmin, 'vmax': vmax} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)} 
+                kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=0.5, vmin=vmin, vmax=vmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)} 
             else:
                 if field == field3 == field4:
                     ovmin = None if len(args.cbar) == 2 else args.cbar[2]
@@ -467,9 +485,9 @@ def plot_polar_plot(
                 else:
                     ovmin = None if len(args.cbar) == 2 else args.cbar[idx+1]
                     ovmax = None if len(args.cbar) == 2 else args.cbar[idx+2]
-                kwargs[field] =  {'vmin': ovmin, 'vmax': ovmax} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
+                kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=0.5, vmin=ovmin, vmax=ovmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
 
-        if ymax < np.pi:
+        if x2max < np.pi:
             cs[0] = ax.pcolormesh(tt[:: 1], rr,  var[0], cmap=color_map, shading='auto', **kwargs[field1])
             cs[1] = ax.pcolormesh(t2[::-1], rr,  var[1], cmap=color_map, shading='auto', **kwargs[field2])
             
@@ -479,7 +497,7 @@ def plot_polar_plot(
                 cs[3] = ax.pcolormesh(t2[::-1] + np.pi/2, rr,  var[1], cmap=color_map, shading='auto', **kwargs[field2])
         else:
             if num_fields == 2:
-                cs[0] = ax.pcolormesh(tt[:: 1], rr,  np.vstack((var[0],var[1])), cmap=args.cmap, shading='auto', **kwargs[field1])
+                cs[0] = ax.pcolormesh(tt[:: 1], rr,  np.vstack((var[0],var[1])), cmap=color_map, shading='auto', **kwargs[field1])
                 cs[1] = ax.pcolormesh(t2[::-1], rr,  np.vstack((var[2],var[3])), cmap=args.cmap2, shading='auto', **kwargs[field2])
             else:
                 cs[0] = ax.pcolormesh(tchop[0], rchop[0],  quadr[field1], cmap=color_map, shading='auto', **kwargs[field1])
@@ -515,11 +533,24 @@ def plot_polar_plot(
             cs[0] = ax.pcolormesh(t2[::-1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
     
     if args.pictorial: 
-        ax.set_position( [0.1, -0.15, 0.8, 1.30])
-            
+        ax.set_position([0.1, -0.15, 0.8, 1.30])
+    
+    # angs    = np.linspace(x2min, x2max, 1000)
+    # eps     = 0.05
+    # a       = 0.47 * (1 - eps)**(-1/3)
+    # b       = 0.47 * (1 - eps)**(2/3)
+    # radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+    # r_theta = radius(angs)
+    # star_mask = rr < (radius(tt)+ 0.1)
+    # dummy = fields['p'].copy() * pre_scale.value
+    # dummy[star_mask] = 0.1
+
+    # ax.plot(np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='white')
+    # ax.plot(-np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='white')
+    # ax.pcolormesh(tt, rr, dummy, shading='auto', cmap=color_map, **kwargs[field1])
     if not args.pictorial:
-        if ymax < np.pi:
-            ymd = int( np.floor(ymax * 180/np.pi) )
+        if x2max < np.pi:
+            ymd = int( np.floor(x2max * 180/np.pi) )
             if not args.bipolar:                                                                                                                                                                                   
                 ax.set_thetamin(-ymd)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
                 ax.set_thetamax(ymd)
@@ -537,26 +568,26 @@ def plot_polar_plot(
                     cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
         else:  
             if not args.no_cbar:         
-                cbar_orientation = 'horizontal'
+                cbar_orientation = 'horizontal' if args.nwedge == 2 else 'vertical'
                 # ax.set_position([0.1, -0.18, 0.7, 1.3])
                 if num_fields > 1:
                     if num_fields == 2:
                         if cbar_orientation == 'vertical':
-                            ycoord  = [0.1, 0.08] if ymax < np.pi else [0.10, 0.10]
-                            xcoord  = [0.1, 0.85] if ymax < np.pi else [0.86, 0.05]
-                            cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
+                            ycoord  = [0.1, 0.08] if x2max < np.pi else [0.23, 0.23]
+                            xcoord  = [0.1, 0.85] if x2max < np.pi else [0.91, 0.08]
+                            cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.55]) for i in range(num_fields)]
                         else:
                             if not is_wedge:
-                                ycoord  = [0.2, 0.20] if ymax < np.pi else [0.10, 0.10]
-                                xcoord  = [0.1, 0.50] if ymax < np.pi else [0.51, 0.20]
+                                ycoord  = [0.2, 0.20] if x2max < np.pi else [0.10, 0.10]
+                                xcoord  = [0.1, 0.50] if x2max < np.pi else [0.51, 0.20]
                             else:
-                                ycoord  = [0.2, 0.20] if ymax < np.pi else [0.10, 0.10]
-                                xcoord  = [0.1, 0.50] if ymax < np.pi else [0.51, 0.20]
-                            cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.3, 0.04]) for i in range(num_fields)]
+                                ycoord  = [0.2, 0.20] if x2max < np.pi else [0.15, 0.15]
+                                xcoord  = [0.1, 0.50] if x2max < np.pi else [0.51, 0.04]
+                            cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.45, 0.04]) for i in range(num_fields)]
                     if num_fields == 3:
                         ycoord  = [0.1, 0.5, 0.1]
                         xcoord  = [0.07, 0.85, 0.85]
-                        cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8 * 0.5]) for i in range(1, num_fields)]
+                        cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.4]) for i in range(1, num_fields)]
                         cbaxes.append(fig.add_axes([xcoord[0], ycoord[0] ,0.03, 0.8]))
                     if num_fields == 4:
                         ycoord  = [0.5, 0.1, 0.5, 0.1]
@@ -596,16 +627,30 @@ def plot_polar_plot(
         ang_max   = args.wedge_lims[3]
         
         # Draw the wedge cutout on the main plot
-        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=2, color='white')
-        ax.plot(np.radians(np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color='white')
-        ax.plot(np.radians(np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color='white')
-        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=2, color='white')
+        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=1, color='white')
+        ax.plot(np.radians(np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
+        ax.plot(np.radians(np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
+        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=1, color='white')
+        
+        angs    = np.linspace(x2min, x2max, 1000)
+        eps     = 0.05
+        a       = 0.65 * (1 - eps)**(-1/3)
+        b       = 0.65 * (1 - eps)**(2/3)
+        radius = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+        r_theta = radius(angs)
+        star_mask = rr < (radius(tt)+ 0.1)
+        dummy = fields['p'].copy() * pre_scale.value
+        dummy[star_mask] = 0.1
+
+        ax.plot(np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='white')
+        ax.pcolormesh(tt, rr, dummy, shading='auto', cmap=color_map, **kwargs[field1])
         
         if args.nwedge == 2:
-            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=2, color='white')
-            ax.plot(np.radians(-np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color='white')
-            ax.plot(np.radians(-np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color='white')
-            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=2, color='white')
+            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=1, color='white')
+            ax.plot(np.radians(-np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
+            ax.plot(np.radians(-np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
+            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=1, color='white')
+            ax.plot(np.radians(-np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='white')
             
     ax.set_theta_zero_location('N')
     ax.set_theta_direction(-1)
@@ -618,8 +663,9 @@ def plot_polar_plot(
         ax.axes.yaxis.set_ticklabels([])
         
     ax.axes.xaxis.set_ticklabels([])
-    ax.set_rmax(xmax) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
-    ax.set_rmin(xmin)
+    ax.axes.yaxis.set_ticklabels([])
+    ax.set_rmax(x1max) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
+    ax.set_rmin(x1min)
     
     field_str = get_field_str(args)
     
@@ -654,7 +700,7 @@ def plot_polar_plot(
                 else:
                     continue
 
-            wedge.pcolormesh(tt[:: 1], rr,  np.vstack((var[0],var[1])), cmap=args.cmap, shading='auto', **kwargs[field1])
+            wedge.pcolormesh(tt[:: 1], rr,  np.vstack((var[0],var[1])), cmap=color_map, shading='auto', **kwargs[field1])
             if args.nwedge == 2:
                 axes[2].pcolormesh(t2[::-1], rr,  np.vstack((var[2],var[3])), cmap=args.cmap2, shading='auto', **kwargs[field2])
             
@@ -665,7 +711,7 @@ def plot_polar_plot(
             else:
                 kwargs = {'vmin': vmin2, 'vmax': vmax2}
             w1 = wedge.pcolormesh(tt, rr, var, cmap=color_map, shading='nearest', **kwargs)
-            
+        
         wedge.set_theta_zero_location('N')
         wedge.set_theta_direction(-1)
         wedge.yaxis.grid(False)
@@ -675,14 +721,15 @@ def plot_polar_plot(
         for label in rlabels:
             label.set_color('white')
             
-        wedge.axes.xaxis.set_ticklabels([])
         wedge.set_ylim([wedge_min, wedge_max])
-        wedge.set_rorigin(-wedge_min)
+        wedge.set_rorigin(-wedge_min/4)
         wedge.set_thetamin(ang_min)
         wedge.set_thetamax(ang_max)
         wedge.yaxis.set_minor_locator(plt.MaxNLocator(1))
         wedge.yaxis.set_major_locator(plt.MaxNLocator(2))
-        # wedge.set_aspect(1.)
+        wedge.set_aspect('equal')
+        wedge.axes.xaxis.set_ticklabels([])
+        wedge.axes.yaxis.set_ticklabels([])
         
         if args.nwedge > 1:
             # force the rlabels to be outside plot area
@@ -694,24 +741,24 @@ def plot_polar_plot(
             axes[2].tick_params(axis='both', labelsize=17)               
             axes[2].axes.xaxis.set_ticklabels([])
             axes[2].set_ylim([wedge_min, wedge_max])
-            axes[2].set_rorigin(-wedge_min)
+            axes[2].set_rorigin(-wedge_min/4)
             axes[2].set_thetamin(-ang_min)
             axes[2].set_thetamax(-ang_max)
             axes[2].yaxis.set_minor_locator(plt.MaxNLocator(1))
             axes[2].yaxis.set_major_locator(plt.MaxNLocator(2))
-            # axes[2].set_aspect(1.)
+            axes[2].set_aspect('equal')
+            axes[2].axes.yaxis.set_ticklabels([])
             
-        
-        
     if not args.pictorial:
         if not args.no_cbar:
             if args.log:
-                if ymax == np.pi:
+                if x2max == np.pi:
                     set_label = ax.set_ylabel if cbar_orientation == 'vertical' else ax.set_xlabel
                     if num_fields > 1:
                         for i in range(num_fields):
                             if args.field[i] in lin_fields:
-                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=30)
+                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=30,labelpad=-40)
+                                cbaxes[i].yaxis.set_ticks_position('left')
                             else:
                                 cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=30)
                     else:
@@ -726,7 +773,7 @@ def plot_polar_plot(
                     else:
                         cbar.ax.set_xlabel(r'$\log$ {}'.format(field_str), fontsize=20)
             else:
-                if ymax >= np.pi:
+                if x2max >= np.pi:
                     if num_fields > 1:
                         for i in range(num_fields):
                             cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
@@ -737,7 +784,8 @@ def plot_polar_plot(
         if args.setup != "":
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=25, y=1)
         else:
-            fig.suptitle('t = {:.2f}'.format(tend), fontsize=25, y=0.83)
+            fsize = 25 if not args.print else MEDIUM_SIZE
+            fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.85)
 
 def plot_cartesian_plot(
     fields: dict, 
@@ -747,10 +795,10 @@ def plot_cartesian_plot(
     fig, ax = plt.subplots(1, 1, figsize=(10,10), constrained_layout=False)
 
     xx, yy = mesh['xx'], mesh['yy']
-    xmax        = dset['xmax']
-    xmin        = dset['xmin']
-    ymax        = dset['ymax']
-    ymin        = dset['ymin']
+    x1max        = dset['x1max']
+    x1min        = dset['x1min']
+    x2max        = dset['x2max']
+    x2min        = dset['x2min']
     
     vmin,vmax = args.cbar
 
@@ -808,10 +856,10 @@ def plot_1d_curve(
     r, theta = mesh['r'], mesh['th']
     theta    = theta * 180 / np.pi 
     
-    xmax        = dset['xmax']
-    xmin        = dset['xmin']
-    ymax        = dset['ymax']
-    ymin        = dset['ymin']
+    x1max        = dset['x1max']
+    x1min        = dset['x1min']
+    x2max        = dset['x2max']
+    x2min        = dset['x2min']
     
     vmin,vmax = args.cbar
     var = [field for field in args.field] if num_fields > 1 else args.field[0]
@@ -841,7 +889,7 @@ def plot_1d_curve(
             ax.loglog(r, var[args.tidx], label=label)
     
 
-    ax.set_xlim(xmin, xmax)
+    ax.set_xlim(x1min, x1max)
     ax.set_xlabel(r'$r/R_\odot$', fontsize=20)
     ax.tick_params(axis='both', labelsize=10)
     
@@ -914,8 +962,6 @@ def plot_per_theta(
             pts = 1.0 / np.max(beta)
     
     label = args.labels[case] if args.labels is not None else None
-    if args.tex:
-        label = f"$\{label}$"
     
     if args.cmap != 'grayscale':
         ax.plot(theta, pts,label=label, color=colors[case])
@@ -1008,8 +1054,6 @@ def plot_dec_rad(
         pts   = np.zeros(shape=(len(mdots), theta.size))
     
     label = args.labels[case] if args.labels is not None else None
-    if args.tex:
-        label = f"$\{label}$"
     
     window     = 100
     mean_theta = running_mean(theta, window)
@@ -1177,6 +1221,7 @@ def plot_hist(
     # if case == 2:
     #     oned_field   = get_1d_equiv_file(args.oned_files[1])
     #     calc_1d_hist(oned_field)
+        
     if ax_col == 0:     
         if args.anot_loc is not None:
             etot = np.sum(prims2var(fields, "energy") * dV * e_scale.value)
@@ -1196,10 +1241,7 @@ def plot_hist(
         var /= var.max()
 
     if args.labels is not None:
-        if args.tex:
-            label = '$\%s$'%(args.labels[case])
-        else:
-            label = '%s'%(args.labels[case])
+        label = '%s'%(args.labels[case])
             
         if len(args.labels) == len(args.filename) and not args.sub_split:
             etot         = np.sum(prims2var(fields, "energy") * dV * e_scale.value)
@@ -1266,7 +1308,8 @@ def plot_hist(
     
     if overplot and args.sub_split is None:
         if args.labels is not None:
-                ax.legend(fontsize=15, loc=args.legend_loc)
+            fsize = 15 if not args.print else MEDIUM_SIZE
+            ax.legend(fontsize=fsize, loc=args.legend_loc, fancybox=True, framealpha=0)
         
 
 def plot_dx_domega(
@@ -1350,9 +1393,9 @@ def plot_dx_domega(
                 
     if args.de_domega:
         if args.kinetic:
-            W = calc_lorentz_gamma(fields)
-            mass   = dV * fields['rho'] * W
-            var = (W - 1.0) * mass * e_scale.value
+            W    = calc_lorentz_gamma(fields)
+            mass = dV * fields['rho'] * W
+            var  = (W - 1.0) * mass * e_scale.value
         elif args.enthalpy:
             h   = calc_enthalpy(fields)
             var = (h - 1.0) *  dV * e_scale.value
@@ -1362,8 +1405,9 @@ def plot_dx_domega(
             edens_total = prims2var(fields, 'energy')
             var = edens_total * dV * e_scale.value
     elif args.dm_domega:
-        var = dV * fields['rho'] * m.value
-    
+        W   = calc_lorentz_gamma(fields)
+        var = dV * fields['rho'] * W * m.value
+        
     gb      = fields['gamma_beta']
     tcenter = 0.5 * (tv[1:] + tv[:-1])
     dtheta  = (theta[-1,0] - theta[0,0])/theta.shape[0] * (180 / np.pi)
@@ -1403,7 +1447,7 @@ def plot_dx_domega(
             ax.step(theta_bin_edges[:-1], iso_var, label=label)
         else:
             quant_func     = np.sum if args.field[0] != 'temperature' else np.mean
-            iso_correction = 4.0 * np.pi if dm_domega else 1.0
+            iso_correction = 4.0 * np.pi
             var_per_theta  = iso_correction * quant_func(var, axis=1) / domega[:,0]
             
             if cutoff.is_integer():
@@ -1426,7 +1470,7 @@ def plot_dx_domega(
                 var_per_theta /= var_per_theta.max()
             
             axes = ax if cutoff != 0 else ax0
-            linestyle = '-' if cutoff != 0 else '--'
+            linestyle = '-' if cutoff != 0 else '-'
             if cutoff == 0:
                 ax0_ylims = [var_per_theta.min(), var_per_theta.max()]
             if args.cmap == 'grayscale':
@@ -1466,15 +1510,16 @@ def plot_dx_domega(
     
         # axins.set_xticklabels([])
         # axins.set_yticklabels([])
+    fsize = 15 if not args.print else MEDIUM_SIZE
     if args.sub_split is None:
         ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
         if 'ax0' in locals():
             if args.kinetic:
-                fig.text(0.030, 0.5, r'$E_{\rm K, \Omega}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
+                fig.text(-0.02, 0.5, r'$E_{\rm K, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=fsize, va='center', rotation='vertical')
             elif args.dm_domega:
-                fig.text(0.010, 0.5, r'$M_{\theta}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
+                fig.text(0.010, 0.5, r'$M_{\rm iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=fsize, va='center', rotation='vertical')
             else:
-                fig.text(0.010, 0.5, r'$E_{\rm T, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=15, va='center', rotation='vertical')
+                fig.text(0.010, 0.5, r'$E_{\rm T, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=fsize, va='center', rotation='vertical')
         else:
             if len(args.cutoffs) == 1:
                 if args.kinetic:
@@ -1498,14 +1543,14 @@ def plot_dx_domega(
                         ax.set_ylabel(r'$E_{{\rm T, iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
                 elif args.dm_domega:
                     units = r'[\rm{{g}}]' if not args.norm else ''
-                    ax.set_ylabel(r'$M_{\Omega} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
+                    ax.set_ylabel(r'$M_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
                 elif args.field[0] == 'temperature':
                     ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{eV}}]$', fontsize=15)
         
-        ax.tick_params('both', labelsize=15)
+        ax.tick_params('both', labelsize=fsize)
     else:
-        ax.tick_params('x', labelsize=15)
-        ax.tick_params('y', labelsize=10)
+        ax.tick_params('x', labelsize=fsize)
+        ax.tick_params('y', labelsize=fsize)
         
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
@@ -1524,12 +1569,13 @@ def plot_dx_domega(
             # ax0.set_yscale('log')
             ax0.spines['top'].set_visible(False)
             ax0.spines['right'].set_visible(False)
-            ax0.spines['bottom'].set_linewidth(2)
+            # sax0.spines['bottom'].set_linewidth(2)
             # ax0.axes.get_xaxis().set_ticks([])
             ax0.set_ylim(ax0_ylims)
-            plt.subplots_adjust(hspace=0)
+            plt.subplots_adjust(hspace=0.03)
             ax0.yaxis.set_minor_locator(plt.MaxNLocator(2))
-            ax0.tick_params('both',which='major', labelsize=15)
+            tsize = 15 if not args.print else MEDIUM_SIZE
+            ax0.tick_params('both',which='major', labelsize=tsize)
             #ax.set_xlim(theta[0,0], theta[-1,0])
             
         if args.inset:
@@ -1539,16 +1585,15 @@ def plot_dx_domega(
             ticks = calc_dec_rad(0.0, np.array(ax.axes.get_ylim())) 
             ax2.set_ylim(ticks[0],ticks[-1])
             
-        
-        
         # ax0.yaxis.set_major_formatter(logfmt)
         # ax0.set_ylim(1e52,5e52)
         
     if not args.sub_split:
         if args.labels:
-            ax.legend(fontsize=15, loc=args.legend_loc)
+            size = 15 if not args.print else MEDIUM_SIZE
+            ax.legend(fontsize=size, loc=args.legend_loc, fancybox=True, framealpha=0.1, borderpad=0.2)
             if 'ax0' in locals():
-                ax0.legend(fontsize=15, loc='best')
+                ax0.legend(fontsize=size, loc='best', fancybox=True, framealpha=0.1, borderpad=0.2)
                 
 def plot_ligthcurve(
     fields:        dict, 
@@ -1734,13 +1779,14 @@ def main():
     parser.add_argument('--tidx', dest='tidx', type=int, default = None,
                         help='Set to a value if you wish to plot a 1D curve about some angle')
     
-    parser.add_argument('--nwedge', dest='nwedge', default=0, type=int)
-    parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 70, 110], type=float, nargs=4)
+    parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
+    parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 70, 110], type=float, nargs=4, help="wedge limits")
     parser.add_argument('--xlims', dest='xlims', default = None, type=float, nargs=2)
     parser.add_argument('--ylims', dest='ylims', default = None, type=float, nargs=2)
     parser.add_argument('--units', dest='units', default = False, action='store_true')
     parser.add_argument('--dbg', dest='dbg', default = False, action='store_true')
     parser.add_argument('--tex', dest='tex', default = False, action='store_true')
+    parser.add_argument('--print', dest='print', default = False, action='store_true')
     parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
     parser.add_argument('--pictorial', dest='pictorial', default = False, action='store_true')
     parser.add_argument('--subplots', dest='subplots', default = None, type=int)
@@ -1750,8 +1796,7 @@ def main():
     parser.add_argument('--anot_text', dest='anot_text', default = None, type=str)
     parser.add_argument('--inset', dest='inset', action= 'store_true', default=False)
     parser.add_argument('--png', dest='png', action= 'store_true', default=False)
-    parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, 
-                        help='The shock optical depth')
+    parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
     parser.add_argument('--light_curve', dest='light_curve', action='store_true',default=False)
     
     parser.add_argument('--save', dest='save', type=str,
@@ -1795,12 +1840,14 @@ def main():
                         fig.text(0.030, 0.5, r'$E_{{\rm T, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=20, va='center', rotation='vertical')
             else:
                 units = r"[\rm{erg}]" if not args.norm else ""
+                xpos  = 0.030 if not args.print else -0.020
+                fsize = 20 if not args.print else MEDIUM_SIZE
                 if args.kinetic:
-                    fig.text(0.030, 0.5, r'$E_{\rm K}( > \Gamma \beta) \ %s$'%(units), fontsize=20, va='center', rotation='vertical')
+                    fig.text(xpos, 0.5, r'$E_{\rm K}( > \Gamma \beta) \ %s$'%(units), fontsize=fsize, va='center', rotation='vertical')
                 elif args.enthalpy:
-                    fig.text(0.030, 0.5, r'$H( > \Gamma \beta) \ %s$'%(units), fontsize=20, va='center', rotation='vertical')
+                    fig.text(xpos, 0.5, r'$H( > \Gamma \beta) \ %s$'%(units), fontsize=fsize, va='center', rotation='vertical')
                 else:
-                    fig.text(0.030, 0.5, r'$E_{\rm T}( > \Gamma \beta) \ %s$'%(units), fontsize=20, va='center', rotation='vertical')
+                    fig.text(xpos, 0.5, r'$E_{\rm T}( > \Gamma \beta) \ %s$'%(units), fontsize=fsize, va='center', rotation='vertical')
             axs_iter       = iter(axs)            # iterators for the multi-plot
             subplot_iter   = iter(args.sub_split) # iterators for the subplot splitting
             
@@ -1884,11 +1931,12 @@ def main():
                 plot_polar_plot(fields, args, mesh, setup)
     
     if args.sub_split is not None:
+        fsize = 15 if not args.print else MEDIUM_SIZE
         if args.labels is not None:
                 if not args.legend_loc:
-                    axs[0].legend(fontsize=15, loc='upper right')
+                    axs[0].legend(fontsize=fsize, loc='upper right', fancybox=True, framealpha=0.1)
                 else:
-                    axs[0].legend(fontsize=15, loc=args.legend_loc)
+                    axs[0].legend(fontsize=fsize, loc=args.legend_loc, fancybox=True, framealpha=0.1)
         plt.subplots_adjust(hspace=0.1)
 
             
@@ -1896,16 +1944,41 @@ def main():
         plt.show()
     else:
         if args.tex:
+            plt.rc('font',   size=SMALL_SIZE)          # controls default text sizes
+            plt.rc('axes',   titlesize=SMALL_SIZE)     # fontsize of the axes title
+            plt.rc('axes',   labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
+            plt.rc('xtick',  labelsize=SMALL_SIZE)     # fontsize of the tick labels
+            plt.rc('ytick',  labelsize=SMALL_SIZE)     # fontsize of the tick labels
+            plt.rc('legend', fontsize=SMALL_SIZE)      # legend fontsize
+            plt.rc('figure', titlesize=BIGGER_SIZE)    # fontsize of the figure title
             plt.rcParams.update(
                 {
                     "text.usetex": True,
                     "font.family": "serif",
                     "font.serif": "Times New Roman",
+                    "font.size": MEDIUM_SIZE
                 }
             )
-        
+        if args.print:
+            fig = plt.gcf()
+            all_axes = fig.get_axes()
+            fig_height = 5 if not args.sub_split else 10
+            
+            for i, ax in enumerate(all_axes):
+                for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
+                    ax.get_xticklabels() + ax.get_yticklabels()):
+                    item.set_fontsize(MEDIUM_SIZE)
+                if i == 0:
+                    try:
+                        for item in ax.get_legend().get_texts():
+                            item.set_fontsize(SMALL_SIZE)
+                    except AttributeError:
+                        pass
+                fig.set_size_inches(4, fig_height)
+                
+            
         ext = 'pdf' if not args.png else 'png'
-        plt.savefig('{}.{}'.format(args.save.replace(' ', '_'), ext), dpi=500, bbox_inches='tight')
+        plt.savefig('{}.{}'.format(args.save.replace(' ', '_'), ext), dpi=600, bbox_inches='tight')
     
 if __name__ == '__main__':
     main()

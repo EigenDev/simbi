@@ -178,7 +178,8 @@ cdef class PyStateSR2D:
         bool first_order,
         bool periodic,
         bool linspace,
-        bool hllc):
+        bool hllc,
+        bool quirk_smoothing):
         
         result = self.c_state.simulate2D(
             sources,
@@ -192,7 +193,8 @@ cdef class PyStateSR2D:
             first_order,
             periodic,
             linspace,
-            hllc)
+            hllc,
+            quirk_smoothing)
 
         result = np.asarray(result)
         if col_maj:

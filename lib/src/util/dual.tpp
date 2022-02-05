@@ -342,6 +342,7 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(&(device->xphysical_grid),&host.xphysical_grid,  sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->yphysical_grid),&host.yphysical_grid,  sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->active_zones),  &host.active_zones,    sizeof(int));
+            simbi::gpu::api::copyHostToDevice(&(device->hllc), &host.hllc, sizeof(bool));
             
         };
 

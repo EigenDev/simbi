@@ -30,12 +30,12 @@ namespace simbi
     compute_dt(T *s, 
     const simbi::Geometry geometry, 
     luint bytes,
-    real dx, 
-    real dy, 
+    real dx1, 
+    real dx2 , 
     real rmin = 0, 
     real rmax = 1,
-    real ymin = 0,
-    real ymax = 1);
+    real x2min = 0,
+    real x2max = 1);
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
