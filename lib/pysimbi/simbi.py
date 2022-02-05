@@ -34,22 +34,22 @@ class Hydro:
             
             geometry (tuple):               The first starting point, the last, and an optional midpoint in the grid
                                             Ex. geometry = (0.0, 1.0, 0.5) for Sod Shock Tube
-                                            Ex. geometry = ((xmin, xmax), (ymin, ymax))
+                                            Ex. geometry = ((x1min, x1max), (x2min, x2max))
                                 
             n_vars (int):                   Number of primitives in the problem
             
             coord_system (string):          The coordinate system the problem uses. Currently only supports Cartesian 
                                             and Spherical Coordinate Lattces
             
-            regime (string):                The classical (Newtonian) or relativisitc regime to do the problem in
+            regime (string):                The classical (Newtonian) or relativisitc regime
             
         Return:
             None
         """
-        # TODO: Add an example Instantian Here for the Sod Problem
+        # TODO: Add an example Instantiation Here for the Sod Problem
         self.coord_system = coord_system
-        self.regime = regime
-        discontinuity = False
+        self.regime       = regime
+        discontinuity     = False
         
         #Check dimensions of state
         if len(initial_state) == 2:
@@ -143,16 +143,8 @@ class Hydro:
         elif len(initial_state) == 3:
             self.dimensions = 1
             
-            
-            left_bound = self.geometry[0]
-            right_bound = self.geometry[1]
-            
-            length = right_bound - left_bound
-            self.dx = length/self.Npts
-            
-            self.n_vars = n_vars
-            
-            self.init_rho = initial_state[0]
+            self.n_vars        = n_vars
+            self.init_rho      = initial_state[0]
             self.init_pressure = initial_state[1]
             
             if regime == "classical":
@@ -161,11 +153,11 @@ class Hydro:
                                     0.5*self.init_rho*self.init_v**2 )
                 
             else:
-                self.init_v = initial_state[2]
-                self.W = np.asarray(1/np.sqrt(1 - self.init_v**2))
-                self.init_h = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
-                self.initD = self.init_rho*self.W
-                self.initS = self.init_h*self.init_rho*self.W**2*self.init_v
+                self.init_v   = initial_state[2]
+                self.W        = np.asarray(1/np.sqrt(1 - self.init_v**2))
+                self.init_h   = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
+                self.initD    = self.init_rho*self.W
+                self.initS    = self.init_h*self.init_rho*self.W**2*self.init_v
                 self.init_tau = (self.init_rho*self.init_h*self.W**2 - self.init_pressure
                                   - self.init_rho*self.W)
             
@@ -182,7 +174,6 @@ class Hydro:
             left_y, right_y = geometry[1]
             
             self.xNpts, self.yNpts = Npts 
-            
             self.n_vars = n_vars 
             
             if self.regime == "classical":
@@ -198,17 +189,16 @@ class Hydro:
                 
                 
             else:
-                self.init_rho = initial_state[0]
+                self.init_rho      = initial_state[0]
                 self.init_pressure = initial_state[1]
-                self.init_v1 = initial_state[2]
-                self.init_v2 = initial_state[3]
-                total_v = np.sqrt(self.init_v1**2 + self.init_v2**2)
+                self.init_v1       = initial_state[2]
+                self.init_v2       = initial_state[3]
+                vsq                = self.init_v1**2 + self.init_v2**2
                 
-                self.W = np.asarray(1/np.sqrt(1 - total_v**2))
-                
+                self.W = 1/np.sqrt(1 - vsq**2)
                 self.init_h = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
                 
-                self.initD = self.init_rho*self.W
+                self.initD  = self.init_rho*self.W
                 self.initS1 = self.init_h*self.init_rho*self.W**2*self.init_v1
                 self.initS2 = self.init_h*self.init_rho*self.W**2*self.init_v2 
                 
@@ -246,18 +236,18 @@ class Hydro:
                 
                 
             else:
-                self.init_rho = initial_state[0]
+                self.init_rho      = initial_state[0]
                 self.init_pressure = initial_state[1]
-                self.init_v1 = initial_state[2]
-                self.init_v2 = initial_state[3]
-                self.init_v3 = initial_state[4]
-                total_v = np.sqrt(self.init_v1**2 + self.init_v2**2 + self.init_v3**2)
+                self.init_v1       = initial_state[2]
+                self.init_v2       = initial_state[3]
+                self.init_v3       = initial_state[4]
+                total_v            = np.sqrt(self.init_v1**2 + self.init_v2**2 + self.init_v3**2)
                 
-                self.W = np.asarray(1/np.sqrt(1 - total_v**2))
+                self.W = 1/np.sqrt(1 - total_v**2)
                 
                 self.init_h = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
                 
-                self.initD = self.init_rho*self.W
+                self.initD  = self.init_rho*self.W
                 self.initS1 = self.init_h*self.init_rho*self.W**2*self.init_v1
                 self.initS2 = self.init_h*self.init_rho*self.W**2*self.init_v2 
                 self.initS3 = self.init_h*self.init_rho*self.W**2*self.init_v3 
@@ -311,7 +301,7 @@ class Hydro:
                  first_order: bool = True,
                  periodic: bool = False,
                  linspace: bool = True,
-                 CFL: float = 0.4,
+                 cfl: float = 0.4,
                  sources: np.ndarray = None,
                  scalars: np.ndarray = 0,
                  hllc: bool =False,
@@ -319,21 +309,22 @@ class Hydro:
                  chkpt_interval:float = 0.1,
                  data_directory:str = "data/",
                  engine_duration: float = 10.0,
-                 compute_mode: str = 'cpu') -> np.ndarray:
+                 compute_mode: str = 'cpu',
+                 quirk_smoothing: bool = True) -> np.ndarray:
         """
         Simulate the Hydro Setup
         
         Parameters:
-            tend        (float): The desired time to end the simulation
-            dt          (float): The desired timestep
-            first_order (boolean): First order RK1 or the RK2 PLM.
-            period      (boolean): Periodic BCs or not
-            linspace    (boolean): Prompts a linearly spaced mesh or log spaced if False
-            coordinate  (boolean): The coordinate system the simulation is taking place in
-            CFL         (float):   The CFL number for min adaptive timestep
+            tend        (float):      The desired time to end the simulation
+            dt          (float):      The desired timestep
+            first_order (boolean):    First order RK1 or the RK2 PLM.
+            period      (boolean):    Periodic BCs or not
+            linspace    (boolean):    Prompts a linearly spaced mesh or log spaced if False
+            coordinate  (boolean):    The coordinate system the simulation is taking place in
+            cfl         (float):      The cfl number for min adaptive timestep
             sources     (array_like): The source terms for the simulations
-            hllc        (boolean): Tells the simulation whether to perform HLLC or HLLE
-            chkpt       (string): The path to the checkpoint file to read into the simulation
+            hllc        (boolean):    Tells the simulation whether to perform HLLC or HLLE
+            chkpt       (string):     The path to the checkpoint file to read into the simulation
             
         Returns:
             u (array): The conserved/primitive variable array
@@ -351,7 +342,6 @@ class Hydro:
         #Convert strings to byte arrays
         data_directory = os.path.join(data_directory, '').encode('utf-8')
         coordinates    = self.coord_system.encode('utf-8')
-        # Initialize conserved u-tensor
         
         self.u = np.asarray(self.u)
         self.t = 0
@@ -364,22 +354,23 @@ class Hydro:
         u = self.u 
         start_time = tstart if self.t == 0 else self.t
         
+        if first_order:
+            print("Computing First Order Solution...")
+        else:
+            print('Computing Second Order Solution...')
+        
         if self.dimensions == 1:
-            if (linspace):
+            if linspace:
                 x1 = np.linspace(self.geometry[0], self.geometry[1], self.Npts)
             else:
                 x1 = np.logspace(np.log10(self.geometry[0]), np.log10(self.geometry[1]), self.Npts)
             sources = np.zeros((3, x1.size), dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             
-            if first_order:
-                print("Computing First Order...") 
-            else:
-                print('Computing Higher Order...')
             if self.regime == "classical":
-                a = PyState(u, self.gamma, CFL, r = x1, coord_system = coordinates)
+                a = PyState(u, self.gamma, cfl, r = x1, coord_system = coordinates)
             else:
-                a = PyStateSR(u, self.gamma, CFL, r = x1, coord_system = coordinates)
+                a = PyStateSR(u, self.gamma, cfl, r = x1, coord_system = coordinates)
     
             u = a.simulate(sources = sources,
                 tstart = start_time,
@@ -402,33 +393,42 @@ class Hydro:
                 x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
                 x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
             
-            sources = np.zeros((4, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
+            # ignore the chi term
+            sources = np.zeros(self.u[:-1].shape, dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             
-            if (first_order):
-                print("Computing First Order...")
-            
-            else:
-                print('Computing Higher Order...')
-                
             if self.regime == "classical":
-                b = PyState2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
+                b = PyState2D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                u = b.simulate(
+                    sources         = sources,
+                    tstart          = start_time,
+                    tend            = tend,
+                    dt              = dt,
+                    plm_theta       = plm_theta,
+                    engine_duration = engine_duration,
+                    chkpt_interval  = chkpt_interval,
+                    data_directory  = data_directory,
+                    first_order     = first_order,
+                    periodic        = periodic,
+                    linspace        = linspace,
+                    hllc            = hllc) 
             else:
-                b = PyStateSR2D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
-                   
-            u = b.simulate(
-                sources = sources,
-                tstart = start_time,
-                tend = tend,
-                dt = dt,
-                plm_theta = plm_theta,
-                engine_duration = engine_duration,
-                chkpt_interval = chkpt_interval,
-                data_directory = data_directory,
-                first_order = first_order,
-                periodic = periodic,
-                linspace = linspace,
-                hllc = hllc)  
+                b = PyStateSR2D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+            
+                u = b.simulate(
+                    sources         = sources,
+                    tstart          = start_time,
+                    tend            = tend,
+                    dt              = dt,
+                    plm_theta       = plm_theta,
+                    engine_duration = engine_duration,
+                    chkpt_interval  = chkpt_interval,
+                    data_directory  = data_directory,
+                    first_order     = first_order,
+                    periodic        = periodic,
+                    linspace        = linspace,
+                    hllc            = hllc,
+                    quirk_smoothing = quirk_smoothing)  
 
         else:
             if (linspace):
@@ -442,31 +442,26 @@ class Hydro:
             
             sources = np.zeros((5, x3.size, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
-            
-            if (first_order):
-                print("Computing First Order...")
-            
-            else:
-                print('Computing Higher Order...')
                 
             if self.regime == "classical":
                 pass
-                # b = PyState3D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, coord_system=coordinates)
+                # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
             else:
-                b = PyStateSR3D(u, self.gamma, cfl=CFL, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
+                b = PyStateSR3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
                    
-            u = b.simulate(sources = sources,
-                tstart = tstart,
-                tend = tend,
-                dt = dt,
-                plm_theta = plm_theta,
+            u = b.simulate(
+                sources         = sources,
+                tstart          = tstart,
+                tend            = tend,
+                dt              = dt,
+                plm_theta       = plm_theta,
                 engine_duration = engine_duration,
-                chkpt_interval = chkpt_interval,
-                data_directory = data_directory,
-                first_order = first_order,
-                periodic = periodic,
-                linspace = linspace,
-                hllc = hllc)  
+                chkpt_interval  = chkpt_interval,
+                data_directory  = data_directory,
+                first_order     = first_order,
+                periodic        = periodic,
+                linspace        = linspace,
+                hllc            = hllc)  
         
         return self._cleanup(u, first_order) if not periodic else u
         

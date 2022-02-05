@@ -184,8 +184,8 @@ namespace simbi{
                     u_state[jj * sx +  (x1grid_size - 1) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
                     u_state[jj * sx +  (x1grid_size - 2) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
 
-                    u_state[jj * sx + 0 * sy].m1              = - u_state[jj * sx + 3 * sy].m1;
-                    u_state[jj * sx + 1 * sy].m1              = - u_state[jj * sx + 2 * sy].m1;
+                    u_state[jj * sx + 0 * sy].m1 = - u_state[jj * sx + 3 * sy].m1;
+                    u_state[jj * sx + 1 * sy].m1 = - u_state[jj * sx + 2 * sy].m1;
 
                     // Fix the ghost zones at the angular boundaries
                     if (ii < x1grid_size){

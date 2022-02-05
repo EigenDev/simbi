@@ -34,41 +34,46 @@ def find_nearest(arr, val):
     idx = np.argmin(np.abs(arr - val))
     return idx, arr[idx]
  
+def fill_below_intersec(x, y, constraint, color):
+    # colors = plt.cm.plasma(np.linspace(0.25, 0.75, len(x)))
+    ind = find_nearest(y, constraint)[0]
+    plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
+    
 def get_field_str(args):
-    if args.field == "rho":
+    if args.field == 'rho':
         if args.units:
             return r'$\rho$ [g cm$^{-3}$]'
         else:
             return r'$\rho$'
-    elif args.field == "gamma_beta":
-        return r"$\Gamma \ \beta$"
-    elif args.field == "energy":
-        return r"$\tau$"
+    elif args.field == 'gamma_beta':
+        return r'$\Gamma \ \beta$'
+    elif args.field == 'energy':
+        return r'$\tau$'
     else:
         return args.field
     
 def prims2cons(fields, cons):
-    if cons == "D":
+    if cons == 'D':
         return fields['rho'] * fields['W']
-    elif cons == "S":
+    elif cons == 'S':
         return fields['rho'] * fields['W']**2 * fields['v']
-    elif cons == "energy":
+    elif cons == 'energy':
         return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p'] - fields['rho']*fields['W']
 
 
 def plot_profile(args, field_dict, ax = None, overplot = False, subplot = False, case = 0):
     
     colors = plt.cm.twilight_shifted(np.linspace(0.25, 0.75, len(args.filename)))
-    r = field_dict["r"]
+    r = field_dict['r']
     tend = field_dict['t']
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,8))
     
     unit_scale = 1.0
     if (args.units):
-        if args.field == "rho":
+        if args.field == 'rho':
             unit_scale = rho_scale
-        elif args.field == "p":
+        elif args.field == 'p':
             unit_scale = pre_scale
         
     if args.field in cons:
@@ -82,7 +87,6 @@ def plot_profile(args, field_dict, ax = None, overplot = False, subplot = False,
         ax.plot(r, var * unit_scale, color=colors[case], label=r'${}$, t={:.2f}'.format(args.labels[case], tend))
 
     ax.tick_params(axis='both', labelsize=15)
-    
     if (args.log):
         ax.set_xscale('log')
         ax.set_yscale('log')
@@ -91,8 +95,8 @@ def plot_profile(args, field_dict, ax = None, overplot = False, subplot = False,
     if args.xlim is None:
         ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
     else:
-        xmin, xmax = eval(args.xlim)
-        ax.set_xlim(xmin, xmax)
+        x1min, x1max = eval(args.xlim)
+        ax.set_xlim(x1min, x1max)
     # Change the format of the field
     field_str = get_field_str(args)
         
@@ -107,7 +111,7 @@ def plot_profile(args, field_dict, ax = None, overplot = False, subplot = False,
     ########
     r_outer = find_nearest(r, 0.55)[0]
     r_slow  = find_nearest(r, 1.50)[0]
-    if field_dict["is_linspace"]:
+    if field_dict['is_linspace']:
         rvertices = 0.5 * (r[1:] + r[:-1])
     else:  
         rvertices = np.sqrt(r[1:] * r[:-1])
@@ -116,7 +120,7 @@ def plot_profile(args, field_dict, ax = None, overplot = False, subplot = False,
     rvertices = np.insert(rvertices, rvertices.shape[0], r[-1])
     dr = rvertices[1:] - rvertices[:-1]
     dV          =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
-    mout    = (4./3.) * np.pi * np.sum(dV[r_outer:r_slow] * field_dict["rho"][r_outer: r_slow])
+    mout    = (4./3.) * np.pi * np.sum(dV[r_outer:r_slow] * field_dict['rho'][r_outer: r_slow])
     # print(mout)
     # zzz = input('')
     ########################
@@ -134,11 +138,11 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
 
-    tend = fields["t"]
-    edens_total = prims2cons(fields, "energy")
-    r           = fields["r"]
+    tend = fields['t']
+    edens_total = prims2cons(fields, 'energy')
+    r           = fields['r']
     
-    if fields["is_linspace"]:
+    if fields['is_linspace']:
         rvertices = 0.5 * (r[1:] + r[:-1])
     else:  
         rvertices = np.sqrt(r[1:] * r[:-1])
@@ -148,49 +152,49 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
     dr = rvertices[1:] - rvertices[:-1]
     dV =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
     
-    etotal = edens_total * (4 * np.pi * dV) * e_scale.value
-    mass   = 4.0 * np.pi * dV * fields["W"] * fields["rho"]
-    e_k    = (fields['W'] - 1.0) * mass * e_scale.value
+    if args.eks:
+        mass   = 4.0 * np.pi * dV * fields['W']**2 * fields['rho']
+        energy = (fields['W'] - 1.0) * mass * e_scale.value
+    elif args.hhist:
+        energy = (fields['enthalpy'] - 1.0) *  4.0 * np.pi * dV * e_scale.value
+    else:
+        energy = edens_total * 4.0 * np.pi * dV * e_scale.value
 
 
     u = fields['gamma_beta']
     w = 0.01 #np.diff(u).max()*1e-1
     n = int(np.ceil( (u.max() - u.min() ) / w ) )
     gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), n)
-    eks = np.asarray([e_k[u > gb].sum() for gb in gbs])
-    ets = np.asarray([etotal[u > gb].sum() for gb in gbs])
     
-    if args.eks:
-        energy = eks 
-    else:
-        energy = ets
+    energy = np.asarray([energy[u > gb].sum() for gb in gbs])
     
-    E_seg_rat  = ets[1:]/energy[:-1]
-    gb_seg_rat = gbs[1:]/gbs[:-1]
-    E_seg_rat[E_seg_rat == 0] = 1
+    # E_seg_rat  = energy[1:]/energy[:-1]
+    # gb_seg_rat = gbs[1:]/gbs[:-1]
+    # E_seg_rat[E_seg_rat == 0] = 1
     
-    slope = (energy[1:] - energy[:-1])/(gbs[1:] - gbs[:-1])
-    power_law_region = np.argmin(slope)
-    up_min           = find_nearest(gbs, 2 * gbs[power_law_region: ][0])[0]
-    upower           = gbs[up_min: ]
+    # slope = (energy[1:] - energy[:-1])/(gbs[1:] - gbs[:-1])
+    # power_law_region = np.argmin(slope)
+    # up_min           = find_nearest(gbs, 2 * gbs[power_law_region: ][0])[0]
+    # upower           = gbs[up_min: ]
     
-    # Fix the power law segment, ignoring the sharp dip at the tail of the CDF
-    epower_law_seg   = E_seg_rat [up_min: np.argmin(E_seg_rat > 0.8)]
-    gbpower_law_seg  = gb_seg_rat[up_min: np.argmin(E_seg_rat > 0.8)]
-    segments         = np.log10(epower_law_seg) / np.log10(gbpower_law_seg)
-    alpha            = 1.0 - np.mean(segments)
-    
-    print("Avg power law index: {:.2f}".format(alpha))
+    # # Fix the power law segment, ignoring the sharp dip at the tail of the CDF
+    # epower_law_seg   = E_seg_rat [up_min: np.argmin(E_seg_rat > 0.8)]
+    # gbpower_law_seg  = gb_seg_rat[up_min: np.argmin(E_seg_rat > 0.8)]
+    # segments         = np.log10(epower_law_seg) / np.log10(gbpower_law_seg)
+    # alpha            = 1.0 - np.mean(segments)
+    # E_0 = energy[up_min] * upower[0] ** (alpha - 1)
+    # print('Avg power law index: {:.2f}'.format(alpha))
     bins    = np.arange(min(gbs), max(gbs) + w, w)
     logbins = np.logspace(np.log10(bins[0]),np.log10(bins[-1]), len(bins))
     
-    E_0 = ets[up_min] * upower[0] ** (alpha - 1)
+    
     if args.labels is None:
         hist = ax.hist(gbs, bins=gbs, weights=energy, label= r'$E_T$', histtype='step', color=colors[case], rwidth=1.0, linewidth=3.0)
         # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
     else:
         hist = ax.hist(gbs, bins=gbs, weights=energy, label=r'${}$, t={:.2f}'.format(args.labels[case], tend), color=colors[case], histtype='step', rwidth=1.0, linewidth=3.0)
         # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--', label = r'${}$ fit'.format(args.labels[case]))
+
 
     sorted_energy = np.sort(energy)
     ax.set_xscale('log')
@@ -199,12 +203,17 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
     ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
     if args.eks:
         ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+    elif args.hhist:
+        ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
     else:
         ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
     ax.tick_params('both', labelsize=15)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     
+
+    if args.fill_scale is not None:
+        fill_below_intersec(gbs, energy, args.fill_scale*energy.max(), colors[case])
     if not subplot:
         ax.set_title(r'setup: {}'.format(args.setup[0]), fontsize=20)
         # ax.legend(fontsize=15)
@@ -215,7 +224,7 @@ def plot_hist(args, fields, overplot=False, ax=None, subplot = False, case=0):
 def main():
     parser = argparse.ArgumentParser(
         description='Plot a 2D Figure From a File (H5).',
-        epilog="This Only Supports H5 Files Right Now")
+        epilog='This Only Supports H5 Files Right Now')
     
     parser.add_argument('filename', metavar='Filename', nargs='+',
                         help='A Data Source to Be Plotted')
@@ -223,15 +232,18 @@ def main():
     parser.add_argument('setup', metavar='Setup', nargs='+', type=str,
                         help='The name of the setup you are plotting (e.g., Blandford McKee)')
     
-    parser.add_argument('--field', dest = "field", metavar='Field Variable', nargs='?',
+    parser.add_argument('--field', dest = 'field', metavar='Field Variable', nargs='?',
                         help='The name of the field variable you\'d like to plot',
-                        choices=field_choices, default="rho")
+                        choices=field_choices, default='rho')
     
-    parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',
+    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max',
                         default = 0.0, help='The domain range')
     
-    parser.add_argument('--xlim', dest = "xlim", metavar='Domain',
+    parser.add_argument('--xlim', dest = 'xlim', metavar='Domain',
                         default = None, help='The domain range')
+    
+    parser.add_argument('--fill_scale', dest = 'fill_scale', metavar='Filler maximum', type=float,
+                        default = None, help='Set the y-scale to start plt.fill_between')
     
     parser.add_argument('--log', dest='log', action='store_true',
                         default=False,
@@ -244,6 +256,10 @@ def main():
     parser.add_argument('--eks', dest='eks', action='store_true',
                         default=False,
                         help='Plot the kinetic energy on the histogram')
+    
+    parser.add_argument('--hhist', dest='hhist', action='store_true',
+                        default=False,
+                        help='Plot the enthalpy on the histogram')
     
     parser.add_argument('--labels', dest='labels', nargs='+',
                         help='map labels to filenames')
@@ -271,25 +287,29 @@ def main():
         field_dict[idx] = {}
         with h5py.File(file, 'r') as hf:
             
-            ds = hf.get("sim_info")
+            ds = hf.get('sim_info')
             
-            rho         = hf.get("rho")[:]
-            v           = hf.get("v")[:]
-            p           = hf.get("p")[:]   
-            nx          = ds.attrs["Nx"]
-            t           = ds.attrs["current_time"] * time_scale
-            xmax        = ds.attrs["xmax"]
-            xmin        = ds.attrs["xmin"]
+            rho         = hf.get('rho')[:]
+            v           = hf.get('v')[:]
+            p           = hf.get('p')[:]   
+            nx          = ds.attrs['Nx']
+            t           = ds.attrs['current_time'] * time_scale
+            try:
+                x1max = ds.attrs['x1max']
+                x1min = ds.attrs['x1min']
+            except:
+                x1max = ds.attrs['xmax']
+                x1min = ds.attrs['xmin']
             
             # added these attributes after some time, so fallbacks included
             try:
-                ad_gamma = ds.attrs["adbiatic_gamma"]
+                ad_gamma = ds.attrs['adbiatic_gamma']
             except:
                 ad_gamma = 4./3.
                 
             
             try:
-                is_linspace = ds.attrs["linspace"]
+                is_linspace = ds.attrs['linspace']
             except:
                 is_linspace = False
 
@@ -319,10 +339,14 @@ def main():
             h = 1.0 + ad_gamma * p / (rho * (ad_gamma - 1.0))
             
             if (is_linspace):
-                r = np.linspace(xmin, xmax, xactive)
+                r = np.linspace(x1min, x1max, xactive)
             else:
-                r = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
-                
+                r = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
+            
+            old_beta = np.isnan(W.sum())
+            uf = v if old_beta else W * beta
+            if old_beta:
+                W = np.sqrt(1 + uf * uf)
             # post process the time into days, weeks, 
             if (t.value > u.hour.to(u.s)):
                 t = t.to(u.hour)
@@ -331,26 +355,26 @@ def main():
             elif (t.value > u.week.to(u.s)):
                 t = t.to(u.week)
             
-            field_dict[idx]["rho"]         = rho
-            field_dict[idx]["v"]           = v
-            field_dict[idx]["p"]           = p
-            field_dict[idx]["gamma_beta"]  = W*beta
-            field_dict[idx]["temperature"] = T
-            field_dict[idx]["enthalpy"]    = h
-            field_dict[idx]["W"]           = W
-            field_dict[idx]["t"]           = t 
-            field_dict[idx]["xmin"]        = xmin
-            field_dict[idx]["xmax"]        = xmax
-            field_dict[idx]["xactive"]     = xactive
-            field_dict[idx]["r"]           = r
-            field_dict[idx]["is_linspace"]           = is_linspace
+            field_dict[idx]['rho']         = rho
+            field_dict[idx]['v']           = v
+            field_dict[idx]['p']           = p
+            field_dict[idx]['gamma_beta']  = uf
+            field_dict[idx]['temperature'] = T
+            field_dict[idx]['enthalpy']    = h
+            field_dict[idx]['W']           = W
+            field_dict[idx]['t']           = t 
+            field_dict[idx]['x1min']        = x1min
+            field_dict[idx]['x1max']        = x1max
+            field_dict[idx]['xactive']     = xactive
+            field_dict[idx]['r']           = r
+            field_dict[idx]['is_linspace']           = is_linspace
         
     if len(args.filename) > 1:
         if args.plots == 1:
             fig = plt.figure(figsize=(10,10))
             ax = fig.add_subplot(1, 1, 1)
             for idx, file in enumerate(args.filename):
-                if args.ehist:
+                if args.ehist or args.eks or args.hhist:
                     plot_hist(args, field_dict[idx], ax = ax, overplot= True, case = idx)
                 else:
                     plot_profile(args, field_dict[idx], ax = ax, overplot=True, case = idx)
@@ -362,12 +386,12 @@ def main():
                 plot_hist(args, field_dict[idx], ax = ax1, overplot= True, subplot = True, case = idx)
                 plot_profile(args, field_dict[idx], ax = ax2, overplot=True, subplot = True, case = idx)
                 
-            fig.suptitle("{}".format(args.setup[0]), fontsize=40)
+            fig.suptitle('{}'.format(args.setup[0]), fontsize=40)
         if args.labels != None:
             ax.legend(fontsize = 15)
             
     else:
-        if args.ehist:
+        if args.ehist or args.hhist or args.eks:
             fig = plot_hist(args, field_dict[0])
         else:
             fig = plot_profile(args, field_dict[0])
@@ -375,9 +399,9 @@ def main():
     
     
     if args.save is not None:
-        fig.savefig("{}.png".format(args.save), bbox_inches='tight')
+        fig.savefig('{}.png'.format(args.save), bbox_inches='tight')
     else:
         plt.show()
     
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -16,8 +16,13 @@ def load_checkpoint(model, filename, dim):
             p           = hf.get("p")[:]
             nx          = ds.attrs["Nx"]
             model.t     = ds.attrs["current_time"]
-            xmax        = ds.attrs["xmax"]
-            xmin        = ds.attrs["xmin"]
+            try:
+                x1max = ds.attrs["x1max"]
+                x1min = ds.attrs["x1min"]
+            except:
+                x1max = ds.attrs["xmax"]
+                x1min = ds.attrs["xmin"]
+                
             try:
                 ad_gamma = ds.attrs["ad_gamma"]
             except:
@@ -51,10 +56,16 @@ def load_checkpoint(model, filename, dim):
                 scalars    = np.zeros((ny, nx))
                 
             model.t     = ds.attrs["current_time"]
-            xmax        = ds.attrs["xmax"]
-            xmin        = ds.attrs["xmin"]
-            ymax        = ds.attrs["ymax"]
-            ymin        = ds.attrs["ymin"]
+            try:
+                x1max        = ds.attrs["x1max"]
+                x1min        = ds.attrs["x1min"]
+                x2max        = ds.attrs["x2max"]
+                x2min        = ds.attrs["x2min"]
+            except:
+                x1max        = ds.attrs["xmax"]
+                x1min        = ds.attrs["xmin"]
+                x2max        = ds.attrs["ymax"]
+                x2min        = ds.attrs["ymin"]
             try:
                 ad_gamma = ds.attrs["ad_gamma"]
             except:
@@ -181,43 +192,29 @@ def initializeModel(model, first_order = False, periodic = False, scalars = 0):
                     bottom_ghost = model.u[:, -1]
                     upper_ghost = model.u[:, 0]
                     
-                    model.u = np.insert(model.u, model.u.shape[1], 
-                                    bottom_ghost , axis=1)
-                    
-                    model.u = np.insert(model.u, 0,
-                                    upper_ghost , axis=1)
-                    
+                    model.u = np.insert(model.u, model.u.shape[1], bottom_ghost , axis=1)
+                    model.u = np.insert(model.u, 0, upper_ghost , axis=1)
                     
                     left_ghost = model.u[:, :, 0]
                     right_ghost = model.u[:, :, -1]
                     
-                    
-                    
-                    model.u = np.insert(model.u, 0, 
-                                    left_ghost , axis=2)
-                    
-                    model.u = np.insert(model.u, model.u.shape[2],
-                                    right_ghost , axis=2)
+                    model.u = np.insert(model.u, 0, left_ghost , axis=2)
+                    model.u = np.insert(model.u, model.u.shape[2], right_ghost , axis=2)
                     
                 else:
                     # Add boundary ghosts
                     bottom_ghost = model.u[:, -1]
                     upper_ghost = model.u[:, 0]
                     
-                    model.u = np.insert(model.u, model.u.shape[1], 
-                                    (bottom_ghost, bottom_ghost) , axis=1)
+                    model.u = np.insert(model.u, model.u.shape[1], (bottom_ghost, bottom_ghost) , axis=1)
                     
-                    model.u = np.insert(model.u, 0,
-                                    (upper_ghost, upper_ghost) , axis=1)
+                    model.u = np.insert(model.u, 0, (upper_ghost, upper_ghost) , axis=1)
                     
                     left_ghost = model.u[:, :, 0]
                     right_ghost = model.u[:, :, -1]
                     
-                    model.u = np.insert(model.u, 0, 
-                                    (left_ghost, left_ghost) , axis=2)
-                    
-                    model.u = np.insert(model.u, model.u.shape[2],
-                                    (right_ghost, right_ghost) , axis=2)
+                    model.u = np.insert(model.u, 0, (left_ghost, left_ghost) , axis=2)
+                    model.u = np.insert(model.u, model.u.shape[2],(right_ghost, right_ghost) , axis=2)
         else:
             if not first_order:
                 # Add the extra ghost cells for i-2, i+2

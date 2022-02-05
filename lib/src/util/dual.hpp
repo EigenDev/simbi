@@ -50,8 +50,8 @@ namespace simbi
             CLattice1D      *host_clattice;
 
             real host_dt;
-            real host_xmin;
-            real host_xmax;
+            real host_x1min;
+            real host_x1max;
 
             void copyHostToDev(const U &host, U *device);
             void copyDevToHost(const U *device, U &host);
@@ -90,8 +90,8 @@ namespace simbi
             CLattice1D      *host_clattice;
             luint n, nreal, cbytes, pbytes, rbytes, rrbytes, fabytes;
             real host_dt;
-            real host_xmin;
-            real host_xmax;
+            real host_x1min;
+            real host_x1max;
 
             void copyHostToDev(const Newtonian1D &host,   Newtonian1D *device);
             void copyDevToHost(const Newtonian1D *device, Newtonian1D &host);
@@ -140,10 +140,10 @@ namespace simbi
             CLattice2D      *host_clattice;
 
             real host_dt;
-            real host_xmin;
-            real host_xmax;
-            real host_ymin;
-            real host_ymax;
+            real host_x1min;
+            real host_x1max;
+            real host_x2min;
+            real host_x2max;
             real host_dx;
 
             void copyHostToDev(const U &host, U *device);
@@ -188,10 +188,10 @@ namespace simbi
             CLattice2D      *host_clattice;
 
             real host_dt;
-            real host_xmin;
-            real host_xmax;
-            real host_ymin;
-            real host_ymax;
+            real host_x1min;
+            real host_x1max;
+            real host_x2min;
+            real host_x2max;
             real host_dx;
 
             void copyHostToDev(const Newtonian2D &host,   Newtonian2D *device);
@@ -242,10 +242,10 @@ namespace simbi
             CLattice2D      *host_clattice;
 
             real host_dt;
-            real host_xmin;
-            real host_xmax;
-            real host_ymin;
-            real host_ymax;
+            real host_x1min;
+            real host_x1max;
+            real host_x2min;
+            real host_x2max;
             real host_zmin;
             real host_zmax;
 

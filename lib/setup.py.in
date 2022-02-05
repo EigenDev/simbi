@@ -2,9 +2,8 @@
 
 import os
 import sys
-import numpy
 from os.path import join as pjoin
-from setuptools import setup, find_packages, find_namespace_packages
+from setuptools import setup, find_packages
 from setuptools.extension import Extension
 from distutils.core import Command
 from distutils import sysconfig
@@ -15,109 +14,90 @@ from setuptools.command.develop import develop
 
 class CompilerParams():
     def __init__(self, arch='cpu'):
-        self._arch        = arch 
-
-        super().__init__()
+        self.arch     = arch 
+        self.language = "c++"
+        self.set_sources()
+        self.set_compiler_args()
+        self.set_define_macros()
+        self.set_extra_includes()
+        self.set_libraries()
+        self.set_library_dirs()
+        self.set_linker_args()
+        self.set_runtime_libs()
         
-    @property
-    def arch(self):
-        return self._arch 
-    
-    @property   
-    def compiler_args(self):
-        cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-mfpmath=sse', '-flto']
-        if self._arch == 'gpu':
+    def set_compiler_args(self):
+        cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-flto']
+        if self.arch == 'gpu':
             gpu_compiler_args = { '$ENV{CC}': cpu_compiler_args,
                                    'hipcc': []
                                  }
             if "${HIP_PLATFORM}" == "nvidia":
-                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_86', '-ccbin=gcc-10',
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_86', '-ccbin=$ENV{CC}',
                                             '--ptxas-options=-v', '--extended-lambda',
                                             '--compiler-options', '-fPIC', '-O2']
+                
             else:
                 gpu_compiler_args["hipcc"] += ['-std=c++17', '-O2', '-fPIC', '-march=native']
                 
-        self._compiler_args = cpu_compiler_args if self._arch == "cpu" else gpu_compiler_args
-        return self._compiler_args
+        self.compiler_args = cpu_compiler_args if self.arch == "cpu" else gpu_compiler_args
                 
-    @property
-    def linker_args(self):
-        self._linker_args = ['-lhdf5', '-lhdf5_cpp', '-fopenmp']
-        if self._arch != "cpu":
+    def set_linker_args(self):
+        self.linker_args = ['-lhdf5', '-lhdf5_cpp', '-fopenmp']
+        if self.arch != "cpu":
             if "${HIP_PLATFORM}" == "nvidia":
-                self._linker_args += ['-lcudart']
+                self.linker_args += ['-lcudart']
             else:
-                self._linker_args += ['-lamdhip64']
-        return self._linker_args 
+                self.linker_args += ['-lamdhip64']
     
-    @property
-    def libraries(self):
-        self._libraries = ['hdf5', 'hdf5_cpp']
-        if self._arch != "cpu":
+    def set_libraries(self):
+        self.libraries = ['hdf5', 'hdf5_cpp']
+        if self.arch != "cpu":
             if "${HIP_PLATFORM}" == "nvidia":
-                self._libraries += ['cudart']
+                self.libraries += ['cudart']
             else:
-                self._libraries += ['amdhip64']
-                
-        return self._libraries
+                self.libraries += ['amdhip64']
     
-    @property
-    def runtime_libs(self):
-        self._runtime_libs = []
-        if self._arch != "cpu":
+    def set_runtime_libs(self):
+        self.runtime_libs = []
+        if self.arch != "cpu":
             rtimelibs = [lib for lib in "${HIP_RUNTIME_LIBRARY_DIRS}".split(';')]
-            self._runtime_libs += rtimelibs
+            self.runtime_libs += rtimelibs
     
-    @property
-    def define_macros(self):
-        self._defineMacros = []
-        if self._arch != "cpu":
+    def set_define_macros(self):
+        self.define_macros = []
+        if self.arch != "cpu":
             if "${HIP_PLATFORM}" == "nvidia":
-                self._defineMacros = [("__HIP_PLATFORM_NVIDIA__", "1")]
+                self.define_macros = [("__HIP_PLATFORM_NVIDIA__", "1")]
             else:
-                self._defineMacros = [("__HIP_PLATFORM_AMD__", "1")]
-                
-        return self._defineMacros
-    
-    @property        
-    def library_dirs(self):
+                self.define_macros = [("__HIP_PLATFORM_AMD__", "1")]
+         
+    def set_library_dirs(self):
         hdf5_cxx_libs = [lib for lib in '${HDF5_CXX_LIBRARIES}'.split(';')]
         hdf5_path = os.path.dirname(hdf5_cxx_libs[0])
-        self._library_dirs = [hdf5_path]
-        if self._arch != "cpu":
+        self.library_dirs = [hdf5_path]
+        if self.arch != "cpu":
             gpu_libs = [lib for lib in '${HIP_RUNTIME_LIBRARY_DIRS}'.split(';')]
-            self._library_dirs += gpu_libs
-            
-        return self._library_dirs
-    
-    @property
-    def language(self):
-        self._language = "c++"
-        return self._language 
+            self.library_dirs += gpu_libs
         
-    @property
-    def extra_includes(self):
+    def set_extra_includes(self):
         hdflist = '${HDF5_INCLUDE_DIRS}'.split(';')
-        self._extraIncludes = ['${CMAKE_CURRENT_SOURCE_DIR}/src'] + hdflist 
-        if self._arch != "cpu":
+        self.extra_includes = ['${CMAKE_CURRENT_SOURCE_DIR}/src'] + hdflist 
+        if self.arch != "cpu":
             gpu_includes = '${HIP_INCLUDE_DIRS}'.split(';')
-            self._extraIncludes += gpu_includes
-        return self._extraIncludes
+            self.extra_includes += gpu_includes
     
-    @property
-    def sources(self):
+    def set_sources(self):
         src_dir  = os.path.dirname("${CMAKE_CURRENT_SOURCE_DIR}/src/")
         com_src  = pjoin(src_dir, "common")
         util_src = pjoin(src_dir, "util")
-        self._sources   = [pjoin(com_src,  file) for file in os.listdir(com_src)  if file.endswith('.cpp')]
-        self._sources  += [pjoin(util_src, file) for file in os.listdir(util_src) if file.endswith('.cpp')]
-        self._sources  += [pjoin(src_dir,  file) for file in os.listdir(src_dir)  if file.endswith('.cpp')]
+        self.sources   = [pjoin(com_src,  file) for file in os.listdir(com_src)  if file.endswith('.cpp')]
+        self.sources  += [pjoin(util_src, file) for file in os.listdir(util_src) if file.endswith('.cpp')]
+        self.sources  += [pjoin(src_dir,  file) for file in os.listdir(src_dir)  if file.endswith('.cpp')]
         agno_src = pjoin(src_dir, "hydro")
         for file in os.listdir(agno_src):
             if file.endswith(".cpp") and file != "ag_state.cpp":
-                self._sources.append(pjoin(agno_src, file))
-        self._sources.insert(0, pjoin(agno_src, "ag_state.pyx"))
-        return self._sources
+                self.sources.append(pjoin(agno_src, file))
+        self.sources.insert(0, pjoin(agno_src, "ag_state.pyx"))
 
 def extensions(comp: CompilerParams, name: str = "state"):
     '''
@@ -148,29 +128,9 @@ def extensions(comp: CompilerParams, name: str = "state"):
         'define_macros':         comp.define_macros
     }
 
-    # Ensure disutils does not mess with the build process
-    # sysconfig.get_config_vars()['CFLAGS'] = ''
-    # sysconfig.get_config_vars()['OPT'] = ''
-    # sysconfig.get_config_vars()['PY_CFLAGS'] = ''
-    # sysconfig.get_config_vars()['PY_CORE_CFLAGS'] = ''
-    # sysconfig.get_config_vars()['CC'] = '$ENV{CXX}'
-    # sysconfig.get_config_vars()['CXX'] = '$ENV{CXX}'
-    # sysconfig.get_config_vars()['BASECFLAGS'] = ''
-    # sysconfig.get_config_vars()['CCSHARED'] = '-fPIC'
-    # sysconfig.get_config_vars()['LDSHARED'] = '$ENV{CXX} -shared'
-    # sysconfig.get_config_vars()['CPP'] = '$ENV{CXX}'
-    # sysconfig.get_config_vars()['CPPFLAGS'] = ''
-    # sysconfig.get_config_vars()['BLDSHARED'] = ''
-    # sysconfig.get_config_vars()['CONFIGURE_LDFLAGS'] = ''
-    # sysconfig.get_config_vars()['LDFLAGS'] = ''
-    # sysconfig.get_config_vars()['PY_LDFLAGS'] = ''
-    # sysconfig.get_config_vars()['OPT'] = ''
-
     return cythonize([Extension(name, comp.sources, **extensionArguments)], language_level = "3", nthreads=2)
 
-
-
-
+# Adpated from https://github.com/rmcgibbo/npcuda-example/blob/master/cython/setup.py
 def customize_compiler_for_hipcc(self):
     """Inject deep into distutils to customize how the dispatch
     to gcc/hipcc works.

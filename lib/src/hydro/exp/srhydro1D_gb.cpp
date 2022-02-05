@@ -92,7 +92,7 @@ void SRHD::advance(
         Conserved u_l, u_r;
         Conserved f_l, f_r, frf, flf;
         Primitive prims_l, prims_r;
-        real rmean, dV, sL, sR, pc, dx1;
+        real rmean, dV, sL, sR, pc, dx;
   
         auto ia = ii + radius;
         auto txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
@@ -159,7 +159,7 @@ void SRHD::advance(
                     dx1 = coord_lattice->gpu_dx1[ii];
                     self->gpu_cons[ia] -= ((frf - flf) / dx1) * dt;
                 #else
-                    dx1 = self->coord_lattice.dx1[ii];
+                    dx1        = self->coord_lattice.dx1[ii];
                     cons[ia] -= ((frf - flf) / dx1) * dt;
                 #endif
                 
@@ -291,7 +291,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         #else 
         auto* const conserved_buff = &cons[0];
         #endif 
-        volatile __shared__ bool found_failure;
+        __shared__ volatile bool found_failure;
         luint tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
         if (tx == 0) found_failure = self->inFailureState;
         simbi::gpu::api::synchronize();
@@ -299,10 +299,6 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         bool workLeftToDo = true;
         while (!found_failure && workLeftToDo)
         {
-            if (tx == 0 && self->inFailureState) 
-                found_failure = true;
-            simbi::gpu::api::synchronize();
-            
             // Compile time thread selection
             #if GPU_CODE
                 conserved_buff[tx] = self->gpu_cons[ii];
@@ -321,9 +317,9 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             do
             {
                 pre = peq;
-                et = tau + D + pre;
-                v2 = S * S / (et * et);
-                W = (real)1.0 / std::sqrt((real)1.0 - v2);
+                et  = tau + D + pre;
+                v2  = S * S / (et * et);
+                W   = (real)1.0 / std::sqrt((real)1.0 - v2);
                 rho = D / W;
 
                 eps = (tau + ((real)1.0 - W) * D + ((real)1.0 - W * W) * pre) / (D * W);
@@ -332,7 +328,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 c2 = self->gamma *pre / (h * rho); 
 
                 g = c2 * v2 - (real)1.0;
-                f = (self->gamma - (real)1) * rho * eps - pre;
+                f = (self->gamma - 1) * rho * eps - pre;
 
                 peq = pre - f / g;
                 if (iter >= MAX_ITER)
@@ -351,21 +347,22 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 
 
             real v            = S / (tau + D + peq);
-            real mach_ceiling = 100.0;
-            real u            = v /std::sqrt(1 - v * v);
-            real e            = peq / rho * 3.0;
-            real emin         = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
+            real w            = 1 / std::sqrt(1 - v * v);
+            // real mach_ceiling = 100.0;
+            // real u            = v /std::sqrt(1 - v * v);
+            // real e            = peq / rho * 3.0;
+            // real emin         = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
 
-            if (e < emin) {
-                // printf("peq: %f, npew: %f\n", rho * emin * (self->gamma - 1.0));
-                peq = rho * emin * (self->gamma - 1.0);
-            }
+            // if (e < emin) {
+            //     // printf("peq: %f, npew: %f\n", rho * emin * (self->gamma - 1.0));
+            //     peq = rho * emin * (self->gamma - 1.0);
+            // }
             #if GPU_CODE
                 self->gpu_pressure_guess[ii] = peq;
-                self->gpu_prims[ii]          = Primitive{D * sqrt(1 - v * v), v, peq};
+                self->gpu_prims[ii]          = Primitive{D / w, v * w, peq};
             #else
                 pressure_guess[ii] = peq;
-                prims[ii]  = Primitive{D * sqrt(1 - v * v), v, peq};
+                prims[ii]  = Primitive{D  / w, v * w, peq};
             #endif
             workLeftToDo = false;
         }
@@ -382,13 +379,17 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     // Compute L/R Sound Speeds
     const real rho_l = prims_l.rho;
     const real p_l   = prims_l.p;
-    const real v_l   = prims_l.v;
+    const real gb_l  = prims_l.v;
+    const real w_l   = std::sqrt(1 + gb_l * gb_l);
+    const real v_l   = gb_l / w_l;
     const real h_l   = (real)1.0 + gamma * p_l / (rho_l * (gamma - 1));
     const real cs_l  = std::sqrt(gamma * p_l / (rho_l * h_l));
 
     const real rho_r = prims_r.rho;
     const real p_r   = prims_r.p;
-    const real v_r   = prims_r.v;
+    const real gb_r  = prims_r.v;
+    const real w_r   = std::sqrt(1 + gb_r * gb_r);
+    const real v_r   = gb_r / w_r;
     const real h_r   = (real)1.0 + gamma * p_r / (rho_r * (gamma - 1));
     const real cs_r  = std::sqrt(gamma * p_r / (rho_r * h_r));
 
@@ -440,7 +441,7 @@ void SRHD::adapt_dt()
     #pragma omp parallel 
     {
         real dr, cs, cfl_dt;
-        real h, rho, p, v, vPLus, vMinus;
+        real h, rho, p, v, vPLus, vMinus, gb, w;
 
         // Compute the minimum timestep given cfl
         #pragma omp for schedule(static) reduction(min:min_dt)
@@ -449,7 +450,9 @@ void SRHD::adapt_dt()
             dr  = coord_lattice.dx1[ii];
             rho = prims[ii + idx_active].rho;
             p   = prims[ii + idx_active].p;
-            v   = prims[ii + idx_active].v;
+            gb  = prims[ii + idx_active].v;
+            w   = std::sqrt(1 + gb * gb);
+            v   = gb / w;
 
             h = (real)1.0 + gamma * p / (rho * (gamma - 1));
             cs = std::sqrt(gamma * p / (rho * h));
@@ -485,12 +488,12 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD::prims2cons(const Primitive &prim)
 {
     const real rho = prim.rho;
-    const real v   = prim.v;
+    const real gb  = prim.v;
     const real pre = prim.p;  
     const real h   = (real)1.0 + gamma * pre / (rho * (gamma - 1));
-    const real W   = (real)1.0 / std::sqrt(1 - v * v);
+    const real W   = std::sqrt(1 + gb * gb);
 
-    return Conserved{rho * W, rho * h * W * W * v, rho * h * W * W - pre - rho * W};
+    return Conserved{rho * W, rho * h * W * gb, rho * h * W * W - pre - rho * W};
 };
 
 GPU_CALLABLE_MEMBER
@@ -541,13 +544,14 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD::prims2flux(const Primitive &prim)
 {
     const real rho = prim.rho;
+    const real gb  = prim.v;
     const real pre = prim.p;
-    const real v   = prim.v;
 
-    const real W = (real)1.0 / std::sqrt(1 - v * v);
+    const real w = std::sqrt(1 + gb * gb);
+    const real v = gb / w;
     const real h = (real)1.0 + gamma * pre / (rho * (gamma - 1));
-    const real D = rho * W;
-    const real S = rho * h * W * W * v;
+    const real D = rho * w;
+    const real S = rho * h * w * gb;
 
     return Conserved{D*v, S*v + pre, S - D*v};
 };
@@ -624,9 +628,11 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         const real cofactor = (real)1.0 / (aL - aStar);
 
         //--------------Compute the L Star State----------
-        const real v = left_prims.v;
+        const real gb = left_prims.v;
+        const real w  = std::sqrt(1 + gb * gb);
+        const real v  = gb / w;
         // Left Star State in x-direction of coordinate lattice
-        const real Dstar    = cofactor * (aL - v) * D;
+        const real Dstar    = cofactor *  D * (aL - v);
         const real Sstar    = cofactor * (S * (aL - v) - pressure + pStar);
         const real Estar    = cofactor * (E * (aL - v) + pStar * aStar - pressure * v);
         const real tauStar  = Estar - Dstar;
@@ -646,9 +652,11 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         const real cofactor  = (real)1.0 / (aR - aStar);
 
         //--------------Compute the R Star State----------
-        const real v = right_prims.v;
+        const real gb = right_prims.v;
+        const real w  = std::sqrt(1 + gb * gb);
+        const real v  = gb / w;
         // Left Star State in x-direction of coordinate lattice
-        const real Dstar    = cofactor * (aR - v) * D;
+        const real Dstar    = cofactor *  D * (aR - v);
         const real Sstar    = cofactor * (S * (aR - v) - pressure + pStar);
         const real Estar    = cofactor * (E * (aR - v) + pStar * aStar - pressure * v);
         const real tauStar  = Estar - Dstar;

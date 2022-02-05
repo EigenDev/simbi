@@ -19,6 +19,11 @@ void config_system() {
     geometry["spherical"] = simbi::Geometry::SPHERICAL;
 }
 
+void pause_program()
+{
+    std::cin.get();
+}
+
 void config_ghosts1D(std::vector<hydro1d::Conserved> &u_state, int grid_size, bool first_order){
     if (first_order){
         u_state[0].rho = u_state[1].rho;
@@ -355,12 +360,12 @@ void write_hdf5(
             att.write(real_type, &setup.ad_gamma);
             att.close();
 
-            att = sim_info.createAttribute("xmax", real_type, att_space);
-            att.write(real_type, &setup.xmax);
+            att = sim_info.createAttribute("x1max", real_type, att_space);
+            att.write(real_type, &setup.x1max);
             att.close();
 
-            att = sim_info.createAttribute("xmin", real_type, att_space);
-            att.write(real_type, &setup.xmin);
+            att = sim_info.createAttribute("x1min", real_type, att_space);
+            att.write(real_type, &setup.x1min);
             att.close();
 
             att = sim_info.createAttribute("Nx", int_type, att_space);
@@ -448,20 +453,20 @@ void write_hdf5(
             att.write(bool_type, &setup.linspace);
             att.close();
             
-            att = sim_info.createAttribute("xmax", real_type, att_space);
-            att.write(real_type, &setup.xmax);
+            att = sim_info.createAttribute("x1max", real_type, att_space);
+            att.write(real_type, &setup.x1max);
             att.close();
 
-            att = sim_info.createAttribute("xmin", real_type, att_space);
-            att.write(real_type, &setup.xmin);
+            att = sim_info.createAttribute("x1min", real_type, att_space);
+            att.write(real_type, &setup.x1min);
             att.close();
 
-            att = sim_info.createAttribute("ymax", real_type, att_space);
-            att.write(real_type, &setup.ymax);
+            att = sim_info.createAttribute("x2max", real_type, att_space);
+            att.write(real_type, &setup.x2max);
             att.close();
 
-            att = sim_info.createAttribute("ymin", real_type, att_space);
-            att.write(real_type, &setup.ymin);
+            att = sim_info.createAttribute("x2min", real_type, att_space);
+            att.write(real_type, &setup.x2min);
             att.close();
 
             att = sim_info.createAttribute("adiabatic_gamma", real_type, att_space);
@@ -559,20 +564,20 @@ void write_hdf5(
             att.write(bool_type, &setup.linspace);
             att.close();
             
-            att = sim_info.createAttribute("xmax", real_type, att_space);
-            att.write(real_type, &setup.xmax);
+            att = sim_info.createAttribute("x1max", real_type, att_space);
+            att.write(real_type, &setup.x1max);
             att.close();
 
-            att = sim_info.createAttribute("xmin", real_type, att_space);
-            att.write(real_type, &setup.xmin);
+            att = sim_info.createAttribute("x1min", real_type, att_space);
+            att.write(real_type, &setup.x1min);
             att.close();
 
-            att = sim_info.createAttribute("ymax", real_type, att_space);
-            att.write(real_type, &setup.ymax);
+            att = sim_info.createAttribute("x2max", real_type, att_space);
+            att.write(real_type, &setup.x2max);
             att.close();
 
-            att = sim_info.createAttribute("ymin", real_type, att_space);
-            att.write(real_type, &setup.ymin);
+            att = sim_info.createAttribute("x2min", real_type, att_space);
+            att.write(real_type, &setup.x2min);
             att.close();
 
             att = sim_info.createAttribute("zmax", real_type, att_space);

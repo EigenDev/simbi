@@ -20,11 +20,11 @@ cdef class PyState:
     def __cinit__(self, 
         np.ndarray[np.double_t, ndim=2] state, 
         real gamma, 
-        real CFL=0.4,
+        real cfl=0.4,
         vector[real] r = [0], 
         string coord_system = "cartesian".encode('ascii')):
 
-        self.c_state = Newtonian1D(state, gamma,CFL, r, coord_system)
+        self.c_state = Newtonian1D(state, gamma,cfl, r, coord_system)
 
     def simulate(self, 
         vector[vector[real]] sources,
@@ -64,10 +64,10 @@ cdef class PyStateSR:
     def __cinit__(self, 
         np.ndarray[np.double_t, ndim=2] state, 
         real gamma, 
-        real CFL=0.4,
+        real cfl=0.4,
         vector[real] r = [0], 
         string coord_system = "cartesian".encode('ascii')):
-        self.c_state = SRHD(state, gamma,CFL, r, coord_system)
+        self.c_state = SRHD(state, gamma,cfl, r, coord_system)
         
     def simulate(self,
         vector[vector[real]] sources,
@@ -178,7 +178,8 @@ cdef class PyStateSR2D:
         bool first_order,
         bool periodic,
         bool linspace,
-        bool hllc):
+        bool hllc,
+        bool quirk_smoothing):
         
         result = self.c_state.simulate2D(
             sources,
@@ -192,7 +193,8 @@ cdef class PyStateSR2D:
             first_order,
             periodic,
             linspace,
-            hllc)
+            hllc,
+            quirk_smoothing)
 
         result = np.asarray(result)
         if col_maj:

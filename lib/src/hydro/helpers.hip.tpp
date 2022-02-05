@@ -31,22 +31,26 @@ namespace simbi{
             real dr  = s->coord_lattice.gpu_dx1[ii];
             real rho = prim_buff[tid].rho;
             real p   = prim_buff[tid].p;
-            real v   = prim_buff[tid].v;
         
             if constexpr(is_relativistic<N>::value)
             {
+                // real gb  = prim_buff[tid].v;
+                // real w   = std::sqrt(1 + gb * gb);
+                // real v   = gb / w;
+                real v = prim_buff[tid].v;
                 real h = 1. + gamma * p / (rho * (gamma - 1.));
                 real cs = std::sqrt(gamma * p / (rho * h));
                 vPlus  = (v + cs) / (1 + v * cs);
                 vMinus = (v - cs) / (1 - v * cs);
             } else {
+                real v  = prim_buff[tid].v;
                 real cs = std::sqrt(gamma * p / rho );
-                vPlus  = (v + cs);
-                vMinus = (v - cs);
+                vPlus   = (v + cs);
+                vMinus  = (v - cs);
             }
 
             real cfl_dt = dr / (my_max(std::abs(vPlus), std::abs(vMinus)));
-            s->dt_min[ii] = s->CFL * cfl_dt;
+            s->dt_min[ii] = s->cfl * cfl_dt;
         }
         #endif
     }
@@ -107,12 +111,12 @@ namespace simbi{
     compute_dt(T *s, 
     const simbi::Geometry geometry, 
     luint bytes,
-    real dx, 
-    real dy, 
+    real dx1, 
+    real dx2 , 
     real rmin, 
     real rmax,
-    real ymin,
-    real ymax)
+    real x2min,
+    real x2max)
     {
         #if GPU_CODE
         extern __shared__ N prim_buff[];
@@ -158,23 +162,23 @@ namespace simbi{
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
-                    cfl_dt = my_min(dx / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
-                                    dy / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
+                    cfl_dt = my_min(dx1 / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                    dx2 / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl           = my_max(rmin * pow(10, (ii -(real) 0.5) * dx), rmin);
-                    const real rr           = my_min(rl * pow(10, dx * (ii == 0 ? 0.5 : 1.0)), rmax);
-                    const real tl           = my_max(ymin + (jj - (real)0.5) * dy, ymin);
-                    const real tr           = my_min(tl + dy * (jj == 0 ? 0.5 : 1.0), ymax); 
+                    const real rl           = my_max(rmin * pow(10, (ii -(real) 0.5) * dx1), rmin);
+                    const real rr           = my_min(rl * pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
+                    const real tl           = my_max(x2min + (jj - (real)0.5) * dx2, x2min);
+                    const real tr           = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                     const real rmean        = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
                     cfl_dt = my_min((rr - rl) / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
                             rmean * (tr - tl) / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
                     break;
             } // end switch
 
-            s->dt_min[jj * s->xphysical_grid + ii] = s->CFL * cfl_dt;
+            s->dt_min[jj * s->xphysical_grid + ii] = s->cfl * cfl_dt;
         }
         #endif
     }
@@ -304,7 +308,7 @@ namespace simbi{
                     break;
             }
 
-        dt_buff[tid] = s->CFL * cfl_dt;
+        dt_buff[tid] = s->cfl * cfl_dt;
         __syncthreads();
 
         for (unsigned int stride=(blockDim.x*blockDim.y*blockDim.z)/2; stride>32; stride>>=1) 

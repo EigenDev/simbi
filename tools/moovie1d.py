@@ -67,8 +67,12 @@ def plot_profile(fig, ax, filepath, filename, args):
         p           = hf.get("p")[:]
         nx          = ds.attrs["Nx"]
         t           = ds.attrs["current_time"]
-        xmax        = ds.attrs["xmax"]
-        xmin        = ds.attrs["xmin"]
+        try:
+            x1max        = ds.attrs["x1max"]
+            x1min        = ds.attrs["x1min"]
+        except:
+            x1max        = ds.attrs["xmax"]
+            x1min        = ds.attrs["xmin"]
         
         
         if args.forder:
@@ -102,9 +106,9 @@ def plot_profile(fig, ax, filepath, filename, args):
     xnpts = xactive
 
     if (args.log):
-        r = np.logspace(np.log10(xmin), np.log10(xmax), xactive)
+        r = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
     else:
-        r = np.linspace(xmin, xmax, xactive)
+        r = np.linspace(x1min, x1max, xactive)
         
     ax.plot(r, field_dict[args.field])
     
@@ -123,7 +127,7 @@ def plot_profile(fig, ax, filepath, filename, args):
     
     ax.tick_params(axis='both', labelsize=20)
     
-    ax.set_xlim(xmin, xmax) if args.rmax == 0.0 else ax.set_xlim(xmin, args.rmax)
+    ax.set_xlim(x1min, x1max) if args.rmax == 0.0 else ax.set_xlim(x1min, args.rmax)
 
     # Change the format of the field
     if args.field:

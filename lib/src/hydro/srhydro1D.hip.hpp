@@ -19,9 +19,9 @@ namespace simbi
 {
      struct SRHD
      {
-          lint xmin, xmax;
+          lint x1min, x1max;
           real dt;
-          real gamma, CFL;
+          real gamma, cfl;
           std::string coord_system;
           std::vector<real> r, dt_arr;
           std::vector<std::vector<real>> state;
@@ -29,7 +29,7 @@ namespace simbi
 
 
           SRHD();
-          SRHD(std::vector<std::vector<real>> state, real gamma, real CFL,
+          SRHD(std::vector<std::vector<real>> state, real gamma, real cfl,
                std::vector<real> r, std::string coord_system);
           ~SRHD();
 

@@ -24,7 +24,7 @@ namespace simbi
         std::vector<std::vector<real>> state2D;
         real plm_theta, gamma, bipolar;
         bool first_order, periodic, hllc, linspace, inFailureState;
-        real CFL, dt, decay_const;
+        real cfl, dt, decay_const;
         luint nx, ny, nzones, n, block_size, xphysical_grid, yphysical_grid;
         luint active_zones, idx_active, x_bound, y_bound;
         luint i_start, i_bound, j_start, j_bound;
@@ -33,7 +33,7 @@ namespace simbi
         CLattice2D coord_lattice;
         simbi::Geometry sim_geom;
         real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
-        bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros;
+        bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
 
         //==============GPU Mirrors================
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceTau, *gpu_pressure_guess;
@@ -49,7 +49,7 @@ namespace simbi
             real gamma, 
             std::vector<real> x1,
             std::vector<real> x2,
-            real CFL, 
+            real cfl, 
             std::string coord_system);
         ~SRHD2D();
 
@@ -131,7 +131,8 @@ namespace simbi
             bool first_order,
             bool periodic,
             bool linspace,
-            bool hllc);
+            bool hllc,
+            bool quirk_smoothing=true);
     };
 }
 

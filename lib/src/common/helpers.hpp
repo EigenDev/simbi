@@ -53,7 +53,7 @@ struct MinMod
 struct DataWriteMembers
 {
     real t, ad_gamma;
-    real xmin, xmax, ymin, ymax, zmin, zmax, dt;
+    real x1min, x1max, x2min, x2max, zmin, zmax, dt;
     int nx, ny, nz, xactive_zones, yactive_zones, zactive_zones;
     bool linspace, first_order;
     std::string coord_system;
@@ -113,6 +113,7 @@ constexpr T roll(const std::vector<T>  &v, unsigned int n) { return v[n % v.size
 //---------------------------------------------------------------------------------------------------------
 
 void config_gpu_space();
+void pause_program();
 //----------------Define Methods-------------------------
 std::string create_step_str(real t_interval, std::string &tnow);
 void write_hdf5(
@@ -123,12 +124,11 @@ void write_hdf5(
     const int dim, 
     const int size);
 
-void config_ghosts1D(std::vector<hydro1d::Conserved> &u_state, int grid_size, bool first_order);
+void config_ghosts1D(
+    std::vector<hydro1d::Conserved> &u_state, 
+    int grid_size, 
+    bool first_order);
     
-real calc_intermed_wave(real, real, real, real);
-real calc_intermed_pressure(real, real, real, real, real, real);
-real pressure_func(real, real, real, real, float, real);
-real dfdp(real, real, real, real, float, real);
 void config_ghosts2D(
     std::vector<hydro2d::Conserved> &u_state, 
     int x1grid_size, 

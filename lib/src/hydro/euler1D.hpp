@@ -18,96 +18,97 @@
 namespace simbi {
     enum class SOLVER{HLLE, HLLC};
 
-    class Newtonian1D {
-        public: 
-            std::vector<std::vector<real>> init_state;
-            std::vector<hydro1d::Conserved> cons, cons_n; 
-            std::vector<hydro1d::Primitive> prims;
-            std::vector<real> r, xvertices, sourceRho, sourceMom, sourceE;
-            real plm_theta, gamma, tend, dt, CFL, engine_duration, t, decay_constant;
-            bool first_order, periodic, linspace, hllc, inFailureState;
-            luint nzones, active_zones, idx_active, i_start, i_bound, n, nx;
-            std::string coord_system;
-            simbi::SOLVER sim_solver;
-            CLattice1D coord_lattice;
+    struct Newtonian1D {
+        // Initializer list args
+        std::vector<std::vector<real>> init_state;
+        real gamma, cfl;
+        std::vector<real> r;
+        std::string coord_system;
 
-            //==============================================================
-            // Create dynamic array instances that will live on device
-            //==============================================================
-            //             GPU RESOURCES
-            //==============================================================
-            luint blockSize;
-            hydro1d::Conserved *gpu_cons, *gpu_du_dt, *gpu_u1;
-            hydro1d::Primitive *gpu_prims;
-            real            *gpu_pressure_guess, *gpu_sourceD, *gpu_sourceS, *gpu_source0, *dt_min;
-            CLattice1D      *gpu_coord_lattice;
-            
-            Newtonian1D();
-            Newtonian1D(
-                std::vector<std::vector<real>> init_state, 
-                real gamma, 
-                real CFL,
-                std::vector<real> r, 
-                std::string coord_system);
-            ~Newtonian1D();
+        real plm_theta, tend, dt, engine_duration, t, decay_constant;
+        bool first_order, periodic, linspace, hllc, inFailureState;
 
-            // Calculate the wave speeds from the Jacobian Matrix formed by the Euler Eqns
-            GPU_CALLABLE_MEMBER
-            hydro1d::Eigenvals calc_eigenvals(const hydro1d::Primitive &left_state, const hydro1d::Primitive &right_state);
+        
+        std::vector<hydro1d::Conserved> cons, cons_n; 
+        std::vector<hydro1d::Primitive> prims;
+        std::vector<real> xvertices, sourceRho, sourceMom, sourceE;
+        luint nzones, active_zones, idx_active, i_start, i_bound, n, nx;
+        simbi::SOLVER sim_solver;
+        CLattice1D coord_lattice;
 
-            void cons2prim(ExecutionPolicy<> p, Newtonian1D *dev = nullptr, simbi::MemSide user = simbi::MemSide::Host);
-            void adapt_dt();
-            void adapt_dt(Newtonian1D *dev, luint blockSize, luint tblock);
-            
-            GPU_CALLABLE_MEMBER
-            hydro1d::Conserved prims2cons(const hydro1d::Primitive &prims);
+        //==============================================================
+        // Create dynamic array instances that will live on device
+        //==============================================================
+        //             GPU RESOURCES
+        //==============================================================
+        luint blockSize;
+        hydro1d::Conserved *gpu_cons, *gpu_du_dt, *gpu_u1;
+        hydro1d::Primitive *gpu_prims;
+        real               *gpu_pressure_guess, *gpu_sourceD, *gpu_sourceS, *gpu_source0, *dt_min;
+        CLattice1D         *gpu_coord_lattice;
+        
+        Newtonian1D();
+        Newtonian1D(
+            std::vector<std::vector<real>> init_state, 
+            real gamma, 
+            real cfl,
+            std::vector<real> r, 
+            std::string coord_system);
+        ~Newtonian1D();
 
-            GPU_CALLABLE_MEMBER
-            hydro1d::Conserved prims2flux(const hydro1d::Primitive &prims);
+        // Calculate the wave speeds from the Jacobian Matrix formed by the Euler Eqns
+        GPU_CALLABLE_MEMBER
+        hydro1d::Eigenvals calc_eigenvals(const hydro1d::Primitive &left_state, const hydro1d::Primitive &right_state);
 
-            GPU_CALLABLE_MEMBER
-            hydro1d::Conserved calc_hll_flux(
-                const hydro1d::Primitive &left_prims,
-                const hydro1d::Primitive &right_prims,
-                const hydro1d::Conserved &left_state,
-                const hydro1d::Conserved &right_state,
-                const hydro1d::Conserved &left_flux,
-                const hydro1d::Conserved &right_flux);
+        void cons2prim(ExecutionPolicy<> p, Newtonian1D *dev = nullptr, simbi::MemSide user = simbi::MemSide::Host);
+        void adapt_dt();
+        void adapt_dt(Newtonian1D *dev, luint blockSize, luint tblock);
+        
+        GPU_CALLABLE_MEMBER
+        hydro1d::Conserved prims2cons(const hydro1d::Primitive &prims);
 
-            GPU_CALLABLE_MEMBER
-            hydro1d::Conserved calc_hllc_flux(
-                const hydro1d::Primitive &left_prims,
-                const hydro1d::Primitive &right_prims,
-                const hydro1d::Conserved &left_state,
-                const hydro1d::Conserved &right_state,
-                const hydro1d::Conserved &left_flux,
-                const hydro1d::Conserved &right_flux);
+        GPU_CALLABLE_MEMBER
+        hydro1d::Conserved prims2flux(const hydro1d::Primitive &prims);
 
-            void advance(
-                const luint radius,
-                const simbi::Geometry geometry,
-                const ExecutionPolicy<> p,
-                Newtonian1D *dev = nullptr,  
-                const luint sh_block_size = 0,
-                const simbi::MemSide user = simbi::MemSide::Host);
+        GPU_CALLABLE_MEMBER
+        hydro1d::Conserved calc_hll_flux(
+            const hydro1d::Primitive &left_prims,
+            const hydro1d::Primitive &right_prims,
+            const hydro1d::Conserved &left_state,
+            const hydro1d::Conserved &right_state,
+            const hydro1d::Conserved &left_flux,
+            const hydro1d::Conserved &right_flux);
 
-            std::vector<std::vector<real> > simulate1D(
-                std::vector<std::vector<real>> &sources,
-                real tstart = 0.0,
-                real tend = 0.1,
-                real init_dt = 1.e-4,
-                real plm_theta = 1.5,
-                real engine_duration = 10,
-                real chkpt_luinterval = 0.1,
-                std::string data_directory = "data/",
-                bool first_order = true,
-                bool periodic = false,
-                bool linspace = true,
-                bool hllc = false);
+        GPU_CALLABLE_MEMBER
+        hydro1d::Conserved calc_hllc_flux(
+            const hydro1d::Primitive &left_prims,
+            const hydro1d::Primitive &right_prims,
+            const hydro1d::Conserved &left_state,
+            const hydro1d::Conserved &right_state,
+            const hydro1d::Conserved &left_flux,
+            const hydro1d::Conserved &right_flux);
 
-            
-            
+        void advance(
+            const luint radius,
+            const simbi::Geometry geometry,
+            const ExecutionPolicy<> p,
+            Newtonian1D *dev = nullptr,  
+            const luint sh_block_size = 0,
+            const simbi::MemSide user = simbi::MemSide::Host);
 
+        std::vector<std::vector<real> > simulate1D(
+            std::vector<std::vector<real>> &sources,
+            real tstart = 0.0,
+            real tend = 0.1,
+            real init_dt = 1.e-4,
+            real plm_theta = 1.5,
+            real engine_duration = 10,
+            real chkpt_luinterval = 0.1,
+            std::string data_directory = "data/",
+            bool first_order = true,
+            bool periodic = false,
+            bool linspace = true,
+            bool hllc = false);
     };
 }
 

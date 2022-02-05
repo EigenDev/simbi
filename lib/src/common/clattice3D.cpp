@@ -135,10 +135,7 @@ void simbi::CLattice3D::compute_x2face_areas()
 void simbi::CLattice3D::compute_x3face_areas()
 {
     x3_face_areas.reserve((nx3zones + 1));
-    for(auto &zvertex: x3vertices)
-    {
-        x3_face_areas.push_back(1.0);
-    }
+    std::fill(x3_face_areas.begin(), x3_face_areas.end(), 1.0);
 }
 
 void simbi::CLattice3D::compute_s1face_areas()

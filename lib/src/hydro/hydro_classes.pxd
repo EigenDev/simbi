@@ -17,7 +17,7 @@ cdef extern from "euler1D.hpp" namespace "simbi":
     cdef cppclass Newtonian1D:
         Newtonian1D() except +
         Newtonian1D(vector[vector[real]], real, real, vector[real], string) except + 
-        real theta, gamma, tend, dt, CFL
+        real theta, gamma, tend, dt, cfl
         bool first_order, periodic, linspace
         string coord_system
         vector[real] r
@@ -64,7 +64,7 @@ cdef extern from "srhydro1D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD:
         SRHD() except +
         SRHD(vector[vector[real]], real, real, vector[real], string) except + 
-        real theta, gamma, tend, dt, CFL
+        real theta, gamma, tend, dt, cfl
         bool first_order, periodic, linspace
         string coord_system
         vector[real] r
@@ -105,7 +105,8 @@ cdef extern from "srhydro2D.hip.hpp" namespace "simbi":
             bool first_order,
             bool periodic,
             bool linspace,
-            bool hllc)
+            bool hllc,
+            bool quirk_smoothing)
 
 cdef extern from "srhydro3D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD3D:
@@ -119,7 +120,7 @@ cdef extern from "srhydro3D.hip.hpp" namespace "simbi":
             vector[real] x1, 
             vector[real] x2,
             vector[real] x3,
-            real CFL,
+            real cfl,
             string coord_system) except + 
         real theta, gamma
         int nx, ny, nz
