@@ -36,20 +36,6 @@ struct PrimData
     std::vector<real> rho, v1, v2, v3, p, v, chi;
 };
 
-struct MinMod
-{
-    PrimData prims;
-    real theta, NX;
-    int active_zones, i_bound, j_bound;
-
-    std::vector<real> rhoL, rhoR, rhoT, rhoB;
-    std::vector<real> v1L, v1R, v1T, v1B;
-    std::vector<real> v2L, v2R, v2T, v2B;
-    std::vector<real> pL, pR, pT, pB;
-
-    void compute(int face);
-};
-
 struct DataWriteMembers
 {
     real t, ad_gamma;
@@ -60,7 +46,18 @@ struct DataWriteMembers
 };
 
 
+const std::map<std::string, simbi::Geometry> geometry_map = {
+  { "spherical", simbi::Geometry::SPHERICAL },
+  { "cartesian", simbi::Geometry::CARTESIAN},
+  { "cylindtical", simbi::Geometry::CYLINDRICAL}
+};
 
+const std::map<std::string, simbi::BoundaryCondition> boundary_cond_map = {
+  { "inflow", simbi::BoundaryCondition::INFLOW},
+  { "outflow", simbi::BoundaryCondition::OUTFLOW},
+  { "reflecting", simbi::BoundaryCondition::REFLECTING},
+  { "periodic", simbi::BoundaryCondition::PERIODIC}
+};
 extern std::map<std::string, simbi::Geometry> geometry;
 void config_system();
 //---------------------------------------------------------------------------------------------------------

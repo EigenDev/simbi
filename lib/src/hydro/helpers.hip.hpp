@@ -62,14 +62,14 @@ namespace simbi
         SRHD *dev_sim, 
         const int grid_size,
         const bool first_order, 
-        const bool reflecting = true);
+        const simbi::BoundaryCondition boundary_condition);
 
     void config_ghosts1DGPU(
         const ExecutionPolicy<> p,
         Newtonian1D *dev_sim, 
         const int grid_size,
         const bool first_order, 
-        const bool reflecting = true);
+        const simbi::BoundaryCondition boundary_condition);
         
     void config_ghosts2DGPU(
         const ExecutionPolicy<> p,
@@ -77,6 +77,7 @@ namespace simbi
         const int x1grid_size, 
         const int x2grid_size, 
         const bool first_order,
+        const simbi::BoundaryCondition boundary_condition,
         const bool bipolar = true);
 
     void config_ghosts2DGPU(
@@ -85,6 +86,7 @@ namespace simbi
         const int x1grid_size, 
         const int x2grid_size, 
         const bool first_order,
+        const simbi::BoundaryCondition boundary_condition,
         const bool bipolar = true);
 
     void config_ghosts3DGPU(
@@ -94,6 +96,7 @@ namespace simbi
         const int x2grid_size,
         const int x3grid_size,  
         const bool first_order,
+        const simbi::BoundaryCondition boundary_condition,
         const bool bipolar = true);
 
 } // end simbi

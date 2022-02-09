@@ -18,7 +18,7 @@ cdef extern from "euler1D.hpp" namespace "simbi":
         Newtonian1D() except +
         Newtonian1D(vector[vector[real]], real, real, vector[real], string) except + 
         real theta, gamma, tend, dt, cfl
-        bool first_order, periodic, linspace
+        bool first_order, linspace
         string coord_system
         vector[real] r
         vector[vector[real]] state
@@ -31,8 +31,8 @@ cdef extern from "euler1D.hpp" namespace "simbi":
             real engine_duration,
             real chkpt_interval,
             string data_directory,
+            string boundary_condition,
             bool first_order,
-            bool periodic,
             bool linspace,
             bool hllc)
 
@@ -42,7 +42,7 @@ cdef extern from "euler2D.hpp" namespace "simbi":
         Newtonian2D(vector[vector[real]], int nx, int ny, real, vector[real], vector[real],
                     real, string) except + 
         real theta, gamma
-        bool first_order, periodic
+        bool first_order
         int nx, ny
         vector[vector[real]] state
         vector[vector[real]] simulate2D(
@@ -54,8 +54,8 @@ cdef extern from "euler2D.hpp" namespace "simbi":
             real engine_duration, 
             real chkpt_interval ,
             string data_directory, 
+            string boundary_condition,
             bool first_order,
-            bool periodic, 
             bool linspace, 
             bool hllc)
 
@@ -65,7 +65,7 @@ cdef extern from "srhydro1D.hip.hpp" namespace "simbi":
         SRHD() except +
         SRHD(vector[vector[real]], real, real, vector[real], string) except + 
         real theta, gamma, tend, dt, cfl
-        bool first_order, periodic, linspace
+        bool first_order, linspace
         string coord_system
         vector[real] r
         vector[vector[real]] state
@@ -78,8 +78,8 @@ cdef extern from "srhydro1D.hip.hpp" namespace "simbi":
             real engine_duration,
             real chkpt_interval, 
             string data_directory,
+            string boundary_condition,
             bool first_order, 
-            bool periodic, 
             bool linspace, 
             bool hllc)
 
@@ -90,7 +90,7 @@ cdef extern from "srhydro2D.hip.hpp" namespace "simbi":
                     real, string) except + 
         real theta, gamma
         int nx, ny
-        bool first_order, periodic
+        bool first_order
         vector[vector[real]] state 
 
         vector[vector[real]] simulate2D(
@@ -102,8 +102,8 @@ cdef extern from "srhydro2D.hip.hpp" namespace "simbi":
             real engine_duration,
             real chkpt_interval,
             string data_directory,
+            string boundary_condition,
             bool first_order,
-            bool periodic,
             bool linspace,
             bool hllc,
             bool quirk_smoothing)
@@ -124,7 +124,7 @@ cdef extern from "srhydro3D.hip.hpp" namespace "simbi":
             string coord_system) except + 
         real theta, gamma
         int nx, ny, nz
-        bool first_order, periodic
+        bool first_order
         vector[vector[real]] state 
 
         vector[vector[real]] simulate3D(
@@ -136,7 +136,7 @@ cdef extern from "srhydro3D.hip.hpp" namespace "simbi":
             real engine_duration,
             real chkpt_interval,
             string data_directory,
+            string boundary_condition,
             bool first_order,
-            bool periodic,
             bool linspace,
             bool hllc)

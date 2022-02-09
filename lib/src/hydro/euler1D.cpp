@@ -545,12 +545,12 @@ void Newtonian1D::advance(
     real engine_duration,
     real chkpt_luinterval,
     std::string data_directory,
+    std::string boundary_condition,
     bool first_order,
-    bool periodic,
     bool linspace,
     bool hllc)
 {
-    this->periodic        = periodic;
+    this->periodic        = boundary_condition == "periodic";
     this->first_order     = first_order;
     this->plm_theta       = plm_theta;
     this->linspace        = linspace;
@@ -672,14 +672,16 @@ void Newtonian1D::advance(
 
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
-     if (first_order)
+    const auto bc   = boundary_cond_map.at(boundary_condition);
+    const auto geom = geometry_map.at(coord_system);
+    if (first_order)
     {  
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
-            advance(radius, geometry[coord_system], activeP, self, shBlockSize, memside);
+            advance(radius, geom, activeP, self, shBlockSize, memside);
             cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true, bc);
 
             t += dt; 
             
@@ -730,13 +732,13 @@ void Newtonian1D::advance(
             t1 = high_resolution_clock::now();
             // First Half Step
             cons2prim(fullP, self, memside);
-            advance(radius, geometry[coord_system], activeP, self, shBlockSize, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false);
+            advance(radius, geom, activeP, self, shBlockSize, memside);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false, bc);
 
             // Final Half Step
             cons2prim(fullP, self, memside);
-            advance(radius, geometry[coord_system], activeP, self, shBlockSize, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false);
+            advance(radius, geom, activeP, self, shBlockSize, memside);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false, bc);
             simbi::gpu::api::deviceSynch();
             t += dt; 
             

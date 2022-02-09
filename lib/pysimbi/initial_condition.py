@@ -90,12 +90,12 @@ def load_checkpoint(model, filename, dim):
             model.u = np.array([model.D, model.S1, model.S2, model.tau, model.Dchi])
             
 
-def initializeModel(model, first_order = False, periodic = False, scalars = 0):
+def initializeModel(model, first_order = False, boundary_condition = "outflow", scalars = 0):
     
     # Check if u-array is empty. If it is, generate an array.
     if model.dimensions == 1:
         if not model.u.any():
-            if periodic:
+            if boundary_condition == "periodic":
                 if model.regime == "classical":
                     model.u = np.empty(shape = (model.n_vars, model.Npts), dtype = float)
                     
@@ -186,7 +186,7 @@ def initializeModel(model, first_order = False, periodic = False, scalars = 0):
                 model.u[:, :, :] = np.array([model.initD, model.initS1,
                                                     model.initS2, model.init_tau, model.initD * scalars])
                 
-            if not periodic:
+            if boundary_condition != 'periodic':
                 if first_order:
                     # Add boundary ghosts
                     bottom_ghost = model.u[:, -1]
@@ -226,7 +226,7 @@ def initializeModel(model, first_order = False, periodic = False, scalars = 0):
                 
     else:
         if not model.u.any():
-            if periodic:
+            if boundary_condition == "periodic":
                 model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype = float)
                 
                 model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,

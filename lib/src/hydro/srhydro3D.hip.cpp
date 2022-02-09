@@ -1669,17 +1669,17 @@ void SRHD3D::advance(
 //===================================================================================================================
 std::vector<std::vector<real>> SRHD3D::simulate3D(
     const std::vector<std::vector<real>> sources,
-    real tstart = 0, 
-    real tend = 0.1, 
-    real init_dt = 1.e-4, 
-    real plm_theta = 1.5,
-    real engine_duration = 10, 
-    real chkpt_interval = 0.1,
-    std::string data_directory = "data/", 
-    bool first_order = true,
-    bool periodic = false, 
-    bool linspace = true, 
-    bool hllc = false)
+    real tstart, 
+    real tend, 
+    real init_dt, 
+    real plm_theta,
+    real engine_duration, 
+    real chkpt_interval,
+    std::string data_directory, 
+    std::string boundary_condition,
+    bool first_order,
+    bool linspace, 
+    bool hllc)
 {
     std::string tnow, tchunk, tstep;
     luint total_zones = nx * ny * nz;
@@ -1694,7 +1694,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
 
     this->sources     = sources;
     this->first_order = first_order;
-    this->periodic    = periodic;
+    this->periodic    = boundary_condition == "periodic";
     this->hllc        = hllc;
     this->linspace    = linspace;
     this->plm_theta   = plm_theta;
@@ -1793,7 +1793,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     PrimData prods;
     sr3d::PrimitiveData transfer_prims;
 
-
+    const auto bc   = boundary_cond_map.at(boundary_condition);
+    const auto geom = geometry_map.at(coord_system);
     // if (t == 0)
     // {
     //     config_ghosts2D(cons, nx, ny, first_order);
@@ -1855,14 +1856,14 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             t1 = high_resolution_clock::now();
             if constexpr(BuildPlatform == Platform::GPU)
             {
-                advance(device_self, activeP, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Dev);
+                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Dev);
                 cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts3DGPU(fullP, device_self, nx, ny, nz, true);
+                config_ghosts3DGPU(fullP, device_self, nx, ny, nz, true, bc);
             } else {
                 // First Half Step
-                advance(device_self, activeP, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Host);
+                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Host);
                 cons2prim(fullP);
-                config_ghosts3DGPU(fullP, this, nx, ny, nz, true);
+                config_ghosts3DGPU(fullP, this, nx, ny, nz, true, bc);
             }
             
             t += dt; 
@@ -1916,24 +1917,24 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             if constexpr(BuildPlatform == Platform::GPU)
             {
                 // First Half Step
-                advance(device_self, activeP, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Dev);
+                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Dev);
                 cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts3DGPU(fullP, device_self, nx, ny, nz, false);
+                config_ghosts3DGPU(fullP, device_self, nx, ny, nz, false, bc);
 
                 // Final Half Step
-                advance(device_self, activeP, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Dev);
+                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Dev);
                 cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts3DGPU(fullP, device_self, nx, ny, nz, false);
+                config_ghosts3DGPU(fullP, device_self, nx, ny, nz, false, bc);
             }  else {
                 // First Half Step
-                advance(device_self, activeP, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Host);
+                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Host);
                 cons2prim(fullP);
-                config_ghosts3DGPU(fullP, this, nx, ny, nz, false);
+                config_ghosts3DGPU(fullP, this, nx, ny, nz, false, bc);
 
                 // Final Half Step
-                advance(device_self, activeP, shBlockSize, radius, geometry[coord_system], simbi::MemSide::Host);
+                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Host);
                 cons2prim(fullP);
-                config_ghosts3DGPU(fullP, this, nx, ny, nz, false);
+                config_ghosts3DGPU(fullP, this, nx, ny, nz, false, bc);
             }   
             
             t += dt; 

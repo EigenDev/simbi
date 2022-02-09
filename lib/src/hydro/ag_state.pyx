@@ -28,17 +28,17 @@ cdef class PyState:
 
     def simulate(self, 
         vector[vector[real]] sources,
-        real tstart = 0.0,
-        real tend = 0.1,
-        real dt = 1e-4,
-        real plm_theta = 1.5,
-        real engine_duration = 10.0,
-        real chkpt_interval = 1.0,
-        string data_directory = "data/".encode('ascii'),
-        bool first_order = True,
-        bool periodic = False,
-        bool linspace = True,
-        bool hllc = True):
+        real tstart,
+        real tend,
+        real dt,
+        real plm_theta,
+        real engine_duration,
+        real chkpt_interval,
+        string data_directory,
+        string boundary_condition,
+        bool first_order,
+        bool linspace,
+        bool hllc):
 
         result = self.c_state.simulate1D(
             sources,
@@ -49,8 +49,8 @@ cdef class PyState:
             engine_duration,
             chkpt_interval,
             data_directory,
+            boundary_condition,
             first_order,
-            periodic,
             linspace,
             hllc)
 
@@ -71,17 +71,17 @@ cdef class PyStateSR:
         
     def simulate(self,
         vector[vector[real]] sources,
-        real tstart = 0.0,
-        real tend   = 0.1, 
-        real dt     = 1e-4, 
-        real plm_theta = 1.5, 
-        real engine_duration = 10.0,
-        real chkpt_interval  = 1.0, 
-        string data_directory  = "data/".encode('ascii'),
-        bool first_order = True, 
-        bool periodic = False, 
-        bool linspace = True, 
-        bool hllc     = False):
+        real tstart,
+        real tend, 
+        real dt, 
+        real plm_theta, 
+        real engine_duration,
+        real chkpt_interval, 
+        string data_directory,
+        string boundary_condition,
+        bool first_order, 
+        bool linspace, 
+        bool hllc):
 
         result = self.c_state.simulate1D(
             sources, 
@@ -92,8 +92,8 @@ cdef class PyStateSR:
             engine_duration,
             chkpt_interval, 
             data_directory,
+            boundary_condition,
             first_order, 
-            periodic, 
             linspace, 
             hllc)
         
@@ -116,17 +116,17 @@ cdef class PyState2D:
     
     def simulate(self, 
         vector[vector[real]] sources,
-        real tstart = 0.0, 
-        real tend   = 0.1, 
-        real dt     = 1.e-4, 
-        real plm_theta = 1.5,
-        real engine_duration = 10.0, 
-        real chkpt_interval  = 1.0 ,
-        string data_directory  = "data/".encode('ascii'), 
-        bool first_order       = True,
-        bool periodic          = False, 
-        bool linspace          = True, 
-        bool hllc              = False):
+        real tstart, 
+        real tend, 
+        real dt, 
+        real plm_theta,
+        real engine_duration, 
+        real chkpt_interval,
+        string data_directory, 
+        string boundary_condition,
+        bool first_order,
+        bool linspace, 
+        bool hllc):
 
         result = self.c_state.simulate2D(
             sources,
@@ -135,10 +135,10 @@ cdef class PyState2D:
             dt, 
             plm_theta,
             engine_duration, 
-            chkpt_interval ,
-            data_directory, 
+            chkpt_interval,
+            data_directory,
+            boundary_condition, 
             first_order,
-            periodic, 
             linspace, 
             hllc)
 
@@ -175,8 +175,8 @@ cdef class PyStateSR2D:
         real engine_duration,
         real chkpt_interval,
         string data_directory,
+        string boundary_condition,
         bool first_order,
-        bool periodic,
         bool linspace,
         bool hllc,
         bool quirk_smoothing):
@@ -190,8 +190,8 @@ cdef class PyStateSR2D:
             engine_duration,
             chkpt_interval,
             data_directory,
+            boundary_condition,
             first_order,
-            periodic,
             linspace,
             hllc,
             quirk_smoothing)
@@ -232,8 +232,8 @@ cdef class PyStateSR3D:
         real engine_duration,
         real chkpt_interval,
         string data_directory,
+        string boundary_condition,
         bool first_order,
-        bool periodic,
         bool linspace,
         bool hllc):
         
@@ -246,8 +246,8 @@ cdef class PyStateSR3D:
             engine_duration,
             chkpt_interval,
             data_directory,
+            boundary_condition,
             first_order,
-            periodic,
             linspace,
             hllc)
         result = np.asarray(result)

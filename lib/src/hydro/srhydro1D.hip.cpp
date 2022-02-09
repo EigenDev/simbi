@@ -133,7 +133,6 @@ void SRHD::advance(
             }
 
             // Set up the left and right state interfaces for i-1/2
-
             prims_l = prim_buff[(txa - 1) % bx];
             prims_r = prim_buff[(txa - 0) % bx];
 
@@ -150,46 +149,7 @@ void SRHD::advance(
             else
             {
                 flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
-            }
-            
-            switch (geometry)
-            {
-            case simbi::Geometry::CARTESIAN:
-                #if GPU_CODE
-                    dx1 = coord_lattice->gpu_dx1[ii];
-                    self->gpu_cons[ia] -= ((frf - flf) / dx1) * dt;
-                #else
-                    dx1 = self->coord_lattice.dx1[ii];
-                    cons[ia] -= ((frf - flf) / dx1) * dt;
-                #endif
-                
-                break;  
-            
-            case simbi::Geometry::SPHERICAL:
-                #if GPU_CODE
-                    pc    = prim_buff[txa].p;
-                    sL    = coord_lattice->gpu_face_areas[ii + 0];
-                    sR    = coord_lattice->gpu_face_areas[ii + 1];
-                    dV    = coord_lattice->gpu_dV[ii];
-                    rmean = coord_lattice->gpu_x1mean[ii];
-
-                    const auto geom_sources = Conserved{0.0,pc * (sR - sL) / dV, 0.0};
-                    const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
-                    self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * dt;
-                #else
-                    pc    = prim_buff[txa].p;
-                    sL    = self->coord_lattice.face_areas[ii + 0];
-                    sR    = self->coord_lattice.face_areas[ii + 1];
-                    dV    = self->coord_lattice.dV[ii];
-                    rmean = self->coord_lattice.x1mean[ii];
-
-                    const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                    const auto sources      = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
-                    cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * dt;
-                #endif
-                break;
-            } // end switch
-                
+            }   
         }
         else
         {
@@ -239,45 +199,46 @@ void SRHD::advance(
                 } else {
                     flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
                 }
-
-                switch (geometry)
-                {
-                case simbi::Geometry::CARTESIAN:
-                    #if GPU_CODE
-                        dx1 = coord_lattice->gpu_dx1[ii];
-                        self->gpu_cons[ia] -= ((frf - flf) / dx1) * dt * (real)0.5;
-                    #else 
-                        dx1 = coord_lattice->dx1[ii];
-                        cons[ia] -= ((frf - flf)  / dx1) * dt * (real)0.5;
-                    #endif 
-                    
-                    break;
-                case simbi::Geometry::SPHERICAL:
-                    #if GPU_CODE
-                        pc    = prim_buff[txa].p;
-                        sL    = coord_lattice->gpu_face_areas[ii + 0];
-                        sR    = coord_lattice->gpu_face_areas[ii + 1];
-                        dV    = coord_lattice->gpu_dV[ii];
-                        rmean = coord_lattice->gpu_x1mean[ii];
-                        const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                        const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
-                        self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * (real)0.5 * dt;
-                    #else 
-                        pc    = prim_buff[txa].p;
-                        sL    = coord_lattice->face_areas[ii + 0];
-                        sR    = coord_lattice->face_areas[ii + 1];
-                        dV    = coord_lattice->dV[ii];
-                        rmean = coord_lattice->x1mean[ii];
-                        
-                        const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                        const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
-                        cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * (real)0.5 * dt;
-                    #endif 
-                    
-                    break;
-                }
             }
         }
+
+        auto step = (self->first_order) ? (real)1.0 : (real)0.5;
+        switch (geometry)
+        {
+            case simbi::Geometry::CARTESIAN:
+                #if GPU_CODE
+                    dx1 = coord_lattice->gpu_dx1[ii];
+                    self->gpu_cons[ia] -= ((frf - flf) / dx1) * dt * step;
+                #else 
+                    dx1 = coord_lattice->dx1[ii];
+                    cons[ia] -= ((frf - flf)  / dx1) * dt * step;
+                #endif 
+                
+                break;
+            case simbi::Geometry::SPHERICAL:
+                #if GPU_CODE
+                    pc    = prim_buff[txa].p;
+                    sL    = coord_lattice->gpu_face_areas[ii + 0];
+                    sR    = coord_lattice->gpu_face_areas[ii + 1];
+                    dV    = coord_lattice->gpu_dV[ii];
+                    rmean = coord_lattice->gpu_x1mean[ii];
+                    const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
+                    const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
+                    self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt;
+                #else 
+                    pc    = prim_buff[txa].p;
+                    sL    = coord_lattice->face_areas[ii + 0];
+                    sR    = coord_lattice->face_areas[ii + 1];
+                    dV    = coord_lattice->dV[ii];
+                    rmean = coord_lattice->x1mean[ii];
+                    
+                    const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
+                    const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
+                    cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt;
+                #endif 
+                
+                break;
+        } // end switch
     });	
 }
 
@@ -332,7 +293,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 c2 = self->gamma *pre / (h * rho); 
 
                 g = c2 * v2 - (real)1.0;
-                f = (self->gamma - (real)1) * rho * eps - pre;
+                f = (self->gamma - (real)1.0) * rho * eps - pre;
 
                 peq = pre - f / g;
                 if (iter >= MAX_ITER)
@@ -349,23 +310,22 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 
             } while (std::abs(peq - pre) >= tol);
 
+            real v = S / (tau + D + peq);
+            // real mach_ceiling = 100.0;
+            // real u            = v /std::sqrt(1 - v * v);
+            // real e            = peq / rho * 3.0;
+            // real emin         = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
 
-            real v            = S / (tau + D + peq);
-            real mach_ceiling = 100.0;
-            real u            = v /std::sqrt(1 - v * v);
-            real e            = peq / rho * 3.0;
-            real emin         = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
-
-            if (e < emin) {
-                // printf("peq: %f, npew: %f\n", rho * emin * (self->gamma - 1.0));
-                peq = rho * emin * (self->gamma - 1.0);
-            }
+            // if (e < emin) {
+            //     // printf("peq: %f, npew: %f\n", rho * emin * (self->gamma - 1.0));
+            //     peq = rho * emin * (self->gamma - 1.0);
+            // }
             #if GPU_CODE
                 self->gpu_pressure_guess[ii] = peq;
-                self->gpu_prims[ii]          = Primitive{D * sqrt(1 - v * v), v, peq};
+                self->gpu_prims[ii]          = Primitive{D / W, v, peq};
             #else
                 pressure_guess[ii] = peq;
-                prims[ii]  = Primitive{D * sqrt(1 - v * v), v, peq};
+                prims[ii]  = Primitive{D / W, v, peq};
             #endif
             workLeftToDo = false;
         }
@@ -674,12 +634,12 @@ SRHD::simulate1D(
     real engine_duration,
     real chkpt_interval,
     std::string data_directory,
+    std::string boundary_condition,
     bool first_order,
-    bool periodic,
     bool linspace,
     bool hllc)
 {
-    this->periodic = periodic;
+    this->periodic = boundary_condition == "periodic";
     this->first_order = first_order;
     this->plm_theta = plm_theta;
     this->linspace = linspace;
@@ -786,15 +746,17 @@ SRHD::simulate1D(
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
     // Simulate :)
+    const auto bc   = boundary_cond_map.at(boundary_condition);
+    const auto geom = geometry_map.at(coord_system);
     if (first_order)
     {  
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
             
-            advance(self, shBlockSize, radius, geometry[coord_system], memside);
+            advance(self, shBlockSize, radius, geom, memside);
             cons2prim(fullP, device_self, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true, bc);
             simbi::gpu::api::deviceSynch();
             t += dt; 
             
@@ -848,13 +810,13 @@ SRHD::simulate1D(
 
             // First Half Step
             cons2prim(fullP, self, memside);
-            advance(self, shBlockSize, radius, geometry[coord_system], memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false);
+            advance(self, shBlockSize, radius, geom, memside);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false, bc);
 
             // Final Half Step
             cons2prim(fullP, self, memside);
-            advance(self, shBlockSize, radius, geometry[coord_system], memside);
-            if (!periodic)  config_ghosts1DGPU(fullP, self, nx, false);
+            advance(self, shBlockSize, radius, geom, memside);
+            if (!periodic)  config_ghosts1DGPU(fullP, self, nx, false, bc);
 
             t += dt; 
             if (n >= nfold){

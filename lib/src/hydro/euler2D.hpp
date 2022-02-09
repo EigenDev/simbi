@@ -112,8 +112,8 @@ namespace simbi {
             real engine_duration = 10, 
             real chkpt_luinterval = 0.1,
             std::string data_directory = "data/", 
+            std::string boundary_condition = "outflow",
             bool first_order = true,
-            bool periodic = false, 
             bool linspace = true, 
             bool hllc = false);
         
