@@ -190,8 +190,12 @@ def get_1d_equiv_file(filename: str) -> dict:
         p           = hf.get('p')[:]
         nx          = ds.attrs['Nx']
         t           = ds.attrs['current_time']
-        x1max        = ds.attrs['x1max']
-        x1min        = ds.attrs['x1min']
+        try:
+            x1max = ds.attrs['x1max']
+            x1min = ds.attrs['x1min']
+        except:
+            x1max = ds.attrs['xmax']
+            x1min = ds.attrs['xmin']
 
         rho = rho[2:-2]
         v   = v  [2:-2]
@@ -381,6 +385,12 @@ def plot_polar_plot(
     '''
     num_fields = len(args.field)
     is_wedge   = args.nwedge > 0
+    rr, tt = mesh['rr'], mesh['theta']
+    t2     = - tt[::-1]
+    x1max  = dset['x1max']
+    x1min  = dset['x1min']
+    x2max  = dset['x2max']
+    x2min  = dset['x2min']
     if not subplots:
         if is_wedge:
             nplots = args.nwedge + 1
@@ -389,21 +399,18 @@ def plot_polar_plot(
             ax    = axes[0]
             wedge = axes[1]
         else:
+            if x2max < np.pi:
+                figsize = (8, 5)
+            else:
+                figsize = (10, 8)
             fig, ax = plt.subplots(1, 1, subplot_kw={'projection': 'polar'},
-                                figsize=(10, 8), constrained_layout=False)
+                                figsize=figsize, constrained_layout=True)
     else:
         if is_wedge:
             ax    = axs[0]
             wedge = axs[1]
         else:
             ax = axs
-        
-    rr, tt      = mesh['rr'], mesh['theta']
-    t2          = - tt[::-1]
-    x1max        = dset['x1max']
-    x1min        = dset['x1min']
-    x2max        = dset['x2max']
-    x2min        = dset['x2min']
     
     vmin,vmax = args.cbar[:2]
 
@@ -477,7 +484,8 @@ def plot_polar_plot(
         for idx, key in enumerate(quadr.keys()):
             field = key
             if idx == 0:
-                kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=0.5, vmin=vmin, vmax=vmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)} 
+                # 'norm': mcolors.PowerNorm(gamma=1.0, vmin=vmin, vmax=vmax)}
+                kwargs[field] =  {'vmin': vmin, 'vmax': vmax} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)} 
             else:
                 if field == field3 == field4:
                     ovmin = None if len(args.cbar) == 2 else args.cbar[2]
@@ -485,11 +493,11 @@ def plot_polar_plot(
                 else:
                     ovmin = None if len(args.cbar) == 2 else args.cbar[idx+1]
                     ovmax = None if len(args.cbar) == 2 else args.cbar[idx+2]
-                kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=0.5, vmin=ovmin, vmax=ovmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
+                kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=1.00, vmin=ovmin, vmax=ovmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
 
         if x2max < np.pi:
             cs[0] = ax.pcolormesh(tt[:: 1], rr,  var[0], cmap=color_map, shading='auto', **kwargs[field1])
-            cs[1] = ax.pcolormesh(t2[::-1], rr,  var[1], cmap=color_map, shading='auto', **kwargs[field2])
+            cs[1] = ax.pcolormesh(t2[::-1], rr,  var[1], cmap=args.cmap2, shading='auto', **kwargs[field2])
             
             # If simulation only goes to pi/2, if bipolar flag is set, mirror the fields accross the equator
             if args.bipolar:
@@ -535,40 +543,43 @@ def plot_polar_plot(
     if args.pictorial: 
         ax.set_position([0.1, -0.15, 0.8, 1.30])
     
-    # angs    = np.linspace(x2min, x2max, 1000)
-    # eps     = 0.05
-    # a       = 0.47 * (1 - eps)**(-1/3)
-    # b       = 0.47 * (1 - eps)**(2/3)
-    # radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
-    # r_theta = radius(angs)
-    # star_mask = rr < (radius(tt)+ 0.1)
-    # dummy = fields['p'].copy() * pre_scale.value
-    # dummy[star_mask] = 0.1
+    angs    = np.linspace(x2min, x2max, 1000)
+    eps     = 0.05
+    a       = 0.47 * (1 - eps)**(-1/3)
+    b       = 0.47 * (1 - eps)**(2/3)
+    radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+    r_theta = radius(angs)
 
-    # ax.plot(np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='white')
-    # ax.plot(-np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='white')
-    # ax.pcolormesh(tt, rr, dummy, shading='auto', cmap=color_map, **kwargs[field1])
+    ax.plot(np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='orange')
+    ax.plot(-np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='orange')
     if not args.pictorial:
         if x2max < np.pi:
             ymd = int( np.floor(x2max * 180/np.pi) )
             if not args.bipolar:                                                                                                                                                                                   
                 ax.set_thetamin(-ymd)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
                 ax.set_thetamax(ymd)
-                ax.set_position( [0.1, -0.18, 0.8, 1.43])
+                ax.set_position( [0.05, -0.40, 0.9, 2])
+                # ax.set_position( [0.1, -0.18, 0.9, 1.43])
             else:
-                ax.set_position( [0.1, -0.18, 0.9, 1.43])
+                ax.set_position( [0.1, -0.45, 0.9, 2])
+                #ax.set_position( [0.1, -0.18, 0.9, 1.50])
             if num_fields > 1:
-                ycoord  = [0.1, 0.1 ]
-                xcoord  = [0.88, 0.04]
-                cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
-                cbar_orientation = 'vertical'
+                cbar_orientation = args.cbar_orient
+                if cbar_orientation == 'vertical':
+                    ycoord  = [0.1, 0.1]
+                    xcoord  = [0.88, 0.04]
+                    cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
+                else:
+                    ycoord  = [0.15, 0.15]
+                    xcoord  = [0.51, 0.06]
+                    cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.43, 0.05]) for i in range(num_fields)]
             else:
                 cbar_orientation = 'horizontal'
                 if cbar_orientation == 'horizontal':
-                    cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
+                    cbaxes  = fig.add_axes([0.15, 0.15, 0.70, 0.05]) 
         else:  
             if not args.no_cbar:         
-                cbar_orientation = 'horizontal' if args.nwedge == 2 else 'vertical'
+                cbar_orientation = args.cbar_orient
                 # ax.set_position([0.1, -0.18, 0.7, 1.3])
                 if num_fields > 1:
                     if num_fields == 2:
@@ -600,7 +611,7 @@ def plot_polar_plot(
                     if cbar_orientation == 'vertical':
                         cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85])
                     else:
-                        cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85])
+                        cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.90])
         if args.log:
             if not args.no_cbar:
                 if num_fields > 1:
@@ -627,30 +638,30 @@ def plot_polar_plot(
         ang_max   = args.wedge_lims[3]
         
         # Draw the wedge cutout on the main plot
-        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=1, color='white')
-        ax.plot(np.radians(np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
-        ax.plot(np.radians(np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
-        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=1, color='white')
+        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=1, color='orange')
+        ax.plot(np.radians(np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='orange')
+        ax.plot(np.radians(np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='orange')
+        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=1, color='orange')
         
-        angs    = np.linspace(x2min, x2max, 1000)
-        eps     = 0.05
-        a       = 0.65 * (1 - eps)**(-1/3)
-        b       = 0.65 * (1 - eps)**(2/3)
-        radius = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
-        r_theta = radius(angs)
-        star_mask = rr < (radius(tt)+ 0.1)
-        dummy = fields['p'].copy() * pre_scale.value
-        dummy[star_mask] = 0.1
+        # angs    = np.linspace(x2min, x2max, 1000)
+        # eps     = 0.05
+        # a       = 0.47 * (1 - eps)**(-1/3)
+        # b       = 0.47 * (1 - eps)**(2/3)
+        # radius = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+        # r_theta = radius(angs)
+        # star_mask = rr < (radius(tt)+ 0.1)
+        # dummy = fields['p'].copy() * pre_scale.value
+        # dummy[star_mask] = 0.1
 
-        ax.plot(np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='white')
-        ax.pcolormesh(tt, rr, dummy, shading='auto', cmap=color_map, **kwargs[field1])
+        # ax.plot(np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='white')
+        # ax.pcolormesh(tt, rr, dummy, shading='auto', cmap=color_map, **kwargs[field1])
         
         if args.nwedge == 2:
-            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=1, color='white')
-            ax.plot(np.radians(-np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
-            ax.plot(np.radians(-np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
-            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=1, color='white')
-            ax.plot(np.radians(-np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='white')
+            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=1, color='orange')
+            ax.plot(np.radians(-np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='orange')
+            ax.plot(np.radians(-np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='orange')
+            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=1, color='orange')
+            # ax.plot(np.radians(-np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='white')
             
     ax.set_theta_zero_location('N')
     ax.set_theta_direction(-1)
@@ -668,7 +679,6 @@ def plot_polar_plot(
     ax.set_rmin(x1min)
     
     field_str = get_field_str(args)
-    
     if is_wedge:
         if num_fields == 1:
             wedge.set_position([0.5, -0.5, 0.3, 2])
@@ -748,44 +758,46 @@ def plot_polar_plot(
             axes[2].yaxis.set_major_locator(plt.MaxNLocator(2))
             axes[2].set_aspect('equal')
             axes[2].axes.yaxis.set_ticklabels([])
-            
+
     if not args.pictorial:
         if not args.no_cbar:
+            set_label = ax.set_ylabel if args.cbar_orient == 'vertical' else ax.set_xlabel
+            fsize = BIGGER_SIZE #30 if not args.print else MEDIUM_SIZE
             if args.log:
                 if x2max == np.pi:
-                    set_label = ax.set_ylabel if cbar_orientation == 'vertical' else ax.set_xlabel
                     if num_fields > 1:
                         for i in range(num_fields):
                             if args.field[i] in lin_fields:
-                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=30,labelpad=-40)
-                                cbaxes[i].yaxis.set_ticks_position('left')
+                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize)
+                                # cbaxes[i].yaxis.set_ticks_position('left')
                             else:
-                                cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=30)
+                                cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=fsize)
                     else:
-                        cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
+                        cbar.ax.set_label(r'$\log$ {}'.format(field_str), fontsize=fsize)
                 else:
                     if num_fields > 1:
                         for i in range(num_fields):
                             if args.field[i] in lin_fields:
-                                cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
+                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize)
                             else:
-                                cbar[i].ax.set_ylabel(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+                                cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=fsize)
                     else:
-                        cbar.ax.set_xlabel(r'$\log$ {}'.format(field_str), fontsize=20)
+                        cbar.ax.set_label(r'$\log$ {}'.format(field_str), fontsize=fsize)
             else:
                 if x2max >= np.pi:
                     if num_fields > 1:
                         for i in range(num_fields):
-                            cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
+                            cbar[i].ax.set_label(r'{}'.format(field_str[i]), fontsize=fsize)
                     else:
-                        cbar.ax.set_ylabel(f'{field_str}', fontsize=20)
+                        cbar.ax.set_label(f'{field_str}', fontsize=fsize)
                 else:
-                    cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
+                    cbar.ax.set_label(r'{}'.format(field_str), fontsize=fsize)
         if args.setup != "":
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=25, y=1)
         else:
-            fsize = 25 if not args.print else MEDIUM_SIZE
-            fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.85)
+            pass
+            # fsize = 25 if not args.print else MEDIUM_SIZE
+            # fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.85)
 
 def plot_cartesian_plot(
     fields: dict, 
@@ -1137,7 +1149,7 @@ def plot_hist(
     if args.cmap == 'grayscale':
         colors = plt.cm.gray(np.linspace(0.05, 0.75, color_len+1))
     else:
-        colors = plt.cm.viridis(np.linspace(0.25, 0.75, color_len+1))
+        colors = plt.cm.viridis(np.linspace(0.10, 0.75, color_len+1))
 
     lw = 3.0 + 1.5*(case // 2)
     def calc_1d_hist(fields):
@@ -1780,6 +1792,7 @@ def main():
                         help='Set to a value if you wish to plot a 1D curve about some angle')
     
     parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
+    parser.add_argument('--cbar_orient', dest='cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
     parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 70, 110], type=float, nargs=4, help="wedge limits")
     parser.add_argument('--xlims', dest='xlims', default = None, type=float, nargs=2)
     parser.add_argument('--ylims', dest='ylims', default = None, type=float, nargs=2)
@@ -1962,7 +1975,7 @@ def main():
         if args.print:
             fig = plt.gcf()
             all_axes = fig.get_axes()
-            fig_height = 5 if not args.sub_split else 10
+            fig_height = 4 if not args.sub_split else 10
             
             for i, ax in enumerate(all_axes):
                 for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
@@ -1974,11 +1987,14 @@ def main():
                             item.set_fontsize(SMALL_SIZE)
                     except AttributeError:
                         pass
-                fig.set_size_inches(4, fig_height)
+            #fig.set_size_inches(4, fig_height)
                 
             
         ext = 'pdf' if not args.png else 'png'
-        plt.savefig('{}.{}'.format(args.save.replace(' ', '_'), ext), dpi=600, bbox_inches='tight')
+        fig = plt.gcf()
+        #dpi = fig.dpi 
+        dpi = 600
+        plt.savefig('{}.{}'.format(args.save.replace(' ', '_'), ext), dpi=dpi, bbox_inches='tight')
     
 if __name__ == '__main__':
     main()
