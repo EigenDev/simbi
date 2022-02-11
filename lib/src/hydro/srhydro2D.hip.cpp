@@ -705,8 +705,8 @@ void SRHD2D::cons2prim(
                 iter++;
                 if (iter >= MAX_ITER)
                 {
-                    const auto ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % xphysical_grid;
-                    const auto jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / xphysical_grid;
+                    const auto ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % self->xphysical_grid;
+                    const auto jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / self->xphysical_grid;
                     printf("\nCons2Prim cannot converge\n");
                     printf("Density: %f, Pressure: %f, Vsq: %f, xindex: %lu, yindex: %lu\n", rho, peq, v2, ii, jj);
                     self->dt             = INFINITY;
