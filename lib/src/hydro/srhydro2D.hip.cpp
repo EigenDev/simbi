@@ -1353,6 +1353,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     
     if (t == 0)
     {
+        if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
         transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
         writeToProd<sr2d::PrimitiveData, Primitive>(&transfer_prims, &prods);
         tnow = create_step_str(t_interval, tchunk);
