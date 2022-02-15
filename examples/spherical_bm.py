@@ -34,7 +34,7 @@ rmax = 1.0
 N_exp = 5
 
 
-mode = 'cpu'
+mode = 'gpu'
 theta_min = 0
 theta_max = np.pi
 

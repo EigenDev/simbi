@@ -13,7 +13,7 @@ theta_max = np.pi/2
 rmin  = 0.1
 rmax  = 1.1
 rmid  = (rmax - rmin) / 2
-ynpts = 256 
+ynpts = 100 
 
 # Choose dtheta carefully such that the grid zones remain roughly square
 dtheta = (theta_max - theta_min) / ynpts
@@ -46,7 +46,7 @@ vr = np.zeros(shape=(ynpts, xnpts), dtype= float)
 vt = np.zeros(shape=(ynpts, xnpts), dtype= float)
 
 mode = 'gpu'
-tend = 0.2
+tend = 0.1
 dtheta = theta_max/ynpts
 cs = (gamma * p / gamma)**0.5
 dt = 0.1 * (ri * dtheta)
@@ -59,16 +59,16 @@ SodHLLE = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt), regime="classical
               Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
 t1 = (time.time()*u.s).to(u.min)
-hlle_result = SodHLLE.simulate(tend=tend, first_order=False, dt=dt, compute_mode=mode,
-                   linspace=False, cfl=0.1, hllc=False)
+hlle_result = SodHLLE.simulate(tend=tend, first_order=True, dt=dt, compute_mode=mode,
+                   linspace=False, cfl=0.1, hllc=False, boundary_condition='reflecting')
 
 
 # HLLC Simulation
 SodHLLC = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
-              Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4, boundary_condition='reflecting')
+              Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
 t1 = (time.time()*u.s).to(u.min)
-hllc_result = SodHLLC.simulate(tend=tend, first_order=False, dt=dt, compute_mode=mode,
+hllc_result = SodHLLC.simulate(tend=tend, first_order=True, dt=dt, compute_mode=mode,
                     linspace=False, cfl=0.1, hllc=True, boundary_condition='reflecting')
 
 print("The 2D SOD Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
