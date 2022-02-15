@@ -28,13 +28,13 @@ class CompilerParams():
     def set_compiler_args(self):
         cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-flto']
         if self.arch == 'gpu':
-            gpu_compiler_args = { '$ENV{CC}': cpu_compiler_args,
+            gpu_compiler_args = { '${CMAKE_CXX_COMPILER}': cpu_compiler_args,
                                    'hipcc': []
                                  }
             if "${HIP_PLATFORM}" == "nvidia":
-                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_86', '-ccbin=$ENV{CC}',
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_86', '-ccbin=${CMAKE_CXX_COMPILER}',
                                             '--ptxas-options=-v', '--extended-lambda',
-                                            '--compiler-options', '-fPIC', '-O2']
+                                            '--compiler-options', '-fPIC', '-O2', '-lineinfo']
                 
             else:
                 gpu_compiler_args["hipcc"] += ['-std=c++17', '-O2', '-fPIC', '-march=native']
@@ -161,7 +161,7 @@ def customize_compiler_for_hipcc(self):
             # translated from the extra_compile_args in the Extension class
             postargs = extra_postargs['hipcc']
         else:
-            postargs = extra_postargs['$ENV{CC}']
+            postargs = extra_postargs['${CMAKE_CXX_COMPILER}']
 
         super(obj, src, ext, cc_args, postargs, pp_opts)
         # Reset the default compiler_so, which we might have changed for hip
@@ -246,7 +246,7 @@ setup(
         'install': InstallCommand,
         'develop': DevelopCommand,
         },
-    package_dir={'pysimbi': '${CMAKE_CURRENT_BINARY_DIR}/pysimbi'},
+    package_dir={'pysimbi': '${CMAKE_CURRENT_SOURCE_DIR}/pysimbi'},
     packages=find_packages(),
     install_requires=['numpy', 'cython'],
     python_requires=">=3.6",
