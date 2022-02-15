@@ -332,7 +332,7 @@ namespace simbi{
 
 
     // template<typename T, typename U>
-    // void config_ghosts1DGPU(
+    // void config_ghosts1D(
     //     const ExecutionPolicy<> p, 
     //     U *sim, 
     //     const int grid_size, 

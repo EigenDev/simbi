@@ -1699,26 +1699,15 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->linspace    = linspace;
     this->plm_theta   = plm_theta;
     this->dt          = init_dt;
-
-    if (first_order)
-    {
-        this->xphysical_grid = nx - 2;
-        this->yphysical_grid = ny - 2;
-        this->zphysical_grid = nz - 2;
-        this->idx_active = 1;
-    }
-    else
-    {
-        this->xphysical_grid = nx - 4;
-        this->yphysical_grid = ny - 4;
-        this->zphysical_grid = nz - 4;
-        this->idx_active = 2;
-    }
+    this->bc          = boundary_cond_map.at(boundary_condition);
+    this->geometry    = geometry_map.at(coord_system);
+    this->xphysical_grid = (first_order) ? nx - 2: nx - 4;
+    this->yphysical_grid = (first_order) ? ny - 2: ny - 4;
+    this->zphysical_grid = (first_order) ? nz - 2: nz - 4;
+    this->idx_active     = (first_order) ? 1     : 2;
 
     this->active_zones = xphysical_grid * yphysical_grid * zphysical_grid;
 
-    //--------Config the System Enums
-    config_system();
     if ((coord_system == "spherical") && (linspace))
     {
         this->coord_lattice = CLattice3D(x1, x2, x3, simbi::Geometry::SPHERICAL);
@@ -1793,8 +1782,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     PrimData prods;
     sr3d::PrimitiveData transfer_prims;
 
-    const auto bc   = boundary_cond_map.at(boundary_condition);
-    const auto geom = geometry_map.at(coord_system);
     // if (t == 0)
     // {
     //     config_ghosts2D(cons, nx, ny, first_order);
@@ -1856,14 +1843,14 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             t1 = high_resolution_clock::now();
             if constexpr(BuildPlatform == Platform::GPU)
             {
-                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Dev);
+                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Dev);
                 cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts3DGPU(fullP, device_self, nx, ny, nz, true, bc);
+                config_ghosts3D(fullP, device_self, nx, ny, nz, true, bc);
             } else {
                 // First Half Step
-                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Host);
+                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Host);
                 cons2prim(fullP);
-                config_ghosts3DGPU(fullP, this, nx, ny, nz, true, bc);
+                config_ghosts3D(fullP, this, nx, ny, nz, true, bc);
             }
             
             t += dt; 
@@ -1904,7 +1891,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
 
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
-                adapt_dt(device_self, geometry[coord_system], activeP);
+                adapt_dt(device_self, geometry, activeP);
             else 
                 adapt_dt();
             // Update decay constant
@@ -1917,24 +1904,24 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             if constexpr(BuildPlatform == Platform::GPU)
             {
                 // First Half Step
-                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Dev);
+                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Dev);
                 cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts3DGPU(fullP, device_self, nx, ny, nz, false, bc);
+                config_ghosts3D(fullP, device_self, nx, ny, nz, false, bc);
 
                 // Final Half Step
-                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Dev);
+                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Dev);
                 cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts3DGPU(fullP, device_self, nx, ny, nz, false, bc);
+                config_ghosts3D(fullP, device_self, nx, ny, nz, false, bc);
             }  else {
                 // First Half Step
-                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Host);
+                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Host);
                 cons2prim(fullP);
-                config_ghosts3DGPU(fullP, this, nx, ny, nz, false, bc);
+                config_ghosts3D(fullP, this, nx, ny, nz, false, bc);
 
                 // Final Half Step
-                advance(device_self, activeP, shBlockSize, radius, geom, simbi::MemSide::Host);
+                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Host);
                 cons2prim(fullP);
-                config_ghosts3DGPU(fullP, this, nx, ny, nz, false, bc);
+                config_ghosts3D(fullP, this, nx, ny, nz, false, bc);
             }   
             
             t += dt; 
@@ -1971,7 +1958,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
 
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
-                adapt_dt(device_self, geometry[coord_system], activeP);
+                adapt_dt(device_self, geometry, activeP);
             else 
                 adapt_dt();
             // Update decay constant

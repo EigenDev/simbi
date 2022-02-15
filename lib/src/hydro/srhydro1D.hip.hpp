@@ -26,6 +26,8 @@ namespace simbi
           std::vector<real> r, dt_arr;
           std::vector<std::vector<real>> state;
           CLattice1D coord_lattice;
+          simbi::BoundaryCondition bc;
+          simbi::Geometry geometry;
 
 
           SRHD();

@@ -57,21 +57,21 @@ namespace simbi
     GPU_CALLABLE_INLINE
     constexpr unsigned int kronecker(luint i, luint j) { return (i == j ? 1 : 0); }
 
-    void config_ghosts1DGPU(
+    void config_ghosts1D(
         const ExecutionPolicy<> p,
         SRHD *dev_sim, 
         const int grid_size,
         const bool first_order, 
         const simbi::BoundaryCondition boundary_condition);
 
-    void config_ghosts1DGPU(
+    void config_ghosts1D(
         const ExecutionPolicy<> p,
         Newtonian1D *dev_sim, 
         const int grid_size,
         const bool first_order, 
         const simbi::BoundaryCondition boundary_condition);
         
-    void config_ghosts2DGPU(
+    void config_ghosts2D(
         const ExecutionPolicy<> p,
         SRHD2D *sim, 
         const int x1grid_size, 
@@ -80,7 +80,7 @@ namespace simbi
         const simbi::BoundaryCondition boundary_condition,
         const bool bipolar = true);
 
-    void config_ghosts2DGPU(
+    void config_ghosts2D(
         const ExecutionPolicy<> p,
         Newtonian2D *sim, 
         const int x1grid_size, 
@@ -89,7 +89,7 @@ namespace simbi
         const simbi::BoundaryCondition boundary_condition,
         const bool bipolar = true);
 
-    void config_ghosts3DGPU(
+    void config_ghosts3D(
         const ExecutionPolicy<> p,
         SRHD3D *sim, 
         const int x1grid_size, 

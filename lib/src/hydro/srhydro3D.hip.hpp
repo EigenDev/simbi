@@ -32,6 +32,8 @@ namespace simbi
         std::string coord_system;
         std::vector<real> x1, x2, x3, sourceD, sourceS1, sourceS2, sourceS3, sourceTau, pressure_guess;
         CLattice3D coord_lattice;
+        simbi::Geometry geometry;
+        simbi::BoundaryCondition bc;
 
         //==============GPU Mirrors================
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceS3, *gpu_sourceTau, *gpu_pressure_guess;

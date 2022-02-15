@@ -35,6 +35,8 @@ namespace simbi {
         luint nzones, active_zones, idx_active, i_start, i_bound, n, nx;
         simbi::SOLVER sim_solver;
         CLattice1D coord_lattice;
+        simbi::BoundaryCondition bc;
+        simbi::Geometry geometry;
 
         //==============================================================
         // Create dynamic array instances that will live on device

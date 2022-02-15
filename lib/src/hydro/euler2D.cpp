@@ -240,7 +240,7 @@ void Newtonian2D::adapt_dt()
 
                 cs       = std::sqrt(gamma * pressure / rho );
 
-                switch (geometry[coord_system])
+                switch (geometry)
                 {
                 case simbi::Geometry::CARTESIAN:
                     cfl_dt = 
@@ -470,14 +470,14 @@ void Newtonian2D::advance(
     const real dx1                 = this->dx1;
     const real imax                = this->xphysical_grid - 1;
     const real jmax                = this->yphysical_grid - 1;
-    const bool rho_all_zeros       = this->rho_all_zeros;
-    const bool m1_all_zeros        = this->m1_all_zeros;
-    const bool m2_all_zeros        = this->m2_all_zeros;
-    const bool e_all_zeros         = this->e_all_zeros;
-    const real x1min                = this->x1min;
-    const real x1max                = this->x1max;
-    const real x2min                = this->x2min;
-    const real x2max                = this->x2max;
+    const auto rho_all_zeros       = this->rho_all_zeros;
+    const auto m1_all_zeros        = this->m1_all_zeros;
+    const auto m2_all_zeros        = this->m2_all_zeros;
+    const auto e_all_zeros         = this->e_all_zeros;
+    const real x1min               = this->x1min;
+    const real x1max               = this->x1max;
+    const real x2min               = this->x2min;
+    const real x2max               = this->x2max;
     const real pow_dlogr           = pow(10, dlogx1);
     const auto nzones              = nx * ny;
     #endif
@@ -489,6 +489,7 @@ void Newtonian2D::advance(
     const luint sx           = (col_maj) ? 1  : bx;
     const luint sy           = (col_maj) ? by :  1;
     const auto pseudo_radius = (first_order) ? 1 : 2;
+
     simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
@@ -676,7 +677,8 @@ void Newtonian2D::advance(
         }
 
         //Advance depending on geometry
-        luint real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
+        luint real_loc  = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
+        const auto step = (first_order) ? (real)1.0 : (real)0.5;
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -687,7 +689,7 @@ void Newtonian2D::advance(
                         const real m2_source = (m2_all_zeros)  ? (real)0.0 : self->gpu_sourceM2[real_loc];
                         const real e_source  = (e_all_zeros)   ? (real)0.0 : self->gpu_sourceE[real_loc];
                         const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                        self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf)/ dx2 - source_terms) * (real)0.5 * dt;
+                        self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf)/ dx2 - source_terms) * step;
                     #else
                         const real rho_source = (rho_all_zeros)   ? (real)0.0 : sourceRho[real_loc];
                         const real m1_source  = (m1_all_zeros)  ? (real)0.0   : sourceM1[real_loc];
@@ -696,7 +698,7 @@ void Newtonian2D::advance(
                         const real dx1 = self->coord_lattice.dx1[ii];
                         const real dx2  = self->coord_lattice.dx2[jj];
                         const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                        cons[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * (real)0.5 * dt;
+                        cons[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step;
                     #endif
                 
 
@@ -749,7 +751,6 @@ void Newtonian2D::advance(
 
                 const Conserved geom_source  = {(real)0.0, (rhoc * vc * vc + (real)2.0 * pc) / rmean, - (rhoc  * uc * vc - pc * cot) / rmean , (real)0.0};
                 const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                const auto step = (first_order) ? (real)1.0 : (real)0.5;
 
                 #if GPU_CODE 
                     self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 - geom_source - source_terms) * dt * step;
@@ -801,12 +802,10 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->dt             = init_dt;
     this->xphysical_grid = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
     this->yphysical_grid = (periodic) ? ny : (first_order) ? ny - 2 : ny - 4;
-    this->idx_active     = (periodic) ? 0 : (first_order) ? 1 : 2;
+    this->idx_active     = (periodic) ? 0  :  (first_order) ? 1 : 2;
     this->active_zones   = xphysical_grid * yphysical_grid;
-
-    //--------Config the System Enums
-    config_system();
-    // sim_geom = geometry[coord_system];
+    this->bc             = boundary_cond_map.at(boundary_condition);
+    this->geometry       = geometry_map.at(coord_system);
 
     if ((coord_system == "spherical") && (linspace))
     {
@@ -833,10 +832,10 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     setup.x1min     = x1[0];
     setup.x2max     = x2[yphysical_grid - 1];
     setup.x2min     = x2[0];
-    setup.nx       = nx;
-    setup.ny       = ny;
-    setup.linspace = linspace;
-    setup.ad_gamma = gamma;
+    setup.nx        = nx;
+    setup.ny        = ny;
+    setup.linspace  = linspace;
+    setup.ad_gamma  = gamma;
 
     cons.resize(nzones);
     prims.resize(nzones);
@@ -887,8 +886,12 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
 
         rho_all_zeros  = std::all_of(sourceRho.begin(), sourceRho.end(),   [](real i) {return i == 0;});
         m1_all_zeros   = std::all_of(sourceM1.begin(),  sourceM1.end(),  [](real i) {return i == 0;});
-        m2_all_zeros   = std::all_of(sourceM1.begin(),  sourceM2.end(),  [](real i) {return i == 0;});
+        m2_all_zeros   = std::all_of(sourceM2.begin(),  sourceM2.end(),  [](real i) {return i == 0;});
         e_all_zeros    = std::all_of(sourceE.begin(),  sourceE.end(), [](real i) {return i == 0;});
+
+        // std::cout << "initial stuff" << "\n";
+        // std::cout << rho_all_zeros << ", " << m1_all_zeros << ", " << m2_all_zeros << ", " << e_all_zeros << "\n";
+        // std::cin.get();
     }
     
     // Some variables to handle file automatic file string
@@ -908,22 +911,21 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     const luint shBlockBytes    = shBlockSpace * sizeof(Primitive);
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
-    const auto bc   = boundary_cond_map.at(boundary_condition);
-    const auto geom = geometry_map.at(coord_system);
+    
     if (t == 0)
     {
         if constexpr(BuildPlatform == Platform::GPU)
         {
-            if (!periodic) config_ghosts2DGPU(fullP, device_self, nx, ny, first_order, bc);
+            if (!periodic) config_ghosts2D(fullP, device_self, nx, ny, first_order, bc);
         } else {
-            if (!periodic) config_ghosts2DGPU(fullP, this, nx, ny, first_order, bc);
+            if (!periodic) config_ghosts2D(fullP, this, nx, ny, first_order, bc);
         }
     }
     const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive) + xblockdim * yblockdim * sizeof(real);
     if constexpr(BuildPlatform == Platform::GPU)
     {
         cons2prim(fullP, device_self, simbi::MemSide::Dev);
-        adapt_dt(device_self, geometry[coord_system], activeP, dtShBytes);
+        adapt_dt(device_self, geometry, activeP, dtShBytes);
     } else {
         cons2prim(fullP);
         adapt_dt();
@@ -944,12 +946,14 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     {  
         while (t < tend && !inFailureState)
         {
+            // Advance a full step
             t1 = high_resolution_clock::now();
-            advance(self, activeP, bx, by, radius, geom, memside);
+            advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts2DGPU(fullP, self, nx, ny, true, bc);
+            if (!periodic) config_ghosts2D(fullP, self, nx, ny, true, bc);
             t += dt; 
             
+            // Output to stdout
             if (n >= nfold){
                 simbi::gpu::api::deviceSynch();
                 ncheck += 1;
@@ -960,7 +964,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
                 nfold += 100;
             }
 
-            /* Write to a File every tenth of a second */
+            // Write to a File every nth of a second 
             if (t >= t_interval)
             {
                 if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
@@ -982,10 +986,11 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             
             n++;
             simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
+            
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
-                adapt_dt(device_self, geom, activeP, dtShBytes);
+                adapt_dt(device_self, geometry, activeP, dtShBytes);
             } else {
                 adapt_dt();
             }
@@ -996,14 +1001,14 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         {
             t1 = high_resolution_clock::now();
             // First Half Step
-            advance(self, activeP, bx, by, radius, geom, memside);
+            advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts2DGPU(fullP, self, nx, ny, false, bc);
+            if (!periodic) config_ghosts2D(fullP, self, nx, ny, false, bc);
 
             // Final Half Step
-            advance(self, activeP, bx, by, radius, geom, memside);
+            advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts2DGPU(fullP, self, nx, ny, false, bc);
+            if (!periodic) config_ghosts2D(fullP, self, nx, ny, false, bc);
 
             t += dt; 
 
@@ -1045,7 +1050,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
-                adapt_dt(device_self, geom, activeP, dtShBytes);
+                adapt_dt(device_self, geometry, activeP, dtShBytes);
             } else {
                 adapt_dt();
             }

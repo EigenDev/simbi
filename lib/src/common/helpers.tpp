@@ -19,48 +19,6 @@ std::string string_format( const std::string& format, Args ... args )
     return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
 }
 
-template <typename T>
-std::vector<real> calc_lorentz_gamma(T &v){
-    int vsize = v.size();
-    std::vector<real> W(vsize); 
-
-    for (int ii=0; ii < vsize; ii++){
-        W[ii] = 1/sqrt(1 - v[ii]*v[ii]);
-    }
-
-    return W;
-};
-
-
-template <typename T>
-void config_ghosts1D(T &u_state, int grid_size, bool first_order){
-    if (first_order){
-        u_state[0].D = u_state[1].D;
-        u_state[grid_size - 1].D = u_state[grid_size - 2].D;
-
-        u_state[0].S = - u_state[1].S;
-        u_state[grid_size - 1].S = u_state[grid_size - 2].S;
-
-        u_state[0].tau = u_state[1].tau;
-        u_state[grid_size - 1].tau = u_state[grid_size - 2].tau;
-    } else {
-        u_state[0].D = u_state[3].D;
-        u_state[1].D = u_state[2].D;
-        u_state[grid_size - 1].D = u_state[grid_size - 3].D;
-        u_state[grid_size - 2].D = u_state[grid_size - 3].D;
-
-        u_state[0].S = - u_state[3].S;
-        u_state[1].S = - u_state[2].S;
-        u_state[grid_size - 1].S = u_state[grid_size - 3].S;
-        u_state[grid_size - 2].S = u_state[grid_size - 3].S;
-
-        u_state[0].tau = u_state[3].tau;
-        u_state[1].tau = u_state[2].tau;
-        u_state[grid_size - 1].tau = u_state[grid_size - 3].tau;
-        u_state[grid_size - 2].tau = u_state[grid_size - 3].tau;
-    }
-};
-
 //Handle 2D primitive arrays whether SR or Newtonian
 template<typename T, typename N>
 typename std::enable_if<is_3D_primitive<N>::value>::type
@@ -155,16 +113,3 @@ vec2struct(const std::vector<N> &p){
     
     return sprims;
 }
-
-// Roll a single vector index
-template<typename T>
-GPU_CALLABLE_INLINE
-T roll(T &v, unsigned int n, int size) {
-   return v[n % size];
-};
-
-template<typename T>
-GPU_CALLABLE_INLINE
-T roll(T *v, unsigned int n, int size) {
-   return v[n % size];
-};

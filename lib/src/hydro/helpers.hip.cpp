@@ -8,7 +8,7 @@ namespace simbi{
     //==================================================
     //               1D
     //==================================================
-    void config_ghosts1DGPU(
+    void config_ghosts1D(
         const ExecutionPolicy<> p, 
         SRHD *sim, 
         const int grid_size, 
@@ -66,7 +66,7 @@ namespace simbi{
         });
     };
 
-    void config_ghosts1DGPU(
+    void config_ghosts1D(
         const ExecutionPolicy<> p, 
         Newtonian1D *sim, 
         const int grid_size, 
@@ -126,7 +126,7 @@ namespace simbi{
     //==============================================
     //                  2D
     //==============================================
-    void config_ghosts2DGPU(
+    void config_ghosts2D(
         const ExecutionPolicy<> p,
         SRHD2D *sim, 
         const int x1grid_size, 
@@ -215,7 +215,7 @@ namespace simbi{
         });
     };
 
-    void config_ghosts2DGPU(
+    void config_ghosts2D(
         const ExecutionPolicy<> p,
         Newtonian2D *sim, 
         const int x1grid_size, 
@@ -315,7 +315,7 @@ namespace simbi{
     //                  3D
     //============================================
     
-    void config_ghosts3DGPU(
+    void config_ghosts3D(
         const ExecutionPolicy<> p,
         SRHD3D *sim, 
         const int x1grid_size, 

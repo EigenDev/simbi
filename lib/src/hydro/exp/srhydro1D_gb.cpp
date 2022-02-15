@@ -703,7 +703,7 @@ SRHD::simulate1D(
 
     this->idx_active   = (periodic) ? 0  : (first_order) ? 1 : 2;
     this->active_zones = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
-    config_system();
+    
     n = 0;
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
@@ -802,7 +802,7 @@ SRHD::simulate1D(
             
             advance(self, shBlockSize, radius, geometry[coord_system], memside);
             cons2prim(fullP, device_self, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true);
+            if (!periodic) config_ghosts1D(fullP, self, nx, true);
             simbi::gpu::api::deviceSynch();
             t += dt; 
             
@@ -857,12 +857,12 @@ SRHD::simulate1D(
             // First Half Step
             cons2prim(fullP, self, memside);
             advance(self, shBlockSize, radius, geometry[coord_system], memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false);
+            if (!periodic) config_ghosts1D(fullP, self, nx, false);
 
             // Final Half Step
             cons2prim(fullP, self, memside);
             advance(self, shBlockSize, radius, geometry[coord_system], memside);
-            if (!periodic)  config_ghosts1DGPU(fullP, self, nx, false);
+            if (!periodic)  config_ghosts1D(fullP, self, nx, false);
 
             t += dt; 
             if (n >= nfold){

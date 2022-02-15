@@ -139,6 +139,7 @@ if(PYTHON3)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/initial_condition.py ${CMAKE_CURRENT_BINARY_DIR}/pysimbi/initial_condition.py COPYONLY)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/simbi.py ${CMAKE_CURRENT_BINARY_DIR}/pysimbi/simbi.py COPYONLY)
 
+
     # Custom make command for building default cpu instance in place
     if(HIP_FOUND)
         list(APPEND DEPS ${SRCS})

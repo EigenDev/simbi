@@ -334,8 +334,8 @@ void Newtonian1D::advance(
     const CLattice1D *coord_lattice = &(self->coord_lattice);
     #endif 
 
-    const auto bx                   = (BuildPlatform == Platform::GPU) ? sh_block_size : this->nx;
-    const auto pseudo_radius        = (first_order) ? 1 : 2;
+    const lint bx                   = (BuildPlatform == Platform::GPU) ? sh_block_size : this->nx;
+    const lint pseudo_radius        = (first_order) ? 1 : 2;
     simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
@@ -348,8 +348,8 @@ void Newtonian1D::advance(
         Primitive prims_l, prims_r;
         real dx1, rmean, dV, sL, sR, pc;
 
-        auto ia = ii + radius;
-        auto txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
+        lint ia = ii + radius;
+        lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
         #if GPU_CODE
             luint txl = BLOCK_SIZE;
             // Check if the active index exceeds the active zones
@@ -359,7 +359,7 @@ void Newtonian1D::advance(
             if (threadIdx.x < pseudo_radius)
             {
                 if (ia + BLOCK_SIZE > nx - 1) txl = nx - radius - ia + threadIdx.x;
-                prim_buff[txa - pseudo_radius] = self->gpu_prims[(ia - pseudo_radius) % nx];
+                prim_buff[txa - pseudo_radius] = self->gpu_prims[mod(ia - pseudo_radius, nx)];
                 prim_buff[txa + txl]           = self->gpu_prims[(ia + txl          ) % nx];
             }
             simbi::gpu::api::synchronize();
@@ -386,7 +386,7 @@ void Newtonian1D::advance(
             }
 
             // Set up the left and right state luinterfaces for i-1/2
-            prims_l = prim_buff[(txa - 1) % bx];
+            prims_l = prim_buff[mod(txa - 1, bx)];
             prims_r = prim_buff[(txa + 0) % bx];
             
             u_l = self->prims2cons(prims_l);
@@ -408,11 +408,11 @@ void Newtonian1D::advance(
         {
             Primitive left_most, right_most, left_mid, right_mid, center;
 
-            left_most   = prim_buff[(txa - 2) % bx];
-            left_mid    = prim_buff[(txa - 1) % bx];
-            center      = prim_buff[(txa + 0) % bx];
-            right_mid   = prim_buff[(txa + 1) % bx];
-            right_most  = prim_buff[(txa + 2) % bx];
+            left_most   = prim_buff[mod(txa - 2, bx)];
+            left_mid    = prim_buff[mod(txa - 1, bx)];
+            center      = prim_buff[(txa + 0)  % bx];
+            right_mid   = prim_buff[(txa + 1)  % bx];
+            right_most  = prim_buff[(txa + 2)  % bx];
 
             // Compute the reconstructed primitives at the i+1/2 luinterface
 
@@ -526,32 +526,17 @@ void Newtonian1D::advance(
     this->dt              = init_dt;
     // Define the swap vector for the luintegrated state
     this->nx = init_state[0].size();
-
-    if (periodic){
-        this->idx_active    = 0;
-        this->active_zones = nx;
-        this->i_start      = 0;
-        this->i_bound      = nx;
-    } else {
-        if (first_order){
-            this->idx_active = 1;
-            this->i_start   = 1;
-            this->i_bound   = nx - 1;
-            this->active_zones = nx - 2;
-        } else {
-            this->idx_active = 2;
-            this->i_start    = 2;
-            this->i_bound    = nx - 2;
-            this->active_zones = nx - 4; 
-        }
-    }
+    this->bc            = boundary_cond_map.at(boundary_condition);
+    this->geometry      = geometry_map.at(coord_system);
+    this->idx_active    = (periodic) ? 0 : (first_order) ? 1 : 2;
+    this->active_zones  = (periodic) ? nx: (first_order) ? nx - 2 : nx - 4;
+    
     if (hllc){
         this->sim_solver = simbi::SOLVER::HLLC;
     } else {
         this->sim_solver = simbi::SOLVER::HLLE;
     }
 
-    config_system();
     n = 0;
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
@@ -635,16 +620,15 @@ void Newtonian1D::advance(
 
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
-    const auto bc      = boundary_cond_map.at(boundary_condition);
-    const auto geom    = geometry_map.at(coord_system);
+
     if (first_order)
     {  
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
-            advance(radius, geom, activeP, self, shBlockSize, memside);
+            advance(radius, geometry, activeP, self, shBlockSize, memside);
             cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true, bc);
+            if (!periodic) config_ghosts1D(fullP, self, nx, true, bc);
 
             t += dt; 
             
@@ -695,13 +679,13 @@ void Newtonian1D::advance(
             t1 = high_resolution_clock::now();
             // First Half Step
             cons2prim(fullP, self, memside);
-            advance(radius, geom, activeP, self, shBlockSize, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false, bc);
+            advance(radius, geometry, activeP, self, shBlockSize, memside);
+            if (!periodic) config_ghosts1D(fullP, self, nx, false, bc);
 
             // Final Half Step
             cons2prim(fullP, self, memside);
-            advance(radius, geom, activeP, self, shBlockSize, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false, bc);
+            advance(radius, geometry, activeP, self, shBlockSize, memside);
+            if (!periodic) config_ghosts1D(fullP, self, nx, false, bc);
             simbi::gpu::api::deviceSynch();
             t += dt; 
             

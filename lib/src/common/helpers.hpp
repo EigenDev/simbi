@@ -45,6 +45,10 @@ struct DataWriteMembers
     std::string coord_system;
 };
 
+GPU_CALLABLE_INLINE lint mod(const lint index, const lint size)
+{
+    return (index % size + size) % size;
+}
 
 const std::map<std::string, simbi::Geometry> geometry_map = {
   { "spherical", simbi::Geometry::SPHERICAL },
@@ -58,23 +62,12 @@ const std::map<std::string, simbi::BoundaryCondition> boundary_cond_map = {
   { "reflecting", simbi::BoundaryCondition::REFLECTING},
   { "periodic", simbi::BoundaryCondition::PERIODIC}
 };
-extern std::map<std::string, simbi::Geometry> geometry;
-void config_system();
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-TEMPLATES
 //---------------------------------------------------------------------------------------------------------
 //-------------Define Function Templates-------------------------
 template <typename T, size_t N>
 constexpr size_t array_size(T (&)[N]);
-
-template <typename T>
-void config_ghosts1D(T &v, int, bool = true);
-
-template <typename T>
-void config_ghosts2D(T &v, int, int, bool = false);
-
-template <typename T>
-std::vector<real> calc_lorentz_gamma(T &v);
 
 template<typename T, typename N>
 typename std::enable_if<is_2D_primitive<N>::value>::type
@@ -99,12 +92,6 @@ template <typename T>
 GPU_CALLABLE_INLINE
 constexpr int sgn(T val) { return (T(0) < val) - (val < T(0)); }
 
-template<typename T>
-GPU_CALLABLE_INLINE constexpr T roll(const T *v, unsigned int n, int size) { return v[n % size];}
-
-template<typename T>
-constexpr T roll(const std::vector<T>  &v, unsigned int n) { return v[n % v.size()];}
-
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-METHODS
 //---------------------------------------------------------------------------------------------------------
@@ -120,27 +107,6 @@ void write_hdf5(
     const DataWriteMembers system, 
     const int dim, 
     const int size);
-
-void config_ghosts1D(
-    std::vector<hydro1d::Conserved> &u_state, 
-    int grid_size, 
-    bool first_order);
-    
-void config_ghosts2D(
-    std::vector<hydro2d::Conserved> &u_state, 
-    int x1grid_size, 
-    int x2grid_size, 
-    bool first_order);
-
-void config_ghosts2D(
-    std::vector<sr2d::Conserved> &u_state, 
-    int x1grid_size, 
-    int x2grid_size, 
-    bool first_order,
-    bool bipolar = true);
-
-
-
 
 //-------------------Inline for Speed--------------------------------------
 GPU_CALLABLE_INLINE real minmod(const real x, const real y, const real z)

@@ -76,11 +76,11 @@ void SRHD::advance(
     
     const real dt                   = this->dt;
     const real plm_theta            = this->plm_theta;
-    const luint nx                  = this->nx;
-    const luint bx                  = (BuildPlatform == Platform::GPU) ? sh_block_size : nx;
+    const auto nx                   = this->nx;
+    const lint bx                   = (BuildPlatform == Platform::GPU) ? sh_block_size : nx;
     const real decay_constant       = this->decay_constant;
     const CLattice1D *coord_lattice = &(self->coord_lattice);
-    const luint pseudo_radius       = (first_order) ? 1 : 2;
+    const lint  pseudo_radius       = (first_order) ? 1 : 2;
 
     simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (luint ii) {
         #if GPU_CODE
@@ -94,10 +94,10 @@ void SRHD::advance(
         Primitive prims_l, prims_r;
         real rmean, dV, sL, sR, pc, dx1;
   
-        auto ia = ii + radius;
-        auto txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
+        lint ia = ii + radius;
+        lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
         #if GPU_CODE
-            int txl = BLOCK_SIZE;
+            luint txl = BLOCK_SIZE;
             // Check if the active index exceeds the active zones
             // if it does, then this thread buffer will taken on the
             // ghost index at the very end and return
@@ -105,8 +105,8 @@ void SRHD::advance(
             if (threadIdx.x < pseudo_radius)
             {
                 if (ia + BLOCK_SIZE > nx - 1) txl = nx - radius - ia + threadIdx.x;
-                prim_buff[txa - pseudo_radius] = self->gpu_prims[(ia - pseudo_radius) % nx];
-                prim_buff[txa + txl   ]        = self->gpu_prims[(ia + txl          ) % nx];
+                prim_buff[txa - pseudo_radius] = self->gpu_prims[mod(ia - pseudo_radius, nx)];
+                prim_buff[txa + txl   ]        = self->gpu_prims[(ia + txl ) % nx];
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -133,7 +133,7 @@ void SRHD::advance(
             }
 
             // Set up the left and right state interfaces for i-1/2
-            prims_l = prim_buff[(txa - 1) % bx];
+            prims_l = prim_buff[mod(txa - 1, bx)];
             prims_r = prim_buff[(txa - 0) % bx];
 
             u_l = self->prims2cons(prims_l);
@@ -156,8 +156,8 @@ void SRHD::advance(
             Primitive left_most, right_most, left_mid, right_mid, center;
             // if ( (unsigned)(ii - istart) < (ibound - istart))
             {
-                left_most  = prim_buff[(txa - 2) % bx];
-                left_mid   = prim_buff[(txa - 1) % bx];
+                left_most  = prim_buff[mod(txa - 2, bx)];
+                left_mid   = prim_buff[mod(txa - 1, bx)];
                 center     = prim_buff[(txa + 0) % bx];
                 right_mid  = prim_buff[(txa + 1) % bx];
                 right_most = prim_buff[(txa + 2) % bx];
@@ -652,10 +652,12 @@ SRHD::simulate1D(
     this->tend = tend;
     // Define the swap vector for the integrated state
     this->nx = state[0].size();
+    this->bc       = boundary_cond_map.at(boundary_condition);
+    this->geometry = geometry_map.at(coord_system);
 
     this->idx_active   = (periodic) ? 0  : (first_order) ? 1 : 2;
     this->active_zones = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
-    config_system();
+
     n = 0;
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
@@ -746,17 +748,16 @@ SRHD::simulate1D(
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
     // Simulate :)
-    const auto bc   = boundary_cond_map.at(boundary_condition);
-    const auto geom = geometry_map.at(coord_system);
+    
     if (first_order)
     {  
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
             
-            advance(self, shBlockSize, radius, geom, memside);
+            advance(self, shBlockSize, radius, geometry, memside);
             cons2prim(fullP, device_self, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true, bc);
+            if (!periodic) config_ghosts1D(fullP, self, nx, true, bc);
             simbi::gpu::api::deviceSynch();
             t += dt; 
             
@@ -810,13 +811,13 @@ SRHD::simulate1D(
 
             // First Half Step
             cons2prim(fullP, self, memside);
-            advance(self, shBlockSize, radius, geom, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false, bc);
+            advance(self, shBlockSize, radius, geometry, memside);
+            if (!periodic) config_ghosts1D(fullP, self, nx, false, bc);
 
             // Final Half Step
             cons2prim(fullP, self, memside);
-            advance(self, shBlockSize, radius, geom, memside);
-            if (!periodic)  config_ghosts1DGPU(fullP, self, nx, false, bc);
+            advance(self, shBlockSize, radius, geometry, memside);
+            if (!periodic)  config_ghosts1D(fullP, self, nx, false, bc);
 
             t += dt; 
             if (n >= nfold){

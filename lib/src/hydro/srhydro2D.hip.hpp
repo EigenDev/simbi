@@ -31,7 +31,8 @@ namespace simbi
         std::string coord_system;
         std::vector<real> x1, x2, sourceD, sourceS1, sourceS2, sourceTau, pressure_guess;
         CLattice2D coord_lattice;
-        simbi::Geometry sim_geom;
+        simbi::Geometry geometry;
+        simbi::BoundaryCondition bc;
         real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
 

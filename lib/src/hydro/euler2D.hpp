@@ -31,6 +31,8 @@ namespace simbi {
         luint xphysical_grid, yphysical_grid, x_bound, y_bound;
         CLattice2D coord_lattice;
         simbi::Solver solver;
+        simbi::Geometry geometry;
+        simbi::BoundaryCondition bc;
 
         real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
         bool rho_all_zeros, m1_all_zeros, m2_all_zeros, e_all_zeros;
