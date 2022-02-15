@@ -132,15 +132,15 @@ class Hydro:
             
 
             # Initialize conserved u-tensor and flux tensors (defaulting to 2 ghost cells)
-            self.u = np.empty(shape = (3, self.Npts + 2), dtype=float)
+            self.u = np.empty(shape = (3, self.Npts), dtype=float)
 
             left_bound  = self.geometry[0]
             right_bound = self.geometry[1]
             midpoint    = self.geometry[2]
             
-            size = abs(right_bound - left_bound)
-            breakpoint = size/midpoint                                              # Define the fluid breakpoint
-            slice_point = int((self.Npts+2)/breakpoint)                             # Define the array slicepoint
+            size        = abs(right_bound - left_bound)
+            break_pt    = size/midpoint                                              # Define the fluid breakpoint
+            slice_point = int((self.Npts+2)/break_pt)                             # Define the array slicepoint
             
             if self.regime == "classical":
                 self.u[:, : slice_point] = np.array([rho_l, rho_l*v_l, energy_l]).reshape(3,1)              # Left State
@@ -283,25 +283,7 @@ class Hydro:
                 return state[:, 2: -2]
             else:
                 return state[:, 2:-2, 2:-2]
-        
-    # TODO: Make this more Pythomic
-    def _initialize_simulation(self):
-        """
-        Initialize the hydro simulation based on 
-        init params
-        """
-        
-        self._results = Hydro(
-            gamma = self.gamma,
-            left_state = self.left_state,
-            right_state = self.right_state,
-            Npts = self.Npts,
-            geometry = self.geometry,
-            dt = self.dt, 
-            dimensions = self.dimensions
-        )
     
-
     def simulate(self, 
                  tstart: float = 0,
                  tend: float = 0.1,
@@ -346,8 +328,9 @@ class Hydro:
         else:
             try:
                 from gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-            except:
+            except Exception as e:
                 print("Error in loading GPU extension. Loading CPU instead...")
+                print(f"For reference, the gpu_ext had the follow error: {e}")
                 from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
                 
         self.u = np.asarray(self.u)
@@ -357,14 +340,20 @@ class Hydro:
             simbi_ic.initializeModel(self, first_order, boundary_condition, scalars)
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensions)
-            
-        u = self.u 
+        
+        is_periodic = boundary_condition == 'periodic'
         start_time = tstart if self.t == 0 else self.t
         #Convert strings to byte arrays
         data_directory     = os.path.join(data_directory, '').encode('utf-8')
         coordinates        = self.coord_system.encode('utf-8')
         boundary_condition = boundary_condition.encode('utf-8')
         
+        # Check whether the specified path exists or not
+        if not os.path.exists(data_directory):
+            # Create a new directory because it does not exist 
+            os.makedirs(data_directory)
+            print("No default data directory specified. Creating one...!")
+            
         if first_order:
             print("Computing First Order Solution...")
         else:
@@ -379,11 +368,11 @@ class Hydro:
             sources = sources.reshape(sources.shape[0], -1)
             
             if self.regime == "classical":
-                a = PyState(u, self.gamma, cfl, r = x1, coord_system = coordinates)
+                a = PyState(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
             else:
-                a = PyStateSR(u, self.gamma, cfl, r = x1, coord_system = coordinates)
-    
-            u = a.simulate(sources = sources,
+                a = PyStateSR(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
+
+            solution = a.simulate(sources = sources,
                 tstart = start_time,
                 tend = tend,
                 dt = dt,
@@ -409,8 +398,8 @@ class Hydro:
             sources = sources.reshape(sources.shape[0], -1)
             
             if self.regime == "classical":
-                b = PyState2D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
-                u = b.simulate(
+                b = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                solution = b.simulate(
                     sources         = sources,
                     tstart          = start_time,
                     tend            = tend,
@@ -424,9 +413,9 @@ class Hydro:
                     linspace        = linspace,
                     hllc            = hllc) 
             else:
-                b = PyStateSR2D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                b = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
             
-                u = b.simulate(
+                solution = b.simulate(
                     sources         = sources,
                     tstart          = start_time,
                     tend            = tend,
@@ -458,9 +447,9 @@ class Hydro:
                 pass
                 # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
             else:
-                b = PyStateSR3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
+                b = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
                    
-            u = b.simulate(
+            solution = b.simulate(
                 sources         = sources,
                 tstart          = tstart,
                 tend            = tend,
@@ -474,6 +463,6 @@ class Hydro:
                 linspace        = linspace,
                 hllc            = hllc)  
         
-        return self._cleanup(u, first_order) if not boundary_condition == "periodic" else u
+        return self._cleanup(solution, first_order) if not is_periodic else solution
         
     

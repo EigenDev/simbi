@@ -91,7 +91,6 @@ def load_checkpoint(model, filename, dim):
             
 
 def initializeModel(model, first_order = False, boundary_condition = "outflow", scalars = 0):
-    
     # Check if u-array is empty. If it is, generate an array.
     if model.dimensions == 1:
         if not model.u.any():
@@ -146,12 +145,16 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                     model.u = np.insert(model.u, 0,
                                     (left_ghost, left_ghost) , axis=1)
         else:
-            if not first_order:
+            if not boundary_condition == 'periodic':
                 # Add the extra ghost cells for i-2, i+2
                 right_ghost = model.u[:, -1]
-                left_ghost = model.u[:, 0]
-                model.u = np.insert(model.u, model.u.shape[-1], right_ghost , axis=1)
-                model.u = np.insert(model.u, 0, left_ghost , axis=1)
+                left_ghost  = model.u[:, 0]
+                if first_order:
+                    model.u = np.insert(model.u, model.u.shape[-1], right_ghost , axis=1)
+                    model.u = np.insert(model.u, 0, left_ghost , axis=1)
+                else:
+                    model.u = np.insert(model.u, model.u.shape[-1], (right_ghost,right_ghost) , axis=1)
+                    model.u = np.insert(model.u, 0, (left_ghost,left_ghost) , axis=1)
                 
                     
     elif model.dimensions == 2:
