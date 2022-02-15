@@ -705,8 +705,8 @@ void SRHD2D::cons2prim(
                 iter++;
                 if (iter >= MAX_ITER)
                 {
-                    const auto ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % xphysical_grid;
-                    const auto jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / xphysical_grid;
+                    const auto ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % self->xphysical_grid;
+                    const auto jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / self->xphysical_grid;
                     printf("\nCons2Prim cannot converge\n");
                     printf("Density: %f, Pressure: %f, Vsq: %f, xindex: %lu, yindex: %lu\n", rho, peq, v2, ii, jj);
                     self->dt             = INFINITY;
@@ -1192,8 +1192,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     real engine_duration,
     real chkpt_interval,
     std::string data_directory,
+    std::string boundary_condition,
     bool first_order,
-    bool periodic,
     bool linspace,
     bool hllc,
     bool quirk_smoothing)
@@ -1208,7 +1208,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                : floor(tstart * round_place + (real)0.5) / round_place + chkpt_interval;
 
     this->first_order     = first_order;
-    this->periodic        = periodic;
+    this->periodic        = boundary_condition == "periodic";
     this->hllc            = hllc;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
@@ -1329,14 +1329,15 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const luint shBlockBytes    = shBlockSpace * sizeof(Primitive);
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
-
+    const auto bc   = boundary_cond_map.at(boundary_condition);
+    const auto geom = geometry_map.at(coord_system);
     if (t == 0)
     {
         if constexpr(BuildPlatform == Platform::GPU)
         {
-            config_ghosts2DGPU(fullP, device_self, nx, ny, first_order);
+            config_ghosts2DGPU(fullP, device_self, nx, ny, first_order, bc);
         } else {
-            config_ghosts2DGPU(fullP, this, nx, ny, first_order);
+            config_ghosts2DGPU(fullP, this, nx, ny, first_order, bc);
         }
     }
 
@@ -1352,6 +1353,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     
     if (t == 0)
     {
+        if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
         transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
         writeToProd<sr2d::PrimitiveData, Primitive>(&transfer_prims, &prods);
         tnow = create_step_str(t_interval, tchunk);
@@ -1377,9 +1379,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
-            advance(self, activeP, bx, by, radius, geometry[coord_system], memside);
+            advance(self, activeP, bx, by, radius, geom, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2DGPU(fullP, self, nx, ny, true);
+            config_ghosts2DGPU(fullP, self, nx, ny, true, bc);
             t += dt; 
             
             if (n >= nfold){
@@ -1417,7 +1419,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
-                adapt_dt(device_self, geometry[coord_system], activeP, dtShBytes);
+                adapt_dt(device_self, geom, activeP, dtShBytes);
             } else {
                 adapt_dt();
             }
@@ -1430,14 +1432,14 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         {
             t1 = high_resolution_clock::now();
             // First Half Step
-            advance(self, activeP, bx, by, radius, geometry[coord_system], memside);
+            advance(self, activeP, bx, by, radius, geom, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2DGPU(fullP, self, nx, ny, false);
+            config_ghosts2DGPU(fullP, self, nx, ny, false, bc);
 
             // Final Half Step
-            advance(self, activeP, bx, by, radius, geometry[coord_system], memside);
+            advance(self, activeP, bx, by, radius, geom, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2DGPU(fullP, self, nx, ny, false);
+            config_ghosts2DGPU(fullP, self, nx, ny, false, bc);
 
             t += dt; 
 
@@ -1478,7 +1480,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
-                adapt_dt(device_self, geometry[coord_system], activeP, dtShBytes);
+                adapt_dt(device_self, geom, activeP, dtShBytes);
             } else {
                 adapt_dt();
             }

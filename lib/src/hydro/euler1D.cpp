@@ -189,6 +189,7 @@ void Newtonian1D::adapt_dt(Newtonian1D *dev, luint blockSize, luint tblock)
 {   
     #if GPU_CODE
     {
+        compute_dt<Newtonian1D, Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
         dtWarpReduce<Newtonian1D, Primitive, 16><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
         simbi::gpu::api::deviceSynch();
         simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
@@ -359,7 +360,7 @@ void Newtonian1D::advance(
             {
                 if (ia + BLOCK_SIZE > nx - 1) txl = nx - radius - ia + threadIdx.x;
                 prim_buff[txa - pseudo_radius] = self->gpu_prims[(ia - pseudo_radius) % nx];
-                prim_buff[txa + txl   ]        = self->gpu_prims[(ia + txl          ) % nx];
+                prim_buff[txa + txl]           = self->gpu_prims[(ia + txl          ) % nx];
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -402,44 +403,6 @@ void Newtonian1D::advance(
             {
                 flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
             }
-
-            switch (geometry)
-            {
-            case simbi::Geometry::CARTESIAN:
-                #if GPU_CODE
-                    dx1 = coord_lattice->gpu_dx1[ii];
-                    self->gpu_cons[ia] -= ((frf - flf)/ dx1) * dt;
-                #else
-                    dx1 = self->coord_lattice.dx1[ii];
-                    cons[ia] -= ((frf - flf)/ dx1) * dt;
-                #endif
-                
-                break;  
-            
-            case simbi::Geometry::SPHERICAL:
-                #if GPU_CODE
-                    pc    = prim_buff[txa].p;
-                    sL    = coord_lattice->gpu_face_areas[ii + 0];
-                    sR    = coord_lattice->gpu_face_areas[ii + 1];
-                    dV    = coord_lattice->gpu_dV[ii];
-                    rmean = coord_lattice->gpu_x1mean[ii];
-
-                    const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
-                    // const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
-                    self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources) * dt;
-                #else
-                    pc    = prim_buff[txa].p;
-                    sL    = self->coord_lattice.face_areas[ii + 0];
-                    sR    = self->coord_lattice.face_areas[ii + 1];
-                    dV    = self->coord_lattice.dV[ii];
-                    rmean = self->coord_lattice.x1mean[ii];
-
-                    const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
-                    // const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
-                    cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources) * dt;
-                #endif
-                break;
-            } // end switch
         }
         else
         {
@@ -492,45 +455,45 @@ void Newtonian1D::advance(
             {
                 flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
             }
-
-            switch (geometry)
-            {
-            case simbi::Geometry::CARTESIAN:
-                #if GPU_CODE
-                    dx1 = coord_lattice->gpu_dx1[ii];
-                    self->gpu_cons[ia] -= ( (frf - flf)/ dx1) * dt * (real)0.5;
-                #else
-                    dx1 = self->coord_lattice.dx1[ii];
-                    cons[ia] -= ( (frf - flf)/ dx1) * dt * (real)0.5;
-                #endif
-                
-                break;  
-            
-            case simbi::Geometry::SPHERICAL:
-                #if GPU_CODE
-                    pc    = prim_buff[txa].p;
-                    sL    = coord_lattice->gpu_face_areas[ii + 0];
-                    sR    = coord_lattice->gpu_face_areas[ii + 1];
-                    dV    = coord_lattice->gpu_dV[ii];
-                    rmean = coord_lattice->gpu_x1mean[ii];
-
-                    const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
-                    // const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
-                    self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources) * dt * (real)0.5;
-                #else
-                    pc    = prim_buff[txa].p;
-                    sL    = self->coord_lattice.face_areas[ii + 0];
-                    sR    = self->coord_lattice.face_areas[ii + 1];
-                    dV    = self->coord_lattice.dV[ii];
-                    rmean = self->coord_lattice.x1mean[ii];
-
-                    const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
-                    // const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
-                    cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources) * dt * (real)0.5;
-                #endif
-                break;
-            } // end switch
         }
+        const auto step = (self->first_order) ? (real)1.0 : (real)0.5;
+        switch (geometry)
+        {
+        case simbi::Geometry::CARTESIAN:
+            #if GPU_CODE
+                dx1 = coord_lattice->gpu_dx1[ii];
+                self->gpu_cons[ia] -= ( (frf - flf)/ dx1) * dt * step;
+            #else
+                dx1 = self->coord_lattice.dx1[ii];
+                cons[ia] -= ( (frf - flf)/ dx1) * dt * step;
+            #endif
+            
+            break;  
+        
+        case simbi::Geometry::SPHERICAL:
+            #if GPU_CODE
+                pc    = prim_buff[txa].p;
+                sL    = coord_lattice->gpu_face_areas[ii + 0];
+                sR    = coord_lattice->gpu_face_areas[ii + 1];
+                dV    = coord_lattice->gpu_dV[ii];
+                rmean = coord_lattice->gpu_x1mean[ii];
+
+                const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
+                // const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
+                self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources) * dt * step;
+            #else
+                pc    = prim_buff[txa].p;
+                sL    = self->coord_lattice.face_areas[ii + 0];
+                sR    = self->coord_lattice.face_areas[ii + 1];
+                dV    = self->coord_lattice.dV[ii];
+                rmean = self->coord_lattice.x1mean[ii];
+
+                const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
+                // const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
+                cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources) * dt * step;
+            #endif
+            break;
+        } // end switch
     }); // end parallel region
     
 };
@@ -545,12 +508,12 @@ void Newtonian1D::advance(
     real engine_duration,
     real chkpt_luinterval,
     std::string data_directory,
+    std::string boundary_condition,
     bool first_order,
-    bool periodic,
     bool linspace,
     bool hllc)
 {
-    this->periodic        = periodic;
+    this->periodic        = boundary_condition == "periodic";
     this->first_order     = first_order;
     this->plm_theta       = plm_theta;
     this->linspace        = linspace;
@@ -672,14 +635,16 @@ void Newtonian1D::advance(
 
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
-     if (first_order)
+    const auto bc      = boundary_cond_map.at(boundary_condition);
+    const auto geom    = geometry_map.at(coord_system);
+    if (first_order)
     {  
         while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
-            advance(radius, geometry[coord_system], activeP, self, shBlockSize, memside);
+            advance(radius, geom, activeP, self, shBlockSize, memside);
             cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, true, bc);
 
             t += dt; 
             
@@ -730,13 +695,13 @@ void Newtonian1D::advance(
             t1 = high_resolution_clock::now();
             // First Half Step
             cons2prim(fullP, self, memside);
-            advance(radius, geometry[coord_system], activeP, self, shBlockSize, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false);
+            advance(radius, geom, activeP, self, shBlockSize, memside);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false, bc);
 
             // Final Half Step
             cons2prim(fullP, self, memside);
-            advance(radius, geometry[coord_system], activeP, self, shBlockSize, memside);
-            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false);
+            advance(radius, geom, activeP, self, shBlockSize, memside);
+            if (!periodic) config_ghosts1DGPU(fullP, self, nx, false, bc);
             simbi::gpu::api::deviceSynch();
             t += dt; 
             

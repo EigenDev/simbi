@@ -130,9 +130,16 @@ namespace simbi
           simulate1D(
                std::vector<std::vector<real>> &sources, 
                real tstart,
-               real tend, real dt, real plm_theta, real engine_duraction,
-               real chkpt_interval, std::string data_directory,
-               bool first_order, bool periodic, bool linspace, bool hllc);
+               real tend, 
+               real dt,\
+               real plm_theta, 
+               real engine_duraction,
+               real chkpt_interval, 
+               std::string data_directory,
+               std::string boundary_condition,
+               bool first_order, 
+               bool linspace, 
+               bool hllc);
 
           
           //==============================================================

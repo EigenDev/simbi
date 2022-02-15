@@ -128,8 +128,8 @@ namespace simbi
             real engine_duration,
             real chkpt_interval,
             std::string data_directory,
+            std::string boundary_condition,
             bool first_order,
-            bool periodic,
             bool linspace,
             bool hllc,
             bool quirk_smoothing=true);

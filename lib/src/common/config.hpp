@@ -68,16 +68,18 @@ namespace simbi{
         SECOND_ORDER,
     };
 
-    enum class Dimensions
-    {
-        ONE_D,
-        TWO_D,
-    };
-
     enum class Solver
     {
         HLLC,
         HLLE,
+    };
+
+    enum class BoundaryCondition
+    {
+        REFLECTING,
+        OUTFLOW,
+        INFLOW,
+        PERIODIC,
     };
 
     enum class WaveSpeeds

@@ -125,17 +125,17 @@ namespace simbi
 
         std::vector<std::vector<real>> simulate3D(
             const std::vector<std::vector<real>> sources,
-            real tstart,
-            real tend,
-            real init_dt,
-            real plm_theta,
-            real engine_duration,
-            real chkpt_luinterval,
-            std::string data_directory,
-            bool first_order,
-            bool periodic,
-            bool linspace,
-            bool hllc);
+            real tstart = 0, 
+            real tend = 0.1, 
+            real init_dt = 1.e-4, 
+            real plm_theta = 1.5,
+            real engine_duration = 10, 
+            real chkpt_interval = 0.1,
+            std::string data_directory = "data/", 
+            std::string boundary_condition = "outflow",
+            bool first_order = true,
+            bool linspace = true, 
+            bool hllc = false);
     };
 }
 

@@ -8,8 +8,11 @@ import os
 import sys 
 import h5py 
 import pysimbi.initial_condition as simbi_ic 
-from   gpu_ext import *
-# from   pysimbi.hydro import Hydro
+
+regimes             = ['classical', 'relativistic']
+coord_systems       = ['spherical', 'cartesian'] #TODO: Implement Cylindrical
+boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
+
 class Hydro:
     
     def __init__(self, 
@@ -47,6 +50,12 @@ class Hydro:
             None
         """
         # TODO: Add an example Instantiation Here for the Sod Problem
+        if coord_system not in coord_systems:
+            raise ValueError("Invalid coordinate system. Expected one of: %s" % coord_systems)
+        
+        if regime not in regimes:
+            raise ValueError("Invalid simulation regime. Expected one of: %s" % regimes)
+        
         self.coord_system = coord_system
         self.regime       = regime
         discontinuity     = False
@@ -299,7 +308,6 @@ class Hydro:
                  dt: float = 1.e-4,
                  plm_theta: float = 1.5,
                  first_order: bool = True,
-                 periodic: bool = False,
                  linspace: bool = True,
                  cfl: float = 0.4,
                  sources: np.ndarray = None,
@@ -308,6 +316,7 @@ class Hydro:
                  chkpt: str = None,
                  chkpt_interval:float = 0.1,
                  data_directory:str = "data/",
+                 boundary_condition: str = "outflow",
                  engine_duration: float = 10.0,
                  compute_mode: str = 'cpu',
                  quirk_smoothing: bool = True) -> np.ndarray:
@@ -329,6 +338,8 @@ class Hydro:
         Returns:
             u (array): The conserved/primitive variable array
         """
+        if boundary_condition not in boundary_conditions:
+            raise ValueError("Invalid boundary condition. Expected one of: %s" % boundary_conditions)
         
         if compute_mode == 'cpu':
             from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
@@ -339,20 +350,20 @@ class Hydro:
                 print("Error in loading GPU extension. Loading CPU instead...")
                 from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
                 
-        #Convert strings to byte arrays
-        data_directory = os.path.join(data_directory, '').encode('utf-8')
-        coordinates    = self.coord_system.encode('utf-8')
-        
         self.u = np.asarray(self.u)
         self.t = 0
         
         if not chkpt:
-            simbi_ic.initializeModel(self, first_order, periodic, scalars)
+            simbi_ic.initializeModel(self, first_order, boundary_condition, scalars)
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensions)
             
         u = self.u 
         start_time = tstart if self.t == 0 else self.t
+        #Convert strings to byte arrays
+        data_directory     = os.path.join(data_directory, '').encode('utf-8')
+        coordinates        = self.coord_system.encode('utf-8')
+        boundary_condition = boundary_condition.encode('utf-8')
         
         if first_order:
             print("Computing First Order Solution...")
@@ -380,8 +391,8 @@ class Hydro:
                 engine_duration = engine_duration,
                 chkpt_interval = chkpt_interval,
                 data_directory = data_directory,
+                boundary_condition = boundary_condition,
                 first_order = first_order,
-                periodic = periodic,
                 linspace = linspace,
                 hllc = hllc)  
                 
@@ -408,8 +419,8 @@ class Hydro:
                     engine_duration = engine_duration,
                     chkpt_interval  = chkpt_interval,
                     data_directory  = data_directory,
+                    boundary_condition = boundary_condition,
                     first_order     = first_order,
-                    periodic        = periodic,
                     linspace        = linspace,
                     hllc            = hllc) 
             else:
@@ -424,8 +435,8 @@ class Hydro:
                     engine_duration = engine_duration,
                     chkpt_interval  = chkpt_interval,
                     data_directory  = data_directory,
+                    boundary_condition = boundary_condition,
                     first_order     = first_order,
-                    periodic        = periodic,
                     linspace        = linspace,
                     hllc            = hllc,
                     quirk_smoothing = quirk_smoothing)  
@@ -458,11 +469,11 @@ class Hydro:
                 engine_duration = engine_duration,
                 chkpt_interval  = chkpt_interval,
                 data_directory  = data_directory,
+                boundary_condition = boundary_condition,
                 first_order     = first_order,
-                periodic        = periodic,
                 linspace        = linspace,
                 hllc            = hllc)  
         
-        return self._cleanup(u, first_order) if not periodic else u
+        return self._cleanup(u, first_order) if not boundary_condition == "periodic" else u
         
     
