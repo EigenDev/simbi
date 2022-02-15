@@ -1705,10 +1705,6 @@ def plot_ligthcurve(
     d_28    = (r / (1e28 * u.cm))
     n1      = nwind / (1 * u.cm**(-3))
     
-    # print(td)
-    # print(e52)
-    # zzz = input('')
-    
     nu_c_sphere = 2.70e12 * eb_m1**(-3/2) * e52 **(-1/2) * n1**(-1)  * td  **(-1/2) * u.Hz
     nu_m_sphere = 5.70e14 * eb_m1**( 1/2) * e52 **( 1/2) * ec_m1**2  * td  **(-3/2) * u.Hz
     fnu_max     = 1.1e5   * eb_m1**( 1/2) * e52  *         n1**(1/2) * d_28**(-2)  
@@ -1723,19 +1719,11 @@ def plot_ligthcurve(
         gtr_sync = nu > nu_c
         
         if nu < nu_c:
-            print("1")
-            zzz = input('')
             return (nu/nu_c)**( 1/3)*fnu_max[tidx][r_shock] 
         elif (nu < nu_m) & (nu > nu_c):
             return (nu/nu_c) **(-1/2)*fnu_max[tidx][r_shock]
         elif nu > nu_m:
-            print("3")
-            zzz = input('')
             return (nu_m/nu_c)**(-1/2)*(nu/nu_m)**(-p/2)*fnu_max[tidx][r_shock]     
-        # fnu[gtr_crit] = (nu[gtr_crit]/nu_c[gtr_crit])**( 1/3)*fnu_max[tidx][gtr_crit] 
-        # fnu[between]  = (nu[between]/nu_c[between]) **(-1/2)*fnu_max[tidx][between]
-        # fnu[gtr_sync] = (nu_m/nu_c[gtr_sync])**(-1/2)*(nu[gtr_sync]/nu_m)**(-p/2)*fnu_max[tidx][gtr_sync]
-        # return fnu
 
     theta1    = 0
     theta2    = int(mesh['theta'].shape[0]/2)
@@ -1754,7 +1742,6 @@ def plot_ligthcurve(
         
     ax.set_xlabel(r'$\nu [\rm{Hz}]$', fontsize=15)
     ax.set_ylabel(r'Flux $[\mu \rm{J}]$', fontsize=15)
-    # ax.legend()
     
     
 def main():
