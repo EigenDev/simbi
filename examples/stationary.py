@@ -2,45 +2,59 @@
 
 import numpy as np 
 import time
+import argparse
 import matplotlib.pyplot as plt 
 
 from pysimbi import Hydro
 
-gamma = 1.4
-tend = 1.0
-N = 100
-dt = 1.e-4
+def main():
+    parser = argparse.ArgumentParser(description='Mignone and Bodo Test Problem 1/2 Params')
+    parser.add_argument('--gamma', '-g',  dest='gamma', type=float, default=1.4)
+    parser.add_argument('--tend', '-t',   dest='tend', type=float, default=1.0)
+    parser.add_argument('--nzones', '-n', dest='nzones', type=int, default=400)
+    parser.add_argument('--chint',        dest='chint', type=float, default=0.1)
+    parser.add_argument('--cfl',          dest='cfl', type=float, default=0.8)
+    parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
+    parser.add_argument('--plm',          dest='plm', type=float, default=1.5)
+    parser.add_argument('--omega',        dest='omega', type=float, default=0.0)
+    parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
+    parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
+    parser.add_argument('--data_dr', '-d',   dest='data_dir', type=str, default='data/') 
+    
+    args = parser.parse_args()
+    
+    stationary = ((1.4, 1.0, 0.0), (1.0, 1.0, 0.0))
+    fig, ax = plt.subplots(1, 1, figsize=(10,10))
 
-mode = 'cpu'
-stationary = ((1.4, 1.0, 0.0), (1.0, 1.0, 0.0))
-fig, ax = plt.subplots(1, 1, figsize=(10,10))
+    hydro = Hydro(gamma=args.gamma, initial_state = stationary,
+            Npts=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3)
 
-hydro = Hydro(gamma=gamma, initial_state = stationary,
-        Npts=N, geometry=(0.0,1.0,0.5), n_vars=3)
+    hydro2 = Hydro(gamma=args.gamma, initial_state = stationary,
+            Npts=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3)
 
-hydro2 = Hydro(gamma=gamma, initial_state = stationary,
-        Npts=N, geometry=(0.0,1.0,0.5), n_vars=3)
+    t1 = time.time()
+    poll = hydro.simulate(tend=args.tend, first_order=args.forder, hllc=False, cfl=args.cfl, compute_mode=args.mode, boundary_condition=args.boundc)
+    print("Time for HLLE Simulation: {} sec".format(time.time() - t1))
 
-t1 = time.time()
-poll = hydro.simulate(tend=tend, dt=dt, first_order=False, hllc=False, cfl=0.4, compute_mode=mode, boundary_condition='outflow')
-print("Time for HLLE Simulation: {} sec".format(time.time() - t1))
+    t2 = time.time()
+    bar = hydro2.simulate(tend=args.tend, first_order=args.forder, hllc=True, cfl=args.cfl, compute_mode=args.mode, boundary_condition=args.boundc)
+    print("Time for HLLC Simulation: {} sec".format(time.time() - t2))
 
-t2 = time.time()
-bar = hydro2.simulate(tend=tend, dt=dt, first_order=False, hllc=True, cfl=0.4, compute_mode=mode, boundary_condition='outflow')
-print("Time for HLLC Simulation: {} sec".format(time.time() - t2))
-
-u = bar[1]
-v = poll[1]
+    u = bar[1]
+    v = poll[1]
 
 
-x = np.linspace(0, 1, N)
-fig.suptitle("Stationary Wave Problem at t = {} with N = {}".format(tend, N))
-ax.plot(x, poll[0], 'r--', fillstyle='none', label='HLLE')
-ax.plot(x, bar [0], 'b', label='HLLC')
-ax.set_xlabel('X', fontsize=20)
-ax.set_ylabel('Density', fontsize=20)
+    x = np.linspace(0, 1, args.nzones)
+    fig.suptitle("Stationary Wave Problem at t = {} with N = {}".format(args.tend, args.nzones))
+    ax.plot(x, poll[0], 'r--', fillstyle='none', label='HLLE')
+    ax.plot(x, bar [0], 'b', label='HLLC')
+    ax.set_xlabel('X', fontsize=20)
+    ax.set_ylabel('Density', fontsize=20)
 
 
-ax.legend()
-ax.set_xlim(0, 1)
-plt.show()
+    ax.legend()
+    ax.set_xlim(0, 1)
+    plt.show()
+
+if __name__ == '__main__':
+    main()

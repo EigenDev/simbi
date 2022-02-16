@@ -3,85 +3,94 @@
 import numpy as np 
 import matplotlib.pyplot as plt
 import time
+import argparse
+
 from pysimbi import Hydro 
-from astropy import units as u, constants as const
+from astropy import units as u
 
 
-gamma = 5/3
-theta_min = 0
-theta_max = np.pi/2
-rmin  = 0.1
-rmax  = 1.1
-rmid  = (rmax - rmin) / 2
-ynpts = 100 
+def main():
+    parser = argparse.ArgumentParser(description='2D Sod Shock Tube Params')
+    parser.add_argument('--gamma', '-g',  dest='gamma', type=float, default=1.4)
+    parser.add_argument('--tend', '-t',   dest='tend', type=float, default=0.1)
+    parser.add_argument('--npolar', '-n', dest='npolar', type=int, default=100)
+    parser.add_argument('--chint',        dest='chint', type=float, default=0.1)
+    parser.add_argument('--cfl',          dest='cfl', type=float, default=0.1)
+    parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
+    parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
+    parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
+    parser.add_argument('--data_dr', '-d',   dest='data_dir', type=str, default='data/')  
+    
+    args = parser.parse_args()
+    theta_min = 0
+    theta_max = np.pi/2
+    rmin  = 0.1
+    rmax  = 1.1
+    rmid  = (rmax - rmin) / 2
+    ynpts = args.npolar 
 
-# Choose dtheta carefully such that the grid zones remain roughly square
-dtheta = (theta_max - theta_min) / ynpts
-xnpts = int(1 + np.log10(rmax/rmin)/dtheta)
+    # Choose dtheta carefully such that the grid zones remain roughly square
+    dtheta = (theta_max - theta_min) / ynpts
+    xnpts = int(1 + np.log10(rmax/rmin)/dtheta)
 
-rhoL = 1.0
-vL   = 0.0
-pL   = 1.0
+    rhoL = 1.0
+    vL   = 0.0
+    pL   = 1.0
 
-rhoR = 0.125
-vR   = 0.0
-pR   = 0.1
+    rhoR = 0.125
+    vR   = 0.0
+    pR   = 0.1
 
-r = np.geomspace(rmin, rmax, xnpts)
-r1 = r[1]
-r0 = r[0]
-ri = (r1*r0)**0.5
+    r = np.geomspace(rmin, rmax, xnpts)
+    r1 = r[1]
+    r0 = r[0]
+    ri = (r1*r0)**0.5
 
-theta = np.linspace(theta_min, theta_max, ynpts)
+    theta = np.linspace(theta_min, theta_max, ynpts)
 
-rho = np.zeros(shape=(ynpts, xnpts), dtype= float)
-rho[:,r < rmid] = rhoL 
-rho[:,r > rmid] = rhoR
+    rho = np.zeros(shape=(ynpts, xnpts), dtype= float)
+    rho[:,r < rmid] = rhoL 
+    rho[:,r > rmid] = rhoR
 
-p   = np.zeros(shape=(ynpts, xnpts), dtype= float)
-p[:,r < rmid] = pL 
-p[:,r > rmid] = pR
+    p   = np.zeros(shape=(ynpts, xnpts), dtype= float)
+    p[:,r < rmid] = pL 
+    p[:,r > rmid] = pR
 
-vr = np.zeros(shape=(ynpts, xnpts), dtype= float)
-vt = np.zeros(shape=(ynpts, xnpts), dtype= float)
+    vr = np.zeros(shape=(ynpts, xnpts), dtype= float)
+    vt = np.zeros(shape=(ynpts, xnpts), dtype= float)
 
-mode = 'gpu'
-tend = 0.1
-dtheta = theta_max/ynpts
-cs = (gamma * p / gamma)**0.5
-dt = 0.1 * (ri * dtheta)
+    print("Dim: {}x{}".format(ynpts, xnpts))
 
-print("dt: {}".format(dt) )
-print("Rmin: {}".format(rmin))
-print("Dim: {}x{}".format(ynpts, xnpts))
+    SodHLLE = Hydro(gamma = args.gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
+                Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
-SodHLLE = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
-              Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
-
-t1 = (time.time()*u.s).to(u.min)
-hlle_result = SodHLLE.simulate(tend=tend, first_order=True, dt=dt, compute_mode=mode,
-                   linspace=False, cfl=0.1, hllc=False, boundary_condition='reflecting')
+    t1 = (time.time()*u.s).to(u.min)
+    hlle_result = SodHLLE.simulate(tend=args.tend, first_order=args.forder, compute_mode=args.mode,
+                    linspace=False, cfl=args.cfl, chkpt_interval=args.chint, hllc=False, boundary_condition=args.boundc)
 
 
-# HLLC Simulation
-SodHLLC = Hydro(gamma = gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
-              Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
+    # HLLC Simulation
+    SodHLLC = Hydro(gamma = args.gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
+                Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
-t1 = (time.time()*u.s).to(u.min)
-hllc_result = SodHLLC.simulate(tend=tend, first_order=True, dt=dt, compute_mode=mode,
-                    linspace=False, cfl=0.1, hllc=True, boundary_condition='reflecting')
+    t1 = (time.time()*u.s).to(u.min)
+    hllc_result = SodHLLC.simulate(tend=args.tend, first_order=args.forder, compute_mode=args.mode,
+                        linspace=False, cfl=args.cfl, hllc=True, boundary_condition=args.boundc, chkpt_interval=args.chint)
 
-print("The 2D SOD Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
+    print("The 2D SOD Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 
-rhoE = hlle_result[0]
-rhoC = hllc_result[0]
+    rhoE = hlle_result[0]
+    rhoC = hllc_result[0]
 
-# Plot Radial Density at Theta = 0
-plt.semilogx(r, rhoE[0], label='HLLE')
-plt.semilogx(r, rhoC[0], label='HLLC')
+    # Plot Radial Density at Theta = 0
+    plt.semilogx(r, rhoE[0], label='HLLE')
+    plt.semilogx(r, rhoC[0], label='HLLC')
 
-plt.xlim(r[0], r[-1])
-plt.xlabel('R')
-plt.ylabel('Density')
-plt.legend()
-plt.show()
+    plt.xlim(r[0], r[-1])
+    plt.xlabel('R')
+    plt.ylabel('Density')
+    plt.legend()
+    plt.show()
+    
+if __name__ == '__main__':
+    main()
