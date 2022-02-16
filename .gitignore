@@ -3,8 +3,8 @@ pysimbi/__pycache__/
 SIMBI_2D_Hydro_Code.egg-info/
 build/
 data/
-# cpu_version/
-# hip_version/
+lib/src/gpu_state.pyx
+lib/src/cpu_state.pyx
 lib/src/build_options.hpp 
 data/*
 tests/
