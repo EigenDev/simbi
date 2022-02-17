@@ -360,7 +360,7 @@ void Newtonian1D::advance(
             {
                 if (ia + BLOCK_SIZE > nx - 1) txl = nx - radius - ia + threadIdx.x;
                 prim_buff[txa - pseudo_radius] = self->gpu_prims[mod(ia - pseudo_radius, nx)];
-                prim_buff[txa + txl]           = self->gpu_prims[(ia + txl          ) % nx];
+                prim_buff[txa + txl]           = self->gpu_prims[(ia + txl) % nx];
             }
             simbi::gpu::api::synchronize();
         #endif
