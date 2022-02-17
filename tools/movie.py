@@ -51,7 +51,7 @@ def get_field_str(args):
     field_str_list = []
     for field in args.field:
         if field == "rho" or field == 'D':
-            var = r"\rho" if args.field == "rho" else "D"
+            var = r"\rho" if field == "rho" else "D"
             if args.units:
                 field_str_list.append( r'${}$ [g cm$^{{-3}}$]'.format(var))
             else:
@@ -93,66 +93,73 @@ def get_frames(dir, max_file_num):
     return total_frames, frames
 
 def read_file(filepath, filename, args):
+    setup  = {}
+    fields = {}
     is_cartesian = False
-    field_dict = {}
-    setup_dict = {}
-    with h5py.File(filepath + filename, 'r') as hf:
-        ds = hf.get("sim_info")
-        rho         = hf.get("rho")[:]
-        v1          = hf.get("v1")[:]
-        v2          = hf.get("v2")[:]
-        p           = hf.get("p")[:]
-        t           = ds.attrs["current_time"] * time_scale
+    with h5py.File(filepath + filename, 'r') as hf: 
+        ds          = hf.get('sim_info')
+        rho         = hf.get('rho')[:]
+        v1          = hf.get('v1')[:]
+        v2          = hf.get('v2')[:]
+        p           = hf.get('p')[:]
+        t           = ds.attrs['current_time']
+        
         try:
-            x1max        = ds.attrs["x1max"]
-            x1min        = ds.attrs["x1min"]
-            x2max        = ds.attrs["x2max"]
-            x2min        = ds.attrs["x2min"]
+            x1max = ds.attrs['x1max']
+            x1min = ds.attrs['x1min']
+            x2max = ds.attrs['x2max']
+            x2min = ds.attrs['x2min']
         except:
-            x1max        = ds.attrs["xmax"]
-            x1min        = ds.attrs["xmin"]
-            x2max        = ds.attrs["ymax"]
-            x2min        = ds.attrs["ymin"]
+            x1max = ds.attrs['xmax']
+            x1min = ds.attrs['xmin']
+            x2max = ds.attrs['ymax']
+            x2min = ds.attrs['ymin']  
         
         # New checkpoint files, so check if new attributes were
         # implemented or not
         try:
-            nx          = ds.attrs["nx"]
-            ny          = ds.attrs["ny"]
+            nx          = ds.attrs['nx']
+            ny          = ds.attrs['ny']
         except:
-            nx          = ds.attrs["NX"]
-            ny          = ds.attrs["NY"]
+            nx          = ds.attrs['NX']
+            ny          = ds.attrs['NY']
+        
         try:
-            gamma = ds.attrs["adiabatic_gamma"]
-        except:
-            gamma = 4./3.
-            
-        try:
-            coord_sysem = ds.attrs["geometry"].decode('utf-8')
-        except:
-            coord_sysem = "spherical"
-            
-        try:
-            is_linspace = ds.attrs["linspace"]
-        except:
-            is_linspace = False
-            
-        try:
-            chi = hf.get("chi")[:]
+            chi = hf.get('chi')[:]
         except:
             chi = np.zeros((ny, nx))
+            
+        try:
+            gamma = ds.attrs['adiabatic_gamma']
+        except:
+            gamma = 4./3.
         
-        setup_dict["x1max"] = x1max 
-        setup_dict["x1min"] = x1min 
-        setup_dict["x2max"] = x2max 
-        setup_dict["x2min"] = x2min 
-        setup_dict["time"] = t
+        # Check for garbage value
+        if gamma < 1:
+            gamma = 4./3. 
+            
+        try:
+            coord_sysem = ds.attrs['geometry'].decode('utf-8')
+        except Exception as e:
+            coord_sysem = 'spherical'
+            
+        try:
+            is_linspace = ds.attrs['linspace']
+        except:
+            is_linspace = False
+        
+        setup['x1max'] = x1max 
+        setup['x1min'] = x1min 
+        setup['x2max'] = x2max 
+        setup['x2min'] = x2min 
+        setup['time']  = t * time_scale if coord_sysem == 'spherical' else t 
         
         rho = rho.reshape(ny, nx)
         v1  = v1.reshape(ny, nx)
         v2  = v2.reshape(ny, nx)
         p   = p.reshape(ny, nx)
         chi = chi.reshape(ny, nx)
+        
         
         if args.forder:
             rho = rho[1:-1, 1: -1]
@@ -162,8 +169,8 @@ def read_file(filepath, filename, args):
             chi = chi[1:-1, 1: -1]
             xactive = nx - 2
             yactive = ny - 2
-            setup_dict["xactive"] = xactive
-            setup_dict["yactive"] = yactive
+            setup['xactive'] = xactive
+            setup['yactive'] = yactive
         else:
             rho = rho[2:-2, 2: -2]
             v1  = v1 [2:-2, 2: -2]
@@ -172,48 +179,34 @@ def read_file(filepath, filename, args):
             chi = chi[2:-2, 2: -2]
             xactive = nx - 4
             yactive = ny - 4
-            setup_dict["xactive"] = xactive
-            setup_dict["yactive"] = yactive
+            setup['xactive'] = xactive
+            setup['yactive'] = yactive
         
         if is_linspace:
-            setup_dict["x1"] = np.linspace(x1min, x1max, xactive)
-            setup_dict["x2"] = np.linspace(x2min, x2max, yactive)
+            setup['x1'] = np.linspace(x1min, x1max, xactive)
+            setup['x2'] = np.linspace(x2min, x2max, yactive)
         else:
-            setup_dict["x1"] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
-            setup_dict["x2"] = np.linspace(x2min, x2max, yactive)
+            setup['x1'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
+            setup['x2'] = np.linspace(x2min, x2max, yactive)
         
-        if coord_sysem == "cartesian":
+        if coord_sysem == 'cartesian':
             is_cartesian = True
         
-        setup_dict["is_cartesian"] = is_cartesian
-        setup_dict["dataset"] = ds
-        W    = 1/np.sqrt(1 -(v1**2 + v2**2))
+        W    = 1/np.sqrt(1.0 -(v1**2 + v2**2))
         beta = np.sqrt(v1**2 + v2**2)
         
+        fields['rho']          = rho
+        fields['v1']           = v1 
+        fields['v2']           = v2 
+        fields['p']            = p
+        fields['chi']          = chi
+        fields['gamma_beta']   = W*beta
+        fields['ad_gamma']     = gamma
+        setup['is_cartesian']  = is_cartesian
+        # fields[idx]['gamma_beta_1'] = abs(W*v1)
+        # fields[idx]['gamma_beta_2'] = abs(W*v2)
         
-        e = 3*p/rho 
-        c = const.c.cgs.value
-        a = (4 * const.sigma_sb.cgs.value / c)
-        k = const.k_B.cgs
-        m = const.m_p.cgs.value
-        T = (3 * p * c ** 2  / a)**(1./4.)
-        h = 1. + gamma*p/(rho*(gamma - 1.))
-        
-        field_dict["rho"]          = rho
-        field_dict["v1"]           = v1 
-        field_dict["v2"]           = v2 
-        field_dict["pre"]          = p
-        field_dict["chi"]          = chi
-        field_dict["chi_dens"]     = chi * rho * W
-        field_dict["gamma_beta"]   = W*beta
-        field_dict["gamma_beta_1"] = abs(W*v1)
-        field_dict["gamma_beta_2"] = abs(W*v2)
-        field_dict["temperature"]  = T
-        field_dict["enthalpy"]     = h
-        field_dict["W"]            = W
-        field_dict["energy"]       = rho * h * W * W  - p - rho * W
-        
-    return field_dict, setup_dict
+    return fields, setup 
 
 def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
     num_fields = len(args.field)
@@ -539,9 +532,8 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
         color_map = plt.cm.get_cmap(args.cmap)
         
     tend = ds["time"]
-    c = ax.pcolormesh(xx, yy, field_dict[args.field], cmap=color_map, shading='auto', **kwargs)
+    c = ax.pcolormesh(xx, yy, field_dict[args.field[0]], cmap=color_map, shading='auto', **kwargs)
 
-        
     if args.log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
         cbar = fig.colorbar(c, orientation="vertical", cax=cbaxes, format=logfmt)
@@ -553,14 +545,7 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     ax.tick_params(axis='both', labelsize=10)
     
     # Change the format of the field
-    if args.field == "rho":
-        field_str = r'$\rho$'
-    elif args.field == "gamma_beta":
-        field_str = r"$\Gamma \ \beta$"
-    elif args.field == "temperature":
-        field_str = r"T [K]"
-    else:
-        field_str = args.field
+    field_str = get_field_str(args)
     
     if args.log:
         cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
