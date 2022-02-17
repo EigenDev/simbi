@@ -20,7 +20,7 @@ def main():
     parser.add_argument('--cfl',          dest='cfl', type=float, default=0.8)
     parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
     parser.add_argument('--plm',          dest='plm', type=float, default=1.5)
-    parser.add_argument('--omega',        dest='omega', type=float, default=0.0)
+    parser.add_argument('--omega',        dest='omega', type=float, default=2.0)
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='reflecting', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/') 
@@ -36,7 +36,7 @@ def main():
 
 
     # Constants
-    p_init  = 1.e-6
+    p_init  = 1.e-10
     r_init  = 0.01
     nu      = 3.
     epsilon = 1.
@@ -74,7 +74,7 @@ def main():
     rho[:] = 1.0 * r ** (-args.omega)
 
 
-    p              = p_init 
+    p              = p_init*rho
     p[:, :p_zones] = p_c 
 
     vx = np.zeros((ntheta ,nr), np.double)
@@ -99,7 +99,7 @@ def main():
     rr, t2 = np.meshgrid(r, theta_mirror)
 
     fig, ax= plt.subplots(1, 1, figsize=(8,10), subplot_kw=dict(projection='polar'), constrained_layout=True)
-    c1 = ax.pcolormesh(tt, rr, ufour, cmap='inferno', shading = "aufourto")
+    c1 = ax.pcolormesh(tt, rr, ufour, cmap='inferno', shading = "auto")
     c2 = ax.pcolormesh(t2[::-1], rr, ufour, cmap='inferno', shading = "auto")
 
     fig.suptitle('Spherical Explosion at t={} s on {} x {} grid'.format(args.tend, nr, ntheta), fontsize=15)
