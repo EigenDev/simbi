@@ -3,95 +3,104 @@
 import numpy as np 
 import matplotlib.pyplot as plt
 import time
-import scipy.ndimage
-import matplotlib.colors as colors
+import argparse
+import matplotlib.colors as mcolors
+try:
+    import cmasher
+except:
+    print("Can't find CMasher, so defaulting to matplotlib colors")
 
 from pysimbi import Hydro 
-from astropy import units as u, constants as const
+from astropy import units as u 
+
+def main():
+    parser = argparse.ArgumentParser(description="KH Instability Test")
+    parser.add_argument('--gamma', '-g',  dest='gamma', type=float, default=1.4)
+    parser.add_argument('--tend', '-t',   dest='tend', type=float, default=0.1)
+    parser.add_argument('--nzones', '-n', dest='nzones', type=int, default=100)
+    parser.add_argument('--chint',        dest='chint', type=float, default=0.1)
+    parser.add_argument('--cfl',          dest='cfl', type=float, default=0.4)
+    parser.add_argument('--cmap', '-c',   dest='cmap', type=str, default='gist_ncar')
+    parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
+    parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='periodic', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
+    parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
+    parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/')   
+    
+    args = parser.parse_args()
+    xmin = -0.5
+    xmax = 0.5
+    ymin = -0.5
+    ymax = 0.5
+
+    xnpts = args.nzones
+    ynpts = xnpts
+
+    rhoL = 2.0
+    vxT  = 0.5
+    pL   = 2.5
+
+    rhoR = 1.0
+    vxB  = - 0.5
+    pR   = 2.5
+
+    x = np.linspace(xmin, xmax, xnpts)
+    y = np.linspace(ymin, ymax, ynpts)
 
 
-gamma = 1.4
-xmin = -0.5
-xmax = 0.5
-ymin = -0.5
-ymax = 0.5
+    rho = np.zeros(shape=(ynpts, xnpts), dtype= float)
+    rho[np.where(np.abs(y) < 0.25)] = rhoL 
+    rho[np.where(np.abs(y) > 0.25)] = rhoR
 
-xnpts = 512
-ynpts = xnpts
+    vx = np.zeros(shape=(ynpts, xnpts), dtype= float)
+    vx[np.where(np.abs(y) > 0.25)]  = vxT
+    vx[np.where(np.abs(y) < 0.25)]  = vxB
 
-rhoL = 2.0
-vxT = 0.5
-pL = 2.5
+    vy = np.zeros(shape=(ynpts, xnpts), dtype= float)
 
-rhoR = 1.0
-vxB = - 0.5
-pR = 2.5
+    p = np.zeros(shape=(ynpts, xnpts), dtype= float)
+    p[np.where(np.abs(y) > 0.25)] = pL 
+    p[np.where(np.abs(y) < 0.25)] = pR
 
-mode = 'cpu'
-x = np.linspace(xmin, xmax, xnpts)
-y = np.linspace(ymin, ymax, ynpts)
+    # Seed the KH instability with random velocities
+    seed = np.random.seed(0)
+    sin_arr = 0.01*np.sin(2*np.pi*x)
+    vx_rand = np.random.choice(sin_arr, size=vx.shape)
+    vy_rand = np.random.choice(sin_arr, size=vy.shape)
 
+    vx += vx_rand
+    vy += vy_rand
 
-rho = np.zeros(shape=(ynpts, xnpts), dtype= float)
-rho[np.where(np.abs(y) < 0.25)] = rhoL 
-rho[np.where(np.abs(y) > 0.25)] = rhoR
+    xx, yy = np.meshgrid(x, y)
 
-vx = np.zeros(shape=(ynpts, xnpts), dtype= float)
-vx[np.where(np.abs(y) > 0.25)]  = vxT
-vx[np.where(np.abs(y) < 0.25)]  = vxB
+    fig, ax= plt.subplots(1, 1, figsize=(12,6), constrained_layout=False)
 
-vy = np.zeros(shape=(ynpts, xnpts), dtype= float)
+    # HLLC Simulation
+    SodHLLC = Hydro(gamma = args.gamma, initial_state=(rho, p, vx, vy), 
+                Npts=(xnpts, ynpts), geometry=((xmin, xmax),(ymin, ymax)), n_vars=4)
 
-p = np.zeros(shape=(ynpts, xnpts), dtype= float)
-p[np.where(np.abs(y) > 0.25)] = pL 
-p[np.where(np.abs(y) < 0.25)] = pR
+    t1 = (time.time()*u.s).to(u.min)
+    hllc_result = SodHLLC.simulate(tend=args.tend, first_order=args.forder, compute_mode=args.mode,
+                                linspace=True, cfl=args.cfl, data_directory=args.data_dir,
+                                hllc=True, boundary_condition='periodic', chkpt_interval = args.chint)
 
-# Seed the KH instability with random velocities
-seed = np.random.seed(0)
-sin_arr = 0.01*np.sin(2*np.pi*x)
-vx_rand = np.random.choice(sin_arr, size=vx.shape)
-vy_rand = np.random.choice(sin_arr, size=vy.shape)
+    print("The 2D KH Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 
-vx += vx_rand
-vy += vy_rand
+    rho, vx, vy, pre, chi = hllc_result
 
-tend = 2.0
+    rnorm = mcolors.LogNorm(vmin=0.9, vmax=2.1)
 
-dt = 1.e-4
-xx, yy = np.meshgrid(x, y)
+    c1 = ax.pcolormesh(xx, yy, rho, cmap=args.cmap, edgecolors='none', shading ='auto', vmin=0.9, vmax=2.1)
 
-fig, ax= plt.subplots(1, 1, figsize=(8,10), constrained_layout=False)
-
-# HLLC Simulation
-SodHLLC = Hydro(gamma = gamma, initial_state=(rho, p, vx, vy), 
-              Npts=(xnpts, ynpts), geometry=((xmin, xmax),(ymin, ymax)), n_vars=4)
-
-t1 = (time.time()*u.s).to(u.min)
-hllc_result = SodHLLC.simulate(tend=tend, first_order=False, dt=dt, compute_mode=mode,
-                               linspace=True, cfl=0.4, data_directory="data/",
-                               hllc=True, boundary_condition='periodic', chkpt_interval= 0.01)
-
-print("The 2D KH Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
-
-rho, vx, vy, pre, chi = hllc_result
-
-rnorm = colors.LogNorm(vmin=0.9, vmax=2.1)
-
-c1 = ax.pcolormesh(xx, yy, rho, cmap='gist_rainbow', edgecolors='none', shading ='auto', vmin=0.9, vmax=2.1)
-
-fig.suptitle('SIMBI: KH Instability Test at t={} s on {} x {} grid.'.format(tend, xnpts, ynpts), fontsize=20)
+    fig.suptitle('SIMBI: KH Instability Test at t={} s on {} x {} grid.'.format(args.tend, xnpts, ynpts), fontsize=20)
 
 
-cbar = fig.colorbar(c1, orientation='vertical')
-ax.tick_params(axis='both', labelsize=10)
+    cbar = fig.colorbar(c1, orientation='vertical')
+    ax.tick_params(axis='both', labelsize=10)
+    cbar.ax.set_ylabel('Density', fontsize=20)
+    plt.show()
 
-
-
-
-cbar.ax.set_xlabel('Density', fontsize=20)
-plt.show()
-
-
+if __name__ == '__main__':
+    main()
 
 
 
