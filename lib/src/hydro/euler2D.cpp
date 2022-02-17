@@ -463,8 +463,8 @@ void Newtonian2D::advance(
     const real decay_const         = this->decay_const;
     const real plm_theta           = this->plm_theta;
     const real gamma               = this->gamma;
-    const luint nx                 = this->nx;
-    const luint ny                 = this->ny;
+    const lint nx                  = this->nx;
+    const lint ny                  = this->ny;
     const real dx2                 = this->dx2;
     const real dlogx1              = this->dlogx1;
     const real dx1                 = this->dx1;
@@ -486,8 +486,8 @@ void Newtonian2D::advance(
     const luint nbs = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
 
     // if on NVidia GPU, do column major striding, row-major otherwise
-    const luint sx           = (col_maj) ? 1  : bx;
-    const luint sy           = (col_maj) ? by :  1;
+    const lint sx = (col_maj) ? 1  : bx;
+    const lint sy = (col_maj) ? by :  1;
     const auto pseudo_radius = (first_order) ? 1 : 2;
 
     simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
@@ -497,24 +497,24 @@ void Newtonian2D::advance(
         auto *const prim_buff = &prims[0];
         #endif 
 
-        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
-        const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
+        const lint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
+        const lint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
         #if GPU_CODE 
         if ((ii >= xpg) || (jj >= ypg)) return;
         #endif
 
-        const luint ia  = ii + radius;
-        const luint ja  = jj + radius;
-        const luint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
-        const luint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
-        const luint txa = (BuildPlatform == Platform::GPU) ? tx + pseudo_radius : ia;
-        const luint tya = (BuildPlatform == Platform::GPU) ? ty + pseudo_radius : ja;
+        const lint ia  = ii + radius;
+        const lint ja  = jj + radius;
+        const lint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
+        const lint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
+        const lint txa = (BuildPlatform == Platform::GPU) ? tx + pseudo_radius : ia;
+        const lint tya = (BuildPlatform == Platform::GPU) ? ty + pseudo_radius : ja;
 
         Conserved ux_l, ux_r, uy_l, uy_r;
         Conserved f_l, f_r, g_l, g_r, frf, flf, grf, glf;
         Primitive xprims_l, xprims_r, yprims_l, yprims_r;
 
-        const luint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
+        const lint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
         #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
@@ -524,15 +524,14 @@ void Newtonian2D::advance(
             if (ty < pseudo_radius)
             {
                 if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
-                prim_buff[(tya - pseudo_radius) * sx + txa] = self->gpu_prims[((ja - pseudo_radius) * nx + ia)];
-                prim_buff[(tya + tyl   ) * sx + txa]        = self->gpu_prims[((ja + tyl   ) * nx + ia)]; 
-            
+                prim_buff[(tya - pseudo_radius) * sx + txa] = self->gpu_prims[mod(ja - pseudo_radius, ny) * nx + ia];
+                prim_buff[(tya + tyl) * sx + txa]           = self->gpu_prims[(ja + tyl) % ny             * nx + ia]; 
             }
             if (tx < pseudo_radius)
             {   
                 if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
-                prim_buff[tya * sx + txa - pseudo_radius] =  self->gpu_prims[(ja * nx + ia - pseudo_radius)];
-                prim_buff[tya * sx + txa +    txl]        =  self->gpu_prims[(ja * nx + ia + txl)]; 
+                prim_buff[tya * sx + txa - pseudo_radius] =  self->gpu_prims[ja * nx + mod(ia - pseudo_radius, nx)];
+                prim_buff[tya * sx + txa +    txl]        =  self->gpu_prims[ja * nx +    (ia + txl) % nx]; 
             }
             
             simbi::gpu::api::synchronize();
@@ -540,11 +539,11 @@ void Newtonian2D::advance(
 
         if (first_order)
         {
-            xprims_l = prim_buff[((txa + 0) * sy + (tya + 0) * sx) % nbs];
-            xprims_r = prim_buff[((txa + 1) * sy + (tya + 0) * sx) % nbs];
+            xprims_l = prim_buff[(txa + 0)      * sy + (tya + 0) * sx];
+            xprims_r = prim_buff[(txa + 1) % bx * sy + (tya + 0) * sx];
             //j+1/2
-            yprims_l = prim_buff[((txa + 0) * sy + (tya + 0) * sx) % nbs];
-            yprims_r = prim_buff[((txa + 0) * sy + (tya + 1) * sx) % nbs];
+            yprims_l = prim_buff[(txa + 0) * sy + (tya + 0)      * sx];
+            yprims_r = prim_buff[(txa + 0) * sy + (tya + 1) % by * sx];
             
             // i+1/2
             ux_l = self->prims2cons(xprims_l); 
@@ -568,12 +567,11 @@ void Newtonian2D::advance(
                 grf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
             }
 
-            // Set up the left and right state luinterfaces for i-1/2
-            xprims_l = prim_buff[( (txa - 1) * sy + (tya + 0) * sx ) % nbs];
-            xprims_r = prim_buff[( (txa - 0) * sy + (tya + 0) * sx ) % nbs];
+            xprims_l = prim_buff[mod(txa - 1, bx) * sy + (tya + 0) * sx];
+            xprims_r = prim_buff[   (txa - 0)     * sy + (tya + 0) * sx];
             //j+1/2
-            yprims_l = prim_buff[( (txa - 0) * sy + (tya - 1) * sx ) % nbs]; 
-            yprims_r = prim_buff[( (txa + 0) * sy + (tya - 0) * sx ) % nbs]; 
+            yprims_l = prim_buff[(txa - 0) * sy + mod(tya - 1, by) * sx]; 
+            yprims_r = prim_buff[(txa + 0) * sy +    (tya - 0)     * sx]; 
 
             // i+1/2
             ux_l = self->prims2cons(xprims_l); 
@@ -603,17 +601,17 @@ void Newtonian2D::advance(
             Primitive xleft_most, xright_most, xleft_mid, xright_mid, center;
             Primitive yleft_most, yright_most, yleft_mid, yright_mid;
             // Coordinate X
-            xleft_most  = prim_buff[((txa - 2) * sy + tya * sx)];
-            xleft_mid   = prim_buff[((txa - 1) * sy + tya * sx)];
-            center      = prim_buff[((txa + 0) * sy + tya * sx)];
-            xright_mid  = prim_buff[((txa + 1) * sy + tya * sx)];
-            xright_most = prim_buff[((txa + 2) * sy + tya * sx)];
+            xleft_most  = prim_buff[(mod(txa - 2, bx) * sy + tya * sx)];
+            xleft_mid   = prim_buff[(mod(txa - 1, bx) * sy + tya * sx)];
+            center      = prim_buff[((txa + 0)        * sy + tya * sx)];
+            xright_mid  = prim_buff[((txa + 1) % bx   * sy + tya * sx)];
+            xright_most = prim_buff[((txa + 2) % bx   * sy + tya * sx)];
 
             // Coordinate Y
-            yleft_most  = prim_buff[(txa * sy + (tya - 2) * sx)];
-            yleft_mid   = prim_buff[(txa * sy + (tya - 1) * sx)];
-            yright_mid  = prim_buff[(txa * sy + (tya + 1) * sx)];
-            yright_most = prim_buff[(txa * sy + (tya + 2) * sx)];
+            yleft_most  = prim_buff[(txa * sy + mod(tya - 2, by)      * sx)];
+            yleft_mid   = prim_buff[(txa * sy + mod(tya - 1, by)      * sx)];
+            yright_mid  = prim_buff[(txa * sy +        (tya + 1) % by * sx)];
+            yright_most = prim_buff[(txa * sy +        (tya + 2) % by * sx)];
 
             // Reconstructed left X Primitive vector at the i+1/2 luinterface
             xprims_l = center     + minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*(real)0.5, (xright_mid - center) * plm_theta) * (real)0.5; 
@@ -684,24 +682,27 @@ void Newtonian2D::advance(
             case simbi::Geometry::CARTESIAN:
                 {
                     #if GPU_CODE
-                        const real rho_source  = (rho_all_zeros)   ? (real)0.0 : self->gpu_sourceRho[real_loc];
-                        const real m1_source = (m1_all_zeros)  ? (real)0.0 : self->gpu_sourceM1[real_loc];
-                        const real m2_source = (m2_all_zeros)  ? (real)0.0 : self->gpu_sourceM2[real_loc];
-                        const real e_source  = (e_all_zeros)   ? (real)0.0 : self->gpu_sourceE[real_loc];
+                        const real rho_source  = (rho_all_zeros) ? (real)0.0 : self->gpu_sourceRho[real_loc];
+                        const real m1_source   = (m1_all_zeros)  ? (real)0.0 : self->gpu_sourceM1[real_loc];
+                        const real m2_source   = (m2_all_zeros)  ? (real)0.0 : self->gpu_sourceM2[real_loc];
+                        const real e_source    = (e_all_zeros)   ? (real)0.0 : self->gpu_sourceE[real_loc];
                         const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                        self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf)/ dx2 - source_terms) * step;
+                        self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf) / dx2) * step * dt;
                     #else
-                        const real rho_source = (rho_all_zeros)   ? (real)0.0 : sourceRho[real_loc];
+                        const real rho_source = (rho_all_zeros) ? (real)0.0 : sourceRho[real_loc];
                         const real m1_source  = (m1_all_zeros)  ? (real)0.0   : sourceM1[real_loc];
                         const real m2_source  = (m2_all_zeros)  ? (real)0.0   : sourceM2[real_loc];
                         const real e_source   = (e_all_zeros)   ? (real)0.0   : sourceE[real_loc];
-                        const real dx1 = self->coord_lattice.dx1[ii];
-                        const real dx2  = self->coord_lattice.dx2[jj];
-                        const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                        cons[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step;
-                    #endif
-                
+                        const real dx1        = self->coord_lattice.dx1[ii];
+                        const real dx2        = self->coord_lattice.dx2[jj];
 
+                        const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
+                        cons[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step * dt;
+                    #endif
+                    // if ((ii == 0) && (jj == 0) || (ii == nx - 1) && (jj == ny - 1)) 
+                    // {
+                    //     printf("[%ld,%ld] dx: %f, dy: %f, frf: %f, flf: %f, glf: %f, grf: %f\n", ii,jj, dx1, dx2, frf.rho, flf.rho, glf.rho, grf.rho);
+                    // }
                 break;
                 }
             
@@ -888,10 +889,6 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         m1_all_zeros   = std::all_of(sourceM1.begin(),  sourceM1.end(),  [](real i) {return i == 0;});
         m2_all_zeros   = std::all_of(sourceM2.begin(),  sourceM2.end(),  [](real i) {return i == 0;});
         e_all_zeros    = std::all_of(sourceE.begin(),  sourceE.end(), [](real i) {return i == 0;});
-
-        // std::cout << "initial stuff" << "\n";
-        // std::cout << rho_all_zeros << ", " << m1_all_zeros << ", " << m2_all_zeros << ", " << e_all_zeros << "\n";
-        // std::cin.get();
     }
     
     // Some variables to handle file automatic file string
@@ -986,7 +983,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             
             n++;
             simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
-            
+            // std::cout << "dt: " << dt << "\n";
+            // pause_program();
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
