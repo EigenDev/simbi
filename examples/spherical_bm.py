@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--omega',        dest='omega', type=float, default=0.0)
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='reflecting', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
-    parser.add_argument('--data_dr', '-d',   dest='data_dir', type=str, default='data/') 
+    parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/') 
     
     args = parser.parse_args()
     def find_nearest(array, value):

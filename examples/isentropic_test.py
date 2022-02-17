@@ -14,7 +14,7 @@ def main():
     parser.add_argument('--cfl',          dest='cfl', type=float, default=0.1)  
     parser.add_argument('--alpha',        dest='alpha', type=float, default=0.5)  
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])  
-    parser.add_argument('--data_dr', '-d',dest='data_dir', type=str, default='data/')  
+    parser.add_argument('--data_dir', '-d',dest='data_dir', type=str, default='data/')  
     args = parser.parse_args()
     # Define Constants 
     gamma   = args.gamma

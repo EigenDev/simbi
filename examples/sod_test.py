@@ -17,7 +17,7 @@ def main():
     parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
-    parser.add_argument('--data_dr', '-d',   dest='data_dir', type=str, default='data/')                     
+    parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/')                     
 
     args = parser.parse_args()
     sod   = ((1.0,1.0,0.0),(0.1,0.125,0.0))
