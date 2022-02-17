@@ -61,6 +61,7 @@ def get_2d_file(args: argparse.ArgumentParser, filename: str) -> dict:
         v2          = hf.get('v2')[:]
         p           = hf.get('p')[:]
         t           = ds.attrs['current_time']
+        
         try:
             x1max = ds.attrs['x1max']
             x1min = ds.attrs['x1min']
@@ -97,7 +98,7 @@ def get_2d_file(args: argparse.ArgumentParser, filename: str) -> dict:
             
         try:
             coord_sysem = ds.attrs['geometry'].decode('utf-8')
-        except:
+        except Exception as e:
             coord_sysem = 'spherical'
             
         try:
@@ -826,7 +827,7 @@ def plot_cartesian_plot(
         color_map = plt.cm.get_cmap(args.cmap)
         
     tend = dset['time']
-    c = ax.pcolormesh(xx, yy, fields[args.field], cmap=color_map, shading='auto', **kwargs)
+    c = ax.pcolormesh(xx, yy, fields[args.field[0]], cmap=color_map, shading='auto', **kwargs)
     
     divider = make_axes_locatable(ax)
     cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
