@@ -50,7 +50,7 @@ def fill_below_intersec(x: np.ndarray, y: np.ndarray, constraint: float, color: 
     ind = find_nearest(y, constraint)[0]
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
     
-def get_2d_file(args: argparse.ArgumentParser, filename: str) -> dict:
+def read_2d_file(args: argparse.ArgumentParser, filename: str) -> dict:
     setup  = {}
     fields = {}
     is_cartesian = False
@@ -180,7 +180,7 @@ def get_2d_file(args: argparse.ArgumentParser, filename: str) -> dict:
         
     return fields, setup, mesh 
 
-def get_1d_equiv_file(filename: str) -> dict:
+def read_1d_file(filename: str) -> dict:
     file = filename
     ofield = {}
     with h5py.File(file, 'r') as hf:
@@ -945,7 +945,7 @@ def plot_per_theta(
     
 
     for field in args.field:
-        fields = fields if args.oned_files is None else get_1d_equiv_file(args.oned_files[0])
+        fields = fields if args.oned_files is None else read_1d_file(args.oned_files[0])
         if field in derived:
             var = prims2var(fields, field)
         else:
@@ -1230,10 +1230,10 @@ def plot_hist(
     var       = np.asarray([var[u > gb].sum() for gb in gbs]) 
     
     # if case == 0:
-    #     oned_field   = get_1d_equiv_file(args.oned_files[0])
+    #     oned_field   = read_1d_file(args.oned_files[0])
     #     calc_1d_hist(oned_field)
     # if case == 2:
-    #     oned_field   = get_1d_equiv_file(args.oned_files[1])
+    #     oned_field   = read_1d_file(args.oned_files[1])
     #     calc_1d_hist(oned_field)
         
     if ax_col == 0:     
@@ -1245,10 +1245,10 @@ def plot_hist(
         if args.oned_files is not None:
             if args.sub_split is None:
                 for file in args.oned_files:
-                    oned_field   = get_1d_equiv_file(file)
+                    oned_field   = read_1d_file(file)
                     calc_1d_hist(oned_field)
             else:
-                oned_field = get_1d_equiv_file(args.oned_files[ax_num])
+                oned_field = read_1d_file(args.oned_files[ax_num])
                 calc_1d_hist(oned_field)
 
     if args.norm:
@@ -1410,10 +1410,10 @@ def plot_dx_domega(
         if args.oned_files is not None:
             if args.sub_split is None:
                 for file in args.oned_files:
-                    oned_field   = get_1d_equiv_file(file)
+                    oned_field   = read_1d_file(file)
                     calc_1d_dx_domega(oned_field)
             else:
-                oned_field   = get_1d_equiv_file(args.oned_files[ax_num%len(args.oned_files)])
+                oned_field   = read_1d_file(args.oned_files[ax_num%len(args.oned_files)])
                 calc_1d_dx_domega(oned_field)  
     
     if energy_and_mass:
@@ -1929,7 +1929,7 @@ def main():
             points = [] 
             t = []
         for idx, file in enumerate(args.filename):
-            fields, setup, mesh = get_2d_file(args, file)
+            fields, setup, mesh = read_2d_file(args, file)
             i += 1
             if args.hist and (not args.de_domega and not args.dm_domega):
                 if args.sub_split is None:
@@ -1977,7 +1977,7 @@ def main():
             for ax in axs:
                 ax.label_outer()
     else:
-        fields, setup, mesh = get_2d_file(args, args.filename[0])
+        fields, setup, mesh = read_2d_file(args, args.filename[0])
         if args.hist and (not args.de_domega and not args.dm_domega):
             plot_hist(fields, args, mesh, setup)
         elif args.tidx != None:
