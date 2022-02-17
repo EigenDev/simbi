@@ -60,7 +60,7 @@ def main():
     r = np.logspace(np.log10(rmin), np.log10(rmax), nr) 
 
     r_right = np.sqrt(r[1:nr] * r[0:nr-1])
-    dr = rmin * 1.5 
+    dr      = rmin * 1.5 
 
     p_zones = find_nearest(r, dr)[0]
     p_zones = int(p_zones)
