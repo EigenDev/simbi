@@ -24,6 +24,7 @@ You can check which extension was built by looking in the `build/lib/` directory
 library <br> 
 or do `make cpu` if you do not have the `cpu_ext.so` library. After those install, you should be up and
 running. 
-5) To test, try running the example scripts provided
+5) To test, try running the example scripts provided. For example<br>
+ `./examples/sod_test.py --nzones 512 --mode cpu --cfl 0.1 --bc outflow --tend 0.2` 
 6) ???
 7) Profit
