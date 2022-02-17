@@ -69,7 +69,10 @@ void write_hdf5(
     int rank = 1;
     H5::DataSpace dataspace(rank, dimsf);
     H5::DataType  datatype(H5::PredType::NATIVE_DOUBLE);
-
+    
+    hid_t dtype_str = H5Tcopy(H5T_C_S1);
+    size_t size_str = setup.coord_system.size();                    
+    H5Tset_size(dtype_str, size_str);
     switch (dim)
     {
         case 1:
@@ -142,8 +145,10 @@ void write_hdf5(
             att.write(int_type, &setup.xactive_zones);
             att.close();
 
+            att = sim_info.createAttribute("geometry", dtype_str, att_space);
+            att.write(dtype_str, setup.coord_system.c_str());
+            att.close();
             
-
             sim_info.close();
             break;
         }
@@ -193,6 +198,7 @@ void write_hdf5(
             // Write Datset Attributesauto real_type(H5::PredType::NATIVE_DOUBLE);
             H5::DataType int_type(H5::PredType::NATIVE_INT);
             H5::DataType real_type;
+
             if (typeid(real) == typeid(double))
             {
                 real_type = H5::PredType::NATIVE_DOUBLE;
@@ -253,6 +259,10 @@ void write_hdf5(
 
             att = sim_info.createAttribute("yactive_zones", int_type, att_space);
             att.write(int_type, &setup.xactive_zones);
+            att.close();
+
+            att = sim_info.createAttribute("geometry", dtype_str, att_space);
+            att.write(dtype_str, setup.coord_system.c_str());
             att.close();
 
             sim_info.close();
@@ -380,6 +390,10 @@ void write_hdf5(
 
             att = sim_info.createAttribute("zactive_zones", int_type, att_space);
             att.write(int_type, &setup.zactive_zones);
+            att.close();
+
+            att = sim_info.createAttribute("geometry", dtype_str, att_space);
+            att.write(dtype_str, setup.coord_system.c_str());
             att.close();
 
             sim_info.close();

@@ -548,11 +548,13 @@ void Newtonian1D::advance(
     DataWriteMembers setup;
     setup.x1max          = r[active_zones - 1];
     setup.x1min          = r[0];
-    setup.xactive_zones = active_zones;
-    setup.nx            = nx;
-    setup.linspace      = linspace;
-    setup.coord_system  = coord_system;
-    setup.ad_gamma      = gamma;
+    setup.xactive_zones  = active_zones;
+    setup.nx             = nx;
+    setup.linspace       = linspace;
+    setup.coord_system   = coord_system;
+    setup.ad_gamma       = gamma;
+    setup.first_order    = first_order;
+    setup.coord_system   = coord_system;
 
 
     cons.resize(nx);
