@@ -5,49 +5,20 @@
 import numpy as np 
 import matplotlib.pyplot as plt #! /usr/bin/env python
 import matplotlib.ticker as tkr
-import time
+import utility as util
 import matplotlib.colors as colors
 import argparse 
 import h5py 
 import astropy.constants as const
 
+from utility import DEFAULT_SIZE, SMALL_SIZE, BIGGER_SIZE
 from matplotlib.animation import FuncAnimation
 
 import os, os.path
 
-field_choices = ['rho', 'v', 'p', 'gamma_beta', 'temperature']
+derived = ['gamma_beta', 'temperature']
+field_choices = ['rho', 'v', 'p'] + derived
 
-R_0 = const.R_sun.cgs 
-c   = const.c.cgs
-m   = const.M_sun.cgs
- 
-rho_scale  = m / (4./3. * np.pi * R_0 ** 3) 
-e_scale    = m * const.c.cgs.value**2
-pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
-vel_scale  = c 
-time_scale = R_0 / c
-
-def get_field_str(args):
-    if args.field == "rho":
-        if args.units:
-            return r'$\rho$ [g cm$^{-3}$]'
-        else:
-            return r'$\rho$'
-    elif args.field == "gamma_beta":
-        return r"$\Gamma \ \beta$"
-    elif args.field == "energy":
-        return r"$\tau$"
-    else:
-        return args.field
-    
-def prims2cons(fields, cons):
-    if cons == "D":
-        return fields['rho'] * fields['W']
-    elif cons == "S":
-        return fields['rho'] * fields['W']**2 * fields['v']
-    elif cons == "energy":
-        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p'] - fields['rho']*fields['W']
-    
 def get_frames(dir):
     # Get number of files in dir
     total_frames = len([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
@@ -56,102 +27,33 @@ def get_frames(dir):
     return total_frames, frames
 
 def plot_profile(fig, ax, filepath, filename, args):
+    fields = util.read_1d_file(filepath + filename)
+    r, t      = fields['r'], fields['t']
+    x1min, x1max = fields['xlims']
     
-    field_dict = {}
-    with h5py.File(filepath + filename, 'r') as hf:
-        
-        ds = hf.get("sim_info")
-        
-        rho         = hf.get("rho")[:]
-        v           = hf.get("v")[:]
-        p           = hf.get("p")[:]
-        nx          = ds.attrs["Nx"]
-        t           = ds.attrs["current_time"]
-        try:
-            x1max        = ds.attrs["x1max"]
-            x1min        = ds.attrs["x1min"]
-        except:
-            x1max        = ds.attrs["xmax"]
-            x1min        = ds.attrs["xmin"]
-        
-        
-        if args.forder:
-            rho = rho[1:-1]
-            v   = v[1:-1]
-            p   = p  [1:-1]
-            xactive = nx - 2
-        else:
-            rho = rho[2:-2]
-            v   = v [2:-2]
-            p   = p  [2:-2]
-            xactive = nx - 4
-            
-        W    = 1/np.sqrt(1 - v**2)
-        beta = v
-        
-        e = 3*p/rho 
-        c = const.c.cgs.value
-        a = (4 * const.sigma_sb.cgs.value / c)
-        m = const.m_p.cgs.value
-        T = (3 * p * c ** 2  / a)**(1./4.)
-        
-        
-        field_dict["rho"]         = rho
-        field_dict["v"]           = v
-        field_dict["p"]           = p
-        field_dict["gamma_beta"]  = W*beta
-        field_dict["temperature"] = T
-        
-        
-    xnpts = xactive
-
-    if (args.log):
-        r = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
+    if args.field[0] in derived:
+        var = util.prims2var(fields, args.field[0])
     else:
-        r = np.linspace(x1min, x1max, xactive)
+        var = fields[args.field]
         
-    ax.plot(r, field_dict[args.field])
-    
+    ax.plot(r, var)
     if args.log:
         ax.set_xscale('log')
         ax.set_yscale('log')
     
-    ax.set_xlabel('$r/R_\odot$', fontsize=30)
-
-
-    if args.log and args.field != "gamma_beta":
-        logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        ax.yaxis.set_major_formatter(logfmt)
+    if args.units:
+        xlabel = r'$r/R_\odot$'
+    else:
+        xlabel = 'r'
         
+    ax.set_xlabel(xlabel, fontsize=30)
     ax.set_title('{} at t = {:.2f} s'.format(args.setup[0], t), fontsize=30)
-    
     ax.tick_params(axis='both', labelsize=20)
-    
     ax.set_xlim(x1min, x1max) if args.rmax == 0.0 else ax.set_xlim(x1min, args.rmax)
 
     # Change the format of the field
-    if args.field:
-        if   args.field == "rho":
-            field_str = r'$\log \rho$'
-        elif args.field == "gamma_beta":
-            field_str = r"$\Gamma \ \beta$"
-        elif args.field == "temperature":
-            field_str = r"$\log$ T [K]"
-        else:
-            field_str = arg.sfield
-    else:
-        if  args.field == "rho":
-            field_str = r' $\rho$'
-        elif args.field == "gamma_beta":
-            field_str = r" $\Gamma \ \beta$"
-        elif args.field == "temperature":
-            field_str = " T [K]"
-        else:
-            field_str = args.field
-    
-    
+    field_str = util.get_field_str(args)
     ax.set_ylabel('{}'.format(field_str), fontsize=20)
-    
     return ax
 
 def plot_hist(args, fields, overplot=False, ax=None, case=0):
@@ -159,11 +61,11 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
 
-    tend = fields["t"]
-    edens_total = prims2cons(fields, "energy")
-    r           = fields["r"]
+    tend = fields['t']
+    edens_total = util.prims2var(fields, 'energy')
+    r           = fields['r']
     
-    if fields["is_linspace"]:
+    if fields['is_linspace']:
         rvertices = 0.5 * (r[1:] + r[:-1])
     else:  
         rvertices = np.sqrt(r[1:] * r[:-1])
@@ -174,7 +76,7 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
     dV          =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
     
     etotal = edens_total * (4 * np.pi * dV) * e_scale.value
-    mass   = dV * fields["W"] * fields["rho"]
+    mass   = dV * fields['W'] * fields['rho']
     e_k    = (fields['W'] - 1.0) * mass * e_scale.value
 
     u = fields['gamma_beta']
@@ -199,7 +101,7 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
     segments         = np.log10(epower_law_seg) / np.log10(gbpower_law_seg)
     alpha            = 1.0 - np.mean(segments)
     
-    print("Avg power law index: {:.2f}".format(alpha))
+    print('Avg power law index: {:.2f}'.format(alpha))
     bins    = np.arange(min(gbs), max(gbs) + w, w)
     logbins = np.logspace(np.log10(bins[0]),np.log10(bins[-1]), len(bins))
     
@@ -236,7 +138,7 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
 def main():
     parser = argparse.ArgumentParser(
         description='Plot a 2D Figure From a File (H5).',
-        epilog="This Only Supports H5 Files Right Now")
+        epilog='This Only Supports H5 Files Right Now')
     
     parser.add_argument('data_dir', metavar='dir', nargs='+',
                         help='A data directory to retrieve the h5 files')
@@ -244,43 +146,52 @@ def main():
     parser.add_argument('setup', metavar='Setup', nargs='+', type=str,
                         help='The name of the setup you are plotting (e.g., Blandford McKee)')
     
-    parser.add_argument('--field', dest = "field", metavar='Field Variable', nargs='?',
+    parser.add_argument('--field', dest = 'field', metavar='Field Variable', nargs='+',
                         help='The name of the field variable you\'d like to plot',
-                        choices=field_choices, default="rho")
+                        choices=field_choices, default='rho')
     
-    parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',
+    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max',
                         default = 0.0, help='The domain range')
-    
-    parser.add_argument('--log', dest='log', action='store_true',
-                        default=False,
+    parser.add_argument('--tex', dest='tex', action='store_true', default=False,
+                        help='Use latex typesetting')
+    parser.add_argument('--log', dest='log', action='store_true', default=False,
                         help='Logarithmic Radial Grid Option')
-    
-    parser.add_argument('--first_order', dest='forder', action='store_true',
-                        default=False,
-                        help='True if this is a grid using RK1')
+    parser.add_argument('--units', dest='units', default=False, action='store_true')
     
     parser.add_argument('--save', dest='save', action='store_true',
                         default=False)
 
    
     args = parser.parse_args()
-    fig = plt.figure(figsize=(15,8))
-    
-    for field in args.field:
-        ax  = fig.add_subplot(111)
+    if args.tex:
+        plt.rc('font',   size=DEFAULT_SIZE)          # controls default text sizes
+        plt.rc('axes',   titlesize=DEFAULT_SIZE)     # fontsize of the axes title
+        plt.rc('axes',   labelsize=DEFAULT_SIZE)    # fontsize of the x and y labels
+        plt.rc('xtick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
+        plt.rc('ytick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
+        plt.rc('legend', fontsize=DEFAULT_SIZE)      # legend fontsize
+        plt.rc('figure', titlesize=DEFAULT_SIZE)    # fontsize of the figure title
+        
+        plt.rcParams.update(
+            {
+                "text.usetex": True,
+                "font.family": "serif",
+                "font.serif": "Times New Roman",
+                "font.size": DEFAULT_SIZE
+            }
+        )
+    fig, ax = plt.subplots(1, 1, figsize=(15,8))
     
     frame_count, flist = get_frames(args.data_dir[0])
     
     def init_mesh(filename):
-        p = plot_profile(fig, ax, args.data_dir[0], filename, args)
-        
-        return p
+        return plot_profile(fig, ax, args.data_dir[0], filename, args)
         
     def update(frame, fargs):
-        """
+        '''
         Animation function. Takes the current frame number (to select the potion of
         data to plot) and a line object to update.
-        """
+        '''
 
         ax.cla()
         # Not strictly neccessary, just so we know we are stealing these from
@@ -308,14 +219,14 @@ def main():
     )
 
     if args.save:
-        animation.save("{}.mp4".format(args.setup[0]).replace(" ", "_"))
-        # animation.save("science/{}_{}.mp4".format(args.setup[0], args.field))
+        animation.save('{}.mp4'.format(args.setup[0]).replace(' ', '_'))
+        # animation.save('science/{}_{}.mp4'.format(args.setup[0], args.field))
     else:
         plt.show()
 
     
     
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
 
 import h5py 

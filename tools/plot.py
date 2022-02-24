@@ -59,50 +59,6 @@ def calc_cell_volume(r: np.ndarray, theta: np.ndarray) -> np.ndarray:
     
     return (2.0 * np.pi *  (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos)
 
-def calc_enthalpy(fields: dict) -> np.ndarray:
-    return 1.0 + fields['p']*fields['ad_gamma'] / (fields['rho'] * (fields['ad_gamma'] - 1.0))
-    
-def calc_lorentz_gamma(fields: dict) -> np.ndarray:
-    return (1.0 + fields['gamma_beta']**2)**0.5
-
-def calc_beta(fields: dict) -> np.ndarray:
-    W = calc_lorentz_gamma(fields)
-    return (1.0 - 1.0 / W**2)**0.5
-
-def running_mean(x, N):
-    cumsum = np.cumsum(np.insert(x, 0, 0)) 
-    return (cumsum[N:] - cumsum[:-N]) / float(N)
-
-def prims2var(fields: dict, var: str) -> np.ndarray:
-    h = calc_enthalpy(fields)
-    W = calc_lorentz_gamma(fields)
-    if var == 'D':
-        # Lab frame density
-        return fields['rho'] * W
-    elif var == 'S':
-        # Lab frame momentum density
-        return fields['rho'] * W**2 * calc_enthalpy(fields) * fields['v']
-    elif var == 'energy':
-        # Energy minus rest mass energy
-        return fields['rho']*h*W**2 - fields['p'] - fields['rho']*W
-    elif var == 'energy_rst':
-        # Total Energy
-        return fields['rho']*h*W**2 - fields['p']
-    elif var == 'temperature':
-        a    = (4.0 * const.sigma_sb.cgs / c)
-        T    = (3.0 * fields['p'] * util.pre_scale  / a)**0.25
-        T_eV = (const.k_B.cgs * T).to(u.eV)
-        return T_eV.value
-    elif var == 'chi_dens':
-        return fields['chi'] * fields['rho'] * W
-    elif var == 'gamma_beta_1':
-        return W * fields['v1']
-    elif var == 'gamma_beta_2':
-        return W * fields['v2']
-    elif var =='sp_enthalpy':
-        # Specific enthalpy
-        return h - 1.0  
-
 def place_anotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, etot: float) -> None:
     order_of_mag = np.floor(np.log10(etot))
     front_factor = int(etot / 10**order_of_mag)
@@ -191,9 +147,9 @@ def plot_polar_plot(
         for field in args.field:
             if field in derived:
                 if x2max == np.pi:
-                    var += np.split(prims2var(fields, field), 2)
+                    var += np.split(util.prims2var(fields, field), 2)
                 else:
-                    var.append(prims2var(fields, field))
+                    var.append(util.prims2var(fields, field))
             else:
                 if x2max == np.pi:
                     var += np.split(fields[field], 2)
@@ -279,7 +235,7 @@ def plot_polar_plot(
         cs = np.zeros(len(args.field), dtype=object)
         
         if args.field[0] in derived:
-            var = units * prims2var(fields, args.field[0])
+            var = units * util.prims2var(fields, args.field[0])
         else:
             var = units * fields[args.field[0]]
         
@@ -641,7 +597,7 @@ def plot_1d_curve(
     else:
         for idx, field in enumerate(args.field):
             if field in derived:
-                var = prims2var(fields, field)
+                var = util.prims2var(fields, field)
             else:
                 var = fields[field]
                 
@@ -693,7 +649,7 @@ def plot_per_theta(
     for field in args.field:
         fields = fields if args.oned_files is None else util.read_1d_file(args.oned_files[0])
         if field in derived:
-            var = prims2var(fields, field)
+            var = util.prims2var(fields, field)
         else:
             var = fields[field].copy()
         if args.units:
@@ -765,7 +721,7 @@ def plot_per_theta(
     if case == 0:
         if args.anot_loc is not None:
             dV = calc_cell_volume(mesh['rr'], mesh['theta'])
-            etot = np.sum(prims2var(fields, "energy") * dV * util.e_scale.value)
+            etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
             place_anotation(args, fields, ax, etot)
             
     ax.spines['right'].set_visible(False)
@@ -863,7 +819,7 @@ def plot_dec_rad(
     if case == 0:
         if args.anot_loc is not None:
             dV = calc_cell_volume(mesh['rr'], mesh['theta'])
-            etot = np.sum(prims2var(fields, "energy") * dV * util.e_scale.value)
+            etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
             place_anotation(args, fields, ax, etot)
             
     ax.spines['right'].set_visible(False)
@@ -918,7 +874,7 @@ def plot_hist(
             u   = fields['gamma_beta']
             var = u* fields['rho'] * dV_1d   / (1 + u**2)**0.5 
         else:
-            edens_1d  = prims2var(fields, 'energy')
+            edens_1d  = util.prims2var(fields, 'energy')
             var       = edens_1d * dV_1d * util.e_scale.value          # Total Energy in [erg]
             
         u1d       = fields['gamma_beta']
@@ -928,7 +884,7 @@ def plot_hist(
         label = r'$\varepsilon = 0$'
         if args.labels is not None:
             if len(args.labels) == len(args.filename) and not args.sub_split:
-                etot         = np.sum(prims2var(fields, "energy") * dV_1d * util.e_scale.value)
+                etot         = np.sum(util.prims2var(fields, "energy") * dV_1d * util.e_scale.value)
                 order_of_mag = np.floor(np.log10(etot))
                 scale        = int(etot / 1e51)
                 front_factor = int(etot / 10**order_of_mag)
@@ -968,7 +924,7 @@ def plot_hist(
         u   = fields['gamma_beta']
         var = u * fields['rho'] * dV / (1 + u**2)**0.5 * util.m.value
     else:
-        var = prims2var(fields, "energy") * dV * util.e_scale.value
+        var = util.prims2var(fields, "energy") * dV * util.e_scale.value
 
     # Create 4-Velocity bins as well as the Y-value bins directly
     u         = fields['gamma_beta']
@@ -984,7 +940,7 @@ def plot_hist(
         
     if ax_col == 0:     
         if args.anot_loc is not None:
-            etot = np.sum(prims2var(fields, "energy") * dV * util.e_scale.value)
+            etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
             place_anotation(args, fields, ax, etot)
         
         #1D Comparison 
@@ -1004,7 +960,7 @@ def plot_hist(
         label = '%s'%(args.labels[case])
             
         if len(args.labels) == len(args.filename) and not args.sub_split:
-            etot         = np.sum(prims2var(fields, "energy") * dV * util.e_scale.value)
+            etot         = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
             order_of_mag = np.floor(np.log10(etot))
             scale        = int(etot / 1e51)
             front_factor = int(etot / 10**order_of_mag)
@@ -1110,7 +1066,7 @@ def plot_dx_domega(
         return r 
         
     def calc_1d_dx_domega(ofield: dict) -> None:
-        edens_1d = prims2var(ofield, 'energy')
+        edens_1d = util.prims2var(ofield, 'energy')
         dV_1d    = calc_cell_volume1D(ofield['r'])
         mass     = dV_1d * ofield['rho'] * ofield['W']
         e_k      = (ofield['W'] - 1.0) * mass * util.e_scale.value
@@ -1148,7 +1104,7 @@ def plot_dx_domega(
     
     if ax_col == 0:
         if args.anot_loc is not None:
-            etot = np.sum(prims2var(fields, "energy") * dV * util.e_scale.value)
+            etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
             if not energy_and_mass:
                 place_anotation(args, fields, ax, etot)
             else:
@@ -1179,9 +1135,9 @@ def plot_dx_domega(
             h   = calc_enthalpy(fields)
             var = (h - 1.0) *  dV * util.e_scale.value
         elif 'temperature' in args.field:
-            var = prims2var(fields, 'temperature')
+            var = util.prims2var(fields, 'temperature')
         else:
-            edens_total = prims2var(fields, 'energy')
+            edens_total = util.prims2var(fields, 'energy')
             var = edens_total * dV * util.e_scale.value
     elif args.dm_domega:
         W   = calc_lorentz_gamma(fields)
