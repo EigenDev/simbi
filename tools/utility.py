@@ -27,6 +27,16 @@ e_scale    = m * c **2
 pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
 time_scale = R_0 / c
 
+def calc_enthalpy(fields: dict) -> np.ndarray:
+    return 1.0 + fields['p']*fields['ad_gamma'] / (fields['rho'] * (fields['ad_gamma'] - 1.0))
+    
+def calc_lorentz_gamma(fields: dict) -> np.ndarray:
+    return (1.0 + fields['gamma_beta']**2)**0.5
+
+def calc_beta(fields: dict) -> np.ndarray:
+    W = calc_lorentz_gamma(fields)
+    return (1.0 - 1.0 / W**2)**0.5
+
 def get_field_str(args: argparse.ArgumentParser) -> str:
     field_str_list = []
     for field in args.field:
@@ -214,9 +224,10 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
     return fields, setup, mesh 
 
 def read_1d_file(filename: str) -> dict:
-    file = filename
+    is_linspace = False
     ofield = {}
-    with h5py.File(file, 'r') as hf:
+    setups = {}
+    with h5py.File(filename, 'r') as hf:
         ds = hf.get('sim_info')
         
         rho         = hf.get('rho')[:]
@@ -231,18 +242,18 @@ def read_1d_file(filename: str) -> dict:
             x1max = ds.attrs['xmax']
             x1min = ds.attrs['xmin']
 
+        try:
+            is_linspace = ds.attrs['linspace']
+        except:
+            is_linspace = False
+            
         rho = rho[2:-2]
         v   = v  [2:-2]
         p   = p  [2:-2]
         xactive = nx - 4
         
-        if v.any() > 1:
-            print(v)
-            zzz = input('')
         W    = 1/np.sqrt(1 - v**2)
-        beta = v
         
-
         a    = (4 * const.sigma_sb.cgs / c)
         k    = const.k_B.cgs
         T    = (3 * p * pre_scale  / a)**(1./4.)
@@ -250,15 +261,21 @@ def read_1d_file(filename: str) -> dict:
         
         h = 1.0 + 4/3 * p / (rho * (4/3 - 1))
         
+        if is_linspace:
+            ofield['r'] = np.linspace(x1min, x1max, xactive)
+        else:
+            ofield['r'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
+            
         ofield['ad_gamma']    = 4./3.
         ofield['rho']         = rho
         ofield['v']           = v
         ofield['p']           = p
         ofield['W']           = W
         ofield['enthalpy']    = h
-        ofield['gamma_beta']  = W*beta
+        ofield['gamma_beta']  = W*v
         ofield['temperature'] = T_eV
-        ofield['r']           = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
+        ofield['t']           = t
+        ofield['xlims']       = x1min, x1max
         
     return ofield
 
@@ -282,6 +299,8 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
         T    = (3.0 * fields['p'] * pre_scale  / a)**0.25
         T_eV = (const.k_B.cgs * T).to(units.eV)
         return T_eV.value
+    elif var == 'gamma_beta':
+        return W * fields['v']
     elif var == 'chi_dens':
         return fields['chi'] * fields['rho'] * W
     elif var == 'gamma_beta_1':
