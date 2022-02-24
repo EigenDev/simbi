@@ -31,12 +31,12 @@ def main():
             
 
     t1 = time.time()
-    hlle = hydro.simulate(tend=args.tend, first_order=args.forder, hllc=False, cfl=args.cfl, 
+    hlle = hydro.simulate(tend=args.tend, first_order=args.forder, hllc=False, cfl=args.cfl, data_directory=args.data_dir,
                           compute_mode=args.mode, boundary_condition=args.boundc, chkpt_interval=args.chint)
     print("Time for HLLE Simulation: {:.2f} sec".format(time.time() - t1))
 
     t2 = time.time()
-    hllc = hydro2.simulate(tend=args.tend, first_order=args.forder, hllc=True, cfl=args.cfl, 
+    hllc = hydro2.simulate(tend=args.tend, first_order=args.forder, hllc=True, cfl=args.cfl, data_directory=args.data_dir,
                            compute_mode=args.mode, boundary_condition=args.boundc, chkpt_interval=args.chint)
     print("Time for HLLC Simulation: {:.2f} sec".format(time.time() - t2))
 
