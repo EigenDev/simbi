@@ -10,7 +10,9 @@ import matplotlib.colors as colors
 import argparse 
 import h5py 
 import astropy.constants as const
+import utility as util 
 
+from utility import DEFAULT_SIZE, SMALL_SIZE, BIGGER_SIZE
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.animation import FuncAnimation
 import os, os.path
@@ -19,70 +21,10 @@ try:
     import cmasher as cmr 
 except:
     print("No cmasher, so defaulting to matplotlib colormaps")
-    cmr = []
 
-cmar_maps = cmr
 cons = ['D', 'momentum', 'energy', 'energy_rst']
 field_choices = ['rho', 'v1', 'v2', 'pre', 'gamma_beta', 'temperature', 'gamma_beta_1', 'gamma_beta_2', 'energy', 'mass', 'chi', 'chi_dens'] + cons 
 lin_fields = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
-col = plt.cm.jet([0.25,0.75])  
-
-R_0 = const.R_sun.cgs 
-c   = const.c.cgs
-m   = const.M_sun.cgs
- 
-rho_scale  = m / (4./3. * np.pi * R_0 ** 3) 
-e_scale    = m * const.c.cgs.value**2
-pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
-vel_scale  = c 
-time_scale = R_0 / c
-
-def prims2cons(fields, cons):
-    if cons == "D":
-        return fields['rho'] * fields['W']
-    elif cons == "S":
-        return fields['rho'] * fields['W']**2 * fields['v']
-    elif cons == "energy":
-        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p'] - fields['rho']*fields['W']
-    elif cons == "energy_rst":
-        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p']
-    
-def get_field_str(args):
-    field_str_list = []
-    for field in args.field:
-        if field == "rho" or field == 'D':
-            var = r"\rho" if field == "rho" else "D"
-            if args.units:
-                field_str_list.append( r'${}$ [g cm$^{{-3}}$]'.format(var))
-            else:
-                field_str_list.append( r'${}$'.format(var))
-            
-        elif field == "gamma_beta":
-            field_str_list.append( r"$\Gamma \beta$")
-        elif field == "gamma_beta_1":
-            field_str_list.append( r"$\Gamma \beta_1$")
-        elif field == "gamma_beta_2":
-            field_str_list.append( r"$\Gamma \beta_2$")
-        elif field == "energy" or field == 'p':
-            var = "\tau" if field == "energy" else "p"
-            if args.units:
-                field_str_list.append( r"${} [\rm erg \ cm^{{-3}}]$".format(var))
-            else:
-                field_str_list.append( r"${} $".format(var))
-        elif field == "energy_rst":
-            if args.units:
-                field_str_list.append( r"$\tau - D \  [\rm erg \ cm^{-3}]$")
-            else:
-                field_str_list.append( r"$\tau - D")
-        elif field == "chi":
-            field_str_list.append( r"$\chi$")
-        elif field == "chi_dens":
-            field_str_list.append( r"$D \cdot \chi$")
-        else:
-            field_str_list.append( field)
-    
-    
-    return field_str_list if len(args.field) > 1 else field_str_list[0]
 
 
 def get_frames(dir, max_file_num):
@@ -91,122 +33,6 @@ def get_frames(dir, max_file_num):
     frames = frames[:max_file_num]
     total_frames = len(frames)
     return total_frames, frames
-
-def read_file(filepath, filename, args):
-    setup  = {}
-    fields = {}
-    is_cartesian = False
-    with h5py.File(filepath + filename, 'r') as hf: 
-        ds          = hf.get('sim_info')
-        rho         = hf.get('rho')[:]
-        v1          = hf.get('v1')[:]
-        v2          = hf.get('v2')[:]
-        p           = hf.get('p')[:]
-        t           = ds.attrs['current_time']
-        
-        try:
-            x1max = ds.attrs['x1max']
-            x1min = ds.attrs['x1min']
-            x2max = ds.attrs['x2max']
-            x2min = ds.attrs['x2min']
-        except:
-            x1max = ds.attrs['xmax']
-            x1min = ds.attrs['xmin']
-            x2max = ds.attrs['ymax']
-            x2min = ds.attrs['ymin']  
-        
-        # New checkpoint files, so check if new attributes were
-        # implemented or not
-        try:
-            nx          = ds.attrs['nx']
-            ny          = ds.attrs['ny']
-        except:
-            nx          = ds.attrs['NX']
-            ny          = ds.attrs['NY']
-        
-        try:
-            chi = hf.get('chi')[:]
-        except:
-            chi = np.zeros((ny, nx))
-            
-        try:
-            gamma = ds.attrs['adiabatic_gamma']
-        except:
-            gamma = 4./3.
-        
-        # Check for garbage value
-        if gamma < 1:
-            gamma = 4./3. 
-            
-        try:
-            coord_sysem = ds.attrs['geometry'].decode('utf-8')
-        except Exception as e:
-            coord_sysem = 'spherical'
-            
-        try:
-            is_linspace = ds.attrs['linspace']
-        except:
-            is_linspace = False
-        
-        setup['x1max'] = x1max 
-        setup['x1min'] = x1min 
-        setup['x2max'] = x2max 
-        setup['x2min'] = x2min 
-        setup['time']  = t * time_scale if coord_sysem == 'spherical' else t 
-        
-        rho = rho.reshape(ny, nx)
-        v1  = v1.reshape(ny, nx)
-        v2  = v2.reshape(ny, nx)
-        p   = p.reshape(ny, nx)
-        chi = chi.reshape(ny, nx)
-        
-        
-        if args.forder:
-            rho = rho[1:-1, 1: -1]
-            v1  = v1 [1:-1, 1: -1]
-            v2  = v2 [1:-1, 1: -1]
-            p   = p  [1:-1, 1: -1]
-            chi = chi[1:-1, 1: -1]
-            xactive = nx - 2
-            yactive = ny - 2
-            setup['xactive'] = xactive
-            setup['yactive'] = yactive
-        else:
-            rho = rho[2:-2, 2: -2]
-            v1  = v1 [2:-2, 2: -2]
-            v2  = v2 [2:-2, 2: -2]
-            p   = p  [2:-2, 2: -2]
-            chi = chi[2:-2, 2: -2]
-            xactive = nx - 4
-            yactive = ny - 4
-            setup['xactive'] = xactive
-            setup['yactive'] = yactive
-        
-        if is_linspace:
-            setup['x1'] = np.linspace(x1min, x1max, xactive)
-            setup['x2'] = np.linspace(x2min, x2max, yactive)
-        else:
-            setup['x1'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
-            setup['x2'] = np.linspace(x2min, x2max, yactive)
-        
-        if coord_sysem == 'cartesian':
-            is_cartesian = True
-        
-        W    = 1/np.sqrt(1.0 -(v1**2 + v2**2))
-        beta = np.sqrt(v1**2 + v2**2)
-        
-        fields['rho']          = rho
-        fields['v1']           = v1 
-        fields['v2']           = v2 
-        fields['p']            = p
-        fields['chi']          = chi
-        fields['gamma_beta']   = W*beta
-        fields['ad_gamma']     = gamma
-        setup['is_cartesian']  = is_cartesian
-        # fields[idx]['gamma_beta_1'] = abs(W*v1)
-        # fields[idx]['gamma_beta_2'] = abs(W*v2)
-        
-    return fields, setup 
 
 def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
     num_fields = len(args.field)
@@ -248,9 +74,9 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         for field in args.field:
             if field in cons:
                 if x2max == np.pi:
-                    var += np.split(prims2cons(field_dict, field), 2)
+                    var += np.split(util.prims2var(field_dict, field), 2)
                 else:
-                    var.append(prims2cons(field_dict, field))
+                    var.append(util.prims2var(field_dict, field))
             else:
                 if x2max == np.pi:
                     var += np.split(field_dict[field], 2)
@@ -330,7 +156,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         cs = np.zeros(len(args.field), dtype=object)
         
         if args.field[0] in cons:
-            var = units * prims2cons(field_dict, args.field[0])
+            var = units * util.prims2var(field_dict, args.field[0])
         else:
             var = units * field_dict[args.field[0]]
             
@@ -429,7 +255,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
     ax.set_rmax(x1max) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
     ax.set_rmin(x1min)
     
-    field_str = get_field_str(args)
+    field_str = util.get_field_str(args)
     
     if args.wedge:
         if num_fields == 1:
@@ -524,7 +350,7 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     if args.log:
         kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
     else:
-        kwargs = {'vmin': vmin, 'vmax': vmax}
+        kwargs = {'norm': colors.PowerNorm(2.0, vmin=vmin, vmax=vmax)}
         
     if args.rcmap:
         color_map = (plt.cm.get_cmap(args.cmap)).reversed()
@@ -532,6 +358,8 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
         color_map = plt.cm.get_cmap(args.cmap)
         
     tend = ds["time"]
+    ax.yaxis.grid(True, alpha=0.1)
+    ax.xaxis.grid(True, alpha=0.1)
     c = ax.pcolormesh(xx, yy, field_dict[args.field[0]], cmap=color_map, shading='auto', **kwargs)
 
     if args.log:
@@ -540,12 +368,10 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     else:
         cbar = fig.colorbar(c, orientation="vertical", cax=cbaxes)
 
-    ax.yaxis.grid(True, alpha=0.1)
-    ax.xaxis.grid(True, alpha=0.1)
     ax.tick_params(axis='both', labelsize=10)
     
     # Change the format of the field
-    field_str = get_field_str(args)
+    field_str = util.get_field_str(args)
     
     if args.log:
         cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
@@ -555,28 +381,11 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     fig.suptitle('{} at t = {:.2f} s'.format(args.setup[0], tend), fontsize=20, y=0.95)
     
 def create_mesh(fig, ax, filepath, filename, cbaxes, args):
-    fields, setups = read_file(filepath, filename, args)
-    
-    ynpts, xnpts = fields["rho"].shape 
-
-    mesh = {}
+    fields, setups, mesh = util.read_2d_file(args, filepath+filename)
     if setups["is_cartesian"]:
-        xx, yy = np.meshgrid(setups["x1"], setups["x2"])
-        mesh["xx"] = xx
-        mesh["yy"] = yy
         plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, setups)
     else:      
-        rr, tt = np.meshgrid(setups["x1"],  setups["x2"])
-        rr, t2 = np.meshgrid(setups["x1"], -setups["x2"][::-1])
-        mesh["theta"] = tt 
-        mesh["rr"]    = rr
-        mesh["t2"]    = t2
-        mesh["r"]     = setups["x1"]
-        mesh["th"]    = setups["x2"]
-        plot_polar_plot(fig, ax, cbaxes, fields, args, mesh, setups)
-    
-    
-        
+        plot_polar_plot(fig, ax, cbaxes, fields, args, mesh, setups)        
     return ax
 
 def main():
@@ -623,11 +432,8 @@ def main():
     parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X',
                         help='X label name')
     
-    parser.add_argument('--ehist', dest='ehist', action='store_true',
-                        default=False, help='True if you want the plot the energy histogram')
-    
-    parser.add_argument('--norm', dest='norm', action='store_true',
-                        default=False, help='True if you want the plot normalized to max value')
+    parser.add_argument('--tex', dest='tex', action='store_true',
+                        default=False, help='True if you want the latex formatting')
     
     parser.add_argument('--labels', dest='labels', nargs="+", default = None,
                         help='Optionally give a list of labels for multi-file plotting')
@@ -637,11 +443,8 @@ def main():
     
     parser.add_argument('--wedge', dest='wedge', default=False, action='store_true')
     parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 80, 110], type=float, nargs=4)
-
     parser.add_argument('--units', dest='units', default = False, action='store_true')
-    
     parser.add_argument('--file_max', dest='file_max', default = None, type=int)
-    
     parser.add_argument('--frame_range', dest='frame_range', default = [None, None], nargs=2, type=int)
     parser.add_argument('--dbg', dest='dbg', default = False, action='store_true')
     parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
@@ -656,6 +459,25 @@ def main():
                         help='True if you want half a polar plot')
         
     args = parser.parse_args()
+    
+    if args.tex:
+        plt.rc('font',   size=DEFAULT_SIZE)          # controls default text sizes
+        plt.rc('axes',   titlesize=DEFAULT_SIZE)     # fontsize of the axes title
+        plt.rc('axes',   labelsize=DEFAULT_SIZE)    # fontsize of the x and y labels
+        plt.rc('xtick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
+        plt.rc('ytick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
+        plt.rc('legend', fontsize=DEFAULT_SIZE)      # legend fontsize
+        plt.rc('figure', titlesize=DEFAULT_SIZE)    # fontsize of the figure title
+        
+        plt.rcParams.update(
+            {
+                "text.usetex": True,
+                "font.family": "serif",
+                "font.serif": "Times New Roman",
+                "font.size": DEFAULT_SIZE
+            }
+        )
+            
     if args.dbg:
         plt.style.use('dark_background')
         
@@ -672,9 +494,9 @@ def main():
             args.cbar += (num_fields - 1) * [None, None]
             
     # read the first file and infer the system configuration from it
-    init_setup = read_file(args.data_dir[0], flist[0], args)[1]
+    init_setup = util.read_2d_file(args, args.data_dir[0] + flist[0])[1]
     if init_setup["is_cartesian"]:
-        fig, ax = plt.subplots(1, 1, figsize=(10,10), constrained_layout=False)
+        fig, ax = plt.subplots(1, 1, figsize=(11,10), constrained_layout=False)
         divider = make_axes_locatable(ax)
         if not args.pictorial:
             cbaxes = divider.append_axes('right', size='5%', pad=0.05)
@@ -771,7 +593,8 @@ def main():
     if not args.save:
         plt.show()
     else:
-        animation.save("{}.mp4".format(args.save.replace(" ", "_")))
+        dpi = 600
+        animation.save("{}.mp4".format(args.save.replace(" ", "_")), dpi=dpi, codec="libx264")
     
     
     
