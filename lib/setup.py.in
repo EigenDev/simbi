@@ -42,7 +42,7 @@ class CompilerParams():
         self.compiler_args = cpu_compiler_args if self.arch == "cpu" else gpu_compiler_args
                 
     def set_linker_args(self):
-        self.linker_args = ['-lhdf5', '-lhdf5_cpp', '-fopenmp']
+        self.linker_args = ['-lhdf5_cpp', '-fopenmp']
         if self.arch != "cpu":
             if "${HIP_PLATFORM}" == "nvidia":
                 self.linker_args += ['-lcudart']
@@ -50,7 +50,7 @@ class CompilerParams():
                 self.linker_args += ['-lamdhip64']
     
     def set_libraries(self):
-        self.libraries = ['hdf5', 'hdf5_cpp']
+        self.libraries = ['hdf5_cpp']
         if self.arch != "cpu":
             if "${HIP_PLATFORM}" == "nvidia":
                 self.libraries += ['cudart']
