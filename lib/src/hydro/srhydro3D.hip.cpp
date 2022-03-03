@@ -86,10 +86,10 @@ void SRHD3D::cons2prim()
             for (luint ii = 0; ii < nx; ii++)
             {
                 idx = ii + nx * jj + nx * ny * kk;
-                D   = cons[idx].D;     // Relativistic Mass Density
-                S1  = cons[idx].S1;   // X1-Momentum Denity
-                S2  = cons[idx].S2;   // X2-Momentum Density
-                S3  = cons[idx].S3;   // X2-Momentum Density
+                D   = cons[idx].d;     // Relativistic Mass Density
+                S1  = cons[idx].s1;   // X1-Momentum Denity
+                S2  = cons[idx].s2;   // X2-Momentum Density
+                S3  = cons[idx].s3;   // X2-Momentum Density
                 tau = cons[idx].tau;  // Energy Density
                 S = sqrt(S1 * S1 + S2 * S2 + S3 * S3);
 
@@ -172,10 +172,10 @@ void SRHD3D::cons2prim(
 
         simbi::gpu::api::synchronize();
         luint iter  = 0;
-        real D    = conserved_buff[tid].D;
-        real S1   = conserved_buff[tid].S1;
-        real S2   = conserved_buff[tid].S2;
-        real S3   = conserved_buff[tid].S3;
+        real D    = conserved_buff[tid].d;
+        real S1   = conserved_buff[tid].s1;
+        real S2   = conserved_buff[tid].s2;
+        real S3   = conserved_buff[tid].s3;
         real tau  = conserved_buff[tid].tau;
         real S    = sqrt(S1 * S1 + S2 * S2 + S3 * S3);
 
@@ -372,9 +372,9 @@ Conserved SRHD3D::prims2cons(const Primitive &prims)
 //     real v1 = prims.v1;
 //     real v2 = prims.v2;
 
-//     real D = state.D;
-//     real S1 = state.S1;
-//     real S2 = state.S2;
+//     real D = state.d;
+//     real S1 = state.s1;
+//     real S2 = state.s2;
 //     real tau = state.tau;
 //     real E = tau + D;
 
@@ -594,9 +594,9 @@ Conserved SRHD3D::calc_hllc_flux(
             / (aRplus - aLminus);
 
     //------ Mignone & Bodo subtract off the rest mass density
-    const real e  = hll_state.tau + hll_state.D;
+    const real e  = hll_state.tau + hll_state.d;
     const real s  = hll_state.momentum(nhat);
-    const real fe = hll_flux.tau + hll_flux.D;
+    const real fe = hll_flux.tau + hll_flux.d;
     const real fs = hll_flux.momentum(nhat);
 
     //------Calculate the contact wave velocity and pressure
@@ -611,10 +611,10 @@ Conserved SRHD3D::calc_hllc_flux(
     if (-aL <= (aStar - aL))
     {
         const real pressure = left_prims.p;
-        const real D = left_state.D;
-        const real S1 = left_state.S1;
-        const real S2 = left_state.S2;
-        const real S3 = left_state.S3;
+        const real D = left_state.d;
+        const real S1 = left_state.s1;
+        const real S2 = left_state.s2;
+        const real S3 = left_state.s3;
         const real tau = left_state.tau;
         const real E = tau + D;
         const real cofactor = (real)1.0 / (aL - aStar);
@@ -677,10 +677,10 @@ Conserved SRHD3D::calc_hllc_flux(
     else
     {
         const real pressure = right_prims.p;
-        const real D  = right_state.D;
-        const real S1 = right_state.S1;
-        const real S2 = right_state.S2;
-        const real S3 = right_state.S3;
+        const real D  = right_state.d;
+        const real S1 = right_state.s1;
+        const real S2 = right_state.s2;
+        const real S3 = right_state.s3;
         const real tau = right_state.tau;
         const real E = tau + D;
         const real cofactor = (real)1.0 / (aR - aStar);
@@ -959,12 +959,12 @@ void SRHD3D::advance(
             luint real_loc = kk * xpg * ypg + jj * xpg + ii;
 
             // printf("f1: %f, f2: %f, g1: %f, g2: %f, h1: %f, h2: %f\n",
-            // f1.D,
-            // f2.D,
-            // g1.D,
-            // g2.D,
-            // h1.D,
-            // h2.D);
+            // f1.d,
+            // f2.d,
+            // g1.d,
+            // g2.d,
+            // h1.d,
+            // h2.d);
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
@@ -973,19 +973,19 @@ void SRHD3D::advance(
                             real dx1 = coord_lattice->gpu_dx1[ii];
                             real dx2  = coord_lattice->gpu_dx2[jj];
                             real dz = coord_lattice->gpu_dx3[kk];
-                            self->gpu_cons[aid].D   += dt * ( -(f1.D - f2.D)     / dx1 - (g1.D   - g2.D )  / dx2 - (h1.D - h2.D)     / dz + self->gpu_sourceD   [real_loc] );
-                            self->gpu_cons[aid].S1  += dt * ( -(f1.S1 - f2.S1)   / dx1 - (g1.S1  - g2.S1)  / dx2 - (h1.S1 - h2.S3)   / dz + self->gpu_sourceS1  [real_loc] );
-                            self->gpu_cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx1  - (g1.S2  - g2.S2) / dx2 - (h1.S2 - h2.S3)   / dz + self->gpu_sourceS2  [real_loc] );
-                            self->gpu_cons[aid].S3  += dt * ( -(f1.S3 - f2.S3)   / dx1  - (g1.S3  - g2.S3) / dx2 - (h1.S3 - h2.S3)   / dz + self->gpu_sourceS3  [real_loc] );
+                            self->gpu_cons[aid].d   += dt * ( -(f1.d - f2.d)     / dx1 - (g1.d   - g2.d )  / dx2 - (h1.d - h2.d)     / dz + self->gpu_sourceD   [real_loc] );
+                            self->gpu_cons[aid].s1  += dt * ( -(f1.s1 - f2.s1)   / dx1 - (g1.s1  - g2.s1)  / dx2 - (h1.s1 - h2.s3)   / dz + self->gpu_sourceS1  [real_loc] );
+                            self->gpu_cons[aid].s2  += dt * ( -(f1.s2 - f2.s2)   / dx1  - (g1.s2  - g2.s2) / dx2 - (h1.s2 - h2.s3)   / dz + self->gpu_sourceS2  [real_loc] );
+                            self->gpu_cons[aid].s3  += dt * ( -(f1.s3 - f2.s3)   / dx1  - (g1.s3  - g2.s3) / dx2 - (h1.s3 - h2.s3)   / dz + self->gpu_sourceS3  [real_loc] );
                             self->gpu_cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + self->gpu_sourceTau [real_loc] );
                         #else
                             real dx1 = coord_lattice->dx1[ii];
                             real dx2  = coord_lattice->dx2[jj];
                             real dz = coord_lattice->dx3[kk];
-                            self->cons[aid].D   += dt * ( -(f1.D - f2.D)     / dx1 - (g1.D   - g2.D )  / dx2 - (h1.D - h2.D)     / dz + sourceD   [real_loc] );
-                            self->cons[aid].S1  += dt * ( -(f1.S1 - f2.S1)   / dx1 - (g1.S1  - g2.S1)  / dx2 - (h1.S1 - h2.S3)   / dz + sourceS1  [real_loc] );
-                            self->cons[aid].S2  += dt * ( -(f1.S2 - f2.S2)   / dx1  - (g1.S2  - g2.S2) / dx2 - (h1.S2 - h2.S3)   / dz + sourceS2  [real_loc] );
-                            self->cons[aid].S3  += dt * ( -(f1.S3 - f2.S3)   / dx1  - (g1.S3  - g2.S3) / dx2 - (h1.S3 - h2.S3)   / dz + sourceS3  [real_loc] );
+                            self->cons[aid].d   += dt * ( -(f1.d - f2.d)     / dx1 - (g1.d   - g2.d )  / dx2 - (h1.d - h2.d)     / dz + sourceD   [real_loc] );
+                            self->cons[aid].s1  += dt * ( -(f1.s1 - f2.s1)   / dx1 - (g1.s1  - g2.s1)  / dx2 - (h1.s1 - h2.s3)   / dz + sourceS1  [real_loc] );
+                            self->cons[aid].s2  += dt * ( -(f1.s2 - f2.s2)   / dx1  - (g1.s2  - g2.s2) / dx2 - (h1.s2 - h2.s3)   / dz + sourceS2  [real_loc] );
+                            self->cons[aid].s3  += dt * ( -(f1.s3 - f2.s3)   / dx1  - (g1.s3  - g2.s3) / dx2 - (h1.s3 - h2.s3)   / dz + sourceS3  [real_loc] );
                             self->cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + sourceTau [real_loc] );
                         #endif
                         
@@ -1031,29 +1031,29 @@ void SRHD3D::advance(
                             self->gpu_cons[aid] +=
                             Conserved{
                                 // L(D)
-                                -(f1.D * s1R - f2.D * s1L) / dV1 
-                                    - (g1.D * s2R - g2.D * s2L) / dV2 
-                                        - (h1.D * s3R - h2.D * s3L) / dV3 
+                                -(f1.d * s1R - f2.d * s1L) / dV1 
+                                    - (g1.d * s2R - g2.d * s2L) / dV2 
+                                        - (h1.d * s3R - h2.d * s3L) / dV3 
                                             + self->gpu_sourceD[real_loc] * decay_const,
 
                                 // L(S1)
-                                -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
-                                    - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        - (h1.S1 * s3R - h2.S1 * s3L) / dV3 
+                                -(f1.s1 * s1R - f2.s1 * s1L) / dV1 
+                                    - (g1.s1 * s2R - g2.s1 * s2L) / dV2 
+                                        - (h1.s1 * s3R - h2.s1 * s3L) / dV3 
                                         + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
                                                 self->gpu_sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
-                                -(f1.S2 * s1R - f2.S2 * s1L) / dV1
-                                        - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
-                                            - (h1.S2 * s3R - h2.S2 * s3L) / dV3 
+                                -(f1.s2 * s1R - f2.s2 * s1L) / dV1
+                                        - (g1.s2 * s2R - g2.s2 * s2L) / dV2 
+                                            - (h1.s2 * s3R - h2.s2 * s3L) / dV3 
                                             - rhoc * hc * gam2 * uc * vc / rmean + coord_lattice->gpu_cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
                                             + self->gpu_sourceS2[real_loc] * decay_const,
 
                                 // L(S3)
-                                -(f1.S3 * s1R - f2.S3 * s1L) / dV1
-                                        - (g1.S3 * s2R - g2.S3 * s2L) / dV2 
-                                            - (h1.S3 * s3R - h2.S3 * s3L) / dV3 
+                                -(f1.s3 * s1R - f2.s3 * s1L) / dV1
+                                        - (g1.s3 * s2R - g2.s3 * s2L) / dV2 
+                                            - (h1.s3 * s3R - h2.s3 * s3L) / dV3 
                                                 - rhoc * hc * gam2 * wc * (uc + vc * coord_lattice->gpu_cot[jj])/ rmean
                                             +     self->gpu_sourceS3[real_loc] * decay_const,
 
@@ -1067,29 +1067,29 @@ void SRHD3D::advance(
                             cons[aid] +=
                             Conserved{
                                 // L(D)
-                                -(f1.D * s1R - f2.D * s1L) / dV1 
-                                    - (g1.D * s2R - g2.D * s2L) / dV2 
-                                        - (h1.D * s3R - h2.D * s3L) / dV3 
+                                -(f1.d * s1R - f2.d * s1L) / dV1 
+                                    - (g1.d * s2R - g2.d * s2L) / dV2 
+                                        - (h1.d * s3R - h2.d * s3L) / dV3 
                                             + sourceD[real_loc] * decay_const,
 
                                 // L(S1)
-                                -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
-                                    - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        - (h1.S1 * s3R - h2.S1 * s3L) / dV3 
+                                -(f1.s1 * s1R - f2.s1 * s1L) / dV1 
+                                    - (g1.s1 * s2R - g2.s1 * s2L) / dV2 
+                                        - (h1.s1 * s3R - h2.s1 * s3L) / dV3 
                                         + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
                                                 sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
-                                -(f1.S2 * s1R - f2.S2 * s1L) / dV1
-                                        - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
-                                            - (h1.S2 * s3R - h2.S2 * s3L) / dV3 
+                                -(f1.s2 * s1R - f2.s2 * s1L) / dV1
+                                        - (g1.s2 * s2R - g2.s2 * s2L) / dV2 
+                                            - (h1.s2 * s3R - h2.s2 * s3L) / dV3 
                                             - rhoc * hc * gam2 * uc * vc / rmean + coord_lattice->cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
                                             + sourceS2[real_loc] * decay_const,
 
                                 // L(S3)
-                                -(f1.S3 * s1R - f2.S3 * s1L) / dV1
-                                        - (g1.S3 * s2R - g2.S3 * s2L) / dV2 
-                                            - (h1.S3 * s3R - h2.S3 * s3L) / dV3 
+                                -(f1.s3 * s1R - f2.s3 * s1L) / dV1
+                                        - (g1.s3 * s2R - g2.s3 * s2L) / dV2 
+                                            - (h1.s3 * s3R - h2.s3 * s3L) / dV3 
                                                 - rhoc * hc * gam2 * wc * (uc + vc * coord_lattice->cot[jj])/ rmean
                                                     + sourceS3[real_loc] * decay_const,
 
@@ -1528,19 +1528,19 @@ void SRHD3D::advance(
                             real dx1 = coord_lattice->gpu_dx1[ii];
                             real dx2  = coord_lattice->gpu_dx2[jj];
                             real dz = coord_lattice->gpu_dx3[kk];
-                            self->gpu_cons[aid].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx1 - (g1.D   - g2.D )  / dx2 - (h1.D - h2.D)     / dz + self->gpu_sourceD   [real_loc] );
-                            self->gpu_cons[aid].S1  += (real)0.5 * dt * ( -(f1.S1 - f2.S1)   / dx1 - (g1.S1  - g2.S1)  / dx2 - (h1.S1 - h2.S3)   / dz + self->gpu_sourceS1  [real_loc] );
-                            self->gpu_cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx1  - (g1.S2  - g2.S2) / dx2 - (h1.S2 - h2.S3)   / dz + self->gpu_sourceS2  [real_loc] );
-                            self->gpu_cons[aid].S3  += (real)0.5 * dt * ( -(f1.S3 - f2.S3)   / dx1  - (g1.S3  - g2.S3) / dx2 - (h1.S3 - h2.S3)   / dz + self->gpu_sourceS3  [real_loc] );
+                            self->gpu_cons[aid].d   += (real)0.5 * dt * ( -(f1.d - f2.d)     / dx1 - (g1.d   - g2.d )  / dx2 - (h1.d - h2.d)     / dz + self->gpu_sourceD   [real_loc] );
+                            self->gpu_cons[aid].s1  += (real)0.5 * dt * ( -(f1.s1 - f2.s1)   / dx1 - (g1.s1  - g2.s1)  / dx2 - (h1.s1 - h2.s3)   / dz + self->gpu_sourceS1  [real_loc] );
+                            self->gpu_cons[aid].s2  += (real)0.5 * dt * ( -(f1.s2 - f2.s2)   / dx1  - (g1.s2  - g2.s2) / dx2 - (h1.s2 - h2.s3)   / dz + self->gpu_sourceS2  [real_loc] );
+                            self->gpu_cons[aid].s3  += (real)0.5 * dt * ( -(f1.s3 - f2.s3)   / dx1  - (g1.s3  - g2.s3) / dx2 - (h1.s3 - h2.s3)   / dz + self->gpu_sourceS3  [real_loc] );
                             self->gpu_cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + self->gpu_sourceTau [real_loc] );
                         #else
                             real dx1 = self->coord_lattice.dx1[ii];
                             real dx2  = self->coord_lattice.dx2[jj];
                             real dz = self->coord_lattice.dx3[kk];
-                            cons[aid].D   += (real)0.5 * dt * ( -(f1.D - f2.D)     / dx1 - (g1.D   - g2.D )  / dx2 - (h1.D - h2.D)     / dz + sourceD   [real_loc] );
-                            cons[aid].S1  += (real)0.5 * dt * ( -(f1.S1 - f2.S1)   / dx1 - (g1.S1  - g2.S1)  / dx2 - (h1.S1 - h2.S3)   / dz + sourceS1  [real_loc] );
-                            cons[aid].S2  += (real)0.5 * dt * ( -(f1.S2 - f2.S2)   / dx1  - (g1.S2  - g2.S2) / dx2 - (h1.S2 - h2.S3)   / dz + sourceS2  [real_loc] );
-                            cons[aid].S3  += (real)0.5 * dt * ( -(f1.S3 - f2.S3)   / dx1  - (g1.S3  - g2.S3) / dx2 - (h1.S3 - h2.S3)   / dz + sourceS3  [real_loc] );
+                            cons[aid].d   += (real)0.5 * dt * ( -(f1.d - f2.d)     / dx1 - (g1.d   - g2.d )  / dx2 - (h1.d - h2.d)     / dz + sourceD   [real_loc] );
+                            cons[aid].s1  += (real)0.5 * dt * ( -(f1.s1 - f2.s1)   / dx1 - (g1.s1  - g2.s1)  / dx2 - (h1.s1 - h2.s3)   / dz + sourceS1  [real_loc] );
+                            cons[aid].s2  += (real)0.5 * dt * ( -(f1.s2 - f2.s2)   / dx1  - (g1.s2  - g2.s2) / dx2 - (h1.s2 - h2.s3)   / dz + sourceS2  [real_loc] );
+                            cons[aid].s3  += (real)0.5 * dt * ( -(f1.s3 - f2.s3)   / dx1  - (g1.s3  - g2.s3) / dx2 - (h1.s3 - h2.s3)   / dz + sourceS3  [real_loc] );
                             cons[aid].tau += (real)0.5 * dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + sourceTau [real_loc] );
                         #endif
                         
@@ -1586,29 +1586,29 @@ void SRHD3D::advance(
                             self->gpu_cons[aid] +=
                             Conserved{
                                 // L(D)
-                                -(f1.D * s1R - f2.D * s1L) / dV1 
-                                    - (g1.D * s2R - g2.D * s2L) / dV2 
-                                        - (h1.D * s3R - h2.D * s3L) / dV3 
+                                -(f1.d * s1R - f2.d * s1L) / dV1 
+                                    - (g1.d * s2R - g2.d * s2L) / dV2 
+                                        - (h1.d * s3R - h2.d * s3L) / dV3 
                                             + self->gpu_sourceD[real_loc] * decay_const,
 
                                 // L(S1)
-                                -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
-                                    - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        - (h1.S1 * s3R - h2.S1 * s3L) / dV3 
+                                -(f1.s1 * s1R - f2.s1 * s1L) / dV1 
+                                    - (g1.s1 * s2R - g2.s1 * s2L) / dV2 
+                                        - (h1.s1 * s3R - h2.s1 * s3L) / dV3 
                                         + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
                                                 self->gpu_sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
-                                -(f1.S2 * s1R - f2.S2 * s1L) / dV1
-                                        - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
-                                            - (h1.S2 * s3R - h2.S2 * s3L) / dV3 
+                                -(f1.s2 * s1R - f2.s2 * s1L) / dV1
+                                        - (g1.s2 * s2R - g2.s2 * s2L) / dV2 
+                                            - (h1.s2 * s3R - h2.s2 * s3L) / dV3 
                                             - rhoc * hc * gam2 * uc * vc / rmean + coord_lattice->gpu_cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
                                             + self->gpu_sourceS2[real_loc] * decay_const,
 
                                 // L(S3)
-                                -(f1.S3 * s1R - f2.S3 * s1L) / dV1
-                                        - (g1.S3 * s2R - g2.S3 * s2L) / dV2 
-                                            - (h1.S3 * s3R - h2.S3 * s3L) / dV3 
+                                -(f1.s3 * s1R - f2.s3 * s1L) / dV1
+                                        - (g1.s3 * s2R - g2.s3 * s2L) / dV2 
+                                            - (h1.s3 * s3R - h2.s3 * s3L) / dV3 
                                                 - rhoc * hc * gam2 * wc * (uc + vc * coord_lattice->gpu_cot[jj])/ rmean
                                             +     self->gpu_sourceS3[real_loc] * decay_const,
 
@@ -1622,29 +1622,29 @@ void SRHD3D::advance(
                             cons[aid] +=
                             Conserved{
                                 // L(D)
-                                -(f1.D * s1R - f2.D * s1L) / dV1 
-                                    - (g1.D * s2R - g2.D * s2L) / dV2 
-                                        - (h1.D * s3R - h2.D * s3L) / dV3 
+                                -(f1.d * s1R - f2.d * s1L) / dV1 
+                                    - (g1.d * s2R - g2.d * s2L) / dV2 
+                                        - (h1.d * s3R - h2.d * s3L) / dV3 
                                             + sourceD[real_loc] * decay_const,
 
                                 // L(S1)
-                                -(f1.S1 * s1R - f2.S1 * s1L) / dV1 
-                                    - (g1.S1 * s2R - g2.S1 * s2L) / dV2 
-                                        - (h1.S1 * s3R - h2.S1 * s3L) / dV3 
+                                -(f1.s1 * s1R - f2.s1 * s1L) / dV1 
+                                    - (g1.s1 * s2R - g2.s1 * s2L) / dV2 
+                                        - (h1.s1 * s3R - h2.s1 * s3L) / dV3 
                                         + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
                                                 sourceS1[real_loc] * decay_const,
 
                                 // L(S2)
-                                -(f1.S2 * s1R - f2.S2 * s1L) / dV1
-                                        - (g1.S2 * s2R - g2.S2 * s2L) / dV2 
-                                            - (h1.S2 * s3R - h2.S2 * s3L) / dV3 
+                                -(f1.s2 * s1R - f2.s2 * s1L) / dV1
+                                        - (g1.s2 * s2R - g2.s2 * s2L) / dV2 
+                                            - (h1.s2 * s3R - h2.s2 * s3L) / dV3 
                                             - rhoc * hc * gam2 * uc * vc / rmean + self->coord_lattice.cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
                                             + sourceS2[real_loc] * decay_const,
 
                                 // L(S3)
-                                -(f1.S3 * s1R - f2.S3 * s1L) / dV1
-                                        - (g1.S3 * s2R - g2.S3 * s2L) / dV2 
-                                            - (h1.S3 * s3R - h2.S3 * s3L) / dV3 
+                                -(f1.s3 * s1R - f2.s3 * s1L) / dV1
+                                        - (g1.s3 * s2R - g2.s3 * s2L) / dV2 
+                                            - (h1.s3 * s3R - h2.s3 * s3L) / dV3 
                                                 - rhoc * hc * gam2 * wc * (uc + vc * self->coord_lattice.cot[jj])/ rmean
                                                     + sourceS3[real_loc] * decay_const,
 

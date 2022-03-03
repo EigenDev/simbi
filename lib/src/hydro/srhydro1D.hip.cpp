@@ -269,8 +269,8 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 conserved_buff[tx] = self->gpu_cons[ii];
             #endif
 
-            const real D       = conserved_buff[tx].D;
-            const real S       = conserved_buff[tx].S;
+            const real D       = conserved_buff[tx].d;
+            const real S       = conserved_buff[tx].s;
             const real tau     = conserved_buff[tx].tau;
             #if GPU_CODE
             real peq           = self->gpu_pressure_guess[ii];
@@ -479,8 +479,8 @@ Conserved SRHD::calc_intermed_state(
     const real pressure = prims.p;
     const real v = prims.v;
 
-    const real D = state.D;
-    const real S = state.S;
+    const real D = state.d;
+    const real S = state.s;
     const real tau = state.tau;
     const real E = tau + D;
 
@@ -561,10 +561,10 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const Conserved hll_state = calc_hll_state(left_state, right_state, left_flux, right_flux,
                                left_prims, right_prims);
 
-    const real e  = hll_state.tau + hll_state.D;
-    const real s  = hll_state.S;
-    const real fs = hll_flux.S;
-    const real fe = hll_flux.tau + hll_flux.D;
+    const real e  = hll_state.tau + hll_state.d;
+    const real s  = hll_state.s;
+    const real fs = hll_flux.s;
+    const real fe = hll_flux.tau + hll_flux.d;
     
     const real a     = fe;
     const real b     = - (e + fs);
@@ -577,8 +577,8 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     if (-aL <= (aStar - aL))
     {
         const real pressure = left_prims.p;
-        const real D        = left_state.D;
-        const real S        = left_state.S;
+        const real D        = left_state.d;
+        const real S        = left_state.s;
         const real tau      = left_state.tau;
         const real E        = tau + D;
         const real cofactor = (real)1.0 / (aL - aStar);
@@ -599,8 +599,8 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     else
     {
         const real pressure  = right_prims.p;
-        const real D         = right_state.D;
-        const real S         = right_state.S;
+        const real D         = right_state.d;
+        const real S         = right_state.s;
         const real tau       = right_state.tau;
         const real E         = tau + D;
         const real cofactor  = (real)1.0 / (aR - aStar);

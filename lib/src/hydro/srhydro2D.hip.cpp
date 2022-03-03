@@ -161,9 +161,9 @@ Conserved SRHD2D::calc_intermed_statesSR2D(const Primitive &prims,
     real v1 = prims.v1;
     real v2 = prims.v2;
 
-    real D = state.D;
-    real S1 = state.S1;
-    real S2 = state.S2;
+    real D = state.d;
+    real S1 = state.s1;
+    real S2 = state.s2;
     real tau = state.tau;
     real E = tau + D;
 
@@ -250,7 +250,6 @@ void SRHD2D::adapt_dt()
                 }
 
                 min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
-                
             } // end ii 
         } // end jj
     } // end parallel region
@@ -332,10 +331,10 @@ Conserved SRHD2D::calc_hll_flux(
     auto hll_flux = (left_flux * aRplus - right_flux * aLminus + (right_state - left_state) * aRplus * aLminus) / (aRplus - aLminus);
 
     // Upwind the scalar concentration flux
-    if (hll_flux.D < (real)0.0)
-        hll_flux.chi = right_prims.chi * hll_flux.D;
+    if (hll_flux.d < (real)0.0)
+        hll_flux.chi = right_prims.chi * hll_flux.d;
     else
-        hll_flux.chi = left_prims.chi  * hll_flux.D;
+        hll_flux.chi = left_prims.chi  * hll_flux.d;
 
     // Compute the HLL Flux component-wise
     return hll_flux;
@@ -381,9 +380,9 @@ Conserved SRHD2D::calc_hllc_flux(
         (left_flux * aRplus - right_flux * aLminus + (right_state - left_state) * aRplus * aLminus) / (aRplus - aLminus);
 
     //------ Mignone & Bodo subtract off the rest mass density
-    const real e  = hll_state.tau + hll_state.D;
+    const real e  = hll_state.tau + hll_state.d;
     const real s  = hll_state.momentum(nhat);
-    const real fe = hll_flux.tau + hll_flux.D;
+    const real fe = hll_flux.tau + hll_flux.d;
     const real fs = hll_flux.momentum(nhat);
 
     //------Calculate the contact wave velocity and pressure
@@ -400,9 +399,9 @@ Conserved SRHD2D::calc_hllc_flux(
 
     //--------------Compute the L Star State----------
     real pressure = left_prims.p;
-    real D        = left_state.D;
-    real S1       = left_state.S1;
-    real S2       = left_state.S2;
+    real D        = left_state.d;
+    real S1       = left_state.s1;
+    real S2       = left_state.s2;
     real tau      = left_state.tau;
     real E        = tau + D;
     real cofactor = (real)1.0 / (aL - aStar);
@@ -419,9 +418,9 @@ Conserved SRHD2D::calc_hllc_flux(
     const auto starStateL   = Conserved{Dstar, S1star, S2star, tauStar};
 
     pressure = right_prims.p;
-    D        = right_state.D;
-    S1       = right_state.S1;
-    S2       = right_state.S2;
+    D        = right_state.d;
+    S1       = right_state.s1;
+    S2       = right_state.s2;
     tau      = right_state.tau;
     E        = tau + D;
     cofactor = (real)1.0 / (aR - aStar);
@@ -444,19 +443,19 @@ Conserved SRHD2D::calc_hllc_flux(
                         + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR) * (real)0.5;
 
     // upwind the concentration flux 
-    if (hllc_flux.D < (real)0.0)
-        hllc_flux.chi = right_prims.chi * hllc_flux.D;
+    if (hllc_flux.d < (real)0.0)
+        hllc_flux.chi = right_prims.chi * hllc_flux.d;
     else
-        hllc_flux.chi = left_prims.chi  * hllc_flux.D;
+        hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
     return hllc_flux;
 
     // if (-aL <= (aStar - aL))
     // {
     //     const real pressure = left_prims.p;
-    //     const real D        = left_state.D;
-    //     const real S1       = left_state.S1;
-    //     const real S2       = left_state.S2;
+    //     const real D        = left_state.d;
+    //     const real S1       = left_state.s1;
+    //     const real S2       = left_state.s2;
     //     const real tau      = left_state.tau;
     //     const real chi      = left_state.chi;
     //     const real E        = tau + D;
@@ -476,19 +475,19 @@ Conserved SRHD2D::calc_hllc_flux(
     //     auto hllc_flux = left_flux + (starStateL - left_state) * aL;
 
     //     // upwind the concentration flux 
-    //     if (hllc_flux.D < (real)0.0)
-    //         hllc_flux.chi = right_prims.chi * hllc_flux.D;
+    //     if (hllc_flux.d < (real)0.0)
+    //         hllc_flux.chi = right_prims.chi * hllc_flux.d;
     //     else
-    //         hllc_flux.chi = left_prims.chi  * hllc_flux.D;
+    //         hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
     //     return hllc_flux;
     // }
     // else
     // {
     //     const real pressure = right_prims.p;
-    //     const real D        = right_state.D;
-    //     const real S1       = right_state.S1;
-    //     const real S2       = right_state.S2;
+    //     const real D        = right_state.d;
+    //     const real S1       = right_state.s1;
+    //     const real S2       = right_state.s2;
     //     const real tau      = right_state.tau;
     //     const real chi      = right_state.chi;
     //     const real E        = tau + D;
@@ -508,10 +507,10 @@ Conserved SRHD2D::calc_hllc_flux(
     //     auto hllc_flux = right_flux + (starStateR - right_state) * aR;
 
     //     // upwind the concentration flux 
-    //     if (hllc_flux.D < (real)0.0)
-    //         hllc_flux.chi = right_prims.chi * hllc_flux.D;
+    //     if (hllc_flux.d < (real)0.0)
+    //         hllc_flux.chi = right_prims.chi * hllc_flux.d;
     //     else
-    //         hllc_flux.chi = left_prims.chi  * hllc_flux.D;
+    //         hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
     //     return hllc_flux;
     // }
@@ -519,9 +518,9 @@ Conserved SRHD2D::calc_hllc_flux(
     // if (-aL <= (aStar - aL))
     // {
     //     const real pressure = left_prims.p;
-    //     const real D        = left_state.D;
-    //     const real S1       = left_state.S1;
-    //     const real S2       = left_state.S2;
+    //     const real D        = left_state.d;
+    //     const real S1       = left_state.s1;
+    //     const real S2       = left_state.s2;
     //     const real tau      = left_state.tau;
     //     const real E        = tau + D;
     //     const real cofactor = 1. / (aL - aStar);
@@ -544,10 +543,10 @@ Conserved SRHD2D::calc_hllc_flux(
     //         auto hllc_flux =  left_flux + (interstate_left - left_state) * aL;
 
     //         // upwind the concentration flux 
-    //         if (hllc_flux.D < (real)0.0)
-    //             hllc_flux.chi = right_prims.chi * hllc_flux.D;
+    //         if (hllc_flux.d < (real)0.0)
+    //             hllc_flux.chi = right_prims.chi * hllc_flux.d;
     //         else
-    //             hllc_flux.chi = left_prims.chi  * hllc_flux.D;
+    //             hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
     //         return hllc_flux;
     //     }
@@ -566,10 +565,10 @@ Conserved SRHD2D::calc_hllc_flux(
     //         //---------Compute the L Star Flux
     //         auto hllc_flux = left_flux + (interstate_left - left_state) * aL;
     //         // upwind the concentration flux 
-    //         if (hllc_flux.D < (real)0.0)
-    //             hllc_flux.chi = right_prims.chi * hllc_flux.D;
+    //         if (hllc_flux.d < (real)0.0)
+    //             hllc_flux.chi = right_prims.chi * hllc_flux.d;
     //         else
-    //             hllc_flux.chi = left_prims.chi  * hllc_flux.D;
+    //             hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
     //         return hllc_flux;
     //     }
@@ -577,9 +576,9 @@ Conserved SRHD2D::calc_hllc_flux(
     // else
     // {
     //     const real pressure = right_prims.p;
-    //     const real D = right_state.D;
-    //     const real S1 = right_state.S1;
-    //     const real S2 = right_state.S2;
+    //     const real D = right_state.d;
+    //     const real S1 = right_state.s1;
+    //     const real S2 = right_state.s2;
     //     const real tau = right_state.tau;
     //     const real E = tau + D;
     //     const real cofactor = 1. / (aR - aStar);
@@ -602,10 +601,10 @@ Conserved SRHD2D::calc_hllc_flux(
     //         auto hllc_flux = right_flux + (interstate_right - right_state) * aR;
 
     //         // upwind the concentration flux 
-    //         if (hllc_flux.D < (real)0.0)
-    //             hllc_flux.chi = right_prims.chi * hllc_flux.D;
+    //         if (hllc_flux.d < (real)0.0)
+    //             hllc_flux.chi = right_prims.chi * hllc_flux.d;
     //         else
-    //             hllc_flux.chi = left_prims.chi  * hllc_flux.D;
+    //             hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
     //         return hllc_flux;
     //     }
@@ -625,10 +624,10 @@ Conserved SRHD2D::calc_hllc_flux(
     //         // Compute the intermediate right flux
     //         auto hllc_flux = right_flux + (interstate_right - right_state) * aR;
     //         // upwind the concentration flux 
-    //         if (hllc_flux.D < (real)0.0)
-    //             hllc_flux.chi = right_prims.chi * hllc_flux.D;
+    //         if (hllc_flux.d < (real)0.0)
+    //             hllc_flux.chi = right_prims.chi * hllc_flux.d;
     //         else
-    //             hllc_flux.chi = left_prims.chi  * hllc_flux.D;
+    //             hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
     //         return hllc_flux;
     //     }
@@ -672,9 +671,9 @@ void SRHD2D::cons2prim(
             #endif 
 
             luint iter  = 0;
-            const real D    = conserved_buff[tid].D;
-            const real S1   = conserved_buff[tid].S1;
-            const real S2   = conserved_buff[tid].S2;
+            const real D    = conserved_buff[tid].d;
+            const real S1   = conserved_buff[tid].s1;
+            const real S2   = conserved_buff[tid].s2;
             const real tau  = conserved_buff[tid].tau;
             const real Dchi = conserved_buff[tid].chi; 
             const real S    = std::sqrt(S1 * S1 + S2 * S2);
@@ -907,16 +906,16 @@ void SRHD2D::advance(
                             const real s1_source = (s1_all_zeros)  ? 0 : self->gpu_sourceS1[real_loc];
                             const real s2_source = (s2_all_zeros)  ? 0 : self->gpu_sourceS2[real_loc];
                             const real e_source  = (e_all_zeros)   ? 0 : self->gpu_sourceTau[real_loc];
-                            self->gpu_cons[aid].D   += dt * ( -(frf.D - flf.D)     / dx1 - (grf.D   - glf.D ) / dx2 + d_source * decay_const);
-                            self->gpu_cons[aid].S1  += dt * ( -(frf.S1 - flf.S1)   / dx1 - (grf.S1  - glf.S1) / dx2 + d_source * decay_const);
-                            self->gpu_cons[aid].S2  += dt * ( -(frf.S2 - flf.S2)   / dx1  -(grf.S2  - glf.S2) / dx2 + d_source * decay_const);
+                            self->gpu_cons[aid].d   += dt * ( -(frf.d - flf.d)     / dx1 - (grf.d   - glf.d ) / dx2 + d_source * decay_const);
+                            self->gpu_cons[aid].s1  += dt * ( -(frf.s1 - flf.s1)   / dx1 - (grf.s1  - glf.s1) / dx2 + d_source * decay_const);
+                            self->gpu_cons[aid].s2  += dt * ( -(frf.s2 - flf.s2)   / dx1  -(grf.s2  - glf.s2) / dx2 + d_source * decay_const);
                             self->gpu_cons[aid].tau += dt * ( -(frf.tau - flf.tau) / dx1 - (grf.tau - glf.tau)/ dx2 + d_source * decay_const);
                         #else
                             const real dx1 = coord_lattice.dx1[ii];
                             const real dx2  = coord_lattice.dx2[jj];
-                            cons[aid].D   += dt * ( -(frf.D - flf.D)     / dx1 - (grf.D   - glf.D ) / dx2 + sourceD   [real_loc] );
-                            cons[aid].S1  += dt * ( -(frf.S1 - flf.S1)   / dx1 - (grf.S1  - glf.S1) / dx2 + sourceS1  [real_loc] );
-                            cons[aid].S2  += dt * ( -(frf.S2 - flf.S2)   / dx1  -(grf.S2  - glf.S2) / dx2 + sourceS2  [real_loc] );
+                            cons[aid].d   += dt * ( -(frf.d - flf.d)     / dx1 - (grf.d   - glf.d ) / dx2 + sourceD   [real_loc] );
+                            cons[aid].s1  += dt * ( -(frf.s1 - flf.s1)   / dx1 - (grf.s1  - glf.s1) / dx2 + sourceS1  [real_loc] );
+                            cons[aid].s2  += dt * ( -(frf.s2 - flf.s2)   / dx1  -(grf.s2  - glf.s2) / dx2 + sourceS2  [real_loc] );
                             cons[aid].tau += dt * ( -(frf.tau - flf.tau) / dx1 - (grf.tau - glf.tau)/ dx2 + sourceTau [real_loc] );
                         #endif
                     
@@ -1110,6 +1109,7 @@ void SRHD2D::advance(
                             const real dx1 = self->coord_lattice.dx1[ii];
                             const real dx2  = self->coord_lattice.dx2[jj];
                             const Conserved source_terms = {d_source, s1_source, s2_source, e_source};
+                            
                             cons[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * (real)0.5;
                         #endif
                     

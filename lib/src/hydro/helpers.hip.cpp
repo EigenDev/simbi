@@ -28,13 +28,13 @@ namespace simbi{
                 switch (boundary_condition)
                 {
                 case simbi::BoundaryCondition::INFLOW:
-                    cons[0].S =   cons[1].S;
+                    cons[0].s =   cons[1].s;
                     break;
                 case simbi::BoundaryCondition::REFLECTING:
-                    cons[0].S = - cons[1].S;
+                    cons[0].s = - cons[1].s;
                     break;
                 default:
-                    cons[0].S =   cons[1].S;
+                    cons[0].s =   cons[1].s;
                     break;
                 }
             } else {
@@ -46,20 +46,20 @@ namespace simbi{
                 case simbi::BoundaryCondition::INFLOW:
                     cons[0] =     cons[2];
                     cons[1] =     cons[2];
-                    cons[0].S = - cons[2].S;
-                    cons[1].S = - cons[2].S;
+                    cons[0].s = - cons[2].s;
+                    cons[1].s = - cons[2].s;
                     break;
                 case simbi::BoundaryCondition::REFLECTING:
                     cons[0] =     cons[3];
                     cons[1] =     cons[2];  
-                    cons[0].S = - cons[3].S;
-                    cons[1].S = - cons[2].S;
+                    cons[0].s = - cons[3].s;
+                    cons[1].s = - cons[2].s;
                     break;
                 default:
                     cons[0]   = cons[2];
                     cons[1]   = cons[2];
-                    cons[0].S = cons[2].S;
-                    cons[1].S = cons[2].S;
+                    cons[0].s = cons[2].s;
+                    cons[1].s = cons[2].s;
                     break;
                 }
             }
@@ -158,10 +158,10 @@ namespace simbi{
                     switch (boundary_condition)
                     {
                     case simbi::BoundaryCondition::REFLECTING:
-                        u_state[jj * sx + 0 * sy].S1 = - u_state[jj * sx + 1 * sy].S1;
+                        u_state[jj * sx + 0 * sy].s1 = - u_state[jj * sx + 1 * sy].s1;
                         break;
                     case simbi::BoundaryCondition::INFLOW:
-                        u_state[jj * sx + 0 * sy].S1 = - u_state[jj * sx + 1 * sy].S1;
+                        u_state[jj * sx + 0 * sy].s1 = - u_state[jj * sx + 1 * sy].s1;
                         break;
                     default:
                         break;
@@ -171,6 +171,11 @@ namespace simbi{
                     if (ii < x1grid_size){
                         u_state[0 * sx + ii * sy]  = u_state[1 * sx + ii * sy];
                         u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 2) * sx + ii * sy];
+
+                        if (bipolar)
+                        {
+                            u_state[(x2grid_size - 1) * sx + ii * sy].s2 = - u_state[(x2grid_size - 2) * sx + ii * sy].s2;
+                        }
                     }
                 }
 
@@ -186,15 +191,15 @@ namespace simbi{
                         u_state[jj * sx +  0 * sy]   = u_state[jj * sx +  3 * sy];
                         u_state[jj * sx +  1 * sy]   = u_state[jj * sx +  2 * sy];
 
-                        u_state[jj * sx + 0 * sy].S1 = - u_state[jj * sx + 3 * sy].S1;
-                        u_state[jj * sx + 1 * sy].S1 = - u_state[jj * sx + 2 * sy].S1;
+                        u_state[jj * sx + 0 * sy].s1 = - u_state[jj * sx + 3 * sy].s1;
+                        u_state[jj * sx + 1 * sy].s1 = - u_state[jj * sx + 2 * sy].s1;
                         break;
                     case simbi::BoundaryCondition::INFLOW:
                         u_state[jj * sx +  0 * sy]   = u_state[jj * sx +  2 * sy];
                         u_state[jj * sx +  1 * sy]   = u_state[jj * sx +  2 * sy];
 
-                        u_state[jj * sx + 0 * sy].S1 = - u_state[jj * sx + 2 * sy].S1;
-                        u_state[jj * sx + 1 * sy].S1 = - u_state[jj * sx + 2 * sy].S1;
+                        u_state[jj * sx + 0 * sy].s1 = - u_state[jj * sx + 2 * sy].s1;
+                        u_state[jj * sx + 1 * sy].s1 = - u_state[jj * sx + 2 * sy].s1;
                         break;
                     default:
                         u_state[jj * sx +  0 * sy]   = u_state[jj * sx +  2 * sy];
@@ -209,6 +214,12 @@ namespace simbi{
 
                         u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + ii * sy];
                         u_state[(x2grid_size - 2) * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + ii * sy];
+
+                        if (bipolar)
+                        {
+                            u_state[(x2grid_size - 1) * sx + ii * sy].s2 = - u_state[(x2grid_size - 4) * sx + ii * sy].s2;
+                            u_state[(x2grid_size - 2) * sx + ii * sy].s2 = - u_state[(x2grid_size - 3) * sx + ii * sy].s2;
+                        }
                     }
                 }
             }
@@ -298,6 +309,12 @@ namespace simbi{
 
                         u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + ii * sy];
                         u_state[(x2grid_size - 2) * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + ii * sy];
+
+                        if (bipolar)
+                        {
+                            u_state[(x2grid_size - 1) * sx + ii * sy].m2 = - u_state[(x2grid_size - 4) * sx + ii * sy].m2;
+                            u_state[(x2grid_size - 2) * sx + ii * sy].m2 = - u_state[(x2grid_size - 3) * sx + ii * sy].m2;
+                        }
                     }
                 }
             }
@@ -342,46 +359,46 @@ namespace simbi{
                 if ((jj < x2grid_size) && (ii < x1grid_size) && (kk < x3grid_size))
                 {
                     if (jj < 1){
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].D   =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].D;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S1  =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].S1;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S2  =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].S2;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S3  =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].S3;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].d   =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].d;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s1  =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].s1;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s2  =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].s2;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s3  =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].s3;
                         u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau =   u_state[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].tau;
                         
                     } else if (jj > x2grid_size - 2) {
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].D    =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].D;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S1   =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].S1;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S2   =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].S2;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S3   =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].S3;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].d    =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].d;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s1   =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].s1;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s2   =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].s2;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s3   =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].s3;
                         u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau  =   u_state[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].tau;
 
                     } 
                     if (kk < 1){
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].D   =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].D;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S1  =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].S1;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S2  =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].S2;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S3  =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].S3;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].d   =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].d;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s1  =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].s1;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s2  =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].s2;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s3  =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].s3;
                         u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau =   u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].tau;
                         
                     } else if (kk > x3grid_size - 2) {
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].D    =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].D;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S1   =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].S1;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S2   =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].S2;
-                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].S3   =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].S3;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].d    =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].d;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s1   =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].s1;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s2   =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].s2;
+                        u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s3   =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].s3;
                         u_state[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau  =   u_state[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].tau;
 
                     } else {
-                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].D               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].D;
-                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].D = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].D;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].d               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].d;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].d = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].d;
 
-                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S1               = - u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S1;
-                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S1 =   u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S1;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s1               = - u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s1;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s1 =   u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s1;
 
-                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S2                = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S2;
-                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S2  = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S2;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s2                = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s2;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s2  = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s2;
 
-                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S3                = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S3;
-                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S3  = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S3;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s3                = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s3;
+                        u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s3  = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s3;
 
                         u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].tau               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].tau;
                         u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].tau = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].tau;
@@ -393,25 +410,25 @@ namespace simbi{
                 {
 
                     // Fix the ghost zones at the radial boundaries
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  0].D               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  3].D;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  1].D               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  2].D;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 1].D = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 3].D;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 2].D = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 3].D;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  0].d               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  3].d;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  1].d               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  2].d;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 1].d = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 3].d;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 2].d = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 3].d;
 
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S1               = - u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].S1;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S1               = - u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].S1;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S1 =   u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S1;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S1 =   u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S1;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s1               = - u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].s1;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s1               = - u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].s1;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s1 =   u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s1;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s1 =   u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s1;
 
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S2               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].S2;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S2               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].S2;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S2 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S2;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S2 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S2;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s2               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].s2;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s2               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].s2;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s2 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s2;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s2 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s2;
 
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].S3               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].S3;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].S3               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].S3;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].S3 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S3;
-                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].S3 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].S3;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s3               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].s3;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s3               = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].s3;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s3 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s3;
+                    u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s3 = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s3;
 
                     u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].tau                = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].tau;
                     u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].tau                = u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].tau;
@@ -423,32 +440,32 @@ namespace simbi{
                     if (jj < 2){
                         if (ii < x1grid_size){
                             if (jj == 0){
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].D;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].S1;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].S2;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].S3;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].d;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].s1;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].s2;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].s3;
                                 u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].tau;
                             } else {
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D    =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].D;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1   =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].S1;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2   =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].S2;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3   =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].S3;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d    =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].d;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1   =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].s1;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2   =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].s2;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3   =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].s3;
                                 u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau  =   u_state[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].tau;
                             }
                         }
                     } else if (jj > x2grid_size - 3) {
                         if (ii < x1grid_size){
                             if (jj == x2grid_size - 1){
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].D;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].S1;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].S2;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].S3;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].d;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].s1;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].s2;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].s3;
                                 u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].tau;
                             } else {
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].D;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].S1;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].S2;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].S3;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].d;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].s1;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].s2;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].s3;
                                 u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].tau;
                             }
                         }
@@ -457,32 +474,32 @@ namespace simbi{
                     if (kk < 2){
                         if (ii < x1grid_size){
                             if (jj == 0){
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].D;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].d;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3;
                                 u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
                             } else {
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D    =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].D;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1   =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2   =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3   =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d    =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].d;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1   =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2   =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3   =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3;
                                 u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau  =   u_state[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
                             }
                         }
                     } else if (kk > x3grid_size - 3) {
                         if (ii < x1grid_size){
                             if (kk == x3grid_size - 1){
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].D;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].d;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3;
                                 u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
                             } else {
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].D   =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].D;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1  =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S1;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2  =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S2;
-                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3  =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].S3;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].d;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2;
+                                u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3;
                                 u_state[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   u_state[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
                             }
                         }

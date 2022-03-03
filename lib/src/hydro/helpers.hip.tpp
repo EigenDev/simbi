@@ -134,8 +134,8 @@ namespace simbi{
         const luint aid = (col_maj) ? ia * s-> ny + ja : ja * s->nx + ia;
         if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid))
         {
-            prim_buff[tid] = s->gpu_prims[aid];
-            __syncthreads();
+             prim_buff[tid] = s->gpu_prims[aid];
+             __syncthreads();
             real plus_v1 , plus_v2 , minus_v1, minus_v2;
 
             real rho  = prim_buff[tid].rho;
@@ -147,12 +147,12 @@ namespace simbi{
             {
                 real h  = 1 + gamma * p / (rho * (gamma - 1));
                 real cs = sqrt(gamma * p / (rho * h));
-                plus_v1  = (v1 + cs) / (1 + v1 * cs);
-                plus_v2  = (v2 + cs) / (1 + v2 * cs);
-                minus_v1 = (v1 - cs) / (1 - v1 * cs);
-                minus_v2 = (v2 - cs) / (1 - v2 * cs);
+                plus_v1  = (v1 + cs) / ((real)1.0 + v1 * cs);
+                plus_v2  = (v2 + cs) / ((real)1.0 + v2 * cs);
+                minus_v1 = (v1 - cs) / ((real)1.0 - v1 * cs);
+                minus_v2 = (v2 - cs) / ((real)1.0 - v2 * cs);
             } else {
-                real cs = sqrt(gamma * p / rho);
+                real cs  = sqrt(gamma * p / rho);
                 plus_v1  = (v1 + cs);
                 plus_v2  = (v2 + cs);
                 minus_v1 = (v1 - cs);
@@ -177,7 +177,7 @@ namespace simbi{
                             rmean * (tr - tl) / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
                     break;
             } // end switch
-
+            
             s->dt_min[jj * s->xphysical_grid + ii] = s->cfl * cfl_dt;
         }
         #endif
@@ -200,15 +200,15 @@ namespace simbi{
         if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid))
         {
             // tail part
-            // int bidx = 0;
-            // for(int i = 1; bidx + tid  < zones; i++)
-            // {
-            //     val = s->dt_min[tid + bidx];
-            //     min = (val <= 0 || val > min) ? min : val;
-            //     bidx = i * blockDim.x * blockDim.y;
-            // }
-            // previously reduced MIN part
             int bidx = 0;
+            for(int i = 1; bidx + tid  < zones; i++)
+            {
+                val = s->dt_min[tid + bidx];
+                min = (val <= 0 || val > min) ? min : val;
+                bidx = i * blockDim.x * blockDim.y;
+            }
+            // previously reduced MIN part
+            bidx = 0;
             int i;
             for(i = 1; bidx + tid < gridDim.x*gridDim.y; i++)
             {
@@ -226,6 +226,7 @@ namespace simbi{
             }
             if(tid == 0)
             {
+                // printf("dt: %f\n", dt_buff[0]);
                 s->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
                 s->dt = s->dt_min[0];
             }
@@ -350,7 +351,7 @@ namespace simbi{
     //             cons[grid_size - 1] = cons[grid_size - 2];
     //             if constexpr(is_relativistic<T>)
     //             {
-    //                 cons[0].S = - cons[1].S;
+    //                 cons[0].s = - cons[1].s;
     //             } else {
     //                 cons[0].m = - cons[1].m;
     //             }
@@ -363,8 +364,8 @@ namespace simbi{
 
     //             if constexpr(is_relativistic<T>)
     //             {
-    //                 cons[0].S = - cons[3].S;
-    //                 cons[1].S = - cons[2].S;
+    //                 cons[0].s = - cons[3].s;
+    //                 cons[1].s = - cons[2].s;
     //             } else {
     //                 cons[0].m = - cons[3].m;
     //                 cons[1].m = - cons[2].m;

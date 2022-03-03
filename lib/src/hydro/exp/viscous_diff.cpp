@@ -371,8 +371,8 @@ void simbi::ArtificialViscosity::calc_artificial_visc(
                     }
                 ;
 
-            // std::cout << "Flux in S1: "  << avFlux[yc * nx + xc].S1 << "\n";
-            // std::cout << "Flux in S2: "  << avFlux[yc * nx + xc].S2 << "\n";
+            // std::cout << "Flux in S1: "  << avFlux[yc * nx + xc].s1 << "\n";
+            // std::cout << "Flux in S2: "  << avFlux[yc * nx + xc].s2 << "\n";
             // std::cout << "Flux in tau: " << avFlux[yc * nx + xc].tau << "\n";
             // std::cout << "\n";
             // std::cin.get();
