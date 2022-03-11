@@ -84,7 +84,7 @@ void simbi::CLattice1D::compute_dV()
         rl = x1vertices[ii - 1];
 
         dr = rr - rl;
-        rmean = (real)0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
+        rmean = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
         
         dV.push_back(rmean * rmean * dr);
     }
@@ -100,7 +100,7 @@ void simbi::CLattice1D::compute_x1mean()
     {
         xr = x1vertices[ii];
         xl = x1vertices[ii - 1];
-        x1mean.push_back((real)0.75 * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl));
+        x1mean.push_back(static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl));
     }
 }
 

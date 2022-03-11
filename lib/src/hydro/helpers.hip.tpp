@@ -147,10 +147,10 @@ namespace simbi{
             {
                 real h  = 1 + gamma * p / (rho * (gamma - 1));
                 real cs = sqrt(gamma * p / (rho * h));
-                plus_v1  = (v1 + cs) / ((real)1.0 + v1 * cs);
-                plus_v2  = (v2 + cs) / ((real)1.0 + v2 * cs);
-                minus_v1 = (v1 - cs) / ((real)1.0 - v1 * cs);
-                minus_v2 = (v2 - cs) / ((real)1.0 - v2 * cs);
+                plus_v1  = (v1 + cs) / (static_cast<real>(1.0) + v1 * cs);
+                plus_v2  = (v2 + cs) / (static_cast<real>(1.0) + v2 * cs);
+                minus_v1 = (v1 - cs) / (static_cast<real>(1.0) - v1 * cs);
+                minus_v2 = (v2 - cs) / (static_cast<real>(1.0) - v2 * cs);
             } else {
                 real cs  = sqrt(gamma * p / rho);
                 plus_v1  = (v1 + cs);
@@ -168,9 +168,9 @@ namespace simbi{
                 
                 case simbi::Geometry::SPHERICAL:
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl           = my_max(rmin * pow(10, (ii -(real) 0.5) * dx1), rmin);
+                    const real rl           = my_max(rmin * pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
                     const real rr           = my_min(rl * pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
-                    const real tl           = my_max(x2min + (jj - (real)0.5) * dx2, x2min);
+                    const real tl           = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                     const real tr           = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                     const real rmean        = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
                     cfl_dt = my_min((rr - rl) / (my_max(std::abs(plus_v1), std::abs(minus_v1))),

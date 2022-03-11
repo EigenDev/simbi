@@ -81,7 +81,7 @@ void Newtonian1D::cons2prim(ExecutionPolicy<> p, Newtonian1D *dev, simbi::MemSid
         real rho, pre, v;
         rho = conserved_buff[tx].rho;
         v   = conserved_buff[tx].m/rho;
-        pre = (self->gamma - (real)1.0)*(conserved_buff[tx].e_dens - (real)0.5 * rho * v * v);
+        pre = (self->gamma - static_cast<real>(1.0))*(conserved_buff[tx].e_dens - static_cast<real>(0.5) * rho * v * v);
 
         #if GPU_CODE
             self->gpu_prims[ii] = Primitive{rho, v, pre};
@@ -114,14 +114,14 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
     {
     case SOLVER::HLLE:
         {
-        const real aR = my_max(my_max(v_l + cs_l, v_r + cs_r), (real)0.0); 
-        const real aL = my_min(my_min(v_l - cs_l, v_r - cs_r), (real)0.0);
+        const real aR = my_max(my_max(v_l + cs_l, v_r + cs_r), static_cast<real>(0.0)); 
+        const real aL = my_min(my_min(v_l - cs_l, v_r - cs_r), static_cast<real>(0.0));
         return Eigenvals{aL, aR};
         }
     case SOLVER::HLLC:
-        real cbar   = (real)0.5*(cs_l + cs_r);
-        real rhoBar = (real)0.5*(rho_l + rho_r);
-        real pStar  = (real)0.5*(p_l + p_r) + (real)0.5*(v_l - v_r)*cbar*rhoBar;
+        real cbar   = static_cast<real>(0.5)*(cs_l + cs_r);
+        real rhoBar = static_cast<real>(0.5)*(rho_l + rho_r);
+        real pStar  = static_cast<real>(0.5)*(p_l + p_r) + static_cast<real>(0.5)*(v_l - v_r)*cbar*rhoBar;
 
         // Steps to Compute HLLC as described in Toro et al. 2019
         real z      = (gamma - 1.)/(2.*gamma);
@@ -205,7 +205,7 @@ void Newtonian1D::adapt_dt(Newtonian1D *dev, luint blockSize, luint tblock)
 GPU_CALLABLE_MEMBER
 Conserved Newtonian1D::prims2cons(const Primitive &prim)
 {
-    real energy = prim.p/(gamma - (real)1.0) + (real)0.5 * prim.rho * prim.v * prim.v;
+    real energy = prim.p/(gamma - static_cast<real>(1.0)) + static_cast<real>(0.5) * prim.rho * prim.v * prim.v;
 
     return Conserved{prim.rho, prim.rho * prim.v, energy};
 };
@@ -218,7 +218,7 @@ Conserved Newtonian1D::prims2cons(const Primitive &prim)
 GPU_CALLABLE_MEMBER
 Conserved Newtonian1D::prims2flux(const Primitive &prim)
 {
-    real energy = prim.p/(gamma - (real)1.0) + (real)0.5 * prim.rho * prim.v * prim.v;
+    real energy = prim.p/(gamma - static_cast<real>(1.0)) + static_cast<real>(0.5) * prim.rho * prim.v * prim.v;
 
     return Conserved{
         prim.rho * prim.v,
@@ -260,8 +260,8 @@ Conserved Newtonian1D::calc_hllc_flux(
 
     real aL = lambda.aL; 
     real aR = lambda.aR; 
-    real ap = std::max((real)0.0, aR);
-    real am = std::min((real)0.0, aL);
+    real ap = std::max(static_cast<real>(0.0), aR);
+    real am = std::min(static_cast<real>(0.0), aL);
     if (0.0 <= aL){
         return left_flux;
     } 
@@ -417,8 +417,8 @@ void Newtonian1D::advance(
             // Compute the reconstructed primitives at the i+1/2 luinterface
 
             // Reconstructed left primitives vector
-            prims_l = center + minmod((center - left_mid) * plm_theta, (right_mid - left_mid)*(real)0.5, (right_mid - center) * plm_theta) * (real)0.5;
-            prims_r = right_mid - minmod((right_mid - center)*plm_theta, (right_most - center)*(real)0.5, (right_most- right_mid) * plm_theta) * (real)0.5;
+            prims_l = center + minmod((center - left_mid) * plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center) * plm_theta) * static_cast<real>(0.5);
+            prims_r = right_mid - minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most- right_mid) * plm_theta) * static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
@@ -437,8 +437,8 @@ void Newtonian1D::advance(
             }
 
             // Do the same thing, but for the right side luinterface [i - 1/2]
-            prims_l = left_mid + minmod((left_mid - left_most) * plm_theta, (center - left_most)*(real)0.5, (center - left_mid)*plm_theta)*(real)0.5;
-            prims_r = center   - minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*(real)0.5, (right_mid - center)*plm_theta)*(real)0.5;
+            prims_l = left_mid + minmod((left_mid - left_most) * plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
+            prims_r = center   - minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
@@ -456,7 +456,7 @@ void Newtonian1D::advance(
                 flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
             }
         }
-        const auto step = (self->first_order) ? (real)1.0 : (real)0.5;
+        const auto step = (self->first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
@@ -543,8 +543,8 @@ void Newtonian1D::advance(
     PrimData prods;
     real round_place = 1 / chkpt_luinterval;
     real t_luinterval =
-        t == 0 ? floor(tstart * round_place + (real)0.5) / round_place
-               : floor(tstart * round_place + (real)0.5) / round_place + chkpt_luinterval;
+        t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
+               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_luinterval;
     DataWriteMembers setup;
     setup.x1max          = r[active_zones - 1];
     setup.x1min          = r[0];

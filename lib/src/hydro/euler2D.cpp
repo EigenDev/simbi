@@ -115,7 +115,7 @@ void Newtonian2D::cons2prim(
         const real v1      = cons_buff[tid].m1/rho;
         const real v2      = cons_buff[tid].m2/rho;
         const real rho_chi = cons_buff[tid].chi;
-        const real pre     = (gamma - (real)1.0)*(cons_buff[tid].e_dens - (real)0.5 * rho * (v1 * v1 + v2 * v2));
+        const real pre     = (gamma - static_cast<real>(1.0))*(cons_buff[tid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2));
 
         #if GPU_CODE
         self->gpu_prims[gid] = Primitive{rho, v1, v2, pre, rho_chi / rho};
@@ -326,8 +326,8 @@ Conserved Newtonian2D::calc_hll_flux(
                                         
 {
     Eigenvals lambda = calc_eigenvals(left_prims, right_prims, ehat);
-    real am = my_min((real)0.0, lambda.aL);
-    real ap = my_max((real)0.0, lambda.aR);
+    real am = my_min(static_cast<real>(0.0), lambda.aL);
+    real ap = my_max(static_cast<real>(0.0), lambda.aR);
     
     // Compute the HLL Flux 
     return  ( left_flux * ap - right_flux * am 
@@ -614,10 +614,10 @@ void Newtonian2D::advance(
             yright_most = prim_buff[(txa * sy +        (tya + 2) % by * sx)];
 
             // Reconstructed left X Primitive vector at the i+1/2 luinterface
-            xprims_l = center     + minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*(real)0.5, (xright_mid - center) * plm_theta) * (real)0.5; 
-            xprims_r = xright_mid - minmod((xright_mid - center) * plm_theta, (xright_most - center) * (real)0.5, (xright_most - xright_mid)*plm_theta) * (real)0.5;
-            yprims_l = center     + minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*(real)0.5, (yright_mid - center) * plm_theta) * (real)0.5;  
-            yprims_r = yright_mid - minmod((yright_mid - center) * plm_theta, (yright_most - center) * (real)0.5, (yright_most - yright_mid)*plm_theta) * (real)0.5;
+            xprims_l = center     + minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
+            xprims_r = xright_mid - minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
+            yprims_l = center     + minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
+            yprims_r = yright_mid - minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
 
 
             // Calculate the left and right states using the reconstructed PLM
@@ -644,10 +644,10 @@ void Newtonian2D::advance(
             }
 
             // Do the same thing, but for the left side luinterface [i - 1/2]
-            xprims_l = xleft_mid + minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * (real)0.5, (center - xleft_mid)*plm_theta) * (real)0.5;
-            xprims_r = center    - minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*(real)0.5, (xright_mid - center)*plm_theta)*(real)0.5;
-            yprims_l = yleft_mid + minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * (real)0.5, (center - yleft_mid)*plm_theta) * (real)0.5;
-            yprims_r = center    - minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*(real)0.5, (yright_mid - center)*plm_theta)*(real)0.5;
+            xprims_l = xleft_mid + minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
+            xprims_r = center    - minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
+            yprims_l = yleft_mid + minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
+            yprims_r = center    - minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
@@ -676,23 +676,23 @@ void Newtonian2D::advance(
 
         //Advance depending on geometry
         luint real_loc  = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
-        const auto step = (first_order) ? (real)1.0 : (real)0.5;
+        const auto step = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
                 {
                     #if GPU_CODE
-                        const real rho_source  = (rho_all_zeros) ? (real)0.0 : self->gpu_sourceRho[real_loc];
-                        const real m1_source   = (m1_all_zeros)  ? (real)0.0 : self->gpu_sourceM1[real_loc];
-                        const real m2_source   = (m2_all_zeros)  ? (real)0.0 : self->gpu_sourceM2[real_loc];
-                        const real e_source    = (e_all_zeros)   ? (real)0.0 : self->gpu_sourceE[real_loc];
+                        const real rho_source  = (rho_all_zeros) ? static_cast<real>(0.0) : self->gpu_sourceRho[real_loc];
+                        const real m1_source   = (m1_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceM1[real_loc];
+                        const real m2_source   = (m2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceM2[real_loc];
+                        const real e_source    = (e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceE[real_loc];
                         const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
                         self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf) / dx2) * step * dt;
                     #else
-                        const real rho_source = (rho_all_zeros) ? (real)0.0 : sourceRho[real_loc];
-                        const real m1_source  = (m1_all_zeros)  ? (real)0.0   : sourceM1[real_loc];
-                        const real m2_source  = (m2_all_zeros)  ? (real)0.0   : sourceM2[real_loc];
-                        const real e_source   = (e_all_zeros)   ? (real)0.0   : sourceE[real_loc];
+                        const real rho_source = (rho_all_zeros) ? static_cast<real>(0.0) : sourceRho[real_loc];
+                        const real m1_source  = (m1_all_zeros)  ? static_cast<real>(0.0)   : sourceM1[real_loc];
+                        const real m2_source  = (m2_all_zeros)  ? static_cast<real>(0.0)   : sourceM2[real_loc];
+                        const real e_source   = (e_all_zeros)   ? static_cast<real>(0.0)   : sourceE[real_loc];
                         const real dx1        = self->coord_lattice.dx1[ii];
                         const real dx2        = self->coord_lattice.dx2[jj];
 
@@ -709,25 +709,25 @@ void Newtonian2D::advance(
             case simbi::Geometry::SPHERICAL:
                 {
                 #if GPU_CODE
-                const real rl           = (ii > 0 ) ? x1min * pow(10, (ii -(real) 0.5) * dlogx1) :  x1min;
+                const real rl           = (ii > 0 ) ? x1min * pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
                 const real rr           = (ii < xpg - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
-                const real tl           = (jj > 0 ) ? x2min + (jj - (real)0.5) * dx2 :  x2min;
+                const real tl           = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
                 const real tr           = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
-                const real rmean        = (real)0.75 * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
+                const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
                 const real s1R          = rr * rr; 
                 const real s1L          = rl * rl; 
                 const real s2R          = std::sin(tr);
                 const real s2L          = std::sin(tl);
-                const real thmean       = (real)0.5 * (tl + tr);
+                const real thmean       = static_cast<real>(0.5) * (tl + tr);
                 const real sint         = std::sin(thmean);
                 const real dV1          = rmean * rmean * (rr - rl);             
                 const real dV2          = rmean * sint * (tr - tl); 
                 const real cot          = std::cos(thmean) / sint;
 
-                const real rho_source  = (rho_all_zeros) ? (real)0.0 : self->gpu_sourceRho[real_loc];
-                const real m1_source   = (m1_all_zeros)  ? (real)0.0 : self->gpu_sourceM1[real_loc];
-                const real m2_source   = (m2_all_zeros)  ? (real)0.0 : self->gpu_sourceM2[real_loc];
-                const real e_source    = (e_all_zeros)   ? (real)0.0 : self->gpu_sourceE[real_loc];
+                const real rho_source  = (rho_all_zeros) ? static_cast<real>(0.0) : self->gpu_sourceRho[real_loc];
+                const real m1_source   = (m1_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceM1[real_loc];
+                const real m2_source   = (m2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceM2[real_loc];
+                const real e_source    = (e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceE[real_loc];
                 #else
                 const real s1R   = coord_lattice.x1_face_areas[ii + 1];
                 const real s1L   = coord_lattice.x1_face_areas[ii + 0];
@@ -738,10 +738,10 @@ void Newtonian2D::advance(
                 const real dV2   = rmean * coord_lattice.dV2[jj];
                 const real cot   = coord_lattice.cot[jj];
 
-                const real rho_source  = (rho_all_zeros) ? (real)0.0 : sourceRho[real_loc];
-                const real m1_source   = (m1_all_zeros)  ? (real)0.0 : sourceM1[real_loc];
-                const real m2_source   = (m2_all_zeros)  ? (real)0.0 : sourceM2[real_loc];
-                const real e_source    = (e_all_zeros)   ? (real)0.0 : sourceE[real_loc];
+                const real rho_source  = (rho_all_zeros) ? static_cast<real>(0.0) : sourceRho[real_loc];
+                const real m1_source   = (m1_all_zeros)  ? static_cast<real>(0.0) : sourceM1[real_loc];
+                const real m2_source   = (m2_all_zeros)  ? static_cast<real>(0.0) : sourceM2[real_loc];
+                const real e_source    = (e_all_zeros)   ? static_cast<real>(0.0) : sourceE[real_loc];
                 #endif
 
                 // Grab central primitives
@@ -750,7 +750,7 @@ void Newtonian2D::advance(
                 const real vc   = prim_buff[txa * sy + tya * sx].v2;
                 const real pc   = prim_buff[txa * sy + tya * sx].p;
 
-                const Conserved geom_source  = {(real)0.0, (rhoc * vc * vc + (real)2.0 * pc) / rmean, - (rhoc  * uc * vc - pc * cot) / rmean , (real)0.0};
+                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * vc * vc + (real)2.0 * pc) / rmean, - (rhoc  * uc * vc - pc * cot) / rmean , static_cast<real>(0.0)};
                 const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
 
                 #if GPU_CODE 
@@ -792,8 +792,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     real round_place = 1 / chkpt_interval;
     real t = tstart;
     real t_interval =
-        t == 0 ? floor(tstart * round_place + (real)0.5) / round_place
-               : floor(tstart * round_place + (real)0.5) / round_place + chkpt_interval;
+        t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
+               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
     this->first_order    = first_order;
     this->periodic       = boundary_condition == "periodic";
@@ -863,7 +863,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     std::vector<int> init_state;
 
     // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_const = 1 / (1 + std::exp((real)10.0 * (tstart - engine_duration)));
+    decay_const = 1 / (1 + std::exp(static_cast<real>(10.0) * (tstart - engine_duration)));
 
     // Declare I/O variables for Read/Write capability
     PrimData prods;
@@ -994,7 +994,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             } else {
                 adapt_dt();
             }
-            decay_const = (real)1.0 / ((real)1.0 + exp((real)10.0 * (t - engine_duration)));
+            decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
         }
     } else {
         while (t < tend && !inFailureState)
@@ -1044,7 +1044,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             n++;
 
             // Update decay constant
-            decay_const = (real)1.0 / ((real)1.0 + exp((real)10.0 * (t - engine_duration)));
+            decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
 
             simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
             //Adapt the timestep

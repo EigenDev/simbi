@@ -205,8 +205,8 @@ void SRHD::advance(
                 // Compute the reconstructed primitives at the i+1/2 interface
 
                 // Reconstructed left primitives vector
-                prims_l = center    + minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*(real)0.5, (right_mid - center)*plm_theta)*(real)0.5; 
-                prims_r = right_mid - minmod((right_mid - center)*plm_theta, (right_most - center)*(real)0.5, (right_most - right_mid)*plm_theta)*(real)0.5;
+                prims_l = center    + minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5); 
+                prims_r = right_mid - minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most - right_mid)*plm_theta)*static_cast<real>(0.5);
 
                 // Calculate the left and right states using the reconstructed PLM
                 // primitives
@@ -223,8 +223,8 @@ void SRHD::advance(
                 }
                 
                 // Do the same thing, but for the right side interface [i - 1/2]
-                prims_l = left_mid + minmod((left_mid - left_most)*plm_theta, (center - left_most)*(real)0.5, (center - left_mid)*plm_theta)*(real)0.5;
-                prims_r = center   - minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*(real)0.5, (right_mid - center)*plm_theta)*(real)0.5;
+                prims_l = left_mid + minmod((left_mid - left_most)*plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
+                prims_r = center   - minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
 
                 // Calculate the left and right states using the reconstructed PLM
                 // primitives
@@ -245,10 +245,10 @@ void SRHD::advance(
                 case simbi::Geometry::CARTESIAN:
                     #if GPU_CODE
                         dx1 = coord_lattice->gpu_dx1[ii];
-                        self->gpu_cons[ia] -= ((frf - flf) / dx1) * dt * (real)0.5;
+                        self->gpu_cons[ia] -= ((frf - flf) / dx1) * dt * static_cast<real>(0.5);
                     #else 
                         dx1 = coord_lattice->dx1[ii];
-                        cons[ia] -= ((frf - flf)  / dx1) * dt * (real)0.5;
+                        cons[ia] -= ((frf - flf)  / dx1) * dt * static_cast<real>(0.5);
                     #endif 
                     
                     break;
@@ -261,7 +261,7 @@ void SRHD::advance(
                         rmean = coord_lattice->gpu_x1mean[ii];
                         const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                         const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
-                        self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * (real)0.5 * dt;
+                        self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * static_cast<real>(0.5) * dt;
                     #else 
                         pc    = prim_buff[txa].p;
                         sL    = coord_lattice->face_areas[ii + 0];
@@ -271,7 +271,7 @@ void SRHD::advance(
                         
                         const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                         const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
-                        cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * (real)0.5 * dt;
+                        cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * static_cast<real>(0.5) * dt;
                     #endif 
                     
                     break;
@@ -319,15 +319,15 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 pre = peq;
                 et  = tau + D + pre;
                 v2  = S * S / (et * et);
-                W   = (real)1.0 / std::sqrt((real)1.0 - v2);
+                W   = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - v2);
                 rho = D / W;
 
-                eps = (tau + ((real)1.0 - W) * D + ((real)1.0 - W * W) * pre) / (D * W);
+                eps = (tau + (static_cast<real>(1.0) - W) * D + (static_cast<real>(1.0) - W * W) * pre) / (D * W);
 
-                h  = (real)1.0 + eps + pre / rho;
+                h  = static_cast<real>(1.0) + eps + pre / rho;
                 c2 = self->gamma *pre / (h * rho); 
 
-                g = c2 * v2 - (real)1.0;
+                g = c2 * v2 - static_cast<real>(1.0);
                 f = (self->gamma - 1) * rho * eps - pre;
 
                 peq = pre - f / g;
@@ -382,7 +382,7 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     const real gb_l  = prims_l.v;
     const real w_l   = std::sqrt(1 + gb_l * gb_l);
     const real v_l   = gb_l / w_l;
-    const real h_l   = (real)1.0 + gamma * p_l / (rho_l * (gamma - 1));
+    const real h_l   = static_cast<real>(1.0) + gamma * p_l / (rho_l * (gamma - 1));
     const real cs_l  = std::sqrt(gamma * p_l / (rho_l * h_l));
 
     const real rho_r = prims_r.rho;
@@ -390,7 +390,7 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     const real gb_r  = prims_r.v;
     const real w_r   = std::sqrt(1 + gb_r * gb_r);
     const real v_r   = gb_r / w_r;
-    const real h_r   = (real)1.0 + gamma * p_r / (rho_r * (gamma - 1));
+    const real h_r   = static_cast<real>(1.0) + gamma * p_r / (rho_r * (gamma - 1));
     const real cs_r  = std::sqrt(gamma * p_r / (rho_r * h_r));
 
     switch (comp_wave_speed)
@@ -398,8 +398,8 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     case simbi::WaveSpeeds::SCHNEIDER_ET_AL_93:
         {
             // Compute waves based on Schneider et al. 1993 Eq(31 - 33)
-            const real vbar = (real)0.5 * (v_l + v_r);
-            const real cbar = (real)0.5 * (cs_r + cs_l);
+            const real vbar = static_cast<real>(0.5) * (v_l + v_r);
+            const real cbar = static_cast<real>(0.5) * (cs_r + cs_l);
             const real br = (vbar + cbar) / (1 + vbar * cbar);
             const real bl = (vbar - cbar) / (1 - vbar * cbar);
 
@@ -411,13 +411,13 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
             // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-            const real sL = cs_l*cs_l/(gamma*gamma*((real)1.0 - cs_l*cs_l));
-            const real sR = cs_r*cs_r/(gamma*gamma*((real)1.0 - cs_r*cs_r));
+            const real sL = cs_l*cs_l/(gamma*gamma*(static_cast<real>(1.0) - cs_l*cs_l));
+            const real sR = cs_r*cs_r/(gamma*gamma*(static_cast<real>(1.0) - cs_r*cs_r));
             // Define temporaries to save computational cycles
-            const real qfL   = (real)1.0 / ((real)1.0 + sL);
-            const real qfR   = (real)1.0 / ((real)1.0 + sR);
-            const real sqrtR = std::sqrt(sR * ((real)1.0 - v_r * v_r + sR));
-            const real sqrtL = std::sqrt(sL * ((real)1.0 - v_l * v_l + sL));
+            const real qfL   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
+            const real qfR   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
+            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0) - v_r * v_r + sR));
+            const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0) - v_l * v_l + sL));
 
             const real lamLm = (v_l - sqrtL) * qfL;
             const real lamRm = (v_r - sqrtR) * qfR;
@@ -454,7 +454,7 @@ void SRHD::adapt_dt()
             w   = std::sqrt(1 + gb * gb);
             v   = gb / w;
 
-            h = (real)1.0 + gamma * p / (rho * (gamma - 1));
+            h = static_cast<real>(1.0) + gamma * p / (rho * (gamma - 1));
             cs = std::sqrt(gamma * p / (rho * h));
 
             vPLus  = (v + cs) / (1 + v * cs);
@@ -490,7 +490,7 @@ Conserved SRHD::prims2cons(const Primitive &prim)
     const real rho = prim.rho;
     const real gb  = prim.v;
     const real pre = prim.p;  
-    const real h   = (real)1.0 + gamma * pre / (rho * (gamma - 1));
+    const real h   = static_cast<real>(1.0) + gamma * pre / (rho * (gamma - 1));
     const real W   = std::sqrt(1 + gb * gb);
 
     return Conserved{rho * W, rho * h * W * gb, rho * h * W * W - pre - rho * W};
@@ -528,8 +528,8 @@ Conserved SRHD::calc_intermed_state(
     const real E = tau + D;
 
     const real DStar   = ((a - v)   / (a - aStar)) * D;
-    const real Sstar   = ((real)1.0 / (a - aStar)) * (S * (a - v) - pressure + pStar);
-    const real Estar   = ((real)1.0 / (a - aStar)) * (E * (a - v) + pStar * aStar - pressure * v);
+    const real Sstar   = (static_cast<real>(1.0) / (a - aStar)) * (S * (a - v) - pressure + pStar);
+    const real Estar   = (static_cast<real>(1.0) / (a - aStar)) * (E * (a - v) + pStar * aStar - pressure * v);
     const real tauStar = Estar - DStar;
 
     return Conserved{DStar, Sstar, tauStar};
@@ -549,7 +549,7 @@ Conserved SRHD::prims2flux(const Primitive &prim)
 
     const real w = std::sqrt(1 + gb * gb);
     const real v = gb / w;
-    const real h = (real)1.0 + gamma * pre / (rho * (gamma - 1));
+    const real h = static_cast<real>(1.0) + gamma * pre / (rho * (gamma - 1));
     const real D = rho * w;
     const real S = rho * h * w * gb;
 
@@ -571,8 +571,8 @@ SRHD::calc_hll_flux(
     // Grab the necessary wave speeds
     const real aR  = lambda.aR;
     const real aL  = lambda.aL;
-    const real aLm = aL < (real)0.0 ? aL : (real)0.0;
-    const real aRp = aR > (real)0.0 ? aR : (real)0.0;
+    const real aLm = aL < static_cast<real>(0.0) ? aL : static_cast<real>(0.0);
+    const real aRp = aR > static_cast<real>(0.0) ? aR : static_cast<real>(0.0);
 
     // Compute the HLL Flux component-wise
     return (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
@@ -590,11 +590,11 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const real aL = lambda.aL;
     const real aR = lambda.aR;
 
-    if ((real)0.0 <= aL)
+    if (static_cast<real>(0.0) <= aL)
     {
         return left_flux;
     }
-    else if ((real)0.0 >= aR)
+    else if (static_cast<real>(0.0) >= aR)
     {
         return right_flux;
     }
@@ -614,7 +614,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const real b     = - (e + fs);
     const real c     = s;
     const real disc  = std::sqrt(b*b - 4.0*a*c);
-    const real quad  = -(real)0.5*(b + sgn(b)*disc);
+    const real quad  = -static_cast<real>(0.5)*(b + sgn(b)*disc);
     const real aStar = c/quad;
     const real pStar = -fe * aStar + fs;
 
@@ -625,7 +625,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         const real S        = left_state.s;
         const real tau      = left_state.tau;
         const real E        = tau + D;
-        const real cofactor = (real)1.0 / (aL - aStar);
+        const real cofactor = static_cast<real>(1.0) / (aL - aStar);
 
         //--------------Compute the L Star State----------
         const real gb = left_prims.v;
@@ -649,7 +649,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         const real S         = right_state.s;
         const real tau       = right_state.tau;
         const real E         = tau + D;
-        const real cofactor  = (real)1.0 / (aR - aStar);
+        const real cofactor  = static_cast<real>(1.0) / (aR - aStar);
 
         //--------------Compute the R Star State----------
         const real gb = right_prims.v;
@@ -710,8 +710,8 @@ SRHD::simulate1D(
     PrimData prods;
     real round_place = 1 / chkpt_interval;
     real t_interval =
-        t == 0 ? floor(tstart * round_place + (real)0.5) / round_place
-               : floor(tstart * round_place + (real)0.5) / round_place + chkpt_interval;
+        t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
+               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
     DataWriteMembers setup;
     setup.x1max          = r[active_zones - 1];
