@@ -72,9 +72,8 @@ class CompilerParams():
                 self.define_macros = [("__HIP_PLATFORM_AMD__", "1")]
          
     def set_library_dirs(self):
-        hdf5_cxx_libs = [lib for lib in '${HDF5_CXX_LIBRARIES}'.split(';')]
-        hdf5_path = os.path.dirname(hdf5_cxx_libs[0])
-        self.library_dirs = [hdf5_path]
+        hdf5_cxx_libs     = [lib for lib in '${HDF5_CXX_LIBRARIES}'.split(';')]
+        self.library_dirs = [os.path.dirname(file) for file in hdf5_cxx_libs]
         if self.arch != "cpu":
             gpu_libs = [lib for lib in '${HIP_RUNTIME_LIBRARY_DIRS}'.split(';')]
             self.library_dirs += gpu_libs
