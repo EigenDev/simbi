@@ -212,47 +212,56 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                                             model.init_rho*model.init_vy, model.init_rho*model.init_vz,
                                             model.init_energy])
             else:
-                if first_order:
-                    if model.regime == "classical":
+                if model.regime == "classical":
                         model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype=float)
                         model.u[:, :, :, :] = np.array([model.init_rho, 
                                                      model.init_rho*model.init_vx,
                                                      model.init_rho*model.init_vy,
                                                      model.init_rho*model.init_vz,
                                                      model.init_energy])
-                    else:
-                        model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype=float)
-                        model.u[:, :, :] = np.array([model.initD, model.initS1,
-                                                    model.initS2, model.initS3, model.init_tau])
                 else:
-                    if model.regime == "classical":
-                        model.u = np.empty(shape = (model.n_vars, model.yNpts, model.xNpts), dtype=float)
-                        model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,
-                                                    model.init_rho*model.init_vy, model.init_energy])
+                    model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype=float)
+                    model.u[:, :, :] = np.array([model.initD, model.initS1,
+                                                model.initS2, model.initS3, model.init_tau])
+                if first_order:
+                    # Add boundary ghosts
+                    zupper_ghost  = model.u[:, 0]
+                    zlower_ghost  = model.u[:,-1]
+                    
+                    model.u = np.insert(model.u, model.u.shape[1], zupper_ghost , axis=1)
+                    model.u = np.insert(model.u, 0, zlower_ghost , axis=1)
+                    
+                    yupper_ghost = model.u[:, :,  0]
+                    ylower_ghost = model.u[:, :, -1]
+                    
+                    model.u = np.insert(model.u, model.u.shape[2], ylower_ghost , axis=2)
+                    model.u = np.insert(model.u, 0, yupper_ghost, axis=2)
+                    
+                    xleft_ghost  = model.u[:, :, :, 0]
+                    xright_ghost = model.u[:, :, :, -1]
+                    
+                    model.u = np.insert(model.u, model.u.shape[3], xright_ghost , axis=3)
+                    model.u = np.insert(model.u, 0, xleft_ghost , axis=3)
                         
-                    else:
-                        model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype=float)
-                        model.u[:, :, :] = np.array([model.initD, model.initS1,
-                                                    model.initS2, model.initS3, model.init_tau])
-                        
-                # Add boundary ghosts
-                zupper_ghost  = model.u[:, 0]
-                zlower_ghost  = model.u[:,-1]
-                
-                model.u = np.insert(model.u, model.u.shape[1], (zupper_ghost, zupper_ghost) , axis=1)
-                model.u = np.insert(model.u, 0, (zlower_ghost, zlower_ghost) , axis=1)
-                
-                yupper_ghost = model.u[:, :,  0]
-                ylower_ghost = model.u[:, :, -1]
-                
-                model.u = np.insert(model.u, model.u.shape[2], (ylower_ghost, ylower_ghost) , axis=2)
-                model.u = np.insert(model.u, 0, (yupper_ghost, yupper_ghost) , axis=2)
-                
-                xleft_ghost  = model.u[:, :, :, 0]
-                xright_ghost = model.u[:, :, :, -1]
-                
-                model.u = np.insert(model.u, model.u.shape[3], (xright_ghost, xright_ghost) , axis=3)
-                model.u = np.insert(model.u, 0, (xleft_ghost, xleft_ghost) , axis=3)
+                else:
+                    # Add boundary ghosts
+                    zupper_ghost  = model.u[:, 0]
+                    zlower_ghost  = model.u[:,-1]
+                    
+                    model.u = np.insert(model.u, model.u.shape[1], (zupper_ghost, zupper_ghost) , axis=1)
+                    model.u = np.insert(model.u, 0, (zlower_ghost, zlower_ghost) , axis=1)
+                    
+                    yupper_ghost = model.u[:, :,  0]
+                    ylower_ghost = model.u[:, :, -1]
+                    
+                    model.u = np.insert(model.u, model.u.shape[2], (ylower_ghost, ylower_ghost) , axis=2)
+                    model.u = np.insert(model.u, 0, (yupper_ghost, yupper_ghost) , axis=2)
+                    
+                    xleft_ghost  = model.u[:, :, :, 0]
+                    xright_ghost = model.u[:, :, :, -1]
+                    
+                    model.u = np.insert(model.u, model.u.shape[3], (xright_ghost, xright_ghost) , axis=3)
+                    model.u = np.insert(model.u, 0, (xleft_ghost, xleft_ghost) , axis=3)
                     
         else:
             if not first_order:
