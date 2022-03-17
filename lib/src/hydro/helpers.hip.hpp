@@ -37,13 +37,28 @@ namespace simbi
     real x2min = 0,
     real x2max = 1);
 
+    template<typename T, typename N>
+    GPU_LAUNCHABLE  typename std::enable_if<is_3D_primitive<N>::value>::type 
+    compute_dt(T *s, 
+    const simbi::Geometry geometry, 
+    luint bytes,
+    real dx1, 
+    real dx2,
+    real dx3, 
+    real rmin  = 0, 
+    real rmax  = 0,
+    real x2min = 0,
+    real x2max = 0,
+    real x3min = 0,
+    real x3max = 0);
+
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
     dtWarpReduce(T *s);
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_3D_primitive<N>::value>::type 
-    dtWarpReduce(T *s, const simbi::Geometry geometry);
+    dtWarpReduce(T *s);
 
     //======================================
     //              HELPER OVERLOADS
