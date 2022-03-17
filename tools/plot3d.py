@@ -64,12 +64,14 @@ def plot_polar_plot(
     '''
     num_fields = len(args.field)
     is_wedge   = args.nwedge > 0
-    rr, tt = mesh['rr'], mesh['theta']
+    rr, tt, phii = mesh['rr'], mesh['theta'], mesh['phii']
     t2     = - tt[::-1]
     x1max  = dset['x1max']
     x1min  = dset['x1min']
     x2max  = dset['x2max']
     x2min  = dset['x2min']
+    x3min  = dset['x3min']
+    x3max  = dset['x3max']
     if not subplots:
         if is_wedge:
             nplots = args.nwedge + 1
@@ -173,8 +175,8 @@ def plot_polar_plot(
                 else:
                     ovmin = None if len(args.cbar) == 2 else args.cbar[idx+1]
                     ovmax = None if len(args.cbar) == 2 else args.cbar[idx+2]
-                kwargs[field] = {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
-                # kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=1.00, vmin=ovmin, vmax=ovmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
+                # kwargs[field] = {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
+                kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=1.00, vmin=ovmin, vmax=ovmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
 
         if x2max < np.pi:
             cs[0] = ax.pcolormesh(tt[:: 1], rr,  var[0], cmap=color_map, shading='auto', **kwargs[field1])
@@ -212,14 +214,14 @@ def plot_polar_plot(
         else:
             var = units * fields[args.field[0]]
         
-        cs[0] = ax.pcolormesh(tt, rr, var, cmap=color_map, shading='auto',
+        cs[0] = ax.pcolormesh(tt[0], rr[0], var[0], cmap=color_map, shading='auto',
                               linewidth=0, rasterized=True, **kwargs)
-        cs[0] = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, 
+        cs[0] = ax.pcolormesh(-tt[::-1][0], rr[0], var[0],  cmap=color_map, 
                               linewidth=0,rasterized=True, shading='auto', **kwargs)
         
         if args.bipolar:
-            cs[0] = ax.pcolormesh(tt[:: 1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
-            cs[0] = ax.pcolormesh(t2[::-1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
+            cs[0] = ax.pcolormesh(tt[:: 1][0] + np.pi, rr[0],  var[0], cmap=color_map, shading='auto', **kwargs)
+            cs[0] = ax.pcolormesh(t2[::-1][0] + np.pi, rr[0],  var[0], cmap=color_map, shading='auto', **kwargs)
     
     if args.pictorial: 
         ax.set_position([0.1, -0.15, 0.8, 1.30])
@@ -1553,7 +1555,7 @@ def main():
         ax_num   = 0    
         
         for idx, file in enumerate(args.filename):
-            fields, setup, mesh = util.read_2d_file(args, file)
+            fields, setup, mesh = util.read_3d_file(args, file)
             i += 1
             if args.hist and (not args.de_domega and not args.dm_domega):
                 if args.sub_split is None:
@@ -1595,7 +1597,7 @@ def main():
             for ax in axs:
                 ax.label_outer()
     else:
-        fields, setup, mesh = util.read_2d_file(args, args.filename[0])
+        fields, setup, mesh = util.read_3d_file(args, args.filename[0])
         if args.hist and (not args.de_domega and not args.dm_domega):
             plot_hist(fields, args, mesh, setup)
         elif args.tidx != None:
