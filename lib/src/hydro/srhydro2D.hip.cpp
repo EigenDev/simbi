@@ -1209,21 +1209,18 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     simbi::dual::DualSpace2D<Primitive, Conserved, SRHD2D> dualMem;
     dualMem.copyHostToDev(*this, device_self);
 
-    if constexpr(BuildPlatform == Platform::GPU)
-    {   
-        dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
-        dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
-        dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
-        x1min   = x1[0];
-        x1max   = x1[xphysical_grid - 1];
-        x2min   = x2[0];
-        x2max   = x2[yphysical_grid - 1];
+    dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
+    dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
+    dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
+    x1min   = x1[0];
+    x1max   = x1[xphysical_grid - 1];
+    x2min   = x2[0];
+    x2max   = x2[yphysical_grid - 1];
 
-        d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
-        s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
-        s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
-        e_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
-    }
+    d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
+    s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
+    s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
+    e_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
     
     // Some variables to handle file automatic file string
     // formatting 
