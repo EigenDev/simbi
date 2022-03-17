@@ -28,6 +28,7 @@ writeToProd(T *from, PrimData *to){
     to->v2   = from->v2;
     to->v3   = from->v3;
     to->p    = from->p;
+    to->chi  = from->chi;
 }
 
 //Handle 2D primitive arrays whether SR or Newtonian
@@ -60,6 +61,7 @@ vec2struct(const std::vector<N> &p){
     sprims.v2.reserve(nzones);
     sprims.v3.reserve(nzones);
     sprims.p.reserve(nzones);
+    sprims.chi.reserve(nzones);
     for (size_t i = 0; i < nzones; i++)
     {
         sprims.rho.push_back(p[i].rho);
@@ -67,6 +69,7 @@ vec2struct(const std::vector<N> &p){
         sprims.v2.push_back(p[i].v2);
         sprims.v3.push_back(p[i].v3);
         sprims.p.push_back(p[i].p);
+        sprims.chi.push_back(p[i].chi);
     }
     
     return sprims;

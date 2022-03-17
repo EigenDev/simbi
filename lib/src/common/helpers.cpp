@@ -73,6 +73,7 @@ void write_hdf5(
     hid_t dtype_str = H5Tcopy(H5T_C_S1);
     size_t size_str = setup.coord_system.size();                    
     H5Tset_size(dtype_str, size_str);
+
     switch (dim)
     {
         case 1:
@@ -276,14 +277,16 @@ void write_hdf5(
             real* v2  = new real[size];
             real* v3  = new real[size];
             real* p   = new real[size];
+            real* chi = new real[size];
 
             std::copy(prims.rho.begin(), prims.rho.begin() + size, rho);
             std::copy(prims.v1.begin(), prims.v1.begin() + size, v1);
             std::copy(prims.v2.begin(), prims.v2.begin() + size, v2);
             std::copy(prims.v3.begin(), prims.v3.begin() + size, v3);
             std::copy(prims.p.begin(),  prims.p.begin() + size, p);
+            std::copy(prims.chi.begin(),  prims.chi.begin() + size, chi);
             H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
-
+            
             H5::DataType real_type;
             if (typeid(real) == typeid(double))
             {
@@ -312,11 +315,16 @@ void write_hdf5(
             dataset.write(p, real_type);
             dataset.close();
 
+            dataset = file.createDataSet("chi", datatype, dataspace);
+            dataset.write(chi, real_type);
+            dataset.close();
+
             // Free the heap
             delete[] rho;
             delete[] v1;
             delete[] v2;
             delete[] p;
+            delete[] chi;
 
             // Write Datset Attributesauto real_type(real_type);
             H5::DataType int_type(H5::PredType::NATIVE_INT);
@@ -356,11 +364,11 @@ void write_hdf5(
             att.write(real_type, &setup.x2min);
             att.close();
 
-            att = sim_info.createAttribute("zmax", real_type, att_space);
+            att = sim_info.createAttribute("x3max", real_type, att_space);
             att.write(real_type, &setup.zmax);
             att.close();
 
-            att = sim_info.createAttribute("zmin", real_type, att_space);
+            att = sim_info.createAttribute("x3min", real_type, att_space);
             att.write(real_type, &setup.zmin);
             att.close();
 

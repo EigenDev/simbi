@@ -115,6 +115,20 @@ GPU_CALLABLE_INLINE real minmod(const real x, const real y, const real z)
 };
 
 template<typename T>
+GPU_CALLABLE_INLINE typename std::enable_if<is_3D_primitive<T>::value, T>::type
+minmod(const T x, const T y, const T z)
+{
+    const real rho = minmod(x.rho, y.rho, z.rho);
+    const real v1  = minmod(x.v1, y.v1, z.v1);
+    const real v2  = minmod(x.v2, y.v2, z.v2);
+    const real v3  = minmod(x.v3, y.v3, z.v3);
+    const real pre = minmod(x.p, y.p, z.p);
+    const real chi = minmod(x.chi, y.chi, z.chi);
+
+    return T{rho, v1, v2, v3, pre, chi};
+}
+
+template<typename T>
 GPU_CALLABLE_INLINE typename std::enable_if<is_2D_primitive<T>::value, T>::type
 minmod(const T x, const T y, const T z)
 {
