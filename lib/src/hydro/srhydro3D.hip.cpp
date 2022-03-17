@@ -178,7 +178,7 @@ void SRHD3D::cons2prim(
         real S3   = conserved_buff[tid].s3;
         real tau  = conserved_buff[tid].tau;
         real S    = sqrt(S1 * S1 + S2 * S2 + S3 * S3);
-
+        
         #if GPU_CODE
         real peq = self->gpu_pressure_guess[gid];
         #else 
@@ -217,15 +217,16 @@ void SRHD3D::cons2prim(
         real vx = S1 * inv_et;
         real vy = S2 * inv_et;
         real vz = S3 * inv_et;
-
+        
         #if GPU_CODE
             self->gpu_pressure_guess[gid] = peq;
-            self->gpu_prims[gid]          = Primitive{D * sqrt(static_cast<real>(1.0) - (vx * vx + vy * vy + vz * vz)), vx, vy, vz, peq};
+            self->gpu_prims[gid]          = Primitive{rho, vx, vy, vz, peq};
         #else
             pressure_guess[gid] = peq;
-            prims[gid]          = Primitive{D * sqrt(static_cast<real>(1.0) - (vx * vx + vy * vy + vz * vz)), vx, vy, vz,  peq};
+            prims[gid]          = Primitive{rho, vx, vy, vz,  peq};
         #endif
     });
+
 }
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
@@ -479,7 +480,6 @@ void SRHD3D::adapt_dt()
                                         rproj * dx3 / (std::max(std::abs(plus_v3), std::abs(minus_v3)))});
                             
                     }
-
                     min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
                     
                 } // end ii 
@@ -488,13 +488,29 @@ void SRHD3D::adapt_dt()
     } // end parallel region
 
     dt = cfl * min_dt;
-};
+    };
 
-void SRHD3D::adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p)
+void SRHD3D::adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, const luint bytes)
 {
     #if GPU_CODE
     {
-        dtWarpReduce<SRHD3D, Primitive, 128><<<p.gridSize, dim3(BLOCK_SIZE3D, BLOCK_SIZE3D, BLOCK_SIZE3D)>>>(dev, geometry);
+        luint psize = p.blockSize.x*p.blockSize.y;
+        switch (geometry)
+        {
+            case simbi::Geometry::CARTESIAN:
+                compute_dt<SRHD3D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
+                (dev, geometry, psize, dx1, dx2, dx3);
+                dtWarpReduce<SRHD3D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+                (dev);
+                break;
+            
+            case simbi::Geometry::SPHERICAL:
+                compute_dt<SRHD3D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
+                (dev, geometry, psize, dlogx1, dx2, dx3, x1min, x1max, x2min, x2max, x3min, x3max);
+                dtWarpReduce<SRHD3D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+                (dev);
+                break;
+        }
         simbi::gpu::api::deviceSynch();
         simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
     }
@@ -748,33 +764,47 @@ Conserved SRHD3D::calc_hllc_flux(
 void SRHD3D::advance(
     SRHD3D *dev, 
     const ExecutionPolicy<> p,
-    const luint sh_block_size,
+    const luint bx,
+    const luint by,
+    const luint bz,
     const luint radius, 
     const simbi::Geometry geometry, 
     const simbi::MemSide user)
 {
     auto *self = (BuildPlatform == Platform::GPU) ? dev : this;
-    const luint xpg                   = this->xphysical_grid;
-    const luint ypg                   = this->yphysical_grid;
-    const luint zpg                   = this->zphysical_grid;
+    const luint xpg                 = this->xphysical_grid;
+    const luint ypg                 = this->yphysical_grid;
+    const luint zpg                 = this->zphysical_grid;
     const bool is_first_order       = this->first_order;
     const bool is_periodic          = this->periodic;
     const bool hllc                 = this->hllc;
-    const luint bx                    = (BuildPlatform == Platform::GPU) ? sh_block_size : nx;
-    const luint by                    = (BuildPlatform == Platform::GPU) ? sh_block_size : ny;
-    const luint nbs                   = (BuildPlatform == Platform::GPU) ? sh_block_size * sh_block_size * sh_block_size : nzones;
     const real dt                   = this->dt;
     const real decay_const          = this->decay_const;
     const real plm_theta            = this->plm_theta;
     const real gamma                = this->gamma;
-    const luint nx                    = this->nx;
-    const luint ny                    = this->ny;
-    const luint nz                    = this->nz;
-    const luint extent                = (BuildPlatform == Platform::GPU) ? 
+    const real dx2                  = this->dx2;
+    const real dx3                  = this->dx3;
+    const real dlogx1               = this->dlogx1;
+    const real x1min                = this->x1min;
+    const real x1max                = this->x1max;
+    const real x2min                = this->x2min;
+    const real x2max                = this->x2max;
+    const real x3min                = this->x3min;
+    const real x3max                = this->x3max;
+    const real dx1                  = this->dx1;
+    const luint nx                  = this->nx;
+    const luint ny                  = this->ny;
+    const luint nz                  = this->nz;
+    const bool d_all_zeros          = this->d_all_zeros;
+    const bool s1_all_zeros         = this->s1_all_zeros;
+    const bool s2_all_zeros         = this->s2_all_zeros;
+    const bool s3_all_zeros         = this->s3_all_zeros;
+    const bool e_all_zeros          = this->e_all_zeros;
+    const luint extent              = (BuildPlatform == Platform::GPU) ? 
                                             p.blockSize.z * p.gridSize.z * p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
-    const luint xextent               = p.blockSize.x;
-    const luint yextent               = p.blockSize.y;
-    const luint zextent               = p.blockSize.z;
+    const luint xextent             = p.blockSize.x;
+    const luint yextent             = p.blockSize.y;
+    const luint zextent             = p.blockSize.z;
     const CLattice3D *coord_lattice = &(self->coord_lattice);
 
     simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
@@ -803,10 +833,15 @@ void SRHD3D::advance(
 
         // printf("(%d, %d, %d)\n", txa, tya, tza);
         Conserved ux_l, ux_r, uy_l, uy_r, uz_l, uz_r;
-        Conserved f_l, f_r, g_l, g_r, h_l, h_r, f1, f2, g1, g2, h1, h2;
+        Conserved f_l, f_r, g_l, g_r, h_l, h_r, frf, flf, grf, glf, hrf, hlf;
         Primitive xprims_l, xprims_r, yprims_l, yprims_r, zprims_l, zprims_r;
 
         luint aid = ka * nx * ny + ja * nx + ia;
+
+        // Choice of column major striding by user
+        const luint sx = (col_maj) ? 1  : bx;
+        const luint sy = (col_maj) ? by :  1;
+        const luint sz = (col_maj) ? bz :  1;
         #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
@@ -858,24 +893,16 @@ void SRHD3D::advance(
 
         if (is_first_order)
         {
-            if (is_periodic)
-            {
-                // Set up the left and right state interfaces for i+1/2
-                // u_l   = cons_buff[txa];
-                // u_r   = roll(cons_buff, txa + 1, sh_block_size);
-            }
-            else
-            {
 
-                xprims_l = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
-                xprims_r = prim_buff[tza * bx * by + tya * bx + (txa + 1)];
-                //j+1/2
-                yprims_l = prim_buff[tza * bx * by + (tya + 0) * bx + txa];
-                yprims_r = prim_buff[tza * bx * by + (tya + 1) * bx + txa];
-                //j+1/2
-                zprims_l = prim_buff[(tza + 0) * bx * by + tya * bx + txa];
-                zprims_r = prim_buff[(tza + 1) * bx * by + tya * bx + txa];
-            }
+            xprims_l = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
+            xprims_r = prim_buff[tza * bx * by + tya * bx + (txa + 1)];
+            //j+1/2
+            yprims_l = prim_buff[tza * bx * by + (tya + 0) * bx + txa];
+            yprims_r = prim_buff[tza * bx * by + (tya + 1) * bx + txa];
+            //j+1/2
+            zprims_l = prim_buff[(tza + 0) * bx * by + tya * bx + txa];
+            zprims_r = prim_buff[(tza + 1) * bx * by + tya * bx + txa];
+
             ux_l = self->prims2cons(xprims_l);
             ux_r = self->prims2cons(xprims_r);
 
@@ -895,34 +922,27 @@ void SRHD3D::advance(
             h_r = self->calc_Flux(zprims_r, 3);
 
             // Calc HLL Flux at i+1/2 interface
-            if (self-> hllc)
+            if (self->hllc)
             {
-                f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                h1 = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                frf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                grf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                hrf = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
 
             } else {
-                f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                h1 = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                frf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                grf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                hrf = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
             }
 
             // Set up the left and right state interfaces for i-1/2
-            if (is_periodic)
-            {
-                ;
-            }
-            else
-            {
-                xprims_l = prim_buff[tza * bx * by + tya * bx + (txa - 1)];
-                xprims_r = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
-                //j+1/2
-                yprims_l = prim_buff[tza * bx * by + (tya - 1) * bx + txa]; 
-                yprims_r = prim_buff[tza * bx * by + (tya + 0) * bx + txa]; 
-                //k+1/2
-                zprims_l = prim_buff[(tza - 1) * bx * by + tya * bx + txa]; 
-                zprims_r = prim_buff[(tza - 0) * bx * by + tya * bx + txa]; 
-            }
+            xprims_l = prim_buff[tza * bx * by + tya * bx + (txa - 1)];
+            xprims_r = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
+            //j+1/2
+            yprims_l = prim_buff[tza * bx * by + (tya - 1) * bx + txa]; 
+            yprims_r = prim_buff[tza * bx * by + (tya + 0) * bx + txa]; 
+            //k+1/2
+            zprims_l = prim_buff[(tza - 1) * bx * by + tya * bx + txa]; 
+            zprims_r = prim_buff[(tza - 0) * bx * by + tya * bx + txa]; 
 
             ux_l = self->prims2cons(xprims_l);
             ux_r = self->prims2cons(xprims_r);
@@ -945,167 +965,15 @@ void SRHD3D::advance(
             // Calc HLL Flux at i-1/2 interface
             if (self-> hllc)
             {
-                f2 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g2 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                h2 = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                flf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                glf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                hlf = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
 
             } else {
-                f2 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                h2 = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
-            }
-
-            //Advance depending on geometry
-            luint real_loc = kk * xpg * ypg + jj * xpg + ii;
-
-            // printf("f1: %f, f2: %f, g1: %f, g2: %f, h1: %f, h2: %f\n",
-            // f1.d,
-            // f2.d,
-            // g1.d,
-            // g2.d,
-            // h1.d,
-            // h2.d);
-            switch (geometry)
-            {
-                case simbi::Geometry::CARTESIAN:
-                    {
-                        #if GPU_CODE
-                            real dx1 = coord_lattice->gpu_dx1[ii];
-                            real dx2  = coord_lattice->gpu_dx2[jj];
-                            real dz = coord_lattice->gpu_dx3[kk];
-                            self->gpu_cons[aid].d   += dt * ( -(f1.d - f2.d)     / dx1 - (g1.d   - g2.d )  / dx2 - (h1.d - h2.d)     / dz + self->gpu_sourceD   [real_loc] );
-                            self->gpu_cons[aid].s1  += dt * ( -(f1.s1 - f2.s1)   / dx1 - (g1.s1  - g2.s1)  / dx2 - (h1.s1 - h2.s3)   / dz + self->gpu_sourceS1  [real_loc] );
-                            self->gpu_cons[aid].s2  += dt * ( -(f1.s2 - f2.s2)   / dx1  - (g1.s2  - g2.s2) / dx2 - (h1.s2 - h2.s3)   / dz + self->gpu_sourceS2  [real_loc] );
-                            self->gpu_cons[aid].s3  += dt * ( -(f1.s3 - f2.s3)   / dx1  - (g1.s3  - g2.s3) / dx2 - (h1.s3 - h2.s3)   / dz + self->gpu_sourceS3  [real_loc] );
-                            self->gpu_cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + self->gpu_sourceTau [real_loc] );
-                        #else
-                            real dx1 = coord_lattice->dx1[ii];
-                            real dx2  = coord_lattice->dx2[jj];
-                            real dz = coord_lattice->dx3[kk];
-                            self->cons[aid].d   += dt * ( -(f1.d - f2.d)     / dx1 - (g1.d   - g2.d )  / dx2 - (h1.d - h2.d)     / dz + sourceD   [real_loc] );
-                            self->cons[aid].s1  += dt * ( -(f1.s1 - f2.s1)   / dx1 - (g1.s1  - g2.s1)  / dx2 - (h1.s1 - h2.s3)   / dz + sourceS1  [real_loc] );
-                            self->cons[aid].s2  += dt * ( -(f1.s2 - f2.s2)   / dx1  - (g1.s2  - g2.s2) / dx2 - (h1.s2 - h2.s3)   / dz + sourceS2  [real_loc] );
-                            self->cons[aid].s3  += dt * ( -(f1.s3 - f2.s3)   / dx1  - (g1.s3  - g2.s3) / dx2 - (h1.s3 - h2.s3)   / dz + sourceS3  [real_loc] );
-                            self->cons[aid].tau += dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + sourceTau [real_loc] );
-                        #endif
-                        
-                    break;
-                    }
-                
-                case simbi::Geometry::SPHERICAL:
-                    {
-                        #if GPU_CODE
-                        real s1R        = coord_lattice->gpu_x1_face_areas[ii + 1];
-                        real s1L        = coord_lattice->gpu_x1_face_areas[ii + 0];
-                        real s2R        = coord_lattice->gpu_x2_face_areas[jj + 1];
-                        real s2L        = coord_lattice->gpu_x2_face_areas[jj + 0];
-                        real s3R        = coord_lattice->gpu_x3_face_areas[kk + 1];
-                        real s3L        = coord_lattice->gpu_x3_face_areas[kk + 0];
-                        real rmean      = coord_lattice->gpu_x1mean[ii]           ;
-                        real dV1        = coord_lattice->gpu_dV1[ii]              ;
-                        real dV2        = rmean * coord_lattice->gpu_dV2[jj]      ;
-                        real dV3        = rmean * coord_lattice->gpu_sin[jj] * coord_lattice->gpu_dx3[kk];
-                        #else 
-                        real s1R   =  coord_lattice->x1_face_areas[ii + 1];
-                        real s1L   =  coord_lattice->x1_face_areas[ii + 0];
-                        real s2R   =  coord_lattice->x2_face_areas[jj + 1];
-                        real s2L   =  coord_lattice->x2_face_areas[jj + 0];
-                        real s3R   =  coord_lattice->x3_face_areas[kk + 1];
-                        real s3L   =  coord_lattice->x3_face_areas[kk + 0];
-                        real rmean =  coord_lattice->x1mean[ii];
-                        real dV1   =  coord_lattice->dV1[ii];
-                        real dV2   =  rmean * coord_lattice->dV2[jj];
-                        real dV3   =  rmean * coord_lattice->sin[jj] * coord_lattice->dx3[kk];
-                        #endif
-                        // // Grab central primitives
-                        real rhoc = prim_buff[tza * bx * by + tya * bx + txa].rho;
-                        real pc   = prim_buff[tza * bx * by + tya * bx + txa].p;
-                        real uc   = prim_buff[tza * bx * by + tya * bx + txa].v1;
-                        real vc   = prim_buff[tza * bx * by + tya * bx + txa].v2;
-                        real wc   = prim_buff[tza * bx * by + tya * bx + txa].v3;
-
-                        real hc    = static_cast<real>(1.0) + gamma * pc/(rhoc * (gamma - static_cast<real>(1.0)));
-                        real gam2  = static_cast<real>(1.0)/(static_cast<real>(1.0) - (uc * uc + vc * vc + wc * wc));
-
-                        #if GPU_CODE
-                            self->gpu_cons[aid] +=
-                            Conserved{
-                                // L(D)
-                                -(f1.d * s1R - f2.d * s1L) / dV1 
-                                    - (g1.d * s2R - g2.d * s2L) / dV2 
-                                        - (h1.d * s3R - h2.d * s3L) / dV3 
-                                            + self->gpu_sourceD[real_loc] * decay_const,
-
-                                // L(S1)
-                                -(f1.s1 * s1R - f2.s1 * s1L) / dV1 
-                                    - (g1.s1 * s2R - g2.s1 * s2L) / dV2 
-                                        - (h1.s1 * s3R - h2.s1 * s3L) / dV3 
-                                        + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
-                                                self->gpu_sourceS1[real_loc] * decay_const,
-
-                                // L(S2)
-                                -(f1.s2 * s1R - f2.s2 * s1L) / dV1
-                                        - (g1.s2 * s2R - g2.s2 * s2L) / dV2 
-                                            - (h1.s2 * s3R - h2.s2 * s3L) / dV3 
-                                            - rhoc * hc * gam2 * uc * vc / rmean + coord_lattice->gpu_cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
-                                            + self->gpu_sourceS2[real_loc] * decay_const,
-
-                                // L(S3)
-                                -(f1.s3 * s1R - f2.s3 * s1L) / dV1
-                                        - (g1.s3 * s2R - g2.s3 * s2L) / dV2 
-                                            - (h1.s3 * s3R - h2.s3 * s3L) / dV3 
-                                                - rhoc * hc * gam2 * wc * (uc + vc * coord_lattice->gpu_cot[jj])/ rmean
-                                            +     self->gpu_sourceS3[real_loc] * decay_const,
-
-                                // L(tau)
-                                -(f1.tau * s1R - f2.tau * s1L) / dV1 
-                                    - (g1.tau * s2R - g2.tau * s2L) / dV2 
-                                        - (h1.tau* s3R - h2.tau* s3L) / dV3 
-                                            + self->gpu_sourceTau[real_loc] * decay_const
-                            } * dt;
-                        #else
-                            cons[aid] +=
-                            Conserved{
-                                // L(D)
-                                -(f1.d * s1R - f2.d * s1L) / dV1 
-                                    - (g1.d * s2R - g2.d * s2L) / dV2 
-                                        - (h1.d * s3R - h2.d * s3L) / dV3 
-                                            + sourceD[real_loc] * decay_const,
-
-                                // L(S1)
-                                -(f1.s1 * s1R - f2.s1 * s1L) / dV1 
-                                    - (g1.s1 * s2R - g2.s1 * s2L) / dV2 
-                                        - (h1.s1 * s3R - h2.s1 * s3L) / dV3 
-                                        + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
-                                                sourceS1[real_loc] * decay_const,
-
-                                // L(S2)
-                                -(f1.s2 * s1R - f2.s2 * s1L) / dV1
-                                        - (g1.s2 * s2R - g2.s2 * s2L) / dV2 
-                                            - (h1.s2 * s3R - h2.s2 * s3L) / dV3 
-                                            - rhoc * hc * gam2 * uc * vc / rmean + coord_lattice->cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
-                                            + sourceS2[real_loc] * decay_const,
-
-                                // L(S3)
-                                -(f1.s3 * s1R - f2.s3 * s1L) / dV1
-                                        - (g1.s3 * s2R - g2.s3 * s2L) / dV2 
-                                            - (h1.s3 * s3R - h2.s3 * s3L) / dV3 
-                                                - rhoc * hc * gam2 * wc * (uc + vc * coord_lattice->cot[jj])/ rmean
-                                                    + sourceS3[real_loc] * decay_const,
-
-                                // L(tau)
-                                -(f1.tau * s1R - f2.tau * s1L) / dV1 
-                                    - (g1.tau * s2R - g2.tau * s2L) / dV2 
-                                        - (h1.tau* s3R - h2.tau* s3L) / dV3 
-                                            + sourceTau[real_loc] * decay_const
-                            } * dt;
-                        #endif
-                    
-                    break;
-
-                    } // end spherical case
-            } // end switch
-                
+                flf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                glf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                hlf = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+            }   
         }
         else
         {
@@ -1113,187 +981,54 @@ void SRHD3D::advance(
             Primitive yleft_most, yright_most, yleft_mid, yright_mid;
             Primitive zleft_most, zright_most, zleft_mid, zright_mid;
 
-            if (!is_periodic)
-            {
-                // Coordinate X
-                xleft_most  = prim_buff[tza * bx * by + tya * bx + (txa - 2)];
-                xleft_mid   = prim_buff[tza * bx * by + tya * bx + (txa - 1)];
-                center      = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
-                xright_mid  = prim_buff[tza * bx * by + tya * bx + (txa + 1)];
-                xright_most = prim_buff[tza * bx * by + tya * bx + (txa + 2)];
+            // Coordinate X
+            xleft_most  = prim_buff[tza * bx * by + tya * bx + (txa - 2)];
+            xleft_mid   = prim_buff[tza * bx * by + tya * bx + (txa - 1)];
+            center      = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
+            xright_mid  = prim_buff[tza * bx * by + tya * bx + (txa + 1)];
+            xright_most = prim_buff[tza * bx * by + tya * bx + (txa + 2)];
 
-                // Coordinate Y
-                yleft_most  = prim_buff[tza * bx * by + (tya - 2) * bx + txa];
-                yleft_mid   = prim_buff[tza * bx * by + (tya - 1) * bx + txa];
-                yright_mid  = prim_buff[tza * bx * by + (tya + 1) * bx + txa];
-                yright_most = prim_buff[tza * bx * by + (tya + 2) * bx + txa];
+            // Coordinate Y
+            yleft_most  = prim_buff[tza * bx * by + (tya - 2) * bx + txa];
+            yleft_mid   = prim_buff[tza * bx * by + (tya - 1) * bx + txa];
+            yright_mid  = prim_buff[tza * bx * by + (tya + 1) * bx + txa];
+            yright_most = prim_buff[tza * bx * by + (tya + 2) * bx + txa];
 
-                // Coordinate z
-                zleft_most  = prim_buff[(tza - 2) * bx * by + tya * bx + txa];
-                zleft_mid   = prim_buff[(tza - 1) * bx * by + tya * bx + txa];
-                zright_mid  = prim_buff[(tza + 1) * bx * by + tya * bx + txa];
-                zright_most = prim_buff[(tza + 2) * bx * by + tya * bx + txa];
-            }
-            else
-            {
-                // Declare the c[i-2],c[i-1],c_i,c[i+1], c[i+2] variables
+            // Coordinate z
+            zleft_most  = prim_buff[(tza - 2) * bx * by + tya * bx + txa];
+            zleft_mid   = prim_buff[(tza - 1) * bx * by + tya * bx + txa];
+            zright_mid  = prim_buff[(tza + 1) * bx * by + tya * bx + txa];
+            zright_most = prim_buff[(tza + 2) * bx * by + tya * bx + txa];
 
-                /* TODO: Fix this */
-            }
             // Reconstructed left X Primitive vector at the i+1/2 interface
-            xprims_l.rho =
-                center.rho + static_cast<real>(0.5) * minmod(plm_theta * (center.rho - xleft_mid.rho),
-                                            static_cast<real>(0.5) * (xright_mid.rho - xleft_mid.rho),
-                                            plm_theta * (xright_mid.rho - center.rho));
-
-            xprims_l.v1 =
-                center.v1 + static_cast<real>(0.5) * minmod(plm_theta * (center.v1 - xleft_mid.v1),
-                                            static_cast<real>(0.5) * (xright_mid.v1 - xleft_mid.v1),
-                                            plm_theta * (xright_mid.v1 - center.v1));
-
-            xprims_l.v2 =
-                center.v2 + static_cast<real>(0.5) * minmod(plm_theta * (center.v2 - xleft_mid.v2),
-                                            static_cast<real>(0.5) * (xright_mid.v2 - xleft_mid.v2),
-                                            plm_theta * (xright_mid.v2 - center.v2));
-            xprims_l.v3 =
-                center.v3 + static_cast<real>(0.5) * minmod(plm_theta * (center.v3 - xleft_mid.v3),
-                                            static_cast<real>(0.5) * (xright_mid.v3 - xleft_mid.v3),
-                                            plm_theta * (xright_mid.v3 - center.v3));
-
-            xprims_l.p =
-                center.p + static_cast<real>(0.5) * minmod(plm_theta * (center.p - xleft_mid.p),
-                                        static_cast<real>(0.5) * (xright_mid.p - xleft_mid.p),
-                                        plm_theta * (xright_mid.p - center.p));
+            xprims_l =  center +  minmod((center - xleft_mid) * plm_theta,
+                               (xright_mid - xleft_mid)  * static_cast<real>(0.5),
+                                (xright_mid - center) * plm_theta) * static_cast<real>(0.5);
 
             // Reconstructed right Primitive vector in x
-            xprims_r.rho =
-                xright_mid.rho -
-                static_cast<real>(0.5) * minmod(plm_theta * (xright_mid.rho - center.rho),
-                                static_cast<real>(0.5) * (xright_most.rho - center.rho),
-                                plm_theta * (xright_most.rho - xright_mid.rho));
-
-            xprims_r.v1 = xright_mid.v1 -
-                            static_cast<real>(0.5) * minmod(plm_theta * (xright_mid.v1 - center.v1),
-                                        static_cast<real>(0.5) * (xright_most.v1 - center.v1),
-                                        plm_theta * (xright_most.v1 - xright_mid.v1));
-
-            xprims_r.v2 = xright_mid.v2 -
-                            static_cast<real>(0.5) * minmod(plm_theta * (xright_mid.v2 - center.v2),
-                                        static_cast<real>(0.5) * (xright_most.v2 - center.v2),
-                                        plm_theta * (xright_most.v2 - xright_mid.v2));
-
-            xprims_r.v3 = xright_mid.v3 -
-                            static_cast<real>(0.5) * minmod(plm_theta * (xright_mid.v3 - center.v3),
-                                        static_cast<real>(0.5) * (xright_most.v3 - center.v3),
-                                        plm_theta * (xright_most.v3 - xright_mid.v3));
-
-            xprims_r.p = xright_mid.p -
-                            static_cast<real>(0.5) * minmod(plm_theta * (xright_mid.p - center.p),
-                                        static_cast<real>(0.5) * (xright_most.p - center.p),
-                                        plm_theta * (xright_most.p - xright_mid.p));
+            xprims_r =  xright_mid - minmod((xright_mid - center) * plm_theta, 
+                                            (xright_most - center) * static_cast<real>(0.5),
+                                            (xright_most - xright_mid) * plm_theta) * static_cast<real>(0.5);
 
             // Reconstructed right Primitive vector in y-direction at j+1/2
             // interfce
-            yprims_l.rho =
-                center.rho + static_cast<real>(0.5) * minmod(plm_theta * (center.rho - yleft_mid.rho),
-                                            static_cast<real>(0.5) * (yright_mid.rho - yleft_mid.rho),
-                                            plm_theta * (yright_mid.rho - center.rho));
+            yprims_l = center + minmod((center - yleft_mid) * plm_theta,
+                                        (yright_mid - yleft_mid) * static_cast<real>(0.5),
+                                        (yright_mid - center) * plm_theta) * static_cast<real>(0.5);
 
-            yprims_l.v1 =
-                center.v1 + static_cast<real>(0.5) * minmod(plm_theta * (center.v1 - yleft_mid.v1),
-                                            static_cast<real>(0.5) * (yright_mid.v1 - yleft_mid.v1),
-                                            plm_theta * (yright_mid.v1 - center.v1));
-
-            yprims_l.v2 =
-                center.v2 + static_cast<real>(0.5) * minmod(plm_theta * (center.v2 - yleft_mid.v2),
-                                            static_cast<real>(0.5) * (yright_mid.v2 - yleft_mid.v2),
-                                            plm_theta * (yright_mid.v2 - center.v2));
-            yprims_l.v3 =
-                center.v3 + static_cast<real>(0.5) * minmod(plm_theta * (center.v3 - yleft_mid.v3),
-                                            static_cast<real>(0.5) * (yright_mid.v3 - yleft_mid.v3),
-                                            plm_theta * (yright_mid.v3 - center.v3));
-            yprims_l.p =
-                center.p + static_cast<real>(0.5) * minmod(plm_theta * (center.p - yleft_mid.p),
-                                        static_cast<real>(0.5) * (yright_mid.p - yleft_mid.p),
-                                        plm_theta * (yright_mid.p - center.p));
-
-            yprims_r.rho =
-                yright_mid.rho -
-                static_cast<real>(0.5) * minmod(plm_theta * (yright_mid.rho - center.rho),
-                                static_cast<real>(0.5) * (yright_most.rho - center.rho),
-                                plm_theta * (yright_most.rho - yright_mid.rho));
-
-            yprims_r.v1 = yright_mid.v1 -
-                            static_cast<real>(0.5) * minmod(plm_theta * (yright_mid.v1 - center.v1),
-                                        static_cast<real>(0.5) * (yright_most.v1 - center.v1),
-                                        plm_theta * (yright_most.v1 - yright_mid.v1));
-
-            yprims_r.v2 = yright_mid.v2 -
-                            static_cast<real>(0.5) * minmod(plm_theta * (yright_mid.v2 - center.v2),
-                                        static_cast<real>(0.5) * (yright_most.v2 - center.v2),
-                                        plm_theta * (yright_most.v2 - yright_mid.v2));
-            yprims_r.v3 = yright_mid.v3 -
-                            static_cast<real>(0.5) * minmod(plm_theta * (yright_mid.v3 - center.v3),
-                                        static_cast<real>(0.5) * (yright_most.v3 - center.v3),
-                                        plm_theta * (yright_most.v3 - yright_mid.v3));
-
-            yprims_r.p = yright_mid.p -
-                            static_cast<real>(0.5) * minmod(plm_theta * (yright_mid.p - center.p),
-                                        static_cast<real>(0.5) * (yright_most.p - center.p),
-                                        plm_theta * (yright_most.p - yright_mid.p));
+            yprims_r = yright_mid - minmod((yright_mid - center) * plm_theta,
+                                           (yright_most - center) * static_cast<real>(0.5),
+                                           (yright_most - yright_mid) * plm_theta) * static_cast<real>(0.5);
 
             // Reconstructed right Primitive vector in z-direction at j+1/2
             // interfce
-            zprims_l.rho =
-                center.rho + static_cast<real>(0.5) * minmod(plm_theta * (center.rho - zleft_mid.rho),
-                                            static_cast<real>(0.5) * (zright_mid.rho - zleft_mid.rho),
-                                            plm_theta * (zright_mid.rho - center.rho));
+            zprims_l = center + minmod((center - zleft_mid) * plm_theta,
+                                       (zright_mid - zleft_mid) * static_cast<real>(0.5),
+                                       (zright_mid - center) * plm_theta) * static_cast<real>(0.5);
 
-            zprims_l.v1 =
-                center.v1 + static_cast<real>(0.5) * minmod(plm_theta * (center.v1 - zleft_mid.v1),
-                                            static_cast<real>(0.5) * (zright_mid.v1 - zleft_mid.v1),
-                                            plm_theta * (zright_mid.v1 - center.v1));
-
-            zprims_l.v2 =
-                center.v2 + static_cast<real>(0.5) * minmod(plm_theta * (center.v2 - zleft_mid.v2),
-                                            static_cast<real>(0.5) * (zright_mid.v2 - zleft_mid.v2),
-                                            plm_theta * (zright_mid.v2 - center.v2));
-
-            zprims_l.v3 =
-                center.v3 + static_cast<real>(0.5) * minmod(plm_theta * (center.v3 - zleft_mid.v3),
-                                            static_cast<real>(0.5) * (zright_mid.v3 - zleft_mid.v3),
-                                            plm_theta * (zright_mid.v3 - center.v3));
-
-            zprims_l.p =
-                center.p + static_cast<real>(0.5) * minmod(plm_theta * (center.p - zleft_mid.p),
-                                        static_cast<real>(0.5) * (zright_mid.p - zleft_mid.p),
-                                        plm_theta * (zright_mid.p - center.p));
-
-            zprims_r.rho =
-                zright_mid.rho -
-                static_cast<real>(0.5) * minmod(plm_theta * (zright_mid.rho - center.rho),
-                                static_cast<real>(0.5) * (zright_most.rho - center.rho),
-                                plm_theta * (zright_most.rho - zright_mid.rho));
-
-            zprims_r.v1 = zright_mid.v1 -
-                            static_cast<real>(0.5) * minmod(plm_theta * (zright_mid.v1 - center.v1),
-                                        static_cast<real>(0.5) * (zright_most.v1 - center.v1),
-                                        plm_theta * (zright_most.v1 - zright_mid.v1));
-
-            zprims_r.v2 = zright_mid.v2 -
-                            static_cast<real>(0.5) * minmod(plm_theta * (zright_mid.v2 - center.v2),
-                                        static_cast<real>(0.5) * (zright_most.v2 - center.v2),
-                                        plm_theta * (zright_most.v2 - zright_mid.v2));
-
-            zprims_r.v3 = zright_mid.v3 -
-                            static_cast<real>(0.5) * minmod(plm_theta * (zright_mid.v3 - center.v3),
-                                        static_cast<real>(0.5) * (zright_most.v3 - center.v3),
-                                        plm_theta * (zright_most.v3 - zright_mid.v3));
-
-            zprims_r.p = zright_mid.p -
-                            static_cast<real>(0.5) * minmod(plm_theta * (zright_mid.p - center.p),
-                                        static_cast<real>(0.5) * (zright_most.p - center.p),
-                                        plm_theta * (zright_most.p - zright_mid.p));
+            zprims_r = zright_mid -  minmod((zright_mid - center) * plm_theta,
+                                            (zright_most - center) * static_cast<real>(0.5),
+                                            (zright_most - zright_mid) * plm_theta) * static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
@@ -1317,174 +1052,52 @@ void SRHD3D::advance(
 
             if (hllc)
             {
-                f1 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g1 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                h1 = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                frf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                grf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                hrf = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
             }
             else
             {
-                f1 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g1 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                h1 = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                frf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                grf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                hrf = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
             }
 
             // Do the same thing, but for the left side interface [i - 1/2]
 
             // Left side Primitive in x
-            xprims_l.rho = xleft_mid.rho +
-                            static_cast<real>(0.5) * minmod(plm_theta * (xleft_mid.rho - xleft_most.rho),
-                                        static_cast<real>(0.5) * (center.rho - xleft_most.rho),
-                                        plm_theta * (center.rho - xleft_mid.rho));
-
-            xprims_l.v1 = xleft_mid.v1 +
-                            static_cast<real>(0.5) * minmod(plm_theta * (xleft_mid.v1 - xleft_most.v1),
-                                        static_cast<real>(0.5) * (center.v1 - xleft_most.v1),
-                                        plm_theta * (center.v1 - xleft_mid.v1));
-
-            xprims_l.v2 = xleft_mid.v2 +
-                            static_cast<real>(0.5) * minmod(plm_theta * (xleft_mid.v2 - xleft_most.v2),
-                                        static_cast<real>(0.5) * (center.v2 - xleft_most.v2),
-                                        plm_theta * (center.v2 - xleft_mid.v2));
-
-            xprims_l.v3 = xleft_mid.v3 +
-                            static_cast<real>(0.5) * minmod(plm_theta * (xleft_mid.v3 - xleft_most.v3),
-                                        static_cast<real>(0.5) * (center.v3 - xleft_most.v3),
-                                        plm_theta * (center.v3 - xleft_mid.v3));
-
-            xprims_l.p =
-                xleft_mid.p + static_cast<real>(0.5) * minmod(plm_theta * (xleft_mid.p - xleft_most.p),
-                                            static_cast<real>(0.5) * (center.p - xleft_most.p),
-                                            plm_theta * (center.p - xleft_mid.p));
+            xprims_l = xleft_mid +
+                            minmod((xleft_mid - xleft_most) * plm_theta,
+                                        (center - xleft_most) * static_cast<real>(0.5),
+                                        (center - xleft_mid) * plm_theta) * static_cast<real>(0.5);
 
             // Right side Primitive in x
-            xprims_r.rho =
-                center.rho - static_cast<real>(0.5) * minmod(plm_theta * (center.rho - xleft_mid.rho),
-                                            static_cast<real>(0.5) * (xright_mid.rho - xleft_mid.rho),
-                                            plm_theta * (xright_mid.rho - center.rho));
-
-            xprims_r.v1 =
-                center.v1 - static_cast<real>(0.5) * minmod(plm_theta * (center.v1 - xleft_mid.v1),
-                                            static_cast<real>(0.5) * (xright_mid.v1 - xleft_mid.v1),
-                                            plm_theta * (xright_mid.v1 - center.v1));
-
-            xprims_r.v2 =
-                center.v2 - static_cast<real>(0.5) * minmod(plm_theta * (center.v2 - xleft_mid.v2),
-                                            static_cast<real>(0.5) * (xright_mid.v2 - xleft_mid.v2),
-                                            plm_theta * (xright_mid.v2 - center.v2));
-
-            xprims_r.v3 =
-                center.v3 - static_cast<real>(0.5) * minmod(plm_theta * (center.v3 - xleft_mid.v3),
-                                            static_cast<real>(0.5) * (xright_mid.v3 - xleft_mid.v3),
-                                            plm_theta * (xright_mid.v3 - center.v3));
-
-            xprims_r.p =
-                center.p - static_cast<real>(0.5) * minmod(plm_theta * (center.p - xleft_mid.p),
-                                        static_cast<real>(0.5) * (xright_mid.p - xleft_mid.p),
-                                        plm_theta * (xright_mid.p - center.p));
+            xprims_r =
+                center - minmod((center - xleft_mid) * plm_theta,
+                                            (xright_mid - xleft_mid) * static_cast<real>(0.5),
+                                            (xright_mid - center) * plm_theta);
 
             // Left side Primitive in y
-            yprims_l.rho = yleft_mid.rho +
-                            static_cast<real>(0.5) * minmod(plm_theta * (yleft_mid.rho - yleft_most.rho),
-                                        static_cast<real>(0.5) * (center.rho - yleft_most.rho),
-                                        plm_theta * (center.rho - yleft_mid.rho));
-
-            yprims_l.v1 = yleft_mid.v1 +
-                            static_cast<real>(0.5) * minmod(plm_theta * (yleft_mid.v1 - yleft_most.v1),
-                                        static_cast<real>(0.5) * (center.v1 - yleft_most.v1),
-                                        plm_theta * (center.v1 - yleft_mid.v1));
-
-            yprims_l.v2 = yleft_mid.v2 +
-                            static_cast<real>(0.5) * minmod(plm_theta * (yleft_mid.v2 - yleft_most.v2),
-                                        static_cast<real>(0.5) * (center.v2 - yleft_most.v2),
-                                        plm_theta * (center.v2 - yleft_mid.v2));
-
-            yprims_l.v3 = yleft_mid.v3 +
-                            static_cast<real>(0.5) * minmod(plm_theta * (yleft_mid.v3 - yleft_most.v3),
-                                        static_cast<real>(0.5) * (center.v3 - yleft_most.v3),
-                                        plm_theta * (center.v3 - yleft_mid.v3));
-
-            yprims_l.p =
-                yleft_mid.p + static_cast<real>(0.5) * minmod(plm_theta * (yleft_mid.p - yleft_most.p),
-                                            static_cast<real>(0.5) * (center.p - yleft_most.p),
-                                            plm_theta * (center.p - yleft_mid.p));
+            yprims_l = yleft_mid +
+                            minmod((yleft_mid - yleft_most) * plm_theta,
+                                        (center - yleft_most) * static_cast<real>(0.5),
+                                        (center - yleft_mid) * plm_theta) * static_cast<real>(0.5);
 
             // Right side Primitive in y
-            yprims_r.rho =
-                center.rho - static_cast<real>(0.5) * minmod(plm_theta * (center.rho - yleft_mid.rho),
-                                            static_cast<real>(0.5) * (yright_mid.rho - yleft_mid.rho),
-                                            plm_theta * (yright_mid.rho - center.rho));
-
-            yprims_r.v1 =
-                center.v1 - static_cast<real>(0.5) * minmod(plm_theta * (center.v1 - yleft_mid.v1),
-                                            static_cast<real>(0.5) * (yright_mid.v1 - yleft_mid.v1),
-                                            plm_theta * (yright_mid.v1 - center.v1));
-
-            yprims_r.v2 =
-                center.v2 - static_cast<real>(0.5) * minmod(plm_theta * (center.v2 - yleft_mid.v2),
-                                            static_cast<real>(0.5) * (yright_mid.v2 - yleft_mid.v2),
-                                            plm_theta * (yright_mid.v2 - center.v2));
-
-            yprims_r.v3 =
-                center.v3 - static_cast<real>(0.5) * minmod(plm_theta * (center.v3 - yleft_mid.v3),
-                                            static_cast<real>(0.5) * (yright_mid.v3 - yleft_mid.v3),
-                                            plm_theta * (yright_mid.v3 - center.v3));
-
-            yprims_r.p =
-                center.p - static_cast<real>(0.5) * minmod(plm_theta * (center.p - yleft_mid.p),
-                                        static_cast<real>(0.5) * (yright_mid.p - yleft_mid.p),
-                                        plm_theta * (yright_mid.p - center.p));
+            yprims_r = center - minmod((center - yleft_mid) * plm_theta,
+                                            (yright_mid - yleft_mid) * static_cast<real>(0.5),
+                                            (yright_mid - center) * plm_theta) * static_cast<real>(0.5);
 
             // Left side Primitive in z
-            zprims_l.rho = zleft_mid.rho +
-                            static_cast<real>(0.5) * minmod(plm_theta * (zleft_mid.rho - zleft_most.rho),
-                                        static_cast<real>(0.5) * (center.rho - zleft_most.rho),
-                                        plm_theta * (center.rho - zleft_mid.rho));
-
-            zprims_l.v1 = zleft_mid.v1 +
-                            static_cast<real>(0.5) * minmod(plm_theta * (zleft_mid.v1 - zleft_most.v1),
-                                        static_cast<real>(0.5) * (center.v1 - zleft_most.v1),
-                                        plm_theta * (center.v1 - zleft_mid.v1));
-
-            zprims_l.v2 = zleft_mid.v2 +
-                            static_cast<real>(0.5) * minmod(plm_theta * (zleft_mid.v2 - zleft_most.v2),
-                                        static_cast<real>(0.5) * (center.v2 - zleft_most.v2),
-                                        plm_theta * (center.v2 - zleft_mid.v2));
-
-            zprims_l.v3 = zleft_mid.v3 +
-                            static_cast<real>(0.5) * minmod(plm_theta * (zleft_mid.v3 - zleft_most.v3),
-                                        static_cast<real>(0.5) * (center.v3 - zleft_most.v3),
-                                        plm_theta * (center.v3 - zleft_mid.v3));
-
-            zprims_l.p =
-                zleft_mid.p + static_cast<real>(0.5) * minmod(plm_theta * (zleft_mid.p - zleft_most.p),
-                                            static_cast<real>(0.5) * (center.p - zleft_most.p),
-                                            plm_theta * (center.p - zleft_mid.p));
+            zprims_l = zleft_mid +
+                            minmod((zleft_mid - zleft_most) * plm_theta,
+                                        (center - zleft_most) * static_cast<real>(0.5),
+                                        (center - zleft_mid) * plm_theta) * static_cast<real>(0.5);
 
             // Right side Primitive in z
-            zprims_r.rho =
-                center.rho - static_cast<real>(0.5) * minmod(plm_theta * (center.rho - zleft_mid.rho),
-                                            static_cast<real>(0.5) * (zright_mid.rho - zleft_mid.rho),
-                                            plm_theta * (zright_mid.rho - center.rho));
-
-            zprims_r.v1 =
-                center.v1 - static_cast<real>(0.5) * minmod(plm_theta * (center.v1 - zleft_mid.v1),
-                                            static_cast<real>(0.5) * (zright_mid.v1 - zleft_mid.v1),
-                                            plm_theta * (zright_mid.v1 - center.v1));
-
-            zprims_r.v2 =
-                center.v2 - static_cast<real>(0.5) * minmod(plm_theta * (center.v2 - zleft_mid.v2),
-                                            static_cast<real>(0.5) * (zright_mid.v2 - zleft_mid.v2),
-                                            plm_theta * (zright_mid.v2 - center.v2));
-
-            zprims_r.v3 =
-                center.v3 - static_cast<real>(0.5) * minmod(plm_theta * (center.v3 - zleft_mid.v3),
-                                            static_cast<real>(0.5) * (zright_mid.v3 - zleft_mid.v3),
-                                            plm_theta * (zright_mid.v3 - center.v3));
-
-            zprims_r.p =
-                center.p - static_cast<real>(0.5) * minmod(plm_theta * (center.p - zleft_mid.p),
-                                        static_cast<real>(0.5) * (zright_mid.p - zleft_mid.p),
-                                        plm_theta * (zright_mid.p - center.p));
+            zprims_r = center - minmod((center - zleft_mid) * plm_theta,
+                                        (zright_mid - zleft_mid * static_cast<real>(0.5)),
+                                        (zright_mid - center) * plm_theta) * static_cast<real>(0.5);
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
             ux_l = self->prims2cons(xprims_l);
@@ -1501,166 +1114,117 @@ void SRHD3D::advance(
             h_l = self->calc_Flux(zprims_l, 3);
             h_r = self->calc_Flux(zprims_r, 3);
 
-            // favl = (uy_r - uy_l) * (-K);
-            
             if (hllc)
             {
-                f2 = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g2 = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                h2 = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                flf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                glf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                hlf = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
                 
             }
             else
             {
-                f2 = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                g2 = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                h2 = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                flf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
+                glf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
+                hlf = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
             }
 
-                
-            //Advance depending on geometry
-            luint real_loc = kk * xpg * ypg + jj * xpg + ii;
-            switch (geometry)
-            {
-                case simbi::Geometry::CARTESIAN:
-                    {
-                        #if GPU_CODE
-                            real dx1 = coord_lattice->gpu_dx1[ii];
-                            real dx2  = coord_lattice->gpu_dx2[jj];
-                            real dz = coord_lattice->gpu_dx3[kk];
-                            self->gpu_cons[aid].d   += static_cast<real>(0.5) * dt * ( -(f1.d - f2.d)     / dx1 - (g1.d   - g2.d )  / dx2 - (h1.d - h2.d)     / dz + self->gpu_sourceD   [real_loc] );
-                            self->gpu_cons[aid].s1  += static_cast<real>(0.5) * dt * ( -(f1.s1 - f2.s1)   / dx1 - (g1.s1  - g2.s1)  / dx2 - (h1.s1 - h2.s3)   / dz + self->gpu_sourceS1  [real_loc] );
-                            self->gpu_cons[aid].s2  += static_cast<real>(0.5) * dt * ( -(f1.s2 - f2.s2)   / dx1  - (g1.s2  - g2.s2) / dx2 - (h1.s2 - h2.s3)   / dz + self->gpu_sourceS2  [real_loc] );
-                            self->gpu_cons[aid].s3  += static_cast<real>(0.5) * dt * ( -(f1.s3 - f2.s3)   / dx1  - (g1.s3  - g2.s3) / dx2 - (h1.s3 - h2.s3)   / dz + self->gpu_sourceS3  [real_loc] );
-                            self->gpu_cons[aid].tau += static_cast<real>(0.5) * dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + self->gpu_sourceTau [real_loc] );
-                        #else
-                            real dx1 = self->coord_lattice.dx1[ii];
-                            real dx2  = self->coord_lattice.dx2[jj];
-                            real dz = self->coord_lattice.dx3[kk];
-                            cons[aid].d   += static_cast<real>(0.5) * dt * ( -(f1.d - f2.d)     / dx1 - (g1.d   - g2.d )  / dx2 - (h1.d - h2.d)     / dz + sourceD   [real_loc] );
-                            cons[aid].s1  += static_cast<real>(0.5) * dt * ( -(f1.s1 - f2.s1)   / dx1 - (g1.s1  - g2.s1)  / dx2 - (h1.s1 - h2.s3)   / dz + sourceS1  [real_loc] );
-                            cons[aid].s2  += static_cast<real>(0.5) * dt * ( -(f1.s2 - f2.s2)   / dx1  - (g1.s2  - g2.s2) / dx2 - (h1.s2 - h2.s3)   / dz + sourceS2  [real_loc] );
-                            cons[aid].s3  += static_cast<real>(0.5) * dt * ( -(f1.s3 - f2.s3)   / dx1  - (g1.s3  - g2.s3) / dx2 - (h1.s3 - h2.s3)   / dz + sourceS3  [real_loc] );
-                            cons[aid].tau += static_cast<real>(0.5) * dt * ( -(f1.tau - f2.tau) / dx1 - (g1.tau - g2.tau) / dx2 - (h1.tau - h2.tau) / dz + sourceTau [real_loc] );
-                        #endif
-                        
-                    break;
-                    }
-                
-                case simbi::Geometry::SPHERICAL:
-                    {
-                        #if GPU_CODE
-                        real s1R        = coord_lattice->gpu_x1_face_areas[ii + 1];
-                        real s1L        = coord_lattice->gpu_x1_face_areas[ii + 0];
-                        real s2R        = coord_lattice->gpu_x2_face_areas[jj + 1];
-                        real s2L        = coord_lattice->gpu_x2_face_areas[jj + 0];
-                        real s3R        = coord_lattice->gpu_x3_face_areas[kk + 1];
-                        real s3L        = coord_lattice->gpu_x3_face_areas[kk + 0];
-                        real rmean      = coord_lattice->gpu_x1mean[ii]           ;
-                        real dV1        = coord_lattice->gpu_dV1[ii]              ;
-                        real dV2        = rmean * coord_lattice->gpu_dV2[jj]      ;
-                        real dV3        = rmean * coord_lattice->gpu_sin[jj] * coord_lattice->gpu_dx3[kk];
-                        #else
-                        real s1R    = self->coord_lattice.x1_face_areas[ii + 1];
-                        real s1L    = self->coord_lattice.x1_face_areas[ii + 0];
-                        real s2R    = self->coord_lattice.x2_face_areas[jj + 1];
-                        real s2L    = self->coord_lattice.x2_face_areas[jj + 0];
-                        real s3R    = self->coord_lattice.x3_face_areas[kk + 1];
-                        real s3L    = self->coord_lattice.x3_face_areas[kk + 0];
-                        real rmean  = self->coord_lattice.x1mean[ii];
-                        real dV1    = self->coord_lattice.dV1[ii];
-                        real dV2    = rmean * self->coord_lattice.dV2[jj];
-                        real dV3    = rmean * self->coord_lattice.sin[jj] * self->coord_lattice.dx3[kk];
-                        #endif
-                        // // Grab central primitives
-                        real rhoc = prim_buff[tza * bx * by + tya * bx + txa].rho;
-                        real pc   = prim_buff[tza * bx * by + tya * bx + txa].p;
-                        real uc   = prim_buff[tza * bx * by + tya * bx + txa].v1;
-                        real vc   = prim_buff[tza * bx * by + tya * bx + txa].v2;
-                        real wc   = prim_buff[tza * bx * by + tya * bx + txa].v3;
-
-                        real hc    = static_cast<real>(1.0) + gamma * pc/(rhoc * (gamma - static_cast<real>(1.0)));
-                        real gam2  = static_cast<real>(1.0)/(static_cast<real>(1.0) - (uc * uc + vc * vc + wc * wc));
-
-                        #if GPU_CODE
-                            self->gpu_cons[aid] +=
-                            Conserved{
-                                // L(D)
-                                -(f1.d * s1R - f2.d * s1L) / dV1 
-                                    - (g1.d * s2R - g2.d * s2L) / dV2 
-                                        - (h1.d * s3R - h2.d * s3L) / dV3 
-                                            + self->gpu_sourceD[real_loc] * decay_const,
-
-                                // L(S1)
-                                -(f1.s1 * s1R - f2.s1 * s1L) / dV1 
-                                    - (g1.s1 * s2R - g2.s1 * s2L) / dV2 
-                                        - (h1.s1 * s3R - h2.s1 * s3L) / dV3 
-                                        + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
-                                                self->gpu_sourceS1[real_loc] * decay_const,
-
-                                // L(S2)
-                                -(f1.s2 * s1R - f2.s2 * s1L) / dV1
-                                        - (g1.s2 * s2R - g2.s2 * s2L) / dV2 
-                                            - (h1.s2 * s3R - h2.s2 * s3L) / dV3 
-                                            - rhoc * hc * gam2 * uc * vc / rmean + coord_lattice->gpu_cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
-                                            + self->gpu_sourceS2[real_loc] * decay_const,
-
-                                // L(S3)
-                                -(f1.s3 * s1R - f2.s3 * s1L) / dV1
-                                        - (g1.s3 * s2R - g2.s3 * s2L) / dV2 
-                                            - (h1.s3 * s3R - h2.s3 * s3L) / dV3 
-                                                - rhoc * hc * gam2 * wc * (uc + vc * coord_lattice->gpu_cot[jj])/ rmean
-                                            +     self->gpu_sourceS3[real_loc] * decay_const,
-
-                                // L(tau)
-                                -(f1.tau * s1R - f2.tau * s1L) / dV1 
-                                    - (g1.tau * s2R - g2.tau * s2L) / dV2 
-                                        - (h1.tau* s3R - h2.tau* s3L) / dV3 
-                                            + self->gpu_sourceTau[real_loc] * decay_const
-                            } * dt * static_cast<real>(0.5);
-                        #else
-                            cons[aid] +=
-                            Conserved{
-                                // L(D)
-                                -(f1.d * s1R - f2.d * s1L) / dV1 
-                                    - (g1.d * s2R - g2.d * s2L) / dV2 
-                                        - (h1.d * s3R - h2.d * s3L) / dV3 
-                                            + sourceD[real_loc] * decay_const,
-
-                                // L(S1)
-                                -(f1.s1 * s1R - f2.s1 * s1L) / dV1 
-                                    - (g1.s1 * s2R - g2.s1 * s2L) / dV2 
-                                        - (h1.s1 * s3R - h2.s1 * s3L) / dV3 
-                                        + rhoc * hc * gam2 * (vc * vc + wc * wc) / rmean + 2 * pc / rmean +
-                                                sourceS1[real_loc] * decay_const,
-
-                                // L(S2)
-                                -(f1.s2 * s1R - f2.s2 * s1L) / dV1
-                                        - (g1.s2 * s2R - g2.s2 * s2L) / dV2 
-                                            - (h1.s2 * s3R - h2.s2 * s3L) / dV3 
-                                            - rhoc * hc * gam2 * uc * vc / rmean + self->coord_lattice.cot[jj] / rmean * (pc + rhoc * hc * gam2 *wc * wc) 
-                                            + sourceS2[real_loc] * decay_const,
-
-                                // L(S3)
-                                -(f1.s3 * s1R - f2.s3 * s1L) / dV1
-                                        - (g1.s3 * s2R - g2.s3 * s2L) / dV2 
-                                            - (h1.s3 * s3R - h2.s3 * s3L) / dV3 
-                                                - rhoc * hc * gam2 * wc * (uc + vc * self->coord_lattice.cot[jj])/ rmean
-                                                    + sourceS3[real_loc] * decay_const,
-
-                                // L(tau)
-                                -(f1.tau * s1R - f2.tau * s1L) / dV1 
-                                    - (g1.tau * s2R - g2.tau * s2L) / dV2 
-                                        - (h1.tau* s3R - h2.tau* s3L) / dV3 
-                                            + sourceTau[real_loc] * decay_const
-                            } * dt * static_cast<real>(0.5);
-                        #endif 
-                    
-                    break;
-
-                    } // end spherical case
-            } // end switch
         }// end else 
+
+        //Advance depending on geometry
+        const luint real_loc = (col_maj) ? ii * ypg + jj : kk * xpg * ypg + jj * xpg + ii;
+        const auto step = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+        switch (geometry)
+        {
+            case simbi::Geometry::CARTESIAN:
+                {
+                    #if GPU_CODE
+                        real dx1 = coord_lattice->gpu_dx1[ii];
+                        real dx2  = coord_lattice->gpu_dx2[jj];
+                        real dx3 = coord_lattice->gpu_dx3[kk];
+                        self->gpu_cons[aid].d   += step * dt * ( -(frf.d - flf.d)     / dx1 - (grf.d   - glf.d )  / dx2 - (hrf.d - hlf.d)     / dx3 + self->gpu_sourceD   [real_loc] );
+                        self->gpu_cons[aid].s1  += step * dt * ( -(frf.s1 - flf.s1)   / dx1 - (grf.s1  - glf.s1)  / dx2 - (hrf.s1 - hlf.s3)   / dx3 + self->gpu_sourceS1  [real_loc] );
+                        self->gpu_cons[aid].s2  += step * dt * ( -(frf.s2 - flf.s2)   / dx1  - (grf.s2  - glf.s2) / dx2 - (hrf.s2 - hlf.s3)   / dx3 + self->gpu_sourceS2  [real_loc] );
+                        self->gpu_cons[aid].s3  += step * dt * ( -(frf.s3 - flf.s3)   / dx1  - (grf.s3  - glf.s3) / dx2 - (hrf.s3 - hlf.s3)   / dx3 + self->gpu_sourceS3  [real_loc] );
+                        self->gpu_cons[aid].tau += step * dt * ( -(frf.tau - flf.tau) / dx1 - (grf.tau - glf.tau) / dx2 - (hrf.tau - hlf.tau) / dx3 + self->gpu_sourceTau [real_loc] );
+                    #else
+                        real dx1 = self->coord_lattice.dx1[ii];
+                        real dx2  = self->coord_lattice.dx2[jj];
+                        real dx3 = self->coord_lattice.dx3[kk];
+                        cons[aid].d   += step * dt * ( -(frf.d - flf.d)     / dx1 - (grf.d   - glf.d )  / dx2 - (hrf.d - hlf.d)     / dx3 + sourceD   [real_loc] );
+                        cons[aid].s1  += step * dt * ( -(frf.s1 - flf.s1)   / dx1 - (grf.s1  - glf.s1)  / dx2 - (hrf.s1 - hlf.s3)   / dx3 + sourceS1  [real_loc] );
+                        cons[aid].s2  += step * dt * ( -(frf.s2 - flf.s2)   / dx1  -(grf.s2  - glf.s2)  / dx2 - (hrf.s2 - hlf.s3)   / dx3 + sourceS2  [real_loc] );
+                        cons[aid].s3  += step * dt * ( -(frf.s3 - flf.s3)   / dx1  -(grf.s3  - glf.s3)  / dx2 - (hrf.s3 - hlf.s3)   / dx3 + sourceS3  [real_loc] );
+                        cons[aid].tau += step * dt * ( -(frf.tau - flf.tau) / dx1 - (grf.tau - glf.tau) / dx2 - (hrf.tau - hlf.tau) / dx3 + sourceTau [real_loc] );
+                    #endif
+                    
+                break;
+                }
+            
+            case simbi::Geometry::SPHERICAL:
+                {
+                #if GPU_CODE
+                const real rl           = (ii > 0 ) ? x1min * pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
+                const real rr           = (ii < xpg - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
+                const real tl           = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
+                const real tr           = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
+                const real ql           = (kk > 0 ) ? x3min + (kk - static_cast<real>(0.5)) * dx3 :  x3min;
+                const real qr           = (kk < zpg - 1) ? ql + dx3 * (kk == 0 ? 0.5 : 1.0) :  x3max; 
+                const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
+                const real s1R          = rr * rr; 
+                const real s1L          = rl * rl; 
+                const real s2R          = std::sin(tr);
+                const real s2L          = std::sin(tl);
+                const real thmean       = static_cast<real>(0.5) * (tl + tr);
+                const real sint         = std::sin(thmean);
+                const real dV1          = rmean * rmean * (rr - rl);             
+                const real dV2          = rmean * sint * (tr - tl); 
+                const real dV3          = rmean * sint * (qr - ql); 
+                const real cot          = std::cos(thmean) / sint;
+
+                const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : 0; //self->gpu_sourceD[real_loc];
+                const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : 0; //self->gpu_sourceS1[real_loc];
+                const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : 0; //self->gpu_sourceS2[real_loc];
+                const real s3_source = (s3_all_zeros)  ? static_cast<real>(0.0) : 0; //self->gpu_sourceS3[real_loc];
+                const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : 0; //self->gpu_sourceTau[real_loc];
+                #else
+                const real s1R   = self->coord_lattice.x1_face_areas[ii + 1];
+                const real s1L   = self->coord_lattice.x1_face_areas[ii + 0];
+                const real s2R   = self->coord_lattice.x2_face_areas[jj + 1];
+                const real s2L   = self->coord_lattice.x2_face_areas[jj + 0];
+                const real rmean = self->coord_lattice.x1mean[ii];
+                const real dV1   = self->coord_lattice.dV1[ii];
+                const real dV2   = rmean * self->coord_lattice.dV2[jj];
+                const real dV3   = rmean * self->coord_lattice.sin[jj] * self->coord_lattice.dx3[kk];
+                const real cot   = self->coord_lattice.cot[jj];
+
+                const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : sourceD[real_loc];
+                const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : sourceS1[real_loc];
+                const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : sourceS2[real_loc];
+                const real s3_source = (s3_all_zeros)  ? static_cast<real>(0.0) : sourceS3[real_loc];
+                const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : sourceTau[real_loc];
+                #endif
+
+                // Grab central primitives
+                const real rhoc = prim_buff[txa * sy + tya * sx + tza * sx * by].rho;
+                const real uc   = prim_buff[txa * sy + tya * sx + tza * sx * by].v1;
+                const real vc   = prim_buff[txa * sy + tya * sx + tza * sx * by].v2;
+                const real wc   = prim_buff[txa * sy + tya * sx + tza * sx * by].v3;
+                const real pc   = prim_buff[txa * sy + tya * sx + tza * sx * by].p;
+
+                const real hc   = static_cast<real>(1.0) + gamma * pc/(rhoc * (gamma - static_cast<real>(1.0)));
+                const real gam2 = static_cast<real>(1.0)/(static_cast<real>(1.0) - (uc * uc + vc * vc + wc * wc));
+
+                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , - rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean, static_cast<real>(0.0)};
+                const Conserved source_terms = Conserved{d_source, s1_source, s2_source, s3_source, e_source} * decay_const;
+                #if GPU_CODE 
+                    self->gpu_cons[aid] -= Conserved{0, 0, 0, 0, 0}; //( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 + (hrf - hlf) / dV3 - geom_source - source_terms) * dt * step;
+                #else
+                    cons[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 + (hrf - hlf) / dV3 - geom_source - source_terms) * dt * step;
+                #endif
+                
+                break;
+                }
+        } // end switch
 
     });
 }
@@ -1730,6 +1294,23 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                                      simbi::Cellspacing::LINSPACE);
     }
 
+    dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
+    dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
+    dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
+    dx3     = (x3[zphysical_grid - 1] - x3[0]) / (zphysical_grid - 1);
+    x1min   = x1[0];
+    x1max   = x1[xphysical_grid - 1];
+    x2min   = x2[0];
+    x2max   = x2[yphysical_grid - 1];
+    x3min   = x3[0];
+    x3max   = x3[zphysical_grid - 1];
+
+    d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
+    s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
+    s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
+    s3_all_zeros = std::all_of(sourceS3.begin(),  sourceS3.end(),  [](real i) {return i == 0;});
+    e_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
+
     if (coord_lattice.x2vertices[yphysical_grid] == PI){
         bipolar = true;
     }
@@ -1769,7 +1350,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         auto S3           = state3D[3][i];
         auto E            = state3D[4][i];
         auto S            = sqrt(S1 * S1 + S2 * S2 + S3 * S3);
-        cons[i]           = Conserved(D, S1, S2, S3, E);
+        cons[i]           = Conserved{D, S1, S2, S3, E};
         pressure_guess[i] = std::abs(S - D - E);
     }
     n = 0;
@@ -1784,12 +1365,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     PrimData prods;
     sr3d::PrimitiveData transfer_prims;
 
-    // if (t == 0)
-    // {
-    //     config_ghosts2D(cons, nx, ny, first_order);
-    // }
-    // Copy the current SRHD instance over to the device
-
     SRHD3D *device_self;
     simbi::gpu::api::gpuMalloc(&device_self, sizeof(SRHD3D));
     simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(SRHD3D));
@@ -1801,61 +1376,73 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     luint tchunk_order_of_mag = 2;
     luint time_order_of_mag;
 
-    const luint nxBlocks          = (nx + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-    const luint nyBlocks          = (ny + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-    const luint nzBlocks          = (nz + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-    const luint physical_nxBlocks = (xphysical_grid + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-    const luint physical_nyBlocks = (yphysical_grid + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-    const luint physical_nzBlocks = (zphysical_grid + BLOCK_SIZE3D - 1) / BLOCK_SIZE3D;
-
-    dim3 agridDim  = dim3(physical_nxBlocks, physical_nyBlocks, physical_nzBlocks); // active grid dimensions
-    dim3 fgridDim  = dim3(nxBlocks, nyBlocks, nzBlocks);                            // full grid dimensions
-    dim3 threadDim = dim3(BLOCK_SIZE3D, BLOCK_SIZE3D, BLOCK_SIZE3D);                // thread block dimensions
-
-    const luint xblockdim         = xphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : xphysical_grid;
-    const luint yblockdim         = yphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : yphysical_grid;
-    const luint zblockdim         = zphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : zphysical_grid;
-    const luint radius            = (first_order) ? 1 : 2;
-    const luint shBlockSize       = BLOCK_SIZE3D + 2 * radius;
-    const luint shBlockSpace      = shBlockSize * shBlockSize * shBlockSize;
-    const luint shBlockBytes = shBlockSpace * sizeof(Primitive);
+    // // Setup the system
+    const luint xblockdim       = xphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : xphysical_grid;
+    const luint yblockdim       = yphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : yphysical_grid;
+    const luint zblockdim       = zphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : zphysical_grid;
+    const luint radius          = (periodic) ? 0 : (first_order) ? 1 : 2;
+    const luint bx              = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
+    const luint by              = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
+    const luint bz              = (BuildPlatform == Platform::GPU) ? zblockdim + 2 * radius: nz;
+    const luint shBlockSpace    = bx * by * bz;
+    const luint shBlockBytes    = shBlockSpace * sizeof(Primitive);
     const auto fullP            = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
-    const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, 
-                                                         {xblockdim, yblockdim, zblockdim}, shBlockBytes);
-
-    if constexpr(BuildPlatform == Platform::GPU)
-        cons2prim(fullP, device_self, simbi::MemSide::Dev);
-    else 
-        cons2prim(fullP);
-
-    simbi::gpu::api::deviceSynch();
+    const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
+    if (t == 0)
+    {
+        if constexpr(BuildPlatform == Platform::GPU)
+        {
+            config_ghosts3D(fullP, device_self, nx, ny, nz, first_order, bc);
+        } else {
+            config_ghosts3D(fullP, this, nx, ny, nz, first_order, bc);
+        }
+    }
+
+    const auto dtShBytes = zblockdim * xblockdim * yblockdim * sizeof(Primitive) + zblockdim * xblockdim * yblockdim * sizeof(real);
+    if constexpr(BuildPlatform == Platform::GPU)
+    {
+        cons2prim(fullP, device_self, simbi::MemSide::Dev);
+        adapt_dt(device_self, geometry, activeP, dtShBytes);
+    } else {
+        cons2prim(fullP);
+        adapt_dt();
+    }
+
+    if (t == 0)
+    {
+        if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
+        transfer_prims = vec2struct<sr3d::PrimitiveData, Primitive>(prims);
+        writeToProd<sr3d::PrimitiveData, Primitive>(&transfer_prims, &prods);
+        tnow = create_step_str(t_interval, tchunk);
+        filename = string_format("%d.chkpt." + tnow + ".h5", yphysical_grid);
+        setup.t = t;
+        setup.dt = dt;
+        write_hdf5(data_directory, filename, prods, setup, 3, total_zones);
+        t_interval += chkpt_interval;
+    }
     // Some benchmarking tools 
     luint      n   = 0;
     luint  nfold   = 0;
     luint  ncheck  = 0;
-    real zu_avg = 0;
+    real    zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;
+
+    const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
+    const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
+
     // Simulate :)
     if (first_order)
     {  
         while (t < tend)
         {
             t1 = high_resolution_clock::now();
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Dev);
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts3D(fullP, device_self, nx, ny, nz, true, bc);
-            } else {
-                // First Half Step
-                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Host);
-                cons2prim(fullP);
-                config_ghosts3D(fullP, this, nx, ny, nz, true, bc);
-            }
-            
+            advance(self, activeP, bx, by, bz, radius, geometry, memside);
+            cons2prim(fullP, self, memside);
+            config_ghosts3D(fullP, self, nx, ny, nz, true, bc);
             t += dt; 
+            
 
             if (n >= nfold){
                 simbi::gpu::api::deviceSynch();
@@ -1888,14 +1475,12 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             }
 
             n++;
-
-            // std::cin.get();
-
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
-                adapt_dt(device_self, geometry, activeP);
+                adapt_dt(device_self, geometry, activeP, dtShBytes);
             else 
                 adapt_dt();
+
             // Update decay constant
             decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
         }
@@ -1903,29 +1488,16 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         while (t < tend)
         {
             t1 = high_resolution_clock::now();
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                // First Half Step
-                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Dev);
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts3D(fullP, device_self, nx, ny, nz, false, bc);
 
-                // Final Half Step
-                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Dev);
-                cons2prim(fullP, device_self, simbi::MemSide::Dev);
-                config_ghosts3D(fullP, device_self, nx, ny, nz, false, bc);
-            }  else {
-                // First Half Step
-                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Host);
-                cons2prim(fullP);
-                config_ghosts3D(fullP, this, nx, ny, nz, false, bc);
+            // First half step
+            advance(self, activeP, bx, by, bz,  radius, geometry, memside);
+            cons2prim(fullP, self, memside);
+            config_ghosts3D(fullP, self, nx, ny, nz, false, bc);
 
-                // Final Half Step
-                advance(device_self, activeP, shBlockSize, radius, geometry, simbi::MemSide::Host);
-                cons2prim(fullP);
-                config_ghosts3D(fullP, this, nx, ny, nz, false, bc);
-            }   
-            
+            // Final half step
+            advance(self, activeP, bx, by, bz,  radius, geometry, memside);
+            cons2prim(fullP, self, memside);
+            config_ghosts3D(fullP, self, nx, ny, nz, false, bc); 
             t += dt; 
 
             if (n >= nfold){
@@ -1960,9 +1532,10 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
 
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
-                adapt_dt(device_self, geometry, activeP);
+                adapt_dt(device_self, geometry, activeP, dtShBytes);
             else 
                 adapt_dt();
+                
             // Update decay constant
             decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
 

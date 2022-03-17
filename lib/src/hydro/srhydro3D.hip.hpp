@@ -35,6 +35,9 @@ namespace simbi
         simbi::Geometry geometry;
         simbi::BoundaryCondition bc;
 
+        real x3max, x3min, x2max, x2min, x1min, x1max, dx3, dx2, dx1, dlogx1;
+        bool d_all_zeros, s1_all_zeros, s2_all_zeros, s3_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
+
         //==============GPU Mirrors================
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceS3, *gpu_sourceTau, *gpu_pressure_guess;
         real *sys_state, *dt_min;
@@ -65,7 +68,9 @@ namespace simbi
         void advance(
             SRHD3D *dev, 
             const ExecutionPolicy<> p,
-            const luint sh_block_size,
+            const luint bx,
+            const luint by,
+            const luint bz,
             const luint radius, 
             const simbi::Geometry geometry, 
             const simbi::MemSide user);
@@ -123,7 +128,7 @@ namespace simbi
         std::vector<sr3d::Conserved> u_dot2D(const std::vector<sr3d::Conserved> &cons_state);
 
         void adapt_dt();
-        void adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p);
+        void adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, const luint bytes);
 
         std::vector<std::vector<real>> simulate3D(
             const std::vector<std::vector<real>> sources,
