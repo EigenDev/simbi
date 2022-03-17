@@ -126,7 +126,7 @@ namespace simbi
     unsigned int globalThreadIdx_x() {
     if constexpr(BuildPlatform == Platform::GPU)
     	return ( 
-                  (blockIdx.z * blockDim.z + threadIdx.z) * blockDim.x * gridDim.x * blockDim.y * gridDim.z
+                  (blockIdx.z * blockDim.z + threadIdx.z) * blockDim.x * gridDim.x * blockDim.y * gridDim.y
                 + (blockIdx.y * blockDim.y + threadIdx.y) * blockDim.x * gridDim.x 
                 +  blockIdx.x * blockDim.x + threadIdx.x
             );
