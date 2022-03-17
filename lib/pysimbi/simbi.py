@@ -276,13 +276,17 @@ class Hydro:
         if first_order:
             if self.dimensions == 1:
                 return state[:, 1: -1]
-            else:
+            elif self.dimensions == 2:
                 return state[:, 1:-1, 1:-1]
+            else:
+                return state[:, 1:-1, 1:-1, 1:-1]
         else:
             if self.dimensions == 1:
                 return state[:, 2: -2]
-            else:
+            elif self.dimensions == 2:
                 return state[:, 2:-2, 2:-2]
+            else:
+                return state[:, 2:-2, 2:-2, 2:-2]
     
     def simulate(self, 
                  tstart: float = 0,
@@ -448,7 +452,7 @@ class Hydro:
                 # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
             else:
                 b = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
-                   
+            
             solution = b.simulate(
                 sources         = sources,
                 tstart          = tstart,
