@@ -154,9 +154,14 @@ void SRHD3D::cons2prim(
     SRHD3D *dev, 
     simbi::MemSide user)
 {
+    const auto xpg = xphysical_grid;
+    const auto ypg = yphysical_grid;
+    const auto zpg = zphysical_grid;
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
+        bool workLeftToDo = true;
+        volatile  __shared__ bool found_failure;
         #if GPU_CODE 
         extern __shared__ Conserved conserved_buff[];
         #else 
@@ -186,45 +191,67 @@ void SRHD3D::cons2prim(
         #endif
 
         real tol = D * tol_scale;
-        do
-        {
-            pre = peq;
-            et  = tau + D + pre;
-            v2 = S * S / (et * et);
-            W   = static_cast<real>(1.0) / sqrt(static_cast<real>(1.0) - v2);
-            rho = D / W;
-
-            eps = (tau + (static_cast<real>(1.0) - W) * D + (static_cast<real>(1.0) - W * W) * pre) / (D * W);
-
-            h = static_cast<real>(1.0) + eps + pre / rho;
-            c2 = self->gamma * pre / (h * rho);
-
-            g = c2 * v2 - static_cast<real>(1.0);
-            f = (self->gamma - static_cast<real>(1.0)) * rho * eps - pre;
-
-            peq = pre - f / g;
-            iter++;
-            if (iter >= MAX_ITER)
-            {
-                printf("\nCons2Prim cannot converge\n");
-                self->dt = INFINITY;
-                return;
-            }
-
-        } while (std::abs(peq - pre) >= tol);
-        
-        real inv_et = static_cast<real>(1.0) / (tau + D + peq); 
-        real vx = S1 * inv_et;
-        real vy = S2 * inv_et;
-        real vz = S3 * inv_et;
-        
         #if GPU_CODE
-            self->gpu_pressure_guess[gid] = peq;
-            self->gpu_prims[gid]          = Primitive{rho, vx, vy, vz, peq};
-        #else
-            pressure_guess[gid] = peq;
-            prims[gid]          = Primitive{rho, vx, vy, vz,  peq};
+        if (tid == 0) found_failure = self->inFailureState;
+        simbi::gpu::api::synchronize();
+        #else 
+        found_failure = inFailureState;
         #endif
+            
+        while (!found_failure && workLeftToDo)
+        {
+            if (tid == 0 && self->inFailureState) 
+                found_failure = true;
+
+            do
+            {
+                pre = peq;
+                et  = tau + D + pre;
+                v2 = S * S / (et * et);
+                W   = static_cast<real>(1.0) / sqrt(static_cast<real>(1.0) - v2);
+                rho = D / W;
+
+                eps = (tau + (static_cast<real>(1.0) - W) * D + (static_cast<real>(1.0) - W * W) * pre) / (D * W);
+
+                h = static_cast<real>(1.0) + eps + pre / rho;
+                c2 = self->gamma * pre / (h * rho);
+
+                g = c2 * v2 - static_cast<real>(1.0);
+                f = (self->gamma - static_cast<real>(1.0)) * rho * eps - pre;
+
+                peq = pre - f / g;
+                iter++;
+                if (iter >= MAX_ITER)
+                {
+                    const auto kk  = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z: simbi::detail::get_height(gid, xpg, ypg);
+                    const auto jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: simbi::detail::get_row(gid, xpg, ypg, kk);
+                    const auto ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: simbi::detail::get_column(gid, xpg, ypg, kk);
+                    
+                    if (!self->inFailureState) printf("\nCons2Prim cannot converge\n");
+                    if (!self->inFailureState) printf("Density: %f, Pressure: %f, Vsq: %f, xindex: %lu, yindex: %lu, zindex: %lu\n", rho, peq, v2, ii, jj, kk);
+                    found_failure        = true;
+                    self->inFailureState = true;
+                    simbi::gpu::api::synchronize();
+                    break;
+                }
+
+            } while (std::abs(peq - pre) >= tol);
+
+            real inv_et = static_cast<real>(1.0) / (tau + D + peq); 
+            real vx = S1 * inv_et;
+            real vy = S2 * inv_et;
+            real vz = S3 * inv_et;
+            
+            #if GPU_CODE
+                self->gpu_pressure_guess[gid] = peq;
+                self->gpu_prims[gid]          = Primitive{rho, vx, vy, vz, peq};
+            #else
+                pressure_guess[gid] = peq;
+                prims[gid]          = Primitive{rho, vx, vy, vz,  peq};
+            #endif
+            workLeftToDo = false;
+        }
+
     });
 
 }
@@ -782,6 +809,7 @@ void SRHD3D::advance(
     const real decay_const          = this->decay_const;
     const real plm_theta            = this->plm_theta;
     const real gamma                = this->gamma;
+    const real dx1                  = this->dx1;
     const real dx2                  = this->dx2;
     const real dx3                  = this->dx3;
     const real dlogx1               = this->dlogx1;
@@ -791,7 +819,6 @@ void SRHD3D::advance(
     const real x2max                = this->x2max;
     const real x3min                = this->x3min;
     const real x3max                = this->x3max;
-    const real dx1                  = this->dx1;
     const luint nx                  = this->nx;
     const luint ny                  = this->ny;
     const luint nz                  = this->nz;
@@ -806,6 +833,11 @@ void SRHD3D::advance(
     const luint yextent             = p.blockSize.y;
     const luint zextent             = p.blockSize.z;
     const CLattice3D *coord_lattice = &(self->coord_lattice);
+
+    // Choice of column major striding by user
+    const luint sx = (col_maj) ? 1  : bx;
+    const luint sy = (col_maj) ? by :  1;
+    const luint sz = (col_maj) ? bz :  1;
 
     simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
@@ -824,9 +856,9 @@ void SRHD3D::advance(
         const luint ia  = ii + radius;
         const luint ja  = jj + radius;
         const luint ka  = kk + radius;
-        const luint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
-        const luint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
-        const luint tz  = (BuildPlatform == Platform::GPU) ? threadIdx.z: 0;
+        const luint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x : 0;
+        const luint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y : 0;
+        const luint tz  = (BuildPlatform == Platform::GPU) ? threadIdx.z : 0;
         const luint txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
         const luint tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
         const luint tza = (BuildPlatform == Platform::GPU) ? tz + radius : ka;
@@ -837,11 +869,6 @@ void SRHD3D::advance(
         Primitive xprims_l, xprims_r, yprims_l, yprims_r, zprims_l, zprims_r;
 
         luint aid = ka * nx * ny + ja * nx + ia;
-
-        // Choice of column major striding by user
-        const luint sx = (col_maj) ? 1  : bx;
-        const luint sy = (col_maj) ? by :  1;
-        const luint sz = (col_maj) ? bz :  1;
         #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
@@ -849,9 +876,9 @@ void SRHD3D::advance(
 
             // Load Shared memory into buffer for active zones plus ghosts
             prim_buff[tza * bx * by + tya * bx + txa] = self->gpu_prims[aid];
-            if (threadIdx.z < radius)    
+            if (tz < radius)    
             {
-                if (ka + zextent > nz - 1) tzl = nz - radius - ka + threadIdx.z;
+                if (ka + zextent > nz - 1) tzl = nz - radius - ka + tz;
                 prim_buff[(tza - radius) * bx * by + tya * bx + txa] = self->gpu_prims[(ka - radius) * nx * ny + ja * nx + ia];
                 prim_buff[(tza + tzl   ) * bx * by + tya * bx + txa] = self->gpu_prims[(ka + tzl   ) * nx * ny + ja * nx + ia];
 
@@ -862,9 +889,9 @@ void SRHD3D::advance(
                     prim_buff[(tza + 1 + tzl   ) * bx * by + tya * bx + txa] =  self->gpu_prims[(ka + 1 + tzl   ) * nx * ny + ja * nx + ia]; 
                 }  
             }
-            if (threadIdx.y < radius)    
+            if (ty < radius)    
             {
-                if (ja + yextent > ny - 1) tyl = ny - radius - ja + threadIdx.y;
+                if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
                 prim_buff[tza * bx * by + (tya - radius) * bx + txa] = self->gpu_prims[ka * nx * ny + (ja - radius) * nx + ia];
                 prim_buff[tza * bx * by + (tya + tyl   ) * bx + txa] = self->gpu_prims[ka * nx * ny + (ja + tyl   ) * nx + ia];
 
@@ -875,9 +902,9 @@ void SRHD3D::advance(
                     prim_buff[tza * bx * by + (tya + 1 + tyl) * bx + txa]    =  self->gpu_prims[ka * nx * ny + ((ja + 1 + txl   ) * nx) + ia]; 
                 } 
             }
-            if (threadIdx.x < radius)
+            if (tx < radius)
             {   
-                if (ia + xextent > nx - 1) txl = nx - radius - ia + threadIdx.x;
+                if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
                 prim_buff[tza * bx * by + tya * bx + txa - radius] =  self->gpu_prims[ka * nx * ny + (ja * nx) + ia - radius];
                 prim_buff[tza * bx * by + tya * bx + txa +    txl] =  self->gpu_prims[ka * nx * ny + (ja * nx) + ia + txl]; 
 
@@ -1131,8 +1158,8 @@ void SRHD3D::advance(
         }// end else 
 
         //Advance depending on geometry
-        const luint real_loc = (col_maj) ? ii * ypg + jj : kk * xpg * ypg + jj * xpg + ii;
-        const auto step = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+        const luint real_loc =  kk * xpg * ypg + jj * xpg + ii;
+        const auto step = (is_first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -1177,15 +1204,15 @@ void SRHD3D::advance(
                 const real thmean       = static_cast<real>(0.5) * (tl + tr);
                 const real sint         = std::sin(thmean);
                 const real dV1          = rmean * rmean * (rr - rl);             
-                const real dV2          = rmean * sint * (tr - tl); 
-                const real dV3          = rmean * sint * (qr - ql); 
+                const real dV2          = rmean * sint  * (tr - tl); 
+                const real dV3          = rmean * sint  * (qr - ql); 
                 const real cot          = std::cos(thmean) / sint;
 
-                const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : 0; //self->gpu_sourceD[real_loc];
-                const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : 0; //self->gpu_sourceS1[real_loc];
-                const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : 0; //self->gpu_sourceS2[real_loc];
-                const real s3_source = (s3_all_zeros)  ? static_cast<real>(0.0) : 0; //self->gpu_sourceS3[real_loc];
-                const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : 0; //self->gpu_sourceTau[real_loc];
+                const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceD[real_loc];
+                const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS1[real_loc];
+                const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS2[real_loc];
+                const real s3_source = (s3_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS3[real_loc];
+                const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceTau[real_loc];
                 #else
                 const real s1R   = self->coord_lattice.x1_face_areas[ii + 1];
                 const real s1L   = self->coord_lattice.x1_face_areas[ii + 0];
@@ -1205,19 +1232,20 @@ void SRHD3D::advance(
                 #endif
 
                 // Grab central primitives
-                const real rhoc = prim_buff[txa * sy + tya * sx + tza * sx * by].rho;
-                const real uc   = prim_buff[txa * sy + tya * sx + tza * sx * by].v1;
-                const real vc   = prim_buff[txa * sy + tya * sx + tza * sx * by].v2;
-                const real wc   = prim_buff[txa * sy + tya * sx + tza * sx * by].v3;
-                const real pc   = prim_buff[txa * sy + tya * sx + tza * sx * by].p;
+                const real rhoc = prim_buff[txa + tya * bx + tza * bx * by].rho;
+                const real uc   = prim_buff[txa + tya * bx + tza * bx * by].v1;
+                const real vc   = prim_buff[txa + tya * bx + tza * bx * by].v2;
+                const real wc   = prim_buff[txa + tya * bx + tza * bx * by].v3;
+                const real pc   = prim_buff[txa + tya * bx + tza * bx * by].p;
 
                 const real hc   = static_cast<real>(1.0) + gamma * pc/(rhoc * (gamma - static_cast<real>(1.0)));
                 const real gam2 = static_cast<real>(1.0)/(static_cast<real>(1.0) - (uc * uc + vc * vc + wc * wc));
 
                 const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , - rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean, static_cast<real>(0.0)};
                 const Conserved source_terms = Conserved{d_source, s1_source, s2_source, s3_source, e_source} * decay_const;
+
                 #if GPU_CODE 
-                    self->gpu_cons[aid] -= Conserved{0, 0, 0, 0, 0}; //( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 + (hrf - hlf) / dV3 - geom_source - source_terms) * dt * step;
+                    self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 + (hrf - hlf) / dV3 - geom_source - source_terms) * dt * step;
                 #else
                     cons[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 + (hrf - hlf) / dV3 - geom_source - source_terms) * dt * step;
                 #endif
@@ -1341,6 +1369,11 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     sourceS3  = sources[3];
     sourceTau = sources[4];
 
+    d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
+    s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
+    s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
+    s3_all_zeros = std::all_of(sourceS3.begin(),  sourceS3.end(),  [](real i) {return i == 0;});
+    e_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < state3D[0].size(); i++)
     {
@@ -1373,8 +1406,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     // Some variables to handle file automatic file string
     // formatting 
     tchunk = "000000";
-    luint tchunk_order_of_mag = 2;
-    luint time_order_of_mag;
+    int tchunk_order_of_mag = 2;
+    int time_order_of_mag;
 
     // // Setup the system
     const luint xblockdim       = xphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : xphysical_grid;
@@ -1421,6 +1454,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         write_hdf5(data_directory, filename, prods, setup, 3, total_zones);
         t_interval += chkpt_interval;
     }
+
     // Some benchmarking tools 
     luint      n   = 0;
     luint  nfold   = 0;
@@ -1435,7 +1469,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     // Simulate :)
     if (first_order)
     {  
-        while (t < tend)
+        while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
             advance(self, activeP, bx, by, bz, radius, geometry, memside);
@@ -1475,6 +1509,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             }
 
             n++;
+            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
                 adapt_dt(device_self, geometry, activeP, dtShBytes);
@@ -1485,7 +1520,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
         }
     } else {
-        while (t < tend)
+        while (t < tend && !inFailureState)
         {
             t1 = high_resolution_clock::now();
 
@@ -1529,18 +1564,16 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                 t_interval += chkpt_interval;
             }
             n++;
-
+            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
                 adapt_dt(device_self, geometry, activeP, dtShBytes);
             else 
                 adapt_dt();
-                
+
             // Update decay constant
             decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
-
         }
-
     }
     
     std::cout << "\n";

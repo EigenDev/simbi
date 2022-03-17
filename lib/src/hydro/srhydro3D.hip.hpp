@@ -37,6 +37,7 @@ namespace simbi
 
         real x3max, x3min, x2max, x2min, x1min, x1max, dx3, dx2, dx1, dlogx1;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, s3_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
+        bool inFailureState;
 
         //==============GPU Mirrors================
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceS3, *gpu_sourceTau, *gpu_pressure_guess;
