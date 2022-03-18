@@ -8,6 +8,8 @@ option(GPU_CODE "Turns gpu compilation on/off" ON)
 option(FLOAT_PRECISION "Turns float precision on/off" OFF)
 set(BUILD_OPTS_IN  "${CMAKE_CURRENT_SOURCE_DIR}/build_options.hpp.in")
 set(BUILD_OPTS     "${CMAKE_CURRENT_SOURCE_DIR}/src/build_options.hpp")
+set(CUDA_SM "86" CACHE STRING "Architecture of NVidia GPU")
+message("CUDA_SM=${CUDA_SM}")
 configure_file(${BUILD_OPTS_IN} ${BUILD_OPTS})
 # Search for rocm in common locations
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
