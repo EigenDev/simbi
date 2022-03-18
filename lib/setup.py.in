@@ -32,7 +32,7 @@ class CompilerParams():
                                    'hipcc': []
                                  }
             if "${HIP_PLATFORM}" == "nvidia":
-                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_86', '-ccbin=${CMAKE_CXX_COMPILER}',
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_${CUDA_SM}', '-ccbin=${CMAKE_CXX_COMPILER}',
                                             '--ptxas-options=-v', '--extended-lambda',
                                             '--compiler-options', '-fPIC', '-O2', '-lineinfo']
                 
@@ -58,7 +58,8 @@ class CompilerParams():
                 self.libraries += ['amdhip64']
     
     def set_runtime_libs(self):
-        self.runtime_libs = []
+        hdf5_cxx_libs     = [lib for lib in '${HDF5_CXX_LIBRARIES}'.split(';')]
+        self.runtime_libs = [os.path.dirname(file) for file in hdf5_cxx_libs]
         if self.arch != "cpu":
             rtimelibs = [lib for lib in "${HIP_RUNTIME_LIBRARY_DIRS}".split(';')]
             self.runtime_libs += rtimelibs
