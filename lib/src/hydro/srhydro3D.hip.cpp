@@ -863,7 +863,6 @@ void SRHD3D::advance(
         const luint tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
         const luint tza = (BuildPlatform == Platform::GPU) ? tz + radius : ka;
 
-        // printf("(%d, %d, %d)\n", txa, tya, tza);
         Conserved ux_l, ux_r, uy_l, uy_r, uz_l, uz_r;
         Conserved f_l, f_r, g_l, g_r, h_l, h_r, frf, flf, grf, glf, hrf, hlf;
         Primitive xprims_l, xprims_r, yprims_l, yprims_r, zprims_l, zprims_r;
@@ -883,10 +882,14 @@ void SRHD3D::advance(
                 prim_buff[(tza + tzl   ) * bx * by + tya * bx + txa] = self->gpu_prims[(ka + tzl   ) * nx * ny + ja * nx + ia];
 
                 // Sometimes there's a single active thread, so we have to load all 5 zones immediately
-                if ((tzl == 1) && (radius == 2)) 
-                {
-                    prim_buff[(tza + 1 - radius) * bx * by + tya * bx + txa] =  self->gpu_prims[(ka + 1 - radius) * nx * ny + ja * nx + ia];
-                    prim_buff[(tza + 1 + tzl   ) * bx * by + tya * bx + txa] =  self->gpu_prims[(ka + 1 + tzl   ) * nx * ny + ja * nx + ia]; 
+                if (radius == 2)
+                {\
+                    if (tzl == 1)
+                    {
+                        prim_buff[(tza + 1 - radius) * bx * by + tya * bx + txa] =  self->gpu_prims[(ka + 1 - radius) * nx * ny + ja * nx + ia];
+                        prim_buff[(tza + 1 + tzl   ) * bx * by + tya * bx + txa] =  self->gpu_prims[(ka + 1 + tzl   ) * nx * ny + ja * nx + ia]; 
+                    }
+                    prim_buff[(tza + tzl - 1) * bx * by + tya * bx + txa] =  self->gpu_prims[(ka + tzl - 1) * nx * ny + ja * nx + ia]; 
                 }  
             }
             if (ty < radius)    
@@ -896,28 +899,47 @@ void SRHD3D::advance(
                 prim_buff[tza * bx * by + (tya + tyl   ) * bx + txa] = self->gpu_prims[ka * nx * ny + (ja + tyl   ) * nx + ia];
 
                 // Sometimes there's a single active thread, so we have to load all 5 zones immediately
-                if ((tyl == 1) && (radius == 2)) 
+                if (radius == 2)
                 {
-                    prim_buff[tza * bx * by + (tya + 1 - radius) * bx + txa] =  self->gpu_prims[ka * nx * ny + ((ja + 1 - radius) * nx) + ia];
-                    prim_buff[tza * bx * by + (tya + 1 + tyl) * bx + txa]    =  self->gpu_prims[ka * nx * ny + ((ja + 1 + txl   ) * nx) + ia]; 
+                    if (tyl == 1)
+                    {
+                        prim_buff[tza * bx * by + (tya + 1 - radius) * bx + txa] =  self->gpu_prims[ka * nx * ny + ((ja + 1 - radius) * nx) + ia];
+                        prim_buff[tza * bx * by + (tya + 1 + tyl) * bx + txa]    =  self->gpu_prims[ka * nx * ny + ((ja + 1 + txl   ) * nx) + ia]; 
+                    }
+                    prim_buff[tza * bx * by + (tya + tyl - 1) * bx + txa]    =  self->gpu_prims[ka * nx * ny + ((ja + txl - 1) * nx) + ia]; 
+
                 } 
             }
             if (tx < radius)
             {   
                 if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
-                prim_buff[tza * bx * by + tya * bx + txa - radius] =  self->gpu_prims[ka * nx * ny + (ja * nx) + ia - radius];
-                prim_buff[tza * bx * by + tya * bx + txa +    txl] =  self->gpu_prims[ka * nx * ny + (ja * nx) + ia + txl]; 
+                // printf("ia: %lu, val: %lu, txl: %lu, txa + txl: %lu\n", ia, ia + xextent, txl, txa + txl);
+                prim_buff[tza * bx * by + tya * bx + txa - radius] =  self->gpu_prims[ka * nx * ny + ja * nx + ia - radius];
+                prim_buff[tza * bx * by + tya * bx + txa +    txl] =  self->gpu_prims[ka * nx * ny + ja * nx + ia + txl]; 
 
                 // Sometimes there's a single active thread, so we have to load all 5 zones immediately
-                if ((txl == 1) && (radius == 2)) 
+                if (radius == 2)
                 {
-                    prim_buff[tza * bx * by + tya * bx + (txa + 1) - radius] =  self->gpu_prims[ka * nx * ny + (ja * nx) + (ia + 1) - radius];
-                    prim_buff[tza * bx * by + tya * bx + (txa + 1) +    txl] =  self->gpu_prims[ka * nx * ny + (ja * nx) + (ia + 1) + txl]; 
+                    if (txl == 1)
+                    {
+                        prim_buff[tza * bx * by + tya * bx + txa + 1 - radius] =  self->gpu_prims[ka * nx * ny + ja * nx + ia + 1 - radius];
+                        prim_buff[tza * bx * by + tya * bx + txa + 1 +    txl] =  self->gpu_prims[ka * nx * ny + ja * nx + ia + 1 + txl]; 
+                    }
+                    prim_buff[tza * bx * by + tya * bx + txa + txl - 1] = self->gpu_prims[ka * nx * ny + ja * nx + ia + txl - 1]; 
                 }
             }
             simbi::gpu::api::synchronize();
         #endif
-
+        
+        // if (ia == nx - 3)
+        // {
+        //     printf("[%lu, %lu, txl=%lu, xext: %lu] LL: %3.e, L: %3.e, C: %3.e, R: %3.e, RR: %3.e\n", ia, txa, txl, xextent, 
+        //     prim_buff[tza * bx * by + tya * bx + txa - 2].rho,
+        //     prim_buff[tza * bx * by + tya * bx + txa - 1].rho,
+        //     prim_buff[tza * bx * by + tya * bx + txa - 0].rho,
+        //     prim_buff[tza * bx * by + tya * bx + txa + 1].rho,
+        //     prim_buff[tza * bx * by + tya * bx + txa + 2].rho);
+        // }
         if (is_first_order)
         {
 
@@ -1102,7 +1124,7 @@ void SRHD3D::advance(
             xprims_r =
                 center - minmod((center - xleft_mid) * plm_theta,
                                             (xright_mid - xleft_mid) * static_cast<real>(0.5),
-                                            (xright_mid - center) * plm_theta);
+                                            (xright_mid - center) * plm_theta) * static_cast<real>(0.5);
 
             // Left side Primitive in y
             yprims_l = yleft_mid +
@@ -1146,7 +1168,6 @@ void SRHD3D::advance(
                 flf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
                 glf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
                 hlf = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
-                
             }
             else
             {
@@ -1189,7 +1210,6 @@ void SRHD3D::advance(
             
             case simbi::Geometry::SPHERICAL:
                 {
-                #if GPU_CODE
                 const real rl           = (ii > 0 ) ? x1min * pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
                 const real rr           = (ii < xpg - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
                 const real tl           = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
@@ -1213,23 +1233,6 @@ void SRHD3D::advance(
                 const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS2[real_loc];
                 const real s3_source = (s3_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS3[real_loc];
                 const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceTau[real_loc];
-                #else
-                const real s1R   = self->coord_lattice.x1_face_areas[ii + 1];
-                const real s1L   = self->coord_lattice.x1_face_areas[ii + 0];
-                const real s2R   = self->coord_lattice.x2_face_areas[jj + 1];
-                const real s2L   = self->coord_lattice.x2_face_areas[jj + 0];
-                const real rmean = self->coord_lattice.x1mean[ii];
-                const real dV1   = self->coord_lattice.dV1[ii];
-                const real dV2   = rmean * self->coord_lattice.dV2[jj];
-                const real dV3   = rmean * self->coord_lattice.sin[jj] * self->coord_lattice.dx3[kk];
-                const real cot   = self->coord_lattice.cot[jj];
-
-                const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : sourceD[real_loc];
-                const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : sourceS1[real_loc];
-                const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : sourceS2[real_loc];
-                const real s3_source = (s3_all_zeros)  ? static_cast<real>(0.0) : sourceS3[real_loc];
-                const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : sourceTau[real_loc];
-                #endif
 
                 // Grab central primitives
                 const real rhoc = prim_buff[txa + tya * bx + tza * bx * by].rho;
@@ -1484,7 +1487,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones / delta_t.count();
-                writefl("\r Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, total_zones/delta_t.count());
+                writefl("\rIteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, total_zones/delta_t.count());
                 nfold += 100;
             }
 
@@ -1541,7 +1544,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones / delta_t.count();
-                writefl("\r Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, total_zones/delta_t.count());
+                writefl("\rIteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, total_zones/delta_t.count());
                 nfold += 100;
             }
             /* Write to a File every tenth of a second */
