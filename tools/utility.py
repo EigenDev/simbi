@@ -233,16 +233,15 @@ def read_3d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         
         
     znpts, ynpts, xnpts = rho.shape 
-    print(znpts)
     
     mesh = {}
     if setup['is_cartesian']:
-        zz, yy, xx = np.meshgrid(setup['x3'], setup['x2'], setup['x1'])
+        yy, zz, xx = np.meshgrid(setup['x2'], setup['x3'], setup['x1'])
         mesh['xx'] = xx
         mesh['yy'] = yy
         mesh['zz'] = zz
-    else:      
-        phii, tt, rr = np.meshgrid(setup['x3'], setup['x2'], setup['x1'])
+    else:  
+        tt, phii, rr = np.meshgrid(setup['x2'], setup['x3'], setup['x1'])
         mesh['theta'] = tt 
         mesh['rr']    = rr
         mesh['phii']  = phii
