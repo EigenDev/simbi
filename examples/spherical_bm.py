@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--cfl',          dest='cfl', type=float, default=0.8)
     parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
     parser.add_argument('--plm',          dest='plm', type=float, default=1.5)
+    parser.add_argument('--e_scale',      dest='e_scale', type=float, default=1.0)
     parser.add_argument('--omega',        dest='omega', type=float, default=2.0)
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='reflecting', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
@@ -28,7 +29,7 @@ def main():
     args = parser.parse_args()
     def find_nearest(array, value):
         array = np.asarray(array)
-        idx = (np.abs(array - value)).argmin()
+        idx   = (np.abs(array - value)).argmin()
         return idx, array[idx]
 
     def rho0(n, theta):
@@ -36,10 +37,9 @@ def main():
 
 
     # Constants
-    p_init  = 1.e-10
-    r_init  = 0.01
-    nu      = 3.
-    epsilon = 1.
+    r_init    = 0.01
+    nu        = 3.
+    exp_scale = args.e_scale
 
     rho_init = rho0(0, np.pi)
     v_init   = 0.
@@ -51,34 +51,34 @@ def main():
     theta_max = np.pi
 
     theta        = np.linspace(theta_min, theta_max, ntheta)
-    theta_mirror = -theta[::-1]
+    theta_mirror = -theta
 
     # Choose xnpts carefully such that the grid zones remain roughly square
     dtheta = theta_max/ntheta
     nr = int(np.ceil(1 + np.log10(rmax/rmin)/dtheta ))
 
     r = np.logspace(np.log10(rmin), np.log10(rmax), nr) 
+    r_right     = np.sqrt(r[1:nr] * r[0:nr-1])
+    dr          = rmin * 3.5
+    rho         = np.ones((ntheta , nr), float) * (r / r[0])**(-args.omega)
+    p_zones     = find_nearest(r, dr)[0]
+    epsilon_0   = np.sum(rho[:, :p_zones] * 4.0 / (nu + 1.0) * np.pi * dr ** 3)
+    epsilon_exp = exp_scale * epsilon_0
 
-    r_right = np.sqrt(r[1:nr] * r[0:nr-1])
-    dr      = rmin * 1.5 
-
-    p_zones = find_nearest(r, dr)[0]
-    p_zones = int(p_zones)
-
-    p_c = (args.gamma - 1.)*(3*epsilon/((nu + 1)*np.pi*dr**nu))
+    p_c = (args.gamma - 1.)*(3*epsilon_exp/((nu + 1)*np.pi*dr**nu))
 
     print("Central Pressure:", p_c)
     print("Dimensions: {} x {}".format(ntheta, nr))
     zzz = input("Press any key to continue...")
-    rho = np.zeros((ntheta , nr), float)
-    rho[:] = 1.0 * r ** (-args.omega)
-
-
-    p              = p_init*rho
+    
+    viewing_angle = 0.0 
+    jet_angle     = 0.1 
+    
+    p              = rho * 1e-6
     p[:, :p_zones] = p_c 
 
-    vx = np.zeros((ntheta ,nr), np.double)
-    vy = np.zeros((ntheta ,nr), np.double)
+    vx = np.zeros((ntheta ,nr))
+    vy = np.zeros((ntheta ,nr))
 
     bm = Hydro(gamma = args.gamma, initial_state=(rho, p, vx, vy), 
                 Npts=(nr, ntheta), 
