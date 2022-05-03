@@ -49,7 +49,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
     x2max        = ds["x2max"]
     x2min        = ds["x2min"]
     
-    vmin,vmax = args.cbar
+    vmin,vmax = args.cbar[:2]
 
     unit_scale = np.ones(num_fields)
     if (args.units):
