@@ -43,7 +43,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         ax = axs
         
     rr, tt = mesh['rr'], mesh['theta']
-    t2 = mesh['t2']
+    t2     = -tt
     x1max        = ds["x1max"]
     x1min        = ds["x1min"]
     x2max        = ds["x2max"]
