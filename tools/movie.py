@@ -417,7 +417,7 @@ def main():
     
     parser.add_argument('--cmap', dest = "cmap", metavar='Color Bar Colarmap',
                         default = 'magma', help='The colorbar cmap you\'d like to plot')
-    parser.add_argument('--cmap2', dest = "cmap", metavar='Color Bar #2 Colarmap',
+    parser.add_argument('--cmap2', dest = "cmap2", metavar='Color Bar #2 Colarmap',
                         default = 'magma', help='The colorbar cmap you\'d like to plot')
     parser.add_argument('--log', dest='log', action='store_true',
                         default=False,
