@@ -172,7 +172,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
             cs[0] = ax.pcolormesh(t2[::-1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
     
     if args.pictorial: 
-        ax.set_position( [0.1, -0.15, 0.8, 1.30])
+        ax.set_position( [0.1, -0.15, 0.8, 1.3])
             
     if not args.pictorial:
         if x2max < np.pi:
@@ -288,7 +288,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
                     continue
                 
             wedge.pcolormesh(tchop[0], rchop[0], quadr[field1], cmap=color_map, shading='nearest', **kwargs[field1])
-            wedge.pcolormesh(tchop[1], rchop[1], quadr[field2], cmap=color_map, shading='nearest', **kwargs[field2])
+            wedge.pcolormesh(tchop[1], rchop[1], quadr[field2], cmap=args.cmap2, shading='nearest', **kwargs[field2])
         else:
             vmin2, vmax2 = args.cbar2
             if args.log:
@@ -513,6 +513,7 @@ def main():
         else:
             fig = plt.figure(figsize=(15,8), constrained_layout=False)
             ax  = fig.add_subplot(111, projection='polar')
+            ax.grid(False)
             
         if init_setup["x2max"] < np.pi:
             ax.set_position( [0.1, -0.18, 0.8, 1.43])
@@ -540,7 +541,8 @@ def main():
                         cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8/(0.5 * num_fields)]) for i in range(num_fields)]
             else:
                 if args.pictorial:
-                    cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
+                    pass
+                    # cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
             cbar_orientation = "vertical"
     
     def init_mesh(filename):
@@ -599,7 +601,7 @@ def main():
         plt.show()
     else:
         dpi = 600
-        animation.save("{}.mp4".format(args.save.replace(" ", "_")), dpi=dpi, codec="libx264")
+        animation.save("{}.mp4".format(args.save.replace(" ", "_")), dpi=dpi)
     
     
     
