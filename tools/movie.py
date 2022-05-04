@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt #! /usr/bin/env python
 import matplotlib.ticker as tkr
 import time
-import matplotlib.colors as colors
+import matplotlib.colors as mcolors
 import argparse 
 import h5py 
 import astropy.constants as const
@@ -22,10 +22,10 @@ try:
 except:
     print("No cmasher, so defaulting to matplotlib colormaps")
 
-cons = ['D', 'momentum', 'energy', 'energy_rst']
-field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'temperature', 'gamma_beta_1', 'gamma_beta_2', 'energy', 'mass', 'chi', 'chi_dens'] + cons 
-lin_fields = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
-
+derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'chi_dens',
+                 'gamma_beta_1', 'gamma_beta_2']
+field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'chi'] + derived
+lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
 
 def get_frames(dir, max_file_num):
     frames       = sorted([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
@@ -34,30 +34,42 @@ def get_frames(dir, max_file_num):
     total_frames = len(frames)
     return total_frames, frames
 
-def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
+def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
     num_fields = len(args.field)
-    if args.wedge:
-        ax    = axs[0]
-        wedge = axs[1]
-    else:
-        ax = axs
-        
+    is_wedge   = args.nwedge > 0
     rr, tt = mesh['rr'], mesh['theta']
-    t2     = -tt
-    x1max        = ds["x1max"]
-    x1min        = ds["x1min"]
-    x2max        = ds["x2max"]
-    x2min        = ds["x2min"]
+    t2     = - tt[::-1]
+    x1max  = dset['x1max']
+    x1min  = dset['x1min']
+    x2max  = dset['x2max']
+    x2min  = dset['x2min']
+    if not subplots:
+        if is_wedge:
+            nplots = args.nwedge + 1
+            ax    = axs[0]
+            wedge = axs[1]
+        else:
+            if x2max < np.pi:
+                figsize = (8, 5)
+            else:
+                figsize = (10, 8)
+            ax = axs
+    else:
+        if is_wedge:
+            ax    = axs[0]
+            wedge = axs[1]
+        else:
+            ax = axs
     
     vmin,vmax = args.cbar[:2]
 
     unit_scale = np.ones(num_fields)
     if (args.units):
         for idx, field in enumerate(args.field):
-            if field == "rho" or field == "D":
-                unit_scale[idx] = rho_scale.value
-            elif field == "p" or field == "energy" or field == "energy_rst":
-                unit_scale[idx] = pre_scale.value
+            if field == 'rho' or field == 'D':
+                unit_scale[idx] = util.rho_scale.value
+            elif field == 'p' or field == 'energy' or field == 'energy_rst':
+                unit_scale[idx] = util.pre_scale.value
     
     units = unit_scale if args.units else np.ones(num_fields)
      
@@ -66,22 +78,24 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
     else:
         color_map = plt.get_cmap(args.cmap)
         
-    tend = ds["time"]
+    tend = dset['time'] * util.time_scale
+    # If plotting multiple fields on single polar projection, split the 
+    # field projections into their own quadrants
     if num_fields > 1:
         cs  = np.zeros(4, dtype=object)
         var = []
         kwargs = []
         for field in args.field:
-            if field in cons:
+            if field in derived:
                 if x2max == np.pi:
-                    var += np.split(util.prims2var(field_dict, field), 2)
+                    var += np.split(util.prims2var(fields, field), 2)
                 else:
-                    var.append(util.prims2var(field_dict, field))
+                    var.append(util.prims2var(fields, field))
             else:
                 if x2max == np.pi:
-                    var += np.split(field_dict[field], 2)
+                    var += np.split(fields[field], 2)
                 else:
-                    var.append(field_dict[field])
+                    var.append(fields[field])
                 
         if x2max == np.pi: 
             units  = np.repeat(units, 2)
@@ -101,7 +115,7 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         
         
         quadr[field1] = var[0]
-        quadr[field2] = var[3% num_fields]
+        quadr[field2] = var[3 % num_fields if num_fields != 3 else num_fields]
         
         if x2max == np.pi:
             # Handle case of degenerate fields
@@ -119,20 +133,24 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         for idx, key in enumerate(quadr.keys()):
             field = key
             if idx == 0:
-                kwargs[field] =  {'vmin': vmin, 'vmax': vmax} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)} 
+                # 'norm': mcolors.PowerNorm(gamma=1.0, vmin=vmin, vmax=vmax)}
+                # kwargs[field] = {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)} 
+                kwargs[field] =  {'vmin': vmin, 'vmax': vmax} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)} 
             else:
-                if field3 == field4 and field == field3:
-                    ovmin = quadr[field][0].min()
-                    ovmax = quadr[field][0].max()
+                if field == field3 == field4:
+                    ovmin = None if len(args.cbar) == 2 else args.cbar[2]
+                    ovmax = None if len(args.cbar) == 2 else args.cbar[3]
                 else:
-                    ovmin = quadr[field].min()
-                    ovmax = quadr[field].max()
-                kwargs[field] =  {'vmin': ovmin, 'vmax': ovmax} if field in lin_fields else {'norm': colors.LogNorm(vmin = ovmin, vmax = ovmax)} 
+                    ovmin = None if len(args.cbar) == 2 else args.cbar[idx+1]
+                    ovmax = None if len(args.cbar) == 2 else args.cbar[idx+2]
+                kwargs[field] = {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
+                kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=1.0, vmin=ovmin, vmax=ovmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
 
         if x2max < np.pi:
             cs[0] = ax.pcolormesh(tt[:: 1], rr,  var[0], cmap=color_map, shading='auto', **kwargs[field1])
-            cs[1] = ax.pcolormesh(t2[::-1], rr,  var[1], cmap=color_map, shading='auto', **kwargs[field2])
+            cs[1] = ax.pcolormesh(t2[::-1], rr,  var[1], cmap=args.cmap2, shading='auto', **kwargs[field2])
             
+            # If simulation only goes to pi/2, if bipolar flag is set, mirror the fields accross the equator
             if args.bipolar:
                 cs[2] = ax.pcolormesh(tt[:: 1] + np.pi/2, rr,  var[0], cmap=color_map, shading='auto', **kwargs[field1])
                 cs[3] = ax.pcolormesh(t2[::-1] + np.pi/2, rr,  var[1], cmap=color_map, shading='auto', **kwargs[field2])
@@ -153,101 +171,144 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
             
     else:
         if args.log:
-            kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
+            kwargs = {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)}
         else:
             kwargs = {'vmin': vmin, 'vmax': vmax}
             
         cs = np.zeros(len(args.field), dtype=object)
         
-        if args.field[0] in cons:
-            var = units * util.prims2var(field_dict, args.field[0])
+        if args.field[0] in derived:
+            var = units * util.prims2var(fields, args.field[0])
         else:
-            var = units * field_dict[args.field[0]]
-            
-        cs[0] = ax.pcolormesh(tt, rr, var, cmap=color_map, shading='auto', **kwargs)
-        cs[0] = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, shading='auto', **kwargs)
+            var = units * fields[args.field[0]]
+        
+        cs[0] = ax.pcolormesh(tt, rr, var, cmap=color_map, shading='auto',
+                              linewidth=0, rasterized=True, **kwargs)
+        cs[0] = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, 
+                              linewidth=0,rasterized=True, shading='auto', **kwargs)
         
         if args.bipolar:
             cs[0] = ax.pcolormesh(tt[:: 1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
             cs[0] = ax.pcolormesh(t2[::-1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
     
     if args.pictorial: 
-        ax.set_position( [0.1, -0.15, 0.8, 1.3])
-            
+        ax.set_position([0.1, -0.15, 0.8, 1.30])
+    
+    # =================================================
+    #                   DRAW DASHED LINE
+    # =================================================
+    # angs    = np.linspace(x2min, x2max, 1000)
+    # eps     = 0.2
+    # a       = 0.47 * (1 - eps)**(-1/3)
+    # b       = 0.47 * (1 - eps)**(2/3)
+    # radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+    # r_theta = radius(angs)
+
+    # ax.plot(np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='orange')
+    # ax.plot(-np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='orange')
+    
     if not args.pictorial:
         if x2max < np.pi:
             ymd = int( np.floor(x2max * 180/np.pi) )
             if not args.bipolar:                                                                                                                                                                                   
                 ax.set_thetamin(-ymd)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
                 ax.set_thetamax(ymd)
-                ax.set_position( [0.1, -0.18, 0.8, 1.43])
+                ax.set_position( [0.05, -0.40, 0.9, 2])
+                # ax.set_position( [0.1, -0.18, 0.9, 1.43])
             else:
-                ax.set_position( [0.1, -0.18, 0.9, 1.43])
+                ax.set_position( [0.1, -0.45, 0.9, 2])
+                #ax.set_position( [0.1, -0.18, 0.9, 1.50])
             if num_fields > 1:
-                ycoord  = [0.1, 0.1 ]
-                xcoord  = [0.88, 0.04]
-                # cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
-                cbar_orientation = "vertical"
+                cbar_orientation = args.cbar_orient
+                if cbar_orientation == 'vertical':
+                    ycoord  = [0.1, 0.1]
+                    xcoord  = [0.88, 0.04]
+                    cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
+                else:
+                    ycoord  = [0.15, 0.15]
+                    xcoord  = [0.51, 0.06]
+                    cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.43, 0.05]) for i in range(num_fields)]
             else:
-                # cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
-                cbar_orientation = "horizontal"
-                
-            
-        else:
-            if num_fields > 1:
-                if num_fields == 2:
-                    ycoord  = [0.1, 0.1 ]
-                    xcoord  = [0.1, 0.85]
-                    # cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
-                    
-                if num_fields == 3:
-                    ycoord  = [0.1, 0.5, 0.1]
-                    xcoord  = [0.07, 0.85, 0.85]
-                    # cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8 * 0.5]) for i in range(1, num_fields)]
-                    # cbaxes.append(fig.add_axes([xcoord[0], ycoord[0] ,0.03, 0.8]))
-                if num_fields == 4:
-                    ycoord  = [0.5, 0.1, 0.5, 0.1]
-                    xcoord  = [0.85, 0.85, 0.07, 0.07]
-                    # cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8/(0.5 * num_fields)]) for i in range(num_fields)]
-                    
-                cbar_orientation = "vertical"
-            else:
-                # cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
-                cbar_orientation = "vertical"
-        
+                cbar_orientation = 'horizontal'
+                if cbar_orientation == 'horizontal':
+                    cbaxes  = fig.add_axes([0.15, 0.15, 0.70, 0.05]) 
+        else:  
+            if not args.no_cbar:         
+                cbar_orientation = args.cbar_orient
+                # ax.set_position([0.1, -0.18, 0.7, 1.3])
+                if num_fields > 1:
+                    if num_fields == 2:
+                        if cbar_orientation == 'vertical':
+                            ycoord  = [0.1, 0.08] if x2max < np.pi else [0.15, 0.15]
+                            xcoord  = [0.1, 0.85] if x2max < np.pi else [0.93, 0.08]
+                            cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.65]) for i in range(num_fields)]
+                        else:
+                            if is_wedge:
+                                ycoord  = [0.2, 0.20] if x2max < np.pi else [0.15, 0.15]
+                                xcoord  = [0.1, 0.50] if x2max < np.pi else [0.52, 0.04]
+                            else:
+                                ycoord  = [0.2, 0.20] if x2max < np.pi else [0.10, 0.10]
+                                xcoord  = [0.1, 0.50] if x2max < np.pi else [0.51, 0.20]
+                            cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.45, 0.04]) for i in range(num_fields)]
+                    if num_fields == 3:
+                        ycoord  = [0.1, 0.5, 0.1]
+                        xcoord  = [0.07, 0.85, 0.85]
+                        cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.4]) for i in range(1, num_fields)]
+                        cbaxes.append(fig.add_axes([xcoord[0], ycoord[0] ,0.03, 0.8]))
+                    if num_fields == 4:
+                        ycoord  = [0.5, 0.1, 0.5, 0.1]
+                        xcoord  = [0.85, 0.85, 0.07, 0.07]
+                        cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8/(0.5 * num_fields)]) for i in range(num_fields)]
+                else:
+                    if not is_wedge:
+                        pass
+                        #plt.tight_layout()
+                        
+                    if cbar_orientation == 'vertical':
+                        cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.85])
+                    else:
+                        cbaxes  = fig.add_axes([0.86, 0.07, 0.03, 0.90])
         if args.log:
-            if num_fields > 1:
-                fmt  = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.field]
-                cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i],       format=fmt[i]) for i in range(num_fields)]
-                for cb in cbar:
-                    cb.outline.set_visible(False)                                 
-            else:
-                logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-                cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes, format=logfmt)
+            if not args.no_cbar:
+                if num_fields > 1:
+                    fmt  = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.field]
+                    cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i], format=fmt[i]) for i in range(num_fields)]
+                    for cb in cbar:
+                        cb.outline.set_visible(False)                                 
+                else:
+                    logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+                    cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes, format=logfmt)
         else:
-            if num_fields > 1:
-                cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i]) for i in range(num_fields)]
-            else:
-                cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes)
+            if not args.no_cbar:
+                if num_fields > 1:
+                    cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i]) for i in range(num_fields)]
+                else:
+                    cbar = fig.colorbar(cs[0], orientation=cbar_orientation, cax=cbaxes)
         ax.yaxis.grid(True, alpha=0.05)
         ax.xaxis.grid(True, alpha=0.05)
     
-    if args.wedge:
+    if is_wedge:
         wedge_min = args.wedge_lims[0]
         wedge_max = args.wedge_lims[1]
         ang_min   = args.wedge_lims[2]
         ang_max   = args.wedge_lims[3]
         
-        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=2, color="white")
-        ax.plot(np.radians(np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color="white")
-        ax.plot(np.radians(np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=2, color="white")
-        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=2, color="white")
-    
-    
-    ax.set_theta_zero_location("N")
+        # Draw the wedge cutout on the main plot
+        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=1, color='white')
+        ax.plot(np.radians(np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
+        ax.plot(np.radians(np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
+        ax.plot(np.radians(np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=1, color='white')
+   
+            
+        if args.nwedge == 2:
+            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_max, wedge_max, 1000), linewidth=1, color='white')
+            ax.plot(np.radians(-np.linspace(ang_min, ang_min, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
+            ax.plot(np.radians(-np.linspace(ang_max, ang_max, 1000)), np.linspace(wedge_min, wedge_max, 1000), linewidth=1, color='white')
+            ax.plot(np.radians(-np.linspace(ang_min, ang_max, 1000)), np.linspace(wedge_min, wedge_min, 1000), linewidth=1, color='white')
+            
+    ax.set_theta_zero_location('N')
     ax.set_theta_direction(-1)
-    
-    ax.tick_params(axis='both', labelsize=10)
+    ax.tick_params(axis='both', labelsize=15)
     rlabels = ax.get_ymajorticklabels()
     if not args.pictorial:
         for label in rlabels:
@@ -256,18 +317,23 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
         ax.axes.yaxis.set_ticklabels([])
         
     ax.axes.xaxis.set_ticklabels([])
+    ax.axes.yaxis.set_ticklabels([])
     ax.set_rmax(x1max) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
     ax.set_rmin(x1min)
     
     field_str = util.get_field_str(args)
-    
-    if args.wedge:
+    if is_wedge:
         if num_fields == 1:
-            wedge.set_position( [0.5, -0.5, 0.3, 2])
-            ax.set_position( [0.05, -0.5, 0.46, 2])
+            wedge.set_position([0.5, -0.5, 0.3, 2])
+            ax.set_position([0.05, -0.5, 0.46, 2])
         else:
-            ax.set_position( [0.16, -0.5, 0.46, 2])
-            wedge.set_position( [0.58, -0.5, 0.3, 2])
+            if args.nwedge == 1:
+                ax.set_position([0.15, -0.5, 0.46, 2])
+                wedge.set_position([0.58, -0.5, 0.3, 2])
+            elif args.nwedge == 2:
+                ax.set_position([0.28, -0.5, 0.45, 2.0])
+                wedge.set_position([0.70, -0.5, 0.3, 2])
+                axes[2].set_position([0.01, -0.5, 0.3, 2])
             
         if len(args.field) > 1:
             if len(args.cbar2) == 4:
@@ -279,68 +345,109 @@ def plot_polar_plot(fig, axs, cbaxes, field_dict, args, mesh, ds):
             for idx, key in enumerate(quadr.keys()):
                 field = args.field[idx % num_fields]
                 if idx == 0:
-                    kwargs[field] =  {'vmin': vmin2, 'vmax': vmax2} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin2, vmax = vmax2)} 
+                    kwargs[field] =  {'vmin': vmin2, 'vmax': vmax2} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin2, vmax = vmax2)} 
                 elif idx == 1:
                     ovmin = quadr[field].min()
                     ovmax = quadr[field].max()
-                    kwargs[field] =  {'vmin': vmin3, 'vmax': vmax3} if field in lin_fields else {'norm': colors.LogNorm(vmin = vmin3, vmax = vmax3)} 
+                    kwargs[field] =  {'vmin': vmin3, 'vmax': vmax3} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin3, vmax = vmax3)} 
                 else:
                     continue
-                
-            wedge.pcolormesh(tchop[0], rchop[0], quadr[field1], cmap=color_map, shading='nearest', **kwargs[field1])
-            wedge.pcolormesh(tchop[1], rchop[1], quadr[field2], cmap=args.cmap2, shading='nearest', **kwargs[field2])
+
+            wedge.pcolormesh(tt[:: 1], rr,  np.vstack((var[0],var[1])), cmap=color_map, shading='auto', **kwargs[field1])
+            if args.nwedge == 2:
+                axes[2].pcolormesh(t2[::-1], rr,  np.vstack((var[2],var[3])), cmap=args.cmap2, shading='auto', **kwargs[field2])
+            
         else:
             vmin2, vmax2 = args.cbar2
             if args.log:
-                kwargs = {'norm': colors.LogNorm(vmin = vmin2, vmax = vmax2)}
+                kwargs = {'norm': mcolors.LogNorm(vmin = vmin2, vmax = vmax2)}
             else:
                 kwargs = {'vmin': vmin2, 'vmax': vmax2}
-            wedge.pcolormesh(tt, rr, var, cmap=color_map, shading='nearest', **kwargs)
-            
-        wedge.set_theta_zero_location("N")
+            w1 = wedge.pcolormesh(tt, rr, var, cmap=color_map, shading='nearest', **kwargs)
+        
+        wedge.set_theta_zero_location('N')
         wedge.set_theta_direction(-1)
         wedge.yaxis.grid(False)
         wedge.xaxis.grid(False)
-        wedge.tick_params(axis='both', labelsize=6)
+        wedge.tick_params(axis='both', labelsize=17)
         rlabels = ax.get_ymajorticklabels()
         for label in rlabels:
             label.set_color('white')
             
-        wedge.axes.xaxis.set_ticklabels([])
         wedge.set_ylim([wedge_min, wedge_max])
-        wedge.set_rorigin(-wedge_min)
+        wedge.set_rorigin(-wedge_min/4)
         wedge.set_thetamin(ang_min)
         wedge.set_thetamax(ang_max)
-        wedge.set_aspect(1.)
+        wedge.yaxis.set_minor_locator(plt.MaxNLocator(1))
+        wedge.yaxis.set_major_locator(plt.MaxNLocator(2))
+        wedge.set_aspect('equal')
+        wedge.axes.xaxis.set_ticklabels([])
+        wedge.axes.yaxis.set_ticklabels([])
         
-        
+        if args.nwedge > 1:
+            # force the rlabels to be outside plot area
+            axes[2].tick_params(axis="y",direction="out", pad=-25)
+            axes[2].set_theta_zero_location('N')
+            axes[2].set_theta_direction(-1)
+            axes[2].yaxis.grid(False)
+            axes[2].xaxis.grid(False)
+            axes[2].tick_params(axis='both', labelsize=17)               
+            axes[2].axes.xaxis.set_ticklabels([])
+            axes[2].set_ylim([wedge_min, wedge_max])
+            axes[2].set_rorigin(-wedge_min/4)
+            axes[2].set_thetamin(-ang_min)
+            axes[2].set_thetamax(-ang_max)
+            axes[2].yaxis.set_minor_locator(plt.MaxNLocator(1))
+            axes[2].yaxis.set_major_locator(plt.MaxNLocator(2))
+            axes[2].set_aspect('equal')
+            axes[2].axes.yaxis.set_ticklabels([])
+            
     if not args.pictorial:
-        if args.log:
-            if x2max == np.pi:
-                if num_fields > 1:
-                    for i in range(num_fields):
-                        if args.field[i] in lin_fields:
-                            cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
-                        else:
-                            cbar[i].ax.set_ylabel(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+        if not args.no_cbar:
+            set_label = ax.set_ylabel if args.cbar_orient == 'vertical' else ax.set_xlabel
+            fsize = 30 if not args.print else DEFAULT_SIZE
+            if args.log:
+                if x2max == np.pi:
+                    if num_fields > 1:
+                        for i in range(num_fields):
+                            if args.field[i] in lin_fields:
+                                # labelpad = -35 if you want the labels to be on other side
+                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize, labelpad = -40 )
+                                # xticks = [0.10, 0.20, 0.35, 0.50]
+                                # cbar[i].set_ticks(xticks)
+                                # cbar[i].set_ticklabels(['%.2f' % x for x in xticks])
+                                # loc = tkr.MultipleLocator(base=0.12) # this locator puts ticks at regular intervals
+                                # cbaxes[i].xaxis.set_major_locator(loc)
+                                cbaxes[i].yaxis.set_ticks_position('left')
+                            else:
+                                cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=fsize)
+                                # cbaxes[i].xaxis.set_major_locator(plt.MaxNLocator(4))
+                    else:
+                        cbar.set_label(r'$\log$ {}'.format(field_str), fontsize=fsize)
                 else:
-                    cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
+                    if num_fields > 1:
+                        for i in range(num_fields):
+                            if args.field[i] in lin_fields:
+                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize)
+                            else:
+                                cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=fsize)
+                    else:
+                        cbar.set_label(r'$\log$ {}'.format(field_str), fontsize=fsize)
             else:
-                if num_fields > 1:
-                    for i in range(num_fields):
-                        if args.field[i] in lin_fields:
-                            cbar[i].ax.set_ylabel(r'{}'.format(field_str[i]), fontsize=20)
-                        else:
-                            cbar[i].ax.set_ylabel(r'$\log$ {}'.format(field_str[i]), fontsize=20)
+                if x2max >= np.pi:
+                    if num_fields > 1:
+                        for i in range(num_fields):
+                            cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize)
+                    else:
+                        cbar.set_label(f'{field_str}', fontsize=fsize)
                 else:
-                    cbar.ax.set_xlabel(r'$\log$ {}'.format(field_str), fontsize=20)
-        else:
-            if x2max >= np.pi:
-                cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
-            else:
-                cbar.ax.set_xlabel(r'{}'.format(field_str), fontsize=20)
+                    cbar.set_label(r'{}'.format(field_str), fontsize=fsize)
         
-        fig.suptitle('{} at t = {:.2f}'.format(args.setup[0], tend), fontsize=20, y=1)
+        if args.setup != "":
+            fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=25, y=1)
+        else:
+            fsize = 25 if not args.print else DEFAULT_SIZE
+            fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.95)
     
 def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     xx, yy = mesh['xx'], mesh['yy']
@@ -446,7 +553,7 @@ def main():
     parser.add_argument('--tidx', dest='tidx', type=int, default = None,
                         help='Set to a value if you wish to plot a 1D curve about some angle')
     
-    parser.add_argument('--wedge', dest='wedge', default=False, action='store_true')
+    parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
     parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 80, 110], type=float, nargs=4)
     parser.add_argument('--units', dest='units', default = False, action='store_true')
     parser.add_argument('--file_max', dest='file_max', default = None, type=int)
@@ -454,7 +561,7 @@ def main():
     parser.add_argument('--dbg', dest='dbg', default = False, action='store_true')
     parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
     parser.add_argument('--pictorial', dest='pictorial', default = False, action='store_true')
-    
+    parser.add_argument('--fig_dims', dest='fig_dims', default = [3.35, 9], type=float, nargs=2)
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
                         help='Save the fig with some name')
@@ -507,7 +614,7 @@ def main():
             cbaxes = divider.append_axes('right', size='5%', pad=0.05)
         cbar_orientation = "vertical"
     else:
-        if args.wedge:
+        if args.nwedge > 0:
             fig, ax = plt.subplots(1, 2, subplot_kw={'projection': 'polar'},
                          figsize=(15, 10), constrained_layout=True)
         else:
@@ -594,7 +701,7 @@ def main():
         fargs=[args],
         # repeat=False,
         # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
-        interval= 1000 / 10
+        interval= 1000 / 5
     )
 
     if not args.save:
