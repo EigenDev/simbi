@@ -601,7 +601,7 @@ def main():
         plt.show()
     else:
         dpi = 600
-        animation.save("{}.mp4".format(args.save.replace(" ", "_")))
+        animation.save("{}.mp4".format(args.save.replace(" ", "_")), codec="libx264", extra_args=['-pix_fmt', 'yuv420p'])
     
     
     
