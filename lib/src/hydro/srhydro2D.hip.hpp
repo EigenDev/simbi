@@ -41,6 +41,7 @@ namespace simbi
         real *sys_state, *dt_min;
         sr2d::Primitive *gpu_prims;
         sr2d::Conserved *gpu_cons;
+        
 
         /* Methods */
         SRHD2D();
