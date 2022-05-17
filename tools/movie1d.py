@@ -16,25 +16,41 @@ from matplotlib.animation import FuncAnimation
 
 import os, os.path
 
-derived = ['gamma_beta', 'temperature']
+derived = ['gamma_beta', 'temperature', 'D', 's', 'energy']
 field_choices = ['rho', 'v', 'p'] + derived
 
-def get_frames(dir):
+def get_frames(path: str):
+    #check if path is a file
+    isFile = os.path.isfile(path)
+
+    #check if path is a directory
+    isDirectory = os.path.isdir(path)
+    
+    if isDirectory:
+        file_path = os.path.join(path, '')
+        files = sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
+    else:
+        files = sorted([file for file in args.files])
+    
+    # sort by length of strings now
+    files.sort(key=len, reverse=False)
+    
+    frame_count, flist = len(files), files
     # Get number of files in dir
-    total_frames = len([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
-    frames       = sorted([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
+    # total_frames = len([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
+    # frames       = sorted([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
 
-    return total_frames, frames
+    return frame_count, flist
 
-def plot_profile(fig, ax, filepath, filename, args):
-    fields = util.read_1d_file(filepath + filename)
-    r, t      = fields['r'], fields['t']
-    x1min, x1max = fields['xlims']
+def plot_profile(fig, ax, filename, args):
+    fields, setup, mesh = util.read_1d_file(filename)
+    r, t                = mesh['r'], setup['time']
+    x1min, x1max        = mesh['xlims']
     
     if args.field[0] in derived:
         var = util.prims2var(fields, args.field[0])
     else:
-        var = fields[args.field]
+        var = fields[args.field[0]]
         
     ax.plot(r, var)
     if args.log:
@@ -50,7 +66,10 @@ def plot_profile(fig, ax, filepath, filename, args):
     ax.set_title('{} at t = {:.2f} s'.format(args.setup[0], t), fontsize=30)
     ax.tick_params(axis='both', labelsize=20)
     ax.set_xlim(x1min, x1max) if args.rmax == 0.0 else ax.set_xlim(x1min, args.rmax)
-
+    
+    if args.ylims is not None:
+        ax.set_ylim(*args.ylims)
+        
     # Change the format of the field
     field_str = util.get_field_str(args)
     ax.set_ylabel('{}'.format(field_str), fontsize=20)
@@ -140,29 +159,22 @@ def main():
         description='Plot a 2D Figure From a File (H5).',
         epilog='This Only Supports H5 Files Right Now')
     
-    parser.add_argument('data_dir', metavar='dir', nargs='+',
-                        help='A data directory to retrieve the h5 files')
-    
+    parser.add_argument('files', metavar='files', nargs='+',
+                        help='A data directory or list to retrieve the h5 files')
     parser.add_argument('setup', metavar='Setup', nargs='+', type=str,
                         help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    
     parser.add_argument('--field', dest = 'field', metavar='Field Variable', nargs='+',
                         help='The name of the field variable you\'d like to plot',
                         choices=field_choices, default='rho')
-    
-    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max',
-                        default = 0.0, help='The domain range')
-    parser.add_argument('--tex', dest='tex', action='store_true', default=False,
-                        help='Use latex typesetting')
-    parser.add_argument('--log', dest='log', action='store_true', default=False,
-                        help='Logarithmic Radial Grid Option')
+    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max',default = 0.0, help='The domain range')
+    parser.add_argument('--tex', dest='tex', action='store_true', default=False,help='Use latex typesetting')
+    parser.add_argument('--log', dest='log', action='store_true', default=False, help='Logarithmic Radial Grid Option')
     parser.add_argument('--units', dest='units', default=False, action='store_true')
-    
-    parser.add_argument('--save', dest='save', action='store_true',
-                        default=False)
-
+    parser.add_argument('--save', dest='save', default=None, type=str)
+    parser.add_argument('--ylims', dest='ylims', default=None, type=float, nargs='+')
    
     args = parser.parse_args()
+
     if args.tex:
         plt.rc('font',   size=DEFAULT_SIZE)          # controls default text sizes
         plt.rc('axes',   titlesize=DEFAULT_SIZE)     # fontsize of the axes title
@@ -181,11 +193,10 @@ def main():
             }
         )
     fig, ax = plt.subplots(1, 1, figsize=(15,8))
-    
-    frame_count, flist = get_frames(args.data_dir[0])
+    frame_count, flist = get_frames(args.files[0])
     
     def init_mesh(filename):
-        return plot_profile(fig, ax, args.data_dir[0], filename, args)
+        return plot_profile(fig, ax, filename, args)
         
     def update(frame, fargs):
         '''
@@ -196,7 +207,7 @@ def main():
         ax.cla()
         # Not strictly neccessary, just so we know we are stealing these from
         # the global scope
-        pcolor_mesh = plot_profile(fig, ax, args.data_dir[0], flist[frame], fargs)
+        pcolor_mesh = plot_profile(fig, ax, flist[frame], fargs)
 
         return pcolor_mesh
 
@@ -215,11 +226,11 @@ def main():
         fargs=[args],
         # repeat=False,
         # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
-        interval= 1000 / 2
+        interval= 1000 / 10
     )
 
-    if args.save:
-        animation.save('{}.mp4'.format(args.setup[0]).replace(' ', '_'))
+    if args.save is not None:
+        animation.save('{}.mp4'.format(args.save).replace(' ', '_'))
         # animation.save('science/{}_{}.mp4'.format(args.setup[0], args.field))
     else:
         plt.show()

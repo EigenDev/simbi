@@ -107,6 +107,8 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
             field_str_list.append( r'$D \cdot \chi$')
         elif field == 'temperature':
             field_str_list.append("T [eV]" if args.units else "T")
+        elif field == 'mach':
+            field_str_list.append('M')
         else:
             field_str_list.append(field)
 
@@ -473,6 +475,10 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
     elif var =='sp_enthalpy':
         # Specific enthalpy
         return h - 1.0  
+    elif var == 'mach':
+        beta2 = 1.0 - (1.0 + fields['gamma_beta']**2)**(-1)
+        cs2   = fields['ad_gamma'] * fields['p'] / fields['rho'] / h
+        return np.sqrt(beta2 / cs2)
     
 def find_nearest(arr: list, val: float) -> Union[int, float]:
     arr = np.asarray(arr)

@@ -26,7 +26,7 @@ except:
     
     
 derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'chi_dens',
-                 'gamma_beta_1', 'gamma_beta_2']
+                 'gamma_beta_1', 'gamma_beta_2', 'mach']
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'chi'] + derived
 lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
 
@@ -174,7 +174,7 @@ def plot_polar_plot(
                     ovmin = None if len(args.cbar) == 2 else args.cbar[idx+1]
                     ovmax = None if len(args.cbar) == 2 else args.cbar[idx+2]
                 kwargs[field] = {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
-                # kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=1.00, vmin=ovmin, vmax=ovmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
+                kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=1.0, vmin=ovmin, vmax=ovmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
 
         if x2max < np.pi:
             cs[0] = ax.pcolormesh(tt[:: 1], rr,  var[0], cmap=color_map, shading='auto', **kwargs[field1])
@@ -224,10 +224,13 @@ def plot_polar_plot(
     if args.pictorial: 
         ax.set_position([0.1, -0.15, 0.8, 1.30])
     
+    #========================================================
+    #               ORANGE DASHED CURVE
+    #========================================================
     # angs    = np.linspace(x2min, x2max, 1000)
-    # eps     = 0.05
-    # a       = 0.47 * (1 - eps)**(-1/3)
-    # b       = 0.47 * (1 - eps)**(2/3)
+    # eps     = 0.2
+    # a       = 0.50 * (1 - eps)**(-1/3)
+    # b       = 0.50 * (1 - eps)**(2/3)
     # radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
     # r_theta = radius(angs)
 
@@ -236,10 +239,10 @@ def plot_polar_plot(
     
     if not args.pictorial:
         if x2max < np.pi:
-            ymd = int( np.floor(x2max * 180/np.pi) )
+            ymax = int( np.floor(x2max * 180/np.pi) )
             if not args.bipolar:                                                                                                                                                                                   
-                ax.set_thetamin(-ymd)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
-                ax.set_thetamax(ymd)
+                ax.set_thetamin(-ymax)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+                ax.set_thetamax(ymax)
                 ax.set_position( [0.05, -0.40, 0.9, 2])
                 # ax.set_position( [0.1, -0.18, 0.9, 1.43])
             else:
@@ -252,7 +255,7 @@ def plot_polar_plot(
                     xcoord  = [0.88, 0.04]
                     cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.8]) for i in range(num_fields)]
                 else:
-                    ycoord  = [0.15, 0.15]
+                    ycoord  = [0.17, 0.17]
                     xcoord  = [0.51, 0.06]
                     cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.43, 0.05]) for i in range(num_fields)]
             else:
@@ -267,7 +270,7 @@ def plot_polar_plot(
                     if num_fields == 2:
                         if cbar_orientation == 'vertical':
                             ycoord  = [0.1, 0.08] if x2max < np.pi else [0.15, 0.15]
-                            xcoord  = [0.1, 0.85] if x2max < np.pi else [0.86, 0.13]
+                            xcoord  = [0.1, 0.85] if x2max < np.pi else [0.93, 0.08]
                             cbaxes  = [fig.add_axes([xcoord[i], ycoord[i] ,0.03, 0.65]) for i in range(num_fields)]
                         else:
                             if is_wedge:
@@ -344,7 +347,7 @@ def plot_polar_plot(
         ax.axes.yaxis.set_ticklabels([])
         
     ax.axes.xaxis.set_ticklabels([])
-    # ax.axes.yaxis.set_ticklabels([])
+    ax.axes.yaxis.set_ticklabels([])
     ax.set_rmax(x1max) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
     ax.set_rmin(x1min)
     
@@ -473,8 +476,9 @@ def plot_polar_plot(
         if args.setup != "":
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=25, y=1)
         else:
-            fsize = 25 if not args.print else DEFAULT_SIZE
-            fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.95)
+            pass
+            # fsize = 25 if not args.print else DEFAULT_SIZE
+            # fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.95)
 
 def plot_cartesian_plot(
     fields: dict, 
@@ -532,9 +536,9 @@ def plot_1d_curve(
     fields: dict, 
     args:       argparse.ArgumentParser, 
     mesh:       dict, 
-    dset:       dict, 
+    dset:       dict,
     overplot:   bool=False,
-    a:          bool=None, 
+    ax:         bool=None, 
     case:       int =0) -> None:
     
     num_fields = len(args.field)
@@ -550,8 +554,11 @@ def plot_1d_curve(
     x2max        = dset['x2max']
     x2min        = dset['x2min']
     
-    vmin,vmax = args.cbar
+    vmin,vmax = args.cbar[:2]
     var = [field for field in args.field] if num_fields > 1 else args.field[0]
+    
+    # Change the format of the field
+    field_str = util.get_field_str(args)
     
     tend = dset['time'] * util.time_scale
     if args.mass:
@@ -575,15 +582,17 @@ def plot_1d_curve(
                 var = fields[field]
                 
             label = None if args.labels is None else '{}'.format(field_str[idx] if num_fields > 1 else field_str)
-            ax.loglog(r, var[args.tidx], label=label)
+            ax.loglog(r, var[args.tidx], label=args.labels[case])
+            if args.oned_files is not None:
+                for one_file in args.oned_files:
+                    oned_var = util.read_1d_file(one_file)[0]
+                    ax.loglog(r, oned_var[field], label='Spherical')
     
 
     ax.set_xlim(x1min, x1max)
     ax.set_xlabel(r'$r/R_\odot$', fontsize=20)
     ax.tick_params(axis='both', labelsize=10)
-    
-    # Change the format of the field
-    field_str = util.get_field_str(args)
+    ax.legend()
     
     if args.log:
         if num_fields == 1:
@@ -828,7 +837,7 @@ def plot_hist(
     else:
         colors = plt.cm.viridis(np.linspace(0.10, 0.75, color_len+1))
 
-    lw = 1.0
+    lw = 1.0 if case < 2 else 2.5
     def calc_1d_hist(fields: dict, mesh: dict):
         dV_1d    = util.calc_cell_volume1D(mesh['r'])
         
@@ -862,6 +871,8 @@ def plot_hist(
                 scale        = int(etot / 1e51)
                 front_factor = int(etot / 10**order_of_mag)
                 if front_factor != 1 or scale != 1:
+                    if scale > 1e3:
+                        scale = 1000
                     label = r"${}E_{{51}}$".format(scale) + f"({label})"     
                 else:
                     label = r"$E_{51}$" + f"({label})" 
@@ -904,27 +915,27 @@ def plot_hist(
     gbs       = np.logspace(np.log10(1.e-3), np.log10(u.max()), 128)
     var       = np.asarray([var[u > gb].sum() for gb in gbs]) 
     
-    # if case == 0:
-    #     oned_field   = util.read_1d_file(args.oned_files[0])
-    #     calc_1d_hist(oned_field)
-    # if case == 2:
-    #     oned_field   = util.read_1d_file(args.oned_files[1])
-    #     calc_1d_hist(oned_field)
+    if case == 0:
+        oned_field, setups1d, mesh1d   = util.read_1d_file(args.oned_files[0])
+        calc_1d_hist(oned_field, mesh1d)
+    if case == 2:
+        oned_field, setups1d, mesh1d   = util.read_1d_file(args.oned_files[1])
+        calc_1d_hist(oned_field, mesh1d)
         
-    if ax_col == 0:     
-        if args.anot_loc is not None:
-            etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
-            place_anotation(args, fields, ax, etot)
+    # if ax_col == 0:     
+    #     if args.anot_loc is not None:
+    #         etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
+    #         place_anotation(args, fields, ax, etot)
         
-        #1D Comparison 
-        if args.oned_files is not None:
-            if args.sub_split is None:
-                for file in args.oned_files:
-                    oned_field, oned_setup, oned_mesh = util.read_1d_file(file)
-                    calc_1d_hist(oned_field, oned_mesh)
-            else:
-                oned_field, one_setup, one_mesh = util.read_1d_file(args.oned_files[ax_num])
-                calc_1d_hist(oned_field)
+    #     #1D Comparison 
+    #     if args.oned_files is not None:
+    #         if args.sub_split is None:
+    #             for file in args.oned_files:
+    #                 oned_field, oned_setup, oned_mesh = util.read_1d_file(file)
+    #                 calc_1d_hist(oned_field, oned_mesh)
+    #         else:
+    #             oned_field, one_setup, one_mesh = util.read_1d_file(args.oned_files[ax_num])
+    #             calc_1d_hist(oned_field)
 
     if args.norm:
         var /= var.max()
@@ -945,10 +956,10 @@ def plot_hist(
         label = None
     
     c = colors[case + 1]
-    # if case % 2 == 0:
-    #     c = colors[1]
-    # else:
-    #     c = colors[-1]
+    if case % 2 == 0:
+        c = colors[1]
+    else:
+        c = colors[-1]
     ax.hist(gbs, bins=gbs, weights=var, label=label, histtype='step', 
             rwidth=1.0, linewidth=lw, color=c, alpha=0.9)
     
@@ -1247,11 +1258,11 @@ def plot_dx_domega(
         if 'ax0' in locals():
             ycoord = 0.5 if not energy_and_mass else 0.67
             if args.kinetic:
-                fig.text(-0.005, ycoord, r'$E_{\rm K, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=fsize, va='center', rotation='vertical')
+                fig.text(-0.06, ycoord, r'$E_{\rm K, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=fsize, va='center', rotation='vertical')
             elif args.dm_domega:
-                fig.text(0.010, ycoord, r'$M_{\rm iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=fsize, va='center', rotation='vertical')
+                fig.text(0.01, ycoord, r'$M_{\rm iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=fsize, va='center', rotation='vertical')
             else:
-                fig.text(0.010, ycoord, r'$E_{\rm T, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=fsize, va='center', rotation='vertical')
+                fig.text(0.01, ycoord, r'$E_{\rm T, iso}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=fsize, va='center', rotation='vertical')
                 
             if energy_and_mass:
                 ax2.set_ylabel(r'$M_{\rm iso} \ (>\Gamma \beta) \ [\rm g]$')
@@ -1297,7 +1308,7 @@ def plot_dx_domega(
         #ax2.spines['right'].set_visible(False)
         #ax2.spines['top'].set_visible(False)
     else:
-        ax.spines['right'].set_visible(False)
+        # ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
     
     if args.inset:
@@ -1639,14 +1650,14 @@ def main():
                 if i == 0:
                     try:
                         for item in ax.get_legend().get_texts():
-                            item.set_fontsize(DEFAULT_SIZE)
+                            item.set_fontsize(5)
                     except AttributeError:
                         pass
             
             fig.set_size_inches(*args.fig_dims)
             
-        # fig.tight_layout(pad=0.00)
-        plt.subplots_adjust(wspace=0, hspace=0)
+        # \fig.tight_layout(pad=0.00)
+        # plt.subplots_adjust(wspace=0, hspace=0)
         ext = 'pdf' if not args.png else 'png'
         dpi = 600
         plt.savefig('{}.{}'.format(args.save.replace(' ', '_'), ext), dpi=dpi, bbox_inches='tight')

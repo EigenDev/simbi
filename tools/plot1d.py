@@ -135,30 +135,19 @@ def plot_hist(args, fields, mesh, dset, overplot=False, ax=None, subplot = False
     tend        = dset['time']
     edens_total = prims2cons(fields, 'energy')
     r           = mesh['r']
-    
-    if fields['is_linspace']:
-        rvertices = 0.5 * (r[1:] + r[:-1])
-    else:  
-        rvertices = np.sqrt(r[1:] * r[:-1])
-        
-    rvertices = np.insert(rvertices,  0, r[0])
-    rvertices = np.insert(rvertices, rvertices.shape[0], r[-1])
-    dr = rvertices[1:] - rvertices[:-1]
-    dV =  ( (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3) )
+    dV          = util.calc_cell_volume1D(r)
     
     if args.eks:
-        mass   = 4.0 * np.pi * dV * fields['W']**2 * fields['rho']
+        mass   = dV * fields['W']**2 * fields['rho']
         energy = (fields['W'] - 1.0) * mass * e_scale.value
     elif args.hhist:
-        energy = (fields['enthalpy'] - 1.0) *  4.0 * np.pi * dV * e_scale.value
+        energy = (fields['enthalpy'] - 1.0) *  dV * e_scale.value
     else:
-        energy = edens_total * 4.0 * np.pi * dV * e_scale.value
+        energy = edens_total * dV * e_scale.value
 
 
     u = fields['gamma_beta']
-    w = 0.01 #np.diff(u).max()*1e-1
-    n = int(np.ceil( (u.max() - u.min() ) / w ) )
-    gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), n)
+    gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), 128)
     
     energy = np.asarray([energy[u > gb].sum() for gb in gbs])
     
@@ -178,10 +167,6 @@ def plot_hist(args, fields, mesh, dset, overplot=False, ax=None, subplot = False
     # alpha            = 1.0 - np.mean(segments)
     # E_0 = energy[up_min] * upower[0] ** (alpha - 1)
     # print('Avg power law index: {:.2f}'.format(alpha))
-    bins    = np.arange(min(gbs), max(gbs) + w, w)
-    logbins = np.logspace(np.log10(bins[0]),np.log10(bins[-1]), len(bins))
-    
-    
     if args.labels is None:
         hist = ax.hist(gbs, bins=gbs, weights=energy, label= r'$E_T$', histtype='step', color=colors[case], rwidth=1.0, linewidth=3.0)
         # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
@@ -300,8 +285,8 @@ def main():
             ax.legend(fontsize = 15)
             
     else:
+        fields, setup, mesh = util.read_1d_file(args.filename[0])
         if args.ehist or args.hhist or args.eks:
-            fields = util.read_1d_file(args.files[0])
             fig = plot_hist(args, fields, mesh, setup)
         else:
             fig = plot_profile(args, fields, mesh, setup)
