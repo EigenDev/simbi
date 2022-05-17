@@ -11,6 +11,28 @@ from pysimbi import Hydro
 from astropy import units as u
 
 
+def volume(r: np.ndarray):
+    rcop = r.copy()
+    rvertices = np.sqrt(rcop[1:]*rcop[:-1])
+    rvertices = np.insert(rvertices, 0, rcop[0])
+    rvertices = np.insert(rvertices, rvertices.shape[0], rcop[-1])
+    return 4.0 * np.pi * (1.0/3.0) * (rvertices[1:]**3 - rvertices[:-1]**3)
+
+
+def volume(r: np.ndarray, theta: np.ndarray):
+    rcop = r.copy()
+    rvertices = np.sqrt(rcop[:, 1:]*rcop[:, :-1])
+    rvertices = np.insert(rvertices, 0, rcop[:, 0], axis=1)
+    rvertices = np.insert(rvertices, rvertices.shape[-1], rcop[:, -1], axis=1)
+    
+    tcop      = theta.copy()
+    tvertices = 0.5 * (tcop[1:] + tcop[:-1])
+    tvertices = np.insert(tvertices, 0, tcop[0], axis=0)
+    tvertices = np.insert(tvertices, tvertices.shape[0], tcop[-1], axis=0)
+    dcos      = np.cos(tvertices[:-1]) - np.cos(tvertices[1:])
+    
+    return 2.0 * np.pi * dcos * (1.0/3.0) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3)
+
 def main():
     parser = argparse.ArgumentParser(description='Mignone and Bodo Test Problem 1/2 Params')
     parser.add_argument('--gamma', '-g',  dest='gamma', type=float, default=4/3)
@@ -38,14 +60,13 @@ def main():
 
     # Constants
     r_init    = 0.01
-    nu        = 3.
     exp_scale = args.e_scale
 
     rho_init = rho0(0, np.pi)
     v_init   = 0.
     ntheta   = args.npolar
     rmin     = 0.01
-    rmax     = 1.0
+    rmax     = 10.0
     
     theta_min = 0
     theta_max = np.pi
@@ -56,26 +77,29 @@ def main():
     # Choose xnpts carefully such that the grid zones remain roughly square
     dtheta = theta_max/ntheta
     nr = int(np.ceil(1 + np.log10(rmax/rmin)/dtheta ))
-
-    r = np.logspace(np.log10(rmin), np.log10(rmax), nr) 
-    r_right     = np.sqrt(r[1:nr] * r[0:nr-1])
-    dr          = rmin * 3.5
+    r           = np.geomspace(rmin, rmax, nr) 
+    rr, thetta  = np.meshgrid(r, theta)
+    dV          = volume(rr, thetta)
+    dr          = rmin * 1.5
     rho         = np.ones((ntheta , nr), float) * (r / r[0])**(-args.omega)
+    chi         = np.zeros_like(rho)
     p_zones     = find_nearest(r, dr)[0]
-    epsilon_0   = np.sum(rho[:, :p_zones] * 4.0 / (nu + 1.0) * np.pi * dr ** 3)
+    epsilon_0   = np.sum(rho[:, :p_zones] * dV[:, :p_zones])
     epsilon_exp = exp_scale * epsilon_0
 
-    p_c = (args.gamma - 1.)*(3*epsilon_exp/((nu + 1)*np.pi*dr**nu))
+    p_c              = (args.gamma - 1.) * (epsilon_exp / dV[:, : p_zones].sum())
+    jet_angle        = 0.1 
+    p                = rho * 1e-6
+    p[:, :p_zones]   = p_c 
+    chi[:, :p_zones] = 1.0
+    
+    h      = 1.0 + args.gamma * p / (rho * (args.gamma - 1.0))
+    tau    = rho * h - p - rho
+    energy = (tau * dV)
 
     print("Central Pressure:", p_c)
     print("Dimensions: {} x {}".format(ntheta, nr))
     zzz = input("Press any key to continue...")
-    
-    viewing_angle = 0.0 
-    jet_angle     = 0.1 
-    
-    p              = rho * 1e-6
-    p[:, :p_zones] = p_c 
 
     vx = np.zeros((ntheta ,nr))
     vy = np.zeros((ntheta ,nr))
@@ -87,7 +111,7 @@ def main():
 
 
     t1 = (time.time()*u.s).to(u.min)
-    sol = bm.simulate(tend=args.tend, first_order= args.forder, compute_mode=args.mode, boundary_condition=args.boundc,
+    sol = bm.simulate(tend=args.tend, first_order= args.forder, compute_mode=args.mode, boundary_condition=args.boundc, scalars=chi,
                         cfl=args.cfl, hllc=True, linspace=False, plm_theta=args.plm, data_directory=args.data_dir, chkpt_interval=args.chint)
 
     print("The 2D BM Simulation for N = {} took {:.3f}".format(ntheta, (time.time()*u.s).to(u.min) - t1))
