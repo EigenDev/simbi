@@ -93,11 +93,19 @@ class CompilerParams():
         self.sources   = [pjoin(com_src,  file) for file in os.listdir(com_src)  if file.endswith('.cpp')]
         self.sources  += [pjoin(util_src, file) for file in os.listdir(util_src) if file.endswith('.cpp')]
         self.sources  += [pjoin(src_dir,  file) for file in os.listdir(src_dir)  if file.endswith('.cpp')]
+        if f'{util_src}/call_obj.cpp' in self.sources:
+            self.sources.remove(f'{util_src}/call_obj.cpp')
+            
         agno_src = pjoin(src_dir, "hydro")
         for file in os.listdir(agno_src):
-            if file.endswith(".cpp") and file != "ag_state.cpp":
+            if file.endswith(".cpp") and file != "cpu_ext.cpp" and file != "call_obj.cpp" and file != "gpu_ext.cpp":
                 self.sources.append(pjoin(agno_src, file))
-        self.sources.insert(0, pjoin(agno_src, "ag_state.pyx"))
+        if self.arch == 'cpu':
+            self.sources.insert(0, pjoin(agno_src, "cpu_ext.pyx"))
+        else:
+            self.sources.insert(0, pjoin(agno_src, "gpu_ext.pyx"))
+            
+        self.sources.insert(1, pjoin(util_src, "call_obj.pyx"))
 
 def extensions(comp: CompilerParams, name: str = "state"):
     '''
@@ -153,7 +161,7 @@ def customize_compiler_for_hipcc(self):
     # object but distutils doesn't have the ability to change compilers
     # based on source extension: we add it.
     def _compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
-        if src != "${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.cpp":
+        if src != "${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_ext.cpp":
             # use the hip for .hip.cpp files
             self.set_executable('compiler_so', '${HIPCC}')
             #self.set_executable('linker_so', '${HIPCC}')
