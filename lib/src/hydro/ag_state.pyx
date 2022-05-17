@@ -81,8 +81,12 @@ cdef class PyStateSR:
         string boundary_condition,
         bool first_order, 
         bool linspace, 
-        bool hllc):
+        bool hllc,
+        a,
+        adot):
 
+        cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
+        cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
         result = self.c_state.simulate1D(
             sources, 
             tstart,
@@ -95,7 +99,9 @@ cdef class PyStateSR:
             boundary_condition,
             first_order, 
             linspace, 
-            hllc)
+            hllc,
+            a_cpp,
+            adot_cpp)
         
         return np.asarray(result)
 
