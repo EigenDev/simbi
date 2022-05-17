@@ -20,30 +20,43 @@ def main():
     parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/')  
     
     args = parser.parse_args()
-
     fig, axs = plt.subplots(3, 1, figsize=(9,9), sharex=True)
+    xmin, xmax = 0.0, 1.0 
+    xmid       = (xmax - xmin) * 0.5 
+    rhoL = 10.0 
+    pL   = 13.33 
+    vL   = 0.0
+    rhoR = 1.0 
+    pR   = 1e-10
+    vR   = 0.0
+    hydro2 = Hydro(gamma=args.gamma, initial_state = ((rhoL,pL,vL),(rhoR,pR,vR)),
+            Npts=args.nzones, geometry=(xmin,xmax,xmid), n_vars=3, regime="relativistic")
 
-    hydro2 = Hydro(gamma=args.gamma, initial_state = ((10.0,13.33,0.0),(1.0,1.e-10,0.0)),
-            Npts=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3, regime="relativistic")
+    hydro = Hydro(gamma=args.gamma, initial_state = ((rhoL,pL,vL),(rhoR,pR,vR)),
+            Npts=args.nzones, geometry=(xmin,xmax, xmid), n_vars=3, regime="relativistic")
+    
+    h = hydro2.simulate(tend=args.tend, 
+                        first_order=args.forder, plm_theta=1.5,  
+                        cfl=args.cfl, hllc=False, 
+                        compute_mode=args.mode, 
+                        boundary_condition=args.boundc)
+    
+    u = hydro.simulate(tend=args.tend,
+                       first_order=args.forder, plm_theta=1.5,
+                       cfl=args.cfl, hllc=True, compute_mode=args.mode, 
+                       boundary_condition=args.boundc,
+                       data_directory = args.data_dir, chkpt_interval=args.chint)
 
-    hydro = Hydro(gamma=args.gamma, initial_state = ((10.0,13.33,0.0),(1.0,1.e-10,0.0)),
-            Npts=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3, regime="relativistic")
 
-
-
-    h = hydro2.simulate(tend=args.tend, first_order=args.forder,  cfl=args.cfl, hllc=True , compute_mode=args.mode, boundary_condition=args.boundc)
-    u = hydro.simulate(tend=args.tend,  first_order=args.forder,  cfl=args.cfl, hllc=False, compute_mode=args.mode, boundary_condition=args.boundc)
-
-
-    x = np.linspace(0, 1, args.nzones)
-    axs[0].plot(x, u[0], 'o', fillstyle='none', label='RHLLE')
-    axs[0].plot(x, h[0], label='RHLLC')
+    x = np.linspace(xmin, xmax, args.nzones)
+    axs[0].plot(x, u[0], 'o', fillstyle='none', label='RHLLC')
+    axs[0].plot(x, h[0], label='RHLLE')
     axs[0].spines['right'].set_visible(False)
     axs[0].spines['top'].set_visible(False)
     axs[0].set_ylabel('Density', fontsize=20)
 
-    axs[1].plot(x, u[1], 'o', fillstyle='none', label='RHLLE')
-    axs[1].plot(x, h[1], label='RHLLC')
+    axs[1].plot(x, u[1], 'o', fillstyle='none', label='RHLLC')
+    axs[1].plot(x, h[1], label='RHLLE')
     axs[1].spines['right'].set_visible(False)
     axs[1].spines['top'].set_visible(False)
     axs[1].set_ylabel('Velocity', fontsize=20)
@@ -58,7 +71,7 @@ def main():
     axs[0].set_title('1D Relativistic Blast Wave with N={} at t = {} (Marti & Muller 1999, Problem 1)'.format(args.nzones, args.tend), fontsize=10)
     fig.subplots_adjust(hspace=0.01)
 
-    axs[0].set_xlim(0.0, 1.0)
+    axs[0].set_xlim(x.min(), x.max())
     axs[0].legend(fontsize=15)
 
     plt.show()
