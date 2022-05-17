@@ -106,7 +106,7 @@ namespace simbi {
     inline dim3 threadIdx(1, 1, 1);
     constexpr Platform pyBuild = BuildPlatform;
 
-    inline int hipMalloc(void** ptr , size_t size) {
+    inline int hipMallocManaged(void** ptr , size_t size) {
         return 0;
     }
 
