@@ -19,20 +19,19 @@ namespace simbi
 {
      struct SRHD
      {
-          lint x1min, x1max;
-          real dt;
+          real dt, hubble_param;
           real gamma, cfl;
           std::string coord_system;
-          std::vector<real> r, dt_arr;
+          std::vector<real> x1, dt_arr;
           std::vector<std::vector<real>> state;
           CLattice1D coord_lattice;
           simbi::BoundaryCondition bc;
           simbi::Geometry geometry;
-
+          real dlogx1, dx1, x1min, x1max;  
 
           SRHD();
           SRHD(std::vector<std::vector<real>> state, real gamma, real cfl,
-               std::vector<real> r, std::string coord_system);
+               std::vector<real> x1, std::string coord_system);
           ~SRHD();
 
           // SRHD* device_self;
@@ -115,7 +114,8 @@ namespace simbi
                const sr1d::Conserved &left_state,
                const sr1d::Conserved &right_state,
                const sr1d::Conserved &left_flux,
-               const sr1d::Conserved &right_flux);
+               const sr1d::Conserved &right_flux,
+               const real             vface);
 
           GPU_CALLABLE_MEMBER
           sr1d::Conserved calc_hllc_flux(
@@ -124,7 +124,8 @@ namespace simbi
                const sr1d::Conserved &left_state,
                const sr1d::Conserved &right_state,
                const sr1d::Conserved &left_flux,
-               const sr1d::Conserved &right_flux);
+               const sr1d::Conserved &right_flux,
+               const real             vface);
 
           std::vector<sr1d::Conserved> u_dot1D(std::vector<sr1d::Conserved> &u_state);
           
@@ -141,9 +142,67 @@ namespace simbi
                std::string boundary_condition,
                bool first_order, 
                bool linspace, 
-               bool hllc);
+               bool hllc,
+               std::function<double(double)> a = nullptr,
+               std::function<double(double)> adot = nullptr,
+               std::function<double(double)> d_outer = nullptr,
+               std::function<double(double)> s_souter = nullptr,
+               std::function<double(double)> e_outer = nullptr);
 
-          
+          GPU_CALLABLE_MEMBER
+          real calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side);
+
+          GPU_CALLABLE_INLINE
+          real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
+          {
+               switch (geometry)
+               {
+               case simbi::Geometry::CARTESIAN:
+                    {
+                         return 1.0;
+                    }
+                    break;
+               
+               case simbi::Geometry::SPHERICAL:
+                    {
+                         const real rl = (ii > 0 ) ? x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
+                         if (side == 0)
+                         {
+                              return rl;
+
+                         } else {
+                              return (ii < active_zones - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
+                         }
+                         break;
+                    }
+               }
+          }
+
+          GPU_CALLABLE_MEMBER
+          real get_cell_volume(lint ii, const simbi::Geometry geometry, const bool mesh_motion = false)
+          {
+               if (!mesh_motion)
+               {
+                    return 1.0;
+               } else {
+                    switch (geometry)
+                    {
+                    case simbi::Geometry::SPHERICAL:
+                    {
+                         if (ii >= active_zones - 1)
+                              ii = active_zones - 1;
+                              
+                         const real rl     = (ii > 0 ) ? x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
+                         const real rr     = (ii < active_zones - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
+                         const real rmean  = static_cast<real>(0.75) * (rr * rr * rr *rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
+                         return rmean * rmean * (rr - rl);
+                    }
+                    default:
+                         return 1.0;
+                    }
+               }
+               
+          }
           //==============================================================
           // Create dynamic array instances that will live on device
           //==============================================================
