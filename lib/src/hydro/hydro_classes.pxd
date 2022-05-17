@@ -4,6 +4,13 @@ from libcpp.vector cimport vector
 from libcpp cimport bool
 from libcpp.string cimport string 
 
+
+cdef extern from "util/pyobj_wrapper.hpp":
+    cdef cppclass PyObjWrapper:
+        PyObjWrapper()
+        PyObjWrapper(object) # define a constructor that takes a Python object
+                             # note - doesn't match c++ signature - that's fine!
+
 cdef extern from "build_options.hpp":
     cdef bool col_maj "CYTHON_COL_MAJOR"
 
@@ -81,7 +88,28 @@ cdef extern from "srhydro1D.hip.hpp" namespace "simbi":
             string boundary_condition,
             bool first_order, 
             bool linspace, 
-            bool hllc)
+            bool hllc,
+            PyObjWrapper a,
+            PyObjWrapper adot) except + 
+            
+        vector[vector [real]] simulate1D(
+            vector[vector[real]] sources, 
+            real tstart,
+            real tend, 
+            real dt, 
+            real plm_theta, 
+            real engine_duration,
+            real chkpt_interval, 
+            string data_directory,
+            string boundary_condition,
+            bool first_order, 
+            bool linspace, 
+            bool hllc,
+            PyObjWrapper a,
+            PyObjWrapper adot,
+            PyObjWrapper d_outer,
+            PyObjWrapper s_outer,
+            PyObjWrapper e_outer) except + 
 
 cdef extern from "srhydro2D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD2D:
