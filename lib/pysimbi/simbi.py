@@ -8,11 +8,31 @@ import os
 import sys 
 import h5py 
 import pysimbi.initial_condition as simbi_ic 
+from typing import Callable
 
 regimes             = ['classical', 'relativistic']
 coord_systems       = ['spherical', 'cartesian'] #TODO: Implement Cylindrical
 boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
 
+def calc_cell_volume1D(r: np.ndarray) -> np.ndarray:
+    rvertices = np.sqrt(r[1:] * r[:-1])
+    rvertices = np.insert(rvertices,  0, r[0])
+    rvertices = np.insert(rvertices, r.shape, r[-1])
+    rmean     = 0.75 * (rvertices[1:]**4 - rvertices[:-1]**4) / (rvertices[1:]**3 - rvertices[:-1]**3)
+    dr        = rvertices[1:] - rvertices[:-1]
+    return rmean * rmean * dr 
+
+def calc_cell_volume2D(r: np.ndarray, theta: np.ndarray) -> np.ndarray:
+    tvertices = 0.5 * (theta[1:] + theta[:-1])
+    tvertices = np.insert(tvertices, 0, theta[0], axis=0)
+    tvertices = np.insert(tvertices, tvertices.shape[0], theta[-1], axis=0)
+    dcos      = np.cos(tvertices[:-1]) - np.cos(tvertices[1:])
+    
+    rvertices = np.sqrt(r[:, 1:] * r[:, :-1])
+    rvertices = np.insert(rvertices,  0, r[:, 0], axis=1)
+    rvertices = np.insert(rvertices, rvertices.shape[1], r[:, -1], axis=1)
+    dr        = rvertices[:, 1:] - rvertices[:, :-1]
+    return (2.0 * np.pi *  (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos)
 class Hydro:
     
     def __init__(self, 
@@ -288,24 +308,30 @@ class Hydro:
             else:
                 return state[:, 2:-2, 2:-2, 2:-2]
     
-    def simulate(self, 
-                 tstart: float = 0,
-                 tend: float = 0.1,
-                 dt: float = 1.e-4,
-                 plm_theta: float = 1.5,
-                 first_order: bool = True,
-                 linspace: bool = True,
-                 cfl: float = 0.4,
-                 sources: np.ndarray = None,
-                 scalars: np.ndarray = 0,
-                 hllc: bool =False,
-                 chkpt: str = None,
-                 chkpt_interval:float = 0.1,
-                 data_directory:str = "data/",
-                 boundary_condition: str = "outflow",
-                 engine_duration: float = 10.0,
-                 compute_mode: str = 'cpu',
-                 quirk_smoothing: bool = True) -> np.ndarray:
+    def simulate(
+        self, 
+        tstart: float = 0,
+        tend: float = 0.1,
+        dt: float = 1.e-4,
+        plm_theta: float = 1.5,
+        first_order: bool = True,
+        linspace: bool = True,
+        cfl: float = 0.4,
+        sources: np.ndarray = None,
+        scalars: np.ndarray = 0,
+        hllc: bool =False,
+        chkpt: str = None,
+        chkpt_interval:float = 0.1,
+        data_directory:str = "data/",
+        boundary_condition: str = "outflow",
+        engine_duration: float = 10.0,
+        compute_mode: str = 'cpu',
+        quirk_smoothing: bool = True,
+        a: Callable = None,
+        adot: Callable = None,
+        dens_outer: Callable = None,
+        mom_outer: Callable = None,
+        edens_outer: Callable = None) -> np.ndarray:
         """
         Simulate the Hydro Setup
         
@@ -324,6 +350,11 @@ class Hydro:
         Returns:
             u (array): The conserved/primitive variable array
         """
+        if a == None:
+            a = lambda t: 1.0 
+        if adot == None:
+            adot = lambda t: 0.0
+        
         if boundary_condition not in boundary_conditions:
             raise ValueError("Invalid boundary condition. Expected one of: %s" % boundary_conditions)
         
@@ -363,6 +394,9 @@ class Hydro:
         else:
             print('Computing Second Order Solution...')
         
+        # if there is mesh motion, convert the volumetric conserved vairables into their element-wise conserved
+        
+            
         if self.dimensions == 1:
             if linspace:
                 x1 = np.linspace(self.geometry[0], self.geometry[1], self.Npts)
@@ -371,12 +405,30 @@ class Hydro:
             sources = np.zeros((3, x1.size), dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             
+            if adot(1.0) / a(1.0) != 0 and self.coord_system != 'cartesian':
+                dV = calc_cell_volume1D(x1)
+                if first_order:
+                    self.u[:, 1:-1] *= dV 
+                    self.u[:, 0]    *= dV[0]
+                    self.u[:, -1]   *= dV[-1]
+                else:
+                    self.u[:, 2:-2]  *= dV 
+                    self.u[:, 0: 1]   = self.u[:,  0: 1] * dV[0]
+                    self.u[:,-2:  ]   = self.u[:, -2:  ] * dV[-1]
+            
+            kwargs = {}
             if self.regime == "classical":
-                a = PyState(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
+                state = PyState(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
             else:
-                a = PyStateSR(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
-
-            solution = a.simulate(sources = sources,
+                state = PyStateSR(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
+                kwargs = {'a': a, 'adot': adot}
+                if dens_outer and mom_outer and edens_outer:
+                    kwargs['d_outer'] =  dens_outer
+                    kwargs['s_outer'] =  mom_outer
+                    kwargs['e_outer'] =  edens_outer
+                
+            solution = state.simulate(
+                sources = sources,
                 tstart = start_time,
                 tend = tend,
                 dt = dt,
@@ -387,7 +439,8 @@ class Hydro:
                 boundary_condition = boundary_condition,
                 first_order = first_order,
                 linspace = linspace,
-                hllc = hllc)  
+                hllc = hllc,
+                **kwargs)  
                 
         elif self.dimensions == 2:
             if (linspace):
@@ -402,24 +455,24 @@ class Hydro:
             sources = sources.reshape(sources.shape[0], -1)
             
             if self.regime == "classical":
-                b = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
-                solution = b.simulate(
-                    sources         = sources,
-                    tstart          = start_time,
-                    tend            = tend,
-                    dt              = dt,
-                    plm_theta       = plm_theta,
-                    engine_duration = engine_duration,
-                    chkpt_interval  = chkpt_interval,
-                    data_directory  = data_directory,
+                state = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                solution = state.simulate(
+                    sources            = sources,
+                    tstart             = start_time,
+                    tend               = tend,
+                    dt                 = dt,
+                    plm_theta          = plm_theta,
+                    engine_duration    = engine_duration,
+                    chkpt_interval     = chkpt_interval,
+                    data_directory     = data_directory,
                     boundary_condition = boundary_condition,
-                    first_order     = first_order,
-                    linspace        = linspace,
-                    hllc            = hllc) 
+                    first_order        = first_order,
+                    linspace           = linspace,
+                    hllc               = hllc) 
             else:
-                b = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
             
-                solution = b.simulate(
+                solution = state.simulate(
                     sources         = sources,
                     tstart          = start_time,
                     tend            = tend,
@@ -451,9 +504,9 @@ class Hydro:
                 pass
                 # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
             else:
-                b = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
+                state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
             
-            solution = b.simulate(
+            solution = state.simulate(
                 sources         = sources,
                 tstart          = tstart,
                 tend            = tend,
