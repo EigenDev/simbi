@@ -15,35 +15,60 @@ namespace simbi
                         ss << x;
                         return ss.str();
                 } (args) ... }; 
-
+                
                 auto argss_len = sizeof(argss) / sizeof(argss[0]);
+                std::string width_str = "";
+                int width = 1;
                 static int index = 0;
                 for (auto &ch: fmt) {
                         if (ch == '{') {
                                 auto const left  = ch;
-                                auto const right = *(&ch +1);
+                                auto const right = *(&ch + 1);
                                 if (right != '}') {
-                                        throw std::invalid_argument (
-                                                "syntax error in format string, "
-                                                "missing closing brace"
-                                        );
+                                        if (right == '>')
+                                        {
+                                            const char left_numeral  = *(&ch + 2);
+                                            const char right_numeral = *(&ch + 3);
+
+                                            if (isdigit(left_numeral))
+                                            {
+                                                width_str.push_back(left_numeral);
+                                            }
+
+                                            if (isdigit(right_numeral))
+                                            {
+                                                width_str.push_back(right_numeral);
+                                            }
+
+                                            if (width_str.size() > 0)
+                                            {
+                                                width = std::stoi(width_str);
+                                            }     
+                                        }
+                                        else{
+                                            throw std::invalid_argument (
+                                                    "syntax error in format string, "
+                                                    "missing closing brace"
+                                            );
+                                        }
                                 }
-                                std::cout << std::setw(10) << argss[index];
+                                std::cout << std::setw(width) << argss[index];
                                 index++;
                                 index %= argss_len;
-                        } else if (ch != '}') {
-                                std::cout << ch;
+                        } else if ((ch != '}') && (!isdigit(ch)) && (ch != '>')) {
+                            width_str = "";
+                            std::cout << ch;
                         }
                 }
         }
 
         template <typename ...ARGS> void writeln(std::string const & fmt, ARGS... args) {
-                write (fmt, args...);
+                write(fmt, args...);
                 std::cout << '\n';
         }
 
         template <typename ...ARGS> void writefl(std::string const & fmt, ARGS... args) {
-                write (fmt, args...);
+                write(fmt, args...);
                 std::cout << std::flush;
         }
     } // namespace util
