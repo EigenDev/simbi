@@ -255,6 +255,9 @@ void SRHD2D::adapt_dt()
     } // end parallel region
 
     dt = cfl * min_dt;
+
+    // writeln("dt = {}", dt);
+    // pause_program();
 };
 
 void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, luint bytes)
@@ -267,22 +270,27 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
             case simbi::Geometry::CARTESIAN:
                 compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
                 (dev, geometry, psize, dx1, dx2);
-                dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+                dtWarpReduce<SRHD2D, Primitive, 64><<<p.gridSize,p.blockSize,bytes>>>
                 (dev);
                 break;
             
             case simbi::Geometry::SPHERICAL:
                 compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
                 (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
-                dtWarpReduce<SRHD2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+                dtWarpReduce<SRHD2D, Primitive, 64><<<p.gridSize,p.blockSize,bytes>>>
                 (dev);
                 break;
         }
-
         simbi::gpu::api::deviceSynch();
-        simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
+        this->dt = dev->dt;
     }
     #endif
+    // pause_program();
+//     if (dt < 1e-10)
+//     {
+//         writeln("dt = {}", dt);
+//         pause_program();
+//     };
 }
 
 //===================================================================================================================
@@ -653,7 +661,7 @@ void SRHD2D::cons2prim(
         if (tid == 0) found_failure = self->inFailureState;
         simbi::gpu::api::synchronize();
         #else 
-        found_failure = inFailureState;
+        found_failure = self->inFailureState;
         #endif
             
         while (!found_failure && workLeftToDo)
@@ -729,9 +737,8 @@ void SRHD2D::cons2prim(
             #endif
             workLeftToDo = false;
         }
-        
-
     });
+    this->inFailureState = self->inFailureState;
 }
 
 void SRHD2D::advance(
@@ -813,7 +820,6 @@ void SRHD2D::advance(
         #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
-
             // Load Shared memory into buffer for active zones plus ghosts
             prim_buff[tya * sx + txa * sy] = self->gpu_prims[aid];
             if (ty < radius)
@@ -821,13 +827,16 @@ void SRHD2D::advance(
                 if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
                 prim_buff[(tya - radius) * sx + txa] = self->gpu_prims[(ja - radius) * nx + ia];
                 prim_buff[(tya + tyl   ) * sx + txa] = self->gpu_prims[(ja + tyl   ) * nx + ia]; 
-            
             }
             if (tx < radius)
             {   
                 if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
                 prim_buff[tya * sx + txa - radius] =  self->gpu_prims[ja * nx + ia - radius];
                 prim_buff[tya * sx + txa +    txl] =  self->gpu_prims[ja * nx + ia + txl]; 
+                if ((radius == 2) && (txl < xextent))
+                {
+                    prim_buff[tya * sx + txa + txl + 1] =  self->gpu_prims[ja * nx + ia + txl + 1]; 
+                }
             }
             
             simbi::gpu::api::synchronize();
@@ -835,11 +844,11 @@ void SRHD2D::advance(
 
         if (first_order)
         {
-            xprims_l = prim_buff[( (txa + 0) * sy + (tya + 0) * sx) % nbs];
-            xprims_r = prim_buff[( (txa + 1) * sy + (tya + 0) * sx) % nbs];
+            xprims_l = prim_buff[( (txa + 0) * sy + (tya + 0) * sx)];
+            xprims_r = prim_buff[( (txa + 1) * sy + (tya + 0) * sx)];
             //j+1/2
-            yprims_l = prim_buff[( (txa + 0) * sy + (tya + 0) * sx) % nbs];
-            yprims_r = prim_buff[( (txa + 0) * sy + (tya + 1) * sx) % nbs];
+            yprims_l = prim_buff[( (txa + 0) * sy + (tya + 0) * sx)];
+            yprims_r = prim_buff[( (txa + 0) * sy + (tya + 1) * sx)];
             
             // i+1/2
             ux_l = self->prims2cons(xprims_l); 
@@ -865,11 +874,11 @@ void SRHD2D::advance(
             }
 
             // Set up the left and right state interfaces for i-1/2
-            xprims_l = prim_buff[( (txa - 1) * sy + (tya + 0) * sx ) % nbs];
-            xprims_r = prim_buff[( (txa - 0) * sy + (tya + 0) * sx ) % nbs];
+            xprims_l = prim_buff[( (txa - 1) * sy + (tya + 0) * sx )];
+            xprims_r = prim_buff[( (txa - 0) * sy + (tya + 0) * sx )];
             //j+1/2
-            yprims_l = prim_buff[( (txa - 0) * sy + (tya - 1) * sx ) % nbs]; 
-            yprims_r = prim_buff[( (txa + 0) * sy + (tya - 0) * sx ) % nbs]; 
+            yprims_l = prim_buff[( (txa - 0) * sy + (tya - 1) * sx )]; 
+            yprims_r = prim_buff[( (txa + 0) * sy + (tya - 0) * sx )]; 
 
             // i+1/2
             ux_l = self->prims2cons(xprims_l); 
@@ -1033,7 +1042,7 @@ void SRHD2D::advance(
             case simbi::Geometry::SPHERICAL:
                 {
                 #if GPU_CODE
-                const real rl           = (ii > 0 ) ? x1min * pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
+                const real rl           = (ii > 0 ) ? x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
                 const real rr           = (ii < xpg - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
                 const real tl           = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
                 const real tr           = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
@@ -1178,7 +1187,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     sourceTau  = sources[3];
 
     // Copy the state array into real & profile variables
-    auto e_sum = 0.0;
     for (size_t i = 0; i < state2D[0].size(); i++)
     {
         auto D            = state2D[0][i];
@@ -1189,7 +1197,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         auto S            = std::sqrt(S1 * S1 + S2 * S2);
         cons[i]           = Conserved(D, S1, S2, E, Dchi);
         pressure_guess[i] = std::abs(S - D - E);
-        e_sum += E;
     }
     // deallocate initial state vector
     std::vector<int> state2D;
@@ -1281,6 +1288,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
+    
     // Simulate :)
     if (first_order)
     {  
@@ -1298,7 +1306,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones / delta_t.count();
-                writefl("\r Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {}", n, dt, t, total_zones/delta_t.count());
+                writefl("\r Iteration: {>8} \t dt: {>8} \t Time: {>8} \t Zones/sec: {>8}", n, dt, t, total_zones/delta_t.count());
                 nfold += 100;
             }
 
@@ -1323,7 +1331,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
             
             n++;
-            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
@@ -1357,7 +1364,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones/ delta_t.count();
-                writefl("Iteration: {} \t dt: {} \t Time: {} \t Zones/sec: {} \t\r", n, dt, t, total_zones/delta_t.count());
+                writefl("Iteration: {>8} \t dt: {>8} \t Time: {>8} \t Zones/sec: {>8} \t\r", n, dt, t, total_zones/delta_t.count());
                 nfold += 100;
             }
             
@@ -1384,7 +1391,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             // Update decay constant
             decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
 
-            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
@@ -1392,6 +1398,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             } else {
                 adapt_dt();
             }
+            // std::cout << dt << "\n";
+            // pause_program();
         }
 
     }
