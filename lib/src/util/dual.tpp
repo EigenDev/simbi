@@ -62,6 +62,7 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x1mean),&host_x1m,      sizeof(real *));
             simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_face_areas), &host_fas, sizeof(real *));
 
+            simbi::gpu::api::copyHostToDevice(&(device->inFailureState), &host.inFailureState, sizeof(bool));
             simbi::gpu::api::copyHostToDevice(&(device->dt),        &host.dt      ,            sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->gamma),     &host.gamma   ,            sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->cfl)  ,     &host.cfl     ,            sizeof(real));
@@ -331,6 +332,7 @@ namespace simbi
                 simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceE),&host_source0,  sizeof(real *));
             }
 
+            simbi::gpu::api::copyHostToDevice(&(device->inFailureState), &host.inFailureState, sizeof(bool));
             simbi::gpu::api::copyHostToDevice(&(device->dt),          &host.dt      ,    sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->plm_theta),   &host.plm_theta,   sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->gamma),       &host.gamma   ,    sizeof(real));
@@ -483,6 +485,7 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x2_face_areas), &host_fas2, sizeof(real *));
             simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x3_face_areas), &host_fas3, sizeof(real *));
 
+            simbi::gpu::api::copyHostToDevice(&(device->inFailureState), &host.inFailureState, sizeof(bool));
             simbi::gpu::api::copyHostToDevice(&(device->dt),            &host.dt      ,        sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->plm_theta),     &host.plm_theta,       sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->gamma),         &host.gamma   ,        sizeof(real));
