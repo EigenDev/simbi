@@ -45,7 +45,8 @@ SRHD3D::SRHD3D(
     x2(x2),
     x3(x3),
     cfl(cfl),
-    coord_system(coord_system)
+    coord_system(coord_system),
+    inFailureState(false)
 {
 
 }
@@ -195,7 +196,7 @@ void SRHD3D::cons2prim(
         if (tid == 0) found_failure = self->inFailureState;
         simbi::gpu::api::synchronize();
         #else 
-        found_failure = inFailureState;
+        found_failure = self->inFailureState;
         #endif
             
         while (!found_failure && workLeftToDo)
@@ -226,9 +227,8 @@ void SRHD3D::cons2prim(
                     const auto kk  = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z: simbi::detail::get_height(gid, xpg, ypg);
                     const auto jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: simbi::detail::get_row(gid, xpg, ypg, kk);
                     const auto ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: simbi::detail::get_column(gid, xpg, ypg, kk);
-                    
-                    if (!self->inFailureState) printf("\nCons2Prim cannot converge\n");
-                    if (!self->inFailureState) printf("Density: %f, Pressure: %f, Vsq: %f, xindex: %lu, yindex: %lu, zindex: %lu\n", rho, peq, v2, ii, jj, kk);
+                    printf("\nCons2Prim cannot converge\n");
+                    printf("Density: %f, Pressure: %f, Vsq: %f, xindex: %lu, yindex: %lu, zindex: %lu\n", rho, peq, v2, ii, jj, kk);
                     found_failure        = true;
                     self->inFailureState = true;
                     simbi::gpu::api::synchronize();
@@ -251,9 +251,8 @@ void SRHD3D::cons2prim(
             #endif
             workLeftToDo = false;
         }
-
     });
-
+    this->inFailureState = self->inFailureState;
 }
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
@@ -1512,7 +1511,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             }
 
             n++;
-            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
                 adapt_dt(device_self, geometry, activeP, dtShBytes);
@@ -1567,7 +1565,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                 t_interval += chkpt_interval;
             }
             n++;
-            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
                 adapt_dt(device_self, geometry, activeP, dtShBytes);

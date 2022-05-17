@@ -24,7 +24,7 @@ namespace simbi
         std::vector<std::vector<real>> state3D, sources;
         float tend, tstart;
         real plm_theta, gamma, bipolar;
-        bool first_order, periodic, hllc, linspace;
+        bool first_order, periodic, hllc, linspace, inFailureState;
         real cfl, dt, decay_const;
         luint nx, ny, nz, nzones, n, block_size, xphysical_grid, yphysical_grid, zphysical_grid;
         luint active_zones, idx_active, x_bound, y_bound;
@@ -37,7 +37,7 @@ namespace simbi
 
         real x3max, x3min, x2max, x2min, x1min, x1max, dx3, dx2, dx1, dlogx1;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, s3_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
-        bool inFailureState;
+
 
         //==============GPU Mirrors================
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceS3, *gpu_sourceTau, *gpu_pressure_guess;
