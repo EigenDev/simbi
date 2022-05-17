@@ -145,8 +145,8 @@ namespace simbi{
 
             if constexpr(is_relativistic<N>::value)
             {
-                real h  = 1 + gamma * p / (rho * (gamma - 1));
-                real cs = sqrt(gamma * p / (rho * h));
+                real h   = 1 + gamma * p / (rho * (gamma - 1));
+                real cs  = sqrt(gamma * p / (rho * h));
                 plus_v1  = (v1 + cs) / (static_cast<real>(1.0) + v1 * cs);
                 plus_v2  = (v2 + cs) / (static_cast<real>(1.0) + v2 * cs);
                 minus_v1 = (v1 - cs) / (static_cast<real>(1.0) - v1 * cs);
@@ -179,6 +179,8 @@ namespace simbi{
             } // end switch
             
             s->dt_min[jj * s->xphysical_grid + ii] = s->cfl * cfl_dt;
+            // if (jj * s->xphysical_grid + ii == 21)
+            //     printf("jj: %lu, ii: %lu, dt: %.2e\n", jj, ii, s->dt_min[jj * s->xphysical_grid + ii]);
         }
         #endif
     }
@@ -297,6 +299,9 @@ namespace simbi{
             for(int i = 1; bidx + tid  < zones; i++)
             {
                 val = s->dt_min[tid + bidx];
+                // GPUs are a bit strange...If I don't include the erroneous if statement then val will occasionally be <= 0....
+                if (val <= 0) 
+                    printf("idx: %lu, val: %f, dt: %f", tid + bidx, val, s->dt_min[tid + bidx]);
                 min = (val <= 0 || val > min) ? min : val;
                 bidx = i * blockDim.x * blockDim.y;
             }
@@ -306,7 +311,7 @@ namespace simbi{
             for(i = 1; bidx + tid < gridDim.x*gridDim.y; i++)
             {
                 val  = s->dt_min[tid + bidx];
-                min  = (val <= 0 || val > min) ? min : val;
+                min  = (val <= 0 || val > min)  ? min : val;
                 bidx = i * blockDim.x * blockDim.y;
             }
 
@@ -319,7 +324,8 @@ namespace simbi{
             }
             if(tid == 0)
             {
-                // printf("dt: %f\n", dt_buff[0]);
+                // if (dt_buff[0] < 1e-10)
+                //     printf("dt: %f\n", dt_buff[0]);
                 s->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
                 s->dt = s->dt_min[0];
             }
