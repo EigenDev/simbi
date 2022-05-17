@@ -23,12 +23,30 @@ constexpr real tol_scale = 1e-12;
     _a > _b ? _a : _b;       \
 })
 
+#define my_max3(a,b, c)             \
+({                           \
+    __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+    __typeof__ (c) _c = (c); \
+    _a > _b ? (_a > _c ? _a : _c) : _b > _c ? _b : _c ;   \
+})
+
 #define my_min(a,b)             \
 ({                           \
     __typeof__ (a) _a = (a); \
     __typeof__ (b) _b = (b); \
     _a < _b ? _a : _b;       \
 })
+
+#define my_min3(a,b, c)             \
+({                           \
+    __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+    __typeof__ (c) _c = (c); \
+    _a < _b ? (_a < _c ? _a : _c) : _b < _c ? _b : _c ;   \
+})
+
+#include <functional>
 
 // constexpr int BLOCK_SIZE   = 64;
 // constexpr int BLOCK_SIZE2D = 16;
@@ -88,7 +106,7 @@ namespace simbi{
         MIGNONE_AND_BODO_05,
     };
 
-    constexpr auto comp_wave_speed = WaveSpeeds::SCHNEIDER_ET_AL_93;
+    constexpr auto comp_wave_speed = WaveSpeeds::MIGNONE_AND_BODO_05;
 }
 
 #endif
