@@ -13,7 +13,8 @@ namespace simbi{
         SRHD *sim, 
         const int grid_size, 
         const bool first_order,
-        const simbi::BoundaryCondition boundary_condition)
+        const simbi::BoundaryCondition boundary_condition,
+        const sr1d::Conserved * outer_zones)
     {
         simbi::parallel_for(p, 0, 1, [=] GPU_LAMBDA (const int gid) {
             #if GPU_CODE
@@ -23,24 +24,38 @@ namespace simbi{
             #endif
             if (first_order){
                 cons[0] = cons[1];
-                cons[grid_size - 1] = cons[grid_size - 2];
+                if (outer_zones)
+                {
+                    cons[grid_size - 1] = outer_zones[0];
+                } else {
+                    cons[grid_size - 1] = cons[grid_size - 2];
+                }
+                
                 
                 switch (boundary_condition)
                 {
                 case simbi::BoundaryCondition::INFLOW:
-                    cons[0].s =   cons[1].s;
+                    cons[0] = cons[1];
                     break;
                 case simbi::BoundaryCondition::REFLECTING:
+                    cons[0]   = cons[1];
                     cons[0].s = - cons[1].s;
                     break;
                 default:
-                    cons[0].s =   cons[1].s;
+                    cons[0] = cons[1];
                     break;
                 }
             } else {
-                cons[grid_size - 1] = cons[grid_size - 3];
-                cons[grid_size - 2] = cons[grid_size - 3];
-
+                
+                if (outer_zones)
+                {
+                    cons[grid_size - 1] = outer_zones[0];
+                    cons[grid_size - 2] = outer_zones[0];
+                } else {
+                    cons[grid_size - 1] = cons[grid_size - 3];
+                    cons[grid_size - 2] = cons[grid_size - 3];
+                }
+                
                 switch (boundary_condition)
                 {
                 case simbi::BoundaryCondition::INFLOW:
@@ -58,8 +73,6 @@ namespace simbi{
                 default:
                     cons[0]   = cons[2];
                     cons[1]   = cons[2];
-                    cons[0].s = cons[2].s;
-                    cons[1].s = cons[2].s;
                     break;
                 }
             }

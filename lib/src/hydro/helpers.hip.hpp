@@ -77,7 +77,8 @@ namespace simbi
         SRHD *dev_sim, 
         const int grid_size,
         const bool first_order, 
-        const simbi::BoundaryCondition boundary_condition);
+        const simbi::BoundaryCondition boundary_condition,
+        const sr1d::Conserved *outer_zones = nullptr);
 
     void config_ghosts1D(
         const ExecutionPolicy<> p,
