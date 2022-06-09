@@ -13,6 +13,8 @@ src/state.cpp
 test.cpp
 call_obj.cpp
 call_obj.h 
+gpu_ext.cpp 
+cpu_ext.cpp
 ustate
 .vscode/
 *.h5
