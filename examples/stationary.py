@@ -48,7 +48,7 @@ def main():
 
 
     x = np.linspace(0, 1, args.nzones)
-    fig.suptitle("Stationary Wave Problem at $t$ = {} with $N =$ {}".format(args.tend, args.nzones))
+    fig.suptitle(r"$\rm{{Stationary  \ Wave \  Problem \ at}} \ t = {} \ \rm{{with}} \ N = {}$".format(args.tend, args.nzones))
     ax.plot(x, poll[0], 'r--', fillstyle='none', label='HLLE')
     ax.plot(x, bar [0], 'b', label='HLLC')
     ax.set_xlabel('$x$')
