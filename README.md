@@ -4,10 +4,11 @@
 https://user-images.githubusercontent.com/29236993/145315802-c8d7e8c5-7beb-488c-b496-b9edf404be2e.mp4
 
 ## 1D Moving mesh techniques
-https://user-images.githubusercontent.com/29236993/172739739-1714ab98-0a20-4334-a28f-c133d17e8e18.mp4
 
+https://user-images.githubusercontent.com/29236993/172741123-c9ef49ea-c504-4fef-8964-1cfb571b6ea3.mp4
 
-https://user-images.githubusercontent.com/29236993/172739751-54c8a1da-5663-4da5-8c47-98c79b2b37c6.mp4
+https://user-images.githubusercontent.com/29236993/172741106-3d4ea7ff-bb1e-4530-9716-8cf8db321ff4.mp4
+
 
 ## Requirements 
 1) GCC < GCC-11 (Cython doesn't play nicely with gcc 11 for some reason)
