@@ -110,6 +110,7 @@ void SRHD::advance(
     const CLattice1D *coord_lattice = &(self->coord_lattice);
     const lint  pseudo_radius       = (first_order) ? 1 : 2;
 
+    const auto step                 = (self->first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
     simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
@@ -230,7 +231,6 @@ void SRHD::advance(
             }
         }
 
-        auto step = (self->first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -239,16 +239,6 @@ void SRHD::advance(
                 #else 
                     cons[ia] -= ((frf - flf)  / dx1) * dt * step;
                 #endif 
-                
-                if (ii == 0)
-                {
-                    self->x1min += step * dt * vfaceL;
-                }
-                else if (ii == xpg - 1)
-                {
-                    self->x1max += step * dt * vfaceR;
-                    // writeln("flf: {}, frf: {}", flf.d, frf.d);
-                }
                 break;
             case simbi::Geometry::SPHERICAL:
             {
@@ -260,14 +250,7 @@ void SRHD::advance(
                 const real dV     = rmean * rmean * (rrf - rlf);    
                 const real factor = (mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
-                if (ii == 0)
-                {
-                    self->x1min += step * dt * vfaceL;
-                }
-                else if (ii == xpg - 1)
-                {
-                    self->x1max += step * dt * vfaceR;
-                }
+
                 #if GPU_CODE
                     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                     const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
@@ -292,14 +275,7 @@ void SRHD::advance(
                 const real sL           = rlf; 
                 const real dV           = rmean * (rrf - rlf);             
                 const real pc           = prim_buff[txa].p;
-                if (ii == 0)
-                {
-                    self->x1min = rlf;
-                }
-                if (ii == xpg - 1)
-                {
-                    self->x1max = rrf;
-                }
+                
                 #if GPU_CODE
                     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                     const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
@@ -314,6 +290,15 @@ void SRHD::advance(
             }
         } // end switch
     });	
+
+    // shift the grid max and mins
+    const real x1l    = self->get_xface(0, geometry, 0);
+    const real x1r    = self->get_xface(active_zones, geometry, 1);
+    const real vfaceR = x1r * hubble_param;
+    const real vfaceL = x1l * hubble_param;
+
+    self->x1min += step * dt * vfaceL;
+    self->x1max += step * dt * vfaceR;
     #if GPU_CODE
     this->x1max = self->x1max;
     this->x1min = self->x1min;
@@ -324,7 +309,14 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 {
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
     const bool mesh_motion = (hubble_param != 0);
-    const real step = (first_order) ? 1.0 : 0.5;
+    const real step        = (first_order) ? 1.0 : 0.5;
+    const real radius      = (first_order) ? 1 : 2;
+    #if GPU_CODE
+    const auto active_zones = this->active_zones;
+    const auto dt           = this->dt;
+    const auto hubble_param = this->hubble_param;
+    const auto geometry = this->geometry;
+    #endif
     simbi::parallel_for(p, (luint)0, nx, [=] GPU_LAMBDA (luint ii){
         #if GPU_CODE
         __shared__ Conserved  conserved_buff[BLOCK_SIZE];
@@ -334,7 +326,9 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         real eps, pre, v2, et, c2, h, g, f, W, rho, peq;
         volatile __shared__ bool found_failure;
         luint tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
-        if (tx == 0) found_failure = self->inFailureState;
+
+        if (tx == 0) 
+            found_failure = self->inFailureState;
         simbi::gpu::api::synchronize();
         
         real invdV = 1.0;
@@ -347,7 +341,14 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             
             if (mesh_motion && (geometry == simbi::Geometry::SPHERICAL))
             {
-                const lint idx   = (ii < active_zones - 1) ? ii : active_zones - 1;
+                lint idx;
+                if (ii < radius) {
+                    idx = 0;
+                } else if (ii > active_zones + 1) {
+                    idx = active_zones - 1;
+                } else {
+                    idx = ii - radius;
+                }
                 const real xl    = self->get_xface(idx, geometry, 0);
                 const real xr    = self->get_xface(idx, geometry, 1);
                 const real xlf   = xl * (1.0 + step * dt * hubble_param);
@@ -364,21 +365,20 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 peq  = self->pressure_guess[ii];
             }
 
-            const real D       = conserved_buff[tx].d   * invdV;
-            const real S       = conserved_buff[tx].s   * invdV;
-            const real tau     = conserved_buff[tx].tau * invdV;
-            // if (invdV < 0)
+            const real D   = conserved_buff[tx].d   * invdV;
+            const real S   = conserved_buff[tx].s   * invdV;
+            const real tau = conserved_buff[tx].tau * invdV;
+
+            // writeln("inverse volume: {}, lab frame density: {}", invdV, D);
+            // pause_program();
+            // if (ii == 2)
             // {
             //     writeln("D: {}, S: {}, E: {}, dV: {}", D, S, tau, invdV);
+            //     pause_program();
             // }
                 
-            // #if GPU_CODE
-            
-            // #else 
-            
-            // #endif
-            int iter           = 0;
-            const real tol     = D * tol_scale;
+            int iter       = 0;
+            const real tol = D * tol_scale;
             do
             {
                 pre = peq;
@@ -420,24 +420,17 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             //     // printf("peq: %f, npew: %f\n", rho * emin * (self->gamma - 1.0));
             //     peq = rho * emin * (self->gamma - 1.0);
             // }
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
+            #if GPU_CODE
                 self->gpu_pressure_guess[ii] = peq;
                 self->gpu_prims[ii]          = Primitive{D / W, v, peq};
-            } else {
+            #else
                 pressure_guess[ii] = peq;
                 prims[ii]  = Primitive{D / W, v, peq};
-            }
-            // #if GPU_CODE
-                
-            // #else
-                
-            // #endif
+            #endif
             workLeftToDo = false;
         }
     });
-    if constexpr(BuildPlatform == Platform::GPU)
-    {
+    if constexpr(BuildPlatform == Platform::GPU) {
         this->inFailureState = self->inFailureState;
     }
     
@@ -702,8 +695,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const real pStar = -fe * aStar + fs;
 
     
-    if (vface <= aStar)
-    {
+    if (vface <= aStar) {
         const real pressure = left_prims.p;
         const real D        = left_state.d;
         const real S        = left_state.s;
@@ -726,9 +718,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         Conserved hllc_flux = left_flux + (star_stateL - left_state) * aLm;
         return    hllc_flux - star_stateL * vface;
 
-    }
-    else
-    {
+    } else {
         const real pressure  = right_prims.p;
         const real D         = right_state.d;
         const real S         = right_state.s;
@@ -865,12 +855,12 @@ SRHD::simulate1D(
     simbi::dual::DualSpace1D<Primitive, Conserved, SRHD> dualMem;
     dualMem.copyHostToDev(*this, device_self);
 
-    const auto fullP              = simbi::ExecutionPolicy(nx);
-    const auto activeP            = simbi::ExecutionPolicy(active_zones);
-    const luint radius            = (periodic) ? 0 : (first_order) ? 1 : 2;
-    const luint pseudo_radius     = (first_order) ? 1 : 2;
-    const luint shBlockSize       = BLOCK_SIZE + 2 * pseudo_radius;
-    const luint shBlockBytes      = shBlockSize * sizeof(Primitive);
+    const auto fullP          = simbi::ExecutionPolicy(nx);
+    const auto activeP        = simbi::ExecutionPolicy(active_zones);
+    const luint radius        = (periodic) ? 0 : (first_order) ? 1 : 2;
+    const luint pseudo_radius = (first_order) ? 1 : 2;
+    const luint shBlockSize   = BLOCK_SIZE + 2 * pseudo_radius;
+    const luint shBlockBytes  = shBlockSize * sizeof(Primitive);
 
     if constexpr(BuildPlatform == Platform::GPU)
     {
@@ -884,6 +874,7 @@ SRHD::simulate1D(
     tchunk = "000000";
     lint tchunk_order_of_mag = 2;
     lint time_order_of_mag;
+    double tbefore;
 
     // Some benchmarking tools 
     luint   nfold   = 0;
@@ -907,7 +898,32 @@ SRHD::simulate1D(
         #endif
         outer_zones[0] = {d_outer(x1max), s_outer(x1max), e_outer(x1max)};
     }
-    
+
+    // Save initial condition
+    if (t == 0)
+    {
+        if constexpr(BuildPlatform == Platform::GPU) 
+            dualMem.copyDevToHost(device_self, *this);
+
+        setup.x1max = x1max;
+        setup.x1min = x1min;
+        time_order_of_mag = std::floor(std::log10(t));
+        if (time_order_of_mag > tchunk_order_of_mag)
+        {
+            tchunk.insert(0, "0");
+            tchunk_order_of_mag += 1;
+        }
+        transfer_prims = vec2struct<sr1d::PrimitiveArray, Primitive>(prims);
+        writeToProd<sr1d::PrimitiveArray, Primitive>(&transfer_prims, &prods);
+        tnow = create_step_str(t_interval, tchunk);
+        filename = string_format("%d.chkpt." + tnow + ".h5", active_zones);
+        setup.t  = t;
+        setup.dt = t - tbefore;
+        tbefore  = t;
+        write_hdf5(data_directory, filename, prods, setup, 1, nx);
+        t_interval += chkpt_interval;
+    }
+
     const bool mesh_motion = (hubble_param != 0);
     if (first_order)
     {  
@@ -952,7 +968,8 @@ SRHD::simulate1D(
                 tnow      = create_step_str(t_interval, tchunk);
                 filename  = string_format("%lu.chkpt." + tnow + ".h5", active_zones);
                 setup.t   = t;
-                setup.dt  = dt;
+                setup.dt  = t - tbefore;
+                tbefore   = t;
                 write_hdf5(data_directory, filename, prods, setup, 1, nx);
                 t_interval += chkpt_interval;
             }
@@ -1008,10 +1025,15 @@ SRHD::simulate1D(
                 nfold += 100;
             }
             
+            // std::cout << t << "\n";
             /* Write to a File every tenth of a second */
             if (t >= t_interval && t != INFINITY)
             {
-                if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
+                // writeln("time: {}, tbefore: {}, tinterval: {}, dt: {}", t, tbefore, t_interval, dt);
+                // pause_program();
+                if constexpr(BuildPlatform == Platform::GPU) 
+                    dualMem.copyDevToHost(device_self, *this);
+
                 setup.x1max = x1max;
                 setup.x1min = x1min;
                 time_order_of_mag = std::floor(std::log10(t));
@@ -1025,7 +1047,8 @@ SRHD::simulate1D(
                 tnow = create_step_str(t_interval, tchunk);
                 filename = string_format("%d.chkpt." + tnow + ".h5", active_zones);
                 setup.t  = t;
-                setup.dt = dt;
+                setup.dt = t - tbefore;
+                tbefore  = t;
                 write_hdf5(data_directory, filename, prods, setup, 1, nx);
                 t_interval += chkpt_interval;
             }
@@ -1050,6 +1073,9 @@ SRHD::simulate1D(
             hubble_param = adot(t) / a(t);
             if (inFailureState)
                 simbi::gpu::api::deviceSynch();
+
+            // writeln("dlogr: {}, dlogr_new: {}", dlogx1, std::log10(x1max/x1min)/(active_zones - 1));
+            // pause_program();
             
         }
 
