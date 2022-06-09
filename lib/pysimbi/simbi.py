@@ -413,9 +413,9 @@ class Hydro:
                     self.u[:, -1]   *= dV[-1]
                 else:
                     self.u[:, 2:-2]  *= dV 
-                    self.u[:, 0: 1]   = self.u[:,  0: 1] * dV[0]
-                    self.u[:,-2:  ]   = self.u[:, -2:  ] * dV[-1]
-            
+                    self.u[:, 0: 2]  *= dV[0]
+                    self.u[:,-2:  ]  *= dV[-1]
+                
             kwargs = {}
             if self.regime == "classical":
                 state = PyState(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
