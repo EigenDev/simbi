@@ -13,7 +13,7 @@ import h5py
 import astropy.constants as const
 import astropy.units as u 
 import os
-
+import utility as util
 from datetime import datetime
 
 cons = ['D', 'momentum', 'energy']
@@ -38,28 +38,6 @@ def fill_below_intersec(x, y, constraint, color):
     # colors = plt.cm.plasma(np.linspace(0.25, 0.75, len(x)))
     ind = find_nearest(y, constraint)[0]
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
-    
-def get_field_str(args):
-    if args.field == 'rho':
-        if args.units:
-            return r'$\rho$ [g cm$^{-3}$]'
-        else:
-            return r'$\rho$'
-    elif args.field == 'gamma_beta':
-        return r'$\Gamma \ \beta$'
-    elif args.field == 'energy':
-        return r'$\tau$'
-    else:
-        return args.field
-    
-def prims2cons(fields, cons):
-    if cons == 'D':
-        return fields['rho'] * fields['W']
-    elif cons == 'S':
-        return fields['rho'] * fields['W']**2 * fields['v']
-    elif cons == 'energy':
-        return fields['rho']*fields['enthalpy']*fields['W']**2 - fields['p'] - fields['rho']*fields['W']
-
 
 def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot = False, case = 0):
     
@@ -69,40 +47,41 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,8))
     
-    unit_scale = 1.0
-    if (args.units):
-        if args.field == 'rho':
-            unit_scale = rho_scale
-        elif args.field == 'p':
-            unit_scale = pre_scale
-        
-    if args.field in cons:
-        var = prims2cons(fields, args.field)
-    else:
-        var = fields[args.field]
-        
-    if args.labels is None:
-        ax.plot(r, var * unit_scale, color=colors[case])
-    else:
-        ax.plot(r, var * unit_scale, color=colors[case], label=r'${}$, t={:.2f}'.format(args.labels[case], tend))
+    for field in args.field:
+        unit_scale = 1.0
+        if (args.units):
+            if field == 'rho':
+                unit_scale = rho_scale
+            elif field == 'p':
+                unit_scale = pre_scale
+            
+        if field in cons:
+            var = util.prims2var(fields, field)
+        else:
+            var = fields[field]
+            
+        if args.labels is None:
+            ax.plot(r, var * unit_scale, color=colors[case])
+        else:
+            ax.plot(r, var * unit_scale, color=colors[case], label=r'${}$, t={:.2f}'.format(args.labels[case], tend))
 
-    ax.tick_params(axis='both', labelsize=15)
+    ax.tick_params(axis='both')
     if args.log:
         ax.set_xscale('log')
         ax.set_yscale('log')
     elif not dset['linspace']:
         ax.set_xscale('log')
     
-    ax.set_xlabel('$r$', fontsize=20)
-    if args.xlim is None:
-        ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
-    else:
-        x1min, x1max = eval(args.xlim)
-        ax.set_xlim(x1min, x1max)
+    ax.set_xlabel('$r$')
+    # if args.xlim is None:
+    #     ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
+    # else:
+    #     x1min, x1max = eval(args.xlim)
+    #     ax.set_xlim(x1min, x1max)
     # Change the format of the field
-    field_str = get_field_str(args)
+    field_str = util.get_field_str(args)
         
-    ax.set_ylabel('{}'.format(field_str), fontsize=20)
+    ax.set_ylabel('{}'.format(field_str))
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     # ax.axvline(0.60, color='black', linestyle='--')
@@ -121,9 +100,9 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
     
     
     if not subplot:   
-        ax.set_title('{}'.format(args.setup[0]), fontsize=20)
+        ax.set_title('{}'.format(args.setup[0]))
     if not overplot:
-        ax.set_title('{} at t = {:.3f}'.format(args.setup[0], tend), fontsize=20)
+        ax.set_title('{} at t = {:.3f}'.format(args.setup[0], tend))
         return fig
     
 def plot_hist(args, fields, mesh, dset, overplot=False, ax=None, subplot = False, case=0):
@@ -133,7 +112,7 @@ def plot_hist(args, fields, mesh, dset, overplot=False, ax=None, subplot = False
         ax = fig.add_subplot(1, 1, 1)
 
     tend        = dset['time']
-    edens_total = prims2cons(fields, 'energy')
+    edens_total = util.prims2var(fields, 'energy')
     r           = mesh['r']
     dV          = util.calc_cell_volume1D(r)
     
@@ -179,14 +158,14 @@ def plot_hist(args, fields, mesh, dset, overplot=False, ax=None, subplot = False
     ax.set_xscale('log')
     ax.set_yscale('log')
     # ax.set_ylim(sorted_energy[1], 1.5*ets.max())
-    ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
+    ax.set_xlabel(r'$\Gamma\beta $')
     if args.eks:
-        ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+        ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$')
     elif args.hhist:
-        ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+        ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$')
     else:
-        ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
-    ax.tick_params('both', labelsize=15)
+        ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
+    ax.tick_params('both')
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     
@@ -194,10 +173,10 @@ def plot_hist(args, fields, mesh, dset, overplot=False, ax=None, subplot = False
     if args.fill_scale is not None:
         fill_below_intersec(gbs, energy, args.fill_scale*energy.max(), colors[case])
     if not subplot:
-        ax.set_title(r'setup: {}'.format(args.setup[0]), fontsize=20)
-        # ax.legend(fontsize=15)
+        ax.set_title(r'setup: {}'.format(args.setup[0]))
+        
     if not overplot:
-        ax.set_title(r'setup: {}, t ={:.2f}'.format(args.setup[0], tend), fontsize=20)
+        ax.set_title(r'setup: {}, t ={:.2f}'.format(args.setup[0], tend))
         return fig
 
 def main():
@@ -205,65 +184,35 @@ def main():
         description='Plot a 2D Figure From a File (H5).',
         epilog='This Only Supports H5 Files Right Now')
     
-    parser.add_argument('filename', metavar='Filename', nargs='+',
-                        help='A Data Source to Be Plotted')
-    
-    parser.add_argument('setup', metavar='Setup', nargs='+', type=str,
-                        help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    
-    parser.add_argument('--field', dest = 'field', metavar='Field Variable', nargs='?',
-                        help='The name of the field variable you\'d like to plot',
-                        choices=field_choices, default='rho')
-    
-    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max',
-                        default = 0.0, help='The domain range')
-    
-    parser.add_argument('--xlim', dest = 'xlim', metavar='Domain',
-                        default = None, help='The domain range')
-    
-    parser.add_argument('--fill_scale', dest = 'fill_scale', metavar='Filler maximum', type=float,
-                        default = None, help='Set the y-scale to start plt.fill_between')
-    
-    parser.add_argument('--log', dest='log', action='store_true',
-                        default=False,
-                        help='Logarithmic Radial Grid Option')
-    
-    parser.add_argument('--ehist', dest='ehist', action='store_true',
-                        default=False,
-                        help='Plot the energy_vs_gb histogram')
-    
-    parser.add_argument('--eks', dest='eks', action='store_true',
-                        default=False,
-                        help='Plot the kinetic energy on the histogram')
-    
-    parser.add_argument('--hhist', dest='hhist', action='store_true',
-                        default=False,
-                        help='Plot the enthalpy on the histogram')
-    
-    parser.add_argument('--labels', dest='labels', nargs='+',
-                        help='map labels to filenames')
-
-    parser.add_argument('--save', dest='save',
-                        default=None,
-                        help='If you want save the fig')
-    
-    parser.add_argument('--first_order', dest='forder', action='store_true',
-                        default=False,
-                        help='True if this is a grid using RK1')
-    
-    parser.add_argument('--plots', dest='plots', type = int,
-                        default=1,
-                        help=r'Number of subplots you\'d like')
-    
-    parser.add_argument('--units', dest='units', action='store_true',
-                        default=False,
-                        help='True if you would like units scale (default is solar units)')
-
-   
+    parser.add_argument('filename', metavar='Filename', nargs='+', help='A Data Source to Be Plotted')
+    parser.add_argument('setup', metavar='Setup', nargs='+', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
+    parser.add_argument('--field', dest = 'field', metavar='Field Variable(s)', nargs='+', help='The name of the field variable(s) you\'d like to plot', choices=field_choices, default='rho')
+    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max', default = 0.0, help='The domain range')
+    parser.add_argument('--xlim', dest = 'xlim', metavar='Domain',default = None, help='The domain range')
+    parser.add_argument('--fill_scale', dest = 'fill_scale', metavar='Filler maximum', type=float, default = None, help='Set the y-scale to start plt.fill_between')
+    parser.add_argument('--log', dest='log', action='store_true', default=False, help='Logarithmic Radial Grid Option')
+    parser.add_argument('--ehist', dest='ehist', action='store_true',default=False, help='Plot the energy_vs_gb histogram')
+    parser.add_argument('--eks', dest='eks', action='store_true', default=False,help='Plot the kinetic energy on the histogram')
+    parser.add_argument('--hhist', dest='hhist', action='store_true',default=False,help='Plot the enthalpy on the histogram')
+    parser.add_argument('--labels', dest='labels', nargs='+',help='map labels to filenames')
+    parser.add_argument('--save', dest='save', default=None, help='If you want save the fig')
+    parser.add_argument('--first_order', dest='forder', action='store_true', default=False, help='True if this is a grid using RK1')
+    parser.add_argument('--plots', dest='plots', type = int, default=1,help=r'Number of subplots you\'d like')
+    parser.add_argument('--units', dest='units', action='store_true', default=False,help='True if you would like units scale (default is solar units)')
+    parser.add_argument('--tex', dest='tex', default=False, action='store_true', help='set if want Latex typesetting')
+    parser.add_argument('--fig_size', dest='fig_size', default=(4,3.5), type=float, help='size of figure', nargs=2)
     args = parser.parse_args()
+    
+    if args.tex:
+        plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Time New Roman"]})
+    
+    fig_size = args.fig_size
     if len(args.filename) > 1:
         if args.plots == 1:
-            fig = plt.figure(figsize=(10,10))
+            fig = plt.figure(figsize=(fig_size[0], fig_size[1]))
             ax = fig.add_subplot(1, 1, 1)
             for idx, file in enumerate(args.filename):
                 fields, setup, mesh = util.read_1d_file(file)
@@ -272,7 +221,7 @@ def main():
                 else:
                     plot_profile(args, fields, mesh, setup, ax = ax, overplot=True, case = idx)
         else:
-            fig = plt.figure(figsize=(30,10))
+            fig = plt.figure(figsize=(fig_size[0], fig_size[1]))
             ax1 = fig.add_subplot(1, 2, 1)
             ax2 = fig.add_subplot(1, 2, 2)
             for idx, file in enumerate(args.filename):
@@ -280,9 +229,9 @@ def main():
                 plot_hist(args, fields,mesh, setup,  ax = ax1, overplot= True, subplot = True, case = idx)
                 plot_profile(args, fields, mesh, setup, ax = ax2, overplot=True, subplot = True, case = idx)
                 
-            fig.suptitle('{}'.format(args.setup[0]), fontsize=40)
+            fig.suptitle('{}'.format(args.setup[0]))
         if args.labels != None:
-            ax.legend(fontsize = 15)
+            ax.legend()
             
     else:
         fields, setup, mesh = util.read_1d_file(args.filename[0])
