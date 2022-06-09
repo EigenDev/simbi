@@ -71,8 +71,8 @@ namespace simbi{
                     cons[1].s = - cons[2].s;
                     break;
                 default:
-                    cons[0]   = cons[2];
-                    cons[1]   = cons[2];
+                    cons[0] = cons[2];
+                    cons[1] = cons[2];
                     break;
                 }
             }
