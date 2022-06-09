@@ -3,6 +3,11 @@
 https://user-images.githubusercontent.com/29236993/145315802-c8d7e8c5-7beb-488c-b496-b9edf404be2e.mp4
 
 
+https://user-images.githubusercontent.com/29236993/172739739-1714ab98-0a20-4334-a28f-c133d17e8e18.mp4
+
+
+https://user-images.githubusercontent.com/29236993/172739751-54c8a1da-5663-4da5-8c47-98c79b2b37c6.mp4
+
 ## Requirements 
 1) GCC < GCC-11 (Cython doesn't play nicely with gcc 11 for some reason)
 2) Cython 
