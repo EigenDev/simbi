@@ -1002,20 +1002,18 @@ SRHD::simulate1D(
             // First Half Step
             cons2prim(fullP, self, memside);
             advance(self, shBlockSize, radius, geometry, memside);
-            if (!periodic)
-            {
+            if (!periodic) {
                 config_ghosts1D(fullP, self, nx, false, bc, outer_zones);
             }
             // Final Half Step
             cons2prim(fullP, self, memside);
             advance(self, shBlockSize, radius, geometry, memside);
-            if (!periodic)
-            {
+            if (!periodic) {
                 config_ghosts1D(fullP, self, nx, false, bc, outer_zones);
             }
 
             t += dt; 
-            if (n >= nfold){
+            if (n >= nfold) {
                 simbi::gpu::api::deviceSynch();
                 ncheck += 1;
                 t2 = high_resolution_clock::now();
@@ -1027,8 +1025,7 @@ SRHD::simulate1D(
             
             // std::cout << t << "\n";
             /* Write to a File every tenth of a second */
-            if (t >= t_interval && t != INFINITY)
-            {
+            if (t >= t_interval && t != INFINITY) {
                 // writeln("time: {}, tbefore: {}, tinterval: {}, dt: {}", t, tbefore, t_interval, dt);
                 // pause_program();
                 if constexpr(BuildPlatform == Platform::GPU) 
@@ -1056,16 +1053,14 @@ SRHD::simulate1D(
             simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
 
             //Adapt the timestep
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
+            if constexpr(BuildPlatform == Platform::GPU) {
                 adapt_dt(device_self, activeP.gridSize.x);
             } else {
                 adapt_dt();
             }
 
             // Update the outer zones with the necessary configs if they exists
-            if (d_outer)
-            {
+            if (d_outer) {
                 const real dV  = get_cell_volume(active_zones - 1, geometry, mesh_motion);
                 outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
             }
@@ -1073,9 +1068,6 @@ SRHD::simulate1D(
             hubble_param = adot(t) / a(t);
             if (inFailureState)
                 simbi::gpu::api::deviceSynch();
-
-            // writeln("dlogr: {}, dlogr_new: {}", dlogx1, std::log10(x1max/x1min)/(active_zones - 1));
-            // pause_program();
             
         }
 
