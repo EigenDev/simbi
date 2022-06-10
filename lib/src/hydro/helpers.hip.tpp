@@ -301,7 +301,7 @@ namespace simbi{
                 val = s->dt_min[tid + bidx];
                 // GPUs are a bit strange...If I don't include the erroneous if statement then val will occasionally be <= 0....
                 if (val <= 0) 
-                    printf("idx: %lu, val: %f, dt: %f", tid + bidx, val, s->dt_min[tid + bidx]);
+                    printf("idx: %lu, val: %f, dt: %f\n", tid + bidx, val, s->dt_min[tid + bidx]);
                 min = (val <= 0 || val > min) ? min : val;
                 bidx = i * blockDim.x * blockDim.y;
             }

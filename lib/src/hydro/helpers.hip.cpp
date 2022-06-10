@@ -168,7 +168,7 @@ namespace simbi{
                 {
                     // Fix the ghost zones at the radial boundaries
                     if (outer_zones) {
-                        u_state[jj * sx +  (x1grid_size - 1) * sy] = outer_zones[0];
+                        u_state[jj * sx +  (x1grid_size - 1) * sy] = outer_zones[jj];
                     } else {
                         u_state[jj * sx +  (x1grid_size - 1) * sy] = u_state[jj * sx +  (x1grid_size - 2) * sy];
                     }
@@ -205,8 +205,8 @@ namespace simbi{
                     // Fix the ghost zones at the radial boundaries
                     // Fix the ghost zones at the radial boundaries
                     if (outer_zones) {
-                        u_state[jj * sx +  (x1grid_size - 1) * sy] = outer_zones[0];
-                        u_state[jj * sx +  (x1grid_size - 2) * sy] = outer_zones[0];
+                        u_state[jj * sx +  (x1grid_size - 1) * sy] = outer_zones[jj];
+                        u_state[jj * sx +  (x1grid_size - 2) * sy] = outer_zones[jj];
                     } else {
                         u_state[jj * sx +  (x1grid_size - 1) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
                         u_state[jj * sx +  (x1grid_size - 2) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
