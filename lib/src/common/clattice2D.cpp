@@ -198,8 +198,7 @@ void simbi::CLattice2D::compute_dV()
         {
             rr = x1vertices[ii];
             rl = x1vertices[ii - 1];
-            dV = (1./3.) * (rr*rr*rr - rl*rl*rl)*(std::cos(tl) - std::cos(tr));
-            
+            dV = 2.0 * M_PI * (1./3.) * (rr*rr*rr - rl*rl*rl)*(std::cos(tl) - std::cos(tr));
             dVc.push_back(dV);
         }
     }
@@ -238,32 +237,19 @@ void simbi::CLattice2D::compute_x1mean()
 void simbi::CLattice2D::config_lattice(simbi::Cellspacing xcellspacing, simbi::Cellspacing ycellspacing)
 {
     set_nx1_zones();
-
     set_nx2_zones();
-
     compute_x1_vertices(xcellspacing);
-
     compute_x2_vertices(ycellspacing);
-
     compute_x1face_areas();
-
     compute_x2face_areas();
-
     compute_s1face_areas();
     compute_s2face_areas();
-
     compute_dx1();
-
     compute_dx2();
-
     compute_dV1();
-
     compute_dV2();
-
     compute_dV();
-
     compute_x1mean();
-
     compute_cot();
 }
 
