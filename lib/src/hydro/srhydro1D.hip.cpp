@@ -182,9 +182,7 @@ void SRHD::advance(
             {
                 flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceL);
             }   
-        }
-        else
-        {
+        } else {
             Primitive left_most, right_most, left_mid, right_mid, center;
             left_most  = prim_buff[mod(txa - 2, bx)];
             left_mid   = prim_buff[mod(txa - 1, bx)];
@@ -512,7 +510,7 @@ void SRHD::adapt_dt()
         #pragma omp for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++)
         {
-            x1r    = get_xface(ii, geometry, 0);
+            x1l    = get_xface(ii, geometry, 0);
             x1r    = get_xface(ii, geometry, 1);
             vfaceL = x1l * hubble_param;
             vfaceR = x1r * hubble_param;
@@ -670,12 +668,9 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const real aLm = aL < 0 ? aL : 0;
     const real aRp = aR > 0 ? aR : 0;
 
-    if (vface <= aLm)
-    {
+    if (vface <= aLm) {
         return left_flux - left_state * vface;
-    }
-    else if (vface >= aRp)
-    {
+    } else if (vface >= aRp) {
         return right_flux - right_state * vface;
     }
     const Conserved hll_flux  = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);

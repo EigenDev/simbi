@@ -84,7 +84,8 @@ namespace simbi{
         Newtonian1D *sim, 
         const int grid_size, 
         const bool first_order,
-        const simbi::BoundaryCondition boundary_condition)
+        const simbi::BoundaryCondition boundary_condition,
+        const hydro1d::Conserved *outer_zones)
     {
         simbi::parallel_for(p, 0, 1, [=] GPU_LAMBDA (const int gid) {
             #if GPU_CODE
@@ -146,9 +147,9 @@ namespace simbi{
         const int x2grid_size, 
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
+        const sr2d::Conserved *outer_zones,
         const bool bipolar)
     {
-        
         const int extent = (BuildPlatform == Platform::GPU) ? p.gridSize.x * p.blockSize.x * p.gridSize.y * p.blockSize.y : x1grid_size * x2grid_size; 
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
             const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % x1grid_size;
@@ -166,7 +167,12 @@ namespace simbi{
                 if(jj < x2grid_size)
                 {
                     // Fix the ghost zones at the radial boundaries
-                    u_state[jj * sx +  (x1grid_size - 1) * sy] = u_state[jj * sx +  (x1grid_size - 2) * sy];
+                    if (outer_zones) {
+                        u_state[jj * sx +  (x1grid_size - 1) * sy] = outer_zones[0];
+                    } else {
+                        u_state[jj * sx +  (x1grid_size - 1) * sy] = u_state[jj * sx +  (x1grid_size - 2) * sy];
+                    }
+                    
                     u_state[jj * sx +  0 * sy]   = u_state[jj * sx +  1 * sy];
                     switch (boundary_condition)
                     {
@@ -177,6 +183,7 @@ namespace simbi{
                         u_state[jj * sx + 0 * sy].s1 = - u_state[jj * sx + 1 * sy].s1;
                         break;
                     default:
+                        u_state[jj * sx +  0 * sy]   = u_state[jj * sx +  1 * sy];
                         break;
                     }
 
@@ -196,8 +203,14 @@ namespace simbi{
                 if(jj < x2grid_size)
                 {
                     // Fix the ghost zones at the radial boundaries
-                    u_state[jj * sx +  (x1grid_size - 1) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
-                    u_state[jj * sx +  (x1grid_size - 2) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
+                    // Fix the ghost zones at the radial boundaries
+                    if (outer_zones) {
+                        u_state[jj * sx +  (x1grid_size - 1) * sy] = outer_zones[0];
+                        u_state[jj * sx +  (x1grid_size - 2) * sy] = outer_zones[0];
+                    } else {
+                        u_state[jj * sx +  (x1grid_size - 1) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
+                        u_state[jj * sx +  (x1grid_size - 2) * sy] = u_state[jj * sx +  (x1grid_size - 3) * sy];
+                    }
                     switch (boundary_condition)
                     {
                     case simbi::BoundaryCondition::REFLECTING:
@@ -222,16 +235,16 @@ namespace simbi{
 
                     // Fix the ghost zones at the angular boundaries
                     if (ii < x1grid_size){
-                        u_state[0 * sx + ii * sy]  = u_state[3 * sx + ii * sy];
-                        u_state[1 * sx + ii * sy]  = u_state[2 * sx + ii * sy];
+                        // u_state[0 * sx + (ii + 2) * sy]  = u_state[3 * sx + (ii + 2) * sy];
+                        // u_state[1 * sx + (ii + 2) * sy]  = u_state[2 * sx + (ii + 2) * sy];
 
-                        u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + ii * sy];
-                        u_state[(x2grid_size - 2) * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + ii * sy];
+                        u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + (ii + 2) * sy];
+                        u_state[(x2grid_size - 2) * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + (ii + 2) * sy];
 
                         if (bipolar)
                         {
-                            u_state[(x2grid_size - 1) * sx + ii * sy].s2 = - u_state[(x2grid_size - 4) * sx + ii * sy].s2;
-                            u_state[(x2grid_size - 2) * sx + ii * sy].s2 = - u_state[(x2grid_size - 3) * sx + ii * sy].s2;
+                            u_state[(x2grid_size - 1) * sx + ii * sy].s2 = - u_state[(x2grid_size - 4) * sx + (ii + 2) * sy].s2;
+                            u_state[(x2grid_size - 2) * sx + ii * sy].s2 = - u_state[(x2grid_size - 3) * sx + (ii + 2) * sy].s2;
                         }
                     }
                 }
@@ -246,6 +259,7 @@ namespace simbi{
         const int x2grid_size, 
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
+        const hydro2d::Conserved *outer_zones,
         const bool bipolar)
     {
         

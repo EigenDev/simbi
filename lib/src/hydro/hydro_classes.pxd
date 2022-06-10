@@ -134,7 +134,30 @@ cdef extern from "srhydro2D.hip.hpp" namespace "simbi":
             bool first_order,
             bool linspace,
             bool hllc,
-            bool quirk_smoothing)
+            bool quirk_smoothing,
+            PyObjWrapper a,
+            PyObjWrapper adot)
+
+        vector[vector[real]] simulate2D(
+            vector[vector[real]] sources,
+            real tstart,
+            real tend,
+            real dt,
+            real plm_theta,
+            real engine_duration,
+            real chkpt_interval,
+            string data_directory,
+            string boundary_condition,
+            bool first_order,
+            bool linspace,
+            bool hllc,
+            bool quirk_smoothing,
+            PyObjWrapper a,
+            PyObjWrapper adot,
+            PyObjWrapper d_outer,
+            PyObjWrapper s1_outer,
+            PyObjWrapper s2_outer,
+            PyObjWrapper e_outer)
 
 cdef extern from "srhydro3D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD3D:

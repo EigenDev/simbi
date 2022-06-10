@@ -85,7 +85,8 @@ namespace simbi
         Newtonian1D *dev_sim, 
         const int grid_size,
         const bool first_order, 
-        const simbi::BoundaryCondition boundary_condition);
+        const simbi::BoundaryCondition boundary_condition,
+        const hydro1d::Conserved *outer_zones = nullptr);
         
     void config_ghosts2D(
         const ExecutionPolicy<> p,
@@ -94,6 +95,7 @@ namespace simbi
         const int x2grid_size, 
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
+        const sr2d::Conserved *outer_zones = nullptr,
         const bool bipolar = true);
 
     void config_ghosts2D(
@@ -103,6 +105,7 @@ namespace simbi
         const int x2grid_size, 
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
+        const hydro2d::Conserved *outer_zones = nullptr,
         const bool bipolar = true);
 
     void config_ghosts3D(

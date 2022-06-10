@@ -161,8 +161,6 @@ namespace simbi
                     {
                          return 1.0;
                     }
-                    break;
-               
                case simbi::Geometry::SPHERICAL:
                     {
                          const real rl = (ii > 0 ) ? x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
