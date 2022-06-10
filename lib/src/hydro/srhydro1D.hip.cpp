@@ -221,7 +221,7 @@ void SRHD::advance(
             f_l = self->prims2flux(prims_l);
             f_r = self->prims2flux(prims_r);
 
-            if (self->hllc)
+            if (self->hllc) 
             {
                 flf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceL);
             } else {
@@ -366,14 +366,6 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             const real D   = conserved_buff[tx].d   * invdV;
             const real S   = conserved_buff[tx].s   * invdV;
             const real tau = conserved_buff[tx].tau * invdV;
-
-            // writeln("inverse volume: {}, lab frame density: {}", invdV, D);
-            // pause_program();
-            // if (ii == 2)
-            // {
-            //     writeln("D: {}, S: {}, E: {}, dV: {}", D, S, tau, invdV);
-            //     pause_program();
-            // }
                 
             int iter       = 0;
             const real tol = D * tol_scale;
@@ -1018,11 +1010,8 @@ SRHD::simulate1D(
                 nfold += 100;
             }
             
-            // std::cout << t << "\n";
             /* Write to a File every tenth of a second */
             if (t >= t_interval && t != INFINITY) {
-                // writeln("time: {}, tbefore: {}, tinterval: {}, dt: {}", t, tbefore, t_interval, dt);
-                // pause_program();
                 if constexpr(BuildPlatform == Platform::GPU) 
                     dualMem.copyDevToHost(device_self, *this);
 
@@ -1074,6 +1063,14 @@ SRHD::simulate1D(
         dualMem.copyDevToHost(device_self, *this);
         simbi::gpu::api::gpuFree(device_self);
     } 
+
+    if (outer_zones) {
+        if constexpr(BuildPlatform == Platform::GPU) {
+            simbi::gpu::api::gpuFree(outer_zones);
+        } else {
+            delete[] outer_zones;
+        }
+    }
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
     for (luint ii = 0; ii < nx; ii++)
