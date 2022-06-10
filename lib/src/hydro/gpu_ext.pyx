@@ -56,7 +56,6 @@ cdef class PyState:
 
         return np.asarray(result)
 
-
 # Relativisitc 1D Class
 cdef class PyStateSR:
     cdef SRHD c_state             # hold a c++ instance that we're wrapping           
@@ -90,7 +89,6 @@ cdef class PyStateSR:
 
         cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
-
         cdef PyObjWrapper d_cpp = PyObjWrapper(d_outer)
         cdef PyObjWrapper s_cpp = PyObjWrapper(s_outer)
         cdef PyObjWrapper e_cpp = PyObjWrapper(e_outer)
@@ -130,7 +128,7 @@ cdef class PyStateSR:
                 hllc,
                 a_cpp,
                 adot_cpp)
-        
+            
         return np.asarray(result)
 
 cdef class PyState2D:
@@ -213,22 +211,59 @@ cdef class PyStateSR2D:
         bool first_order,
         bool linspace,
         bool hllc,
-        bool quirk_smoothing):
+        bool quirk_smoothing,
+        a,
+        adot,
+        d_outer  = None,
+        s1_outer = None,
+        s2_outer = None,
+        e_outer  = None):
         
-        result = self.c_state.simulate2D(
-            sources,
-            tstart,
-            tend,
-            dt,
-            plm_theta,
-            engine_duration,
-            chkpt_interval,
-            data_directory,
-            boundary_condition,
-            first_order,
-            linspace,
-            hllc,
-            quirk_smoothing)
+        cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
+        cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
+        cdef PyObjWrapper d_cpp    = PyObjWrapper(d_outer)
+        cdef PyObjWrapper s1_cpp   = PyObjWrapper(s1_outer)
+        cdef PyObjWrapper s2_cpp   = PyObjWrapper(s2_outer)
+        cdef PyObjWrapper e_cpp    = PyObjWrapper(e_outer)
+
+        if d_outer and s1_outer and s2_outer and e_outer:
+            result = self.c_state.simulate2D(
+                sources,
+                tstart,
+                tend,
+                dt,
+                plm_theta,
+                engine_duration,
+                chkpt_interval,
+                data_directory,
+                boundary_condition,
+                first_order,
+                linspace,
+                hllc,
+                quirk_smoothing,
+                a_cpp,
+                adot_cpp,
+                d_cpp,
+                s1_cpp,
+                s2_cpp,
+                e_cpp)
+        else:
+            result = self.c_state.simulate2D(
+                sources,
+                tstart,
+                tend,
+                dt,
+                plm_theta,
+                engine_duration,
+                chkpt_interval,
+                data_directory,
+                boundary_condition,
+                first_order,
+                linspace,
+                hllc,
+                quirk_smoothing,
+                a_cpp,
+                adot_cpp)
 
         result = np.asarray(result)
         if col_maj:
