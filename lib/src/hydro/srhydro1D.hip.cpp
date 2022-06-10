@@ -634,11 +634,9 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hll_flux(
     // Compute the HLL Flux component-wise
     if (vface < aLm) {
         return left_flux - left_state * vface;
-    }
-    else if (vface > aRp) {
+    } else if (vface > aRp) {
         return right_flux - right_state * vface;
-    }
-    else {    
+    } else {    
         const Conserved f_hll = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
         const Conserved u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
         return f_hll - u_hll * vface;
