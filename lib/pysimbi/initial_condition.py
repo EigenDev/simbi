@@ -90,7 +90,7 @@ def load_checkpoint(model, filename, dim):
             model.u = np.array([model.D, model.S1, model.S2, model.tau, model.Dchi])
             
 
-def initializeModel(model, first_order = False, boundary_condition = "outflow", scalars = 0):
+def initializeModel(model, first_order = False, boundary_condition = "outflow", scalars = 0, volume_factor = 1):
     # Check if u-array is empty. If it is, generate an array.
     if model.dimensions == 1:
         if not model.u.any():
@@ -105,7 +105,8 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                     
                     model.u[:, :] = np.array([model.initD, model.initS, 
                                             model.init_tau])
-                    
+
+                model.u *= volume_factor
             else:
                 if first_order:
                     if model.regime == "classical":
@@ -117,7 +118,8 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                         model.u = np.empty(shape = (model.n_vars, model.Npts), dtype=float)
                         model.u[:, :] = np.array([model.initD, model.initS, 
                                             model.init_tau])
-                        
+                    
+                    model.u *= volume_factor
                     # Add boundary ghosts
                     right_ghost = model.u[:, -1]
                     left_ghost = model.u[:, 0]
@@ -146,6 +148,7 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                                     (left_ghost, left_ghost) , axis=1)
         else:
             if not boundary_condition == 'periodic':
+                model.u *= volume_factor
                 # Add the extra ghost cells for i-2, i+2
                 right_ghost = model.u[:, -1]
                 left_ghost  = model.u[:, 0]
@@ -166,6 +169,8 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
             else:
                 model.u[:, :, :] = np.array([model.initD, model.initS1,
                                                     model.initS2, model.init_tau, model.initD * scalars])
+            
+            model.u *= volume_factor
                 
             if boundary_condition != 'periodic':
                 if first_order:
@@ -211,18 +216,22 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                 model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,
                                             model.init_rho*model.init_vy, model.init_rho*model.init_vz,
                                             model.init_energy])
+                
+                model.u *= volume_factor
             else:
                 if model.regime == "classical":
-                        model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype=float)
-                        model.u[:, :, :, :] = np.array([model.init_rho, 
-                                                     model.init_rho*model.init_vx,
-                                                     model.init_rho*model.init_vy,
-                                                     model.init_rho*model.init_vz,
-                                                     model.init_energy])
+                    model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype=float)
+                    model.u[:, :, :, :] = np.array([model.init_rho, 
+                                                    model.init_rho*model.init_vx,
+                                                    model.init_rho*model.init_vy,
+                                                    model.init_rho*model.init_vz,
+                                                    model.init_energy])
+                    model.u *= volume_factor
                 else:
                     model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype=float)
                     model.u[:, :, :] = np.array([model.initD, model.initS1,
                                                 model.initS2, model.initS3, model.init_tau])
+                    model.u *= volume_factor
                 if first_order:
                     # Add boundary ghosts
                     zupper_ghost  = model.u[:, 0]
@@ -265,6 +274,7 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                     
         else:
             if not first_order:
+                model.u *= volume_factor
                 # Add the extra ghost cells for i-2, i+2
                 right_ghost = model.u[:, :, -1]
                 left_ghost = model.u[:, :, 0]

@@ -23,14 +23,15 @@ def calc_cell_volume1D(r: np.ndarray) -> np.ndarray:
     return rmean * rmean * dr 
 
 def calc_cell_volume2D(r: np.ndarray, theta: np.ndarray) -> np.ndarray:
-    tvertices = 0.5 * (theta[1:] + theta[:-1])
-    tvertices = np.insert(tvertices, 0, theta[0], axis=0)
-    tvertices = np.insert(tvertices, tvertices.shape[0], theta[-1], axis=0)
+    rr, thetta = np.meshgrid(r, theta)
+    tvertices = 0.5 * (thetta[1:] + thetta[:-1])
+    tvertices = np.insert(tvertices, 0, thetta[0], axis=0)
+    tvertices = np.insert(tvertices, tvertices.shape[0], thetta[-1], axis=0)
     dcos      = np.cos(tvertices[:-1]) - np.cos(tvertices[1:])
     
-    rvertices = np.sqrt(r[:, 1:] * r[:, :-1])
-    rvertices = np.insert(rvertices,  0, r[:, 0], axis=1)
-    rvertices = np.insert(rvertices, rvertices.shape[1], r[:, -1], axis=1)
+    rvertices = np.sqrt(rr[:, 1:] * rr[:, :-1])
+    rvertices = np.insert(rvertices,  0, rr[:, 0], axis=1)
+    rvertices = np.insert(rvertices, rvertices.shape[1], rr[:, -1], axis=1)
     dr        = rvertices[:, 1:] - rvertices[:, :-1]
     return (2.0 * np.pi *  (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos)
 class Hydro:
@@ -336,25 +337,58 @@ class Hydro:
         Simulate the Hydro Setup
         
         Parameters:
-            tend        (float):      The desired time to end the simulation
-            dt          (float):      The desired timestep
-            first_order (boolean):    First order RK1 or the RK2 PLM.
-            period      (boolean):    Periodic BCs or not
-            linspace    (boolean):    Prompts a linearly spaced mesh or log spaced if False
-            coordinate  (boolean):    The coordinate system the simulation is taking place in
-            cfl         (float):      The cfl number for min adaptive timestep
-            sources     (array_like): The source terms for the simulations
-            hllc        (boolean):    Tells the simulation whether to perform HLLC or HLLE
-            chkpt       (string):     The path to the checkpoint file to read into the simulation
+            tstart      (flaot):         The start time of the simulation
+            tend        (float):         The desired time to end the simulation
+            dt          (float):         The desired timestep
+            plm_theta   (float):         The Piecewise Linear Reconstructed slope parameter
+            first_order (boolean):       First order RK1 or the RK2 PLM.
+            linspace    (boolean):       Prompts a linearly spaced mesh or log spaced if False
+            cfl         (float):         The cfl number for min adaptive timestep
+            sources     (array_like):    The source terms for the simulations
+            scalars     (array_like):    The array of passive scalars
+            hllc        (boolean):       Tells the simulation whether to perform HLLC or HLLE
+            chkpt       (string):        The path to the checkpoint file to read into the simulation
+            chkpt_interval (float):      The interval at which to save the checkpoints
+            data_directory (string):     The directory at which to save the checkpoint files
+            bounday_condition (string):  The outer conditions at the domain x1 boundaries
+            engine_duration (float):     The duration the source terms will last in the simulation
+            compute_mode (string):       The compute mode for simulation execution (cpu or gpu)
+            quirksmoothing (bool):       The switch that controls the Quirk (1960) shock smoothing method
+            a              (Callable):   The scalar function for moving mesh. Think cosmology
+            adot           (Callable):   The first derivative of the scalar function for moving mesh
+            dens_outer     (Callable):   The density to be fed into outer zones if moving mesh
+            mom_outer      (Callables):  idem but for momentum density
+            edens_outer    (Callable):   idem but for energy density
             
         Returns:
-            u (array): The conserved/primitive variable array
+            u (array): The hydro solution containing the primitive variables
         """
         if a == None:
             a = lambda t: 1.0 
         if adot == None:
             adot = lambda t: 0.0
         
+        if self.dimensions == 1:
+            if linspace:
+                x1 = np.linspace(self.geometry[0], self.geometry[1], self.Npts)
+            else:
+                x1 = np.logspace(np.log10(self.geometry[0]), np.log10(self.geometry[1]), self.Npts)
+        else:
+            if (linspace):
+                x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
+                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+            else:
+                x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
+                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+
+        if adot(1.0) / a(1.0) != 0 and self.dimensions != 'cartesian':
+                if self.dimensions == 1:
+                    volume_factor = calc_cell_volume1D(x1)
+                elif self.dimensions == 2:
+                    volume_factor = calc_cell_volume2D(x1, x2)
+        else:
+            volume_factor = 1.0
+                
         if boundary_condition not in boundary_conditions:
             raise ValueError("Invalid boundary condition. Expected one of: %s" % boundary_conditions)
         
@@ -372,12 +406,12 @@ class Hydro:
         self.t = 0
         
         if not chkpt:
-            simbi_ic.initializeModel(self, first_order, boundary_condition, scalars)
+            simbi_ic.initializeModel(self, first_order, boundary_condition, scalars, volume_factor=volume_factor)
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensions)
         
         is_periodic = boundary_condition == 'periodic'
-        start_time = tstart if self.t == 0 else self.t
+        start_time  = tstart if self.t == 0 else self.t
         #Convert strings to byte arrays
         data_directory     = os.path.join(data_directory, '').encode('utf-8')
         coordinates        = self.coord_system.encode('utf-8')
@@ -398,28 +432,13 @@ class Hydro:
         
             
         if self.dimensions == 1:
-            if linspace:
-                x1 = np.linspace(self.geometry[0], self.geometry[1], self.Npts)
-            else:
-                x1 = np.logspace(np.log10(self.geometry[0]), np.log10(self.geometry[1]), self.Npts)
             sources = np.zeros((3, x1.size), dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
-            
-            if adot(1.0) / a(1.0) != 0 and self.coord_system != 'cartesian':
-                dV = calc_cell_volume1D(x1)
-                if first_order:
-                    self.u[:, 1:-1] *= dV 
-                    self.u[:, 0]    *= dV[0]
-                    self.u[:, -1]   *= dV[-1]
-                else:
-                    self.u[:, 2:-2]  *= dV 
-                    self.u[:, 0: 2]  *= dV[0]
-                    self.u[:,-2:  ]  *= dV[-1]
                 
             kwargs = {}
             if self.regime == "classical":
                 state = PyState(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
-            else:
+            else:   
                 state = PyStateSR(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
                 kwargs = {'a': a, 'adot': adot}
                 if dens_outer and mom_outer and edens_outer:
@@ -442,18 +461,12 @@ class Hydro:
                 hllc = hllc,
                 **kwargs)  
                 
-        elif self.dimensions == 2:
-            if (linspace):
-                x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
-                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-            else:
-                x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
-                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-            
+        elif self.dimensions == 2:            
             # ignore the chi term
             sources = np.zeros(self.u[:-1].shape, dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             
+            kwargs = {}
             if self.regime == "classical":
                 state = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
                 solution = state.simulate(
@@ -470,8 +483,19 @@ class Hydro:
                     linspace           = linspace,
                     hllc               = hllc) 
             else:
+                kwargs = {'a': a, 'adot': adot}
+                if dens_outer and mom_outer and edens_outer:
+                    kwargs['d_outer'] =  dens_outer
+                    kwargs['s_outer'] =  mom_outer
+                    kwargs['e_outer'] =  edens_outer
+                
+                if dens_outer and mom_outer and edens_outer:
+                    kwargs['d_outer']  =  dens_outer
+                    kwargs['s1_outer'] =  mom_outer[0]
+                    kwargs['s2_outer'] =  mom_outer[1]
+                    kwargs['e_outer']  =  edens_outer
+                    
                 state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
-            
                 solution = state.simulate(
                     sources         = sources,
                     tstart          = start_time,
@@ -485,7 +509,8 @@ class Hydro:
                     first_order     = first_order,
                     linspace        = linspace,
                     hllc            = hllc,
-                    quirk_smoothing = quirk_smoothing)  
+                    quirk_smoothing = quirk_smoothing,
+                    **kwargs)  
 
         else:
             if (linspace):
