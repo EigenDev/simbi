@@ -124,8 +124,8 @@ namespace simbi
 
         void cons2prim(SRHD2D *s);
 
-        GPU_CALLABLE_INLINE
-        real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
+        GPU_CALLABLE
+        constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
         {
             switch (geometry)
             {

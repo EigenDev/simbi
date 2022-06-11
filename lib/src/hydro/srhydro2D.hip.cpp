@@ -206,97 +206,100 @@ void SRHD2D::adapt_dt()
     real min_dt = INFINITY;
     #pragma omp parallel 
     {
-        real dx1, cs, dx2, rho, pressure, v1, v2, rmean, h;
-        real vfaceL, vfaceR, vzone, x1l, x1r;
-        real cfl_dt;
-        luint shift_i, shift_j;
-        real plus_v1, plus_v2, minus_v1, minus_v2;
-        luint aid; // active index id
-
+        real v1p, v1m, v2p, v2m;
         // Compute the minimum timestep given cfl
         for (luint jj = 0; jj < yphysical_grid; jj++)
         {
-            dx2 = coord_lattice.dx2[jj];
-            shift_j = jj + idx_active;
-            #pragma omp for nowait schedule(static) reduction(min:min_dt)
+            const auto shift_j = jj + idx_active;
+            #pragma omp for reduction(min:min_dt)
             for (luint ii = 0; ii < xphysical_grid; ii++)
             {
-                x1l      = get_xface(ii, geometry, 0);
-                x1r      = get_xface(ii, geometry, 1);
-                vfaceL   = x1l * hubble_param;
-                vfaceR   = x1r * hubble_param;
-                vzone    = 0.5 * (vfaceL + vfaceR);
-                shift_i  = ii + idx_active;
-                aid      = shift_i + nx * shift_j;
-                dx1      = coord_lattice.dx1[ii];
-                rho      = prims[aid].rho;
-                v1       = prims[aid].v1;
-                v2       = prims[aid].v2;
-                pressure = prims[aid].p;
+                const auto shift_i  = ii + idx_active;
+                const auto aid      = shift_i + nx * shift_j;
+                const auto dx1      = coord_lattice.dx1[ii];
+                const auto rho      = prims[aid].rho;
+                const auto v1       = prims[aid].v1;
+                const auto v2       = prims[aid].v2;
+                const auto pressure = prims[aid].p;
+                const auto h        = 1.0 + gamma * pressure / (rho * (gamma - 1.0));
+                const auto cs       = sqrt(gamma * pressure / (rho * h));
 
-                h = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
-                cs = sqrt(gamma * pressure / (rho * h));
+                const auto plus_v1  = (v1 + cs) / (1.0 + v1 * cs);
+                const auto plus_v2  = (v2 + cs) / (1.0 + v2 * cs);
+                const auto minus_v1 = (v1 - cs) / (1.0 - v1 * cs);
+                const auto minus_v2 = (v2 - cs) / (1.0 - v2 * cs);
 
-                plus_v1  = (v1 + cs) / (static_cast<real>(1.0) + v1 * cs);
-                plus_v2  = (v2 + cs) / (static_cast<real>(1.0) + v2 * cs);
-                minus_v1 = (v1 - cs) / (static_cast<real>(1.0) - v1 * cs);
-                minus_v2 = (v2 - cs) / (static_cast<real>(1.0) - v2 * cs);
-
-                if (coord_system == "cartesian")
-                {
-
-                    cfl_dt = std::min(dx1 / (std::max(std::abs(plus_v1 - vzone), std::abs(minus_v1 - vzone))),
-                                dx2 / (std::max(std::abs(plus_v2), std::abs(minus_v2))));
+                v1p = std::abs(plus_v1);
+                v1m = std::abs(minus_v1);
+                v2p = std::abs(plus_v2);
+                v2m = std::abs(minus_v2);
+                real cfl_dt;
+                if (coord_system == "cartesian") {
+                    if (mesh_motion) {
+                        v1p = std::abs(plus_v1  - hubble_param);
+                        v1m = std::abs(minus_v1 - hubble_param);
+                    }
+                    cfl_dt = std::min(dx1 / (std::max(v1p, v1m)), dx2 / (std::max(v2p, v2m)));
+                } else {
+                    const real tl     = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                    const real tr     = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    const real dtheta = tr - tl;
+                    const real x1l    = get_xface(ii, geometry, 0);
+                    const real x1r    = get_xface(ii, geometry, 1);
+                    const real dr     = x1r - x1l;
+                    const real rmean  = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
+                    if (mesh_motion)
+                    {
+                        const real vfaceL   = x1l * hubble_param;
+                        const real vfaceR   = x1r * hubble_param;
+                        const real vzone    = 0.5 * (vfaceL + vfaceR);
+                        v1p = std::abs(plus_v1  - vzone);
+                        v1m = std::abs(minus_v1 - vzone);
+                    }
+                    cfl_dt = std::min(dr / (std::max(v1p, v1m)),  rmean * dtheta / (std::max(v2p, v2m)));
                 }
-                else
-                {
-                    rmean = coord_lattice.x1mean[ii];
-                    cfl_dt = std::min(dx1 / (std::max(std::abs(plus_v1 -vzone), std::abs(minus_v1 - vzone))),
-                                rmean * dx2 / (std::max(std::abs(plus_v2), std::abs(minus_v2))));
-                }
-
                 min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
             } // end ii 
         } // end jj
     } // end parallel region
-
     dt = cfl * min_dt;
-
-    // writeln("dt = {}", dt);
-    // pause_program();
 };
 
 void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, luint bytes)
 {
     #if GPU_CODE
     {
-        luint psize = p.blockSize.x*p.blockSize.y;
+        const luint psize         = p.blockSize.x*p.blockSize.y;
+        const luint dt_buff_width = bytes * sizeof(real) / sizeof(Primitive);
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
-                compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
-                (dev, geometry, psize, dx1, dx2);
-                dtWarpReduce<SRHD2D, Primitive, 64><<<p.gridSize,p.blockSize,bytes>>>
-                (dev);
+                compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>(
+                    dev, 
+                    geometry, 
+                    psize, 
+                    dx1, 
+                    dx2
+                );
+                dtWarpReduce<SRHD2D, Primitive, 8><<<p.gridSize,p.blockSize,dt_buff_width>>>(dev);
                 break;
             
             case simbi::Geometry::SPHERICAL:
-                compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
-                (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
-                dtWarpReduce<SRHD2D, Primitive, 64><<<p.gridSize,p.blockSize,bytes>>>
-                (dev);
+                compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>> (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
+                dtWarpReduce<SRHD2D, Primitive, 8><<<p.gridSize,p.blockSize,dt_buff_width>>>(dev);
                 break;
         }
         simbi::gpu::api::deviceSynch();
         this->dt = dev->dt;
     }
     #endif
+    // writeln("dt: {}", dt);
     // pause_program();
-//     if (dt < 1e-10)
-//     {
-//         writeln("dt = {}", dt);
-//         pause_program();
-//     };
+    if (dt < 1e-10)
+    {
+        writeln("dt = {}", dt);
+        pause_program();
+    };
 }
 
 //===================================================================================================================
@@ -861,7 +864,7 @@ void SRHD2D::advance(
     const luint sx = (col_maj) ? 1  : bx;
     const luint sy = (col_maj) ? by :  1;
 
-    simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
+    simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx) {
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
         #else 
@@ -910,6 +913,7 @@ void SRHD2D::advance(
             
             simbi::gpu::api::synchronize();
         #endif
+
 
         const real x1l    = self->get_xface(ii, geometry, 0);
         const real x1r    = self->get_xface(ii, geometry, 1);
@@ -1173,7 +1177,6 @@ void SRHD2D::advance(
                 break;
                 }
         } // end switch
-
     });
 
     const real x1l    = self->get_xface(0, geometry, 0);
@@ -1258,16 +1261,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
-    Conserved *outer_zones = nullptr;
-    if (d_outer)
-    {
-        #if GPU_CODE
-        simbi::gpu::api::gpuMalloc(&outer_zones, 2 * sizeof(Conserved));
-        #else
-        outer_zones = new Conserved[2];
-        #endif
-        outer_zones[0] = {d_outer(x1max, 0.0), s1_outer(x1max, 0.0), s2_outer(x1max, 0.0), e_outer(x1max, 0.0)};
-    }
 
     if (coord_lattice.x2vertices[yphysical_grid] == M_PI){
         this->bipolar = true;
@@ -1359,6 +1352,28 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
+    Conserved *outer_zones = nullptr;
+    // Fill outer zones if user-defined conservative functions provided
+    const real step = (first_order) ? 1.0 : 0.5;
+    if (d_outer)
+    {
+        #if GPU_CODE
+        simbi::gpu::api::gpuMalloc(&outer_zones, ny * sizeof(Conserved));
+        #else
+        outer_zones = new Conserved[ny];
+        #endif
+        lint jreal = 0;
+        for (int jj = 0; jj < ny; jj++) {
+           if (jj > yphysical_grid + 1) {
+                jreal = yphysical_grid - 1;
+            } else {
+                jreal = (jj - radius) > 0 ? jj - radius : 0;
+            }
+            const real dV = get_cell_volume(xphysical_grid - 1, jreal, geometry, step);
+            outer_zones[jj] = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
+        }
+    }
+
     if (t == 0)
     {
         if constexpr(BuildPlatform == Platform::GPU)
@@ -1370,9 +1385,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     }
 
     
-    const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive) + xblockdim * yblockdim * sizeof(real);
-    if constexpr(BuildPlatform == Platform::GPU)
-    {
+    const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive);
+    if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP, device_self, simbi::MemSide::Dev);
         adapt_dt(device_self, geometry, activeP, dtShBytes);
     } else {
@@ -1410,7 +1424,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             t1 = high_resolution_clock::now();
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2D(fullP, self, nx, ny, true, bc);
+            config_ghosts2D(fullP, self, nx, ny, true, bc, outer_zones, bipolar);
             t += dt; 
             
             if (n >= nfold){
@@ -1437,8 +1451,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 writeToProd<sr2d::PrimitiveData, Primitive>(&transfer_prims, &prods);
                 tnow = create_step_str(t_interval, tchunk);
                 filename = string_format("%d.chkpt." + tnow + ".h5", yphysical_grid);
-                setup.t = t;
-                setup.dt = dt;
+                setup.t     = t;
+                setup.dt    = dt;
                 setup.x1max = x1max;
                 setup.x1min = x1min;
                 write_hdf5(data_directory, filename, prods, setup, 2, total_zones);
@@ -1457,6 +1471,20 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             hubble_param = adot(t) / a(t);
             // Update decay constant
             decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
+
+            if (d_outer)
+            {
+                lint jreal = 0;
+                for (int jj = 0; jj < ny; jj++) {
+                if (jj > yphysical_grid + 1) {
+                        jreal = yphysical_grid - 1;
+                    } else {
+                        jreal = (jj - radius) > 0 ? jj - radius : 0;
+                    }
+                    const real dV = get_cell_volume(xphysical_grid - 1, jreal, geometry, step);
+                    outer_zones[jj] = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
+                }
+            }
         }
     } else {
         while (t < tend && !inFailureState)
@@ -1465,12 +1493,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             // First Half Step
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2D(fullP, self, nx, ny, false, bc);
+            config_ghosts2D(fullP, self, nx, ny, false, bc, outer_zones, bipolar);
 
             // Final Half Step
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2D(fullP, self, nx, ny, false, bc);
+            config_ghosts2D(fullP, self, nx, ny, false, bc, outer_zones, bipolar);
 
             t += dt; 
 
@@ -1498,8 +1526,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 writeToProd<sr2d::PrimitiveData, Primitive>(&transfer_prims, &prods);
                 tnow = create_step_str(t_interval, tchunk);
                 filename = string_format("%d.chkpt." + tnow + ".h5", yphysical_grid);
-                setup.t = t;
-                setup.dt = dt;
+                setup.t     = t;
+                setup.dt    = dt;
                 setup.x1max = x1max;
                 setup.x1min = x1min;
                 write_hdf5(data_directory, filename, prods, setup, 2, total_zones);
@@ -1517,6 +1545,19 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 adapt_dt();
             }
             hubble_param = adot(t) / a(t);
+            if (d_outer)
+            {
+                lint jreal = 0;
+                for (int jj = 0; jj < ny; jj++) {
+                if (jj > yphysical_grid + 1) {
+                        jreal = yphysical_grid - 1;
+                    } else {
+                        jreal = (jj - radius) > 0 ? jj - radius : 0;
+                    }
+                    const real dV = get_cell_volume(xphysical_grid - 1, jreal, geometry, step);
+                    outer_zones[jj] = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
+                }
+            }
         }
     }
     writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
@@ -1525,6 +1566,14 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     {
         dualMem.copyDevToHost(device_self, *this);
         simbi::gpu::api::gpuFree(device_self);
+    }
+
+    if (outer_zones) {
+        if constexpr(BuildPlatform == Platform::GPU) {
+            simbi::gpu::api::gpuFree(outer_zones);
+        } else {
+            delete[] outer_zones;
+        }
     }
 
     transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
