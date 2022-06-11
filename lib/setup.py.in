@@ -34,10 +34,10 @@ class CompilerParams():
             if "${HIP_PLATFORM}" == "nvidia":
                 gpu_compiler_args["hipcc"] += ['-std=c++17', '-arch=sm_${CUDA_SM}', '-ccbin=${CMAKE_CXX_COMPILER}',
                                             '--ptxas-options=-v', '--extended-lambda',
-                                            '--compiler-options', '-fPIC', '-O2', '-lineinfo']
+                                            '--compiler-options', '-fPIC', '-O3', '-lineinfo']
                 
             else:
-                gpu_compiler_args["hipcc"] += ['-std=c++17', '-O2', '-fPIC', '-march=native']
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-O#', '-fPIC', '-march=native']
                 
         self.compiler_args = cpu_compiler_args if self.arch == "cpu" else gpu_compiler_args
                 
