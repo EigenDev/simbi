@@ -189,15 +189,12 @@ namespace simbi
             luint rrbytes  = nzreal * sizeof(real);
             luint r1bytes  = nxreal * sizeof(real);
             luint r2bytes  = nyreal * sizeof(real);
-            luint fa1bytes = host.coord_lattice.x1_face_areas.size() * sizeof(real);
-            luint fa2bytes = host.coord_lattice.x2_face_areas.size() * sizeof(real);
 
             //--------Allocate the memory for pointer objects-------------------------
             simbi::gpu::api::gpuMalloc(&host_u0,              cbytes  );
             simbi::gpu::api::gpuMalloc(&host_prims,           pbytes  );
             simbi::gpu::api::gpuMalloc(&host_pressure_guess,  rbytes  );
             simbi::gpu::api::gpuMalloc(&host_dtmin,           rrbytes );
-            simbi::gpu::api::gpuMalloc(&host_clattice, sizeof(CLattice2D));
 
             //--------Copy the host resources to pointer variables on host
             simbi::gpu::api::copyHostToDevice(host_u0,    host.cons.data(), cbytes);
@@ -208,7 +205,7 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(&(device->gpu_cons), &host_u0,    sizeof(C *));
             simbi::gpu::api::copyHostToDevice(&(device->gpu_prims),&host_prims, sizeof(T *));
             simbi::gpu::api::copyHostToDevice(&(device->gpu_pressure_guess),  &host_pressure_guess, sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->dt_min),       &host_dtmin,    sizeof(real *));
+            simbi::gpu::api::copyHostToDevice(&(device->dt_min),       &host_dtmin, sizeof(real *));
 
             //===================================================
             // SOURCE TERM OFF-LOADING BRANCHES
