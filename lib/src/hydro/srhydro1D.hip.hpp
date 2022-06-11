@@ -43,7 +43,7 @@ namespace simbi
           luint nx, n, active_zones, idx_active, i_start, i_bound;
           real tend;
           real plm_theta, engine_duration, t, decay_constant;
-          bool first_order, periodic, linspace, hllc, inFailureState;
+          bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
 
           std::vector<real> sourceD, sourceS, source0, pressure_guess;
 
@@ -152,8 +152,8 @@ namespace simbi
           GPU_CALLABLE_MEMBER
           real calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side);
 
-          GPU_CALLABLE_INLINE
-          real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
+          GPU_CALLABLE_MEMBER
+          constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
           {
                switch (geometry)
                {
@@ -163,19 +163,18 @@ namespace simbi
                     }
                case simbi::Geometry::SPHERICAL:
                     {
-                         const real rl = (ii > 0 ) ? x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
+                         const real rl = my_max(x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                          if (side == 0) {
                               return rl;
                          } else {
-                              return (ii < active_zones - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
+                              return my_min(rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                          }
-                         break;
                     }
                }
           }
 
           GPU_CALLABLE_MEMBER
-          real get_cell_volume(lint ii, const simbi::Geometry geometry, const bool mesh_motion = false)
+          constexpr real get_cell_volume(lint ii, const simbi::Geometry geometry)
           {
                if (!mesh_motion)
                {
@@ -184,12 +183,9 @@ namespace simbi
                     switch (geometry)
                     {
                     case simbi::Geometry::SPHERICAL:
-                    {
-                         if (ii >= active_zones - 1)
-                              ii = active_zones - 1;
-                              
-                         const real rl     = (ii > 0 ) ? x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
-                         const real rr     = (ii < active_zones - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
+                    {         
+                         const real rl     = my_min(x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min);
+                         const real rr     = my_max(rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                          const real rmean  = static_cast<real>(0.75) * (rr * rr * rr *rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
                          return rmean * rmean * (rr - rl);
                     }

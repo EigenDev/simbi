@@ -507,10 +507,10 @@ void SRHD::adapt_dt()
             vfaceL = x1l * hubble_param;
             vfaceR = x1r * hubble_param;
             vzone  = 0.5 * (vfaceL + vfaceR);
-            dr  = coord_lattice.dx1[ii];
-            rho = prims[ii + idx_active].rho;
-            p   = prims[ii + idx_active].p;
-            v   = prims[ii + idx_active].v;
+            dr     = coord_lattice.dx1[ii];
+            rho    = prims[ii + idx_active].rho;
+            p      = prims[ii + idx_active].p;
+            v      = prims[ii + idx_active].v;
 
             h = static_cast<real>(1.0) + gamma * p / (rho * (gamma - 1));
             cs = std::sqrt(gamma * p / (rho * h));
@@ -530,9 +530,9 @@ void SRHD::adapt_dt(SRHD *dev, luint blockSize)
 {   
     #if GPU_CODE
         compute_dt<SRHD, Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
-        dtWarpReduce<SRHD, Primitive, 16><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
+        dtWarpReduce<SRHD, Primitive, 4><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
         simbi::gpu::api::deviceSynch();
-        simbi::gpu::api::copyDevToHost(&dt, &(dev->dt), sizeof(real));
+        this->dt = dev->dt;
     #endif
 };
 
@@ -785,7 +785,8 @@ SRHD::simulate1D(
         t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
-    hubble_param = adot(t) / a(t);
+    this->hubble_param = adot(t) / a(t);
+    this->mesh_motion  = (hubble_param != 0);
     DataWriteMembers setup;
     setup.x1max          = x1[active_zones - 1];
     setup.x1min          = x1[0];
@@ -909,7 +910,6 @@ SRHD::simulate1D(
         t_interval += chkpt_interval;
     }
 
-    const bool mesh_motion = (hubble_param != 0);
     if (first_order)
     {  
         while (t < tend && !inFailureState)
@@ -971,7 +971,7 @@ SRHD::simulate1D(
             // Update the outer zones with the necessary configs if they exists
             if (d_outer)
             {
-                const real dV  = get_cell_volume(active_zones - 1, geometry, mesh_motion);
+                const real dV  = get_cell_volume(active_zones - 1, geometry);
                 outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
             }
 
@@ -1043,7 +1043,7 @@ SRHD::simulate1D(
 
             // Update the outer zones with the necessary configs if they exists
             if (d_outer) {
-                const real dV  = get_cell_volume(active_zones - 1, geometry, mesh_motion);
+                const real dV  = get_cell_volume(active_zones - 1, geometry);
                 outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
             }
 
