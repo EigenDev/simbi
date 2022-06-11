@@ -381,7 +381,7 @@ class Hydro:
                 x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
                 x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
 
-        if adot(1.0) / a(1.0) != 0 and self.dimensions != 'cartesian':
+        if adot(1.0) / a(1.0) != 0 and self.coord_system != 'cartesian':
                 if self.dimensions == 1:
                     volume_factor = calc_cell_volume1D(x1)
                 elif self.dimensions == 2:
@@ -484,11 +484,6 @@ class Hydro:
                     hllc               = hllc) 
             else:
                 kwargs = {'a': a, 'adot': adot}
-                if dens_outer and mom_outer and edens_outer:
-                    kwargs['d_outer'] =  dens_outer
-                    kwargs['s_outer'] =  mom_outer
-                    kwargs['e_outer'] =  edens_outer
-                
                 if dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer']  =  dens_outer
                     kwargs['s1_outer'] =  mom_outer[0]
