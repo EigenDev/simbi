@@ -37,7 +37,7 @@ class CompilerParams():
                                             '--compiler-options', '-fPIC', '-O3', '-lineinfo']
                 
             else:
-                gpu_compiler_args["hipcc"] += ['-std=c++17', '-O#', '-fPIC', '-march=native']
+                gpu_compiler_args["hipcc"] += ['-std=c++17', '-O3', '-fPIC', '-march=native']
                 
         self.compiler_args = cpu_compiler_args if self.arch == "cpu" else gpu_compiler_args
                 
