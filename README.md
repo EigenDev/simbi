@@ -1,4 +1,4 @@
-# SIMBI: 3D Relatavistic Hydro Code
+# SIMBI: 3D Relativistic Hydro Code
 
 ## 2D Relativistic Jet Simulation
 https://user-images.githubusercontent.com/29236993/145315802-c8d7e8c5-7beb-488c-b496-b9edf404be2e.mp4
