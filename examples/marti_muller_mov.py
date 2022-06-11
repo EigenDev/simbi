@@ -18,7 +18,7 @@ def main():
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/')  
-    
+    parser.add_argument('--adot', help='speed of mesh motion in units of c', dest='adot', default=0.1, type=float)
     args = parser.parse_args()
     fig, axs = plt.subplots(3, 1, figsize=(9,9), sharex=True)
     xmin, xmax = 0.0, 1.0 
@@ -34,7 +34,7 @@ def main():
         return 1.0
     
     def adot(t):
-        return 0.65
+        return args.adot
     
     def rho(x):
         if x < 1.5:
