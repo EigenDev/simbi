@@ -25,7 +25,8 @@ def main():
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='periodic', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/')   
-    
+    parser.add_argument('--plm_theta', dest='plm_theta', help='picewise linear slope value', default=1.5, type=float)
+
     args = parser.parse_args()
     xmin = -0.5
     xmax = 0.5
@@ -74,14 +75,24 @@ def main():
 
     fig, ax= plt.subplots(1, 1, figsize=(12,6), constrained_layout=False)
 
+    sim_params = {
+            'tend': args.tend,
+            'first_order': args.forder,
+            'compute_mode': args.mode,
+            'boundary_condition': 'periodic',
+            'cfl': args.cfl,
+            'hllc': True,
+            'linspace': True,
+            'plm_theta': args.plm_theta,
+            'data_directory': args.data_dir,
+            'chkpt_interval': args.chint,
+    }
     # HLLC Simulation
     SodHLLC = Hydro(gamma = args.gamma, initial_state=(rho, p, vx, vy), 
                 Npts=(xnpts, ynpts), geometry=((xmin, xmax),(ymin, ymax)), n_vars=4)
 
     t1 = (time.time()*u.s).to(u.min)
-    hllc_result = SodHLLC.simulate(tend=args.tend, first_order=args.forder, compute_mode=args.mode,
-                                linspace=True, cfl=args.cfl, data_directory=args.data_dir,
-                                hllc=True, boundary_condition='periodic', chkpt_interval = args.chint)
+    hllc_result = SodHLLC.simulate(**sim_params)
 
     print("The 2D KH Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 

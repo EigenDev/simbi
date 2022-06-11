@@ -15,7 +15,7 @@ def main():
     parser.add_argument('--chint',        dest='chint', type=float, default=0.1)
     parser.add_argument('--cfl',          dest='cfl', type=float, default=0.8)
     parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
-    parser.add_argument('--plm',          dest='plm', type=float, default=1.5)
+    parser.add_argument('--plm_theta',    dest='plm_theta', type=float, default=1.5)
     parser.add_argument('--omega',        dest='omega', type=float, default=0.0)
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
@@ -35,12 +35,24 @@ def main():
     hydro2 = Hydro(gamma=args.gamma, initial_state = stationary,
             Npts=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3)
 
+    sim_params = {
+        'tend': args.tend,
+        'first_order': args.forder,
+        'compute_mode': args.mode,
+        'boundary_condition': args.boundc,
+        'cfl': args.cfl,
+        'hllc': False,
+        'linspace': True,
+        'plm_theta': args.plm_theta,
+        'data_directory': args.data_dir,
+        'chkpt_interval': args.chint
+    }
     t1 = time.time()
-    poll = hydro.simulate(tend=args.tend, first_order=args.forder, hllc=False, cfl=args.cfl, compute_mode=args.mode, boundary_condition=args.boundc)
+    poll = hydro.simulate(**sim_params)
     print("Time for HLLE Simulation: {} sec".format(time.time() - t1))
-
     t2 = time.time()
-    bar = hydro2.simulate(tend=args.tend, first_order=args.forder, hllc=True, cfl=args.cfl, compute_mode=args.mode, boundary_condition=args.boundc)
+    sim_params['hllc'] = True
+    bar = hydro2.simulate(**sim_params)
     print("Time for HLLC Simulation: {} sec".format(time.time() - t2))
 
     u = bar[1]

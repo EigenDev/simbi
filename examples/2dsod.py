@@ -20,7 +20,7 @@ def main():
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/')  
-    
+    parser.add_argument('--plm_theta', dest='plm_theta', help='picewise linear slope value', default=1.5, type=float)
     args = parser.parse_args()
     theta_min = 0
     theta_max = np.pi/2
@@ -61,21 +61,33 @@ def main():
 
     print("Dim: {}x{}".format(ynpts, xnpts))
 
+    sim_params = {
+            'tend': args.tend,
+            'first_order': args.forder,
+            'compute_mode': args.mode,
+            'boundary_condition': args.boundc,
+            'cfl': args.cfl,
+            'hllc': False,
+            'linspace': False,
+            'plm_theta': args.plm_theta,
+            'data_directory': args.data_dir,
+            'chkpt_interval': args.chint,
+    }
+    
     SodHLLE = Hydro(gamma = args.gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
                 Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
     t1 = (time.time()*u.s).to(u.min)
-    hlle_result = SodHLLE.simulate(tend=args.tend, first_order=args.forder, compute_mode=args.mode,
-                    linspace=False, cfl=args.cfl, chkpt_interval=args.chint, hllc=False, boundary_condition=args.boundc)
+    hlle_result = SodHLLE.simulate(**sim_params)
 
 
     # HLLC Simulation
     SodHLLC = Hydro(gamma = args.gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
                 Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
+    sim_params['hllc'] = True 
     t1 = (time.time()*u.s).to(u.min)
-    hllc_result = SodHLLC.simulate(tend=args.tend, first_order=args.forder, compute_mode=args.mode,
-                        linspace=False, cfl=args.cfl, hllc=True, boundary_condition=args.boundc, chkpt_interval=args.chint)
+    hllc_result = SodHLLC.simulate(**sim_params)
 
     print("The 2D SOD Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
 

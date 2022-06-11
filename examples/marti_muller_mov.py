@@ -19,6 +19,8 @@ def main():
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/')  
     parser.add_argument('--adot', help='speed of mesh motion in units of c', dest='adot', default=0.1, type=float)
+    parser.add_argument('--plm_theta', dest='plm_theta', help='picewise linear slope value', default=1.5, type=float)
+
     args = parser.parse_args()
     fig, axs = plt.subplots(3, 1, figsize=(9,9), sharex=True)
     xmin, xmax = 0.0, 1.0 
@@ -56,17 +58,27 @@ def main():
     hydro = Hydro(gamma=args.gamma, initial_state = ((rhoL,pL,vL),(rhoR,pR,vR)),
             Npts=args.nzones, geometry=(xmin,xmax, xmid), n_vars=3, regime="relativistic")
     
-    h = hydro2.simulate(tend=args.tend, 
-                        first_order=args.forder, plm_theta=1.5,  
-                        cfl=args.cfl, hllc=False, 
-                        compute_mode=args.mode, 
-                        boundary_condition=args.boundc, adot = adot, a=a)
+    sim_params = {
+            'tend': args.tend,
+            'first_order': args.forder,
+            'compute_mode': args.mode,
+            'boundary_condition': args.boundc,
+            'cfl': args.cfl,
+            'hllc': False,
+            'linspace': True,
+            'plm_theta': args.plm_theta,
+            'data_directory': args.data_dir,
+            'chkpt_interval': args.chint,
+            'a': a,
+            'adot': adot,
+            'dens_outer': rho,
+            'mom_outer': s,
+            'edens_outer': tau
+    }
     
-    u = hydro.simulate(tend=args.tend,
-                       first_order=args.forder, plm_theta=1.5,
-                       cfl=args.cfl, hllc=True, compute_mode=args.mode, 
-                       boundary_condition=args.boundc,
-                       data_directory = args.data_dir, chkpt_interval=args.chint, adot = adot, a=a, dens_outer=rho, mom_outer=s, edens_outer=tau)
+    h = hydro2.simulate(**sim_params)
+    sim_params['hllc'] = True
+    u = hydro.simulate(**sim_params)
 
 
     x  = np.linspace(xmin, xmax, args.nzones)

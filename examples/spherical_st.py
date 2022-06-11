@@ -24,7 +24,8 @@ def main():
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/') 
-    
+    parser.add_argument('--plm_theta',    dest='plm_theta', type=float, default=1.5)
+
     args = parser.parse_args()
     def find_nearest(array, value):
         array = np.asarray(array)
@@ -90,10 +91,20 @@ def main():
                 n_vars=4, regime="classical", coord_system="spherical")
 
 
+    sim_params = {
+        'tend': args.tend,
+        'first_order': args.forder,
+        'compute_mode': args.mode,
+        'boundary_condition': args.boundc,
+        'cfl': args.cfl,
+        'hllc': True,
+        'linspace': False,
+        'plm_theta': args.plm_theta,
+        'data_directory': args.data_dir,
+        'chkpt_interval': args.chint
+    }
     t1 = (time.time()*u.s).to(u.min)
-    sol = bm.simulate(tend=args.tend, first_order= args.forder, compute_mode=args.mode, boundary_condition=args.boundc,
-                        cfl=args.cfl, hllc=True, linspace=False, plm_theta=args.plm, data_directory=args.data_dir, 
-                        chkpt_interval = args.chint)
+    sol = bm.simulate(**sim_params)
 
     print("The 2D Sedov-Taylor Simulation for N = {} took {:.3f}".format(ntheta, (time.time()*u.s).to(u.min) - t1))
 

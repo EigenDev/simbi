@@ -41,7 +41,7 @@ def main():
     parser.add_argument('--chint',        dest='chint', type=float, default=0.1)
     parser.add_argument('--cfl',          dest='cfl', type=float, default=0.8)
     parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
-    parser.add_argument('--plm',          dest='plm', type=float, default=1.5)
+    parser.add_argument('--plm_theta',    dest='plm_theta', type=float, default=1.5)
     parser.add_argument('--e_scale',      dest='e_scale', type=float, default=1.0)
     parser.add_argument('--omega',        dest='omega', type=float, default=2.0)
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='reflecting', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
@@ -110,10 +110,20 @@ def main():
                 n_vars=4, regime="relativistic", coord_system="spherical")
 
 
+    sim_params = {
+        'tend': args.tend,
+        'first_order': args.forder,
+        'compute_mode': args.mode,
+        'boundary_condition': args.boundc,
+        'cfl': args.cfl,
+        'hllc': True,
+        'linspace': False,
+        'plm_theta': args.plm_theta,
+        'data_directory': args.data_dir,
+        'chkpt_interval': args.chint,
+    }
     t1 = (time.time()*u.s).to(u.min)
-    sol = bm.simulate(tend=args.tend, first_order= args.forder, compute_mode=args.mode, boundary_condition=args.boundc, scalars=chi,
-                        cfl=args.cfl, hllc=True, linspace=False, plm_theta=args.plm, data_directory=args.data_dir, chkpt_interval=args.chint)
-
+    sol = bm.simulate(**sim_params)
     print("The 2D BM Simulation for N = {} took {:.3f}".format(ntheta, (time.time()*u.s).to(u.min) - t1))
 
     W     = 1/np.sqrt(1 - (sol[1]**2 + sol[2]**2))

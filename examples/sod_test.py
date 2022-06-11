@@ -18,6 +18,7 @@ def main():
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/')                     
+    parser.add_argument('--plm_theta', dest='plm_theta', type=float, help='piecwise linear reconstruction slope', default=1.5)
 
     args = parser.parse_args()
     sod   = ((1.0,1.0,0.0),(0.1,0.125,0.0))
@@ -30,14 +31,25 @@ def main():
             Npts=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3)
             
 
+    sim_params = {
+        'tend': args.tend,
+        'first_order': args.forder,
+        'compute_mode': args.mode,
+        'boundary_condition': args.boundc,
+        'cfl': args.cfl,
+        'hllc': False,
+        'linspace': True,
+        'plm_theta': args.plm_theta,
+        'data_directory': args.data_dir,
+        'chkpt_interval': args.chint,
+    }
     t1 = time.time()
-    hlle = hydro.simulate(tend=args.tend, first_order=args.forder, hllc=False, cfl=args.cfl, data_directory=args.data_dir,
-                          compute_mode=args.mode, boundary_condition=args.boundc, chkpt_interval=args.chint)
+    hlle = hydro.simulate(**sim_params)
     print("Time for HLLE Simulation: {:.2f} sec".format(time.time() - t1))
 
     t2 = time.time()
-    hllc = hydro2.simulate(tend=args.tend, first_order=args.forder, hllc=True, cfl=args.cfl, data_directory=args.data_dir,
-                           compute_mode=args.mode, boundary_condition=args.boundc, chkpt_interval=args.chint)
+    sim_params['hllc'] = True
+    hllc = hydro2.simulate(**sim_params)
     print("Time for HLLC Simulation: {:.2f} sec".format(time.time() - t2))
 
     u = hllc[1]
