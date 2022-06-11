@@ -3,12 +3,12 @@ namespace simbi{
     template<unsigned int blockSize>
     GPU_DEV void warpReduceMin(volatile real* smem, unsigned int tid)
     {
-        if (blockSize >= 64) smem[tid] = (smem[tid] < smem[tid + 32]) ? smem[tid] : smem[tid + 32];
-        if (blockSize >= 32) smem[tid] = (smem[tid] < smem[tid + 16]) ? smem[tid] : smem[tid + 16];
-        if (blockSize >= 16) smem[tid] = (smem[tid] < smem[tid +  8]) ? smem[tid] : smem[tid +  8];
-        if (blockSize >=  8) smem[tid] = (smem[tid] < smem[tid +  4]) ? smem[tid] : smem[tid +  4];
-        if (blockSize >=  4) smem[tid] = (smem[tid] < smem[tid +  2]) ? smem[tid] : smem[tid +  2];
-        if (blockSize >=  2) smem[tid] = (smem[tid] < smem[tid +  1]) ? smem[tid] : smem[tid +  1];
+        if (blockSize >= 64) smem[tid]  = (smem[tid] < smem[tid + 32]) ? smem[tid] : smem[tid + 32];
+        if (blockSize >= 32) smem[tid]  = (smem[tid] < smem[tid + 16]) ? smem[tid] : smem[tid + 16];
+        if (blockSize >= 16) smem[tid]  = (smem[tid] < smem[tid +  8]) ? smem[tid] : smem[tid +  8];
+        if (blockSize >=  8) smem[tid]  = (smem[tid] < smem[tid +  4]) ? smem[tid] : smem[tid +  4];
+        if (blockSize >=  4) smem[tid]  = (smem[tid] < smem[tid +  2]) ? smem[tid] : smem[tid +  2];
+        if (blockSize >=  2) smem[tid]  = (smem[tid] < smem[tid +  1]) ? smem[tid] : smem[tid +  1];
     };
 
     template<typename T, typename N>
@@ -34,21 +34,17 @@ namespace simbi{
         
             if constexpr(is_relativistic<N>::value)
             {
-                // real gb  = prim_buff[tid].v;
-                // real w   = std::sqrt(1 + gb * gb);
-                // real v   = gb / w;
-                real v = prim_buff[tid].v;
-                real h = 1. + gamma * p / (rho * (gamma - 1.));
+                real v  = prim_buff[tid].v;
+                real h  = 1. + gamma * p / (rho * (gamma - 1.));
                 real cs = std::sqrt(gamma * p / (rho * h));
-                vPlus  = (v + cs) / (1 + v * cs);
-                vMinus = (v - cs) / (1 - v * cs);
+                vPlus   = (v + cs) / (1 + v * cs);
+                vMinus  = (v - cs) / (1 - v * cs);
             } else {
                 real v  = prim_buff[tid].v;
                 real cs = std::sqrt(gamma * p / rho );
                 vPlus   = (v + cs);
                 vMinus  = (v - cs);
             }
-
             real cfl_dt = dr / (my_max(std::abs(vPlus), std::abs(vMinus)));
             s->dt_min[ii] = s->cfl * cfl_dt;
         }
@@ -73,7 +69,7 @@ namespace simbi{
             for(int i = 1; bidx + tid < s->active_zones; i++)
             {
                 val = s->dt_min[tid + bidx];
-                min = (val ==0 || val > min) ? min : val;
+                min = (val > min) ? min : val;
                 bidx = i * blockDim.x;
             }
 
@@ -84,7 +80,7 @@ namespace simbi{
             for(i = 1; bidx + tid < gridDim.x; i++)
             {
                 val  = s->dt_min[tid + bidx];
-                min  = (val == 0 || val > min) ? min : val;
+                min  = (val > min) ? min : val;
                 bidx = i * blockDim.x;
             }
 
@@ -179,8 +175,6 @@ namespace simbi{
             } // end switch
             
             s->dt_min[jj * s->xphysical_grid + ii] = s->cfl * cfl_dt;
-            // if (jj * s->xphysical_grid + ii == 21)
-            //     printf("jj: %lu, ii: %lu, dt: %.2e\n", jj, ii, s->dt_min[jj * s->xphysical_grid + ii]);
         }
         #endif
     }
@@ -282,9 +276,8 @@ namespace simbi{
     dtWarpReduce(T *s)
     {
         #if GPU_CODE
-        real val;
         const real gamma     = s->gamma;
-        extern __shared__ volatile real dt_buff[];
+        extern volatile __shared__ real dt_buff[];
         real min = INFINITY;
         const luint tx  = threadIdx.x;
         const luint ty  = threadIdx.y;
@@ -295,14 +288,11 @@ namespace simbi{
         if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid))
         {
             // tail part
-            int bidx = 0;
+            luint bidx = 0;
             for(int i = 1; bidx + tid  < zones; i++)
             {
-                val = s->dt_min[tid + bidx];
-                // GPUs are a bit strange...If I don't include the erroneous if statement then val will occasionally be <= 0....
-                if (val <= 0) 
-                    printf("idx: %lu, val: %f, dt: %f\n", tid + bidx, val, s->dt_min[tid + bidx]);
-                min = (val <= 0 || val > min) ? min : val;
+                const real val = s->dt_min[tid + bidx];
+                min = (val > min) ? min : val;
                 bidx = i * blockDim.x * blockDim.y;
             }
             // previously reduced MIN part
@@ -310,11 +300,12 @@ namespace simbi{
             int i;
             for(i = 1; bidx + tid < gridDim.x*gridDim.y; i++)
             {
-                val  = s->dt_min[tid + bidx];
-                min  = (val <= 0 || val > min)  ? min : val;
+                const real val  = s->dt_min[tid + bidx];
+                min  = (val > min) ? min : val;
                 bidx = i * blockDim.x * blockDim.y;
             }
 
+            // printf("tid: %lu\n, min: %.2e", tid, min);
             dt_buff[tid] = min;
             __syncthreads();
 
@@ -324,8 +315,6 @@ namespace simbi{
             }
             if(tid == 0)
             {
-                // if (dt_buff[0] < 1e-10)
-                //     printf("dt: %f\n", dt_buff[0]);
                 s->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
                 s->dt = s->dt_min[0];
             }
