@@ -7,7 +7,7 @@ import astropy.constants as const
 import astropy.units as units
 import numpy as np 
 import argparse 
-
+import matplotlib.pyplot as plt 
 from typing import Union
 
 # FONT SIZES
@@ -71,7 +71,7 @@ def calc_beta(fields: dict) -> np.ndarray:
 
 def get_field_str(args: argparse.ArgumentParser) -> str:
     field_str_list = []
-    for field in args.field:
+    for field in args.fields:
         if field == 'rho' or field == 'D':
             var = r'\rho' if field == 'rho' else 'D'
             if args.units:
@@ -105,14 +105,16 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
             field_str_list.append( r'$\chi$')
         elif field == 'chi_dens':
             field_str_list.append( r'$D \cdot \chi$')
-        elif field == 'temperature':
+        elif field == 'T_ev':
             field_str_list.append("T [eV]" if args.units else "T")
+        elif field == 'temperature':
+            field_str_list.append("T [K]" if args.units else "T")
         elif field == 'mach':
             field_str_list.append('M')
         else:
             field_str_list.append(field)
 
-    return field_str_list if len(args.field) > 1 else field_str_list[0]
+    return field_str_list if len(args.fields) > 1 else field_str_list[0]
 
 def calc_lorentz_gamma(fields: dict) -> np.ndarray:
     return (1.0 + fields['gamma_beta']**2)**0.5
@@ -459,7 +461,11 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
     elif var == 'energy_rst':
         # Total Energy
         return fields['rho']*h*W**2 - fields['p']
-    elif var == 'temperature':
+    elif var == "temperature":
+        a    = (4.0 * const.sigma_sb.cgs / c)
+        T    = (3.0 * fields['p'] * pre_scale  / a)**0.25
+        return T
+    elif var == 'T_ev':
         a    = (4.0 * const.sigma_sb.cgs / c)
         T    = (3.0 * fields['p'] * pre_scale  / a)**0.25
         T_eV = (const.k_B.cgs * T).to(units.eV)
@@ -479,7 +485,25 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
         beta2 = 1.0 - (1.0 + fields['gamma_beta']**2)**(-1)
         cs2   = fields['ad_gamma'] * fields['p'] / fields['rho'] / h
         return np.sqrt(beta2 / cs2)
+
+def get_colors(interval: np.ndarray, cmap: plt.cm, vmin: float = None, vmax: float = None):
+    """
+    Return array of rgba colors for a given matplotlib colormap
     
+    Parameters
+    -------------------------
+    interval: interval range for colormarp min and max 
+    cmap: the matplotlib colormap instnace
+    vmin: minimum for colormap 
+    vmax: maximum for colormap 
+    
+    Returns
+    -------------------------
+    arr: the colormap array generate by the user conditions
+    """
+    norm = plt.Normalize(vmin, vmax)
+    return cmap(norm(interval))
+
 def find_nearest(arr: list, val: float) -> Union[int, float]:
     arr = np.asarray(arr)
     idx = np.argmin(np.abs(arr - val))
