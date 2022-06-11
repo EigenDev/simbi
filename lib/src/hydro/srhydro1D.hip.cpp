@@ -313,7 +313,8 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
     const auto active_zones = this->active_zones;
     const auto dt           = this->dt;
     const auto hubble_param = this->hubble_param;
-    const auto geometry = this->geometry;
+    const auto geometry     = this->geometry;
+    const auto gamma        = this->gamma;
     #endif
     simbi::parallel_for(p, (luint)0, nx, [=] GPU_LAMBDA (luint ii){
         #if GPU_CODE
@@ -355,13 +356,12 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 invdV            = static_cast<real>(1.0) / (xmean * xmean * (xrf - xlf));
             }
             // Compile time thread selection
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
+            #if GPU_CODE
                 conserved_buff[tx] = self->gpu_cons[ii];  
                 peq = self->gpu_pressure_guess[ii];  
-            } else {
+            #else
                 peq  = self->pressure_guess[ii];
-            }
+            #endif
 
             const real D   = conserved_buff[tx].d   * invdV;
             const real S   = conserved_buff[tx].s   * invdV;
@@ -380,10 +380,10 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 eps = (tau + (static_cast<real>(1.0) - W) * D + (static_cast<real>(1.0) - W * W) * pre) / (D * W);
 
                 h  = static_cast<real>(1.0) + eps + pre / rho;
-                c2 = self->gamma *pre / (h * rho); 
+                c2 = gamma *pre / (h * rho); 
 
                 g = c2 * v2 - static_cast<real>(1.0);
-                f = (self->gamma - static_cast<real>(1.0)) * rho * eps - pre;
+                f = (gamma - static_cast<real>(1.0)) * rho * eps - pre;
 
                 peq = pre - f / g;
                 if (iter >= MAX_ITER)
