@@ -47,10 +47,10 @@ def plot_profile(fig, ax, filename, args):
     r, t                = mesh['r'], setup['time']
     x1min, x1max        = mesh['xlims']
     
-    if args.field[0] in derived:
-        var = util.prims2var(fields, args.field[0])
+    if args.fields[0] in derived:
+        var = util.prims2var(fields, args.fields[0])
     else:
-        var = fields[args.field[0]]
+        var = fields[args.fields[0]]
         
     ax.plot(r, var)
     if args.log:
@@ -163,7 +163,7 @@ def main():
                         help='A data directory or list to retrieve the h5 files')
     parser.add_argument('setup', metavar='Setup', nargs='+', type=str,
                         help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--field', dest = 'field', metavar='Field Variable', nargs='+',
+    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable', nargs='+',
                         help='The name of the field variable you\'d like to plot',
                         choices=field_choices, default='rho')
     parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max',default = 0.0, help='The domain range')
@@ -231,7 +231,7 @@ def main():
 
     if args.save is not None:
         animation.save('{}.mp4'.format(args.save).replace(' ', '_'))
-        # animation.save('science/{}_{}.mp4'.format(args.setup[0], args.field))
+        # animation.save('science/{}_{}.mp4'.format(args.setup[0], args.fields))
     else:
         plt.show()
 

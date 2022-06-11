@@ -15,6 +15,12 @@ import astropy.units as u
 import os
 import utility as util
 from datetime import datetime
+from itertools import cycle
+
+try:
+    import cmasher as cmr 
+except:
+    pass 
 
 cons = ['D', 'momentum', 'energy']
 field_choices = ['rho', 'v', 'p', 'gamma_beta', 'temperature'] + cons
@@ -40,14 +46,22 @@ def fill_below_intersec(x, y, constraint, color):
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
 
 def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot = False, case = 0):
+
+    vmin, vmax = args.clims 
+    cinterval  = np.linspace(vmin, vmax, len(args.filename) * len(args.fields))
+    cmap       = plt.cm.get_cmap(args.cmap)
+    colors     = util.get_colors(cinterval, cmap, vmin, vmax)
+    ccycler    = cycle(colors)
+    linestyles = ['--', '-', '-.', '.']
+    linecycler = cycle(linestyles)
     
-    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
-    r = mesh['r']
+    r      = mesh['r']
     tend = dset['time']
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,8))
     
-    for field in args.field:
+    field_labels = util.get_field_str(args)
+    for idx, field in enumerate(args.fields):
         unit_scale = 1.0
         if (args.units):
             if field == 'rho':
@@ -59,11 +73,15 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
             var = util.prims2var(fields, field)
         else:
             var = fields[field]
+        
+        label = r'$\rm {}, t={:.2f}$'.format(args.labels[case], tend)
+        if len(args.fields) > 1:
+            label = field_labels[idx] + ' ' + label
             
         if args.labels is None:
-            ax.plot(r, var * unit_scale, color=colors[case])
+            ax.plot(r, var * unit_scale, color=colors[case + idx], linestyle=linestyles[case + idx])
         else:
-            ax.plot(r, var * unit_scale, color=colors[case], label=r'${}$, t={:.2f}'.format(args.labels[case], tend))
+            ax.plot(r, var * unit_scale, color=colors[case + idx], linestyle=linestyles[case + idx], label=label)
 
     ax.tick_params(axis='both')
     if args.log:
@@ -73,15 +91,15 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
         ax.set_xscale('log')
     
     ax.set_xlabel('$r$')
-    # if args.xlim is None:
-    #     ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
-    # else:
-    #     x1min, x1max = eval(args.xlim)
-    #     ax.set_xlim(x1min, x1max)
+    if args.xlims is None:
+        ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
+    else:
+        ax.set_xlim(*args.xlims)
     # Change the format of the field
     field_str = util.get_field_str(args)
-        
-    ax.set_ylabel('{}'.format(field_str))
+    
+    if (len(args.fields) == 1):
+        ax.set_ylabel('{}'.format(field_str))
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     # ax.axvline(0.60, color='black', linestyle='--')
@@ -186,9 +204,9 @@ def main():
     
     parser.add_argument('filename', metavar='Filename', nargs='+', help='A Data Source to Be Plotted')
     parser.add_argument('setup', metavar='Setup', nargs='+', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--field', dest = 'field', metavar='Field Variable(s)', nargs='+', help='The name of the field variable(s) you\'d like to plot', choices=field_choices, default='rho')
+    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable(s)', nargs='+', help='The name of the field variable(s) you\'d like to plot', choices=field_choices, default='rho')
     parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max', default = 0.0, help='The domain range')
-    parser.add_argument('--xlim', dest = 'xlim', metavar='Domain',default = None, help='The domain range')
+    parser.add_argument('--xlims', dest = 'xlims', metavar='Domain',default = None, help='The domain range', nargs='+', type=float)
     parser.add_argument('--fill_scale', dest = 'fill_scale', metavar='Filler maximum', type=float, default = None, help='Set the y-scale to start plt.fill_between')
     parser.add_argument('--log', dest='log', action='store_true', default=False, help='Logarithmic Radial Grid Option')
     parser.add_argument('--ehist', dest='ehist', action='store_true',default=False, help='Plot the energy_vs_gb histogram')
@@ -201,6 +219,8 @@ def main():
     parser.add_argument('--units', dest='units', action='store_true', default=False,help='True if you would like units scale (default is solar units)')
     parser.add_argument('--tex', dest='tex', default=False, action='store_true', help='set if want Latex typesetting')
     parser.add_argument('--fig_size', dest='fig_size', default=(4,3.5), type=float, help='size of figure', nargs=2)
+    parser.add_argument('--cmap', dest='cmap', default='viridis', type=str, help='matplotlib color map')
+    parser.add_argument('--clims', dest='clims', default=[0, 1], type=float, nargs='+', help='color limits')
     args = parser.parse_args()
     
     if args.tex:
@@ -243,7 +263,7 @@ def main():
     
     
     if args.save is not None:
-        fig.savefig('{}.png'.format(args.save), bbox_inches='tight')
+        fig.savefig('{}.pdf'.format(args.save), bbox_inches='tight')
     else:
         plt.show()
     

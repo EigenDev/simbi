@@ -62,7 +62,7 @@ def plot_polar_plot(
     '''
     Plot the given data on a polar projection plot. 
     '''
-    num_fields = len(args.field)
+    num_fields = len(args.fields)
     is_wedge   = args.nwedge > 0
     rr, tt = mesh['rr'], mesh['theta']
     t2     = - tt[::-1]
@@ -92,10 +92,10 @@ def plot_polar_plot(
             ax = axs
     
     vmin,vmax = args.cbar[:2]
-
+    ax.grid(False)
     unit_scale = np.ones(num_fields)
     if (args.units):
-        for idx, field in enumerate(args.field):
+        for idx, field in enumerate(args.fields):
             if field == 'rho' or field == 'D':
                 unit_scale[idx] = util.rho_scale.value
             elif field == 'p' or field == 'energy' or field == 'energy_rst':
@@ -115,7 +115,7 @@ def plot_polar_plot(
         cs  = np.zeros(4, dtype=object)
         var = []
         kwargs = []
-        for field in args.field:
+        for field in args.fields:
             if field in derived:
                 if x2max == np.pi:
                     var += np.split(util.prims2var(fields, field), 2)
@@ -138,10 +138,10 @@ def plot_polar_plot(
         rchop  = np.split(rr, 2)
         
         quadr = {}
-        field1 = args.field[0]
-        field2 = args.field[1]
-        field3 = args.field[2 % num_fields]
-        field4 = args.field[-1]
+        field1 = args.fields[0]
+        field2 = args.fields[1]
+        field3 = args.fields[2 % num_fields]
+        field4 = args.fields[-1]
         
         
         quadr[field1] = var[0]
@@ -205,12 +205,12 @@ def plot_polar_plot(
         else:
             kwargs = {'vmin': vmin, 'vmax': vmax}
             
-        cs = np.zeros(len(args.field), dtype=object)
+        cs = np.zeros(len(args.fields), dtype=object)
         
-        if args.field[0] in derived:
-            var = units * util.prims2var(fields, args.field[0])
+        if args.fields[0] in derived:
+            var = units * util.prims2var(fields, args.fields[0])
         else:
-            var = units * fields[args.field[0]]
+            var = units * fields[args.fields[0]]
         
         cs[0] = ax.pcolormesh(tt, rr, var, cmap=color_map, shading='auto',
                               linewidth=0, rasterized=True, **kwargs)
@@ -301,7 +301,7 @@ def plot_polar_plot(
         if args.log:
             if not args.no_cbar:
                 if num_fields > 1:
-                    fmt  = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.field]
+                    fmt  = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.fields]
                     cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i], format=fmt[i]) for i in range(num_fields)]
                     for cb in cbar:
                         cb.outline.set_visible(False)                                 
@@ -365,7 +365,7 @@ def plot_polar_plot(
                 wedge.set_position([0.70, -0.5, 0.3, 2])
                 axes[2].set_position([0.01, -0.5, 0.3, 2])
             
-        if len(args.field) > 1:
+        if len(args.fields) > 1:
             if len(args.cbar2) == 4:
                 vmin2, vmax2, vmin3, vmax3 = args.cbar2
             else:
@@ -373,7 +373,7 @@ def plot_polar_plot(
                 vmin3, vmax3 = None, None
             kwargs = {}
             for idx, key in enumerate(quadr.keys()):
-                field = args.field[idx % num_fields]
+                field = args.fields[idx % num_fields]
                 if idx == 0:
                     kwargs[field] =  {'vmin': vmin2, 'vmax': vmax2} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin2, vmax = vmax2)} 
                 elif idx == 1:
@@ -440,7 +440,7 @@ def plot_polar_plot(
                 if x2max == np.pi:
                     if num_fields > 1:
                         for i in range(num_fields):
-                            if args.field[i] in lin_fields:
+                            if args.fields[i] in lin_fields:
                                 # labelpad = -35 if you want the labels to be on other side
                                 cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize, labelpad = -40 )
                                 # xticks = [0.10, 0.20, 0.35, 0.50]
@@ -457,7 +457,7 @@ def plot_polar_plot(
                 else:
                     if num_fields > 1:
                         for i in range(num_fields):
-                            if args.field[i] in lin_fields:
+                            if args.fields[i] in lin_fields:
                                 cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize)
                             else:
                                 cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=fsize)
@@ -506,7 +506,7 @@ def plot_cartesian_plot(
         color_map = plt.cm.get_cmap(args.cmap)
         
     tend = dset['time']
-    c = ax.pcolormesh(xx, yy, fields[args.field[0]], cmap=color_map, shading='auto', **kwargs)
+    c = ax.pcolormesh(xx, yy, fields[args.fields[0]], cmap=color_map, shading='auto', **kwargs)
     
     divider = make_axes_locatable(ax)
     cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
@@ -541,7 +541,7 @@ def plot_1d_curve(
     ax:         bool=None, 
     case:       int =0) -> None:
     
-    num_fields = len(args.field)
+    num_fields = len(args.fields)
     colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
@@ -555,7 +555,7 @@ def plot_1d_curve(
     x2min        = dset['x2min']
     
     vmin,vmax = args.cbar[:2]
-    var = [field for field in args.field] if num_fields > 1 else args.field[0]
+    var = [field for field in args.fields] if num_fields > 1 else args.fields[0]
     
     # Change the format of the field
     field_str = util.get_field_str(args)
@@ -575,14 +575,14 @@ def plot_1d_curve(
         ax.axvline(0.65, linestyle='--', color='red')
         ax.axvline(1.00, linestyle='--', color='blue')
     else:
-        for idx, field in enumerate(args.field):
+        for idx, field in enumerate(args.fields):
             if field in derived:
                 var = util.prims2var(fields, field)
             else:
                 var = fields[field]
                 
             label = None if args.labels is None else '{}'.format(field_str[idx] if num_fields > 1 else field_str)
-            ax.loglog(r, var[args.tidx], label=args.labels[case])
+            ax.loglog(r, var[args.tidx], label=label)
             if args.oned_files is not None:
                 for one_file in args.oned_files:
                     oned_var = util.read_1d_file(one_file)[0]
@@ -592,11 +592,10 @@ def plot_1d_curve(
     ax.set_xlim(x1min, x1max)
     ax.set_xlabel(r'$r/R_\odot$', fontsize=20)
     ax.tick_params(axis='both', labelsize=10)
-    ax.legend()
-    
+
     if args.log:
         if num_fields == 1:
-            ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+            ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
         else:
             ax.legend()
     else:
@@ -628,7 +627,7 @@ def plot_per_theta(
     theta = mesh['th']
     
 
-    for field in args.field:
+    for field in args.fields:
         fields = fields if args.oned_files is None else util.read_1d_file(args.oned_files[0])[0]
         if field in derived:
             var = util.prims2var(fields, field)
@@ -1118,7 +1117,7 @@ def plot_dx_domega(
         elif args.enthalpy:
             h   = calc_enthalpy(fields)
             var = (h - 1.0) *  dV * util.e_scale.value
-        elif 'temperature' in args.field:
+        elif 'temperature' in args.fields:
             var = util.prims2var(fields, 'temperature')
         else:
             edens_total = util.prims2var(fields, 'energy')
@@ -1184,7 +1183,7 @@ def plot_dx_domega(
                 label=label+r"$ > {}$".format(cut_fmt)
                 
             if not energy_and_mass:
-                quant_func     = np.sum if args.field[0] != 'temperature' else np.mean
+                quant_func     = np.sum if args.fields[0] != 'temperature' else np.mean
                 iso_correction = 4.0 * np.pi
                 var_per_theta  = iso_correction * quant_func(var, axis=1) / domega[:,0]
                 
@@ -1199,7 +1198,7 @@ def plot_dx_domega(
             else:
                 ek  [gb < cutoff] = 0
                 mass[gb < cutoff] = 0
-                quant_func     = np.sum if args.field[0] != 'temperature' else np.mean
+                quant_func     = np.sum if args.fields[0] != 'temperature' else np.mean
                 iso_correction = 4.0 * np.pi
                 ek_iso         = iso_correction * quant_func(ek, axis=1) / domega[:,0]
                 m_iso          = iso_correction * quant_func(mass, axis=1) / domega[:,0] * util.m.cgs.value
@@ -1274,7 +1273,7 @@ def plot_dx_domega(
                     ax.set_ylabel(r'$H_{\rm iso} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
                 elif args.dm_domega:
                     ax.set_ylabel(r'$M_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoffs[0]), fontsize=15)
-                elif args.field[0] == 'temperature':
+                elif args.fields[0] == 'temperature':
                     ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{eV}}]$'.format(args.cutoffs[0]), fontsize=15)
                 else:
                     ax.set_ylabel(r'$E_{{\rm T, iso}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
@@ -1290,7 +1289,7 @@ def plot_dx_domega(
                 elif args.dm_domega:
                     units = r'[\rm{{g}}]' if not args.norm else ''
                     ax.set_ylabel(r'$M_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
-                elif args.field[0] == 'temperature':
+                elif args.fields[0] == 'temperature':
                     ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{eV}}]$', fontsize=15)
         
         ax.tick_params('both', labelsize=fsize)
@@ -1376,7 +1375,7 @@ def main():
     parser.add_argument('setup', metavar='Setup', type=str,
                         help='The name of the setup you are plotting (e.g., Blandford McKee)')
     
-    parser.add_argument('--field', dest = 'field', metavar='Field Variable', nargs='+',
+    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable', nargs='+',
                         help='The name of the field variable you\'d like to plot',
                         choices=field_choices, default=['rho'])
     

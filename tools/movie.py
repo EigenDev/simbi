@@ -35,7 +35,7 @@ def get_frames(dir, max_file_num):
     return total_frames, frames
 
 def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
-    num_fields = len(args.field)
+    num_fields = len(args.fields)
     is_wedge   = args.nwedge > 0
     rr, tt = mesh['rr'], mesh['theta']
     t2     = - tt[::-1]
@@ -65,7 +65,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
 
     unit_scale = np.ones(num_fields)
     if (args.units):
-        for idx, field in enumerate(args.field):
+        for idx, field in enumerate(args.fields):
             if field == 'rho' or field == 'D':
                 unit_scale[idx] = util.rho_scale.value
             elif field == 'p' or field == 'energy' or field == 'energy_rst':
@@ -85,7 +85,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
         cs  = np.zeros(4, dtype=object)
         var = []
         kwargs = []
-        for field in args.field:
+        for field in args.fields:
             if field in derived:
                 if x2max == np.pi:
                     var += np.split(util.prims2var(fields, field), 2)
@@ -108,10 +108,10 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
         rchop  = np.split(rr, 2)
         
         quadr = {}
-        field1 = args.field[0]
-        field2 = args.field[1]
-        field3 = args.field[2 % num_fields]
-        field4 = args.field[-1]
+        field1 = args.fields[0]
+        field2 = args.fields[1]
+        field3 = args.fields[2 % num_fields]
+        field4 = args.fields[-1]
         
         
         quadr[field1] = var[0]
@@ -175,12 +175,12 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
         else:
             kwargs = {'vmin': vmin, 'vmax': vmax}
             
-        cs = np.zeros(len(args.field), dtype=object)
+        cs = np.zeros(len(args.fields), dtype=object)
         
-        if args.field[0] in derived:
-            var = units * util.prims2var(fields, args.field[0])
+        if args.fields[0] in derived:
+            var = units * util.prims2var(fields, args.fields[0])
         else:
-            var = units * fields[args.field[0]]
+            var = units * fields[args.fields[0]]
         
         cs[0] = ax.pcolormesh(tt, rr, var, cmap=color_map, shading='auto',
                               linewidth=0, rasterized=True, **kwargs)
@@ -272,7 +272,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
         if args.log:
             if not args.no_cbar:
                 if num_fields > 1:
-                    fmt  = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.field]
+                    fmt  = [None if field in lin_fields else tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True) for field in args.fields]
                     cbar = [fig.colorbar(cs[i], orientation=cbar_orientation, cax=cbaxes[i], format=fmt[i]) for i in range(num_fields)]
                     for cb in cbar:
                         cb.outline.set_visible(False)                                 
@@ -336,7 +336,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
                 wedge.set_position([0.70, -0.5, 0.3, 2])
                 axes[2].set_position([0.01, -0.5, 0.3, 2])
             
-        if len(args.field) > 1:
+        if len(args.fields) > 1:
             if len(args.cbar2) == 4:
                 vmin2, vmax2, vmin3, vmax3 = args.cbar2
             else:
@@ -344,7 +344,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
                 vmin3, vmax3 = None, None
             kwargs = {}
             for idx, key in enumerate(quadr.keys()):
-                field = args.field[idx % num_fields]
+                field = args.fields[idx % num_fields]
                 if idx == 0:
                     kwargs[field] =  {'vmin': vmin2, 'vmax': vmax2} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = vmin2, vmax = vmax2)} 
                 elif idx == 1:
@@ -411,7 +411,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
                 if x2max == np.pi:
                     if num_fields > 1:
                         for i in range(num_fields):
-                            if args.field[i] in lin_fields:
+                            if args.fields[i] in lin_fields:
                                 # labelpad = -35 if you want the labels to be on other side
                                 cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize, labelpad = -40 )
                                 # xticks = [0.10, 0.20, 0.35, 0.50]
@@ -428,7 +428,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
                 else:
                     if num_fields > 1:
                         for i in range(num_fields):
-                            if args.field[i] in lin_fields:
+                            if args.fields[i] in lin_fields:
                                 cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize)
                             else:
                                 cbar[i].set_label(r'$\log$ {}'.format(field_str[i]), fontsize=fsize)
@@ -472,7 +472,7 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     tend = ds["time"]
     ax.yaxis.grid(True, alpha=0.1)
     ax.xaxis.grid(True, alpha=0.1)
-    c = ax.pcolormesh(xx, yy, field_dict[args.field[0]], cmap=color_map, shading='auto', **kwargs)
+    c = ax.pcolormesh(xx, yy, field_dict[args.fields[0]], cmap=color_map, shading='auto', **kwargs)
 
     if args.log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
@@ -497,6 +497,7 @@ def create_mesh(fig, ax, filepath, filename, cbaxes, args):
     if setups["is_cartesian"]:
         plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, setups)
     else:      
+        ax.grid(False)
         plot_polar_plot(fig, ax, cbaxes, fields, args, mesh, setups)        
     return ax
 
@@ -506,8 +507,8 @@ def main():
         epilog="This Only Supports H5 Files Right Now")
     
     parser.add_argument('data_dir', metavar='dir', nargs='+',help='A data directory to retrieve the h5 files')
-    parser.add_argument('setup', metavar='Setup', nargs='+', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--field', dest = "field", metavar='Field Variable', nargs='+',help='The name of the field variable you\'d like to plot',choices=field_choices, default=["rho"])
+    parser.add_argument('setup', metavar='setup', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
+    parser.add_argument('--fields', dest = "field", metavar='Field Variable', nargs='+',help='The name of the field variable you\'d like to plot',choices=field_choices, default=["rho"])
     parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',default = 0.0, help='The domain range')
     parser.add_argument('--cbar_range', dest = "cbar", metavar='Range of Color Bar(s)', nargs='+',default = [None, None], help='The colorbar range you\'d like to plot')
     parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs='+',type=float,default =[None, None], help='The colorbar range you\'d like to plot')
@@ -573,7 +574,7 @@ def main():
     flist      = flist[args.frame_range[0]: args.frame_range[1]]
     frame_count = len(flist)
     
-    num_fields = len(args.field)
+    num_fields = len(args.fields)
     if num_fields > 1:
         if len(args.cbar) == 2*num_fields:
             pass
