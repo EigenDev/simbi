@@ -382,10 +382,10 @@ class Hydro:
                 x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
 
         if adot(1.0) / a(1.0) != 0 and self.coord_system != 'cartesian':
-                if self.dimensions == 1:
-                    volume_factor = calc_cell_volume1D(x1)
-                elif self.dimensions == 2:
-                    volume_factor = calc_cell_volume2D(x1, x2)
+            if self.dimensions == 1:
+                volume_factor = calc_cell_volume1D(x1)
+            elif self.dimensions == 2:
+                volume_factor = calc_cell_volume2D(x1, x2)
         else:
             volume_factor = 1.0
                 
