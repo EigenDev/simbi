@@ -136,6 +136,7 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                         model.u[:, :] = np.array([model.initD, model.initS, 
                                             model.init_tau])
                         
+                    model.u *= volume_factor
                     # Add boundary ghosts
                     right_ghost = model.u[:, -1]
                     left_ghost = model.u[:, 0]
@@ -201,6 +202,7 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                     model.u = np.insert(model.u, model.u.shape[2],(right_ghost, right_ghost) , axis=2)
         else:
             if not first_order:
+                model.u *= volume_factor
                 # Add the extra ghost cells for i-2, i+2
                 right_ghost = model.u[:, :, -1]
                 left_ghost = model.u[:, :, 0]
