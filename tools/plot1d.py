@@ -22,28 +22,8 @@ try:
 except:
     pass 
 
-cons = ['D', 'momentum', 'energy']
-field_choices = ['rho', 'v', 'p', 'gamma_beta', 'temperature'] + cons
-col = plt.cm.jet([0.25,0.75])  
-
-R_0 = const.R_sun.cgs 
-c   = const.c.cgs
-m   = const.M_sun.cgs
- 
-rho_scale  = m / (4./3. * np.pi * R_0 ** 3) 
-e_scale    = m * const.c.cgs.value**2
-pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
-vel_scale  = c 
-time_scale = R_0 / c
-
-def find_nearest(arr, val):
-    idx = np.argmin(np.abs(arr - val))
-    return idx, arr[idx]
- 
-def fill_below_intersec(x, y, constraint, color):
-    # colors = plt.cm.plasma(np.linspace(0.25, 0.75, len(x)))
-    ind = find_nearest(y, constraint)[0]
-    plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
+derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'mach']
+field_choices = ['rho', 'c', 'p', 'gamma_beta', 'chi'] + derived
 
 def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot = False, case = 0):
 
@@ -56,29 +36,36 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
     linecycler = cycle(linestyles)
     
     r      = mesh['r']
-    tend = dset['time']
+    tend   = dset['time']
+    if args.units:
+        tend *= util.time_scale 
+    
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,8))
     
     field_labels = util.get_field_str(args)
     for idx, field in enumerate(args.fields):
         unit_scale = 1.0
-        if (args.units):
-            if field == 'rho':
-                unit_scale = rho_scale
-            elif field == 'p':
-                unit_scale = pre_scale
+        if args.units:
+            if field == 'rho' or field == 'D':
+                unit_scale = util.rho_scale
+            elif field == 'p' or field == 'energy':
+                unit_scale = util.pre_scale
             
-        if field in cons:
+        if field in derived:
             var = util.prims2var(fields, field)
         else:
             var = fields[field]
         
-        label = r'$\rm {}, t={:.2f}$'.format(args.labels[case], tend)
+        if args.labels:
+            label = r'$\rm {}, t={:.1f}$'.format(args.labels[case], tend)
+        else:
+            label = r'$t-{:.1f}$'.format(tend)
+            
         if len(args.fields) > 1:
             label = field_labels[idx] + ' ' + label
             
-        if args.labels is None:
+        if len(args.fields) == 1:
             ax.plot(r, var * unit_scale, color=colors[case + idx], linestyle=linestyles[case + idx])
         else:
             ax.plot(r, var * unit_scale, color=colors[case + idx], linestyle=linestyles[case + idx], label=label)
@@ -104,14 +91,15 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
     ax.spines['top'].set_visible(False)
     # ax.axvline(0.60, color='black', linestyle='--')
     
+    ax.legend()
     ########
     # Personal Calculations
     # TODO: Remove Later
     ########
-    r_outer = find_nearest(r, 0.55)[0]
-    r_slow  = find_nearest(r, 1.50)[0]
-    dV      = util.calc_cell_volume1D(mesh['r']) 
-    mout    = (4./3.) * np.pi * np.sum(dV[r_outer:r_slow] * fields['rho'][r_outer: r_slow])
+    # r_outer = find_nearest(r, 0.55)[0]
+    # r_slow  = find_nearest(r, 1.50)[0]
+    # dV      = util.calc_cell_volume1D(mesh['r']) 
+    # mout    = (4./3.) * np.pi * np.sum(dV[r_outer:r_slow] * fields['rho'][r_outer: r_slow])
     # print(mout)
     # zzz = input('')
     ########################
@@ -136,11 +124,11 @@ def plot_hist(args, fields, mesh, dset, overplot=False, ax=None, subplot = False
     
     if args.eks:
         mass   = dV * fields['W']**2 * fields['rho']
-        energy = (fields['W'] - 1.0) * mass * e_scale.value
+        energy = (fields['W'] - 1.0) * mass * util.e_scale.value
     elif args.hhist:
-        energy = (fields['enthalpy'] - 1.0) *  dV * e_scale.value
+        energy = (fields['enthalpy'] - 1.0) *  dV * util.e_scale.value
     else:
-        energy = edens_total * dV * e_scale.value
+        energy = edens_total * dV * util.e_scale.value
 
 
     u = fields['gamma_beta']
