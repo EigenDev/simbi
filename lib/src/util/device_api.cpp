@@ -8,37 +8,37 @@ namespace simbi
         {
             void copyHostToDevice(void *to, const void *from, size_t bytes)
             {
-                auto status = simbi::gpu::error::status_t(hipMemcpy(to, from, bytes, hipMemcpyHostToDevice));
+                auto status = simbi::gpu::error::status_t(anyGpuMemcpy(to, from, bytes, anyGpuMemcpyHostToDevice));
                 simbi::gpu::error::check_err(status, "Synchronous copy to dev failed");
             }
 
             void copyDevToHost(void *to, const void *from, size_t bytes)
             {
-                auto status = simbi::gpu::error::status_t(hipMemcpy(to, from, bytes, hipMemcpyDeviceToHost));
+                auto status = simbi::gpu::error::status_t(anyGpuMemcpy(to, from, bytes, anyGpuMemcpyDeviceToHost));
                 simbi::gpu::error::check_err(status, "Synchronous copy to host failed");
             }
 
             void copyDevToDev(void *to, const void *from, size_t bytes)
             {
-                auto status = simbi::gpu::error::status_t(hipMemcpy(to, from, bytes, hipMemcpyDeviceToDevice));
+                auto status = simbi::gpu::error::status_t(anyGpuMemcpy(to, from, bytes, anyGpuMemcpyDeviceToDevice));
                 simbi::gpu::error::check_err(status, "Synchronous copy to dev2dev failed");
             }
 
             void gpuMalloc(void *obj, size_t elements)
             {
-                auto status = simbi::gpu::error::status_t(hipMallocManaged((void**)obj, elements));
+                auto status = simbi::gpu::error::status_t(anyGpuMallocManaged((void**)obj, elements));
                 simbi::gpu::error::check_err(status, "Failed to allocate resources on device");
             }
 
             void gpuFree(void *obj)
             {
-                auto status = simbi::gpu::error::status_t(hipFree(obj));
+                auto status = simbi::gpu::error::status_t(anyGpuFree(obj));
                 simbi::gpu::error::check_err(status, "Failed to free resources from device");
             }
 
             void gpuMemset(void *obj, int val, size_t bytes)
             {
-                auto status = simbi::gpu::error::status_t(hipMemset(obj, val, bytes));
+                auto status = simbi::gpu::error::status_t(anyGpuMemset(obj, val, bytes));
                 simbi::gpu::error::check_err(status, "Failed to memset");
             };
         } // namespace api

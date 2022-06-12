@@ -51,8 +51,7 @@ namespace simbi
             };
 
             inline ::std::string  describe(status_t status) { 
-                
-                return hipGetErrorString(hipError_t(status)); 
+                return anyGpuGetErrorString(anyGpuError_t(status)); 
             }
             
             class runtime_error : public ::std::runtime_error {
@@ -112,7 +111,7 @@ namespace simbi
             inline void deviceSynch() {
                 if constexpr(BuildPlatform == Platform::GPU)
                 {
-                    auto status = error::status_t(hipDeviceSynchronize());
+                    auto status = error::status_t(anyGpuDeviceSynchronize());
                     error::check_err(status, "Failed to synch device(s)");
                 } else {
                     return;
@@ -297,7 +296,7 @@ namespace simbi
     GPU_DEV_INLINE
     void synchronize() {
     #if GPU_CODE
-    if constexpr(BuildPlatform == Platform::GPU) __syncthreads();
+    __syncthreads();
     #endif
     
     }
