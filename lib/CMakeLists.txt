@@ -16,13 +16,14 @@ list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
 find_program(PYTHON3 "python3")
 find_package(HDF5 REQUIRED COMPONENTS CXX HL)
 find_package(HIP)
-
+find_package(CUDA)
 # SET (HDF5_LIBS ${HDF5_LIBRARIES} "${HDF5_CPP_LIBRARIES}/../")
 # message(STATUS "HDF5 Lib Path: ${HDF5_CXX_LIBRARIES}")
 # message(STATUS "HDF5 Lib Path: ${HDF5_LIBRARIES}")
 
 # Determine HIP_PLATFORM
 if (HIP_FOUND)
+#---------------------------------------
     if(NOT DEFINED HIP_PLATFORM)
         if(NOT DEFINED ENV{HIP_PLATFORM})
             execute_process(COMMAND /opt/rocm/hip/bin/hipconfig --platform
@@ -36,16 +37,17 @@ if (HIP_FOUND)
 
     # Detect the hipcc compiler path
     # execute_process(COMMAND which hipcc OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE HIPCC)
-    set(HIPCC "/opt/rocm/bin/hipcc")
+    set(GPUCC "/opt/rocm/bin/hipcc")
     if(HIP_PLATFORM STREQUAL "nvidia")
         set(HIP_RUNTIME "cuda"  CACHE STRING "HIP Runtime")
         set(HIP_COMPILER "nvcc" CACHE STRING "HIP Compiler")
-        set(HIP_RUNTIME_LIBRARY_DIRS "/opt/rocm/hip/lib")
+        set(GPU_RUNTIME_LIBRARY_DIRS "/opt/rocm/hip/lib")
         find_package(CUDA)
         enable_language(CUDA)
         set(CUDART_LIB_PATH ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
-        list(APPEND  HIP_RUNTIME_LIBRARY_DIRS ${CUDART_LIB_PATH})
+        list(APPEND  GPU_RUNTIME_LIBRARY_DIRS ${CUDART_LIB_PATH})
         list(APPEND HIP_INCLUDE_DIRS ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+        set(GPU_INCLUDE_DIRS ${HIP_INCLUDE_DIRS})
         set(CUDA_SM "86" CACHE STRING "Architecture of NVidia GPU")
         message(STATUS "CUDA_SM=${CUDA_SM}")
         message(STATUS "CUDA_TOOLKIT_PATH: ${CUDA_TOOLKIT_ROOT_DIR}")
@@ -60,8 +62,21 @@ if (HIP_FOUND)
     message(STATUS "HIP Runtime: "  ${HIP_RUNTIME})
     message(STATUS "HIP Compiler: " ${HIP_COMPILER})
     message(STATUS "HIP LIBS: " ${HIP_LIBRARIES})
+else()
+#----------------------------------------
+if(CUDA_FOUND)
+set(GPUCC "/opt/cuda/bin/nvcc")
+enable_language(CUDA)
+set(GPU_RUNTIME_LIBRARY_DIRS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+set(GPU_INCLUDE_DIRS ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+set(CUDA_SM "86" CACHE STRING "Architecture of NVidia GPU")
+message(STATUS "CUDA_SM=${CUDA_SM}")
+message(STATUS "CUDA_TOOLKIT_PATH: ${CUDA_TOOLKIT_ROOT_DIR}")
+endif(CUDA_FOUND)
+
+#------------------------------------------
 endif(HIP_FOUND)
-# COPY_IF_DIFFERENT("${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}")
+
 if(DEFINED ENV{VIRTUAL_ENV} OR DEFINED ENV{CONDA_PREFIX})
     set(_pip_args)
 else()
@@ -143,7 +158,7 @@ if(PYTHON3)
 
 
     # Custom make command for building default cpu instance in place
-    if(HIP_FOUND)
+    if(HIP_FOUND OR CUDA_FOUND)
         list(APPEND DEPS ${SRCS})
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_gpu
@@ -183,6 +198,6 @@ if(PYTHON3)
         add_custom_target(cpu ALL DEPENDS ${OUTPUT}/pytimestamp_cpu)
         install(CODE "execute_process(COMMAND pip install ${_pip_args} -e ${CMAKE_CURRENT_BINARY_DIR} --install-option=--cpu)")
     
-    endif(HIP_FOUND)
+    endif(HIP_FOUND OR CUDA_FOUND)
     
 endif(PYTHON3)

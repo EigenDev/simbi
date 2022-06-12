@@ -25,10 +25,9 @@ constexpr bool col_maj = false;
 
 #if defined(__CUDACC__) || defined(__HCC__) || (defined(__clang__) && defined(__HIP__))
 #define GPU_CODE 1
-#include "hip/hip_runtime.h"
 constexpr Platform BuildPlatform = Platform::GPU;
 // typedef float real;
-typedef hipStream_t simbiStream_t;
+
 #define GPU_DEV                        __device__
 #define GPU_DEV_INLINE                 __device__ inline
 #define GPU_LAUNCHABLE                 __global__
@@ -40,11 +39,36 @@ typedef hipStream_t simbiStream_t;
 #define EXTERN_SHARED                 extern __shared__
 #define GPU_SHARED_DYN                 extern __shared__
 #define GPU_CAPTURE                    [=, *this]
-//  declaration of a function 
-#define GPU_KERNEL( name , ... ) __global__ void name ( __VA_ARGS__ )
-//  call of a function 
-#define GPU_KERNEL_LAUNCH( name , gridDim , blockDim , sharedBytes, streamId,  ... ) \
-    hipLaunchKernelGGL(name, gridDim, blockDim, sharedBytes, streamId,  __VA_ARGS__ )
+
+#if defined(__CUDACC__) && !defined(__HIP_PLATFORM_NVIDIA__)
+typedef cudaStream_t simbiStream_t;
+#define anyGpuMalloc                cudaMalloc
+#define anyGpuMallocManaged         cudaMallocManaged
+#define anyGpuMemcpy                cudaMemcpy
+#define anyGpuFree                  cudaFree
+#define anyGpuMemset                cudaMemset
+#define anyGpuDeviceSynchronize     cudaDeviceSynchronize
+#define anyGpuMemcpyHostToDevice    cudaMemcpyHostToDevice
+#define anyGpuMemcpyDeviceToDevice  cudaMemcpyDeviceToDevice
+#define anyGpuMemcpyDeviceToHost    cudaMemcpyDeviceToHost
+#define anyGpuGetErrorString        cudaGetErrorString
+#define anyGpuError_t               cudaError_t
+#else 
+#include "hip/hip_runtime.h"
+typedef hipStream_t simbiStream_t;
+#define anyGpuMalloc                hipMalloc
+#define anyGpuMallocManaged         hipMallocManaged
+#define anyGpuMemcpy                hipMemcpy
+#define anyGpuFree                  hipFree
+#define anyGpuMemset                hipMemset
+#define anyGpuMemcpyHostToDevice    hipMemcpyHostToDevice
+#define anyGpuMemcpyDeviceToDevice  hipMemcpyDeviceToDevice
+#define anyGpuMemcpyDeviceToHost    hipMemcpyDeviceToHost
+#define anyGpuDeviceSynchronize     hipDeviceSynchronize
+#define anyGpuGetErrorString        hipGetErrorString
+#define anyGpuError_t               hipError_t
+#endif
+
 #else
 #define GPU_CODE 0
 #include <cmath>
@@ -93,11 +117,11 @@ namespace simbi {
     };
 
     typedef int simbiStream_t;
-    typedef int hipError_t; 
-    enum hipMemcpyType {
-        hipMemcpyHostToDevice,
-        hipMemcpyDeviceToDevice,
-        hipMemcpyDeviceToHost
+    typedef int anyGpuError_t; 
+    enum anyGpuMemcpyType {
+        anyGpuMemcpyHostToDevice,
+        anyGpuMemcpyDeviceToDevice,
+        anyGpuMemcpyDeviceToHost
     };
     typedef u3 dim3;
     inline dim3 blockIdx(1, 1, 1); 
@@ -106,24 +130,27 @@ namespace simbi {
     inline dim3 threadIdx(1, 1, 1);
     constexpr Platform pyBuild = BuildPlatform;
 
-    inline int hipMallocManaged(void** ptr , size_t size) {
+    inline int anyGpuMallocManaged(void** ptr , size_t size) {
         return 0;
     }
 
-    inline int hipMemset(void* ptr, int val, size_t size){
+    inline int anyGpuMemset(void* ptr, int val, size_t size){
         return 0;
     }
 
-    template <typename T> inline int hipFree(T * ptr) {return 0;}
-    inline int hipMemcpy( void* dest , const void* src , size_t size, hipMemcpyType tt) {
+    template <typename T> inline int anyGpuFree(T * ptr) {
+        return 0;
+    }
+
+    inline int anyGpuMemcpy( void* dest , const void* src , size_t size, anyGpuMemcpyType tt) {
         return 0;
     }
 
     inline void __syncthreads() { return;}
-    inline hipError_t hipDeviceSynchronize() { return 0;}
+    inline anyGpuError_t anyGpuDeviceSynchronize() { return 0;}
 
     template <typename T>
-    inline std::string hipGetErrorString(T) { return std::string("nothing odd here.");}
+    inline std::string anyGpuGetErrorString(T) { return std::string("nothing odd here.");}
 } // end simbi
 
 using namespace simbi;
