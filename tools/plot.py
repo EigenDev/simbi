@@ -94,7 +94,7 @@ def plot_polar_plot(
     vmin,vmax = args.cbar[:2]
     ax.grid(False)
     unit_scale = np.ones(num_fields)
-    if (args.units):
+    if args.units:
         for idx, field in enumerate(args.fields):
             if field == 'rho' or field == 'D':
                 unit_scale[idx] = util.rho_scale.value
