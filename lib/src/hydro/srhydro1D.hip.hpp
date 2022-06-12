@@ -152,7 +152,7 @@ namespace simbi
           GPU_CALLABLE_MEMBER
           real calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side);
 
-          GPU_CALLABLE_MEMBER
+          GPU_CALLABLE_INLINE
           constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
           {
                switch (geometry)
@@ -184,8 +184,8 @@ namespace simbi
                     {
                     case simbi::Geometry::SPHERICAL:
                     {         
-                         const real rl     = my_min(x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min);
-                         const real rr     = my_max(rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                         const real rl     = my_max(x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min);
+                         const real rr     = my_min(rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                          const real rmean  = static_cast<real>(0.75) * (rr * rr * rr *rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
                          return rmean * rmean * (rr - rl);
                     }

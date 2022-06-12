@@ -183,28 +183,24 @@ void SRHD::advance(
                 flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceL);
             }   
         } else {
-            Primitive left_most, right_most, left_mid, right_mid, center;
-            left_most  = prim_buff[mod(txa - 2, bx)];
-            left_mid   = prim_buff[mod(txa - 1, bx)];
-            center     = prim_buff[(txa + 0) % bx];
-            right_mid  = prim_buff[(txa + 1) % bx];
-            right_most = prim_buff[(txa + 2) % bx];
+            const Primitive left_most  = prim_buff[mod(txa - 2, bx)];
+            const Primitive left_mid   = prim_buff[mod(txa - 1, bx)];
+            const Primitive center     = prim_buff[(txa + 0) % bx];
+            const Primitive right_mid  = prim_buff[(txa + 1) % bx];
+            const Primitive right_most = prim_buff[(txa + 2) % bx];
 
             // Compute the reconstructed primitives at the i+1/2 interface
-
             // Reconstructed left primitives vector
             prims_l = center    + minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5); 
             prims_r = right_mid - minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most - right_mid)*plm_theta)*static_cast<real>(0.5);
 
-            // Calculate the left and right states using the reconstructed PLM
-            // primitives
+            // Calculate the left and right states using the reconstructed PLM primitives
             u_l = self->prims2cons(prims_l);
             u_r = self->prims2cons(prims_r);
             f_l = self->prims2flux(prims_l);
             f_r = self->prims2flux(prims_r);
 
-            if (self->hllc)
-            {
+            if (self->hllc) {
                 frf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceR);
             } else {
                 frf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceR);
@@ -333,20 +329,12 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         real invdV = 1.0;
         bool workLeftToDo = true;
         while (!found_failure && workLeftToDo)
-        {
-            if (tx == 0 && self->inFailureState) 
-                found_failure = true;
-            simbi::gpu::api::synchronize();
-            
+        {   
             if (mesh_motion && (geometry == simbi::Geometry::SPHERICAL))
             {
-                lint idx;
-                if (ii < radius) {
-                    idx = 0;
-                } else if (ii > active_zones + 1) {
+                lint idx = (ii - radius > 0) * (ii - radius);
+                if (ii > active_zones + 1) {
                     idx = active_zones - 1;
-                } else {
-                    idx = ii - radius;
                 }
                 const real xl    = self->get_xface(idx, geometry, 0);
                 const real xr    = self->get_xface(idx, geometry, 1);
@@ -366,7 +354,12 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             const real D   = conserved_buff[tx].d   * invdV;
             const real S   = conserved_buff[tx].s   * invdV;
             const real tau = conserved_buff[tx].tau * invdV;
-                
+            
+            // if (ii == 0)
+            // {
+            //     writeln("D: {}, V: {}", D, 1.0 / invdV);
+            //     pause_program();
+            // }
             int iter       = 0;
             const real tol = D * tol_scale;
             do
@@ -453,11 +446,12 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
             // Compute waves based on Schneider et al. 1993 Eq(31 - 33)
             const real vbar = static_cast<real>(0.5) * (v_l + v_r);
             const real cbar = static_cast<real>(0.5) * (cs_r + cs_l);
-            const real br = (vbar + cbar) / (1 + vbar * cbar);
-            const real bl = (vbar - cbar) / (1 - vbar * cbar);
 
-            const real aL = my_min(bl, (v_l - cs_l) / (1 - v_l * cs_l));
-            const real aR = my_max(br, (v_r + cs_r) / (1 + v_r * cs_r));
+            const real bR   = (vbar + cbar) / (1 + vbar * cbar);
+            const real bL   = (vbar - cbar) / (1 - vbar * cbar);
+
+            const real aL = my_min(bL, (v_l - cs_l) / (1 - v_l * cs_l));
+            const real aR = my_max(bR, (v_r + cs_r) / (1 + v_r * cs_r));
 
             return Eigenvals(aL, aR);
         }
@@ -486,6 +480,13 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
 
             return Eigenvals(aL, aR);
         }
+    case simbi::WaveSpeeds::NAIVE:
+    {
+        const real aL = my_min((v_r - cs_r) / (1 - v_r * cs_r), (v_l - cs_l) / (1 - v_l * cs_l));
+        const real aR = my_max((v_l + cs_l) / (1 + v_l * cs_l), (v_r + cs_r) / (1 + v_r * cs_r));
+
+        return Eigenvals(aL, aR);
+    }
     }  
 };
 
@@ -605,11 +606,10 @@ Conserved SRHD::prims2flux(const Primitive &prim)
     const real rho = prim.rho;
     const real pre = prim.p;
     const real v   = prim.v;
-
-    const real W = static_cast<real>(1.0) / std::sqrt(1 - v * v);
-    const real h = static_cast<real>(1.0) + gamma * pre / (rho * (gamma - 1));
-    const real D = rho * W;
-    const real S = rho * h * W * W * v;
+    const real W   = static_cast<real>(1.0) / std::sqrt(1 - v * v);
+    const real h   = static_cast<real>(1.0) + gamma * pre / (rho * (gamma - 1));
+    const real D   = rho * W;
+    const real S   = rho * h * W * W * v;
 
     return Conserved{D*v, S*v + pre, S - D*v};
 };
@@ -882,7 +882,8 @@ SRHD::simulate1D(
         #else
         outer_zones = new Conserved[2];
         #endif
-        outer_zones[0] = {d_outer(x1max), s_outer(x1max), e_outer(x1max)};
+        const real dV  = get_cell_volume(active_zones - 1, geometry);
+        outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
     }
 
     // Save initial condition
@@ -918,8 +919,7 @@ SRHD::simulate1D(
             
             advance(self, shBlockSize, radius, geometry, memside);
             cons2prim(fullP, device_self, memside);
-            if (!periodic)
-            {
+            if (!periodic) {
                 config_ghosts1D(fullP, self, nx, true, bc, outer_zones);
             }
             t += dt; 
@@ -943,8 +943,7 @@ SRHD::simulate1D(
                 setup.x1max = x1max;
                 setup.x1min = x1min;
                 time_order_of_mag = std::floor(std::log10(t));
-                if (time_order_of_mag > tchunk_order_of_mag)
-                {
+                if (time_order_of_mag > tchunk_order_of_mag) {
                     tchunk.insert(0, "0");
                     tchunk_order_of_mag += 1;
                 }
