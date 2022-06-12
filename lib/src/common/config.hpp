@@ -104,6 +104,7 @@ namespace simbi{
     {
         SCHNEIDER_ET_AL_93,
         MIGNONE_AND_BODO_05,
+        NAIVE,
     };
 
     constexpr auto comp_wave_speed = WaveSpeeds::MIGNONE_AND_BODO_05;
