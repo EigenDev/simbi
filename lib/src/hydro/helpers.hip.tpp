@@ -23,6 +23,7 @@ namespace simbi{
         int ii   = blockDim.x * blockIdx.x + threadIdx.x;
         int aid  = ii + s->idx_active;
         real val;
+        real vzone = 0.0;
         if (ii < s->active_zones)
         {
             prim_buff[tid] = s->gpu_prims[aid];
@@ -45,7 +46,16 @@ namespace simbi{
                 vPlus   = (v + cs);
                 vMinus  = (v - cs);
             }
-            real cfl_dt = dr / (my_max(std::abs(vPlus), std::abs(vMinus)));
+            if (s->mesh_motion)
+            {
+                const real x1l    = s->get_xface(ii, s->geometry, 0);
+                const real x1r    = s->get_xface(ii, s->geometry, 1);
+                const real vfaceL = x1l * s->hubble_param;
+                const real vfaceR = x1r * s->hubble_param;
+                vzone             = 0.5 * (vfaceL + vfaceR);
+            }
+
+            real cfl_dt = dr / (my_max(std::abs(vPlus - vzone), std::abs(vMinus - vzone)));
             s->dt_min[ii] = s->cfl * cfl_dt;
         }
         #endif
@@ -116,7 +126,7 @@ namespace simbi{
     {
         #if GPU_CODE
         extern __shared__ N prim_buff[];
-        real cfl_dt;
+        real cfl_dt, v1p, v1m, v2p, v2m;
         const real gamma = s->gamma;
         real val;
 
@@ -154,23 +164,35 @@ namespace simbi{
                 minus_v1 = (v1 - cs);
                 minus_v2 = (v2 - cs);
             }
-        
+
+            v1p = std::abs(plus_v1);
+            v1m = std::abs(minus_v1);
+            v2p = std::abs(plus_v2);
+            v2m = std::abs(minus_v2);
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
-                    cfl_dt = my_min(dx1 / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
-                                    dx2 / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
+                    cfl_dt = my_min(dx1 / (my_max(v1p, v1m)),
+                                    dx2 / (my_max(v2m, v2m)));
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl           = my_max(rmin * pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
-                    const real rr           = my_min(rl * pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
-                    const real tl           = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                    const real tr           = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    const real rl  = my_max(rmin * pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
+                    const real rr  = my_min(rl * pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
+                    const real tl  = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                    const real tr  = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    if (s->mesh_motion)
+                    {
+                        const real vfaceL   = rl * s->hubble_param;
+                        const real vfaceR   = rr * s->hubble_param;
+                        const real vzone    = 0.5 * (vfaceL + vfaceR);
+                        v1p = std::abs(plus_v1  - vzone);
+                        v1m = std::abs(minus_v1 - vzone);
+                    }
                     const real rmean        = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
-                    cfl_dt = my_min((rr - rl) / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
-                            rmean * (tr - tl) / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
+                    cfl_dt = my_min((rr - rl) / (my_max(v1p, v1m)),
+                            rmean * (tr - tl) / (my_max(v2p, v2m)));
                     break;
             } // end switch
             
