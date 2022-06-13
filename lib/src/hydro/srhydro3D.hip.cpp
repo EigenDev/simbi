@@ -260,109 +260,72 @@ void SRHD3D::cons2prim(
 GPU_CALLABLE_MEMBER
 Eigenvals SRHD3D::calc_Eigenvals(const Primitive &prims_l,
                                  const Primitive &prims_r,
-                                 const luint nhat = 1)
+                                 const luint nhat)
 {
-    // Eigenvals lambda;
-
     // Separate the left and right Primitive
     const real rho_l = prims_l.rho;
     const real p_l   = prims_l.p;
-    const real h_l   = static_cast<real>(1.0) + gamma * p_l / (rho_l * (gamma - 1));
+    const real h_l   = static_cast<real>(1.0) + gamma * p_l / (rho_l * (gamma - static_cast<real>(1.0)));
 
     const real rho_r = prims_r.rho;
     const real p_r   = prims_r.p;
-    const real h_r   = static_cast<real>(1.0) + gamma * p_r / (rho_r * (gamma - 1));
+    const real h_r   = static_cast<real>(1.0) + gamma * p_r / (rho_r * (gamma - static_cast<real>(1.0)));
 
     const real cs_r = sqrt(gamma * p_r / (h_r * rho_r));
     const real cs_l = sqrt(gamma * p_l / (h_l * rho_l));
 
-    switch (nhat)
+    const real v_l = prims_l.vcomponent(nhat);
+    const real v_r = prims_r.vcomponent(nhat);
+
+    //-----------Calculate wave speeds based on Shneider et al. 1992
+    switch (comp_wave_speed)
     {
-        case 1:
+    case simbi::WaveSpeeds::SCHNEIDER_ET_AL_93:
         {
-            const real v1_l = prims_l.v1;
-            const real v1_r = prims_r.v1;
-
-            //-----------Calculate wave speeds based on Shneider et al. 1992
-            const real vbar  = static_cast<real>(0.5) * (v1_l + v1_r);
+            const real vbar  = static_cast<real>(0.5) * (v_l + v_r);
             const real cbar  = static_cast<real>(0.5) * (cs_l + cs_r);
             const real bl    = (vbar - cbar)/(static_cast<real>(1.0) - cbar*vbar);
             const real br    = (vbar + cbar)/(static_cast<real>(1.0) + cbar*vbar);
-            const real aL    = my_min(bl, (v1_l - cs_l)/(static_cast<real>(1.0) - v1_l*cs_l));
-            const real aR    = my_max(br, (v1_r + cs_r)/(static_cast<real>(1.0) + v1_r*cs_r));
+            const real aL    = my_min(bl, (v_l - cs_l)/(static_cast<real>(1.0) - v_l*cs_l));
+            const real aR    = my_max(br, (v_r + cs_r)/(static_cast<real>(1.0) + v_r*cs_r));
 
-            return Eigenvals(aL, aR);
-
+            return Eigenvals(aL, aR, cs_l, cs_r);
+        }
+    
+    case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
+        {
             //--------Calc the wave speeds based on Mignone and Bodo (2005)
-            // const real sL = cs_l * cs_l * (static_cast<real>(1.0) / (gamma * gamma * (1 - cs_l * cs_l)));
-            // const real sR = cs_r * cs_r * (static_cast<real>(1.0) / (gamma * gamma * (1 - cs_r * cs_r)));
+            const real sL = cs_l * cs_l * (static_cast<real>(1.0) / (gamma * gamma * (static_cast<real>(1.0) - cs_l * cs_l)));
+            const real sR = cs_r * cs_r * (static_cast<real>(1.0) / (gamma * gamma * (static_cast<real>(1.0) - cs_r * cs_r)));
 
-            // // Define temporaries to save computational cycles
-            // const real qfL = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
-            // const real qfR = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
-            // const real sqrtR = sqrt(sR * (1 - v1_r * v1_r + sR));
-            // const real sqrtL = sqrt(sL * (1 - v1_l * v1_l + sL));
+            // Define temporaries to save computational cycles
+            const real qfL   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
+            const real qfR   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
+            const real sqrtR = sqrt(sR * (static_cast<real>(1.0)- v_r * v_r + sR));
+            const real sqrtL = sqrt(sL * (static_cast<real>(1.0)- v_l * v_l + sL));
 
-            // const real lamLm = (v1_l - sqrtL) * qfL;
-            // const real lamRm = (v1_r - sqrtR) * qfR;
-            // const real lamLp = (v1_l + sqrtL) * qfL;
-            // const real lamRp = (v1_r + sqrtR) * qfR;
+            const real lamLm = (v_l - sqrtL) * qfL;
+            const real lamRm = (v_r - sqrtR) * qfR;
+            const real lamLp = (v_l + sqrtL) * qfL;
+            const real lamRp = (v_r + sqrtR) * qfR;
 
-            // const real aL = lamLm < lamRm ? lamLm : lamRm;
-            // const real aR = lamLp > lamRp ? lamLp : lamRp;
+            const real aL = lamLm < lamRm ? lamLm : lamRm;
+            const real aR = lamLp > lamRp ? lamLp : lamRp;
 
-            // return Eigenvals(aL, aR);
+            return Eigenvals(aL, aR, cs_l, cs_r);
         }
-        case 2:
+    case simbi::WaveSpeeds::NAIVE:
         {
-            const real v2_r = prims_r.v2;
-            const real v2_l = prims_l.v2;
+            const real aLm = (v_l - cs_l) / (1 - v_l * cs_l);
+            const real aLp = (v_l + cs_l) / (1 + v_l * cs_l);
+            const real aRm = (v_r - cs_r) / (1 - v_r * cs_r);
+            const real aRp = (v_r + cs_r) / (1 + v_r * cs_r);
 
-            //-----------Calculate wave speeds based on Shneider et al. 1992
-            const real vbar  = static_cast<real>(0.5) * (v2_l + v2_r);
-            const real cbar  = static_cast<real>(0.5) * (cs_l + cs_r);
-            const real bl    = (vbar - cbar)/(static_cast<real>(1.0) - cbar*vbar);
-            const real br    = (vbar + cbar)/(static_cast<real>(1.0) + cbar*vbar);
-            const real aL    = my_min(bl, (v2_l - cs_l)/(static_cast<real>(1.0) - v2_l*cs_l));
-            const real aR    = my_max(br, (v2_r + cs_r)/(static_cast<real>(1.0) + v2_r*cs_r));
-
-            return Eigenvals(aL, aR);
-
-            // Calc the wave speeds based on Mignone and Bodo (2005)
-            // real sL = cs_l * cs_l * (static_cast<real>(1.0) / (gamma * gamma * (1 - cs_l * cs_l)));
-            // real sR = cs_r * cs_r * (static_cast<real>(1.0) / (gamma * gamma * (1 - cs_r * cs_r)));
-
-            // Define some temporaries to save a few cycles
-            // const real qfL = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
-            // const real qfR = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
-            // const real sqrtR = sqrt(sR * (1 - v2_r * v2_r + sR));
-            // const real sqrtL = sqrt(sL * (1 - v2_l * v2_l + sL));
-
-            // const real lamLm = (v2_l - sqrtL) * qfL;
-            // const real lamRm = (v2_r - sqrtR) * qfR;
-            // const real lamLp = (v2_l + sqrtL) * qfL;
-            // const real lamRp = (v2_r + sqrtR) * qfR;
-            // const real aL = lamLm < lamRm ? lamLm : lamRm;
-            // const real aR = lamLp > lamRp ? lamLp : lamRp;
-
-            // return Eigenvals(aL, aR);
+            const real aL = my_min(aLm, aRm);
+            const real aR = my_max(aLp, aRp);
+            return Eigenvals(aL, aR, cs_l, cs_r);
         }
-        case 3:
-        {
-            const real v3_r = prims_r.v3;
-            const real v3_l = prims_l.v3;
-
-            //-----------Calculate wave speeds based on Shneider et al. 1992
-            const real vbar  = static_cast<real>(0.5) * (v3_l + v3_r);
-            const real cbar  = static_cast<real>(0.5) * (cs_l + cs_r);
-            const real bl    = (vbar - cbar)/(static_cast<real>(1.0) - cbar*vbar);
-            const real br    = (vbar + cbar)/(static_cast<real>(1.0) + cbar*vbar);
-            const real aL    = my_min(bl, (v3_l - cs_l)/(static_cast<real>(1.0) - v3_l*cs_l));
-            const real aR    = my_max(br, (v3_r + cs_r)/(static_cast<real>(1.0) + v3_r*cs_r));
-
-            return Eigenvals(aL, aR);
-        }
-    } // end switch
+    }
 };
 
 //-----------------------------------------------------------------------------------------
@@ -535,6 +498,9 @@ void SRHD3D::adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const Executi
                 (dev, geometry, psize, dlogx1, dx2, dx3, x1min, x1max, x2min, x2max, x3min, x3max);
                 dtWarpReduce<SRHD3D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
                 (dev);
+                break;
+            case simbi::Geometry::CYLINDRICAL:
+                // TODO: Implement Cylindrical coordinates at some point
                 break;
         }
         simbi::gpu::api::deviceSynch();
@@ -1254,6 +1220,9 @@ void SRHD3D::advance(
                 
                 break;
                 }
+            case simbi::Geometry::CYLINDRICAL:
+                // TODO: Implement Cylindrical coordinates at some point
+                break;
         } // end switch
 
     });
@@ -1359,7 +1328,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     setup.ad_gamma       = gamma;
     setup.first_order    = first_order;
     setup.coord_system   = coord_system;
-
+    setup.boundarycond   = boundary_condition;
+    
     cons.resize(nzones);
     prims.resize(nzones);
     pressure_guess.resize(nzones);
