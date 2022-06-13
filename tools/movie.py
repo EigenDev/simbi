@@ -508,7 +508,7 @@ def main():
     
     parser.add_argument('data_dir', metavar='dir', nargs='+',help='A data directory to retrieve the h5 files')
     parser.add_argument('setup', metavar='setup', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--fields', dest = "field", metavar='Field Variable', nargs='+',help='The name of the field variable you\'d like to plot',choices=field_choices, default=["rho"])
+    parser.add_argument('--fields', dest = "fields", metavar='Field Variable', nargs='+',help='The name of the field variable you\'d like to plot',choices=field_choices, default=["rho"])
     parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',default = 0.0, help='The domain range')
     parser.add_argument('--cbar_range', dest = "cbar", metavar='Range of Color Bar(s)', nargs='+',default = [None, None], help='The colorbar range you\'d like to plot')
     parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs='+',type=float,default =[None, None], help='The colorbar range you\'d like to plot')
