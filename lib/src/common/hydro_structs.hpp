@@ -410,6 +410,9 @@ namespace sr3d {
             chi    -= prims.chi;
             return *this;
         }
+
+        GPU_CALLABLE_MEMBER
+        constexpr real vcomponent(const unsigned nhat) const {return (nhat == 1 ? v1 : (nhat == 2) ? v2 : v3); }
     };
 
     struct PrimitiveData {
@@ -421,8 +424,9 @@ namespace sr3d {
     struct Eigenvals{
         GPU_CALLABLE_MEMBER Eigenvals() {}
         GPU_CALLABLE_MEMBER ~Eigenvals() {}
-        real aL, aR;
-        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
+        real aL, aR, cL, cR;
+        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR), cL(0), cR(0) {}
+        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR, real cL, real cR) : aL(aL), aR(aR), cL(cL), cR(cR) {}
     };
 
 } // end sr3d 
