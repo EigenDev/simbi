@@ -110,10 +110,9 @@ void SRHD::advance(
     const auto nx                   = this->nx;
     const lint bx                   = (BuildPlatform == Platform::GPU) ? sh_block_size : nx;
     const real decay_constant       = this->decay_constant;
-    const CLattice1D *coord_lattice = &(self->coord_lattice);
     const lint  pseudo_radius       = (first_order) ? 1 : 2;
-
-    const auto step                 = (self->first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+    const auto step                 = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+    const auto active_zones         = this->active_zones;
     simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
@@ -286,20 +285,14 @@ void SRHD::advance(
                 break;
             }
         } // end switch
+        if (ii == active_zones - 1) {
+            self->x1max += step * dt * vfaceR;
+        } else if (ii == 0) {
+            self->x1min += step * dt * vfaceL;
+        }
     });	
 
-    // shift the grid max and mins
-    const real x1l    = self->get_xface(0, geometry, 0);
-    const real x1r    = self->get_xface(active_zones, geometry, 1);
-    const real vfaceR = x1r * hubble_param;
-    const real vfaceL = x1l * hubble_param;
-
-    self->x1min += step * dt * vfaceL;
-    self->x1max += step * dt * vfaceR;
-    #if GPU_CODE
-    this->x1max = self->x1max;
-    this->x1min = self->x1min;
-    #endif
+    
 }
 
 void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
@@ -357,12 +350,6 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             const real D   = conserved_buff[tx].d   * invdV;
             const real S   = conserved_buff[tx].s   * invdV;
             const real tau = conserved_buff[tx].tau * invdV;
-            
-            // if (ii == 0)
-            // {
-            //     writeln("D: {}, V: {}", D, 1.0 / invdV);
-            //     pause_program();
-            // }
             int iter       = 0;
             const real tol = D * tol_scale;
             do
@@ -416,10 +403,6 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             workLeftToDo = false;
         }
     });
-    if constexpr(BuildPlatform == Platform::GPU) {
-        this->inFailureState = self->inFailureState;
-    }
-    
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -536,7 +519,7 @@ void SRHD::adapt_dt(SRHD *dev, luint blockSize)
         compute_dt<SRHD, Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
         dtWarpReduce<SRHD, Primitive, 4><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
         simbi::gpu::api::deviceSynch();
-        this->dt = dev->dt;
+        simbi::gpu::api::copyDevToHost(&dt, &(dev->dt), sizeof(real));
     #endif
 };
 
@@ -871,22 +854,18 @@ SRHD::simulate1D(
     real     zu_avg = 0;
     high_resolution_clock::time_point t1, t2;
     std::chrono::duration<real> delta_t;
-
-    // Determine the memory side and state position
-    const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
-    const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
-    // Simulate :)
     
-    Conserved * outer_zones = nullptr;
+    Conserved *outer_zones     = nullptr;
+    Conserved *dev_outer_zones = nullptr;
     if (d_outer)
     {
-        #if GPU_CODE
-        simbi::gpu::api::gpuMalloc(&outer_zones, 2 * sizeof(Conserved));
-        #else
         outer_zones = new Conserved[2];
-        #endif
         const real dV  = get_cell_volume(active_zones - 1, geometry);
         outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
+        if constexpr(BuildPlatform == Platform::GPU) {
+            simbi::gpu::api::gpuMalloc(&dev_outer_zones, 2 * sizeof(Conserved));
+            simbi::gpu::api::copyHostToDevice(dev_outer_zones, outer_zones, 2 * sizeof(Conserved));
+        }
     }
 
     // Save initial condition
@@ -914,6 +893,11 @@ SRHD::simulate1D(
         t_interval += chkpt_interval;
     }
 
+    // Determine the memory side and state position
+    const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
+    const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
+    const auto ozones  = (BuildPlatform == Platform::GPU) ? dev_outer_zones : outer_zones;
+    // Simulate :)
     if (first_order)
     {  
         while (t < tend && !inFailureState)
@@ -923,7 +907,7 @@ SRHD::simulate1D(
             advance(self, shBlockSize, radius, geometry, memside);
             cons2prim(fullP, device_self, memside);
             if (!periodic) {
-                config_ghosts1D(fullP, self, nx, true, bc, outer_zones);
+                config_ghosts1D(fullP, self, nx, true, bc, ozones);
             }
             t += dt; 
             
@@ -973,8 +957,15 @@ SRHD::simulate1D(
             // Update the outer zones with the necessary configs if they exists
             if (d_outer)
             {
+                if constexpr(BuildPlatform == Platform::GPU) {
+                    simbi::gpu::api::copyDevToHost(&x1min, &(device_self->x1min),  sizeof(real));
+                    simbi::gpu::api::copyDevToHost(&x1max, &(device_self->x1max),  sizeof(real));
+                }
                 const real dV  = get_cell_volume(active_zones - 1, geometry);
                 outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
+                if constexpr(BuildPlatform == Platform::GPU) {
+                    simbi::gpu::api::copyHostToDevice(ozones, outer_zones, 2 * sizeof(Conserved));
+                }
             }
 
             hubble_param = adot(t) / a(t);
@@ -990,13 +981,13 @@ SRHD::simulate1D(
             cons2prim(fullP, self, memside);
             advance(self, shBlockSize, radius, geometry, memside);
             if (!periodic) {
-                config_ghosts1D(fullP, self, nx, false, bc, outer_zones);
+                config_ghosts1D(fullP, self, nx, false, bc, ozones);
             }
             // Final Half Step
             cons2prim(fullP, self, memside);
             advance(self, shBlockSize, radius, geometry, memside);
             if (!periodic) {
-                config_ghosts1D(fullP, self, nx, false, bc, outer_zones);
+                config_ghosts1D(fullP, self, nx, false, bc, ozones);
             }
 
             t += dt; 
@@ -1045,16 +1036,20 @@ SRHD::simulate1D(
 
             // Update the outer zones with the necessary configs if they exists
             if (d_outer) {
+                if constexpr(BuildPlatform == Platform::GPU) {
+                    simbi::gpu::api::copyDevToHost(&x1min, &(device_self->x1min),  sizeof(real));
+                    simbi::gpu::api::copyDevToHost(&x1max, &(device_self->x1max),  sizeof(real));
+                }
                 const real dV  = get_cell_volume(active_zones - 1, geometry);
                 outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
+                if constexpr(BuildPlatform == Platform::GPU) {
+                    simbi::gpu::api::copyHostToDevice(ozones, outer_zones, 2 * sizeof(Conserved));
+                }
             }
-
             hubble_param = adot(t) / a(t);
             if (inFailureState)
                 simbi::gpu::api::deviceSynch();
-            
         }
-
     }
     if (ncheck > 0) {
          writeln("Average zone update/sec for:{>5} iterations was {>5} zones/sec", n, zu_avg/ncheck);
@@ -1069,9 +1064,9 @@ SRHD::simulate1D(
 
     if (outer_zones) {
         if constexpr(BuildPlatform == Platform::GPU) {
-            simbi::gpu::api::gpuFree(outer_zones);
+            simbi::gpu::api::gpuFree(ozones);
         } else {
-            delete[] outer_zones;
+            delete[] ozones;
         }
     }
 

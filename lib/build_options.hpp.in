@@ -134,6 +134,10 @@ namespace simbi {
         return 0;
     }
 
+    inline int anyGpuMalloc(void** ptr , size_t size) {
+        return 0;
+    }
+
     inline int anyGpuMemset(void* ptr, int val, size_t size){
         return 0;
     }
