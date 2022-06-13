@@ -47,7 +47,7 @@ def main():
     parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='reflecting', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/') 
-    
+    parser.add_argument('--vouter', dest='vouter', default=0.1, type=float, help='velocity of outer voundary in units of c')
     args = parser.parse_args()
     def find_nearest(array, value):
         array = np.asarray(array)
@@ -107,7 +107,7 @@ def main():
     def a(t):
         return 1.0 
     def adot(t):
-        return 0.5                                                  
+        return args.vouter                                                  
     
     def rho_outer(r, theta):
         return rho0 * (r / r0)**(-args.omega)
