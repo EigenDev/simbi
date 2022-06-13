@@ -4,10 +4,7 @@
 https://user-images.githubusercontent.com/29236993/145315802-c8d7e8c5-7beb-488c-b496-b9edf404be2e.mp4
 
 ## 1D Moving mesh techniques
-
-https://user-images.githubusercontent.com/29236993/172741123-c9ef49ea-c504-4fef-8964-1cfb571b6ea3.mp4
-
-https://user-images.githubusercontent.com/29236993/172741106-3d4ea7ff-bb1e-4530-9716-8cf8db321ff4.mp4
+https://user-images.githubusercontent.com/29236993/173423001-53ab2b60-4159-4ce5-a5a9-de0095b6870a.mp4
 
 
 ## Requirements 
