@@ -558,8 +558,7 @@ def plot_1d_curve(
     var = [field for field in args.fields] if num_fields > 1 else args.fields[0]
     
     # Change the format of the field
-    field_str = util.get_field_str(args)
-    
+    field_labels = util.get_field_str(args)
     tend = dset['time'] * util.time_scale
     if args.mass:
         dV          = util.calc_cell_volume2D(mesh['rr'], mesh['theta'])
@@ -580,29 +579,29 @@ def plot_1d_curve(
                 var = util.prims2var(fields, field)
             else:
                 var = fields[field]
+            
+            if args.labels:
+                label = r'$\rm {}, t={:.1f}$'.format(args.labels[case], tend)
+            else:
+                label = r'$t-{:.1f}$'.format(tend)
                 
-            label = None if args.labels is None else '{}'.format(field_str[idx] if num_fields > 1 else field_str)
+            if len(args.fields) > 1:
+                label = field_labels[idx] + ', ' + label
             ax.loglog(r, var[args.tidx], label=label)
             if args.oned_files is not None:
                 for one_file in args.oned_files:
                     oned_var = util.read_1d_file(one_file)[0]
                     ax.loglog(r, oned_var[field], label='Spherical')
     
-
+    
     ax.set_xlim(x1min, x1max)
     ax.set_xlabel(r'$r/R_\odot$', fontsize=20)
     ax.tick_params(axis='both', labelsize=10)
 
-    if args.log:
-        if num_fields == 1:
-            ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
-        else:
-            ax.legend()
+    if args.legend:
+        ax.legend()
     else:
-        if num_fields == 1:
-            ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
-        else:
-            ax.legend()
+        ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
     
     if args.setup != "":
         ax.set_title(r'$\theta = {:.2f}$ time: {:.3f}'.format(mesh['th'][args.tidx] * 180 / np.pi, tend))
@@ -1369,100 +1368,35 @@ def main():
         description='Plot a 2D Figure From a File (H5).',
         epilog='This Only Supports H5 Files Right Now')
     
-    parser.add_argument('filename', metavar='Filename', nargs='+',
-                        help='A Data Source to Be Plotted')
-    
-    parser.add_argument('setup', metavar='Setup', type=str,
-                        help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    
-    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable', nargs='+',
-                        help='The name of the field variable you\'d like to plot',
-                        choices=field_choices, default=['rho'])
-    
+    parser.add_argument('filename', metavar='Filename', nargs='+', help='A Data Source to Be Plotted')
+    parser.add_argument('setup', metavar='Setup', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
+    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable', nargs='+', help='The name of the field variable you\'d like to plot',choices=field_choices, default=['rho'])
     parser.add_argument('--1d_files', dest='oned_files', nargs='+', help='1D files to check against', default=None)
-    
-    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max',
-                        default = 0.0, help='The domain range')
-    
-    parser.add_argument('--cbar_range', dest = 'cbar', metavar='Range of Color Bar', nargs='+',
-                        default = [None, None], help='The colorbar range you\'d like to plot')
-    
-    parser.add_argument('--cbar_sub', dest = 'cbar2', metavar='Range of Color Bar for secondary plot',nargs='+',type=float,
-                        default =[None, None], help='The colorbar range you\'d like to plot')
-    
-    parser.add_argument('--no_cbar', dest ='no_cbar',action='store_true',
-                        default=False, help='colobar visible siwtch')
-    
-    parser.add_argument('--cmap', dest ='cmap', metavar='Color Bar Colarmap',
-                        default = 'magma', help='The colorbar cmap you\'d like to plot')
-    parser.add_argument('--cmap2', dest ='cmap2', metavar='Color Bar Colarmap 2',
-                        default = 'magma', help='The secondary colorbar cmap you\'d like to plot')
-    
-    parser.add_argument('--log', dest='log', action='store_true',
-                        default=False,
-                        help='Logarithmic Radial Grid Option')
-    
-    parser.add_argument('--first_order', dest='forder', action='store_true',
-                        default=False,
-                        help='True if this is a grid using RK1')
-    
-    parser.add_argument('--rev_cmap', dest='rcmap', action='store_true',
-                        default=False,
-                        help='True if you want the colormap to be reversed')
-    
-    parser.add_argument('--x', dest='x', nargs='+', default = None, type=float,
-                        help='List of x values to plot field max against')
-    
-    parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X',
-                        help='X label name')
-    
-    parser.add_argument('--kinetic', dest='kinetic', action='store_true', default=False,
-                        help='Plot the kinetic energy on the histogram')
-    
-    parser.add_argument('--enthalpy', dest='enthalpy', action='store_true',
-                        default=False,
-                        help='Plot the enthalpy on the histogram')
-    
-    parser.add_argument('--hist', dest='hist', action='store_true',
-                        default=False,
-                        help='Convert plot to histogram')
-    
-    parser.add_argument('--mass', dest='mass', action='store_true',
-                        default=False,
-                        help='Compute mass histogram')
-    
-    parser.add_argument('--dm_du', dest='dm_du', default = False, action='store_true',
-                        help='Compute dM/dU over whole domain')
-    
-    parser.add_argument('--de_domega', dest='de_domega', action='store_true',
-                        default=False,
-                        help='Plot the dE/dOmega plot')
-    
-    parser.add_argument('--dm_domega', dest='dm_domega', action='store_true',
-                        default=False,
-                        help='Plot the dM/dOmega plot')
-    
-    parser.add_argument('--dec_rad', dest='dec_rad', default = False, action='store_true',
-                        help='Compute dr as function of angle')
-    
-    parser.add_argument('--cutoffs', dest='cutoffs', default=[0.0], type=float, nargs='+',
-                        help='The 4-velocity cutoff value for the dE/dOmega plot')
-    
-    parser.add_argument('--fill_scale', dest ='fill_scale', metavar='Filler maximum', type=float,
-                        default = None, help='Set the y-scale to start plt.fill_between')
-    
-    parser.add_argument('--ax_anchor', dest='ax_anchor', type=str, nargs='+', default=None, 
-                        help='Anchor annotation text for each plot')
-    
-    parser.add_argument('--norm', dest='norm', action='store_true',
-                        default=False, help='True if you want the plot normalized to max value')
-    
-    parser.add_argument('--labels', dest='labels', nargs='+', default = None,
-                        help='Optionally give a list of labels for multi-file plotting')
-    
-    parser.add_argument('--tidx', dest='tidx', type=int, default = None,
-                        help='Set to a value if you wish to plot a 1D curve about some angle')
-    
+    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max', default = 0.0, help='The domain range')
+    parser.add_argument('--cbar_range', dest = 'cbar', metavar='Range of Color Bar', nargs='+', default = [None, None], help='The colorbar range you\'d like to plot')
+    parser.add_argument('--cbar_sub', dest = 'cbar2', metavar='Range of Color Bar for secondary plot',nargs='+',type=float, default =[None, None], help='The colorbar range you\'d like to plot')
+    parser.add_argument('--no_cbar', dest ='no_cbar',action='store_true', default=False, help='colobar visible siwtch')
+    parser.add_argument('--cmap', dest ='cmap', metavar='Color Bar Colarmap', default = 'magma', help='The colorbar cmap you\'d like to plot')
+    parser.add_argument('--cmap2', dest ='cmap2', metavar='Color Bar Colarmap 2', default = 'magma', help='The secondary colorbar cmap you\'d like to plot')
+    parser.add_argument('--log', dest='log', action='store_true', default=False,help='Logarithmic Radial Grid Option')
+    parser.add_argument('--first_order', dest='forder', action='store_true',default=False,  help='True if this is a grid using RK1')
+    parser.add_argument('--rev_cmap', dest='rcmap', action='store_true',default=False, help='True if you want the colormap to be reversed')
+    parser.add_argument('--x', dest='x', nargs='+', default = None, type=float, help='List of x values to plot field max against')
+    parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X',  help='X label name')
+    parser.add_argument('--kinetic', dest='kinetic', action='store_true', default=False, help='Plot the kinetic energy on the histogram')
+    parser.add_argument('--enthalpy', dest='enthalpy', action='store_true',default=False,  help='Plot the enthalpy on the histogram')
+    parser.add_argument('--hist', dest='hist', action='store_true',default=False, help='Convert plot to histogram')
+    parser.add_argument('--mass', dest='mass', action='store_true', default=False,  help='Compute mass histogram')
+    parser.add_argument('--dm_du', dest='dm_du', default = False, action='store_true', help='Compute dM/dU over whole domain')
+    parser.add_argument('--de_domega', dest='de_domega', action='store_true',default=False, help='Plot the dE/dOmega plot')
+    parser.add_argument('--dm_domega', dest='dm_domega', action='store_true',default=False, help='Plot the dM/dOmega plot')
+    parser.add_argument('--dec_rad', dest='dec_rad', default = False, action='store_true', help='Compute dr as function of angle')
+    parser.add_argument('--cutoffs', dest='cutoffs', default=[0.0], type=float, nargs='+', help='The 4-velocity cutoff value for the dE/dOmega plot')
+    parser.add_argument('--fill_scale', dest ='fill_scale', metavar='Filler maximum', type=float, default = None, help='Set the y-scale to start plt.fill_between')
+    parser.add_argument('--ax_anchor', dest='ax_anchor', type=str, nargs='+', default=None,  help='Anchor annotation text for each plot')
+    parser.add_argument('--norm', dest='norm', action='store_true', default=False, help='True if you want the plot normalized to max value')
+    parser.add_argument('--labels', dest='labels', nargs='+', default = None, help='Optionally give a list of labels for multi-file plotting')
+    parser.add_argument('--tidx', dest='tidx', type=int, default = None, help='Set to a value if you wish to plot a 1D curve about some angle')
     parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
     parser.add_argument('--cbar_orient', dest='cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
     parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 70, 110], type=float, nargs=4, help="wedge limits")
@@ -1483,11 +1417,8 @@ def main():
     parser.add_argument('--png', dest='png', action= 'store_true', default=False)
     parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
     parser.add_argument('--fig_dims', dest='fig_dims', default = [3.35, 9], type=float, nargs=2)
-    
-    parser.add_argument('--save', dest='save', type=str,
-                        default=None,
-                        help='Save the fig with some name')
-
+    parser.add_argument('--legend', dest='legend', default=True, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--save', dest='save', type=str,default=None,help='Save the fig with some name')
     args = parser.parse_args()
     
     if args.tex:

@@ -27,12 +27,13 @@ field_choices = ['rho', 'c', 'p', 'gamma_beta', 'chi'] + derived
 
 def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot = False, case = 0):
 
+    ncols = len(args.filename) * len(args.fields)
     vmin, vmax = args.clims 
-    cinterval  = np.linspace(vmin, vmax, len(args.filename) * len(args.fields))
+    cinterval  = np.linspace(vmin, vmax, ncols)
     cmap       = plt.cm.get_cmap(args.cmap)
     colors     = util.get_colors(cinterval, cmap, vmin, vmax)
     ccycler    = cycle(colors)
-    linestyles = ['--', '-', '-.', '.']
+    linestyles = ['--', '-', '-.']
     linecycler = cycle(linestyles)
     
     r      = mesh['r']
@@ -65,10 +66,8 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
         if len(args.fields) > 1:
             label = field_labels[idx] + ' ' + label
             
-        if len(args.fields) == 1:
-            ax.plot(r, var * unit_scale, color=colors[case + idx], linestyle=linestyles[case + idx])
-        else:
-            ax.plot(r, var * unit_scale, color=colors[case + idx], linestyle=linestyles[case + idx], label=label)
+        # print(case % ncols)
+        ax.plot(r, var * unit_scale, color=colors[case], label=label, linestyle=next(linecycler))
 
     ax.tick_params(axis='both')
     if args.log:
@@ -91,7 +90,9 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
     ax.spines['top'].set_visible(False)
     # ax.axvline(0.60, color='black', linestyle='--')
     
-    ax.legend()
+    if args.legend:
+        ax.legend()
+
     ########
     # Personal Calculations
     # TODO: Remove Later
@@ -135,7 +136,6 @@ def plot_hist(args, fields, mesh, dset, overplot=False, ax=None, subplot = False
     gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), 128)
     
     energy = np.asarray([energy[u > gb].sum() for gb in gbs])
-    
     # E_seg_rat  = energy[1:]/energy[:-1]
     # gb_seg_rat = gbs[1:]/gbs[:-1]
     # E_seg_rat[E_seg_rat == 0] = 1
@@ -209,6 +209,7 @@ def main():
     parser.add_argument('--fig_size', dest='fig_size', default=(4,3.5), type=float, help='size of figure', nargs=2)
     parser.add_argument('--cmap', dest='cmap', default='viridis', type=str, help='matplotlib color map')
     parser.add_argument('--clims', dest='clims', default=[0, 1], type=float, nargs='+', help='color limits')
+    parser.add_argument('--legend', dest='legend', default=True, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
     
     if args.tex:
@@ -238,6 +239,7 @@ def main():
                 plot_profile(args, fields, mesh, setup, ax = ax2, overplot=True, subplot = True, case = idx)
                 
             fig.suptitle('{}'.format(args.setup[0]))
+            
         if args.labels != None:
             ax.legend()
             
