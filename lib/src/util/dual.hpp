@@ -116,7 +116,6 @@ namespace simbi
                 simbi::gpu::api::gpuFree(host_u0);
                 simbi::gpu::api::gpuFree(host_prims);
                 simbi::gpu::api::gpuFree(host_pressure_guess);
-                simbi::gpu::api::gpuFree(host_clattice);
                 if(!e_all_zeros)  simbi::gpu::api::gpuFree(host_source0);
                 if(!d_all_zeros)  simbi::gpu::api::gpuFree(host_sourceD);
                 if(!s1_all_zeros) simbi::gpu::api::gpuFree(host_sourceS1);
@@ -166,7 +165,6 @@ namespace simbi
                 simbi::gpu::api::gpuFree(host_u0);
                 simbi::gpu::api::gpuFree(host_prims);
                 simbi::gpu::api::gpuFree(host_pressure_guess);
-                simbi::gpu::api::gpuFree(host_clattice);
                 if(!e_all_zeros)  simbi::gpu::api::gpuFree(host_source0);
                 if(!rho_all_zeros)  simbi::gpu::api::gpuFree(host_sourceRho);
                 if(!m1_all_zeros) simbi::gpu::api::gpuFree(host_sourceM1);
