@@ -107,7 +107,7 @@ namespace simbi{
         NAIVE,
     };
 
-    constexpr auto comp_wave_speed = WaveSpeeds::MIGNONE_AND_BODO_05;
+    constexpr auto comp_wave_speed = WaveSpeeds::NAIVE;
 }
 
 #endif
