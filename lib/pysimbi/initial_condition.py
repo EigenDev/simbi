@@ -3,9 +3,11 @@
 # to try and reduce the confusion between functions
 import numpy as np 
 import h5py 
-
-def load_checkpoint(model, filename, dim):
-    
+import pysimbi.helpers as helpers 
+ 
+def load_checkpoint(model, filename, dim, mesh_motion):
+    print(f"Loading from checkpoint: {filename}...")
+    volume_factor = 1.0
     with h5py.File(filename, 'r+') as hf:
         t = 0
         ds = hf.get("sim_info")
@@ -28,6 +30,14 @@ def load_checkpoint(model, filename, dim):
             except:
                 ad_gamma = 4./3.
             
+            if mesh_motion:
+                nx_active = ds.attrs['xactive_zones']
+                if ds.attrs['linspace']:
+                    model.x1 = np.linspace(x1min, x1max, nx_active)
+                else:
+                    model.x1 = np.geomspace(x1min, x1max, nx_active)
+
+                volume_factor = helpers.calc_cell_volume1D(model.x1)
             
             h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
             
@@ -35,9 +45,22 @@ def load_checkpoint(model, filename, dim):
             model.D   = rho * W 
             model.S   = W**2 * rho*h*v
             model.tau = W**2 * rho*h - p - rho*W
-            
-            model.u = np.array([model.D, model.S, model.tau])
-            
+            model.u   = np.array([model.D, model.S, model.tau])
+            if mesh_motion:
+                if ds.attrs['boundary_condition'] == 'periodic':
+                    model.u   *= volume_factor
+                else:
+                    if ds.attrs['first_order']:
+                        nghosts = 1 
+                    else:
+                        nghosts = 2 
+                    print(model.u[0])
+                    zzz = input('')
+                    model.u[:, nghosts:-nghosts] *= volume_factor
+                    model.u[:, 0:nghosts]        *= volume_factor[0]
+                    model.u[:, -nghosts: ]       *= volume_factor[-1]
+                    print(model.u[0])
+                    zzz = input('')
         else:
             rho         = hf.get("rho")[:]
             v1          = hf.get("v1")[:]
@@ -70,8 +93,20 @@ def load_checkpoint(model, filename, dim):
                 ad_gamma = ds.attrs["ad_gamma"]
             except:
                 ad_gamma = 4./3.
-            
-            
+
+            if mesh_motion:
+                nx_active = ds.attrs['xactive_zones']
+                ny_active = ds.attrs['yactive_zones']
+                    
+                if ds.attrs['linspace']:
+                    model.x1 = np.linspace(x1min, x1max, nx)
+                    model.x2 = np.linspace(x1min, x2max, ny)
+                else:
+                    model.x1 = np.geomspace(x1min, x1max, nx)
+                    model.x2 = np.linspace(x2min,  x2max, ny)
+                
+                volume_factor = helpers.calc_cell_volume2D(model.x1, model.x2)
+                
             rho     = rho.reshape(ny, nx)
             v1      = v1.reshape(ny, nx)
             v2      = v2.reshape(ny, nx)
@@ -81,13 +116,26 @@ def load_checkpoint(model, filename, dim):
             h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
             
             W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
-            model.D    = rho * W 
-            model.S1   = W*W*rho*h*v1 
-            model.S2   = W*W*rho*h*v2 
+            model.D    = rho * W              
+            model.S1   = W*W*rho*h*v1         
+            model.S2   = W*W*rho*h*v2         
             model.tau  = W*W*rho*h - p - rho*W
-            model.Dchi = model.D * scalars
-            
+            model.Dchi = model.D * scalars    
             model.u = np.array([model.D, model.S1, model.S2, model.tau, model.Dchi])
+            if mesh_motion:
+                if ds.attrs['boundary_condition'] == 'periodic':
+                    model.u   *= volume_factor
+                else:
+                    if ds.attrs['first_order']:
+                        nghosts = 1 
+                    else:
+                        nghosts = 2 
+                    
+                    model.u[:, nghosts:-nghosts, nghosts:-nghosts] *= volume_factor
+                    model.u[:, :, 0: nghosts] *= volume_factor[:, 0]
+                    model.u[:, :, -nghosts: ] *= volume_factor[:, -1]
+                    model.u[:, 0: nghosts, :] *= volume_factor[0, :]
+                    model.u[:, -nghosts: , :] *= volume_factor[-1, :]
             
 
 def initializeModel(model, first_order = False, boundary_condition = "outflow", scalars = 0, volume_factor = 1):

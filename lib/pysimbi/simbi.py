@@ -2,7 +2,7 @@
 # Marcus DuPont
 # New York University
 # 06/10/2020
-
+import pysimbi.helpers as helpers
 import numpy as np 
 import os
 import sys 
@@ -14,26 +14,6 @@ regimes             = ['classical', 'relativistic']
 coord_systems       = ['spherical', 'cartesian'] #TODO: Implement Cylindrical
 boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
 
-def calc_cell_volume1D(r: np.ndarray) -> np.ndarray:
-    rvertices = np.sqrt(r[1:] * r[:-1])
-    rvertices = np.insert(rvertices,  0, r[0])
-    rvertices = np.insert(rvertices, r.shape, r[-1])
-    rmean     = 0.75 * (rvertices[1:]**4 - rvertices[:-1]**4) / (rvertices[1:]**3 - rvertices[:-1]**3)
-    dr        = rvertices[1:] - rvertices[:-1]
-    return rmean * rmean * dr 
-
-def calc_cell_volume2D(r: np.ndarray, theta: np.ndarray) -> np.ndarray:
-    rr, thetta = np.meshgrid(r, theta)
-    tvertices = 0.5 * (thetta[1:] + thetta[:-1])
-    tvertices = np.insert(tvertices, 0, thetta[0], axis=0)
-    tvertices = np.insert(tvertices, tvertices.shape[0], thetta[-1], axis=0)
-    dcos      = np.cos(tvertices[:-1]) - np.cos(tvertices[1:])
-    
-    rvertices = np.sqrt(rr[:, 1:] * rr[:, :-1])
-    rvertices = np.insert(rvertices,  0, rr[:, 0], axis=1)
-    rvertices = np.insert(rvertices, rvertices.shape[1], rr[:, -1], axis=1)
-    dr        = rvertices[:, 1:] - rvertices[:, :-1]
-    return (2.0 * np.pi *  (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos)
 class Hydro:
     
     def __init__(self, 
@@ -368,24 +348,25 @@ class Hydro:
         if adot == None:
             adot = lambda t: 0.0
         
+        mesh_motion = adot(1.0) / a(1.0) != 0
         if self.dimensions == 1:
             if linspace:
-                x1 = np.linspace(self.geometry[0], self.geometry[1], self.Npts)
+                self.x1 = np.linspace(self.geometry[0], self.geometry[1], self.Npts)
             else:
-                x1 = np.logspace(np.log10(self.geometry[0]), np.log10(self.geometry[1]), self.Npts)
+                self.x1 = np.logspace(np.log10(self.geometry[0]), np.log10(self.geometry[1]), self.Npts)
         else:
             if (linspace):
-                x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
-                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+                self.x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
+                self.x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
             else:
-                x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
-                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+                self.x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
+                self.x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
 
-        if adot(1.0) / a(1.0) != 0 and self.coord_system != 'cartesian':
+        if mesh_motion and self.coord_system != 'cartesian':
             if self.dimensions == 1:
-                volume_factor = calc_cell_volume1D(x1)
+                volume_factor = helpers.calc_cell_volume1D(self.x1)
             elif self.dimensions == 2:
-                volume_factor = calc_cell_volume2D(x1, x2)
+                volume_factor = helpers.calc_cell_volume2D(self.x1, self.x2)
         else:
             volume_factor = 1.0
                 
@@ -408,7 +389,7 @@ class Hydro:
         if not chkpt:
             simbi_ic.initializeModel(self, first_order, boundary_condition, scalars, volume_factor=volume_factor)
         else:
-            simbi_ic.load_checkpoint(self, chkpt, self.dimensions)
+            simbi_ic.load_checkpoint(self, chkpt, self.dimensions, mesh_motion)
         
         is_periodic = boundary_condition == 'periodic'
         start_time  = tstart if self.t == 0 else self.t
@@ -432,14 +413,14 @@ class Hydro:
         
             
         if self.dimensions == 1:
-            sources = np.zeros((3, x1.size), dtype=float) if not sources else np.asarray(sources)
+            sources = np.zeros((3, self.x1.size), dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
                 
             kwargs = {}
             if self.regime == "classical":
-                state = PyState(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
+                state = PyState(self.u, self.gamma, cfl, r = self.x1, coord_system = coordinates)
             else:   
-                state = PyStateSR(self.u, self.gamma, cfl, r = x1, coord_system = coordinates)
+                state = PyStateSR(self.u, self.gamma, cfl, r = self.x1, coord_system = coordinates)
                 kwargs = {'a': a, 'adot': adot}
                 if dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] =  dens_outer
@@ -468,7 +449,7 @@ class Hydro:
             
             kwargs = {}
             if self.regime == "classical":
-                state = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                state = PyState2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=coordinates)
                 solution = state.simulate(
                     sources            = sources,
                     tstart             = start_time,
@@ -490,7 +471,7 @@ class Hydro:
                     kwargs['s2_outer'] =  mom_outer[1]
                     kwargs['e_outer']  =  edens_outer
                     
-                state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=coordinates)
                 solution = state.simulate(
                     sources         = sources,
                     tstart          = start_time,
@@ -509,22 +490,22 @@ class Hydro:
 
         else:
             if (linspace):
-                x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
-                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-                x3 = np.linspace(self.geometry[2][0], self.geometry[2][1], self.zNpts)
+                self.x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
+                self.x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+                self.x3 = np.linspace(self.geometry[2][0], self.geometry[2][1], self.zNpts)
             else:
-                x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
-                x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-                x3 = np.linspace(self.geometry[2][0], self.geometry[2][1], self.zNpts)
+                self.x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
+                self.x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
+                self.x3 = np.linspace(self.geometry[2][0], self.geometry[2][1], self.zNpts)
             
-            sources = np.zeros((5, x3.size, x2.size, x1.size), dtype=float) if not sources else np.asarray(sources)
+            sources = np.zeros((5, self.x3.size, self.x2.size, self.x1.size), dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
                 
             if self.regime == "classical":
                 pass
-                # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                # b = PyState3D(u, self.gamma, cfl=cfl, self.x1=self.x1, x2=x2, coord_system=coordinates)
             else:
-                state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
+                state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, x3=self.x3, coord_system=coordinates)
             
             solution = state.simulate(
                 sources         = sources,
