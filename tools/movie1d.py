@@ -46,34 +46,57 @@ def plot_profile(fig, ax, filename, args):
     fields, setup, mesh = util.read_1d_file(filename)
     r, t                = mesh['r'], setup['time']
     x1min, x1max        = mesh['xlims']
+    if args.units:
+        tend *= util.time_scale 
     
-    if args.fields[0] in derived:
-        var = util.prims2var(fields, args.fields[0])
-    else:
-        var = fields[args.fields[0]]
+    field_labels = util.get_field_str(args)
+    for idx, field in enumerate(args.fields):
+        unit_scale = 1.0
+        if args.units:
+            if field == 'rho' or field == 'D':
+                unit_scale = util.rho_scale
+            elif field == 'p' or field == 'energy':
+                unit_scale = util.pre_scale
+            
+        if field in derived:
+            var = util.prims2var(fields, field)
+        else:
+            var = fields[field]
         
-    ax.plot(r, var)
+        if args.scale_down:
+            var /= args.scale_down[idx]
+            
+        if args.labels:
+            label = r'$\rm {}$'.format(args.labels[case])
+            
+        if len(args.fields) > 1:
+            label = field_labels[idx]
+        
+        ax.plot(r, var * unit_scale, label=label)
+
+    ax.tick_params(axis='both')
     if args.log:
         ax.set_xscale('log')
         ax.set_yscale('log')
+    elif not setup['linspace']:
+        ax.set_xscale('log')
     
-    if args.units:
-        xlabel = r'$r/R_\odot$'
+    ax.set_xlabel('$r$')
+    if args.xlims is None:
+        ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
     else:
-        xlabel = 'r'
-        
-    ax.set_xlabel(xlabel, fontsize=30)
-    ax.set_title('{} at t = {:.2f} s'.format(args.setup[0], t), fontsize=30)
-    ax.tick_params(axis='both', labelsize=20)
-    ax.set_xlim(x1min, x1max) if args.rmax == 0.0 else ax.set_xlim(x1min, args.rmax)
-    
-    if args.ylims is not None:
-        ax.set_ylim(*args.ylims)
-        
+        ax.set_xlim(*args.xlims)
     # Change the format of the field
     field_str = util.get_field_str(args)
-    ax.set_ylabel('{}'.format(field_str), fontsize=20)
-    return ax
+    
+    if (len(args.fields) == 1):
+        ax.set_ylabel('{}'.format(field_str))
+        
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    if args.legend:
+        ax.legend()
+    ax.set_title('{} at t = {:.2f}'.format(args.setup[0], t))
 
 def plot_hist(args, fields, overplot=False, ax=None, case=0):
     if not overplot:
@@ -155,44 +178,40 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Plot a 2D Figure From a File (H5).',
-        epilog='This Only Supports H5 Files Right Now')
-    
-    parser.add_argument('files', metavar='files', nargs='+',
-                        help='A data directory or list to retrieve the h5 files')
-    parser.add_argument('setup', metavar='Setup', nargs='+', type=str,
-                        help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable', nargs='+',
-                        help='The name of the field variable you\'d like to plot',
-                        choices=field_choices, default='rho')
+    parser = argparse.ArgumentParser(description='Plot a 2D Figure From a File (H5).', epilog='This Only Supports H5 Files Right Now')
+    parser.add_argument('files', metavar='files', nargs='+',help='A data directory or list to retrieve the h5 files')
+    parser.add_argument('setup', metavar='Setup', nargs='+', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
+    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable', nargs='+',help='The name of the field variable you\'d like to plot',choices=field_choices, default='rho')
     parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max',default = 0.0, help='The domain range')
     parser.add_argument('--tex', dest='tex', action='store_true', default=False,help='Use latex typesetting')
     parser.add_argument('--log', dest='log', action='store_true', default=False, help='Logarithmic Radial Grid Option')
     parser.add_argument('--units', dest='units', default=False, action='store_true')
     parser.add_argument('--save', dest='save', default=None, type=str)
     parser.add_argument('--ylims', dest='ylims', default=None, type=float, nargs='+')
-   
+    parser.add_argument('--legend', dest='legend', default=True, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--labels', dest='labels', nargs='+',help='map labels to filenames')
+    parser.add_argument('--xlims', dest = 'xlims', metavar='Domain',default = None, help='The domain range', nargs='+', type=float)
+    parser.add_argument('--scale_down', dest='scale_down', default=None, type=float, help='list of values to scale down fields', nargs='+')
     args = parser.parse_args()
 
     if args.tex:
-        plt.rc('font',   size=DEFAULT_SIZE)          # controls default text sizes
-        plt.rc('axes',   titlesize=DEFAULT_SIZE)     # fontsize of the axes title
-        plt.rc('axes',   labelsize=DEFAULT_SIZE)    # fontsize of the x and y labels
-        plt.rc('xtick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
-        plt.rc('ytick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
-        plt.rc('legend', fontsize=DEFAULT_SIZE)      # legend fontsize
-        plt.rc('figure', titlesize=DEFAULT_SIZE)    # fontsize of the figure title
+        plt.rc('font',   size=BIGGER_SIZE)          # controls default text sizes
+        plt.rc('axes',   titlesize=BIGGER_SIZE)     # fontsize of the axes title
+        plt.rc('axes',   labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
+        plt.rc('xtick',  labelsize=BIGGER_SIZE)     # fontsize of the tick labels
+        plt.rc('ytick',  labelsize=BIGGER_SIZE)     # fontsize of the tick labels
+        plt.rc('legend', fontsize=BIGGER_SIZE)      # legend fontsize
+        plt.rc('figure', titlesize=BIGGER_SIZE)    # fontsize of the figure title
         
         plt.rcParams.update(
             {
                 "text.usetex": True,
                 "font.family": "serif",
                 "font.serif": "Times New Roman",
-                "font.size": DEFAULT_SIZE
+                "font.size": BIGGER_SIZE
             }
         )
-    fig, ax = plt.subplots(1, 1, figsize=(15,8))
+    fig, ax = plt.subplots(1, 1, figsize=(15, 8))
     frame_count, flist = get_frames(args.files[0])
     
     def init_mesh(filename):

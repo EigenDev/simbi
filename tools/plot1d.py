@@ -25,8 +25,7 @@ except:
 derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'mach']
 field_choices = ['rho', 'c', 'p', 'gamma_beta', 'chi'] + derived
 
-def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot = False, case = 0):
-
+def plot_profile(args, fields, mesh, setup, ax = None, overplot = False, subplot = False, case = 0):
     ncols = len(args.filename) * len(args.fields)
     vmin, vmax = args.clims 
     cinterval  = np.linspace(vmin, vmax, ncols)
@@ -37,7 +36,7 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
     linecycler = cycle(linestyles)
     
     r      = mesh['r']
-    tend   = dset['time']
+    tend   = setup['time']
     if args.units:
         tend *= util.time_scale 
     
@@ -73,7 +72,7 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
     if args.log:
         ax.set_xscale('log')
         ax.set_yscale('log')
-    elif not dset['linspace']:
+    elif not setup['linspace']:
         ax.set_xscale('log')
     
     ax.set_xlabel('$r$')
@@ -92,7 +91,7 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
     
     if args.legend:
         ax.legend()
-
+        
     ########
     # Personal Calculations
     # TODO: Remove Later
@@ -112,13 +111,13 @@ def plot_profile(args, fields, mesh, dset, ax = None, overplot = False, subplot 
         ax.set_title('{} at t = {:.3f}'.format(args.setup[0], tend))
         return fig
     
-def plot_hist(args, fields, mesh, dset, overplot=False, ax=None, subplot = False, case=0):
+def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = False, case=0):
     colors = plt.cm.twilight_shifted(np.linspace(0.25, 0.75, len(args.filename)))
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
 
-    tend        = dset['time']
+    tend        = setup['time']
     edens_total = util.prims2var(fields, 'energy')
     r           = mesh['r']
     dV          = util.calc_cell_volume1D(r)
