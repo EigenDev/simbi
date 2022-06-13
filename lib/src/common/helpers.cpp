@@ -126,6 +126,10 @@ void write_hdf5(
             att.write(bool_type, &setup.linspace);
             att.close();
 
+            att = sim_info.createAttribute("first_order", bool_type, att_space);
+            att.write(bool_type, &setup.first_order);
+            att.close();
+
             att = sim_info.createAttribute("adiabatic_gamma", real_type, att_space);
             att.write(real_type, &setup.ad_gamma);
             att.close();
@@ -148,6 +152,10 @@ void write_hdf5(
 
             att = sim_info.createAttribute("geometry", dtype_str, att_space);
             att.write(dtype_str, setup.coord_system.c_str());
+            att.close();
+
+            att = sim_info.createAttribute("boundary_condition", dtype_str, att_space);
+            att.write(dtype_str, setup.boundarycond.c_str());
             att.close();
             
             sim_info.close();
@@ -225,6 +233,10 @@ void write_hdf5(
             att = sim_info.createAttribute("linspace", bool_type, att_space);
             att.write(bool_type, &setup.linspace);
             att.close();
+
+            att = sim_info.createAttribute("first_order", bool_type, att_space);
+            att.write(bool_type, &setup.first_order);
+            att.close();
             
             att = sim_info.createAttribute("x1max", real_type, att_space);
             att.write(real_type, &setup.x1max);
@@ -264,6 +276,10 @@ void write_hdf5(
 
             att = sim_info.createAttribute("geometry", dtype_str, att_space);
             att.write(dtype_str, setup.coord_system.c_str());
+            att.close();
+
+            att = sim_info.createAttribute("boundary_condition", dtype_str, att_space);
+            att.write(dtype_str, setup.boundarycond.c_str());
             att.close();
 
             sim_info.close();
@@ -347,6 +363,10 @@ void write_hdf5(
             att = sim_info.createAttribute("linspace", bool_type, att_space);
             att.write(bool_type, &setup.linspace);
             att.close();
+
+            att = sim_info.createAttribute("first_order", bool_type, att_space);
+            att.write(bool_type, &setup.first_order);
+            att.close();
             
             att = sim_info.createAttribute("x1max", real_type, att_space);
             att.write(real_type, &setup.x1max);
@@ -402,6 +422,10 @@ void write_hdf5(
 
             att = sim_info.createAttribute("geometry", dtype_str, att_space);
             att.write(dtype_str, setup.coord_system.c_str());
+            att.close();
+
+            att = sim_info.createAttribute("boundary_condition", dtype_str, att_space);
+            att.write(dtype_str, setup.boundarycond.c_str());
             att.close();
 
             sim_info.close();
