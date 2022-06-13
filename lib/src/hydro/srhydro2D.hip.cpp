@@ -299,7 +299,8 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
                 break;
         }
         simbi::gpu::api::deviceSynch();
-        this->dt = dev->dt;
+        simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
+
     }
     #endif
 }
@@ -804,7 +805,6 @@ void SRHD2D::cons2prim(
             workLeftToDo = false;
         }
     });
-    this->inFailureState = self->inFailureState;
 }
 
 void SRHD2D::advance(
@@ -1179,18 +1179,12 @@ void SRHD2D::advance(
                 // TODO: Implement Cylindrical coordinates at some point
                 break;
         } // end switch
+        if (ii == xpg - 1) {
+            self->x1max += step * dt * vfaceR;
+        } else if (ii == 0) {
+            self->x1min += step * dt * vfaceL;
+        }
     });
-
-    const real x1l    = self->get_xface(0, geometry, 0);
-    const real x1r    = self->get_xface(xphysical_grid, geometry, 1);
-    const real vfaceR = x1r * hubble_param;
-    const real vfaceL = x1l * hubble_param;
-    self->x1min += step * dt * vfaceL;
-    self->x1max += step * dt * vfaceR;
-    #if GPU_CODE
-    this->x1max = self->x1max;
-    this->x1min = self->x1min;
-    #endif
 }
 
 //===================================================================================================================
@@ -1375,15 +1369,15 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     }
 
     Conserved *outer_zones = nullptr;
+    Conserved *dev_outer_zones = nullptr;
     // Fill outer zones if user-defined conservative functions provided
     const real step = (first_order) ? 1.0 : 0.5;
     if (d_outer)
     {
-        #if GPU_CODE
-        simbi::gpu::api::gpuMalloc(&outer_zones, ny * sizeof(Conserved));
-        #else
+        if constexpr(BuildPlatform == Platform::GPU) {
+            simbi::gpu::api::gpuMalloc(&dev_outer_zones, ny * sizeof(Conserved));
+        }
         outer_zones = new Conserved[ny];
-        #endif
         lint jreal = 0;
         for (int jj = 0; jj < ny; jj++) {
            if (jj > yphysical_grid + 1) {
@@ -1393,6 +1387,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
             const real dV = get_cell_volume(xphysical_grid - 1, jreal, geometry, step);
             outer_zones[jj] = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
+        }
+        if constexpr(BuildPlatform == Platform::GPU) {
+            simbi::gpu::api::copyHostToDevice(dev_outer_zones, outer_zones, ny * sizeof(Conserved));
         }
     }
     
@@ -1418,7 +1415,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
-
+    const auto ozones  = (BuildPlatform == Platform::GPU) ? dev_outer_zones : outer_zones;
     // Simulate :)
     if (first_order)
     {  
@@ -1427,7 +1424,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             t1 = high_resolution_clock::now();
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2D(fullP, self, nx, ny, true, bc, outer_zones, bipolar);
+            config_ghosts2D(fullP, self, nx, ny, true, bc, ozones, bipolar);
             t += dt; 
             
             if (n >= nfold){
@@ -1443,7 +1440,11 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             /* Write to a File every tenth of a second */
             if (t >= t_interval)
             {
-                if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
+                if constexpr(BuildPlatform == Platform::GPU){
+                    simbi::gpu::api::copyDevToHost(&x1min, &(device_self->x1min),  sizeof(real));
+                    simbi::gpu::api::copyDevToHost(&x1max, &(device_self->x1max),  sizeof(real));
+                    dualMem.copyDevToHost(device_self, *this);
+                } 
                 time_order_of_mag = std::floor(std::log10(t));
                 if (time_order_of_mag > tchunk_order_of_mag){
                     tchunk.insert(0, "0");
@@ -1470,13 +1471,17 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             } else {
                 adapt_dt();
             }
-          
+            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
             hubble_param = adot(t) / a(t);
             // Update decay constant
             decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
 
             if (d_outer)
             {
+                if constexpr(BuildPlatform == Platform::GPU) {
+                    simbi::gpu::api::copyDevToHost(&x1min, &(device_self->x1min),  sizeof(real));
+                    simbi::gpu::api::copyDevToHost(&x1max, &(device_self->x1max),  sizeof(real));
+                }
                 simbi::gpu::api::deviceSynch();
                 lint jreal = 0;
                 for (int jj = 0; jj < ny; jj++) {
@@ -1488,6 +1493,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                     const real dV = get_cell_volume(xphysical_grid - 1, jreal, geometry, step);
                     outer_zones[jj] = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
                 }
+                 if constexpr(BuildPlatform == Platform::GPU) {
+                    simbi::gpu::api::copyHostToDevice(ozones, outer_zones, ny * sizeof(Conserved));
+                }
             }
         }
     } else {
@@ -1497,12 +1505,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             // First Half Step
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2D(fullP, self, nx, ny, false, bc, outer_zones, bipolar);
+            config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, bipolar);
 
             // Final Half Step
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2D(fullP, self, nx, ny, false, bc, outer_zones, bipolar);
+            config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, bipolar);
 
             t += dt; 
 
@@ -1540,6 +1548,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             n++;
             // Update decay constant
             decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
+            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
 
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
@@ -1551,6 +1560,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             hubble_param = adot(t) / a(t);
             if (d_outer)
             {
+                if constexpr(BuildPlatform == Platform::GPU) {
+                    simbi::gpu::api::copyDevToHost(&x1min, &(device_self->x1min),  sizeof(real));
+                    simbi::gpu::api::copyDevToHost(&x1max, &(device_self->x1max),  sizeof(real));
+                }
                 lint jreal = 0;
                 for (int jj = 0; jj < ny; jj++) {
                 if (jj > yphysical_grid + 1) {
@@ -1560,6 +1573,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                     }
                     const real dV = get_cell_volume(xphysical_grid - 1, jreal, geometry, step);
                     outer_zones[jj] = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
+                }
+                 if constexpr(BuildPlatform == Platform::GPU) {
+                    simbi::gpu::api::copyHostToDevice(ozones, outer_zones, ny * sizeof(Conserved));
                 }
             }
         }
@@ -1578,9 +1594,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
         if constexpr(BuildPlatform == Platform::GPU) {
             simbi::gpu::api::deviceSynch();
-            simbi::gpu::api::gpuFree(outer_zones);
+            simbi::gpu::api::gpuFree(ozones);
         } else {
-            delete[] outer_zones;
+            delete[] ozones;
         }
     }
 

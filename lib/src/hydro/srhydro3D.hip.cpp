@@ -252,7 +252,6 @@ void SRHD3D::cons2prim(
             workLeftToDo = false;
         }
     });
-    this->inFailureState = self->inFailureState;
 }
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
@@ -489,14 +488,14 @@ void SRHD3D::adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const Executi
             case simbi::Geometry::CARTESIAN:
                 compute_dt<SRHD3D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
                 (dev, geometry, psize, dx1, dx2, dx3);
-                dtWarpReduce<SRHD3D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+                dtWarpReduce<SRHD3D, Primitive, 4><<<p.gridSize,p.blockSize,bytes>>>
                 (dev);
                 break;
             
             case simbi::Geometry::SPHERICAL:
                 compute_dt<SRHD3D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
                 (dev, geometry, psize, dlogx1, dx2, dx3, x1min, x1max, x2min, x2max, x3min, x3max);
-                dtWarpReduce<SRHD3D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
+                dtWarpReduce<SRHD3D, Primitive, 4><<<p.gridSize,p.blockSize,bytes>>>
                 (dev);
                 break;
             case simbi::Geometry::CYLINDRICAL:
@@ -1546,10 +1545,9 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         }
     }
     
-    std::cout << "\n";
-    std::cout << "Average zone_updates/sec for: " 
-    << n << " iterations was " 
-    << zu_avg / ncheck << " zones/sec" << "\n";
+    if (ncheck > 0) {
+        writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
+    }
 
     if constexpr(BuildPlatform == Platform::GPU)
     {
