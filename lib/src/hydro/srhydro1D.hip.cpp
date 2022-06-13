@@ -62,7 +62,7 @@ void SRHD::set_mirror_ptrs()
 GPU_CALLABLE_MEMBER
 real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side)
 {
-    switch (geometry)
+    switch(geometry)
     {
     case simbi::Geometry::SPHERICAL:
         {
@@ -76,6 +76,9 @@ real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geome
             // Rigid motion
             return  hubble_const;
         }
+    case simbi::Geometry::CYLINDRICAL:
+        // TODO: Implement Cylindrical coordinates at some point
+        break;
     }
 }
 //=====================================================================
@@ -225,7 +228,7 @@ void SRHD::advance(
             }
         }
 
-        switch (geometry)
+        switch(geometry)
         {
             case simbi::Geometry::CARTESIAN:
                 #if GPU_CODE
@@ -796,7 +799,7 @@ SRHD::simulate1D(
     setup.ad_gamma       = gamma;
     setup.first_order    = first_order;
     setup.coord_system   = coord_system;
-
+    setup.boundarycond   = boundary_condition;
     // Create Structure of Vectors (SoV) for trabsferring
     // data to files once ready
     sr1d::PrimitiveArray transfer_prims;
@@ -1053,7 +1056,10 @@ SRHD::simulate1D(
         }
 
     }
-    writeln("Average zone update/sec for:{>5} iterations was {>5} zones/sec", n, zu_avg/ncheck);
+    if (ncheck > 0) {
+         writeln("Average zone update/sec for:{>5} iterations was {>5} zones/sec", n, zu_avg/ncheck);
+    }
+   
 
     if constexpr (BuildPlatform == Platform::GPU)
     {

@@ -120,12 +120,18 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &prims_l,
 
             return Eigenvals(aL, aR, cs_l, cs_r);
         }
+    case simbi::WaveSpeeds::NAIVE:
+        {
+            const real aLm = (v_l - cs_l) / (1 - v_l * cs_l);
+            const real aLp = (v_l + cs_l) / (1 + v_l * cs_l);
+            const real aRm = (v_r - cs_r) / (1 - v_r * cs_r);
+            const real aRp = (v_r + cs_r) / (1 + v_r * cs_r);
+
+            const real aL = my_min(aLm, aRm);
+            const real aR = my_max(aLp, aRp);
+            return Eigenvals(aL, aR, cs_l, cs_r);
+        }
     }
-    
-
-    
-
-    
 };
 
 //-----------------------------------------------------------------------------------------
@@ -288,18 +294,14 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
                 compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>> (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
                 dtWarpReduce<SRHD2D, Primitive, 8><<<p.gridSize,p.blockSize,dt_buff_width>>>(dev);
                 break;
+            case simbi::Geometry::CYLINDRICAL:
+                // TODO: Implement Cylindrical coordinates at some point
+                break;
         }
         simbi::gpu::api::deviceSynch();
         this->dt = dev->dt;
     }
     #endif
-    // writeln("dt: {}", dt);
-    // pause_program();
-    if (dt < 1e-10)
-    {
-        writeln("dt = {}", dt);
-        pause_program();
-    };
 }
 
 //===================================================================================================================
@@ -713,13 +715,13 @@ void SRHD2D::cons2prim(
                 if (ii > self->xphysical_grid + 1) {
                     ireal = self->xphysical_grid - 1;
                 } else {
-                    ireal = (ii - radius) > 0 ? ii - radius : 0;
+                    ireal = (ii - radius > 0 ) * (ii - radius);
                 }
 
                 if (jj > self->yphysical_grid + 1) {
                     jreal = self->yphysical_grid - 1;
                 } else {
-                    jreal = (jj - radius) > 0 ? jj - radius : 0;
+                    jreal = (jj - radius > 0) * (jj - radius);
                 }
                 
                 const real dV = self->get_cell_volume(ireal, jreal, geometry, step);
@@ -796,12 +798,6 @@ void SRHD2D::cons2prim(
                 self->gpu_pressure_guess[gid] = peq;
                 self->gpu_prims[gid]          = Primitive{D / W, vx, vy, peq, Dchi / D};
             #else
-                // const auto ii = gid % xphysical_grid;
-                // if (ii == 0) 
-                // {
-                //     writeln("i: {},j: {},  D: {}", ii, jj, D);
-                //     pause_program();
-                // }
                 self->pressure_guess[gid] = peq;
                 self->prims[gid]          = Primitive{D / W, vx, vy, peq, Dchi / D};
             #endif
@@ -1121,8 +1117,8 @@ void SRHD2D::advance(
                 const real rl           = x1l + vfaceL * step * dt; 
                 const real rr           = x1r + vfaceR * step * dt;
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
-                const real tl           = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
-                const real tr           = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
+                const real tl           = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                const real tr           = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real s1R          = rr * rr; 
                 const real s1L          = rl * rl; 
                 const real s2R          = std::sin(tr);
@@ -1132,7 +1128,8 @@ void SRHD2D::advance(
                 const real dV1          = rmean * rmean * (rr - rl);             
                 const real dV2          = rmean * sint * (tr - tl); 
                 const real cot          = std::cos(thmean) / sint;
-                const real dVtot        = self->get_cell_volume(ii, jj, geometry, step);
+                const real dcos         = std::cos(tl) - std::cos(tr);
+                const real dVtot        = (2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos);
                 const real factor       = (self->mesh_motion) ? dVtot : 1;  
                 // writeln("vfaceL: {}, vfaceR: {}, factor: {}, frf: {}, flf: {}", vfaceL, vfaceR, factor, frf.d, flf.d);
                 // pause_program();
@@ -1142,14 +1139,16 @@ void SRHD2D::advance(
                 const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS2[real_loc];
                 const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceTau[real_loc];
                 #else
-                // const real s1R   = coord_lattice.x1_face_areas[ii + 1];
-                // const real s1L   = coord_lattice.x1_face_areas[ii + 0];
-                // const real s2R   = coord_lattice.x2_face_areas[jj + 1];
-                // const real s2L   = coord_lattice.x2_face_areas[jj + 0];
-                // const real rmean = coord_lattice.x1mean[ii];
-                // const real dV1   = coord_lattice.dV1[ii];
-                // const real dV2   = rmean * coord_lattice.dV2[jj];
-                // const real cot   = coord_lattice.cot[jj];
+                // const real s1R    = coord_lattice.x1_face_areas[ii + 1];
+                // const real s1L    = coord_lattice.x1_face_areas[ii + 0];
+                // const real s2R    = coord_lattice.x2_face_areas[jj + 1];
+                // const real s2L    = coord_lattice.x2_face_areas[jj + 0];
+                // const real rmean  = coord_lattice.x1mean[ii];
+                // const real dV1    = coord_lattice.dV1[ii];
+                // const real dV2    = rmean * coord_lattice.dV2[jj];
+                // const real cot    = coord_lattice.cot[jj];
+                // const real dVtot  = self->get_cell_volume(ii, jj, geometry, step);
+                // const real factor = (self->mesh_motion) ? dVtot : 1;  
 
                 const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : sourceD[real_loc];
                 const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : sourceS1[real_loc];
@@ -1176,6 +1175,9 @@ void SRHD2D::advance(
                 
                 break;
                 }
+            case simbi::Geometry::CYLINDRICAL:
+                // TODO: Implement Cylindrical coordinates at some point
+                break;
         } // end switch
     });
 
@@ -1340,6 +1342,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     setup.ad_gamma       = gamma;
     setup.first_order    = first_order;
     setup.coord_system   = coord_system;
+    setup.boundarycond   = boundary_condition;
 
     // // Setup the system
     const luint xblockdim       = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
@@ -1352,6 +1355,25 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
+    if (t == 0)
+    {
+        if constexpr(BuildPlatform == Platform::GPU)
+        {
+            config_ghosts2D(fullP, device_self, nx, ny, first_order, bc);
+        } else {
+            config_ghosts2D(fullP, this, nx, ny, first_order, bc);
+        }
+    }
+
+    const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive);
+    if constexpr(BuildPlatform == Platform::GPU) {
+        cons2prim(fullP, device_self, simbi::MemSide::Dev);
+        adapt_dt(device_self, geometry, activeP, dtShBytes);
+    } else {
+        cons2prim(fullP);
+        adapt_dt();
+    }
+
     Conserved *outer_zones = nullptr;
     // Fill outer zones if user-defined conservative functions provided
     const real step = (first_order) ? 1.0 : 0.5;
@@ -1372,26 +1394,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             const real dV = get_cell_volume(xphysical_grid - 1, jreal, geometry, step);
             outer_zones[jj] = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
         }
-    }
-
-    if (t == 0)
-    {
-        if constexpr(BuildPlatform == Platform::GPU)
-        {
-            config_ghosts2D(fullP, device_self, nx, ny, first_order, bc);
-        } else {
-            config_ghosts2D(fullP, this, nx, ny, first_order, bc);
-        }
-    }
-
-    
-    const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive);
-    if constexpr(BuildPlatform == Platform::GPU) {
-        cons2prim(fullP, device_self, simbi::MemSide::Dev);
-        adapt_dt(device_self, geometry, activeP, dtShBytes);
-    } else {
-        cons2prim(fullP);
-        adapt_dt();
     }
     
     if (t == 0)
@@ -1416,6 +1418,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
+
     // Simulate :)
     if (first_order)
     {  
@@ -1474,6 +1477,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
             if (d_outer)
             {
+                simbi::gpu::api::deviceSynch();
                 lint jreal = 0;
                 for (int jj = 0; jj < ny; jj++) {
                 if (jj > yphysical_grid + 1) {
@@ -1560,7 +1564,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
         }
     }
-    writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
+    if (ncheck > 0) {
+        writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
+    }
 
     if constexpr(BuildPlatform == Platform::GPU)
     {
@@ -1569,7 +1575,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     }
 
     if (outer_zones) {
+
         if constexpr(BuildPlatform == Platform::GPU) {
+            simbi::gpu::api::deviceSynch();
             simbi::gpu::api::gpuFree(outer_zones);
         } else {
             delete[] outer_zones;
