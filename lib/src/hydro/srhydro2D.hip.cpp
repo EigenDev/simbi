@@ -823,7 +823,7 @@ void SRHD2D::advance(
                                             p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
     const luint xextent               = p.blockSize.x;
     const luint yextent               = p.blockSize.y;
-    const auto step = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+    const auto step                   = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
 
     #if GPU_CODE
     const bool first_order         = this->first_order;
@@ -851,6 +851,8 @@ void SRHD2D::advance(
     const bool quirk_smoothing     = this->quirk_smoothing;
     const real pow_dlogr           = pow(10, dlogx1);
     const real hubble_param        = this->hubble_param;
+    // const real x1min_init          = this->x1min_init;
+    // const real 
     #endif
 
     // const CLattice2D *coord_lattice = &(self->coord_lattice);
@@ -1139,17 +1141,6 @@ void SRHD2D::advance(
                 const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS2[real_loc];
                 const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceTau[real_loc];
                 #else
-                // const real s1R    = coord_lattice.x1_face_areas[ii + 1];
-                // const real s1L    = coord_lattice.x1_face_areas[ii + 0];
-                // const real s2R    = coord_lattice.x2_face_areas[jj + 1];
-                // const real s2L    = coord_lattice.x2_face_areas[jj + 0];
-                // const real rmean  = coord_lattice.x1mean[ii];
-                // const real dV1    = coord_lattice.dV1[ii];
-                // const real dV2    = rmean * coord_lattice.dV2[jj];
-                // const real cot    = coord_lattice.cot[jj];
-                // const real dVtot  = self->get_cell_volume(ii, jj, geometry, step);
-                // const real factor = (self->mesh_motion) ? dVtot : 1;  
-
                 const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : sourceD[real_loc];
                 const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : sourceS1[real_loc];
                 const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : sourceS2[real_loc];
@@ -1179,12 +1170,18 @@ void SRHD2D::advance(
                 // TODO: Implement Cylindrical coordinates at some point
                 break;
         } // end switch
-        if (ii == xpg - 1) {
-            self->x1max += step * dt * vfaceR;
-        } else if (ii == 0) {
-            self->x1min += step * dt * vfaceL;
-        }
     });
+    // update x1 enpoints
+    const real x1l    = self->get_xface(0, geometry, 0);
+    const real x1r    = self->get_xface(xphysical_grid, geometry, 1);
+    const real vfaceR = x1r * hubble_param;
+    const real vfaceL = x1l * hubble_param;
+    self->x1min      += step * dt * vfaceL;
+    self->x1max      += step * dt * vfaceR;
+    if constexpr(BuildPlatform == Platform::GPU) {
+        this->x1max = self->x1max;
+        this->x1min = self->x1min;
+    }
 }
 
 //===================================================================================================================
@@ -1313,7 +1310,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // Copy the current SRHD instance over to the device
     // if compiling for CPU, these functions do nothing
     SRHD2D *device_self;
-    simbi::gpu::api::gpuMalloc(&device_self, sizeof(SRHD2D));
+    simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(SRHD2D));
     simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(SRHD2D));
     simbi::dual::DualSpace2D<Primitive, Conserved, SRHD2D> dualMem;
     dualMem.copyHostToDev(*this, device_self);
@@ -1377,6 +1374,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         if constexpr(BuildPlatform == Platform::GPU) {
             simbi::gpu::api::gpuMalloc(&dev_outer_zones, ny * sizeof(Conserved));
         }
+
         outer_zones = new Conserved[ny];
         lint jreal = 0;
         for (int jj = 0; jj < ny; jj++) {
@@ -1478,10 +1476,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
             if (d_outer)
             {
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    simbi::gpu::api::copyDevToHost(&x1min, &(device_self->x1min),  sizeof(real));
-                    simbi::gpu::api::copyDevToHost(&x1max, &(device_self->x1max),  sizeof(real));
-                }
                 simbi::gpu::api::deviceSynch();
                 lint jreal = 0;
                 for (int jj = 0; jj < ny; jj++) {
@@ -1560,10 +1554,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             hubble_param = adot(t) / a(t);
             if (d_outer)
             {
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    simbi::gpu::api::copyDevToHost(&x1min, &(device_self->x1min),  sizeof(real));
-                    simbi::gpu::api::copyDevToHost(&x1max, &(device_self->x1max),  sizeof(real));
-                }
                 lint jreal = 0;
                 for (int jj = 0; jj < ny; jj++) {
                 if (jj > yphysical_grid + 1) {

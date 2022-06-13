@@ -99,20 +99,23 @@ void SRHD::advance(
     p.blockSize                 = BLOCK_SIZE;
     p.sharedMemBytes            = shBlockBytes;
 
+    #if GPU_CODE
     real x1max                      = this->x1max;
     real x1min                      = this->x1min;
     const real dx1                  = this->dx1;
     const real hubble_param         = this->hubble_param;
     const real dlogx1               = this->dlogx1;
-    const real xpg                  = this->active_zones;
     const real dt                   = this->dt;
     const real plm_theta            = this->plm_theta;
     const auto nx                   = this->nx;
-    const lint bx                   = (BuildPlatform == Platform::GPU) ? sh_block_size : nx;
     const real decay_constant       = this->decay_constant;
+    const auto active_zones         = this->active_zones;
+    #endif 
+
+    const real xpg                  = this->active_zones;
+    const lint bx                   = (BuildPlatform == Platform::GPU) ? sh_block_size : nx;
     const lint  pseudo_radius       = (first_order) ? 1 : 2;
     const auto step                 = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
-    const auto active_zones         = this->active_zones;
     simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
@@ -291,8 +294,11 @@ void SRHD::advance(
             self->x1min += step * dt * vfaceL;
         }
     });	
-
     
+    if constexpr(BuildPlatform == Platform::GPU) {
+        this->x1max = self->x1max;
+        this->x1min = self->x1min;
+    }
 }
 
 void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
@@ -822,7 +828,7 @@ SRHD::simulate1D(
 
     // Copy the current SRHD instance over to the device
     SRHD *device_self;
-    simbi::gpu::api::gpuMalloc(&device_self, sizeof(SRHD));
+    simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(SRHD));
     simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(SRHD));
     simbi::dual::DualSpace1D<Primitive, Conserved, SRHD> dualMem;
     dualMem.copyHostToDev(*this, device_self);
@@ -945,7 +951,6 @@ SRHD::simulate1D(
                 t_interval += chkpt_interval;
             }
             n++;
-            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
             // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU)
             {
@@ -958,8 +963,8 @@ SRHD::simulate1D(
             if (d_outer)
             {
                 if constexpr(BuildPlatform == Platform::GPU) {
-                    simbi::gpu::api::copyDevToHost(&x1min, &(device_self->x1min),  sizeof(real));
-                    simbi::gpu::api::copyDevToHost(&x1max, &(device_self->x1max),  sizeof(real));
+                    this->x1min = device_self->x1min;
+                    this->x1max = device_self->x1max;
                 }
                 const real dV  = get_cell_volume(active_zones - 1, geometry);
                 outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
@@ -969,6 +974,9 @@ SRHD::simulate1D(
             }
 
             hubble_param = adot(t) / a(t);
+            if constexpr(BuildPlatform == Platform::GPU){
+                this->inFailureState = self->inFailureState;
+            }
             if (inFailureState)
                 simbi::gpu::api::deviceSynch();
         }
@@ -1025,7 +1033,6 @@ SRHD::simulate1D(
                 t_interval += chkpt_interval;
             }
             n++;
-            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
 
             //Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU) {
@@ -1037,8 +1044,8 @@ SRHD::simulate1D(
             // Update the outer zones with the necessary configs if they exists
             if (d_outer) {
                 if constexpr(BuildPlatform == Platform::GPU) {
-                    simbi::gpu::api::copyDevToHost(&x1min, &(device_self->x1min),  sizeof(real));
-                    simbi::gpu::api::copyDevToHost(&x1max, &(device_self->x1max),  sizeof(real));
+                    this->x1min = device_self->x1min;
+                    this->x1max = device_self->x1max;
                 }
                 const real dV  = get_cell_volume(active_zones - 1, geometry);
                 outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
@@ -1046,7 +1053,11 @@ SRHD::simulate1D(
                     simbi::gpu::api::copyHostToDevice(ozones, outer_zones, 2 * sizeof(Conserved));
                 }
             }
+
             hubble_param = adot(t) / a(t);
+            if constexpr(BuildPlatform == Platform::GPU){
+                this->inFailureState = self->inFailureState;
+            }
             if (inFailureState)
                 simbi::gpu::api::deviceSynch();
         }
@@ -1071,8 +1082,7 @@ SRHD::simulate1D(
     }
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
-    for (luint ii = 0; ii < nx; ii++)
-    {
+    for (luint ii = 0; ii < nx; ii++) {
         final_prims[0][ii] = prims[ii].rho;
         final_prims[1][ii] = prims[ii].v;
         final_prims[2][ii] = prims[ii].p;

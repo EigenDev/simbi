@@ -29,6 +29,11 @@ namespace simbi
                 auto status = simbi::gpu::error::status_t(anyGpuMalloc((void**)obj, elements));
                 simbi::gpu::error::check_err(status, "Failed to allocate resources on device");
             }
+            void gpuMallocManaged(void *obj, size_t elements)
+            {
+                auto status = simbi::gpu::error::status_t(anyGpuMallocManaged((void**)obj, elements));
+                simbi::gpu::error::check_err(status, "Failed to allocate resources on device");
+            }
 
             void gpuFree(void *obj)
             {

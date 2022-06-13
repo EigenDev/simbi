@@ -94,6 +94,7 @@ namespace simbi
             void copyDevToHost(void *to, const void *from, size_t bytes);
             void copyDevToDev(void *to, const void *from, size_t bytes);
             void gpuMalloc(void *obj, size_t bytes);
+            void gpuMallocManaged(void *obj, size_t bytes);
             void gpuFree(void *obj);
 
             void gpuMemset(void *obj, int val, size_t bytes);
