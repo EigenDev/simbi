@@ -42,7 +42,7 @@ struct DataWriteMembers
     real x1min, x1max, x2min, x2max, zmin, zmax, dt;
     int nx, ny, nz, xactive_zones, yactive_zones, zactive_zones;
     bool linspace, first_order;
-    std::string coord_system;
+    std::string coord_system, boundarycond;
 };
 
 GPU_CALLABLE_INLINE lint mod(const lint index, const lint size)
