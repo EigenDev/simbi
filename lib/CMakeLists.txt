@@ -126,7 +126,6 @@ set(SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/helpers.hip.tpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.pyx
 
     #######################
     #### UTIL Dependencies
@@ -193,7 +192,7 @@ if(PYTHON3)
         add_custom_command(
             OUTPUT  ${OUTPUT}/pytimestamp_cpu
             COMMAND ${PYTHON3} setup.py build_ext --inplace --cpu && rm -f 
-                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/ag_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
+                                        ${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/cpu_state.cpp && rm -Rf ${CMAKE_CURRENT_SOURCE_DIR}/build
             COMMAND ${CMAKE_COMMAND} -E touch ${OUTPUT}/pytimestamp_cpu
             DEPENDS ${DEPS}
         )
