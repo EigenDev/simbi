@@ -124,7 +124,7 @@ namespace simbi
 
         void cons2prim(SRHD2D *s);
 
-        GPU_CALLABLE
+        GPU_CALLABLE_INLINE
         constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
         {
             switch (geometry)
@@ -154,8 +154,8 @@ namespace simbi
             const real xr     = get_xface(ii, geometry, 1);
             const real xlf    = xl * (1.0 + step * dt * hubble_param);
             const real xrf    = xr * (1.0 + step * dt * hubble_param);
-            const real tl     = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
-            const real tr     = (jj < yphysical_grid - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
+            const real tl     = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+            const real tr     = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
             const real dcos   = std::cos(tl) - std::cos(tr);
             const real dV     = (2.0 * M_PI * (1.0 / 3.0) * (xr * xr * xr - xl * xl * xl) * dcos);
             return dV;
