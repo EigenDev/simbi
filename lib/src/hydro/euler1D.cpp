@@ -460,6 +460,7 @@ void Newtonian1D::advance(
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
+            { 
             #if GPU_CODE
                 dx1 = coord_lattice->gpu_dx1[ii];
                 self->gpu_cons[ia] -= ( (frf - flf)/ dx1) * dt * step;
@@ -469,8 +470,9 @@ void Newtonian1D::advance(
             #endif
             
             break;  
-        
+            }
         case simbi::Geometry::SPHERICAL:
+            {
             #if GPU_CODE
                 pc    = prim_buff[txa].p;
                 sL    = coord_lattice->gpu_face_areas[ii + 0];
@@ -492,6 +494,10 @@ void Newtonian1D::advance(
                 // const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
                 cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources) * dt * step;
             #endif
+            break;
+            }
+        case simbi::Geometry::CYLINDRICAL:
+            // TODO: Implement Cylindrical coordinates at some point
             break;
         } // end switch
     }); // end parallel region
@@ -531,6 +537,8 @@ void Newtonian1D::advance(
     this->idx_active    = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->active_zones  = (periodic) ? nx: (first_order) ? nx - 2 : nx - 4;
     
+    // TODO: invoke mesh motion later
+    this->mesh_motion = false;
     if (hllc){
         this->sim_solver = simbi::SOLVER::HLLC;
     } else {

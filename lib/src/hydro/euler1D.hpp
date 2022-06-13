@@ -25,8 +25,8 @@ namespace simbi {
         std::vector<real> r;
         std::string coord_system;
 
-        real plm_theta, tend, dt, engine_duration, t, decay_constant;
-        bool first_order, periodic, linspace, hllc, inFailureState;
+        real plm_theta, tend, dt, engine_duration, t, decay_constant, hubble_param, x1min , x1max, dlogx1, dx1;
+        bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
 
         
         std::vector<hydro1d::Conserved> cons, cons_n; 
@@ -71,6 +71,27 @@ namespace simbi {
 
         GPU_CALLABLE_MEMBER
         hydro1d::Conserved prims2flux(const hydro1d::Primitive &prims);
+
+        GPU_CALLABLE_INLINE
+        constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
+        {
+            switch (geometry)
+            {
+            case simbi::Geometry::CARTESIAN:
+                {
+                        return 1.0;
+                }
+            case simbi::Geometry::SPHERICAL:
+                {
+                        const real rl = my_max(x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                        if (side == 0) {
+                            return rl;
+                        } else {
+                            return my_min(rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                        }
+                }
+            }
+        }
 
         GPU_CALLABLE_MEMBER
         hydro1d::Conserved calc_hll_flux(

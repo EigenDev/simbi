@@ -23,8 +23,8 @@ namespace simbi {
         std::vector<hydro2d::Conserved> cons, cons_n;
         std::vector<hydro2d::Primitive> prims;
         std::vector<real> sourceRho, sourceM1, sourceM2, sourceE;
-        real plm_theta, gamma, tend, cfl, dt, decay_const;
-        bool first_order, periodic, hllc, linspace, inFailureState;
+        real plm_theta, gamma, tend, cfl, dt, decay_const, hubble_param;
+        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion;
         std::string coord_system;
         std::vector<real> x1, x2;
         luint nzones, ny, nx, active_zones, idx_active, n;
@@ -92,7 +92,29 @@ namespace simbi {
             const hydro2d::Primitive &left_prims,
             const hydro2d::Primitive &right_prims,
             const luint ehat = 1);
-
+        
+        GPU_CALLABLE_INLINE
+        constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
+        {
+            switch (geometry)
+            {
+            case simbi::Geometry::CARTESIAN:
+                {
+                        return 1.0;
+                }
+            
+            case simbi::Geometry::SPHERICAL:
+                {
+                        const real rl = (ii > 0 ) ? x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
+                        if (side == 0) {
+                            return rl;
+                        } else {
+                            return (ii < xphysical_grid - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
+                        }
+                        break;
+                }
+            }
+        }
         void adapt_dt();
         void adapt_dt(Newtonian2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, luint bytes);
 

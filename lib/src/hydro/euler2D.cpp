@@ -254,6 +254,9 @@ void Newtonian2D::adapt_dt()
                         my_min( dx1/(my_max(std::abs(v1 + cs), std::abs(v1 - cs))), rmean*dx2/(my_max(std::abs(v2 + cs), std::abs(v2 - cs))) );
 
                     break;
+                case simbi::Geometry::CYLINDRICAL:
+                    // TODO: Implement Cylindrical coordinates at some point
+                    break;
                 }
 
                 min_dt = my_min(min_dt, cfl_dt);
@@ -282,6 +285,9 @@ void Newtonian2D::adapt_dt(Newtonian2D *dev, const simbi::Geometry geometry, con
             (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
             dtWarpReduce<Newtonian2D, Primitive, 128><<<p.gridSize,p.blockSize,bytes>>>
             (dev);
+            break;
+        case simbi::Geometry::CYLINDRICAL:
+            // TODO: Implement Cylindrical coordinates at some point
             break;
         }
         
@@ -761,6 +767,9 @@ void Newtonian2D::advance(
                 
                 break;
                 }
+            case simbi::Geometry::CYLINDRICAL:
+                // TODO: Implement Cylindrical coordinates at some point
+                break;
         } // end switch
 
     });
@@ -807,7 +816,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->active_zones   = xphysical_grid * yphysical_grid;
     this->bc             = boundary_cond_map.at(boundary_condition);
     this->geometry       = geometry_map.at(coord_system);
-
+    // TODO: invoke mesh motion later
+    this->mesh_motion = false;
     if ((coord_system == "spherical") && (linspace))
     {
         this->coord_lattice = CLattice2D(x1, x2, simbi::Geometry::SPHERICAL);
