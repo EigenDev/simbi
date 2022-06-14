@@ -1,9 +1,6 @@
 /**
 * Helper Function Template Tool
 */
-
-#include <vector>
-
 template <typename T, size_t N>
 constexpr size_t array_size(T (&)[N]) {
     return N;
@@ -115,4 +112,44 @@ vec2struct(const std::vector<N> &p){
     }
     
     return sprims;
+}
+
+template<typename T, typename U, typename V, typename W, int X>
+void write_to_file(
+    T *sim_state_host, 
+    T *sim_state_dev, 
+    W  &dual_memory_layer,
+    DataWriteMembers &setup,
+    const std::string data_directory,
+    const real t, 
+    const real t_interval, 
+    const real chkpt_interval, 
+    const luint chkpt_zone_label)
+{
+    if constexpr(BuildPlatform == Platform::GPU) {
+        dual_memory_layer.copyDevToHost(sim_state_dev, *sim_state_host);
+    }
+    setup.x1max = sim_state_host->x1max;
+    setup.x1min = sim_state_host->x1min;
+
+    PrimData prods;
+    static double tbefore           = 0.0;
+    static std::string tchunk       = "000000";
+    static lint tchunk_order_of_mag = 2;
+    const auto time_order_of_mag    = std::floor(std::log10(t));
+    if (time_order_of_mag > tchunk_order_of_mag) {
+        tchunk.insert(0, "0");
+        tchunk_order_of_mag += 1;
+    }
+
+    // Transform vector of primitive structs to struct of primitive vectors
+    auto transfer_prims = vec2struct<U, V>(sim_state_host->prims);
+    writeToProd<U, V>(&transfer_prims, &prods);
+    const auto tnow     = create_step_str(t_interval, tchunk);
+    const auto filename = string_format("%d.chkpt." + tnow + ".h5", chkpt_zone_label);
+
+    setup.t             = t;
+    setup.dt            = t - tbefore;
+    tbefore             = t;
+    write_hdf5(data_directory, filename, prods, setup, X, sim_state_host->nx);
 }

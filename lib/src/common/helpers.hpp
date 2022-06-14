@@ -92,6 +92,18 @@ template <typename T>
 GPU_CALLABLE_INLINE
 constexpr int sgn(T val) { return (T(0) < val) - (val < T(0)); }
 
+template<typename T, typename U, typename V, typename W, int X>
+void write_to_file(
+    T *sim_state_host, 
+    T *sim_state_dev, 
+    W  &dual_memory_layer,
+    DataWriteMembers &setup,
+    const std::string data_directory,
+    const real t, 
+    const real t_interval, 
+    const real chkpt_interval, 
+    const luint chkpt_zone_label);
+
 //---------------------------------------------------------------------------------------------------------
 //  HELPER-METHODS
 //---------------------------------------------------------------------------------------------------------
