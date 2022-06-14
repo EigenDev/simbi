@@ -22,11 +22,6 @@ namespace simbi
                 // printf("\nFreeing Device Memory...\n");
                 simbi::gpu::api::gpuFree(host_u0);
                 simbi::gpu::api::gpuFree(host_prims);
-                simbi::gpu::api::gpuFree(host_clattice);
-                simbi::gpu::api::gpuFree(host_dV);
-                simbi::gpu::api::gpuFree(host_dx1);
-                simbi::gpu::api::gpuFree(host_fas);
-                simbi::gpu::api::gpuFree(host_x1m);
                 simbi::gpu::api::gpuFree(host_source0);
                 simbi::gpu::api::gpuFree(host_sourceD);
                 simbi::gpu::api::gpuFree(host_sourceS);

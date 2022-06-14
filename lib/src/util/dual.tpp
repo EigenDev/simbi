@@ -13,24 +13,16 @@ namespace simbi
             cbytes  = n * sizeof(C);
             pbytes  = n * sizeof(T);
             rbytes  = n * sizeof(real);
-
-
             rrbytes = nreal * sizeof(real);
-            fabytes = host.coord_lattice.face_areas.size() * sizeof(real);
 
             //--------Allocate the memory for pointer objects-------------------------
             simbi::gpu::api::gpuMalloc(&host_u0,               cbytes);
             simbi::gpu::api::gpuMalloc(&host_prims,            pbytes);
             simbi::gpu::api::gpuMalloc(&host_pressure_guess,   rbytes);
-            simbi::gpu::api::gpuMalloc(&host_dx1,             rrbytes);
-            simbi::gpu::api::gpuMalloc(&host_dV ,             rrbytes);
-            simbi::gpu::api::gpuMalloc(&host_x1m,             rrbytes);
-            simbi::gpu::api::gpuMalloc(&host_fas,             fabytes);
             simbi::gpu::api::gpuMalloc(&host_source0,         rrbytes);
             simbi::gpu::api::gpuMalloc(&host_sourceD,         rrbytes);
             simbi::gpu::api::gpuMalloc(&host_sourceS,         rrbytes);
             simbi::gpu::api::gpuMalloc(&host_dtmin,            rbytes);
-            simbi::gpu::api::gpuMalloc(&host_clattice, sizeof(CLattice1D));
 
             //--------Copy the host resources to pointer variables on host
             simbi::gpu::api::copyHostToDevice(host_u0,    host.cons.data(), cbytes);
@@ -48,30 +40,17 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceD), &host_sourceD,     sizeof(real*));
             simbi::gpu::api::copyHostToDevice(&(device->gpu_sourceS), &host_sourceS,     sizeof(real*));
             simbi::gpu::api::copyHostToDevice(&(device->dt_min), &host_dtmin,            sizeof(real*));
-            // ====================================================
-            //          GEOMETRY DEEP COPY
-            //=====================================================
-            simbi::gpu::api::copyHostToDevice(host_dx1, host.coord_lattice.dx1.data() ,       rrbytes);
-            simbi::gpu::api::copyHostToDevice(host_dV,  host.coord_lattice.dV.data(),         rrbytes);
-            simbi::gpu::api::copyHostToDevice(host_fas, host.coord_lattice.face_areas.data(), fabytes);
-            simbi::gpu::api::copyHostToDevice(host_x1m, host.coord_lattice.x1mean.data(),     rrbytes);
-
-            // Now copy pointer to device directly
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dx1), &host_dx1,        sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_dV), &host_dV,          sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_x1mean),&host_x1m,      sizeof(real *));
-            simbi::gpu::api::copyHostToDevice(&(device->coord_lattice.gpu_face_areas), &host_fas, sizeof(real *));
 
             simbi::gpu::api::copyHostToDevice(&(device->inFailureState), &host.inFailureState, sizeof(bool));
             simbi::gpu::api::copyHostToDevice(&(device->dt),        &host.dt      ,            sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->gamma),     &host.gamma   ,            sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->cfl)  ,     &host.cfl     ,            sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->nx),        &host.nx      ,            sizeof(int) );
-            simbi::gpu::api::copyHostToDevice(&(device->idx_active),        &host.idx_active,            sizeof(int) );
+            simbi::gpu::api::copyHostToDevice(&(device->idx_active),&host.idx_active,          sizeof(int) );
             simbi::gpu::api::copyHostToDevice(&(device->active_zones),&host.active_zones,      sizeof(int) );
             simbi::gpu::api::copyHostToDevice(&(device->decay_constant), &host.decay_constant, sizeof(real));
 
-            reset_dt();
+            // reset_dt();
         };
 
         template<typename T, typename C>
