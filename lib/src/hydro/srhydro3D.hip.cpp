@@ -22,6 +22,14 @@ using namespace simbi;
 using namespace simbi::util;
 using namespace std::chrono;
 
+
+/* Define typedefs because I am lazy */
+using Primitive           = sr3d::Primitive;
+using Conserved           = sr3d::Conserved;
+using Eigenvals           = sr3d::Eigenvals;
+using dualType            = simbi::dual::DualSpace3D<Primitive, Conserved, SRHD3D>;
+constexpr auto write2file = write_to_file<simbi::SRHD3D, sr3d::PrimitiveData, Primitive, dualType, 3>;
+
 // Default Constructor
 SRHD3D::SRHD3D() {}
 
@@ -53,103 +61,16 @@ SRHD3D::SRHD3D(
 
 // Destructor
 SRHD3D::~SRHD3D() {}
-
-/* Define typedefs because I am lazy */
-typedef sr3d::Primitive Primitive;
-typedef sr3d::Conserved Conserved;
-typedef sr3d::Eigenvals Eigenvals;
-
 //-----------------------------------------------------------------------------------------
 //                          GET THE Primitive
 //-----------------------------------------------------------------------------------------
-
-void SRHD3D::cons2prim()
-{
-    /**
-   * Return a 3D matrix containing the primitive
-   * variables density , pressure, and
-   * three-velocity
-   */
-
-    real S1, S2, S3, S, D, tau, tol;
-    real W, v1, v2, v3;
-
-    // Define Newton-Raphson Vars
-    real etotal, c2, f, g, p, peq;
-    real Ws, rhos, eps, h;
-
-    luint idx;
-    luint iter = 0;
-    for (luint kk = 0; kk < nz; kk++)
-    {
-        for (luint jj = 0; jj < ny; jj++)
-        {
-            for (luint ii = 0; ii < nx; ii++)
-            {
-                idx = ii + nx * jj + nx * ny * kk;
-                D   = cons[idx].d;     // Relativistic Mass Density
-                S1  = cons[idx].s1;   // X1-Momentum Denity
-                S2  = cons[idx].s2;   // X2-Momentum Density
-                S3  = cons[idx].s3;   // X2-Momentum Density
-                tau = cons[idx].tau;  // Energy Density
-                S = sqrt(S1 * S1 + S2 * S2 + S3 * S3);
-
-                peq = (n != 0.0) ? pressure_guess[idx] : std::abs(S - D - tau);
-
-                tol = D * 1.e-12;
-
-                //--------- Iteratively Solve for Pressure using Newton-Raphson
-                // Note: The NR scheme can be modified based on:
-                // https://www.sciencedirect.com/science/article/pii/S0893965913002930
-                iter = 0;
-                do
-                {
-                    p = peq;
-                    etotal = tau + p + D;
-                    v2 = S * S / (etotal * etotal);
-                    Ws = static_cast<real>(1.0) / sqrt(static_cast<real>(1.0) - v2);
-                    rhos = D / Ws;
-                    eps = (tau + D * (static_cast<real>(1.0) - Ws) + (static_cast<real>(1.0) - Ws * Ws) * p) / (D * Ws);
-                    f = (gamma - static_cast<real>(1.0)) * rhos * eps - p;
-
-                    h = static_cast<real>(1.0) + eps + p / rhos;
-                    c2 = gamma * p / (h * rhos);
-                    g = c2 * v2 - static_cast<real>(1.0);
-                    peq = p - f / g;
-                    iter++;
-
-                    if (iter > MAX_ITER)
-                    {
-                        std::cout << "\n";
-                        std::cout << "p: " << p       << "\n";
-                        std::cout << "S: " << S       << "\n";
-                        std::cout << "tau: " << tau   << "\n";
-                        std::cout << "D: " << D       << "\n";
-                        std::cout << "et: " << etotal << "\n";
-                        std::cout << "Ws: " << Ws     << "\n";
-                        std::cout << "v2: " << v2     << "\n";
-                        std::cout << "W: " << W       << "\n";
-                        std::cout << "n: " << n       << "\n";
-                        std::cout << "\n Cons2Prim Cannot Converge" << "\n";
-                        exit(EXIT_FAILURE);
-                    }
-
-                } while (std::abs(peq - p) >= tol);
-            
-
-                v1 = S1 / (tau + D + peq);
-                v2 = S2 / (tau + D + peq);
-                v3 = S3 / (tau + D + peq);
-                Ws = static_cast<real>(1.0) / sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2 + v3 * v3));
-
-                // Update the pressure guess for the next time step
-                pressure_guess[idx] = peq;
-                prims[idx]          = Primitive{D  / Ws, v1, v2, v3, peq};
-            }
-        }
-    }
-};
-
+/**
+ * Return a 3D matrix containing the primitive
+ * variables density , pressure, and three-velocity
+ * 
+ * @param  none 
+ * @return none
+ */
 void SRHD3D::cons2prim(
     ExecutionPolicy<> p, 
     SRHD3D *dev, 
@@ -257,9 +178,10 @@ void SRHD3D::cons2prim(
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 GPU_CALLABLE_MEMBER
-Eigenvals SRHD3D::calc_Eigenvals(const Primitive &prims_l,
-                                 const Primitive &prims_r,
-                                 const luint nhat)
+Eigenvals SRHD3D::calc_Eigenvals(
+    const Primitive &prims_l,
+    const Primitive &prims_r,
+    const luint nhat)
 {
     // Separate the left and right Primitive
     const real rho_l = prims_l.rho;
@@ -348,54 +270,6 @@ Conserved SRHD3D::prims2cons(const Primitive &prims)
         rho * h * lorentz_gamma * lorentz_gamma * vz,
         rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma};
 };
-
-// Conserved SRHD3D::calc_intermed_statesSR2D(const Primitive &prims,
-//                                            const Conserved &state, real a,
-//                                            real aStar, real pStar,
-//                                            luint nhat = 1)
-// {
-//     real Dstar, S1star, S2star, tauStar, Estar, cofactor;
-//     Conserved starStates;
-
-//     real pressure = prims.p;
-//     real v1 = prims.v1;
-//     real v2 = prims.v2;
-
-//     real D = state.d;
-//     real S1 = state.s1;
-//     real S2 = state.s2;
-//     real tau = state.tau;
-//     real E = tau + D;
-
-//     switch (nhat)
-//     {
-//     case 1:
-//         cofactor = static_cast<real>(1.0) / (a - aStar);
-//         Dstar = cofactor * (a - v1) * D;
-//         S1star = cofactor * (S1 * (a - v1) - pressure + pStar);
-//         S2star = cofactor * (a - v1) * S2;
-//         Estar = cofactor * (E * (a - v1) + pStar * aStar - pressure * v1);
-//         tauStar = Estar - Dstar;
-
-//         starStates = Conserved(Dstar, S1star, S2star, tauStar);
-
-//         return starStates;
-//     case 2:
-//         cofactor = static_cast<real>(1.0) / (a - aStar);
-//         Dstar = cofactor * (a - v2) * D;
-//         S1star = cofactor * (a - v2) * S1;
-//         S2star = cofactor * (S2 * (a - v2) - pressure + pStar);
-//         Estar = cofactor * (E * (a - v2) + pStar * aStar - pressure * v2);
-//         tauStar = Estar - Dstar;
-
-//         starStates = Conserved(Dstar, S1star, S2star, tauStar);
-
-//         return starStates;
-//     }
-
-//     return starStates;
-// }
-
 //---------------------------------------------------------------------
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------

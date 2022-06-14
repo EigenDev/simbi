@@ -55,6 +55,7 @@ namespace simbi
             std::string coord_system);
         ~SRHD2D();
 
+        //================================= Methods ==================================================
         GPU_CALLABLE_MEMBER
         sr2d::Eigenvals calc_eigenvals(
             const sr2d::Primitive &prims_l,
@@ -63,22 +64,6 @@ namespace simbi
 
         GPU_CALLABLE_MEMBER
         sr2d::Conserved prims2cons(const sr2d::Primitive &prims) const;
-        
-        sr2d::Conserved calc_hll_state(
-            const sr2d::Conserved &left_state,
-            const sr2d::Conserved &right_state,
-            const sr2d::Conserved &left_flux,
-            const sr2d::Conserved &right_flux,
-            const sr2d::Primitive &left_prims,
-            const sr2d::Primitive &right_prims,
-            luint nhat) const;
-
-        sr2d::Conserved calc_intermed_statesSR2D(const sr2d::Primitive &prims,
-                                                 const sr2d::Conserved &state,
-                                                 real a,
-                                                 real aStar,
-                                                 real pStar,
-                                                 luint nhat);
 
         GPU_CALLABLE_MEMBER
         sr2d::Conserved calc_hllc_flux(

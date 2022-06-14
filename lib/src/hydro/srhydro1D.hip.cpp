@@ -28,9 +28,11 @@ using namespace std::chrono;
 //================================================
 //              DATA STRUCTURES
 //================================================
-typedef sr1d::Conserved Conserved;
-typedef sr1d::Primitive Primitive;
-typedef sr1d::Eigenvals Eigenvals;
+using Conserved  =  sr1d::Conserved;
+using Primitive  =  sr1d::Primitive;
+using Eigenvals  =  sr1d::Eigenvals;
+using srDualType =  dual::DualSpace1D<Primitive, Conserved, SRHD>;
+constexpr auto write2file = write_to_file<simbi::SRHD, sr1d::PrimitiveArray, sr1d::Primitive, srDualType, 1>;
 
 // Default Constructor
 SRHD::SRHD(){}
@@ -60,16 +62,18 @@ void SRHD::set_mirror_ptrs()
 }
 
 GPU_CALLABLE_MEMBER
-real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side)
+real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side) const
 {
     switch(geometry)
     {
     case simbi::Geometry::SPHERICAL:
         {
-            const real xl = (ii > 0 ) ? x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min; 
-            const real xr = (ii < active_zones - 1) ? xl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
-
-            return xl * kronecker(0, side) * hubble_const + xr * kronecker(1, side) * hubble_const;
+            const real xl = my_max(x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min); 
+            if (side == 0) {
+                return xl;
+            } else {
+                const real xr = my_min(xl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)),  x1max);
+            }
         }
     case simbi::Geometry::CARTESIAN:
         {
@@ -146,8 +150,8 @@ void SRHD::advance(
 
         const real x1l    = self->get_xface(ii, geometry, 0);
         const real x1r    = self->get_xface(ii, geometry, 1);
-        const real vfaceR = x1r * hubble_param;
-        const real vfaceL = x1l * hubble_param;
+        const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
+        const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
         if (self->first_order)
         {
 
@@ -294,10 +298,9 @@ void SRHD::advance(
             self->x1min += step * dt * vfaceL;
         }
     });	
-    
     if constexpr(BuildPlatform == Platform::GPU) {
-        this->x1max = self->x1max;
-        this->x1min = self->x1min;
+        this->x1min = dev->x1min;
+        this->x1max = dev->x1max;
     }
 }
 
@@ -415,8 +418,9 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 GPU_CALLABLE_MEMBER
-Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
-                               const Primitive &prims_r)
+Eigenvals SRHD::calc_eigenvals(
+    const Primitive &prims_l,
+    const Primitive &prims_r) const
 {
     // Compute L/R Sound Speeds
     const real rho_l = prims_l.rho;
@@ -487,31 +491,27 @@ void SRHD::adapt_dt()
 {   
     real min_dt = INFINITY;
     #pragma omp parallel 
-    {
-        real dr, cs, cfl_dt, vfaceL, vfaceR, vzone, x1l, x1r;
-        real h, rho, p, v, vPLus, vMinus;
-
+    {   
+        real vfaceL = 0.0;
+        real vfaceR = 0.0;
         // Compute the minimum timestep given cfl
         #pragma omp for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++)
         {
-            x1l    = get_xface(ii, geometry, 0);
-            x1r    = get_xface(ii, geometry, 1);
-            vfaceL = x1l * hubble_param;
-            vfaceR = x1r * hubble_param;
-            vzone  = 0.5 * (vfaceL + vfaceR);
-            dr     = coord_lattice.dx1[ii];
-            rho    = prims[ii + idx_active].rho;
-            p      = prims[ii + idx_active].p;
-            v      = prims[ii + idx_active].v;
+            const real rho    = prims[ii + idx_active].rho;
+            const real p      = prims[ii + idx_active].p;
+            const real v      = prims[ii + idx_active].v;
+            const real h      = static_cast<real>(1.0) + gamma * p / (rho * (gamma - 1));
+            const real cs     = std::sqrt(gamma * p / (rho * h));
+            const real vPLus  = (v + cs) / (1 + v * cs);
+            const real vMinus = (v - cs) / (1 - v * cs);
 
-            h = static_cast<real>(1.0) + gamma * p / (rho * (gamma - 1));
-            cs = std::sqrt(gamma * p / (rho * h));
-
-            vPLus  = (v + cs) / (1 + v * cs);
-            vMinus = (v - cs) / (1 - v * cs);
-
-            cfl_dt = dr / (my_max(std::abs(vPLus - vzone), std::abs(vMinus - vzone)));
+            const real x1l    = get_xface(ii, geometry, 0);
+            const real x1r    = get_xface(ii, geometry, 1);
+            const real dx1    = x1r - x1l;
+            const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
+            const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
+            const real cfl_dt = dx1 / (my_max(std::abs(vPLus - vfaceR), std::abs(vMinus - vfaceL)));
             min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
         }
     }   
@@ -536,7 +536,7 @@ void SRHD::adapt_dt(SRHD *dev, luint blockSize)
 // Get the (3,1) state array for computation. Used for Higher Order
 // Reconstruction
 GPU_CALLABLE_MEMBER
-Conserved SRHD::prims2cons(const Primitive &prim)
+Conserved SRHD::prims2cons(const Primitive &prim) const
 {
     const real rho = prim.rho;
     const real v   = prim.v;
@@ -547,53 +547,12 @@ Conserved SRHD::prims2cons(const Primitive &prim)
     return Conserved{rho * W, rho * h * W * W * v, rho * h * W * W - pre - rho * W};
 };
 
-GPU_CALLABLE_MEMBER
-Conserved SRHD::calc_hll_state(const Conserved &left_state,
-                               const Conserved &right_state,
-                               const Conserved &left_flux,
-                               const Conserved &right_flux,
-                               const Primitive &left_prims,
-                               const Primitive &right_prims)
-{
-    const Eigenvals lambda = calc_eigenvals(left_prims, right_prims);
-    const real aL          = lambda.aL;
-    const real aR          = lambda.aR;
-    const real aLm         = aL < 0 ? aL : 0;
-    const real aRp         = aR > 0 ? aR : 0;
-    
-    return (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
-}
-
-Conserved SRHD::calc_intermed_state(
-    const Primitive &prims,
-    const Conserved &state, 
-    const real a,
-    const real aStar, 
-    const real pStar)
-{
-    const real pressure = prims.p;
-    const real v = prims.v;
-
-    const real D = state.d;
-    const real S = state.s;
-    const real tau = state.tau;
-    const real E = tau + D;
-
-    const real DStar   = ((a - v)   / (a - aStar)) * D;
-    const real Sstar   = (static_cast<real>(1.0) / (a - aStar)) * (S * (a - v) - pressure + pStar);
-    const real Estar   = (static_cast<real>(1.0) / (a - aStar)) * (E * (a - v) + pStar * aStar - pressure * v);
-    const real tauStar = Estar - DStar;
-
-    return Conserved{DStar, Sstar, tauStar};
-}
-
 //-----------------------------------------------------------------------------------------------------------
 //                                            FLUX CALCULATIONS
 //-----------------------------------------------------------------------------------------------------------
-
 // Get the 1D Flux array (3,1)
 GPU_CALLABLE_MEMBER
-Conserved SRHD::prims2flux(const Primitive &prim)
+Conserved SRHD::prims2flux(const Primitive &prim) const
 {
     const real rho = prim.rho;
     const real pre = prim.p;
@@ -602,7 +561,6 @@ Conserved SRHD::prims2flux(const Primitive &prim)
     const real h   = static_cast<real>(1.0) + gamma * pre / (rho * (gamma - 1));
     const real D   = rho * W;
     const real S   = rho * h * W * W * v;
-
     return Conserved{D*v, S*v + pre, S - D*v};
 };
 
@@ -613,7 +571,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hll_flux(
     const Conserved &right_state,
     const Conserved &left_flux,  
     const Conserved &right_flux,
-    const real      vface)
+    const real      vface) const
 {
     const Eigenvals lambda = calc_eigenvals(left_prims, right_prims);
 
@@ -642,7 +600,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const Conserved &right_state,
     const Conserved &left_flux,  
     const Conserved &right_flux,
-    const real       vface)
+    const real       vface) const
 {
     const Eigenvals lambda = calc_eigenvals(left_prims, right_prims);
     const real aL  = lambda.aL;
@@ -694,7 +652,6 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         // Compute the HLL Flux component-wise
         Conserved hllc_flux = left_flux + (star_stateL - left_state) * aLm;
         return    hllc_flux - star_stateL * vface;
-
     } else {
         const real pressure  = right_prims.p;
         const real D         = right_state.d;
@@ -718,11 +675,9 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         return    hllc_flux -  star_stateR * vface;
     }
 };
-
 //----------------------------------------------------------------------------------------------------------
 //                                  UDOT CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
-
 std::vector<std::vector<real>>
 SRHD::simulate1D(
     std::vector<std::vector<real>> &sources,
@@ -755,20 +710,18 @@ SRHD::simulate1D(
     this->t           = tstart;
     this->tend        = tend;
     // Define the swap vector for the integrated state
-    this->nx         = state[0].size();
-    this->bc         = boundary_cond_map.at(boundary_condition);
-    this->geometry   = geometry_map.at(coord_system);
-
+    this->nx           = state[0].size();
+    this->bc           = boundary_cond_map.at(boundary_condition);
+    this->geometry     = geometry_map.at(coord_system);
     this->idx_active   = (periodic) ? 0  : (first_order) ? 1 : 2;
     this->active_zones = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
-
 
     this->dlogx1  = std::log10(x1[active_zones - 1]/ x1[0]) / (active_zones - 1);
     this->dx1     = (x1[active_zones - 1] - x1[0]) / (active_zones - 1);
     this->x1min   = x1[0];
     this->x1max   = x1[active_zones - 1];
 
-    n = 0;
+    luint n = 0;
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
     PrimData prods;
@@ -789,41 +742,16 @@ SRHD::simulate1D(
     setup.first_order    = first_order;
     setup.coord_system   = coord_system;
     setup.boundarycond   = boundary_condition;
-    // Create Structure of Vectors (SoV) for trabsferring
-    // data to files once ready
-    sr1d::PrimitiveArray transfer_prims;
 
     cons.resize(nx);
     prims.resize(nx);
     pressure_guess.resize(nx);
     dt_arr.resize(nx);
     // Copy the state array into real & profile variables
-    for (luint ii = 0; ii < nx; ii++)
-    {
+    for (luint ii = 0; ii < nx; ii++) {
         cons[ii] = Conserved{state[0][ii], state[1][ii], state[2][ii]};
         // initial pressure guess is | |S| - D - tau|
         pressure_guess[ii] = std::abs((state[1][ii]) - state[0][ii] - state[2][ii]);
-    }
-    // deallocate the init state vector now
-    std::vector<int> state;
-
-    if ((coord_system == "spherical") && (linspace))
-    {
-        this->geometry = simbi::Geometry::SPHERICAL;
-        this->coord_lattice = CLattice1D(x1, simbi::Geometry::SPHERICAL);
-        coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE);
-    }
-    else if ((coord_system == "spherical") && (!linspace))
-    {
-        this->geometry = simbi::Geometry::SPHERICAL;
-        this->coord_lattice = CLattice1D(x1, simbi::Geometry::SPHERICAL);
-        coord_lattice.config_lattice(simbi::Cellspacing::LOGSPACE);
-    }
-    else
-    {
-        this->geometry = simbi::Geometry::CARTESIAN;
-        this->coord_lattice = CLattice1D(x1, simbi::Geometry::CARTESIAN);
-        coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE);
     }
 
     // Copy the current SRHD instance over to the device
@@ -840,19 +768,13 @@ SRHD::simulate1D(
     const luint shBlockSize   = BLOCK_SIZE + 2 * pseudo_radius;
     const luint shBlockBytes  = shBlockSize * sizeof(Primitive);
 
-    if constexpr(BuildPlatform == Platform::GPU)
-    {
+    if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP, device_self, simbi::MemSide::Dev);
         adapt_dt(device_self, activeP.gridSize.x);
     } else {
         cons2prim(fullP);
         adapt_dt();
     }
-    // Some variables to handle file automatic file string formatting 
-    tchunk = "000000";
-    lint tchunk_order_of_mag = 2;
-    lint time_order_of_mag;
-    double tbefore;
 
     // Some benchmarking tools 
     luint   nfold   = 0;
@@ -873,36 +795,16 @@ SRHD::simulate1D(
             simbi::gpu::api::copyHostToDevice(dev_outer_zones, outer_zones, 2 * sizeof(Conserved));
         }
     }
-
     // Save initial condition
-    if (t == 0)
-    {
-        if constexpr(BuildPlatform == Platform::GPU) 
-            dualMem.copyDevToHost(device_self, *this);
-
-        setup.x1max = x1max;
-        setup.x1min = x1min;
-        time_order_of_mag = std::floor(std::log10(t));
-        if (time_order_of_mag > tchunk_order_of_mag)
-        {
-            tchunk.insert(0, "0");
-            tchunk_order_of_mag += 1;
-        }
-        transfer_prims = vec2struct<sr1d::PrimitiveArray, Primitive>(prims);
-        writeToProd<sr1d::PrimitiveArray, Primitive>(&transfer_prims, &prods);
-        tnow = create_step_str(t_interval, tchunk);
-        filename = string_format("%d.chkpt." + tnow + ".h5", active_zones);
-        setup.t  = t;
-        setup.dt = t - tbefore;
-        tbefore  = t;
-        write_hdf5(data_directory, filename, prods, setup, 1, nx);
+    if (t == 0) {
+        write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
         t_interval += chkpt_interval;
     }
-
     // Determine the memory side and state position
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
     const auto ozones  = (BuildPlatform == Platform::GPU) ? dev_outer_zones : outer_zones;
+
     // Simulate :)
     if (first_order)
     {  
@@ -928,26 +830,8 @@ SRHD::simulate1D(
             }
 
             /* Write to a file every nth of a second */
-            if (t >= t_interval)
-            {
-                if constexpr(BuildPlatform == Platform::GPU) 
-                    dualMem.copyDevToHost(device_self, *this);
-
-                setup.x1max = x1max;
-                setup.x1min = x1min;
-                time_order_of_mag = std::floor(std::log10(t));
-                if (time_order_of_mag > tchunk_order_of_mag) {
-                    tchunk.insert(0, "0");
-                    tchunk_order_of_mag += 1;
-                }
-                transfer_prims = vec2struct<sr1d::PrimitiveArray, Primitive>(prims);
-                writeToProd<sr1d::PrimitiveArray, Primitive>(&transfer_prims, &prods);
-                tnow      = create_step_str(t_interval, tchunk);
-                filename  = string_format("%lu.chkpt." + tnow + ".h5", active_zones);
-                setup.t   = t;
-                setup.dt  = t - tbefore;
-                tbefore   = t;
-                write_hdf5(data_directory, filename, prods, setup, 1, nx);
+            if (t >= t_interval && t != INFINITY) {
+                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
                 t_interval += chkpt_interval;
             }
             n++;
@@ -960,12 +844,7 @@ SRHD::simulate1D(
             }
 
             // Update the outer zones with the necessary configs if they exists
-            if (d_outer)
-            {
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    this->x1min = device_self->x1min;
-                    this->x1max = device_self->x1max;
-                }
+            if (d_outer) {
                 const real dV  = get_cell_volume(active_zones - 1, geometry);
                 outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
                 if constexpr(BuildPlatform == Platform::GPU) {
@@ -986,14 +865,14 @@ SRHD::simulate1D(
             t1 = high_resolution_clock::now();
 
             // First Half Step
-            cons2prim(fullP, self, memside);
             advance(self, shBlockSize, radius, geometry, memside);
+            cons2prim(fullP, self, memside);
             if (!periodic) {
                 config_ghosts1D(fullP, self, nx, false, bc, ozones);
             }
             // Final Half Step
-            cons2prim(fullP, self, memside);
             advance(self, shBlockSize, radius, geometry, memside);
+            cons2prim(fullP, self, memside);
             if (!periodic) {
                 config_ghosts1D(fullP, self, nx, false, bc, ozones);
             }
@@ -1011,25 +890,7 @@ SRHD::simulate1D(
             
             /* Write to a File every tenth of a second */
             if (t >= t_interval && t != INFINITY) {
-                if constexpr(BuildPlatform == Platform::GPU) 
-                    dualMem.copyDevToHost(device_self, *this);
-
-                setup.x1max = x1max;
-                setup.x1min = x1min;
-                time_order_of_mag = std::floor(std::log10(t));
-                if (time_order_of_mag > tchunk_order_of_mag)
-                {
-                    tchunk.insert(0, "0");
-                    tchunk_order_of_mag += 1;
-                }
-                transfer_prims = vec2struct<sr1d::PrimitiveArray, Primitive>(prims);
-                writeToProd<sr1d::PrimitiveArray, Primitive>(&transfer_prims, &prods);
-                tnow = create_step_str(t_interval, tchunk);
-                filename = string_format("%d.chkpt." + tnow + ".h5", active_zones);
-                setup.t  = t;
-                setup.dt = t - tbefore;
-                tbefore  = t;
-                write_hdf5(data_directory, filename, prods, setup, 1, nx);
+                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
                 t_interval += chkpt_interval;
             }
             n++;
@@ -1043,10 +904,6 @@ SRHD::simulate1D(
 
             // Update the outer zones with the necessary configs if they exists
             if (d_outer) {
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    this->x1min = device_self->x1min;
-                    this->x1max = device_self->x1max;
-                }
                 const real dV  = get_cell_volume(active_zones - 1, geometry);
                 outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
                 if constexpr(BuildPlatform == Platform::GPU) {

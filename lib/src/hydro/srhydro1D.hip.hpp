@@ -40,7 +40,7 @@ namespace simbi
           std::vector<sr1d::Conserved> cons;
           std::vector<sr1d::Primitive> prims;
 
-          luint nx, n, active_zones, idx_active, i_start, i_bound;
+          luint nx, active_zones, idx_active, i_start, i_bound;
           real tend;
           real plm_theta, engine_duration, t, decay_constant;
           bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
@@ -51,7 +51,7 @@ namespace simbi
           // Host Ptrs to underlying data
           //===============================
           sr1d::Conserved * cons_ptr;
-          real      * pguess_ptr;
+          real            * pguess_ptr;
           sr1d::Primitive * prims_ptr;
 
           void advance(
@@ -62,50 +62,20 @@ namespace simbi
                const simbi::MemSide user = simbi::MemSide::Host);
 
           void set_mirror_ptrs();
-          void initalizeSystem(
-              std::vector<std::vector<real>> &sources,
-              real tstart = 0.0,
-              real tend = 0.1,
-              real dt = 1.e-4,
-              real plm_theta = 1.5,
-              real engine_duration = 10,
-              real chkpt_interval = 0.1,
-              std::string data_directory = "data/",
-              bool first_order = true,
-              bool periodic = false,
-              bool linspace = true,
-              bool hllc = false);
-          
           void cons2prim(ExecutionPolicy<> p, SRHD *dev = nullptr, simbi::MemSide user = simbi::MemSide::Host);
 
           GPU_CALLABLE_MEMBER
           sr1d::Eigenvals calc_eigenvals(const sr1d::Primitive &prims_l,
-                                         const sr1d::Primitive &prims_r);
+                                         const sr1d::Primitive &prims_r) const;
 
           void adapt_dt();
           void adapt_dt(SRHD *dev, luint blockSize);
 
           GPU_CALLABLE_MEMBER
-          sr1d::Conserved prims2cons(const sr1d::Primitive &prim);
+          sr1d::Conserved prims2cons(const sr1d::Primitive &prim) const;
 
           GPU_CALLABLE_MEMBER
-          sr1d::Conserved calc_hll_state(
-               const sr1d::Conserved &left_state,
-               const sr1d::Conserved &right_state,
-               const sr1d::Conserved &left_flux,
-               const sr1d::Conserved &right_flux,
-               const sr1d::Primitive &left_prims,
-               const sr1d::Primitive &right_prims);
-
-          
-          sr1d::Conserved calc_intermed_state(
-               const sr1d::Primitive &prims,
-               const sr1d::Conserved &state,
-               const real a, const real aStar,
-               const real pStar);
-
-          GPU_CALLABLE_MEMBER
-          sr1d::Conserved prims2flux(const sr1d::Primitive &prim);
+          sr1d::Conserved prims2flux(const sr1d::Primitive &prim) const;
 
           GPU_CALLABLE_MEMBER
           sr1d::Conserved calc_hll_flux(
@@ -115,7 +85,7 @@ namespace simbi
                const sr1d::Conserved &right_state,
                const sr1d::Conserved &left_flux,
                const sr1d::Conserved &right_flux,
-               const real             vface);
+               const real             vface) const;
 
           GPU_CALLABLE_MEMBER
           sr1d::Conserved calc_hllc_flux(
@@ -125,9 +95,7 @@ namespace simbi
                const sr1d::Conserved &right_state,
                const sr1d::Conserved &left_flux,
                const sr1d::Conserved &right_flux,
-               const real             vface);
-
-          std::vector<sr1d::Conserved> u_dot1D(std::vector<sr1d::Conserved> &u_state);
+               const real             vface) const;
           
           std::vector<std::vector<real>>
           simulate1D(
@@ -150,16 +118,21 @@ namespace simbi
                std::function<double(double)> e_outer = nullptr);
 
           GPU_CALLABLE_MEMBER
-          real calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side);
+          real calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side) const;
 
           GPU_CALLABLE_INLINE
-          constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
+          constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side) const
           {
                switch (geometry)
                {
                case simbi::Geometry::CARTESIAN:
                     {
-                         return 1.0;
+                         const real xl = my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+                         if (side == 0) {
+                              return xl;
+                         } else {
+                              return my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+                         }
                     }
                case simbi::Geometry::SPHERICAL:
                     {
@@ -174,7 +147,7 @@ namespace simbi
           }
 
           GPU_CALLABLE_MEMBER
-          constexpr real get_cell_volume(lint ii, const simbi::Geometry geometry)
+          constexpr real get_cell_volume(lint ii, const simbi::Geometry geometry) const
           {
                if (!mesh_motion)
                {

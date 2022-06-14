@@ -22,6 +22,13 @@ using namespace simbi;
 using namespace simbi::util;
 using namespace std::chrono;
 
+/* Define typedefs because I am lazy */
+using Primitive           = sr2d::Primitive;
+using Conserved           = sr2d::Conserved;
+using Eigenvals           = sr2d::Eigenvals;
+using dualType            = simbi::dual::DualSpace2D<Primitive, Conserved, SRHD2D>;
+constexpr auto write2file = write_to_file<simbi::SRHD2D, sr2d::PrimitiveData, Primitive, dualType, 2>;
+
 // Default Constructor
 SRHD2D::SRHD2D() {}
 
@@ -50,16 +57,6 @@ SRHD2D::SRHD2D(std::vector<std::vector<real>> state2D, luint nx, luint ny, real 
 
 // Destructor
 SRHD2D::~SRHD2D() {}
-
-/* Define typedefs because I am lazy */
-typedef sr2d::Primitive Primitive;
-typedef sr2d::Conserved Conserved;
-typedef sr2d::Eigenvals Eigenvals;
-
-//-----------------------------------------------------------------------------------------
-//                          GET THE Primitive
-//-----------------------------------------------------------------------------------------
-
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
@@ -155,53 +152,6 @@ Conserved SRHD2D::prims2cons(const Primitive &prims) const
         rho * lorentz_gamma * prims.chi};
 };
 
-Conserved SRHD2D::calc_intermed_statesSR2D(const Primitive &prims,
-                                           const Conserved &state, real a,
-                                           real aStar, real pStar,
-                                           luint nhat = 1)
-{
-    real Dstar, S1star, S2star, tauStar, Estar, cofactor;
-    Conserved starStates;
-
-    real pressure = prims.p;
-    real v1 = prims.v1;
-    real v2 = prims.v2;
-
-    real D = state.d;
-    real S1 = state.s1;
-    real S2 = state.s2;
-    real tau = state.tau;
-    real E = tau + D;
-
-    switch (nhat)
-    {
-    case 1:
-        cofactor = 1. / (a - aStar);
-        Dstar = cofactor * (a - v1) * D;
-        S1star = cofactor * (S1 * (a - v1) - pressure + pStar);
-        S2star = cofactor * (a - v1) * S2;
-        Estar = cofactor * (E * (a - v1) + pStar * aStar - pressure * v1);
-        tauStar = Estar - Dstar;
-
-        starStates = Conserved(Dstar, S1star, S2star, tauStar);
-
-        return starStates;
-    case 2:
-        cofactor = 1. / (a - aStar);
-        Dstar = cofactor * (a - v2) * D;
-        S1star = cofactor * (a - v2) * S1;
-        S2star = cofactor * (S2 * (a - v2) - pressure + pStar);
-        Estar = cofactor * (E * (a - v2) + pStar * aStar - pressure * v2);
-        tauStar = Estar - Dstar;
-
-        starStates = Conserved(Dstar, S1star, S2star, tauStar);
-
-        return starStates;
-    }
-
-    return starStates;
-}
-
 //---------------------------------------------------------------------
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
@@ -258,9 +208,8 @@ void SRHD2D::adapt_dt()
                     {
                         const real vfaceL   = x1l * hubble_param;
                         const real vfaceR   = x1r * hubble_param;
-                        const real vzone    = 0.5 * (vfaceL + vfaceR);
-                        v1p = std::abs(plus_v1  - vzone);
-                        v1m = std::abs(minus_v1 - vzone);
+                        v1p = std::abs(plus_v1  - vfaceL);
+                        v1m = std::abs(minus_v1 - vfaceR);
                     }
                     cfl_dt = std::min(dr / (std::max(v1p, v1m)),  rmean * dtheta / (std::max(v2p, v2m)));
                 }
@@ -1312,7 +1261,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     SRHD2D *device_self;
     simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(SRHD2D));
     simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(SRHD2D));
-    simbi::dual::DualSpace2D<Primitive, Conserved, SRHD2D> dualMem;
+    dualType dualMem;
     dualMem.copyHostToDev(*this, device_self);
     
     // Some variables to handle file automatic file string
@@ -1391,16 +1340,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         }
     }
     
-    if (t == 0)
-    {
-        if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
-        transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
-        writeToProd<sr2d::PrimitiveData, Primitive>(&transfer_prims, &prods);
-        tnow = create_step_str(t_interval, tchunk);
-        filename = string_format("%d.chkpt." + tnow + ".h5", yphysical_grid);
-        setup.t = t;
-        setup.dt = dt;
-        write_hdf5(data_directory, filename, prods, setup, 2, total_zones);
+    if (t == 0) {
+        write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
         t_interval += chkpt_interval;
     }
     // Some benchmarking tools 
@@ -1436,40 +1377,17 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
 
             /* Write to a File every tenth of a second */
-            if (t >= t_interval)
-            {
-                if constexpr(BuildPlatform == Platform::GPU){
-                    simbi::gpu::api::copyDevToHost(&x1min, &(device_self->x1min),  sizeof(real));
-                    simbi::gpu::api::copyDevToHost(&x1max, &(device_self->x1max),  sizeof(real));
-                    dualMem.copyDevToHost(device_self, *this);
-                } 
-                time_order_of_mag = std::floor(std::log10(t));
-                if (time_order_of_mag > tchunk_order_of_mag){
-                    tchunk.insert(0, "0");
-                    tchunk_order_of_mag += 1;
-                }
-                
-                transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
-                writeToProd<sr2d::PrimitiveData, Primitive>(&transfer_prims, &prods);
-                tnow = create_step_str(t_interval, tchunk);
-                filename = string_format("%d.chkpt." + tnow + ".h5", yphysical_grid);
-                setup.t     = t;
-                setup.dt    = dt;
-                setup.x1max = x1max;
-                setup.x1min = x1min;
-                write_hdf5(data_directory, filename, prods, setup, 2, total_zones);
+            if (t >= t_interval && t != INFINITY) {
+                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
                 t_interval += chkpt_interval;
             }
-            
             n++;
             // Adapt the timestep
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
+            if constexpr(BuildPlatform == Platform::GPU) {
                 adapt_dt(device_self, geometry, activeP, dtShBytes);
             } else {
                 adapt_dt();
             }
-            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
             hubble_param = adot(t) / a(t);
             // Update decay constant
             decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
@@ -1490,6 +1408,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                  if constexpr(BuildPlatform == Platform::GPU) {
                     simbi::gpu::api::copyHostToDevice(ozones, outer_zones, ny * sizeof(Conserved));
                 }
+            }
+            if constexpr(BuildPlatform == Platform::GPU) {
+                this->inFailureState = device_self->inFailureState;
+            }
+            if (inFailureState) {
+                simbi::gpu::api::deviceSynch();
             }
         }
     } else {
@@ -1519,34 +1443,15 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             }
             
             /* Write to a File every tenth of a second */
-            if (t >= t_interval)
-            {
-                if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
-                time_order_of_mag = std::floor(std::log10(t));
-                if (time_order_of_mag > tchunk_order_of_mag){
-                    tchunk.insert(0, "0");
-                    tchunk_order_of_mag += 1;
-                }
-                
-                transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
-                writeToProd<sr2d::PrimitiveData, Primitive>(&transfer_prims, &prods);
-                tnow = create_step_str(t_interval, tchunk);
-                filename = string_format("%d.chkpt." + tnow + ".h5", yphysical_grid);
-                setup.t     = t;
-                setup.dt    = dt;
-                setup.x1max = x1max;
-                setup.x1min = x1min;
-                write_hdf5(data_directory, filename, prods, setup, 2, total_zones);
+            if (t >= t_interval && t != INFINITY) {
+                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
                 t_interval += chkpt_interval;
             }
             n++;
             // Update decay constant
             decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
-            simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
-
             //Adapt the timestep
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
+            if constexpr(BuildPlatform == Platform::GPU) {
                 adapt_dt(device_self, geometry, activeP, dtShBytes);
             } else {
                 adapt_dt();
@@ -1567,6 +1472,13 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                  if constexpr(BuildPlatform == Platform::GPU) {
                     simbi::gpu::api::copyHostToDevice(ozones, outer_zones, ny * sizeof(Conserved));
                 }
+            }
+
+            if constexpr(BuildPlatform == Platform::GPU) {
+                this->inFailureState = device_self->inFailureState;
+            }
+            if (inFailureState) {
+                simbi::gpu::api::deviceSynch();
             }
         }
     }
@@ -1591,7 +1503,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     }
 
     transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
-
     std::vector<std::vector<real>> solution(5, std::vector<real>(nzones));
 
     solution[0] = transfer_prims.rho;
