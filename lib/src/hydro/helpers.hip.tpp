@@ -13,56 +13,48 @@ namespace simbi{
 
     template<typename T, typename N>
     GPU_LAUNCHABLE  typename std::enable_if<is_1D_primitive<N>::value>::type 
-    compute_dt(T *s)
+    compute_dt(T *self)
     {
         #if GPU_CODE
         __shared__  N prim_buff[BLOCK_SIZE];
         real vPlus, vMinus;
-        const real gamma     = s->gamma;
+        const real gamma     = self->gamma;
         int tid  = threadIdx.x;
         int ii   = blockDim.x * blockIdx.x + threadIdx.x;
-        int aid  = ii + s->idx_active;
-        real val;
-        real vzone = 0.0;
-        if (ii < s->active_zones)
+        int aid  = ii + self->idx_active;
+        if (ii < self->active_zones)
         {
-            prim_buff[tid] = s->gpu_prims[aid];
+            prim_buff[tid] = self->gpu_prims[aid];
             __syncthreads();
-            
-            real dr  = s->coord_lattice.gpu_dx1[ii];
-            real rho = prim_buff[tid].rho;
-            real p   = prim_buff[tid].p;
+            const real rho = prim_buff[tid].rho;
+            const real p   = prim_buff[tid].p;
         
             if constexpr(is_relativistic<N>::value)
             {
-                real v  = prim_buff[tid].v;
-                real h  = 1. + gamma * p / (rho * (gamma - 1.));
-                real cs = std::sqrt(gamma * p / (rho * h));
-                vPlus   = (v + cs) / (1 + v * cs);
-                vMinus  = (v - cs) / (1 - v * cs);
+                const real v  = prim_buff[tid].v;
+                const real h  = 1. + gamma * p / (rho * (gamma - 1.));
+                const real cs = std::sqrt(gamma * p / (rho * h));
+                vPlus         = (v + cs) / (1 + v * cs);
+                vMinus        = (v - cs) / (1 - v * cs);
             } else {
-                real v  = prim_buff[tid].v;
-                real cs = std::sqrt(gamma * p / rho );
-                vPlus   = (v + cs);
-                vMinus  = (v - cs);
+                const real v  = prim_buff[tid].v;
+                const real cs = std::sqrt(gamma * p / rho );
+                vPlus         = (v + cs);
+                vMinus        = (v - cs);
             }
-            if (s->mesh_motion)
-            {
-                const real x1l    = s->get_xface(ii, s->geometry, 0);
-                const real x1r    = s->get_xface(ii, s->geometry, 1);
-                const real vfaceL = x1l * s->hubble_param;
-                const real vfaceR = x1r * s->hubble_param;
-                vzone             = 0.5 * (vfaceL + vfaceR);
-            }
-
-            real cfl_dt = dr / (my_max(std::abs(vPlus - vzone), std::abs(vMinus - vzone)));
-            s->dt_min[ii] = s->cfl * cfl_dt;
+            const real x1l    = self->get_xface(ii, self->geometry, 0);
+            const real x1r    = self->get_xface(ii, self->geometry, 1);
+            const real dx1    = x1r - x1l;
+            const real vfaceL = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1l * self->hubble_param;
+            const real vfaceR = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1r * self->hubble_param;
+            const real cfl_dt = dx1 / (my_max(std::abs(vPlus), std::abs(vMinus)));
+            self->dt_min[ii]  = self->cfl * cfl_dt;
         }
         #endif
     }
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_1D_primitive<N>::value>::type 
-    dtWarpReduce(T *s)
+    dtWarpReduce(T *self)
     {
         #if GPU_CODE
         real min = INFINITY;
@@ -70,15 +62,15 @@ namespace simbi{
 
         int tid = threadIdx.x;
         int ii  = blockDim.x * blockIdx.x + threadIdx.x;
-        int aid = ii + s->idx_active;
+        int aid = ii + self->idx_active;
         real val;
-        if (ii < s->active_zones)
+        if (ii < self->active_zones)
         {
             // tail part
             int bidx = 0;
-            for(int i = 1; bidx + tid < s->active_zones; i++)
+            for(int i = 1; bidx + tid < self->active_zones; i++)
             {
-                val = s->dt_min[tid + bidx];
+                val = self->dt_min[tid + bidx];
                 min = (val > min) ? min : val;
                 bidx = i * blockDim.x;
             }
@@ -89,7 +81,7 @@ namespace simbi{
             // real min = dt_buff[tid];
             for(i = 1; bidx + tid < gridDim.x; i++)
             {
-                val  = s->dt_min[tid + bidx];
+                val  = self->dt_min[tid + bidx];
                 min  = (val > min) ? min : val;
                 bidx = i * blockDim.x;
             }
@@ -103,8 +95,8 @@ namespace simbi{
             }
             if(tid == 0) 
             {
-                s->dt_min[blockIdx.x] = dt_buff[0]; // dt_min[0] == minimum
-                s->dt                 = s->dt_min[0];
+                self->dt_min[blockIdx.x] = dt_buff[0]; // dt_min[0] == minimum
+                self->dt                 = self->dt_min[0];
             }
         }
         #endif
@@ -114,7 +106,7 @@ namespace simbi{
 
     template<typename T, typename N>
     GPU_LAUNCHABLE  typename std::enable_if<is_2D_primitive<N>::value>::type 
-    compute_dt(T *s, 
+    compute_dt(T *self, 
     const simbi::Geometry geometry, 
     luint bytes,
     real dx1, 
@@ -127,7 +119,7 @@ namespace simbi{
         #if GPU_CODE
         extern __shared__ N prim_buff[];
         real cfl_dt, v1p, v1m, v2p, v2m;
-        const real gamma = s->gamma;
+        const real gamma = self->gamma;
         real val;
 
         const luint tx  = threadIdx.x;
@@ -135,12 +127,12 @@ namespace simbi{
         const luint tid = blockDim.x * ty + tx;
         const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
         const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
-        const luint ia  = ii + s->idx_active;
-        const luint ja  = jj + s->idx_active;
-        const luint aid = (col_maj) ? ia * s-> ny + ja : ja * s->nx + ia;
-        if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid))
+        const luint ia  = ii + self->idx_active;
+        const luint ja  = jj + self->idx_active;
+        const luint aid = (col_maj) ? ia * self-> ny + ja : ja * self->nx + ia;
+        if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid))
         {
-             prim_buff[tid] = s->gpu_prims[aid];
+             prim_buff[tid] = self->gpu_prims[aid];
              __syncthreads();
             real plus_v1 , plus_v2 , minus_v1, minus_v2;
 
@@ -182,13 +174,12 @@ namespace simbi{
                     const real rr  = my_min(rl * pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
                     const real tl  = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                     const real tr  = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                    if (s->mesh_motion)
+                    if (self->mesh_motion)
                     {
-                        const real vfaceL   = rl * s->hubble_param;
-                        const real vfaceR   = rr * s->hubble_param;
-                        const real vzone    = 0.5 * (vfaceL + vfaceR);
-                        v1p = std::abs(plus_v1  - vzone);
-                        v1m = std::abs(minus_v1 - vzone);
+                        const real vfaceL   = rl * self->hubble_param;
+                        const real vfaceR   = rr * self->hubble_param;
+                        v1p = std::abs(plus_v1  - vfaceR);
+                        v1m = std::abs(minus_v1 - vfaceL);
                     }
                     const real rmean        = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
                     cfl_dt = my_min((rr - rl) / (my_max(v1p, v1m)),
@@ -196,14 +187,14 @@ namespace simbi{
                     break;
             } // end switch
             
-            s->dt_min[jj * s->xphysical_grid + ii] = s->cfl * cfl_dt;
+            self->dt_min[jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
         }
         #endif
     }
 
     template<typename T, typename N>
     GPU_LAUNCHABLE  typename std::enable_if<is_3D_primitive<N>::value>::type 
-    compute_dt(T *s, 
+    compute_dt(T *self, 
     const simbi::Geometry geometry, 
     luint bytes,
     real dx1, 
@@ -219,7 +210,7 @@ namespace simbi{
         #if GPU_CODE
         extern __shared__ N prim_buff[];
         real cfl_dt;
-        const real gamma = s->gamma;
+        const real gamma = self->gamma;
         real val;
 
         const luint tx  = threadIdx.x;
@@ -229,13 +220,13 @@ namespace simbi{
         const luint ii  = blockDim.x * blockIdx.x + tx;
         const luint jj  = blockDim.y * blockIdx.y + ty;
         const luint kk  = blockDim.z * blockIdx.z + tz;
-        const luint ia  = ii + s->idx_active;
-        const luint ja  = jj + s->idx_active;
-        const luint ka  = kk + s->idx_active;
-        const luint aid = (col_maj) ? ia * s-> ny + ja : ka * s->nx * s->ny + ja * s->nx + ia;
-        if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid) && (kk < s->zphysical_grid))
+        const luint ia  = ii + self->idx_active;
+        const luint ja  = jj + self->idx_active;
+        const luint ka  = kk + self->idx_active;
+        const luint aid = (col_maj) ? ia * self-> ny + ja : ka * self->nx * self->ny + ja * self->nx + ia;
+        if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid) && (kk < self->zphysical_grid))
         {
-             prim_buff[tid] = s->gpu_prims[aid];
+             prim_buff[tid] = self->gpu_prims[aid];
              __syncthreads();
             real plus_v1 , plus_v2 , minus_v1, minus_v2, plus_v3, minus_v3;
             real rho  = prim_buff[tid].rho;
@@ -288,17 +279,17 @@ namespace simbi{
                     break;
             } // end switch
             
-            s->dt_min[kk * s->xphysical_grid * s->yphysical_grid + jj * s->xphysical_grid + ii] = s->cfl * cfl_dt;
+            self->dt_min[kk * self->xphysical_grid * self->yphysical_grid + jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
         }
         #endif
     }
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
-    dtWarpReduce(T *s)
+    dtWarpReduce(T *self)
     {
         #if GPU_CODE
-        const real gamma     = s->gamma;
+        const real gamma     = self->gamma;
         extern volatile __shared__ real dt_buff[];
         real min = INFINITY;
         const luint tx  = threadIdx.x;
@@ -306,14 +297,14 @@ namespace simbi{
         const luint tid = blockDim.x * ty + tx;
         const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
         const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
-        const luint zones = s->xphysical_grid * s->yphysical_grid;
-        if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid))
+        const luint zones = self->xphysical_grid * self->yphysical_grid;
+        if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid))
         {
             // tail part
             luint bidx = 0;
             for(int i = 1; bidx + tid  < zones; i++)
             {
-                const real val = s->dt_min[tid + bidx];
+                const real val = self->dt_min[tid + bidx];
                 min = (val > min) ? min : val;
                 bidx = i * blockDim.x * blockDim.y;
             }
@@ -322,7 +313,7 @@ namespace simbi{
             int i;
             for(i = 1; bidx + tid < gridDim.x*gridDim.y; i++)
             {
-                const real val  = s->dt_min[tid + bidx];
+                const real val  = self->dt_min[tid + bidx];
                 min  = (val > min) ? min : val;
                 bidx = i * blockDim.x * blockDim.y;
             }
@@ -337,8 +328,8 @@ namespace simbi{
             }
             if(tid == 0)
             {
-                s->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
-                s->dt = s->dt_min[0];
+                self->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
+                self->dt = self->dt_min[0];
             }
         } // end if
     #endif
@@ -347,11 +338,11 @@ namespace simbi{
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_3D_primitive<N>::value>::type
-    dtWarpReduce(T *s)
+    dtWarpReduce(T *self)
     {
         #if GPU_CODE
         real val;
-        const real gamma     = s->gamma;
+        const real gamma     = self->gamma;
         extern __shared__ volatile real dt_buff[];
         real min = INFINITY;
         const luint tx  = threadIdx.x;
@@ -361,14 +352,14 @@ namespace simbi{
         const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
         const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
         const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
-        const luint zones = s->zphysical_grid * s->xphysical_grid * s->yphysical_grid;
-        if ((ii < s->xphysical_grid) && (jj < s->yphysical_grid) && (kk < s->zphysical_grid))
+        const luint zones = self->zphysical_grid * self->xphysical_grid * self->yphysical_grid;
+        if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid) && (kk < self->zphysical_grid))
         {
             // tail part
             int bidx = 0;
             for(int i = 1; bidx + tid  < zones; i++)
             {
-                val = s->dt_min[tid + bidx];
+                val = self->dt_min[tid + bidx];
                 min = (val <= 0 || val > min) ? min : val;
                 bidx = i * blockDim.x * blockDim.y * blockDim.z;
             }
@@ -377,7 +368,7 @@ namespace simbi{
             int i;
             for(i = 1; bidx + tid < gridDim.x*gridDim.y; i++)
             {
-                val  = s->dt_min[tid + bidx];
+                val  = self->dt_min[tid + bidx];
                 min  = (val <= 0 || val > min) ? min : val;
                 bidx = i * blockDim.x * blockDim.y * blockDim.z;
             }
@@ -391,8 +382,8 @@ namespace simbi{
             }
             if(tid == 0)
             {
-                s->dt_min[blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y] = dt_buff[0]; // dt_min[0] == minimum
-                s->dt = s->dt_min[0];
+                self->dt_min[blockIdx.x + blockIdx.y * gridDim.x + blockIdx.z * gridDim.x * gridDim.y] = dt_buff[0]; // dt_min[0] == minimum
+                self->dt = self->dt_min[0];
             }
         } // end if
     #endif
