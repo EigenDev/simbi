@@ -123,16 +123,7 @@ namespace simbi
 
           GPU_CALLABLE_MEMBER
           real calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side) const;
-
-          GPU_CALLABLE_INLINE 
-          constexpr luint get_real_idx(const luint ii) const 
-          {
-               lint idx = (ii - radius > 0) * (ii - radius);
-               if (ii > active_zones + 1) {
-                    idx = active_zones - 1;
-               }
-               return idx;
-          }
+          
           GPU_CALLABLE_INLINE
           constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side) const
           {

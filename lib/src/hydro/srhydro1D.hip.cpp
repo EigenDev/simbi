@@ -335,7 +335,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         {   
             if (mesh_motion && (geometry == simbi::Geometry::SPHERICAL))
             {
-                const luint idx  = get_real_idx(ii);
+                const luint idx  = helpers::get_real_idx(ii, radius, self->active_zones);
                 const real xl    = self->get_xface(idx, geometry, 0);
                 const real xr    = self->get_xface(idx, geometry, 1);
                 const real xmean = static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl);
@@ -373,7 +373,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 peq = pre - f / g;
                 if (iter >= MAX_ITER || std::isnan(peq))
                 {
-                    const luint idx       = get_real_idx(ii);
+                    const luint idx       = helpers::get_real_idx(ii, radius, self->active_zones);
                     const real xl         = self->get_xface(idx, geometry, 0);
                     const real xr         = self->get_xface(idx, geometry, 1);
                     const real xmean      = helpers::calc_any_mean(xl, xr, self->xcell_spacing);
