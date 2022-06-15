@@ -478,7 +478,7 @@ void Newtonian1D::advance(
                 const real sR     = rrf * rrf; 
                 const real sL     = rlf * rlf; 
                 const real dV     = rmean * rmean * (rrf - rlf);    
-                const real factor = (mesh_motion) ? dV : 1;         
+                const real factor = (self->mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
 
                 #if GPU_CODE
