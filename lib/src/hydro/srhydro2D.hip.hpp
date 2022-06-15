@@ -155,8 +155,6 @@ namespace simbi
         {
             const real xl     = get_x1face(ii, geometry, 0);
             const real xr     = get_x1face(ii, geometry, 1);
-            const real xlf    = xl * (1.0 + step * dt * hubble_param);
-            const real xrf    = xr * (1.0 + step * dt * hubble_param);
             const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
             const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
             const real dcos   = std::cos(tl) - std::cos(tr);
