@@ -484,11 +484,11 @@ void Newtonian2D::advance(
     #endif
     const luint nbs                = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
 
-    // if on NVidia GPU, do column major striding, row-major otherwise
-    const lint sx = (col_maj) ? 1  : bx;
-    const lint sy = (col_maj) ? by :  1;
+    // Compile-time choice of coloumn major indexing
+    const lint sx            = (col_maj) ? 1  : bx;
+    const lint sy            = (col_maj) ? by :  1;
     const auto pseudo_radius = (first_order) ? 1 : 2;
-    const auto step = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+    const auto step          = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
     simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
        #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
@@ -502,18 +502,18 @@ void Newtonian2D::advance(
         if ((ii >= xpg) || (jj >= ypg)) return;
         #endif
 
-        const luint ia  = ii + radius;
-        const luint ja  = jj + radius;
-        const luint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
-        const luint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
-        const luint txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
-        const luint tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
+        const lint ia  = ii + radius;
+        const lint ja  = jj + radius;
+        const lint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
+        const lint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
+        const lint txa = (BuildPlatform == Platform::GPU) ? tx + pseudo_radius : ia;
+        const lint tya = (BuildPlatform == Platform::GPU) ? ty + pseudo_radius : ja;
 
         Conserved ux_l, ux_r, uy_l, uy_r;
         Conserved f_l, f_r, g_l, g_r, frf, flf, grf, glf;
         Primitive xprims_l, xprims_r, yprims_l, yprims_r;
 
-        const luint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
+        const lint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
         // Load Shared memory luinto buffer for active zones plus ghosts
         #if GPU_CODE
             luint txl = xextent;
@@ -524,14 +524,14 @@ void Newtonian2D::advance(
             {
                 if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
                 prim_buff[(tya - pseudo_radius) * sx + txa] = self->gpu_prims[helpers::mod(ja - pseudo_radius, ny) * nx + ia];
-               prim_buff[(tya + tyl) * sx + txa] = self->gpu_prims[(ja + tyl) % ny * nx + ia]; 
+                prim_buff[(tya + tyl) * sx + txa]           = self->gpu_prims[(ja + tyl) % ny * nx + ia]; 
             }
             if (tx < pseudo_radius)
             {   
                 if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
-                 prim_buff[tya * sx + txa - pseudo_radius] =  self->gpu_prims[ja * nx + helpers::mod(ia - pseudo_radius, nx)];
+                prim_buff[tya * sx + txa - pseudo_radius] =  self->gpu_prims[ja * nx + helpers::mod(ia - pseudo_radius, nx)];
                 prim_buff[tya * sx + txa +    txl]        =  self->gpu_prims[ja * nx +    (ia + txl) % nx]; 
-                if ((pseudo_radius == 2) && (txl < xextent))
+                if ((radius == 2) && (txl < xextent))
                 {
                     prim_buff[tya * sx + txa + txl + 1] =  self->gpu_prims[ja * nx + ia + txl + 1]; 
                 }
@@ -909,7 +909,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         cons2prim(fullP);
         adapt_dt();
     }
-
+    // writeln("Success!");
+    // helpers::pause_program();
     // Some benchmarking tools 
     luint      n   = 0;
     luint  nfold   = 0;
