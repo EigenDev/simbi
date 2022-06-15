@@ -1225,6 +1225,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     setup.x2min          = x2[0];
     setup.nx             = nx;
     setup.ny             = ny;
+    setup.xactive_zones  = xphysical_grid;
+    setup.yactive_zones  = yphysical_grid;
     setup.linspace       = linspace;
     setup.ad_gamma       = gamma;
     setup.first_order    = first_order;

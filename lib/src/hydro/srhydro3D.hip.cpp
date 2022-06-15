@@ -1139,6 +1139,9 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     setup.nx             = nx;
     setup.ny             = ny;
     setup.nz             = nz;
+    setup.xactive_zones  = xphysical_grid;
+    setup.yactive_zones  = yphysical_grid;
+    setup.zactive_zones  = zphysical_grid;
     setup.linspace       = linspace;
     setup.ad_gamma       = gamma;
     setup.first_order    = first_order;
