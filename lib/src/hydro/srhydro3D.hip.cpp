@@ -75,10 +75,10 @@ void SRHD3D::cons2prim(
     SRHD3D *dev, 
     simbi::MemSide user)
 {
-    const auto xpg    = xphysical_grid;
-    const auto ypg    = yphysical_grid;
-    const auto zpg    = zphysical_grid;
-    const auto radius = (first_order) ? 1 : 2;
+    const luint xpg    = xphysical_grid;
+    const luint ypg    = yphysical_grid;
+    const luint zpg    = zphysical_grid;
+    const luint radius = (first_order) ? 1 : 2;
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
@@ -142,9 +142,9 @@ void SRHD3D::cons2prim(
                 iter++;
                 if (iter >= MAX_ITER || std::isnan(peq))
                 {
-                    const auto kk     = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z: simbi::detail::get_height(gid, xpg, ypg);
-                    const auto jj     = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: simbi::detail::get_row(gid, xpg, ypg, kk);
-                    const auto ii     = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: simbi::detail::get_column(gid, xpg, ypg, kk);
+                    const luint kk    = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z: simbi::detail::get_height(gid, xpg, ypg);
+                    const luint jj    = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: simbi::detail::get_row(gid, xpg, ypg, kk);
+                    const luint ii    = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: simbi::detail::get_column(gid, xpg, ypg, kk);
                     const lint ireal  = helpers::get_real_idx(ii, radius, self->xphysical_grid);
                     const lint jreal  = helpers::get_real_idx(jj, radius, self->yphysical_grid); 
                     const lint kreal  = helpers::get_real_idx(kk, radius, self->zphysical_grid); 
