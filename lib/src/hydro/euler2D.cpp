@@ -683,17 +683,17 @@ void Newtonian2D::advance(
             case simbi::Geometry::CARTESIAN:
                 {
                     #if GPU_CODE
-                        const real rho_source  = (rho_all_zeros) ? static_cast<real>(0.0) : self->gpu_sourceRho[real_loc];
-                        const real m1_source   = (m1_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceM1[real_loc];
-                        const real m2_source   = (m2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceM2[real_loc];
-                        const real e_source    = (e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceE[real_loc];
+                        const real rho_source  = (self->rho_all_zeros) ? static_cast<real>(0.0) : self->gpu_sourceRho[real_loc];
+                        const real m1_source   = (self->m1_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceM1[real_loc];
+                        const real m2_source   = (self->m2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceM2[real_loc];
+                        const real e_source    = (self->e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceE[real_loc];
                         const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
                         self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf) / dx2) * step * dt;
                     #else
-                        const real rho_source = (rho_all_zeros) ? static_cast<real>(0.0) : sourceRho[real_loc];
-                        const real m1_source  = (m1_all_zeros)  ? static_cast<real>(0.0)   : sourceM1[real_loc];
-                        const real m2_source  = (m2_all_zeros)  ? static_cast<real>(0.0)   : sourceM2[real_loc];
-                        const real e_source   = (e_all_zeros)   ? static_cast<real>(0.0)   : sourceE[real_loc];
+                        const real rho_source = (self->rho_all_zeros) ? static_cast<real>(0.0) : sourceRho[real_loc];
+                        const real m1_source  = (self->m1_all_zeros)  ? static_cast<real>(0.0)   : sourceM1[real_loc];
+                        const real m2_source  = (self->m2_all_zeros)  ? static_cast<real>(0.0)   : sourceM2[real_loc];
+                        const real e_source   = (self->e_all_zeros)   ? static_cast<real>(0.0)   : sourceE[real_loc];
                         const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
                         cons[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step * dt;
                     #endif
