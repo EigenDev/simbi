@@ -5,18 +5,17 @@
  * 07/15/2020
  * Compressible Hydro Simulation
  */
-
-#include "util/device_api.hpp"
-#include "util/dual.hpp"
-#include "common/helpers.hpp"
-#include "helpers.hip.hpp"
-#include "srhydro2D.hip.hpp"
-#include "util/printb.hpp"
-#include "util/parallel_for.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
+#include "util/device_api.hpp"
+#include "util/dual.hpp"
+#include "helpers.hip.hpp"
+#include "srhydro2D.hip.hpp"
+#include "util/printb.hpp"
+#include "util/parallel_for.hpp"
+
 
 using namespace simbi;
 using namespace simbi::util;
@@ -27,7 +26,7 @@ using Primitive           = sr2d::Primitive;
 using Conserved           = sr2d::Conserved;
 using Eigenvals           = sr2d::Eigenvals;
 using dualType            = simbi::dual::DualSpace2D<Primitive, Conserved, SRHD2D>;
-constexpr auto write2file = write_to_file<simbi::SRHD2D, sr2d::PrimitiveData, Primitive, dualType, 2>;
+constexpr auto write2file = helpers::write_to_file<simbi::SRHD2D, sr2d::PrimitiveData, Primitive, dualType, 2>;
 
 // Default Constructor
 SRHD2D::SRHD2D() {}
@@ -74,8 +73,8 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &prims_l,
     const real p_r   = prims_r.p;
     const real h_r   = static_cast<real>(1.0) + gamma * p_r / (rho_r * (gamma - static_cast<real>(1.0)));
 
-    const real cs_r = sqrt(gamma * p_r / (h_r * rho_r));
-    const real cs_l = sqrt(gamma * p_l / (h_l * rho_l));
+    const real cs_r = std::sqrt(gamma * p_r / (h_r * rho_r));
+    const real cs_l = std::sqrt(gamma * p_l / (h_l * rho_l));
 
     const real v_l = prims_l.vcomponent(nhat);
     const real v_r = prims_r.vcomponent(nhat);
@@ -89,8 +88,8 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &prims_l,
             const real cbar  = static_cast<real>(0.5) * (cs_l + cs_r);
             const real bl    = (vbar - cbar)/(static_cast<real>(1.0) - cbar*vbar);
             const real br    = (vbar + cbar)/(static_cast<real>(1.0) + cbar*vbar);
-            const real aL    = my_min(bl, (v_l - cs_l)/(static_cast<real>(1.0) - v_l*cs_l));
-            const real aR    = my_max(br, (v_r + cs_r)/(static_cast<real>(1.0) + v_r*cs_r));
+            const real aL    = helpers::my_min(bl, (v_l - cs_l)/(static_cast<real>(1.0) - v_l*cs_l));
+            const real aR    = helpers::my_max(br, (v_r + cs_r)/(static_cast<real>(1.0) + v_r*cs_r));
 
             return Eigenvals(aL, aR, cs_l, cs_r);
         }
@@ -104,8 +103,8 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &prims_l,
             // Define temporaries to save computational cycles
             const real qfL   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
             const real qfR   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
-            const real sqrtR = sqrt(sR * (static_cast<real>(1.0)- v_r * v_r + sR));
-            const real sqrtL = sqrt(sL * (static_cast<real>(1.0)- v_l * v_l + sL));
+            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0)- v_r * v_r + sR));
+            const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0)- v_l * v_l + sL));
 
             const real lamLm = (v_l - sqrtL) * qfL;
             const real lamRm = (v_r - sqrtR) * qfR;
@@ -124,8 +123,8 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &prims_l,
             const real aRm = (v_r - cs_r) / (1 - v_r * cs_r);
             const real aRp = (v_r + cs_r) / (1 + v_r * cs_r);
 
-            const real aL = my_min(aLm, aRm);
-            const real aR = my_max(aLp, aRp);
+            const real aL = helpers::my_min(aLm, aRm);
+            const real aR = helpers::my_max(aLp, aRp);
             return Eigenvals(aL, aR, cs_l, cs_r);
         }
     }
@@ -172,13 +171,12 @@ void SRHD2D::adapt_dt()
             {
                 const auto shift_i  = ii + idx_active;
                 const auto aid      = shift_i + nx * shift_j;
-                const auto dx1      = coord_lattice.dx1[ii];
                 const auto rho      = prims[aid].rho;
                 const auto v1       = prims[aid].v1;
                 const auto v2       = prims[aid].v2;
                 const auto pressure = prims[aid].p;
                 const auto h        = 1.0 + gamma * pressure / (rho * (gamma - 1.0));
-                const auto cs       = sqrt(gamma * pressure / (rho * h));
+                const auto cs       = std::sqrt(gamma * pressure / (rho * h));
 
                 const auto plus_v1  = (v1 + cs) / (1.0 + v1 * cs);
                 const auto plus_v2  = (v2 + cs) / (1.0 + v2 * cs);
@@ -197,11 +195,11 @@ void SRHD2D::adapt_dt()
                     }
                     cfl_dt = std::min(dx1 / (std::max(v1p, v1m)), dx2 / (std::max(v2p, v2m)));
                 } else {
-                    const real tl     = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                    const real tr     = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                    const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                     const real dtheta = tr - tl;
-                    const real x1l    = get_xface(ii, geometry, 0);
-                    const real x1r    = get_xface(ii, geometry, 1);
+                    const real x1l    = get_x1face(ii, geometry, 0);
+                    const real x1r    = get_x1face(ii, geometry, 1);
                     const real dr     = x1r - x1l;
                     const real rmean  = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
                     if (mesh_motion)
@@ -370,7 +368,7 @@ Conserved SRHD2D::calc_hllc_flux(
     const real a     = fe;
     const real b     = -(e + fs);
     const real c     = s;
-    const real quad  = -static_cast<real>(0.5) * (b + sgn(b) * std::sqrt(b * b - static_cast<real>(4.0) * a * c));
+    const real quad  = -static_cast<real>(0.5) * (b + helpers::sgn(b) * std::sqrt(b * b - static_cast<real>(4.0) * a * c));
     const real aStar = c * (static_cast<real>(1.0) / quad);
     const real pStar = -aStar * fe + fs;
 
@@ -415,8 +413,8 @@ Conserved SRHD2D::calc_hllc_flux(
 
     // const real voL      =  left_prims.vcomponent(!nhat);
     // const real voR      = right_prims.vcomponent(!nhat);
-    // const real ma_local = my_max(std::abs(vL / cL), std::abs(vR / cR));
-    // const real phi      = std::sin(my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
+    // const real ma_local = helpers::my_max(std::abs(vL / cL), std::abs(vR / cR));
+    // const real phi      = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
     // const real aL_lm    = (phi != 0) ? phi * aL : aL;
     // const real aR_lm    = (phi != 0) ? phi * aR : aR;
 
@@ -631,7 +629,7 @@ void SRHD2D::cons2prim(
     const real radius      = (first_order) ? 1 : 2;
 
     #if GPU_CODE
-    const bool mesh_motion = this->mesh_motion;
+    const bool mesh_motion  = this->mesh_motion;
     const auto active_zones = this->active_zones;
     const auto dt           = this->dt;
     const auto hubble_param = this->hubble_param;
@@ -652,28 +650,12 @@ void SRHD2D::cons2prim(
         real invdV = 1.0;
         while (!found_failure && workLeftToDo)
         {
-            if (tid == 0 && self->inFailureState) 
-                found_failure = true;
-            
             if (mesh_motion && (geometry == simbi::Geometry::SPHERICAL))
             {
                 const auto ii = gid % self->nx;
                 const auto jj = gid / self->nx;
-                lint ireal;
-                lint jreal; 
-
-                if (ii > self->xphysical_grid + 1) {
-                    ireal = self->xphysical_grid - 1;
-                } else {
-                    ireal = (ii - radius > 0 ) * (ii - radius);
-                }
-
-                if (jj > self->yphysical_grid + 1) {
-                    jreal = self->yphysical_grid - 1;
-                } else {
-                    jreal = (jj - radius > 0) * (jj - radius);
-                }
-                
+                const lint ireal = helpers::get_real_idx(ii, radius, self->xphysical_grid);
+                const lint jreal = helpers::get_real_idx(jj, radius, self->yphysical_grid); 
                 const real dV = self->get_cell_volume(ireal, jreal, geometry, step);
                 invdV = 1.0 / dV;
             }
@@ -694,14 +676,6 @@ void SRHD2D::cons2prim(
             const real Dchi = conserved_buff[tid].chi * invdV; 
             const real S    = std::sqrt(S1 * S1 + S2 * S2);
 
-            // const auto ii = gid % nx;
-            // const auto jj = gid / nx;
-            // if (true)
-            // {
-            //     if (D != 1)
-            //         writeln("ii: {}, jj: {}, M: {}, D: {}, dV: {}", ii, jj, conserved_buff[tid].d, D, 1.0 / invdV);
-            //     // pause_program();
-            // }
             #if GPU_CODE
             real peq = self->gpu_pressure_guess[gid];
             #else 
@@ -726,12 +700,20 @@ void SRHD2D::cons2prim(
 
                 peq = pre - f / g;
                 iter++;
-                if (iter >= MAX_ITER)
+                if (iter >= MAX_ITER || std::isnan(peq))
                 {
-                    const auto ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % self->xphysical_grid;
-                    const auto jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / self->xphysical_grid;
+                    const auto ii = gid % self->nx;
+                    const auto jj = gid / self->nx;
+                    const lint ireal = helpers::get_real_idx(ii, radius, self->xphysical_grid);
+                    const lint jreal = helpers::get_real_idx(jj, radius, self->yphysical_grid); 
+                    const real x1l   = self->get_x1face(ireal, geometry, 0);
+                    const real x1r   = self->get_x1face(ireal, geometry, 1);
+                    const real x2l   = self->get_x2face(jreal, 0);
+                    const real x2r   = self->get_x2face(jreal, 1);
+                    const real x1mean= helpers::calc_any_mean(x1l, x1r, self->x1cell_spacing);
+                    const real x2mean= helpers::calc_any_mean(x2l, x2r, self->x2cell_spacing);
                     printf("\nCons2Prim cannot converge\n");
-                    printf("Density: %f, Pressure: %f, Vsq: %f, xindex: %lu, yindex: %lu\n", rho, peq, v2, ii, jj);
+                    printf("Density: %f, Pressure: %f, Vsq: %f, xcoord: %.2e, yxoord: %.2e\n", rho, peq, v2, x1mean, x2mean);
                     self->dt             = INFINITY;
                     found_failure        = true;
                     self->inFailureState = true;
@@ -798,13 +780,10 @@ void SRHD2D::advance(
     const real x2min               = this->x2min;
     const real x2max               = this->x2max;
     const bool quirk_smoothing     = this->quirk_smoothing;
-    const real pow_dlogr           = pow(10, dlogx1);
+    const real pow_dlogr           = std::pow(10, dlogx1);
     const real hubble_param        = this->hubble_param;
-    // const real x1min_init          = this->x1min_init;
-    // const real 
     #endif
 
-    // const CLattice2D *coord_lattice = &(self->coord_lattice);
     const luint nbs = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
 
     // Choice of column major striding by user
@@ -857,13 +836,12 @@ void SRHD2D::advance(
                     prim_buff[tya * sx + txa + txl + 1] =  self->gpu_prims[ja * nx + ia + txl + 1]; 
                 }
             }
-            
             simbi::gpu::api::synchronize();
         #endif
 
 
-        const real x1l    = self->get_xface(ii, geometry, 0);
-        const real x1r    = self->get_xface(ii, geometry, 1);
+        const real x1l    = self->get_x1face(ii, geometry, 0);
+        const real x1r    = self->get_x1face(ii, geometry, 1);
         const real vfaceR = x1r * hubble_param;
         const real vfaceL = x1l * hubble_param;
         if (first_order)
@@ -945,10 +923,10 @@ void SRHD2D::advance(
             yright_most = prim_buff[(txa * sy + (tya + 2) * sx) % nbs];
 
             // Reconstructed left X Primitive vector at the i+1/2 interface
-            xprims_l = center     + minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
-            xprims_r = xright_mid - minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
-            yprims_l = center     + minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
-            yprims_r = yright_mid - minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
+            xprims_l = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
+            xprims_r = xright_mid - helpers::minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
+            yprims_l = center     + helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
+            yprims_r = yright_mid - helpers::minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
 
 
             // Calculate the left and right states using the reconstructed PLM
@@ -990,10 +968,10 @@ void SRHD2D::advance(
             }
 
             // Do the same thing, but for the left side interface [i - 1/2]
-            xprims_l = xleft_mid + minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
-            xprims_r = center    - minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
-            yprims_l = yleft_mid + minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
-            yprims_r = center    - minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
+            xprims_l = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
+            xprims_r = center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
+            yprims_l = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
+            yprims_r = center    - helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
@@ -1052,8 +1030,6 @@ void SRHD2D::advance(
                         const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : sourceS1[real_loc];
                         const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : sourceS2[real_loc];
                         const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : sourceTau[real_loc];
-                        const real dx1 = self->coord_lattice.dx1[ii];
-                        const real dx2  = self->coord_lattice.dx2[jj];
                         const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
                         cons[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step;
                     #endif
@@ -1068,8 +1044,8 @@ void SRHD2D::advance(
                 const real rl           = x1l + vfaceL * step * dt; 
                 const real rr           = x1r + vfaceR * step * dt;
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
-                const real tl           = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
-                const real tr           = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real s1R          = rr * rr; 
                 const real s1L          = rl * rl; 
                 const real s2R          = std::sin(tr);
@@ -1121,8 +1097,8 @@ void SRHD2D::advance(
         } // end switch
     });
     // update x1 enpoints
-    const real x1l    = self->get_xface(0, geometry, 0);
-    const real x1r    = self->get_xface(xphysical_grid, geometry, 1);
+    const real x1l    = self->get_x1face(0, geometry, 0);
+    const real x1r    = self->get_x1face(xphysical_grid, geometry, 1);
     const real vfaceR = x1r * hubble_param;
     const real vfaceL = x1l * hubble_param;
     self->x1min      += step * dt * vfaceL;
@@ -1157,15 +1133,13 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::function<double(double, double)> s2_outer,
     std::function<double(double, double)> e_outer)
 {
-    std::string tnow, tchunk, tstep, filename;
-    luint total_zones = nx * ny;
-    
     real round_place = 1 / chkpt_interval;
     real t = tstart;
     real t_interval =
         t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
+    this->total_zones     = nx * ny;
     this->first_order     = first_order;
     this->periodic        = boundary_condition == "periodic";
     this->hllc            = hllc;
@@ -1177,34 +1151,27 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->idx_active      = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->active_zones    = xphysical_grid * yphysical_grid;
     this->quirk_smoothing = quirk_smoothing;
-    this->bc              = boundary_cond_map.at(boundary_condition);
-    this->geometry        = geometry_map.at(coord_system);
+    this->bc              = helpers::boundary_cond_map.at(boundary_condition);
+    this->geometry        = helpers::geometry_map.at(coord_system);
+    this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
+    this->x2cell_spacing  = simbi::Cellspacing::LINSPACE;
+    this->dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
+    this->dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
+    this->dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
+    this->x1min   = x1[0];
+    this->x1max   = x1[xphysical_grid - 1];
+    this->x2min   = x2[0];
+    this->x2max   = x2[yphysical_grid - 1];
 
-    if ((coord_system == "spherical") && (linspace))
-    {
-        this->geometry = simbi::Geometry::SPHERICAL;
-        this->coord_lattice = CLattice2D(x1, x2, simbi::Geometry::SPHERICAL);
-        coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE,
-                                     simbi::Cellspacing::LINSPACE);
-    }
-    else if ((coord_system == "spherical") && (!linspace))
-    {
-        this->geometry = simbi::Geometry::SPHERICAL;
-        this->coord_lattice = CLattice2D(x1, x2, simbi::Geometry::SPHERICAL);
-        coord_lattice.config_lattice(simbi::Cellspacing::LOGSPACE,
-                                     simbi::Cellspacing::LINSPACE);
-    } else {
-        this->geometry = simbi::Geometry::CARTESIAN;
-        this->coord_lattice = CLattice2D(x1, x2, simbi::Geometry::CARTESIAN);
-        coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE,
-                                     simbi::Cellspacing::LINSPACE);
-    }
-
+    this->d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
+    this->s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
+    this->s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
+    this->e_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
 
-    if (coord_lattice.x2vertices[yphysical_grid] == M_PI){
+    if (x2max == M_PI){
         this->bipolar = true;
     }
 
@@ -1233,19 +1200,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         pressure_guess[i] = std::abs(S - D - E);
     }
 
-    this->dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
-    this->dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
-    this->dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
-    this->x1min   = x1[0];
-    this->x1max   = x1[xphysical_grid - 1];
-    this->x2min   = x2[0];
-    this->x2max   = x2[yphysical_grid - 1];
-
-    this->d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
-    this->s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
-    this->s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
-    this->e_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
-
     // deallocate initial state vector
     std::vector<int> state2D;
 
@@ -1253,7 +1207,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     decay_const = 1 / (1 + std::exp(static_cast<real>(10.0) * (tstart - engine_duration)));
 
     // Declare I/O variables for Read/Write capability
-    PrimData prods;
     sr2d::PrimitiveData transfer_prims;
     
     // Copy the current SRHD instance over to the device
@@ -1263,12 +1216,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(SRHD2D));
     dualType dualMem;
     dualMem.copyHostToDev(*this, device_self);
-    
-    // Some variables to handle file automatic file string
-    // formatting 
-    tchunk = "000000";
-    int tchunk_order_of_mag = 2;
-    int time_order_of_mag;
 
     // Write some info about the setup for writeup later
     DataWriteMembers setup;
@@ -1502,7 +1449,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         }
     }
 
-    transfer_prims = vec2struct<sr2d::PrimitiveData, Primitive>(prims);
+    transfer_prims = helpers::vec2struct<sr2d::PrimitiveData, Primitive>(prims);
     std::vector<std::vector<real>> solution(5, std::vector<real>(nzones));
 
     solution[0] = transfer_prims.rho;

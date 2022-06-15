@@ -8,7 +8,25 @@
 #define HYDRO_STRUCTS_HPP 
 
 #include <vector>
-#include "config.hpp"
+#include <string>
+#include "enums.hpp"
+#include "build_options.hpp"
+//---------------------------------------------------------------------------------------------------------
+//  HELPER-GLOBAL-STRUCTS
+//---------------------------------------------------------------------------------------------------------
+struct PrimData
+{
+    std::vector<real> rho, v1, v2, v3, p, v, chi;
+};
+
+struct DataWriteMembers
+{
+    real t, ad_gamma;
+    real x1min, x1max, x2min, x2max, zmin, zmax, dt;
+    int nx, ny, nz, xactive_zones, yactive_zones, zactive_zones;
+    bool linspace, first_order;
+    std::string coord_system, boundarycond;
+};
 
 namespace hydro1d {
     struct Primitive {

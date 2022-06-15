@@ -14,7 +14,7 @@ cdef extern from "util/pyobj_wrapper.hpp":
 cdef extern from "build_options.hpp":
     cdef bool col_maj "CYTHON_COL_MAJOR"
 
-cdef extern from "common/config.hpp":
+cdef extern from "common/enums.hpp":
     cdef int FLOAT_PRECISION "FLOAT_PRECISION"
     ctypedef double real 
 

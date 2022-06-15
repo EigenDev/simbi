@@ -1,7 +1,8 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
-#include "common/config.hpp"
+#include "build_options.hpp"
+#include "common/enums.hpp"
 #include "common/hydro_structs.hpp"
 #include "common/helpers.hpp"
 #include "euler1D.hpp"
@@ -66,7 +67,7 @@ namespace simbi
     GPU_CALLABLE_INLINE
     bool quirk_strong_shock(real pl, real pr)
     {
-        return std::abs(pr - pl) / my_min(pl, pr) > QUIRK_THRESHOLD;
+        return std::abs(pr - pl) / helpers::my_min(pl, pr) > QUIRK_THRESHOLD;
     }
 
     GPU_CALLABLE_INLINE

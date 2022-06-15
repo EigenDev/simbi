@@ -100,7 +100,7 @@ set(SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/clattice2D.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/clattice3D.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/clattice3D.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/common/config.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/common/enums.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/helpers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/helpers.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common/helpers.tpp

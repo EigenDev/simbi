@@ -351,7 +351,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             // real mach_ceiling = 100.0;
             // real u            = v /std::sqrt(1 - v * v);
             // real e            = peq / rho * 3.0;
-            // real emin         = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
+            // real emin         = u * u / (1.0 + u * u) / std::pow(mach_ceiling, 2.0);
 
             // if (e < emin) {
             //     // printf("peq: %f, npew: %f\n", rho * emin * (self->gamma - 1.0));
@@ -374,7 +374,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 //----------------------------------------------------------------------------------------------------------
 GPU_CALLABLE_MEMBER
 Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
-                               const Primitive &prims_r)
+                               const Primitive &prims_r) const
 {
     // Compute L/R Sound Speeds
     const real rho_l = prims_l.rho;
@@ -403,8 +403,8 @@ Eigenvals SRHD::calc_eigenvals(const Primitive &prims_l,
             const real br = (vbar + cbar) / (1 + vbar * cbar);
             const real bl = (vbar - cbar) / (1 - vbar * cbar);
 
-            const real aL = my_min(bl, (v_l - cs_l) / (1 - v_l * cs_l));
-            const real aR = my_max(br, (v_r + cs_r) / (1 + v_r * cs_r));
+            const real aL = helpers::my_min(bl, (v_l - cs_l) / (1 - v_l * cs_l));
+            const real aR = helpers::my_max(br, (v_r + cs_r) / (1 + v_r * cs_r));
 
             return Eigenvals(aL, aR);
         }
@@ -460,7 +460,7 @@ void SRHD::adapt_dt()
             vPLus  = (v + cs) / (1 + v * cs);
             vMinus = (v - cs) / (1 - v * cs);
 
-            cfl_dt = dr / (my_max(std::abs(vPLus), std::abs(vMinus)));
+            cfl_dt = dr / (helpers::my_max(std::abs(vPLus), std::abs(vMinus)));
             min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
         }
     }   

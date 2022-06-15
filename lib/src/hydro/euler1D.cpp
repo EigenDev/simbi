@@ -25,20 +25,28 @@ using namespace simbi::util;
 using namespace std::chrono;
 
 
+
+// Typedefs because I'm lazy
+using Conserved = hydro1d::Conserved;
+using Primitive = hydro1d::Primitive;
+using Eigenvals = hydro1d::Eigenvals;
+using dualType  = dual::DualSpace1D<Primitive, Conserved, Newtonian1D>;
+constexpr auto write2file = helpers::write_to_file<simbi::Newtonian1D, hydro1d::PrimitiveData, Primitive, dualType, 1>;
 // Default Constructor 
 Newtonian1D::Newtonian1D () {}
 
 // Overloaded Constructor
 Newtonian1D::Newtonian1D(
-    std::vector< std::vector<real> > init_state, 
+    std::vector< std::vector<real> > state, 
     real gamma, 
     real cfl, 
-    std::vector<real> r,
+    std::vector<real> x1,
     std::string coord_system = "cartesian") :
 
-    init_state(init_state),
+    state(state),
     gamma(gamma),
-    r(r),
+    x1(x1),
+    nx(state[0].size()),
     coord_system(coord_system),
     cfl(cfl),
     inFailureState(false)
@@ -49,11 +57,6 @@ Newtonian1D::Newtonian1D(
 // Destructor 
 Newtonian1D::~Newtonian1D() {}
 
-
-// Typedefs because I'm lazy
-typedef hydro1d::Conserved Conserved;
-typedef hydro1d::Primitive Primitive;
-typedef hydro1d::Eigenvals Eigenvals;
 //--------------------------------------------------------------------------------------------------
 //                          GET THE PRIMITIVE VECTORS
 //--------------------------------------------------------------------------------------------------
@@ -114,8 +117,8 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
     {
     case SOLVER::HLLE:
         {
-        const real aR = my_max(my_max(v_l + cs_l, v_r + cs_r), static_cast<real>(0.0)); 
-        const real aL = my_min(my_min(v_l - cs_l, v_r - cs_r), static_cast<real>(0.0));
+        const real aR = helpers::my_max(helpers::my_max(v_l + cs_l, v_r + cs_r), static_cast<real>(0.0)); 
+        const real aL = helpers::my_min(helpers::my_min(v_l - cs_l, v_r - cs_r), static_cast<real>(0.0));
         return Eigenvals{aL, aR};
         }
     case SOLVER::HLLC:
@@ -126,22 +129,22 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
         // Steps to Compute HLLC as described in Toro et al. 2019
         real z      = (gamma - 1.)/(2.*gamma);
         real num    = cs_l + cs_r - ( gamma-1.)/2 *(v_r - v_l);
-        real denom  = cs_l/pow(p_l,z) + cs_r/pow(p_r, z);
+        real denom  = cs_l/std::pow(p_l,z) + cs_r/std::pow(p_r, z);
         real p_term = num/denom;
         real qL, qR;
 
-        pStar = pow(p_term, (1./z));
+        pStar = std::pow(p_term, (1./z));
 
         if (pStar <= p_l){
             qL = 1.;
         } else {
-            qL = sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_l - 1.));
+            qL = std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_l - 1.));
         }
 
         if (pStar <= p_r){
             qR = 1.;
         } else {
-            qR = sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_r - 1.));
+            qR = std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_r - 1.));
         }
 
         real aL = v_l - qL*cs_l;
@@ -158,27 +161,25 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
 // Adapt the cfl conditonal timestep
 void Newtonian1D::adapt_dt(){
     real min_dt = INFINITY;
-    #pragma omp parallel 
+    // #pragma omp parallel 
     {
-        real dx1, cs, cfl_dt;
-        real v, pre, rho;
-        luint shift_i;
-
         // Compute the minimum timestep given cfl
-        #pragma omp for schedule(static) reduction(min:min_dt)
+        #pragma omp parallel for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++){
-            shift_i = ii + idx_active;
-            dx1      = coord_lattice.dx1[ii];
-
-            rho = prims[shift_i].rho;
-            v   = prims[shift_i].v;
-            pre = prims[shift_i].p;
-
-            cs = std::sqrt(gamma * pre/rho);
-            cfl_dt = dx1/(std::max({std::abs(v + cs), std::abs(v - cs)}));
-
-            min_dt = std::min(min_dt, cfl_dt);
-    
+            const auto shift_i  = ii + idx_active;
+            const real rho      = prims[shift_i].rho;
+            const real v        = prims[shift_i].v;
+            const real pre      = prims[shift_i].p;
+            const real cs       = std::sqrt(gamma * pre/rho);
+            const real vPLus    = v + cs;
+            const real vMinus   = v - cs;
+            const real x1l      = get_xface(ii, geometry, 0);
+            const real x1r      = get_xface(ii, geometry, 1);
+            const real dx1      = x1r - x1l;
+            const real vfaceL   = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
+            const real vfaceR   = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
+            const real cfl_dt   = dx1 / (helpers::my_max(std::abs(vPLus - vfaceR), std::abs(vMinus - vfaceL)));
+            min_dt              = std::min(min_dt, cfl_dt);
         }
     }
 
@@ -257,11 +258,10 @@ Conserved Newtonian1D::calc_hllc_flux(
     const Conserved &right_flux)
 {
     Eigenvals lambda = calc_eigenvals(left_prims, right_prims);
-
     real aL = lambda.aL; 
     real aR = lambda.aR; 
-    real ap = std::max(static_cast<real>(0.0), aR);
-    real am = std::min(static_cast<real>(0.0), aL);
+    real ap = helpers::my_max(static_cast<real>(0.0), aR);
+    real am = helpers::my_min(static_cast<real>(0.0), aL);
     if (0.0 <= aL){
         return left_flux;
     } 
@@ -331,7 +331,6 @@ void Newtonian1D::advance(
     const real plm_theta            = this->plm_theta;
     const auto nx                   = this->nx;
     const real decay_constant       = this->decay_constant;
-    const CLattice1D *coord_lattice = &(self->coord_lattice);
     #endif 
 
     const lint bx                   = (BuildPlatform == Platform::GPU) ? sh_block_size : this->nx;
@@ -346,7 +345,6 @@ void Newtonian1D::advance(
         Conserved u_l, u_r;
         Conserved f_l, f_r, frf, flf;
         Primitive prims_l, prims_r;
-        real dx1, rmean, dV, sL, sR, pc;
 
         lint ia = ii + radius;
         lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
@@ -359,12 +357,16 @@ void Newtonian1D::advance(
             if (threadIdx.x < pseudo_radius)
             {
                 if (ia + BLOCK_SIZE > nx - 1) txl = nx - radius - ia + threadIdx.x;
-                prim_buff[txa - pseudo_radius] = self->gpu_prims[mod(ia - pseudo_radius, nx)];
+                prim_buff[txa - pseudo_radius] = self->gpu_prims[helpers::mod(ia - pseudo_radius, nx)];
                 prim_buff[txa + txl]           = self->gpu_prims[(ia + txl) % nx];
             }
             simbi::gpu::api::synchronize();
         #endif
 
+        const real x1l    = self->get_xface(ii, geometry, 0);
+        const real x1r    = self->get_xface(ii, geometry, 1);
+        const real vfaceL = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
+        const real vfaceR = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
         if (self->first_order)
         {
             prims_l = prim_buff[(txa + 0) % bx];
@@ -386,7 +388,7 @@ void Newtonian1D::advance(
             }
 
             // Set up the left and right state luinterfaces for i-1/2
-            prims_l = prim_buff[mod(txa - 1, bx)];
+            prims_l = prim_buff[helpers::mod(txa - 1, bx)];
             prims_r = prim_buff[(txa + 0) % bx];
             
             u_l = self->prims2cons(prims_l);
@@ -408,8 +410,8 @@ void Newtonian1D::advance(
         {
             Primitive left_most, right_most, left_mid, right_mid, center;
 
-            left_most   = prim_buff[mod(txa - 2, bx)];
-            left_mid    = prim_buff[mod(txa - 1, bx)];
+            left_most   = prim_buff[helpers::mod(txa - 2, bx)];
+            left_mid    = prim_buff[helpers::mod(txa - 1, bx)];
             center      = prim_buff[(txa + 0)  % bx];
             right_mid   = prim_buff[(txa + 1)  % bx];
             right_most  = prim_buff[(txa + 2)  % bx];
@@ -417,8 +419,8 @@ void Newtonian1D::advance(
             // Compute the reconstructed primitives at the i+1/2 luinterface
 
             // Reconstructed left primitives vector
-            prims_l = center + minmod((center - left_mid) * plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center) * plm_theta) * static_cast<real>(0.5);
-            prims_r = right_mid - minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most- right_mid) * plm_theta) * static_cast<real>(0.5);
+            prims_l = center    + helpers::minmod((center - left_mid) * plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center) * plm_theta) * static_cast<real>(0.5);
+            prims_r = right_mid - helpers::minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most- right_mid) * plm_theta) * static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
@@ -437,8 +439,8 @@ void Newtonian1D::advance(
             }
 
             // Do the same thing, but for the right side luinterface [i - 1/2]
-            prims_l = left_mid + minmod((left_mid - left_most) * plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
-            prims_r = center   - minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
+            prims_l = left_mid + helpers::minmod((left_mid - left_most) * plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
+            prims_r = center   - helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
@@ -462,38 +464,34 @@ void Newtonian1D::advance(
         case simbi::Geometry::CARTESIAN:
             { 
             #if GPU_CODE
-                dx1 = coord_lattice->gpu_dx1[ii];
-                self->gpu_cons[ia] -= ( (frf - flf)/ dx1) * dt * step;
+                self->gpu_cons[ia] -= ( (frf - flf)/ self->dx1) * dt * step;
             #else
-                dx1 = self->coord_lattice.dx1[ii];
-                cons[ia] -= ( (frf - flf)/ dx1) * dt * step;
+                cons[ia] -= ( (frf - flf)/ self->dx1) * dt * step;
             #endif
-            
             break;  
             }
         case simbi::Geometry::SPHERICAL:
             {
-            #if GPU_CODE
-                pc    = prim_buff[txa].p;
-                sL    = coord_lattice->gpu_face_areas[ii + 0];
-                sR    = coord_lattice->gpu_face_areas[ii + 1];
-                dV    = coord_lattice->gpu_dV[ii];
-                rmean = coord_lattice->gpu_x1mean[ii];
+                const real rlf    = x1l + vfaceL * step * dt; 
+                const real rrf    = x1r + vfaceR * step * dt;
+                const real rmean  = static_cast<real>(0.75) * (rrf * rrf * rrf * rrf - rlf * rlf * rlf * rlf) / (rrf * rrf * rrf - rlf * rlf * rlf);
+                const real sR     = rrf * rrf; 
+                const real sL     = rlf * rlf; 
+                const real dV     = rmean * rmean * (rrf - rlf);    
+                const real factor = (mesh_motion) ? dV : 1;         
+                const real pc     = prim_buff[txa].p;
 
-                const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
-                // const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
-                self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources) * dt * step;
-            #else
-                pc    = prim_buff[txa].p;
-                sL    = self->coord_lattice.face_areas[ii + 0];
-                sR    = self->coord_lattice.face_areas[ii + 1];
-                dV    = self->coord_lattice.dV[ii];
-                rmean = self->coord_lattice.x1mean[ii];
-
-                const auto geom_sources = Conserved{0.0, (real)2.0 * pc / rmean, 0.0};
-                // const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
-                cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources) * dt * step;
-            #endif
+                #if GPU_CODE
+                    const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
+                    const auto sources = Conserved{self->gpu_sourceRho[ii], self->gpu_sourceMom[ii],self->gpu_sourceE[ii]} * decay_constant;
+                    self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt * factor;
+                #else 
+                    const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
+                    const auto sources = Conserved{sourceRho[ii], sourceMom[ii], sourceE[ii]} * decay_constant;
+                    cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt * factor;
+                #endif 
+                
+                break;
             break;
             }
         case simbi::Geometry::CYLINDRICAL:
@@ -512,7 +510,7 @@ void Newtonian1D::advance(
     real init_dt,
     real plm_theta,
     real engine_duration,
-    real chkpt_luinterval,
+    real chkpt_interval,
     std::string data_directory,
     std::string boundary_condition,
     bool first_order,
@@ -530,13 +528,17 @@ void Newtonian1D::advance(
     this->engine_duration = engine_duration;
     this->t               = tstart;
     this->dt              = init_dt;
-    // Define the swap vector for the luintegrated state
-    this->nx = init_state[0].size();
-    this->bc            = boundary_cond_map.at(boundary_condition);
-    this->geometry      = geometry_map.at(coord_system);
-    this->idx_active    = (periodic) ? 0 : (first_order) ? 1 : 2;
-    this->active_zones  = (periodic) ? nx: (first_order) ? nx - 2 : nx - 4;
-    
+    // Define the swap vector for the integrated state
+    this->bc              = helpers::boundary_cond_map.at(boundary_condition);
+    this->geometry        = helpers::geometry_map.at(coord_system);
+    this->idx_active      = (periodic) ? 0 : (first_order) ? 1 : 2;
+    this->active_zones    = (periodic) ? nx: (first_order) ? nx - 2 : nx - 4;
+    this->dlogx1          = std::log10(x1[active_zones - 1]/ x1[0]) / (active_zones - 1);
+    this->dx1             = (x1[active_zones - 1] - x1[0]) / (active_zones - 1);
+    this->x1min           = x1[0];
+    this->x1max           = x1[active_zones - 1];
+    this->xcell_spacing   = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
+    this->total_zones     = nx;
     // TODO: invoke mesh motion later
     this->mesh_motion = false;
     if (hllc){
@@ -549,20 +551,21 @@ void Newtonian1D::advance(
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
     PrimData prods;
-    real round_place = 1 / chkpt_luinterval;
-    real t_luinterval =
+    real round_place = 1 / chkpt_interval;
+    real t_interval =
         t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
-               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_luinterval;
+               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
     DataWriteMembers setup;
-    setup.x1max          = r[active_zones - 1];
-    setup.x1min          = r[0];
+    setup.x1max          = x1[active_zones - 1];
+    setup.x1min          = x1[0];
     setup.xactive_zones  = active_zones;
     setup.nx             = nx;
     setup.linspace       = linspace;
-    setup.coord_system   = coord_system;
     setup.ad_gamma       = gamma;
     setup.first_order    = first_order;
     setup.coord_system   = coord_system;
+    setup.boundarycond   = boundary_condition;
+
 
 
     cons.resize(nx);
@@ -570,32 +573,11 @@ void Newtonian1D::advance(
     // Copy the state array luinto real & profile variables
     for (size_t ii = 0; ii < nx; ii++)
     {
-        cons[ii] = Conserved{init_state[0][ii], init_state[1][ii], init_state[2][ii]};
-    }
-    cons_n = cons;
-    if ((coord_system == "spherical") && (linspace))
-    {
-        this->coord_lattice = CLattice1D(r, simbi::Geometry::SPHERICAL);
-        coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE);
-    }
-    else if ((coord_system == "spherical") && (!linspace))
-    {
-        this->coord_lattice = CLattice1D(r, simbi::Geometry::SPHERICAL);
-        coord_lattice.config_lattice(simbi::Cellspacing::LOGSPACE);
-    }
-    else
-    {
-        this->coord_lattice = CLattice1D(r, simbi::Geometry::CARTESIAN);
-        coord_lattice.config_lattice(simbi::Cellspacing::LINSPACE);
+        cons[ii] = Conserved{state[0][ii], state[1][ii], state[2][ii]};
     }
     // Create Structure of Vectors (SoV) for trabsferring
     // data to files once ready
     hydro1d::PrimitiveData transfer_prims;
-
-    // Tools for file string formatting
-    tchunk = "000000";
-    int tchunk_order_of_mag = 2;
-    int time_order_of_mag;
 
     // Some benchmarking tools 
     luint   nfold   = 0;
@@ -606,7 +588,7 @@ void Newtonian1D::advance(
 
     // Copy the current SRHD instance over to the device
     Newtonian1D *device_self;
-    simbi::gpu::api::gpuMalloc(&device_self, sizeof(Newtonian1D));
+    simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(Newtonian1D));
     simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(Newtonian1D));
     simbi::dual::DualSpace1D<Primitive, Conserved, Newtonian1D> dualMem;
     dualMem.copyHostToDev(*this, device_self);
@@ -654,23 +636,10 @@ void Newtonian1D::advance(
             }
 
             /* Write to a File every tenth of a second */
-            if (t >= t_luinterval)
+            if (t >= t_interval)
             {
-                if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
-                time_order_of_mag = std::floor(std::log10(t));
-                if (time_order_of_mag > tchunk_order_of_mag)
-                {
-                    tchunk.insert(0, "0");
-                    tchunk_order_of_mag += 1;
-                }
-                transfer_prims = vec2struct<hydro1d::PrimitiveData, Primitive>(prims);
-                writeToProd<hydro1d::PrimitiveData, Primitive>(&transfer_prims, &prods);
-                tnow = create_step_str(t_luinterval, tchunk);
-                filename = string_format("%d.chkpt." + tnow + ".h5", active_zones);
-                setup.t = t;
-                setup.dt = dt;
-                write_hdf5(data_directory, filename, prods, setup, 1, nx);
-                t_luinterval += chkpt_luinterval;
+                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
+                t_interval += chkpt_interval;
             }
             n++;
             
@@ -712,23 +681,10 @@ void Newtonian1D::advance(
             }
             
             /* Write to a File every tenth of a second */
-            if (t >= t_luinterval && t != INFINITY)
+            if (t >= t_interval && t != INFINITY)
             {
-                if constexpr(BuildPlatform == Platform::GPU) dualMem.copyDevToHost(device_self, *this);
-                time_order_of_mag = std::floor(std::log10(t));
-                if (time_order_of_mag > tchunk_order_of_mag)
-                {
-                    tchunk.insert(0, "0");
-                    tchunk_order_of_mag += 1;
-                }
-                transfer_prims = vec2struct<hydro1d::PrimitiveData, Primitive>(prims);
-                writeToProd<hydro1d::PrimitiveData, Primitive>(&transfer_prims, &prods);
-                tnow = create_step_str(t_luinterval, tchunk);
-                filename = string_format("%d.chkpt." + tnow + ".h5", active_zones);
-                setup.t = t;
-                setup.dt = dt;
-                write_hdf5(data_directory, filename, prods, setup, 1, nx);
-                t_luinterval += chkpt_luinterval;
+                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
+                t_interval += chkpt_interval;
             }
             n++;
             simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));
@@ -741,10 +697,9 @@ void Newtonian1D::advance(
             }
         }
     }
-    std::cout << "\n";
-    std::cout << "Average zone_updates/sec for: " 
-    << n << " iterations was " 
-    << zu_avg / ncheck << " zones/sec" << "\n";
+    if (ncheck > 0) {
+         writeln("Average zone update/sec for:{>5} iterations was {>5} zones/sec", n, zu_avg/ncheck);
+    }
 
     if constexpr(BuildPlatform == Platform::GPU)
     {
@@ -752,8 +707,7 @@ void Newtonian1D::advance(
         simbi::gpu::api::gpuFree(device_self);
     }
 
-    transfer_prims = vec2struct<hydro1d::PrimitiveData, Primitive>(prims);
-
+    transfer_prims = helpers::vec2struct<hydro1d::PrimitiveData, Primitive>(prims);
     std::vector<std::vector<real>> solution(3, std::vector<real>(nx));
 
     solution[0] = transfer_prims.rho;

@@ -14,8 +14,8 @@
 #define CLATTICE1D_HPP
 
 #include <vector> 
-#include "config.hpp"
-
+#include "enums.hpp"
+#include "build_options.hpp"
 namespace simbi {
 
     struct CLattice1D{

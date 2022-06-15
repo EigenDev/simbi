@@ -19,7 +19,8 @@
 #include <memory>
 #include "H5Cpp.h"
 #include "hydro_structs.hpp"
-#include "config.hpp"
+#include "enums.hpp"
+#include "build_options.hpp"
 #include "traits.hpp"
 
 // Some useful global constants
@@ -31,6 +32,30 @@ namespace simbi
 {
     namespace helpers
     {
+        template<typename T>
+        GPU_CALLABLE_INLINE
+        constexpr T my_max(const T a, const T b) {
+            return a > b ? a : b;
+        }
+
+        template<typename T>
+        GPU_CALLABLE_INLINE
+        constexpr T my_min(const T a, const T b) {
+            return a < b ? a : b;
+        }
+
+        template<typename T>
+        GPU_CALLABLE_INLINE
+        constexpr T my_max3(const T a, const T b, const T c) {
+            return (a > b) ? (a > c ? a : c) : b > c ? b : c;
+        }
+
+        template<typename T>
+        GPU_CALLABLE_INLINE
+        constexpr T my_min3(const T a, const T b, const T c) {
+            return (a < b) ? (a < c ? a : c) : b < c ? b : c;
+        }
+        
         GPU_CALLABLE_INLINE lint mod(const lint index, const lint size)
         {
             return (index % size + size) % size;
@@ -187,8 +212,7 @@ namespace simbi
                 real_idx = active_zones - 1;
             }
             return real_idx;
-        }
-        
+        }   
     } // namespace helpers
     
     

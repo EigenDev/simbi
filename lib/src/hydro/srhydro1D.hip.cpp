@@ -12,14 +12,11 @@
 #include "util/device_api.hpp"
 #include "util/dual.hpp"
 #include "util/printb.hpp"
-#include "common/helpers.hpp"
 #include "util/parallel_for.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
-#include <math.h>
-#include <memory>
 
 using namespace simbi;
 using namespace simbi::util;
@@ -31,20 +28,21 @@ using namespace std::chrono;
 using Conserved  =  sr1d::Conserved;
 using Primitive  =  sr1d::Primitive;
 using Eigenvals  =  sr1d::Eigenvals;
-using srDualType =  dual::DualSpace1D<Primitive, Conserved, SRHD>;
-constexpr auto write2file = write_to_file<simbi::SRHD, sr1d::PrimitiveArray, sr1d::Primitive, srDualType, 1>;
+using dualType   =  dual::DualSpace1D<Primitive, Conserved, SRHD>;
+constexpr auto write2file = helpers::write_to_file<simbi::SRHD, sr1d::PrimitiveArray, sr1d::Primitive, dualType, 1>;
 
 // Default Constructor
 SRHD::SRHD(){}
 
 // Overloaded Constructor
-SRHD::SRHD(std::vector<std::vector<real>> u_state, real gamma, real cfl,
+SRHD::SRHD(std::vector<std::vector<real>> state, real gamma, real cfl,
            std::vector<real> x1, std::string coord_system = "cartesian") :
 
     inFailureState(false),
-    state(u_state),
+    state(state),
     gamma(gamma),
     x1(x1),
+    nx(state[0].size()),
     coord_system(coord_system),
     cfl(cfl)
 {
@@ -68,11 +66,11 @@ real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geome
     {
     case simbi::Geometry::SPHERICAL:
         {
-            const real xl = my_max(x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min); 
+            const real xl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min); 
             if (side == 0) {
                 return xl;
             } else {
-                const real xr = my_min(xl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)),  x1max);
+                const real xr = helpers::my_min(xl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)),  x1max);
             }
         }
     case simbi::Geometry::CARTESIAN:
@@ -142,7 +140,7 @@ void SRHD::advance(
             if (threadIdx.x < pseudo_radius)
             {
                 if (ia + BLOCK_SIZE > nx - 1) txl = nx - radius - ia + threadIdx.x;
-                prim_buff[txa - pseudo_radius] = self->gpu_prims[mod(ia - pseudo_radius, nx)];
+                prim_buff[txa - pseudo_radius] = self->gpu_prims[helpers::mod(ia - pseudo_radius, nx)];
                 prim_buff[txa + txl   ]        = self->gpu_prims[(ia + txl ) % nx];
             }
             simbi::gpu::api::synchronize();
@@ -174,7 +172,7 @@ void SRHD::advance(
             }
 
             // Set up the left and right state interfaces for i-1/2
-            prims_l = prim_buff[mod(txa - 1, bx)];
+            prims_l = prim_buff[helpers::mod(txa - 1, bx)];
             prims_r = prim_buff[(txa - 0) % bx];
 
             u_l = self->prims2cons(prims_l);
@@ -192,16 +190,16 @@ void SRHD::advance(
                 flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceL);
             }   
         } else {
-            const Primitive left_most  = prim_buff[mod(txa - 2, bx)];
-            const Primitive left_mid   = prim_buff[mod(txa - 1, bx)];
+            const Primitive left_most  = prim_buff[helpers::mod(txa - 2, bx)];
+            const Primitive left_mid   = prim_buff[helpers::mod(txa - 1, bx)];
             const Primitive center     = prim_buff[(txa + 0) % bx];
             const Primitive right_mid  = prim_buff[(txa + 1) % bx];
             const Primitive right_most = prim_buff[(txa + 2) % bx];
 
             // Compute the reconstructed primitives at the i+1/2 interface
             // Reconstructed left primitives vector
-            prims_l = center    + minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5); 
-            prims_r = right_mid - minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most - right_mid)*plm_theta)*static_cast<real>(0.5);
+            prims_l = center    + helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5); 
+            prims_r = right_mid - helpers::minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most - right_mid)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM primitives
             u_l = self->prims2cons(prims_l);
@@ -216,8 +214,8 @@ void SRHD::advance(
             }
             
             // Do the same thing, but for the right side interface [i - 1/2]
-            prims_l = left_mid + minmod((left_mid - left_most)*plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
-            prims_r = center   - minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
+            prims_l = left_mid + helpers::minmod((left_mid - left_most)*plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
+            prims_r = center   - helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
@@ -269,9 +267,9 @@ void SRHD::advance(
                 
             case simbi::Geometry::CYLINDRICAL:
             {
-                const real rl           = (ii > 0 ) ? x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
+                const real rl           = (ii > 0 ) ? x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
                 const real rlf          = rl + vfaceL * step * dt; 
-                const real rr           = (ii < xpg - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
+                const real rr           = (ii < xpg - 1) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
                 const real rrf          = rr + vfaceR * step * dt;
                 const real rmean        = static_cast<real>(0.75) * (rrf * rrf * rrf * rrf - rlf * rlf * rlf * rlf) / (rrf * rrf * rrf - rlf * rlf * rlf);
                 const real sR           = rrf; 
@@ -337,16 +335,11 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         {   
             if (mesh_motion && (geometry == simbi::Geometry::SPHERICAL))
             {
-                lint idx = (ii - radius > 0) * (ii - radius);
-                if (ii > active_zones + 1) {
-                    idx = active_zones - 1;
-                }
+                const luint idx  = get_real_idx(ii);
                 const real xl    = self->get_xface(idx, geometry, 0);
                 const real xr    = self->get_xface(idx, geometry, 1);
-                const real xlf   = xl * (1.0 + step * dt * hubble_param);
-                const real xrf   = xr * (1.0 + step * dt * hubble_param);
-                const real xmean = static_cast<real>(0.75) * (xrf * xrf * xrf * xrf - xlf * xlf * xlf * xlf) / (xrf * xrf * xrf - xlf * xlf * xlf);
-                invdV            = static_cast<real>(1.0) / (xmean * xmean * (xrf - xlf));
+                const real xmean = static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl);
+                invdV            = static_cast<real>(1.0) / (xmean * xmean * (xr - xl));
             }
             // Compile time thread selection
             #if GPU_CODE
@@ -378,10 +371,14 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 f = (gamma - static_cast<real>(1.0)) * rho * eps - pre;
 
                 peq = pre - f / g;
-                if (iter >= MAX_ITER)
+                if (iter >= MAX_ITER || std::isnan(peq))
                 {
+                    const luint idx       = get_real_idx(ii);
+                    const real xl         = self->get_xface(idx, geometry, 0);
+                    const real xr         = self->get_xface(idx, geometry, 1);
+                    const real xmean      = helpers::calc_any_mean(xl, xr, self->xcell_spacing);
                     printf("\nCons2Prim cannot converge\n");
-                    printf("Density: %.3e, Pressure: %.3e, vsq: %.3e, coord: %lu\n", rho, peq, v2, ii);
+                    printf("Density: %.3e, Pressure: %.3e, vsq: %.3e, coord: %.2e\n", rho, peq, v2, xmean);
                     self->dt             = INFINITY;
                     self->inFailureState = true;
                     found_failure        = true;
@@ -396,7 +393,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             // real mach_ceiling = 100.0;
             // real u            = v /std::sqrt(1 - v * v);
             // real e            = peq / rho * 3.0;
-            // real emin         = u * u / (1.0 + u * u) / pow(mach_ceiling, 2.0);
+            // real emin         = u * u / (1.0 + u * u) / std::pow(mach_ceiling, 2.0);
 
             // if (e < emin) {
             //     // printf("peq: %f, npew: %f\n", rho * emin * (self->gamma - 1.0));
@@ -446,8 +443,8 @@ Eigenvals SRHD::calc_eigenvals(
             const real bR   = (vbar + cbar) / (1 + vbar * cbar);
             const real bL   = (vbar - cbar) / (1 - vbar * cbar);
 
-            const real aL = my_min(bL, (v_l - cs_l) / (1 - v_l * cs_l));
-            const real aR = my_max(bR, (v_r + cs_r) / (1 + v_r * cs_r));
+            const real aL = helpers::my_min(bL, (v_l - cs_l) / (1 - v_l * cs_l));
+            const real aR = helpers::my_max(bR, (v_r + cs_r) / (1 + v_r * cs_r));
 
             return Eigenvals(aL, aR);
         }
@@ -471,15 +468,15 @@ Eigenvals SRHD::calc_eigenvals(
             real aR = lamLp > lamRp ? lamLp : lamRp;
 
             // Smoothen for rarefaction fan
-            aL = my_min(aL, (v_l - cs_l) / (1 - v_l * cs_l));
-            aR = my_max(aR, (v_r + cs_r) / (1 + v_r * cs_r));
+            aL = helpers::my_min(aL, (v_l - cs_l) / (1 - v_l * cs_l));
+            aR = helpers::my_max(aR, (v_r + cs_r) / (1 + v_r * cs_r));
 
             return Eigenvals(aL, aR);
         }
     case simbi::WaveSpeeds::NAIVE:
     {
-        const real aL = my_min((v_r - cs_r) / (1 - v_r * cs_r), (v_l - cs_l) / (1 - v_l * cs_l));
-        const real aR = my_max((v_l + cs_l) / (1 + v_l * cs_l), (v_r + cs_r) / (1 + v_r * cs_r));
+        const real aL = helpers::my_min((v_r - cs_r) / (1 - v_r * cs_r), (v_l - cs_l) / (1 - v_l * cs_l));
+        const real aR = helpers::my_max((v_l + cs_l) / (1 + v_l * cs_l), (v_r + cs_r) / (1 + v_r * cs_r));
 
         return Eigenvals(aL, aR);
     }
@@ -511,7 +508,7 @@ void SRHD::adapt_dt()
             const real dx1    = x1r - x1l;
             const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
             const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
-            const real cfl_dt = dx1 / (my_max(std::abs(vPLus - vfaceR), std::abs(vMinus - vfaceL)));
+            const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPLus - vfaceR), std::abs(vMinus - vfaceL)));
             min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
         }
     }   
@@ -625,7 +622,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const real b     = - (e + fs);
     const real c     = s;
     const real disc  = std::sqrt(b*b - 4.0*a*c);
-    const real quad  = -static_cast<real>(0.5)*(b + sgn(b)*disc);
+    const real quad  = -static_cast<real>(0.5)*(b + helpers::sgn(b)*disc);
     const real aStar = c/quad;
     const real pStar = -fe * aStar + fs;
 
@@ -698,29 +695,27 @@ SRHD::simulate1D(
     std::function<double(double)> s_outer,
     std::function<double(double)> e_outer)
 {
-    this->periodic    = boundary_condition == "periodic";
-    this->first_order = first_order;
-    this->plm_theta   = plm_theta;
-    this->linspace    = linspace;
-    this->sourceD     = sources[0];
-    this->sourceS     = sources[1];
-    this->source0     = sources[2];
-    this->hllc        = hllc;
+    this->periodic        = boundary_condition == "periodic";
+    this->first_order     = first_order;
+    this->plm_theta       = plm_theta;
+    this->linspace        = linspace;
+    this->sourceD         = sources[0];
+    this->sourceS         = sources[1];
+    this->source0         = sources[2];
+    this->hllc            = hllc;
     this->engine_duration = engine_duration;
-    this->t           = tstart;
-    this->tend        = tend;
-    // Define the swap vector for the integrated state
-    this->nx           = state[0].size();
-    this->bc           = boundary_cond_map.at(boundary_condition);
-    this->geometry     = geometry_map.at(coord_system);
-    this->idx_active   = (periodic) ? 0  : (first_order) ? 1 : 2;
-    this->active_zones = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
-
-    this->dlogx1  = std::log10(x1[active_zones - 1]/ x1[0]) / (active_zones - 1);
-    this->dx1     = (x1[active_zones - 1] - x1[0]) / (active_zones - 1);
-    this->x1min   = x1[0];
-    this->x1max   = x1[active_zones - 1];
-
+    this->t               = tstart;
+    this->tend            = tend;
+    this->bc              = helpers::boundary_cond_map.at(boundary_condition);
+    this->geometry        = helpers::geometry_map.at(coord_system);
+    this->idx_active      = (periodic) ? 0  : (first_order) ? 1 : 2;
+    this->active_zones    = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
+    this->dlogx1          = std::log10(x1[active_zones - 1]/ x1[0]) / (active_zones - 1);
+    this->dx1             = (x1[active_zones - 1] - x1[0]) / (active_zones - 1);
+    this->x1min           = x1[0];
+    this->x1max           = x1[active_zones - 1];
+    this->xcell_spacing   = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
+    this->total_zones     = nx;
     luint n = 0;
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
@@ -758,12 +753,12 @@ SRHD::simulate1D(
     SRHD *device_self;
     simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(SRHD));
     simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(SRHD));
-    simbi::dual::DualSpace1D<Primitive, Conserved, SRHD> dualMem;
+    dualType dualMem;
     dualMem.copyHostToDev(*this, device_self);
 
     const auto fullP          = simbi::ExecutionPolicy(nx);
     const auto activeP        = simbi::ExecutionPolicy(active_zones);
-    const luint radius        = (periodic) ? 0 : (first_order) ? 1 : 2;
+    this->radius              = (periodic) ? 0 : (first_order) ? 1 : 2;
     const luint pseudo_radius = (first_order) ? 1 : 2;
     const luint shBlockSize   = BLOCK_SIZE + 2 * pseudo_radius;
     const luint shBlockBytes  = shBlockSize * sizeof(Primitive);

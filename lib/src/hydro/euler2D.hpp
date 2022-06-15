@@ -12,9 +12,9 @@
 #include "util/exec_policy.hpp"
 #include "common/hydro_structs.hpp"
 #include "common/clattice2D.hpp"
-#include "common/config.hpp"
+#include "common/enums.hpp"
 #include "common/helpers.hpp"
-
+#include "build_options.hpp"
 
 namespace simbi {
     class Newtonian2D {
@@ -24,15 +24,16 @@ namespace simbi {
         std::vector<hydro2d::Primitive> prims;
         std::vector<real> sourceRho, sourceM1, sourceM2, sourceE;
         real plm_theta, gamma, tend, cfl, dt, decay_const, hubble_param;
-        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion;
+        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, quirk_smoothing, bipolar;
         std::string coord_system;
         std::vector<real> x1, x2;
         luint nzones, ny, nx, active_zones, idx_active, n;
-        luint xphysical_grid, yphysical_grid, x_bound, y_bound;
+        luint xphysical_grid, yphysical_grid, total_zones;
         CLattice2D coord_lattice;
         simbi::Solver solver;
         simbi::Geometry geometry;
         simbi::BoundaryCondition bc;
+        simbi::Cellspacing x1cell_spacing, x2cell_spacing;
 
         real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
         bool rho_all_zeros, m1_all_zeros, m2_all_zeros, e_all_zeros;
@@ -105,11 +106,11 @@ namespace simbi {
             
             case simbi::Geometry::SPHERICAL:
                 {
-                        const real rl = (ii > 0 ) ? x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
+                        const real rl = (ii > 0 ) ? x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
                         if (side == 0) {
                             return rl;
                         } else {
-                            return (ii < xphysical_grid - 1) ? rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
+                            return (ii < xphysical_grid - 1) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
                         }
                         break;
                 }
@@ -140,6 +141,61 @@ namespace simbi {
             bool first_order = true,
             bool linspace = true, 
             bool hllc = false);
+
+
+        GPU_CALLABLE_INLINE
+        constexpr real get_x1face(const lint ii, const simbi::Geometry geometry, const int side)
+        {
+            switch (geometry)
+            {
+            case simbi::Geometry::CARTESIAN:
+                {
+                        const real xl = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+                        if (side == 0) {
+                            return xl;
+                        } else {
+                            return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+                        }
+                }
+            case simbi::Geometry::SPHERICAL:
+                {
+                        const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                        if (side == 0) {
+                            return rl;
+                        } else {
+                            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                        }
+                }
+            }
+        }
+
+
+        GPU_CALLABLE_INLINE
+        constexpr real get_x2face(const lint ii, const int side)
+        {
+
+            const real yl = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
+            if (side == 0) {
+                return yl;
+            } else {
+                return helpers::my_min(yl + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+            }
+        }
+
+        GPU_CALLABLE_INLINE
+        real get_cell_volume(const lint ii, const lint jj, const simbi::Geometry geometry, const real step)
+        {
+            const real xl     = get_x1face(ii, geometry, 0);
+            const real xr     = get_x1face(ii, geometry, 1);
+            const real xlf    = xl * (1.0 + step * dt * hubble_param);
+            const real xrf    = xr * (1.0 + step * dt * hubble_param);
+            const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+            const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+            const real dcos   = std::cos(tl) - std::cos(tr);
+            const real dV     = (2.0 * M_PI * (1.0 / 3.0) * (xr * xr * xr - xl * xl * xl) * dcos);
+            return dV;
+            
+        }
         
     };
 }

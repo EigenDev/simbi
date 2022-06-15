@@ -47,7 +47,7 @@ namespace simbi{
             const real dx1    = x1r - x1l;
             const real vfaceL = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1l * self->hubble_param;
             const real vfaceR = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1r * self->hubble_param;
-            const real cfl_dt = dx1 / (my_max(std::abs(vPlus), std::abs(vMinus)));
+            const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPlus), std::abs(vMinus)));
             self->dt_min[ii]  = self->cfl * cfl_dt;
         }
         #endif
@@ -144,13 +144,13 @@ namespace simbi{
             if constexpr(is_relativistic<N>::value)
             {
                 real h   = 1 + gamma * p / (rho * (gamma - 1));
-                real cs  = sqrt(gamma * p / (rho * h));
+                real cs  = std::sqrt(gamma * p / (rho * h));
                 plus_v1  = (v1 + cs) / (static_cast<real>(1.0) + v1 * cs);
                 plus_v2  = (v2 + cs) / (static_cast<real>(1.0) + v2 * cs);
                 minus_v1 = (v1 - cs) / (static_cast<real>(1.0) - v1 * cs);
                 minus_v2 = (v2 - cs) / (static_cast<real>(1.0) - v2 * cs);
             } else {
-                real cs  = sqrt(gamma * p / rho);
+                real cs  = std::sqrt(gamma * p / rho);
                 plus_v1  = (v1 + cs);
                 plus_v2  = (v2 + cs);
                 minus_v1 = (v1 - cs);
@@ -164,16 +164,16 @@ namespace simbi{
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
-                    cfl_dt = my_min(dx1 / (my_max(v1p, v1m)),
-                                    dx2 / (my_max(v2m, v2m)));
+                    cfl_dt = helpers::my_min(dx1 / (helpers::my_max(v1p, v1m)),
+                                    dx2 / (helpers::my_max(v2m, v2m)));
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl  = my_max(rmin * pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
-                    const real rr  = my_min(rl * pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
-                    const real tl  = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                    const real tr  = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    const real rl  = helpers::my_max(rmin * std::pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
+                    const real rr  = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
+                    const real tl  = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                    const real tr  = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                     if (self->mesh_motion)
                     {
                         const real vfaceL   = rl * self->hubble_param;
@@ -182,8 +182,8 @@ namespace simbi{
                         v1m = std::abs(minus_v1 - vfaceL);
                     }
                     const real rmean        = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
-                    cfl_dt = my_min((rr - rl) / (my_max(v1p, v1m)),
-                            rmean * (tr - tl) / (my_max(v2p, v2m)));
+                    cfl_dt = helpers::my_min((rr - rl) / (helpers::my_max(v1p, v1m)),
+                                     rmean * (tr - tl) / (helpers::my_max(v2p, v2m)));
                     break;
             } // end switch
             
@@ -238,7 +238,7 @@ namespace simbi{
             if constexpr(is_relativistic<N>::value)
             {
                 real h   = 1 + gamma * p / (rho * (gamma - 1));
-                real cs  = sqrt(gamma * p / (rho * h));
+                real cs  = std::sqrt(gamma * p / (rho * h));
                 plus_v1  = (v1 + cs) / (static_cast<real>(1.0) + v1 * cs);
                 plus_v2  = (v2 + cs) / (static_cast<real>(1.0) + v2 * cs);
                 plus_v3  = (v3 + cs) / (static_cast<real>(1.0) + v3 * cs);
@@ -246,7 +246,7 @@ namespace simbi{
                 minus_v2 = (v2 - cs) / (static_cast<real>(1.0) - v2 * cs);
                 minus_v3 = (v3 - cs) / (static_cast<real>(1.0) - v3 * cs);
             } else {
-                real cs  = sqrt(gamma * p / rho);
+                real cs  = std::sqrt(gamma * p / rho);
                 plus_v1  = (v1 + cs);
                 plus_v2  = (v2 + cs);
                 plus_v3  = (v3 + cs);
@@ -258,24 +258,24 @@ namespace simbi{
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
-                    cfl_dt = my_min(dx1 / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
-                                    dx2 / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
-                    cfl_dt = my_min(cfl_dt, dx3 / (my_max(std::abs(plus_v3), std::abs(minus_v3))));
+                    cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                              dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                                              dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl           = my_max(rmin * pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
-                    const real rr           = my_min(rl * pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
-                    const real tl           = my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                    const real tr           = my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                    const real ql           = my_max(x3min + (kk - static_cast<real>(0.5)) * dx3, x3min);
-                    const real qr           = my_min(ql + dx3 * (kk == 0 ? 0.5 : 1.0), x3max); 
+                    const real rl           = helpers::my_max(rmin * std::pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
+                    const real rr           = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
+                    const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                    const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    const real ql           = helpers::my_max(x3min + (kk - static_cast<real>(0.5)) * dx3, x3min);
+                    const real qr           = helpers::my_min(ql + dx3 * (kk == 0 ? 0.5 : 1.0), x3max); 
                     const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
                     const real th           = static_cast<real>(0.5) * (tl + tr);
-                    cfl_dt = my_min((rr - rl) / (my_max(std::abs(plus_v1), std::abs(minus_v1))),
-                            rmean * (tr - tl) / (my_max(std::abs(plus_v2), std::abs(minus_v2))));
-                    cfl_dt = my_min(cfl_dt, rmean * std::sin(th) * (qr - ql)  / (my_max(std::abs(plus_v3), std::abs(minus_v3))));
+                    cfl_dt = helpers::my_min3((rr - rl) / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                      rmean * (tr - tl) / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                       rmean * std::sin(th) * (qr - ql) / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
                     break;
             } // end switch
             
@@ -360,16 +360,16 @@ namespace simbi{
             for(int i = 1; bidx + tid  < zones; i++)
             {
                 val = self->dt_min[tid + bidx];
-                min = (val <= 0 || val > min) ? min : val;
+                min = (val > min) ? min : val;
                 bidx = i * blockDim.x * blockDim.y * blockDim.z;
             }
             // previously reduced MIN part
             bidx = 0;
             int i;
-            for(i = 1; bidx + tid < gridDim.x*gridDim.y; i++)
+            for(i = 1; bidx + tid < gridDim.x*gridDim.y*gridDim.z; i++)
             {
                 val  = self->dt_min[tid + bidx];
-                min  = (val <= 0 || val > min) ? min : val;
+                min  = (val > min) ? min : val;
                 bidx = i * blockDim.x * blockDim.y * blockDim.z;
             }
 

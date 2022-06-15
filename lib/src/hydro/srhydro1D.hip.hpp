@@ -10,11 +10,13 @@
 
 #include <string>
 #include <vector>
+#include "common/helpers.hpp"
 #include "common/clattice1D.hpp"
-#include "common/config.hpp"
+#include "common/enums.hpp"
 #include "common/hydro_structs.hpp"
 #include "build_options.hpp"
 #include "util/exec_policy.hpp"
+#include "build_options.hpp"
 namespace simbi
 {
      struct SRHD
@@ -27,7 +29,9 @@ namespace simbi
           CLattice1D coord_lattice;
           simbi::BoundaryCondition bc;
           simbi::Geometry geometry;
+          simbi::Cellspacing xcell_spacing;
           real dlogx1, dx1, x1min, x1max;  
+          luint radius, total_zones;
 
           SRHD();
           SRHD(std::vector<std::vector<real>> state, real gamma, real cfl,
@@ -120,6 +124,15 @@ namespace simbi
           GPU_CALLABLE_MEMBER
           real calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side) const;
 
+          GPU_CALLABLE_INLINE 
+          constexpr luint get_real_idx(const luint ii) const 
+          {
+               lint idx = (ii - radius > 0) * (ii - radius);
+               if (ii > active_zones + 1) {
+                    idx = active_zones - 1;
+               }
+               return idx;
+          }
           GPU_CALLABLE_INLINE
           constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side) const
           {
@@ -127,20 +140,20 @@ namespace simbi
                {
                case simbi::Geometry::CARTESIAN:
                     {
-                         const real xl = my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+                         const real xl = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
                          if (side == 0) {
                               return xl;
                          } else {
-                              return my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+                              return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                          }
                     }
                case simbi::Geometry::SPHERICAL:
                     {
-                         const real rl = my_max(x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                         const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                          if (side == 0) {
                               return rl;
                          } else {
-                              return my_min(rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                              return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                          }
                     }
                }
@@ -157,8 +170,8 @@ namespace simbi
                     {
                     case simbi::Geometry::SPHERICAL:
                     {         
-                         const real rl     = my_max(x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min);
-                         const real rr     = my_min(rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                         const real rl     = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min);
+                         const real rr     = helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                          const real rmean  = static_cast<real>(0.75) * (rr * rr * rr *rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
                          return rmean * rmean * (rr - rl);
                     }

@@ -14,8 +14,8 @@
 #define CLATTICE3D_HPP
 
 #include <vector> 
-#include <array> 
-#include "config.hpp"
+#include "enums.hpp"
+#include "build_options.hpp"
 namespace simbi {
 
     struct CLattice3D{

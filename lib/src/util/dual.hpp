@@ -63,26 +63,15 @@ namespace simbi
                 // printf("\nFreeing Device Memory...\n");
                 simbi::gpu::api::gpuFree(host_u0);
                 simbi::gpu::api::gpuFree(host_prims);
-                simbi::gpu::api::gpuFree(host_clattice);
-                simbi::gpu::api::gpuFree(host_dV);
-                simbi::gpu::api::gpuFree(host_dx1);
-                simbi::gpu::api::gpuFree(host_fas);
-                simbi::gpu::api::gpuFree(host_x1m);
                 // printf("Memory Freed.\n");
             };
 
             T *host_prims;
             C *host_u0;
-            real            *host_pressure_guess;
             real            *host_source0;
             real            *host_sourceRho;
             real            *host_sourceM;
             real            *host_dtmin;
-            real            *host_dx1; 
-            real            *host_x1m; 
-            real            *host_fas; 
-            real            *host_dV;
-            CLattice1D      *host_clattice;
             luint n, nreal, cbytes, pbytes, rbytes, rrbytes, fabytes;
             real host_dt;
             real host_x1min;
@@ -129,8 +118,6 @@ namespace simbi
             real            *host_sourceS1;
             real            *host_sourceS2;
             real            *host_dtmin;
-            real            *host_dx1, *host_x1m, *host_fas1, *host_dV1;
-            real            *host_dx2, *host_cot, *host_fas2, *host_dV2;
             CLattice2D      *host_clattice;
 
             real host_dt;
@@ -159,7 +146,6 @@ namespace simbi
             {
                 simbi::gpu::api::gpuFree(host_u0);
                 simbi::gpu::api::gpuFree(host_prims);
-                simbi::gpu::api::gpuFree(host_pressure_guess);
                 if(!e_all_zeros)  simbi::gpu::api::gpuFree(host_source0);
                 if(!rho_all_zeros)  simbi::gpu::api::gpuFree(host_sourceRho);
                 if(!m1_all_zeros) simbi::gpu::api::gpuFree(host_sourceM1);
@@ -170,14 +156,11 @@ namespace simbi
 
             T *host_prims;
             C *host_u0;
-            real            *host_pressure_guess;
             real            *host_source0;
             real            *host_sourceRho;
             real            *host_sourceM1;
             real            *host_sourceM2;
             real            *host_dtmin;
-            real            *host_dx1, *host_x1m, *host_fas1, *host_dV1;
-            real            *host_dx2, *host_cot, *host_fas2, *host_dV2;
             CLattice2D      *host_clattice;
 
             real host_dt;
@@ -200,18 +183,6 @@ namespace simbi
                 // printf("\nFreeing Device Memory...\n");
                 simbi::gpu::api::gpuFree(host_u0);
                 simbi::gpu::api::gpuFree(host_prims);
-                simbi::gpu::api::gpuFree(host_clattice);
-                simbi::gpu::api::gpuFree(host_dV1);
-                simbi::gpu::api::gpuFree(host_dV2);
-                simbi::gpu::api::gpuFree(host_dV3);
-                simbi::gpu::api::gpuFree(host_dx1);
-                simbi::gpu::api::gpuFree(host_dx2);
-                simbi::gpu::api::gpuFree(host_dx3);
-                simbi::gpu::api::gpuFree(host_fas1);
-                simbi::gpu::api::gpuFree(host_fas2);
-                simbi::gpu::api::gpuFree(host_fas3);
-                simbi::gpu::api::gpuFree(host_x1m);
-                simbi::gpu::api::gpuFree(host_cot);
                 simbi::gpu::api::gpuFree(host_source0);
                 simbi::gpu::api::gpuFree(host_sourceD);
                 simbi::gpu::api::gpuFree(host_sourceS1);
@@ -230,9 +201,6 @@ namespace simbi
             real            *host_sourceS2;
             real            *host_sourceS3;
             real            *host_dtmin;
-            real            *host_dx1, *host_x1m, *host_fas1, *host_dV1, *host_dx3, *host_sin;
-            real            *host_dx2, *host_cot, *host_fas2, *host_dV2, *host_dV3, *host_fas3;
-            CLattice2D      *host_clattice;
 
             real host_dt;
             real host_x1min;

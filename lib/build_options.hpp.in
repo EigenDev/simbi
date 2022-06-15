@@ -6,13 +6,24 @@
 enum class Platform: int {CPU = 0, GPU = 1};
 
 #include "stdint.h"
-typedef uint64_t luint;
-typedef int64_t  lint;
+#include <functional>
+using luint = uint64_t;
+using lint  = int64_t;
 
 constexpr int BLOCK_SIZE   = 64;
 constexpr int BLOCK_SIZE2D = 16;
 constexpr int BLOCK_SIZE3D = 4;
 constexpr int MAX_ITER     = 1000;
+
+// Precision preprocessing
+#if FLOAT_PRECISION
+using real = float;
+constexpr real tol_scale = 1e-6;
+#else
+using real = double;
+constexpr real tol_scale = 1e-12;
+#endif 
+
 // NVIDIA seems to like to stencil better in 
 // column major order for some reason...hmmmm
 // #if defined(__HIP_PLATFORM_NVIDIA__)
@@ -41,7 +52,7 @@ constexpr Platform BuildPlatform = Platform::GPU;
 #define GPU_CAPTURE                    [=, *this]
 
 #if defined(__CUDACC__) && !defined(__HIP_PLATFORM_NVIDIA__)
-typedef cudaStream_t simbiStream_t;
+using simbiStream_t = cudaStream_t;
 #define anyGpuMalloc                cudaMalloc
 #define anyGpuMallocManaged         cudaMallocManaged
 #define anyGpuMemcpy                cudaMemcpy
@@ -55,7 +66,7 @@ typedef cudaStream_t simbiStream_t;
 #define anyGpuError_t               cudaError_t
 #else 
 #include "hip/hip_runtime.h"
-typedef hipStream_t simbiStream_t;
+using simbiStream_t = hipStream_t;
 #define anyGpuMalloc                hipMalloc
 #define anyGpuMallocManaged         hipMallocManaged
 #define anyGpuMemcpy                hipMemcpy
@@ -116,14 +127,14 @@ namespace simbi {
 
     };
 
-    typedef int simbiStream_t;
-    typedef int anyGpuError_t; 
+    using simbiStream_t = int;
+    using anyGpuError_t = int; 
     enum anyGpuMemcpyType {
         anyGpuMemcpyHostToDevice,
         anyGpuMemcpyDeviceToDevice,
         anyGpuMemcpyDeviceToHost
     };
-    typedef u3 dim3;
+    using dim3 = u3;
     inline dim3 blockIdx(1, 1, 1); 
     inline dim3 blockDim(1, 1, 1); 
     inline dim3 gridDim(1, 1, 1); 

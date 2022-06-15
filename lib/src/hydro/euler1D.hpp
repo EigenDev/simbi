@@ -12,7 +12,8 @@
 #include "common/hydro_structs.hpp"
 #include "common/clattice1D.hpp"
 #include "common/helpers.hpp"
-#include "common/config.hpp"
+#include "common/enums.hpp"
+#include "build_options.hpp"
 #include "util/exec_policy.hpp"
 
 namespace simbi {
@@ -20,9 +21,9 @@ namespace simbi {
 
     struct Newtonian1D {
         // Initializer list args
-        std::vector<std::vector<real>> init_state;
+        std::vector<std::vector<real>> state;
         real gamma, cfl;
-        std::vector<real> r;
+        std::vector<real> x1;
         std::string coord_system;
 
         real plm_theta, tend, dt, engine_duration, t, decay_constant, hubble_param, x1min , x1max, dlogx1, dx1;
@@ -32,11 +33,12 @@ namespace simbi {
         std::vector<hydro1d::Conserved> cons, cons_n; 
         std::vector<hydro1d::Primitive> prims;
         std::vector<real> xvertices, sourceRho, sourceMom, sourceE;
-        luint nzones, active_zones, idx_active, i_start, i_bound, n, nx;
+        luint nzones, active_zones, idx_active, total_zones, n, nx;
         simbi::SOLVER sim_solver;
         CLattice1D coord_lattice;
         simbi::BoundaryCondition bc;
         simbi::Geometry geometry;
+        simbi::Cellspacing xcell_spacing;
 
         //==============================================================
         // Create dynamic array instances that will live on device
@@ -46,15 +48,15 @@ namespace simbi {
         luint blockSize;
         hydro1d::Conserved *gpu_cons, *gpu_du_dt, *gpu_u1;
         hydro1d::Primitive *gpu_prims;
-        real               *gpu_pressure_guess, *gpu_sourceD, *gpu_sourceS, *gpu_source0, *dt_min;
+        real               *gpu_sourceRho, *gpu_sourceMom, *gpu_sourceE, *dt_min;
         CLattice1D         *gpu_coord_lattice;
         
         Newtonian1D();
         Newtonian1D(
-            std::vector<std::vector<real>> init_state, 
+            std::vector<std::vector<real>> state, 
             real gamma, 
             real cfl,
-            std::vector<real> r, 
+            std::vector<real> x1, 
             std::string coord_system);
         ~Newtonian1D();
 
@@ -73,21 +75,26 @@ namespace simbi {
         hydro1d::Conserved prims2flux(const hydro1d::Primitive &prims);
 
         GPU_CALLABLE_INLINE
-        constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
+        constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side) const
         {
             switch (geometry)
             {
             case simbi::Geometry::CARTESIAN:
                 {
-                        return 1.0;
+                        const real xl = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+                        if (side == 0) {
+                            return xl;
+                        } else {
+                            return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+                        }
                 }
             case simbi::Geometry::SPHERICAL:
                 {
-                        const real rl = my_max(x1min * pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                        const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                         if (side == 0) {
                             return rl;
                         } else {
-                            return my_min(rl * pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                         }
                 }
             }

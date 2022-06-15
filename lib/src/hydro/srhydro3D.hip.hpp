@@ -9,9 +9,9 @@
 
 #include <vector>
 #include <string>
-#include "../common/hydro_structs.hpp"
-#include "../common/clattice3D.hpp"
-
+#include "common/hydro_structs.hpp"
+#include "common/clattice3D.hpp"
+#include "common/helpers.hpp"
 namespace simbi
 {
     struct SRHD3D
@@ -23,17 +23,18 @@ namespace simbi
         std::vector<sr3d::Conserved> cons;
         std::vector<std::vector<real>> state3D, sources;
         float tend, tstart;
-        real plm_theta, gamma, bipolar;
-        bool first_order, periodic, hllc, linspace, inFailureState;
+        real plm_theta, gamma, bipolar, hubble_param;
+        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion;
         real cfl, dt, decay_const;
         luint nx, ny, nz, nzones, n, block_size, xphysical_grid, yphysical_grid, zphysical_grid;
-        luint active_zones, idx_active, x_bound, y_bound;
-        luint i_start, i_bound, j_start, j_bound, k_start, k_bound;
+        luint active_zones, idx_active, total_zones;
         std::string coord_system;
         std::vector<real> x1, x2, x3, sourceD, sourceS1, sourceS2, sourceS3, sourceTau, pressure_guess;
         CLattice3D coord_lattice;
         simbi::Geometry geometry;
         simbi::BoundaryCondition bc;
+        simbi::Cellspacing x1cell_spacing, x2cell_spacing, x3cell_spacing;
+
 
         real x3max, x3min, x2max, x2min, x1min, x1max, dx3, dx2, dx1, dlogx1;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, s3_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
@@ -112,7 +113,7 @@ namespace simbi
             const luint nhat);
 
         GPU_CALLABLE_MEMBER
-        sr3d::Conserved calc_Flux(const sr3d::Primitive &prims, luint nhat);
+        sr3d::Conserved calc_Flux(const sr3d::Primitive &prims, const luint nhat);
 
         GPU_CALLABLE_MEMBER
         sr3d::Conserved calc_hll_flux(
@@ -144,6 +145,71 @@ namespace simbi
             bool first_order = true,
             bool linspace = true, 
             bool hllc = false);
+
+        GPU_CALLABLE_INLINE
+        constexpr real get_x1face(const lint ii, const simbi::Geometry geometry, const int side)
+        {
+            switch (geometry)
+            {
+            case simbi::Geometry::CARTESIAN:
+                {
+                        const real x1l = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+                        if (side == 0) {
+                            return x1l;
+                        } else {
+                            return helpers::my_min(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+                        }
+                }
+            case simbi::Geometry::SPHERICAL:
+                {
+                        const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                        if (side == 0) {
+                            return rl;
+                        } else {
+                            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                        }
+                }
+            }
+        }
+
+
+        GPU_CALLABLE_INLINE
+        constexpr real get_x2face(const lint ii, const int side)
+        {
+            const real x2l = helpers::my_max(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
+            if (side == 0) {
+                return x2l;
+            } else {
+                return helpers::my_min(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+            }
+        }
+
+        GPU_CALLABLE_INLINE
+        constexpr real get_x3face(const lint ii, const int side)
+        {
+
+            const real x3l = helpers::my_max(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
+            if (side == 0) {
+                return x3l;
+            } else {
+                return helpers::my_min(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
+            }
+        }
+
+        GPU_CALLABLE_INLINE
+        real get_cell_volume(const lint ii, const lint jj, const simbi::Geometry geometry, const real step)
+        {
+            const real x1l     = get_x1face(ii, geometry, 0);
+            const real x1r     = get_x1face(ii, geometry, 1);
+            const real x1lf    = x1l * (1.0 + step * dt * hubble_param);
+            const real x1rf    = x1r * (1.0 + step * dt * hubble_param);
+            const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+            const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+            const real dcos   = std::cos(tl) - std::cos(tr);
+            const real dV     = (2.0 * M_PI * (1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) * dcos);
+            return dV;
+            
+        }
     };
 }
 
