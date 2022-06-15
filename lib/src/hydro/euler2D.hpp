@@ -17,8 +17,7 @@
 #include "build_options.hpp"
 
 namespace simbi {
-    class Newtonian2D {
-        public:
+    struct Newtonian2D {
         std::vector<std::vector<real> > init_state, sources;
         std::vector<hydro2d::Conserved> cons, cons_n;
         std::vector<hydro2d::Primitive> prims;
@@ -38,10 +37,15 @@ namespace simbi {
         real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
         bool rho_all_zeros, m1_all_zeros, m2_all_zeros, e_all_zeros;
         
-        // GPU Mirrors
-        real *gpu_sourceRho, *gpu_sourceM1, *gpu_sourceM2, *gpu_sourceE, *dt_min;
-        hydro2d::Primitive *gpu_prims;
-        hydro2d::Conserved *gpu_cons;
+        //==============================================================
+        // Create dynamic array instances that will live on device
+        //==============================================================
+        //             GPU RESOURCES
+        //==============================================================
+        luint blockSize;
+        real *gpu_sourceRho,*gpu_sourceM1, *gpu_sourceM2, *gpu_sourceE, *dt_min;
+        hydro2d::Primitive  *gpu_prims;
+        hydro2d::Conserved  *gpu_cons;
 
 
         Newtonian2D();
@@ -116,8 +120,13 @@ namespace simbi {
                 }
             }
         }
+
         void adapt_dt();
-        void adapt_dt(Newtonian2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, luint bytes);
+        void adapt_dt(
+            Newtonian2D *dev, 
+            const simbi::Geometry geometry, 
+            const ExecutionPolicy<> p, 
+            luint bytes);
 
         void advance(
                Newtonian2D *s, 
