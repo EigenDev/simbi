@@ -658,6 +658,7 @@ void SRHD2D::cons2prim(
                 const real dV    = self->get_cell_volume(ireal, jreal, geometry, step);
                 invdV = 1.0 / dV;
             }
+
             #if GPU_CODE
             extern __shared__ Conserved  conserved_buff[];
             // load shared memory
@@ -667,7 +668,7 @@ void SRHD2D::cons2prim(
             auto* const conserved_buff = &cons[0];
             #endif 
 
-            luint iter  = 0;
+            
             const real D    = conserved_buff[tid].d   * invdV;
             const real S1   = conserved_buff[tid].s1  * invdV;
             const real S2   = conserved_buff[tid].s2  * invdV;
@@ -680,6 +681,7 @@ void SRHD2D::cons2prim(
             real peq = pressure_guess[gid];
             #endif
 
+            luint iter  = 0;
             const real tol = D * tol_scale;
             do
             {
@@ -711,7 +713,7 @@ void SRHD2D::cons2prim(
                     const real x1mean= helpers::calc_any_mean(x1l, x1r, self->x1cell_spacing);
                     const real x2mean= helpers::calc_any_mean(x2l, x2r, self->x2cell_spacing);
                     printf("\nCons2Prim cannot converge\n");
-                    printf("Density: %f, Pressure: %f, Vsq: %f, xcoord: %.2e, yxoord: %.2e\n", rho, peq, v2, x1mean, x2mean);
+                    printf("Density: %f, Pressure: %f, Vsq: %f, et: %f, xcoord: %.2e, yxoord: %.2e, iter: %lu\n", rho, peq, v2, et,  x1mean, x2mean, iter);
                     self->dt             = INFINITY;
                     found_failure        = true;
                     self->inFailureState = true;
@@ -767,8 +769,6 @@ void SRHD2D::advance(
     const real dx2                 = this->dx2;
     const real dlogx1              = this->dlogx1;
     const real dx1                 = this->dx1;
-    const real imax                = this->xphysical_grid - 1;
-    const real jmax                = this->yphysical_grid - 1;
     const bool d_all_zeros         = this->d_all_zeros;
     const bool s1_all_zeros        = this->s1_all_zeros;
     const bool s2_all_zeros        = this->s2_all_zeros;
@@ -795,24 +795,24 @@ void SRHD2D::advance(
         auto *const prim_buff = &prims[0];
         #endif 
 
-        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
-        const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
+        const lint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
+        const lint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
         #if GPU_CODE 
         if ((ii >= xpg) || (jj >= ypg)) return;
         #endif
 
-        const luint ia  = ii + radius;
-        const luint ja  = jj + radius;
-        const luint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
-        const luint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
-        const luint txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
-        const luint tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
+        const lint ia  = ii + radius;
+        const lint ja  = jj + radius;
+        const lint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
+        const lint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
+        const lint txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
+        const lint tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
 
         Conserved ux_l, ux_r, uy_l, uy_r;
         Conserved f_l, f_r, g_l, g_r, frf, flf, grf, glf;
         Primitive xprims_l, xprims_r, yprims_l, yprims_r;
 
-        const luint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
+        const lint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
         #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
@@ -1080,6 +1080,12 @@ void SRHD2D::advance(
 
                 const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , static_cast<real>(0.0)};
                 const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
+                // const auto wallahi = ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 - geom_source - source_terms) * dt * step * factor;
+                // if ( ii == 521 && jj == 512) {
+                //     printf("%.4e\n", wallahi.tau);
+                //     // printf("[%lu, %lu] frf: %f, flf: %f, grf: %f, glf: %f\n", ii, jj, frf.d, flf.d, grf.d, glf.d);
+                //     // printf("dV1: %.2e, dV2: %.2e, s1r: %.2e, s1l: %.2e, s2r: %.2e, s2l: %.2e\n", dV1, dV2, s1R, s1L, s2R, s2L);
+                // }
                 #if GPU_CODE 
                     self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 - geom_source - source_terms) * dt * step * factor;
                 #else
@@ -1136,6 +1142,11 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
+    // Define the source terms
+    this->sourceD         = sources[0];
+    this->sourceS1        = sources[1];
+    this->sourceS2        = sources[2];
+    this->sourceTau       = sources[3];
     this->total_zones     = nx * ny;
     this->first_order     = first_order;
     this->periodic        = boundary_condition == "periodic";
@@ -1152,13 +1163,13 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->geometry        = helpers::geometry_map.at(coord_system);
     this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
     this->x2cell_spacing  = simbi::Cellspacing::LINSPACE;
-    this->dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
-    this->dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
-    this->dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
-    this->x1min   = x1[0];
-    this->x1max   = x1[xphysical_grid - 1];
-    this->x2min   = x2[0];
-    this->x2max   = x2[yphysical_grid - 1];
+    this->dx2             = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
+    this->dlogx1          = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
+    this->dx1             = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
+    this->x1min           = x1[0];
+    this->x1max           = x1[xphysical_grid - 1];
+    this->x2min           = x2[0];
+    this->x2max           = x2[yphysical_grid - 1];
 
     this->d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
     this->s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
@@ -1168,21 +1179,16 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
 
-    if (x2max == M_PI){
-        this->bipolar = true;
+    if (x2max == 0.5 * M_PI){
+        this->reflecting_theta = true;
     }
 
     cons.resize(nzones);
     prims.resize(nzones);
     pressure_guess.resize(nzones);
-    // Define the source terms
-    sourceD    = sources[0];
-    sourceS1   = sources[1];
-    sourceS2   = sources[2];
-    sourceTau  = sources[3];
 
     // Copy the state array into real & profile variables
-    for (size_t i = 0; i < state2D[0].size(); i++)
+    for (size_t i = 0; i < nzones; i++)
     {
         auto D            = state2D[0][i];
         auto S1           = state2D[1][i];
@@ -1309,7 +1315,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             t1 = high_resolution_clock::now();
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2D(fullP, self, nx, ny, true, bc, ozones, bipolar);
+            config_ghosts2D(fullP, self, nx, ny, true, bc, ozones, reflecting_theta);
             t += dt; 
             
             if (n >= nfold){
@@ -1369,12 +1375,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             // First Half Step
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, bipolar);
+            config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, reflecting_theta);
 
             // Final Half Step
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, bipolar);
+            config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, reflecting_theta);
 
             t += dt; 
 
@@ -1443,6 +1449,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         if constexpr(BuildPlatform == Platform::GPU) {
             simbi::gpu::api::deviceSynch();
             simbi::gpu::api::gpuFree(ozones);
+            delete[] ozones;
         } else {
             delete[] ozones;
         }

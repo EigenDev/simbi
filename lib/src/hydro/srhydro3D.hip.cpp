@@ -1124,8 +1124,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->hubble_param = 0.0; //adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
 
-    if (x2max == M_PI){
-        this->bipolar = true;
+    if (x2max == 0.5 * M_PI){
+        this->reflecting_theta = true;
     }
 
     // Write some info about the setup for writeup later

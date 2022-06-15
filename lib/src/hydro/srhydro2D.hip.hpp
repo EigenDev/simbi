@@ -23,7 +23,7 @@ namespace simbi
         std::vector<sr2d::Primitive> prims;
         std::vector<sr2d::Conserved> cons;
         std::vector<std::vector<real>> state2D;
-        real plm_theta, gamma, bipolar, hubble_param;
+        real plm_theta, gamma, reflecting_theta, hubble_param;
         bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion;
         real cfl, dt, decay_const;
         luint nx, ny, nzones, n, block_size, xphysical_grid, yphysical_grid;
