@@ -275,7 +275,7 @@ namespace simbi
                     att.close();
 
                     att = sim_info.createAttribute("yactive_zones", int_type, att_space);
-                    att.write(int_type, &setup.xactive_zones);
+                    att.write(int_type, &setup.yactive_zones);
                     att.close();
 
                     att = sim_info.createAttribute("geometry", dtype_str, att_space);
