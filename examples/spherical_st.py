@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description='Mignone and Bodo Test Problem 1/2 Params')
     parser.add_argument('--gamma', '-g',  dest='gamma', type=float, default=5/3)
     parser.add_argument('--tend', '-t',   dest='tend', type=float, default=0.1)
-    parser.add_argument('--npolar', '-n', dest='npolar', type=int, default=400)
+    parser.add_argument('--npolar', '-n', dest='npolar', type=int, default=512)
     parser.add_argument('--chint',        dest='chint', type=float, default=0.1)
     parser.add_argument('--cfl',          dest='cfl', type=float, default=0.8)
     parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
