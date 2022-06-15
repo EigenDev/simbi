@@ -148,7 +148,7 @@ namespace simbi{
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
         const sr2d::Conserved *outer_zones,
-        const bool bipolar)
+        const bool reflecting_theta)
     {
         const int extent = (BuildPlatform == Platform::GPU) ? p.gridSize.x * p.blockSize.x * p.gridSize.y * p.blockSize.y : x1grid_size * x2grid_size; 
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
@@ -192,17 +192,15 @@ namespace simbi{
                         u_state[0 * sx + ii * sy]  = u_state[1 * sx + ii * sy];
                         u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 2) * sx + ii * sy];
 
-                        if (bipolar)
+                        if (reflecting_theta)
                         {
                             u_state[(x2grid_size - 1) * sx + ii * sy].s2 = - u_state[(x2grid_size - 2) * sx + ii * sy].s2;
                         }
                     }
                 }
-
             } else {
                 if(jj < x2grid_size)
                 {
-                    // Fix the ghost zones at the radial boundaries
                     // Fix the ghost zones at the radial boundaries
                     if (outer_zones) {
                         u_state[jj * sx +  (x1grid_size - 1) * sy] = outer_zones[jj];
@@ -238,13 +236,13 @@ namespace simbi{
                         // u_state[0 * sx + (ii + 2) * sy]  = u_state[3 * sx + (ii + 2) * sy];
                         // u_state[1 * sx + (ii + 2) * sy]  = u_state[2 * sx + (ii + 2) * sy];
 
-                        u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + (ii + 2) * sy];
-                        u_state[(x2grid_size - 2) * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + (ii + 2) * sy];
+                        u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + ii * sy];
+                        u_state[(x2grid_size - 2) * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + ii * sy];
 
-                        if (bipolar)
+                        if (reflecting_theta)
                         {
-                            u_state[(x2grid_size - 1) * sx + ii * sy].s2 = - u_state[(x2grid_size - 4) * sx + (ii + 2) * sy].s2;
-                            u_state[(x2grid_size - 2) * sx + ii * sy].s2 = - u_state[(x2grid_size - 3) * sx + (ii + 2) * sy].s2;
+                            u_state[(x2grid_size - 1) * sx + ii * sy].s2 = - u_state[(x2grid_size - 4) * sx + ii * sy].s2;
+                            u_state[(x2grid_size - 2) * sx + ii * sy].s2 = - u_state[(x2grid_size - 3) * sx + ii * sy].s2;
                         }
                     }
                 }
@@ -260,7 +258,7 @@ namespace simbi{
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
         const hydro2d::Conserved *outer_zones,
-        const bool bipolar)
+        const bool reflecting_theta)
     {
         
         const int extent = (BuildPlatform == Platform::GPU) ? p.gridSize.x * p.blockSize.x * p.gridSize.y * p.blockSize.y : x1grid_size * x2grid_size; 
@@ -337,7 +335,7 @@ namespace simbi{
                         u_state[(x2grid_size - 1) * sx + ii * sy] = u_state[(x2grid_size - 4) * sx + ii * sy];
                         u_state[(x2grid_size - 2) * sx + ii * sy] = u_state[(x2grid_size - 3) * sx + ii * sy];
 
-                        if (bipolar)
+                        if (reflecting_theta)
                         {
                             u_state[(x2grid_size - 1) * sx + ii * sy].m2 = - u_state[(x2grid_size - 4) * sx + ii * sy].m2;
                             u_state[(x2grid_size - 2) * sx + ii * sy].m2 = - u_state[(x2grid_size - 3) * sx + ii * sy].m2;
@@ -367,7 +365,7 @@ namespace simbi{
         const int x3grid_size, 
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
-        const bool bipolar)
+        const bool reflecting_theta)
     {
         const int extent = (BuildPlatform == Platform::GPU) ? 
                             p.gridSize.z * p.gridSize.y * p.gridSize.x * p.blockSize.z * p.blockSize.y * p.blockSize.x 

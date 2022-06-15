@@ -97,7 +97,7 @@ namespace simbi
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
         const sr2d::Conserved *outer_zones = nullptr,
-        const bool bipolar = true);
+        const bool reflecting_theta = true);
 
     void config_ghosts2D(
         const ExecutionPolicy<> p,
@@ -107,7 +107,7 @@ namespace simbi
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
         const hydro2d::Conserved *outer_zones = nullptr,
-        const bool bipolar = true);
+        const bool reflecting_theta = true);
 
     void config_ghosts3D(
         const ExecutionPolicy<> p,
@@ -117,7 +117,7 @@ namespace simbi
         const int x3grid_size,  
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
-        const bool bipolar = true);
+        const bool reflecting_theta = true);
 
 } // end simbi
 

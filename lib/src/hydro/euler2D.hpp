@@ -24,7 +24,7 @@ namespace simbi {
         std::vector<hydro2d::Primitive> prims;
         std::vector<real> sourceRho, sourceM1, sourceM2, sourceE;
         real plm_theta, gamma, tend, cfl, dt, decay_const, hubble_param;
-        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, quirk_smoothing, bipolar;
+        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, quirk_smoothing, reflecting_theta;
         std::string coord_system;
         std::vector<real> x1, x2;
         luint nzones, ny, nx, active_zones, idx_active, n;
