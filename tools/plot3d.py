@@ -62,8 +62,8 @@ def plot_polar_plot(
     '''
     Plot the given data on a polar projection plot. 
     '''
-    num_fields = len(args.fields)
-    is_wedge   = args.nwedge > 0
+    num_fields  = len(args.fields)
+    is_wedge    = args.nwedge > 0
     rr, tt, phii = mesh['rr'], mesh['theta'], mesh['phii']
     t2     = - tt[::-1]
     x1max  = dset['x1max']
@@ -79,6 +79,8 @@ def plot_polar_plot(
                                 figsize=(15, 12), constrained_layout=True)
             ax    = axes[0]
             wedge = axes[1]
+            ax.grid(False)
+            wedge.grid(False)
         else:
             if x2max < np.pi:
                 figsize = (8, 5)
@@ -86,12 +88,16 @@ def plot_polar_plot(
                 figsize = (10, 8)
             fig, ax = plt.subplots(1, 1, subplot_kw={'projection': 'polar'},
                                 figsize=args.fig_dims, constrained_layout=False)
+            ax.grid(False)
     else:
         if is_wedge:
             ax    = axs[0]
             wedge = axs[1]
+            ax.grid(False)
+            wedge.grid(False)
         else:
             ax = axs
+            ax.grid(False)
     
     vmin,vmax = args.cbar[:2]
 
@@ -523,12 +529,12 @@ def plot_cartesian_plot(
     # Change the format of the field
     field_str = util.get_field_str(args)
     if args.log:
-        cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+        cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str))
     else:
-        cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
+        cbar.ax.set_ylabel(r'{}'.format(field_str))
     
     if args.setup != "":
-        fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20, y=0.95)
+        fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), y=0.95)
     
 def plot_1d_curve(
     fields: dict, 
@@ -566,7 +572,7 @@ def plot_1d_curve(
         else:
             ax.loglog(r, mass[args.tidx]/ np.max(mass[args.tidx]), label = f'{args.labels[case]} mass', linestyle='-.', color=colors[case])
             ax.loglog(r, fields['p'][args.tidx] / np.max(fields['p'][args.tidx]), label = f'{args.labels[case]} pressure', color=colors[case])
-        ax.legend(fontsize=20)
+        ax.legend()
         ax.axvline(0.65, linestyle='--', color='red')
         ax.axvline(1.00, linestyle='--', color='blue')
     else:
@@ -581,20 +587,20 @@ def plot_1d_curve(
     
 
     ax.set_xlim(x1min, x1max)
-    ax.set_xlabel(r'$r/R_\odot$', fontsize=20)
-    ax.tick_params(axis='both', labelsize=10)
+    ax.set_xlabel(r'$r/R_\odot$')
+    ax.tick_params(axis='both')
     
     # Change the format of the field
     field_str = util.get_field_str(args)
     
     if args.log:
         if num_fields == 1:
-            ax.set_ylabel(r'$\log$[{}]'.format(field_str), fontsize=20)
+            ax.set_ylabel(r'$\log$[{}]'.format(field_str))
         else:
             ax.legend()
     else:
         if num_fields == 1:
-            ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
+            ax.set_ylabel(r'{}'.format(field_str))
         else:
             ax.legend()
     
@@ -602,7 +608,7 @@ def plot_1d_curve(
         ax.set_title(r'$\theta = {:.2f}$ time: {:.3f}'.format(mesh['th'][args.tidx] * 180 / np.pi, tend))
     if not overplot:
         return fig
-    # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup,theta[args.tidx], tend), fontsize=20, y=0.95)
+    # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup,theta[args.tidx], tend), y=0.95)
     
 def plot_per_theta(
     fields:    dict, 
@@ -701,8 +707,8 @@ def plot_per_theta(
             
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
-    ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=15)
-    ax.set_ylabel(ylabel, fontsize=15)
+    ax.set_xlabel(r'$\theta [\rm deg]$')
+    ax.set_ylabel(ylabel)
     ax.set_xlim(theta[0], theta[-1])
     
 def plot_dec_rad(
@@ -799,8 +805,8 @@ def plot_dec_rad(
             
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
-    ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=15)
-    ax.set_ylabel(ylabel, fontsize=15)
+    ax.set_xlabel(r'$\theta [\rm deg]$')
+    ax.set_ylabel(ylabel)
     
     if not args.xlims:
         ax.set_xlim(mean_theta[0], mean_theta[-1])
@@ -977,17 +983,17 @@ def plot_hist(
         ax.set_ylim(args.ylims[0],args.ylims[1])
         
     if args.sub_split is None:
-        ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
+        ax.set_xlabel(r'$\Gamma\beta $')
         if args.kinetic:
-            ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+            ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$')
         elif args.enthalpy:
-            ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+            ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$')
         elif args.dm_du:
-            ax.set_ylabel(r'$dM/d\Gamma\beta ( > \Gamma \beta) \ [\rm{g}]$', fontsize=20)
+            ax.set_ylabel(r'$dM/d\Gamma\beta ( > \Gamma \beta) \ [\rm{g}]$')
         elif args.mass:
-            ax.set_ylabel(r'$M(> \Gamma \beta) \ [\rm{g}]$', fontsize=20)
+            ax.set_ylabel(r'$M(> \Gamma \beta) \ [\rm{g}]$')
         else:
-            ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
+            ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
             
         ax.tick_params('both', labelsize=15)
     else:        
@@ -998,7 +1004,7 @@ def plot_hist(
     ax.spines['top'].set_visible(False)
     
     if args.setup != "":
-        ax.set_title(r'{}, t ={:.2f} s'.format(args.setup, tend), fontsize=20)
+        ax.set_title(r'{}, t ={:.2f} s'.format(args.setup, tend))
     
     if overplot or args.sub_split is None:
         if args.labels is not None:
@@ -1219,7 +1225,7 @@ def plot_dx_domega(
             lw = 1
     
     if args.dec_rad:
-        ax_extra.set_ylabel(r'$r_{\rm dec} [\rm{cm}]$', fontsize=15)  # we already handled the x-label with ax
+        ax_extra.set_ylabel(r'$r_{\rm dec} [\rm{cm}]$')  # we already handled the x-label with ax
         
     if args.xlims is None:
         ax = ax if not energy_and_mass else ax1
@@ -1243,9 +1249,9 @@ def plot_dx_domega(
     fsize = 15 if not args.print else DEFAULT_SIZE
     if args.sub_split is None:
         if energy_and_mass:
-            ax2.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
+            ax2.set_xlabel(r'$\theta [\rm deg]$')
         else:
-            ax.set_xlabel(r'$\theta [\rm deg]$', fontsize=20)
+            ax.set_xlabel(r'$\theta [\rm deg]$')
         if 'ax0' in locals():
             ycoord = 0.5 if not energy_and_mass else 0.67
             if args.kinetic:
@@ -1260,29 +1266,29 @@ def plot_dx_domega(
         else:
             if len(args.cutoffs) == 1:
                 if args.kinetic:
-                    ax.set_ylabel(r'$E_{{\rm K, iso}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
+                    ax.set_ylabel(r'$E_{{\rm K, iso}} \ (\Gamma \beta > {})\ [\rm{{erg}}]$'.format(args.cutoffs[0]))
                 elif args.enthalpy:
-                    ax.set_ylabel(r'$H_{\rm iso} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
+                    ax.set_ylabel(r'$H_{\rm iso} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]))
                 elif args.dm_domega:
-                    ax.set_ylabel(r'$M_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoffs[0]), fontsize=15)
+                    ax.set_ylabel(r'$M_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{g}}]$'.format(args.cutoffs[0]))
                 elif args.fields[0] == 'temperature':
-                    ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{eV}}]$'.format(args.cutoffs[0]), fontsize=15)
+                    ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (\Gamma \beta > {}) \ [\rm{{eV}}]$'.format(args.cutoffs[0]))
                 else:
-                    ax.set_ylabel(r'$E_{{\rm T, iso}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=15)
+                    ax.set_ylabel(r'$E_{{\rm T, iso}} \ (\Gamma \beta > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]))
             else:
                 units = r'[\rm{{erg}}]' if not args.norm else ''
                 if not args.dm_domega:
                     if args.kinetic:
-                        ax.set_ylabel(r'$E_{{\rm K, iso}} \ (> \Gamma \beta)\ %s$'%(units), fontsize=15)
+                        ax.set_ylabel(r'$E_{{\rm K, iso}} \ (> \Gamma \beta)\ %s$'%(units))
                     elif args.enthalpy:
-                        ax.set_ylabel(r'$H_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
+                        ax.set_ylabel(r'$H_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units))
                     else:
-                        ax.set_ylabel(r'$E_{{\rm T, iso}} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
+                        ax.set_ylabel(r'$E_{{\rm T, iso}} \ (>\Gamma \beta) \ %s$'%(units))
                 elif args.dm_domega:
                     units = r'[\rm{{g}}]' if not args.norm else ''
-                    ax.set_ylabel(r'$M_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units), fontsize=15)
+                    ax.set_ylabel(r'$M_{\rm iso} \ (>\Gamma \beta) \ %s$'%(units))
                 elif args.fields[0] == 'temperature':
-                    ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{eV}}]$', fontsize=15)
+                    ax.set_ylabel(r'$\bar{T}_{\rm{iso}} \ (>\Gamma \beta) \ [\rm{{eV}}]$')
         
         ax.tick_params('both', labelsize=fsize)
     else:
@@ -1307,7 +1313,7 @@ def plot_dx_domega(
         axins.spines['top'].set_visible(False)
 
     if args.setup != "":
-        ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
+        ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend))
     if args.log:
         if energy_and_mass:
             ax1.set_yscale('log')
@@ -1522,17 +1528,17 @@ def main():
             if args.setup != "":
                 fig.suptitle(f'{args.setup}')
             if args.de_domega or args.dm_domega:
-                axs[-1].set_xlabel(r'$\theta \ \rm[deg]$', fontsize=20)
+                axs[-1].set_xlabel(r'$\theta \ \rm[deg]$')
             else:
-                axs[-1].set_xlabel(r'$\Gamma \beta$', fontsize=20)
+                axs[-1].set_xlabel(r'$\Gamma \beta$')
             if args.de_domega or args.dm_domega:
                 if len(args.cuotff) == 1:
                     if args.kinetic:
-                        fig.text(0.030, 0.5, r'$E_{{\rm K, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=20, va='center', rotation='vertical')
+                        fig.text(0.030, 0.5, r'$E_{{\rm K, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), va='center', rotation='vertical')
                     elif args.dm_domega:
-                        fig.text(0.030, 0.5, r'$M_{{\rm iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=20, va='center', rotation='vertical')
+                        fig.text(0.030, 0.5, r'$M_{{\rm iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), va='center', rotation='vertical')
                     else:
-                        fig.text(0.030, 0.5, r'$E_{{\rm T, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), fontsize=20, va='center', rotation='vertical')
+                        fig.text(0.030, 0.5, r'$E_{{\rm T, iso}}( > {}) \ [\rm{{erg}}]$'.format(args.cutoffs[0]), va='center', rotation='vertical')
             else:
                 units = r"[\rm{erg}]" if not args.norm else ""
                 xpos  = 0.030 if not args.print else -0.020
