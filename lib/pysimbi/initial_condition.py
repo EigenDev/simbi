@@ -97,13 +97,23 @@ def load_checkpoint(model, filename, dim, mesh_motion):
             if mesh_motion:
                 nx_active = ds.attrs['xactive_zones']
                 ny_active = ds.attrs['yactive_zones']
-                    
+                if (nx_active == 0 or ny_active == 0):
+                    nx_active = nx 
+                    ny_active = ny 
+                    if ds.attrs['boundary_condition'] != 'periodic':
+                        if ds.attrs['first_order']:
+                            nx_active -= 2
+                            ny_active -= 2
+                        else:
+                            nx_active -= 4
+                            ny_active -= 4
+                        
                 if ds.attrs['linspace']:
-                    model.x1 = np.linspace(x1min, x1max, nx)
-                    model.x2 = np.linspace(x1min, x2max, ny)
+                    model.x1 = np.linspace(x1min, x1max, nx_active)
+                    model.x2 = np.linspace(x1min, x2max, ny_active)
                 else:
-                    model.x1 = np.geomspace(x1min, x1max, nx)
-                    model.x2 = np.linspace(x2min,  x2max, ny)
+                    model.x1 = np.geomspace(x1min, x1max, nx_active)
+                    model.x2 = np.linspace(x2min,  x2max, ny_active)
                 
                 volume_factor = helpers.calc_cell_volume2D(model.x1, model.x2)
                 
@@ -130,13 +140,17 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                         nghosts = 1 
                     else:
                         nghosts = 2 
-                    
-                    model.u[:, nghosts:-nghosts, nghosts:-nghosts] *= volume_factor
-                    model.u[:, :, 0: nghosts] *= volume_factor[:, 0]
-                    model.u[:, :, -nghosts: ] *= volume_factor[:, -1]
-                    model.u[:, 0: nghosts, :] *= volume_factor[0, :]
-                    model.u[:, -nghosts: , :] *= volume_factor[-1, :]
-            
+                model.u[:, nghosts:-nghosts, nghosts:-nghosts] *= volume_factor
+                model.u[:, nghosts:-nghosts, 0: nghosts]       *= volume_factor[:, 0].reshape(-1,1)
+                model.u[:, nghosts:-nghosts, -nghosts: ]       *= volume_factor[:, -1].reshape(-1,1)
+                model.u[:, 0: nghosts, nghosts:-nghosts]       *= volume_factor[0, :]
+                model.u[:, -nghosts: , nghosts:-nghosts]       *= volume_factor[-1, :]
+                for i in range(nghosts):
+                    model.u[:, :,  (i + 0)] = model.u[:, :,  (nghosts + 0)]
+                    model.u[:, :, -(i + 1)] = model.u[:, :, -(nghosts + 1)]
+                    model.u[:,  (i + 0), :] = model.u[:,  (nghosts + 0), :]
+                    model.u[:, -(i + 1), :] = model.u[:, -(nghosts + 1), :]
+        
 
 def initializeModel(model, first_order = False, boundary_condition = "outflow", scalars = 0, volume_factor = 1):
     # Check if u-array is empty. If it is, generate an array.
