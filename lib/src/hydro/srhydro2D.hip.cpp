@@ -625,9 +625,8 @@ void SRHD2D::cons2prim(
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
     auto gamma = this->gamma;
 
-    const real step        = (first_order) ? 1.0 : 0.5;
-    const real radius      = (first_order) ? 1 : 2;
-
+    const luint step        = (first_order) ? 1.0 : 0.5;
+    const luint radius      = (first_order) ? 1 : 2;
     #if GPU_CODE
     const bool mesh_motion  = this->mesh_motion;
     const auto active_zones = this->active_zones;
@@ -652,11 +651,11 @@ void SRHD2D::cons2prim(
         {
             if (mesh_motion && (geometry == simbi::Geometry::SPHERICAL))
             {
-                const auto ii = gid % self->nx;
-                const auto jj = gid / self->nx;
-                const lint ireal = helpers::get_real_idx(ii, radius, self->xphysical_grid);
-                const lint jreal = helpers::get_real_idx(jj, radius, self->yphysical_grid); 
-                const real dV = self->get_cell_volume(ireal, jreal, geometry, step);
+                const luint ii   = gid % self->nx;
+                const luint jj   = gid / self->nx;
+                const auto ireal = helpers::get_real_idx(ii, radius, self->xphysical_grid);
+                const auto jreal = helpers::get_real_idx(jj, radius, self->yphysical_grid); 
+                const real dV    = self->get_cell_volume(ireal, jreal, geometry, step);
                 invdV = 1.0 / dV;
             }
             #if GPU_CODE
@@ -675,7 +674,6 @@ void SRHD2D::cons2prim(
             const real tau  = conserved_buff[tid].tau * invdV;
             const real Dchi = conserved_buff[tid].chi * invdV; 
             const real S    = std::sqrt(S1 * S1 + S2 * S2);
-
             #if GPU_CODE
             real peq = self->gpu_pressure_guess[gid];
             #else 
@@ -1058,8 +1056,7 @@ void SRHD2D::advance(
                 const real dcos         = std::cos(tl) - std::cos(tr);
                 const real dVtot        = (2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos);
                 const real factor       = (self->mesh_motion) ? dVtot : 1;  
-                // writeln("vfaceL: {}, vfaceR: {}, factor: {}, frf: {}, flf: {}", vfaceL, vfaceR, factor, frf.d, flf.d);
-                // pause_program();
+
                 #if GPU_CODE
                 const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceD[real_loc];
                 const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS1[real_loc];
