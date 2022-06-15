@@ -928,6 +928,7 @@ SRHD::simulate1D(
     if (outer_zones) {
         if constexpr(BuildPlatform == Platform::GPU) {
             simbi::gpu::api::gpuFree(ozones);
+            delete[] ozones;
         } else {
             delete[] ozones;
         }
