@@ -205,7 +205,7 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE 
-        constexpr luint get_real_idx(const luint idx, const luint offset, const luint active_zones) 
+        constexpr lint get_real_idx(const lint idx, const lint offset, const lint active_zones) 
         {
             lint real_idx = (idx - offset > 0) * (idx - offset);
             if (idx > active_zones + 1) {
