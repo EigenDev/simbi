@@ -1445,13 +1445,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     }
 
     if (outer_zones) {
-
         if constexpr(BuildPlatform == Platform::GPU) {
             simbi::gpu::api::deviceSynch();
-            simbi::gpu::api::gpuFree(ozones);
-            delete[] ozones;
+            simbi::gpu::api::gpuFree(dev_outer_zones);
+            delete[] outer_zones;
         } else {
-            delete[] ozones;
+            delete[] outer_zones;
         }
     }
 
