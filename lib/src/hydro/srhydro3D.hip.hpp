@@ -42,7 +42,7 @@ namespace simbi
 
         //==============GPU Mirrors================
         real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceS3, *gpu_sourceTau, *gpu_pressure_guess;
-        real *sys_state, *dt_min;
+        real *dt_min;
         sr3d::Primitive *gpu_prims;
         sr3d::Conserved *gpu_cons;
 

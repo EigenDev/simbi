@@ -178,10 +178,9 @@ namespace simbi
           //             GPU RESOURCES
           //==============================================================
           luint blockSize;
-          sr1d::Conserved *gpu_cons, *gpu_du_dt, *gpu_u1;
+          sr1d::Conserved *gpu_cons;
           sr1d::Primitive *gpu_prims;
           real            *gpu_pressure_guess, *gpu_sourceD, *gpu_sourceS, *gpu_source0, *dt_min;
-          CLattice1D      *gpu_coord_lattice;
           
      };
      

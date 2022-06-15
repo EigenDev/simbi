@@ -39,8 +39,7 @@ namespace simbi
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
 
         //==============GPU Mirrors================
-        real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceTau, *gpu_pressure_guess;
-        real *sys_state, *dt_min;
+        real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceTau, *gpu_pressure_guess, *dt_min;
         sr2d::Primitive *gpu_prims;
         sr2d::Conserved *gpu_cons;
         

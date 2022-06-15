@@ -42,7 +42,6 @@ Newtonian1D::Newtonian1D(
     real cfl, 
     std::vector<real> x1,
     std::string coord_system = "cartesian") :
-
     state(state),
     gamma(gamma),
     x1(x1),

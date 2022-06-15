@@ -22,7 +22,8 @@ namespace simbi {
     struct Newtonian1D {
         // Initializer list args
         std::vector<std::vector<real>> state;
-        real gamma, cfl;
+        real gamma;
+        real cfl;
         std::vector<real> x1;
         std::string coord_system;
 
@@ -46,10 +47,9 @@ namespace simbi {
         //             GPU RESOURCES
         //==============================================================
         luint blockSize;
-        hydro1d::Conserved *gpu_cons, *gpu_du_dt, *gpu_u1;
+        hydro1d::Conserved *gpu_cons;
         hydro1d::Primitive *gpu_prims;
         real               *gpu_sourceRho, *gpu_sourceMom, *gpu_sourceE, *dt_min;
-        CLattice1D         *gpu_coord_lattice;
         
         Newtonian1D();
         Newtonian1D(

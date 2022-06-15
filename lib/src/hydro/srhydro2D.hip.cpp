@@ -1269,7 +1269,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     Conserved *outer_zones = nullptr;
     Conserved *dev_outer_zones = nullptr;
     // Fill outer zones if user-defined conservative functions provided
-    const real step = (first_order) ? 1.0 : 0.5;
+    const real step = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
     if (d_outer)
     {
         if constexpr(BuildPlatform == Platform::GPU) {
