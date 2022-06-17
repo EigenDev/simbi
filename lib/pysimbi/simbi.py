@@ -391,7 +391,7 @@ class Hydro:
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensions, mesh_motion)
         
-        is_periodic = boundary_condition == 'periodic'
+        periodic = boundary_condition == 'periodic'
         start_time  = tstart if self.t == 0 else self.t
         #Convert strings to byte arrays
         data_directory     = os.path.join(data_directory, '').encode('utf-8')
@@ -413,7 +413,7 @@ class Hydro:
         
             
         if self.dimensions == 1:
-            sources = np.zeros((3, self.x1.size), dtype=float) if not sources else np.asarray(sources)
+            sources = np.zeros(self.u.shape) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
                 
             kwargs = {}
@@ -498,10 +498,11 @@ class Hydro:
                 self.x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
                 self.x3 = np.linspace(self.geometry[2][0], self.geometry[2][1], self.zNpts)
             
-            sources = np.zeros((5, self.x3.size, self.x2.size, self.x1.size), dtype=float) if not sources else np.asarray(sources)
+            sources = np.zeros(self.u.shape[:-1], dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
                 
             if self.regime == "classical":
+                # TODO: Implement Newtonian 3D
                 pass
                 # b = PyState3D(u, self.gamma, cfl=cfl, self.x1=self.x1, x2=x2, coord_system=coordinates)
             else:
@@ -521,6 +522,6 @@ class Hydro:
                 linspace        = linspace,
                 hllc            = hllc)  
         
-        return self._cleanup(solution, first_order) if not is_periodic else solution
+        return self._cleanup(solution, first_order) if not periodic else solution
         
     
