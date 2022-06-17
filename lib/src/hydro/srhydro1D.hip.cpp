@@ -245,7 +245,7 @@ void SRHD::advance(
                 #if GPU_CODE
                     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                     const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
-                    self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt * factor;
+                    self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt * factor;
                 #else 
                     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                     const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
