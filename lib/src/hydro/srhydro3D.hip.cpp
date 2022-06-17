@@ -724,69 +724,31 @@ void SRHD3D::advance(
             prim_buff[tza * bx * by + tya * bx + txa] = self->gpu_prims[aid];
             if (tz < radius)    
             {
-                if (ka + zextent > nz - 1) tzl = nz - radius - ka + tz;
+                if (blockIdx.z == p.gridSize.z - 1 && (ka + zextent > nz - radius + tz)) {
+                    tzl = nz - radius - ka + tz;
+                }
                 prim_buff[(tza - radius) * bx * by + tya * bx + txa] = self->gpu_prims[(ka - radius) * nx * ny + ja * nx + ia];
                 prim_buff[(tza + tzl   ) * bx * by + tya * bx + txa] = self->gpu_prims[(ka + tzl   ) * nx * ny + ja * nx + ia];
-
-                // Sometimes there's a single active thread, so we have to load all 5 zones immediately
-                if (radius == 2)
-                {
-                    if (tzl == 1)
-                    {
-                        prim_buff[(tza + 1 - radius) * bx * by + tya * bx + txa] =  self->gpu_prims[(ka + 1 - radius) * nx * ny + ja * nx + ia];
-                        prim_buff[(tza + 1 + tzl   ) * bx * by + tya * bx + txa] =  self->gpu_prims[(ka + 1 + tzl   ) * nx * ny + ja * nx + ia]; 
-                    }
-                    prim_buff[(tza + tzl - 1) * bx * by + tya * bx + txa] =  self->gpu_prims[(ka + tzl - 1) * nx * ny + ja * nx + ia]; 
-                }  
             }
             if (ty < radius)    
             {
-                if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
+                if (blockIdx.y == p.gridSize.y - 1 && (ja + yextent > ny - radius + ty)) {
+                    tyl = ny - radius - ja + ty;
+                }
                 prim_buff[tza * bx * by + (tya - radius) * bx + txa] = self->gpu_prims[ka * nx * ny + (ja - radius) * nx + ia];
                 prim_buff[tza * bx * by + (tya + tyl   ) * bx + txa] = self->gpu_prims[ka * nx * ny + (ja + tyl   ) * nx + ia];
-
-                // Sometimes there's a single active thread, so we have to load all 5 zones immediately
-                if (radius == 2)
-                {
-                    if (tyl == 1)
-                    {
-                        prim_buff[tza * bx * by + (tya + 1 - radius) * bx + txa] =  self->gpu_prims[ka * nx * ny + ((ja + 1 - radius) * nx) + ia];
-                        prim_buff[tza * bx * by + (tya + 1 + tyl) * bx + txa]    =  self->gpu_prims[ka * nx * ny + ((ja + 1 + txl   ) * nx) + ia]; 
-                    }
-                    prim_buff[tza * bx * by + (tya + tyl - 1) * bx + txa]    =  self->gpu_prims[ka * nx * ny + ((ja + txl - 1) * nx) + ia]; 
-
-                } 
             }
             if (tx < radius)
             {   
-                if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
-                // printf("ia: %lu, val: %lu, txl: %lu, txa + txl: %lu\n", ia, ia + xextent, txl, txa + txl);
+                if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + tx)) {
+                    txl = nx - radius - ia + tx;
+                }
                 prim_buff[tza * bx * by + tya * bx + txa - radius] =  self->gpu_prims[ka * nx * ny + ja * nx + ia - radius];
                 prim_buff[tza * bx * by + tya * bx + txa +    txl] =  self->gpu_prims[ka * nx * ny + ja * nx + ia + txl]; 
-
-                // Sometimes there's a single active thread, so we have to load all 5 zones immediately
-                if (radius == 2)
-                {
-                    if (txl == 1)
-                    {
-                        prim_buff[tza * bx * by + tya * bx + txa + 1 - radius] =  self->gpu_prims[ka * nx * ny + ja * nx + ia + 1 - radius];
-                        prim_buff[tza * bx * by + tya * bx + txa + 1 +    txl] =  self->gpu_prims[ka * nx * ny + ja * nx + ia + 1 + txl]; 
-                    }
-                    prim_buff[tza * bx * by + tya * bx + txa + txl - 1] = self->gpu_prims[ka * nx * ny + ja * nx + ia + txl - 1]; 
-                }
             }
             simbi::gpu::api::synchronize();
         #endif
         
-        // if (ia == nx - 3)
-        // {
-        //     printf("[%lu, %lu, txl=%lu, xext: %lu] LL: %3.e, L: %3.e, C: %3.e, R: %3.e, RR: %3.e\n", ia, txa, txl, xextent, 
-        //     prim_buff[tza * bx * by + tya * bx + txa - 2].rho,
-        //     prim_buff[tza * bx * by + tya * bx + txa - 1].rho,
-        //     prim_buff[tza * bx * by + tya * bx + txa - 0].rho,
-        //     prim_buff[tza * bx * by + tya * bx + txa + 1].rho,
-        //     prim_buff[tza * bx * by + tya * bx + txa + 2].rho);
-        // }
         if (self->first_order){
             xprims_l = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
             xprims_r = prim_buff[tza * bx * by + tya * bx + (txa + 1)];

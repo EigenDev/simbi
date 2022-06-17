@@ -150,7 +150,7 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE
-        real get_cell_volume(const lint ii, const lint jj, const simbi::Geometry geometry, const real step)
+        real get_cell_volume(const lint ii, const lint jj, const simbi::Geometry geometry)
         {
             const real xl     = get_x1face(ii, geometry, 0);
             const real xr     = get_x1face(ii, geometry, 1);

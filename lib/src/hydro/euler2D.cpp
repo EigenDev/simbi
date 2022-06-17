@@ -522,19 +522,19 @@ void Newtonian2D::advance(
             prim_buff[tya * sx + txa * sy] = self->gpu_prims[aid];
             if (ty < pseudo_radius)
             {
-                if (ja + yextent > ny - 1) tyl = ny - radius - ja + ty;
+                if (blockIdx.y == p.gridSize.y - 1 && (ja + yextent > ny - radius + ty)) {
+                    tyl = ny - radius - ja + ty;
+                }
                 prim_buff[(tya - pseudo_radius) * sx + txa] = self->gpu_prims[helpers::mod(ja - pseudo_radius, ny) * nx + ia];
                 prim_buff[(tya + tyl) * sx + txa]           = self->gpu_prims[(ja + tyl) % ny * nx + ia]; 
             }
             if (tx < pseudo_radius)
             {   
-                if (ia + xextent > nx - 1) txl = nx - radius - ia + tx;
+                if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + tx)) {
+                    txl = nx - radius - ia + tx;
+                }
                 prim_buff[tya * sx + txa - pseudo_radius] =  self->gpu_prims[ja * nx + helpers::mod(ia - pseudo_radius, nx)];
                 prim_buff[tya * sx + txa +    txl]        =  self->gpu_prims[ja * nx +    (ia + txl) % nx]; 
-                if ((radius == 2) && (txl < xextent))
-                {
-                    prim_buff[tya * sx + txa + txl + 1] =  self->gpu_prims[ja * nx + ia + txl + 1]; 
-                }
             }
             simbi::gpu::api::synchronize();
         #endif
