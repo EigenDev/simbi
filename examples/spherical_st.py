@@ -45,8 +45,8 @@ def main():
     rho_init = rho0(0, np.pi)
     v_init   = 0.
     ntheta   = args.npolar
-    rmin     = 0.1
-    rmax     = 1.0
+    rmin     = 0.01
+    rmax     = 10.0
     
     theta_min = 0
     theta_max = np.pi
