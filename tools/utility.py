@@ -8,6 +8,7 @@ import astropy.units as units
 import numpy as np 
 import argparse 
 import matplotlib.pyplot as plt 
+import os
 from typing import Union
 
 # FONT SIZES
@@ -24,7 +25,7 @@ m   = const.M_sun.cgs
  
 rho_scale  = m / (4./3. * np.pi * R_0 ** 3) 
 e_scale    = m * c **2
-pre_scale  = e_scale / (4./3. * np.pi * R_0**3)
+edens_scale  = e_scale / (4./3. * np.pi * R_0**3)
 time_scale = R_0 / c
 
 
@@ -421,7 +422,7 @@ def read_1d_file(filename: str) -> dict:
         
         a    = (4 * const.sigma_sb.cgs / c)
         k    = const.k_B.cgs
-        T    = (3 * p * pre_scale  / a)**(1./4.)
+        T    = (3 * p * edens_scale  / a)**(1./4.)
         T_eV = (k * T).to(units.eV)
         
         h = 1.0 + 4/3 * p / (rho * (4/3 - 1))
@@ -463,11 +464,11 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
         return fields['rho']*h*W**2 - fields['p']
     elif var == "temperature":
         a    = (4.0 * const.sigma_sb.cgs / c)
-        T    = (3.0 * fields['p'] * pre_scale  / a)**0.25
+        T    = (3.0 * fields['p'] * edens_scale  / a)**0.25
         return T
     elif var == 'T_ev':
         a    = (4.0 * const.sigma_sb.cgs / c)
-        T    = (3.0 * fields['p'] * pre_scale  / a)**0.25
+        T    = (3.0 * fields['p'] * edens_scale  / a)**0.25
         T_eV = (const.k_B.cgs * T).to(units.eV)
         return T_eV.value
     elif var == 'gamma_beta':
@@ -502,7 +503,7 @@ def get_colors(interval: np.ndarray, cmap: plt.cm, vmin: float = None, vmax: flo
     arr: the colormap array generate by the user conditions
     """
     norm = plt.Normalize(vmin, vmax)
-    return cmap(norm(interval))
+    return cmap(interval)
 
 def find_nearest(arr: list, val: float) -> Union[int, float]:
     arr = np.asarray(arr)
@@ -512,3 +513,23 @@ def find_nearest(arr: list, val: float) -> Union[int, float]:
 def fill_below_intersec(x: np.ndarray, y: np.ndarray, constraint: float, color: float) -> None:
     ind = find_nearest(y, constraint)[0]
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
+    
+def get_file_list(inputs: str) -> list:
+    files = []
+    for obj in inputs:
+        #check if path is a file
+        isFile = os.path.isfile(obj)
+
+        #check if path is a directory
+        isDirectory = os.path.isdir(obj)
+        
+        if isDirectory:
+            file_path = os.path.join(obj, '')
+            files += sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
+            break 
+        else:
+            files += sorted([file for file in inputs])
+            break
+    # sort by length of strings now
+    files.sort(key=len, reverse=False)
+    return files, len(files)

@@ -99,7 +99,7 @@ def plot_polar_plot(
             if field == 'rho' or field == 'D':
                 unit_scale[idx] = util.rho_scale.value
             elif field == 'p' or field == 'energy' or field == 'energy_rst':
-                unit_scale[idx] = util.pre_scale.value
+                unit_scale[idx] = util.edens_scale.value
     
     units = unit_scale if args.units else np.ones(num_fields)
      
@@ -580,6 +580,12 @@ def plot_1d_curve(
             else:
                 var = fields[field]
             
+            if args.units:
+                if field == 'p' or field == 'energy':
+                    var *= util.e_scale.value
+                elif field == 'D' or field == 'rho':
+                    var *= util.rho_scale.value
+                    
             if args.labels:
                 label = r'$\rm {}, t={:.1f}$'.format(args.labels[case], tend)
             else:
@@ -597,11 +603,13 @@ def plot_1d_curve(
     ax.set_xlim(x1min, x1max)
     ax.set_xlabel(r'$r/R_\odot$', fontsize=20)
     ax.tick_params(axis='both', labelsize=10)
-
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
     if args.legend:
         ax.legend()
-    else:
-        ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
+    if len(args.fields) == 1:
+        ax.set_ylabel(r'{}'.format(field_labels), fontsize=20)
+        
     
     if args.setup != "":
         ax.set_title(r'$\theta = {:.2f}$ time: {:.3f}'.format(mesh['th'][args.tidx] * 180 / np.pi, tend))
@@ -634,7 +642,7 @@ def plot_per_theta(
             var = fields[field].copy()
         if args.units:
             if field == 'p' or field == 'energy':
-                var *= prutil.e_scale.value
+                var *= util.e_scale.value
             elif field == 'D' or field == 'rho':
                 var *= util.rho_scale.value
 

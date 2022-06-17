@@ -10,37 +10,19 @@ import matplotlib.colors as colors
 import argparse 
 import h5py 
 import astropy.constants as const
+import os
 
+try:
+    import cmasher as cmr 
+except ImportError:
+    pass 
+
+from cycler import cycler
 from utility import DEFAULT_SIZE, SMALL_SIZE, BIGGER_SIZE
 from matplotlib.animation import FuncAnimation
 
-import os, os.path
-
 derived = ['gamma_beta', 'temperature', 'D', 's', 'energy']
 field_choices = ['rho', 'v', 'p'] + derived
-
-def get_frames(path: str):
-    #check if path is a file
-    isFile = os.path.isfile(path)
-
-    #check if path is a directory
-    isDirectory = os.path.isdir(path)
-    
-    if isDirectory:
-        file_path = os.path.join(path, '')
-        files = sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
-    else:
-        files = sorted([file for file in args.files])
-    
-    # sort by length of strings now
-    files.sort(key=len, reverse=False)
-    
-    frame_count, flist = len(files), files
-    # Get number of files in dir
-    # total_frames = len([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
-    # frames       = sorted([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
-
-    return frame_count, flist
 
 def plot_profile(fig, ax, filename, args):
     fields, setup, mesh = util.read_1d_file(filename)
@@ -50,6 +32,7 @@ def plot_profile(fig, ax, filename, args):
         tend *= util.time_scale 
     
     field_labels = util.get_field_str(args)
+    label = None
     for idx, field in enumerate(args.fields):
         unit_scale = 1.0
         if args.units:
@@ -65,6 +48,7 @@ def plot_profile(fig, ax, filename, args):
         
         if args.scale_down:
             var /= args.scale_down[idx]
+            
             
         if args.labels:
             label = r'$\rm {}$'.format(args.labels[case])
@@ -192,8 +176,18 @@ def main():
     parser.add_argument('--labels', dest='labels', nargs='+',help='map labels to filenames')
     parser.add_argument('--xlims', dest = 'xlims', metavar='Domain',default = None, help='The domain range', nargs='+', type=float)
     parser.add_argument('--scale_down', dest='scale_down', default=None, type=float, help='list of values to scale down fields', nargs='+')
+    parser.add_argument('--dbg', dest='dbg', default=False, action='store_true', help='set if want dark background in plots')
+    parser.add_argument('--frame_range', dest='frame_range', default = [None, None], nargs=2, type=int)
+    parser.add_argument('--cmap', dest='cmap', default='viridis', type=str, help='matplotlib color map')
+    parser.add_argument('--clims', dest='clims', default=[0, 1], type=float, nargs='+', help='color limits')
     args = parser.parse_args()
 
+    vmin, vmax  = args.clims 
+    cinterval   = np.linspace(vmin, vmax, len(args.fields))
+    cmap        = plt.cm.get_cmap(args.cmap)
+    colors      = util.get_colors(cinterval, cmap, vmin, vmax)
+    plt.rc('axes', prop_cycle=(cycler(color=colors)))
+    
     if args.tex:
         plt.rc('font',   size=BIGGER_SIZE)          # controls default text sizes
         plt.rc('axes',   titlesize=BIGGER_SIZE)     # fontsize of the axes title
@@ -211,8 +205,14 @@ def main():
                 "font.size": BIGGER_SIZE
             }
         )
-    fig, ax = plt.subplots(1, 1, figsize=(15, 8))
-    frame_count, flist = get_frames(args.files[0])
+    flist, frame_count = util.get_file_list(args.files)
+    flist              = flist[args.frame_range[0]: args.frame_range[1]]
+    frame_count        = len(flist)
+        
+    fig, ax     = plt.subplots(1, 1, figsize=(15, 8))
+    
+    if args.dbg:
+        plt.style.use('dark_background')
     
     def init_mesh(filename):
         return plot_profile(fig, ax, filename, args)

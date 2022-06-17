@@ -460,9 +460,9 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     vmin,vmax = args.cbar
 
     if args.log:
-        kwargs = {'norm': colors.LogNorm(vmin = vmin, vmax = vmax)}
+        kwargs = {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)}
     else:
-        kwargs = {'norm': colors.PowerNorm(2.0, vmin=vmin, vmax=vmax)}
+        kwargs = {'norm': mcolors.PowerNorm(2.0, vmin=vmin, vmax=vmax)}
         
     if args.rcmap:
         color_map = (plt.cm.get_cmap(args.cmap)).reversed()
@@ -490,10 +490,10 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     else:
         cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
         
-    fig.suptitle('{} at t = {:.2f} s'.format(args.setup[0], tend), fontsize=20, y=0.95)
+    fig.suptitle('{} at t = {:.2f} s'.format(args.setup, tend), fontsize=20, y=0.95)
     
-def create_mesh(fig, ax, filepath, filename, cbaxes, args):
-    fields, setups, mesh = util.read_2d_file(args, filepath+filename)
+def create_mesh(fig, ax, filename, cbaxes, args):
+    fields, setups, mesh = util.read_2d_file(args, filename)
     if setups["is_cartesian"]:
         plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, setups)
     else:      
@@ -506,7 +506,7 @@ def main():
         description='Plot a 2D Figure From a File (H5).',
         epilog="This Only Supports H5 Files Right Now")
     
-    parser.add_argument('data_dir', metavar='dir', nargs='+',help='A data directory to retrieve the h5 files')
+    parser.add_argument('files', metavar='files', nargs='+',help='A data directory to retrieve the h5 files or a list of h5 files')
     parser.add_argument('setup', metavar='setup', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
     parser.add_argument('--fields', dest = "fields", metavar='Field Variable', nargs='+',help='The name of the field variable you\'d like to plot',choices=field_choices, default=["rho"])
     parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',default = 0.0, help='The domain range')
@@ -568,11 +568,10 @@ def main():
             
     if args.dbg:
         plt.style.use('dark_background')
-        
-    frame_count, flist = get_frames(args.data_dir[0], args.file_max)
     
-    flist      = flist[args.frame_range[0]: args.frame_range[1]]
-    frame_count = len(flist)
+    flist, frame_count = util.get_file_list(args.files)
+    flist              = flist[args.frame_range[0]: args.frame_range[1]]
+    frame_count        = len(flist)
     
     num_fields = len(args.fields)
     if num_fields > 1:
@@ -582,7 +581,7 @@ def main():
             args.cbar += (num_fields - 1) * [None, None]
     
     # read the first file and infer the system configuration from it
-    init_setup = util.read_2d_file(args, args.data_dir[0] + flist[0])[1]
+    init_setup = util.read_2d_file(args, flist[0])[1]
     if init_setup["is_cartesian"]:
         fig, ax = plt.subplots(1, 1, figsize=(11,10), constrained_layout=False)
         divider = make_axes_locatable(ax)
@@ -629,9 +628,9 @@ def main():
     
     def init_mesh(filename):
         if not args.pictorial:
-            p = create_mesh(fig, ax, args.data_dir[0], filename, cbaxes, args)
+            p = create_mesh(fig, ax, filename, cbaxes, args)
         else:
-            p = create_mesh(fig, ax, args.data_dir[0], filename, None, args)
+            p = create_mesh(fig, ax, filename, None, args)
         
         return p
         
@@ -655,9 +654,9 @@ def main():
         # Not strictly neccessary, just so we know we are stealing these from
         # the global scope
         if not args.pictorial:
-            pcolor_mesh = create_mesh(fig, ax, args.data_dir[0], flist[frame], cbaxes, args)
+            pcolor_mesh = create_mesh(fig, ax, flist[frame], cbaxes, args)
         else:
-            pcolor_mesh = create_mesh(fig, ax, args.data_dir[0], flist[frame], None, args)
+            pcolor_mesh = create_mesh(fig, ax, flist[frame], None, args)
 
         return pcolor_mesh
 
