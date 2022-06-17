@@ -662,7 +662,7 @@ void SRHD2D::cons2prim(
                 const luint jj   = gid / self->nx;
                 const auto ireal = helpers::get_real_idx(ii, radius, self->xphysical_grid);
                 const auto jreal = helpers::get_real_idx(jj, radius, self->yphysical_grid); 
-                const real dV    = self->get_cell_volume(ireal, jreal, geometry);
+                const real dV    = self->get_cell_volume(ireal, jreal, self->geometry);
                 invdV = 1.0 / dV;
             }
 
