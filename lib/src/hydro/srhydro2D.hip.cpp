@@ -641,6 +641,12 @@ void SRHD2D::cons2prim(
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
     const luint radius = (first_order) ? 1 : 2;
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
+         #if GPU_CODE
+        auto* const conserved_buff = self->gpu_cons;
+        #else
+        auto* const conserved_buff = &cons[0];
+        #endif 
+
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;
@@ -662,21 +668,11 @@ void SRHD2D::cons2prim(
                 invdV = 1.0 / dV;
             }
 
-            #if GPU_CODE
-            extern __shared__ Conserved  conserved_buff[];
-            // load shared memory
-            conserved_buff[tid] = self->gpu_cons[gid];
-            simbi::gpu::api::synchronize();
-            #else
-            auto* const conserved_buff = &cons[0];
-            #endif 
-
-            
-            const real D    = conserved_buff[tid].d   * invdV;
-            const real S1   = conserved_buff[tid].s1  * invdV;
-            const real S2   = conserved_buff[tid].s2  * invdV;
-            const real tau  = conserved_buff[tid].tau * invdV;
-            const real Dchi = conserved_buff[tid].chi * invdV; 
+            const real D    = conserved_buff[gid].d   * invdV;
+            const real S1   = conserved_buff[gid].s1  * invdV;
+            const real S2   = conserved_buff[gid].s2  * invdV;
+            const real tau  = conserved_buff[gid].tau * invdV;
+            const real Dchi = conserved_buff[gid].chi * invdV; 
             const real S    = std::sqrt(S1 * S1 + S2 * S2);
             #if GPU_CODE
             real peq = self->gpu_pressure_guess[gid];
@@ -1313,7 +1309,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 if constexpr(BuildPlatform == Platform::GPU) {
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
-                    const real gtx_emperical_bw       = total_zones * sizeof(Primitive) / (delta_t.count() * 1e9);
+                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t.count() * 1e9);
                     writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, total_zones/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
                     writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, total_zones/delta_t.count());
@@ -1381,7 +1377,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 if constexpr(BuildPlatform == Platform::GPU) {
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
-                    const real gtx_emperical_bw       = total_zones * sizeof(Primitive) / (delta_t.count() * 1e9);
+                    const real gtx_emperical_bw       = total_zones *(sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t.count() * 1e9);
                     writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, total_zones/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
                     writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, total_zones/delta_t.count());
