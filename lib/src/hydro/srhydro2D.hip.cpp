@@ -5,7 +5,6 @@
  * 07/15/2020
  * Compressible Hydro Simulation
  */
-#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
@@ -646,12 +645,9 @@ void SRHD2D::cons2prim(
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;
         const auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * threadIdx.y + threadIdx.x : gid;
-        #if GPU_CODE
-        if (tid == 0) found_failure = self->inFailureState;
+        if (tid == 0)
+            found_failure = self->inFailureState;
         simbi::gpu::api::synchronize();
-        #else 
-        found_failure = self->inFailureState;
-        #endif
         
         real invdV = 1.0;
         while (!found_failure && workLeftToDo)
@@ -1271,7 +1267,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
         outer_zones = new Conserved[ny];
         lint jreal = 0;
-        #pragma omp parallel for 
+        // #pragma omp parallel for 
         for (int jj = 0; jj < ny; jj++) {
             const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
             const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
@@ -1314,7 +1310,14 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones / delta_t.count();
-                writefl("\r Iteration: {>8} \t dt: {>8} \t Time: {>8} \t Zones/sec: {>8}", n, dt, t, total_zones/delta_t.count());
+                if constexpr(BuildPlatform == Platform::GPU) {
+                    // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
+                    constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
+                    const real gtx_emperical_bw       = total_zones * shBlockBytes / (delta_t.count() * 1e9);
+                    writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, nx/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                } else {
+                    writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, nx/delta_t.count());
+                }
                 nfold += 100;
             }
 
@@ -1375,7 +1378,14 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 t2 = high_resolution_clock::now();
                 delta_t = t2 - t1;
                 zu_avg += total_zones/ delta_t.count();
-                writefl("Iteration: {>8} \t dt: {>8} \t Time: {>8} \t Zones/sec: {>8} \t\r", n, dt, t, total_zones/delta_t.count());
+                if constexpr(BuildPlatform == Platform::GPU) {
+                    // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
+                    constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
+                    const real gtx_emperical_bw       = total_zones * shBlockBytes / (delta_t.count() * 1e9);
+                    writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, nx/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                } else {
+                    writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, nx/delta_t.count());
+                }
                 nfold += 100;
             }
             
@@ -1401,7 +1411,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
             //====================== Update the outer boundaries with the user input ==================
             if (d_outer) {
-                #pragma omp parallel for 
+                // #pragma omp parallel for 
                 for (int jj = 0; jj < ny; jj++) {
                     const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
                     const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
