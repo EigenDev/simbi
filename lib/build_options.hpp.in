@@ -34,7 +34,7 @@ constexpr real tol_scale = 1e-12;
 constexpr bool col_maj = false;
 // #endif 
 
-#if defined(__CUDACC__) || defined(__HCC__) || (defined(__clang__) && defined(__HIP__))
+#if defined(__NVCC__) || defined(__HCC__) || (defined(__clang__) && defined(__HIP__))
 #define GPU_CODE 1
 constexpr Platform BuildPlatform = Platform::GPU;
 // typedef float real;
@@ -47,11 +47,11 @@ constexpr Platform BuildPlatform = Platform::GPU;
 #define GPU_CALLABLE_INLINE            __host__ __device__ inline
 #define GPU_CALLABLE_MEMBER            __host__ __device__
 #define GPU_CALLABLE_INLINE_MEMBER     __host__ __device__ inline
-#define EXTERN_SHARED                 extern __shared__
+#define EXTERN_SHARED                  extern __shared__
 #define GPU_SHARED_DYN                 extern __shared__
 #define GPU_CAPTURE                    [=, *this]
 
-#if defined(__CUDACC__) && !defined(__HIP_PLATFORM_NVIDIA__)
+#if defined(__NVCC__) && !defined(__HIP_PLATFORM_NVIDIA__)
 using simbiStream_t = cudaStream_t;
 #define anyGpuMalloc                cudaMalloc
 #define anyGpuMallocManaged         cudaMallocManaged
