@@ -52,6 +52,7 @@ constexpr Platform BuildPlatform = Platform::GPU;
 #define GPU_CAPTURE                    [=, *this]
 
 #if defined(__NVCC__) && !defined(__HIP__)
+#include <cuda_runtime.h>
 using simbiStream_t = cudaStream_t;
 #define anyGpuMalloc                cudaMalloc
 #define anyGpuMallocManaged         cudaMallocManaged
