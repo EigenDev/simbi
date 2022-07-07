@@ -1298,59 +1298,65 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
             config_ghosts2D(fullP, self, nx, ny, true, bc, ozones, reflecting_theta);
+            // simbi::gpu::api::deviceSynch();
             t += dt; 
             
-            if (n >= nfold){
-                simbi::gpu::api::deviceSynch();
-                ncheck += 1;
-                t2 = high_resolution_clock::now();
-                delta_t = t2 - t1;
-                zu_avg += total_zones / delta_t.count();
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
-                    constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
-                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t.count() * 1e9);
-                    writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, total_zones/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
-                } else {
-                    writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, total_zones/delta_t.count());
-                }
-                nfold += 100;
-            }
+            // if (n >= nfold){
+            //     simbi::gpu::api::deviceSynch();
+            //     ncheck += 1;
+            //     t2 = high_resolution_clock::now();
+            //     delta_t = t2 - t1;
+            //     zu_avg += total_zones / delta_t.count();
+            //     if constexpr(BuildPlatform == Platform::GPU) {
+            //         // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
+            //         constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
+            //         const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t.count() * 1e9);
+            //         writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, total_zones/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+            //     } else {
+            //         writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, total_zones/delta_t.count());
+            //     }
+            //     nfold += 100;
+            // }
 
-            /* Write to a File every tenth of a second */
-            if (t >= t_interval && t != INFINITY) {
-                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-                t_interval += chkpt_interval;
-            }
-            n++;
-            // Adapt the timestep
+            // /* Write to a File every tenth of a second */
+            // if (t >= t_interval && t != INFINITY) {
+            //     write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
+            //     t_interval += chkpt_interval;
+            // }
+            // n++;
+            // // Adapt the timestep
             if constexpr(BuildPlatform == Platform::GPU) {
                 adapt_dt(device_self, geometry, activeP, dtShBytes);
             } else {
                 adapt_dt();
             }
-            hubble_param = adot(t) / a(t);
-            // Update decay constant
-            decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
+            // hubble_param = adot(t) / a(t);
+            // // Update decay constant
+            // decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
 
-            if (d_outer) {
-                #pragma omp parallel for 
-                for (int jj = 0; jj < ny; jj++) {
-                    const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
-                    const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
-                    outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
-                }
+            // if (d_outer) {
+            //     // #pragma omp parallel for 
+            //     for (int jj = 0; jj < ny; jj++) {
+            //         const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
+            //         const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
+            //         outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
+            //     }
 
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    simbi::gpu::api::copyHostToDevice(ozones, outer_zones, ny * sizeof(Conserved));
-                }
-            }
-            if constexpr(BuildPlatform == Platform::GPU) {
-                this->inFailureState = device_self->inFailureState;
-            }
-            if (inFailureState) {
-                simbi::gpu::api::deviceSynch();
-            }
+            //     if constexpr(BuildPlatform == Platform::GPU) {
+            //         simbi::gpu::api::copyHostToDevice(ozones, outer_zones, ny * sizeof(Conserved));
+            //     }
+            // }
+            // if constexpr(BuildPlatform == Platform::GPU) {
+            //     this->inFailureState = device_self->inFailureState;
+            // }
+            // if (inFailureState) {
+            //     simbi::gpu::api::deviceSynch();
+            // }
+
+            // const auto t3 = high_resolution_clock::now();
+            // const duration<real> dt_while = t3 - t1;
+            // writeln("Time for 1 iteration: {}", dt_while.count());
+            // helpers::pause_program();
         }
     } else {
         while (t < tend && !inFailureState)
@@ -1365,71 +1371,72 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
             config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, reflecting_theta);
+            // simbi::gpu::api::deviceSynch();
 
             t += dt; 
 
-            if (n >= nfold){
-                simbi::gpu::api::deviceSynch();
-                ncheck += 1;
-                t2 = high_resolution_clock::now();
-                delta_t = t2 - t1;
-                zu_avg += total_zones/ delta_t.count();
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
-                    constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
-                    const real gtx_emperical_bw       = total_zones *(sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t.count() * 1e9);
-                    writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, total_zones/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
-                } else {
-                    writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, total_zones/delta_t.count());
-                }
-                nfold += 100;
-            }
+            // if (n >= nfold){
+            //     simbi::gpu::api::deviceSynch();
+            //     ncheck += 1;
+            //     t2 = high_resolution_clock::now();
+            //     delta_t = t2 - t1;
+            //     zu_avg += total_zones/ delta_t.count();
+            //     if constexpr(BuildPlatform == Platform::GPU) {
+            //         // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
+            //         constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
+            //         const real gtx_emperical_bw       = total_zones *(sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t.count() * 1e9);
+            //         writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, total_zones/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+            //     } else {
+            //         writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, total_zones/delta_t.count());
+            //     }
+            //     nfold += 100;
+            // }
             
-            //========================== Write to a File every nth of a second ============================
-            if (t >= t_interval && t != INFINITY) {
-                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-                t_interval += chkpt_interval;
-            }
-            n++;
+            // //========================== Write to a File every nth of a second ============================
+            // if (t >= t_interval && t != INFINITY) {
+            //     write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
+            //     t_interval += chkpt_interval;
+            // }
+            // n++;
 
-            //============================ Update decay constant =====================================
-            decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
+            // //============================ Update decay constant =====================================
+            // decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
 
-            //==================== Adapt the timestep ==================================================
+            // //==================== Adapt the timestep ==================================================
             if constexpr(BuildPlatform == Platform::GPU) {
                 adapt_dt(device_self, geometry, activeP, dtShBytes);
             } else {
                 adapt_dt();
             }
 
-            // =========================== Update hubble param ======================================
-            hubble_param = adot(t) / a(t);
+            // // =========================== Update hubble param ======================================
+            // hubble_param = adot(t) / a(t);
 
-            //====================== Update the outer boundaries with the user input ==================
-            if (d_outer) {
-                // #pragma omp parallel for 
-                for (int jj = 0; jj < ny; jj++) {
-                    const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
-                    const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
-                    outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
-                }
-                 if constexpr(BuildPlatform == Platform::GPU) {
-                    simbi::gpu::api::copyHostToDevice(ozones, outer_zones, ny * sizeof(Conserved));
-                }
-            }
+            // //====================== Update the outer boundaries with the user input ==================
+            // if (d_outer) {
+            //     // #pragma omp parallel for 
+            //     for (int jj = 0; jj < ny; jj++) {
+            //         const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
+            //         const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
+            //         outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
+            //     }
+            //      if constexpr(BuildPlatform == Platform::GPU) {
+            //         simbi::gpu::api::copyHostToDevice(ozones, outer_zones, ny * sizeof(Conserved));
+            //     }
+            // }
 
-            //================= Transfer state of simulation to host ==================
-            if constexpr(BuildPlatform == Platform::GPU) {
-                this->inFailureState = device_self->inFailureState;
-            }
-            if (inFailureState) {
-                simbi::gpu::api::deviceSynch();
-            }
+            // //================= Transfer state of simulation to host ==================
+            // if constexpr(BuildPlatform == Platform::GPU) {
+            //     this->inFailureState = device_self->inFailureState;
+            // }
+            // if (inFailureState) {
+            //     simbi::gpu::api::deviceSynch();
+            // }
 
-            // const auto t3 = high_resolution_clock::now();
-            // const duration<real> dt_while = t3 - t1;
-            // writeln("Time for 1 iteration: {}", dt_while.count());
-            // helpers::pause_program();
+            const auto t3 = high_resolution_clock::now();
+            const duration<real> dt_while = t3 - t1;
+            writeln("Time for 1 iteration: {}", dt_while.count());
+            helpers::pause_program();
         }
     }
     if (ncheck > 0) {
