@@ -7,6 +7,7 @@ enum class Platform: int {CPU = 0, GPU = 1};
 
 #include "stdint.h"
 #include <functional>
+#include <chrono>
 using luint = uint64_t;
 using lint  = int64_t;
 
@@ -65,6 +66,11 @@ using simbiStream_t = cudaStream_t;
 #define anyGpuMemcpyDeviceToHost    cudaMemcpyDeviceToHost
 #define anyGpuGetErrorString        cudaGetErrorString
 #define anyGpuError_t               cudaError_t
+#define anyGpuEvent_t               cudaEvent_t 
+#define anyGpuEventCreate           cudaEventCreate
+#define anyGpuEventRecord           cudaEventRecord 
+#define anyGpuEventSynchronize      cudaEventSynchronize 
+#define anyGpuEventElapsedTime      cudaEventElapsedTime
 #else 
 #include "hip/hip_runtime.h"
 using simbiStream_t = hipStream_t;
@@ -79,6 +85,11 @@ using simbiStream_t = hipStream_t;
 #define anyGpuDeviceSynchronize     hipDeviceSynchronize
 #define anyGpuGetErrorString        hipGetErrorString
 #define anyGpuError_t               hipError_t
+#define anyGpuEvent_t               hipEvent_t 
+#define anyGpuEventCreate           hipEventCreate
+#define anyGpuEventRecord           hipEventRecord 
+#define anyGpuEventSynchronize      hipEventSynchronize 
+#define anyGpuEventElapsedTime      hipEventElapsedTime
 #endif
 
 #else
@@ -129,7 +140,8 @@ namespace simbi {
     };
 
     using simbiStream_t = int;
-    using anyGpuError_t = int; 
+    using anyGpuError_t = int;
+    using anyGpuEvent_t = std::chrono::high_resolution_clock::time_point;
     enum anyGpuMemcpyType {
         anyGpuMemcpyHostToDevice,
         anyGpuMemcpyDeviceToDevice,
@@ -162,6 +174,21 @@ namespace simbi {
         return 0;
     }
 
+    inline int anyGpuEventCreate(anyGpuEvent_t *a) {
+        return 0;
+    }
+
+    inline int anyGpuEventRecord(anyGpuEvent_t a) {
+        return 0;
+    }
+
+    inline int anyGpuEventSynchronize(anyGpuEvent_t a) {
+        return 0;
+    }
+
+    inline int anyGpuEventElapsedTime(float *time, anyGpuEvent_t a, anyGpuEvent_t b) {
+        return 0;
+    }
     inline void __syncthreads() { return;}
     inline anyGpuError_t anyGpuDeviceSynchronize() { return 0;}
 
