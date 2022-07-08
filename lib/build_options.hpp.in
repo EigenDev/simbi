@@ -10,12 +10,10 @@ enum class Platform: int {CPU = 0, GPU = 1};
 #include <chrono>
 using luint = uint64_t;
 using lint  = int64_t;
-
-constexpr int BLOCK_SIZE   = 64;
+constexpr int BLOCK_SIZE   = 128;
 constexpr int BLOCK_SIZE2D = 16;
 constexpr int BLOCK_SIZE3D = 4;
 constexpr int MAX_ITER     = 1000;
-
 // Precision preprocessing
 #if FLOAT_PRECISION
 using real = float;
@@ -55,6 +53,7 @@ constexpr Platform BuildPlatform = Platform::GPU;
 #if defined(__NVCC__) && !defined(__HIP__)
 #include <cuda_runtime.h>
 using simbiStream_t = cudaStream_t;
+constexpr int WARP_SIZE    = 32;
 #define anyGpuMalloc                cudaMalloc
 #define anyGpuMallocManaged         cudaMallocManaged
 #define anyGpuMemcpy                cudaMemcpy
@@ -74,6 +73,7 @@ using simbiStream_t = cudaStream_t;
 #else 
 #include "hip/hip_runtime.h"
 using simbiStream_t = hipStream_t;
+constexpr int WARP_SIZE    = 64;
 #define anyGpuMalloc                hipMalloc
 #define anyGpuMallocManaged         hipMallocManaged
 #define anyGpuMemcpy                hipMemcpy
@@ -91,8 +91,8 @@ using simbiStream_t = hipStream_t;
 #define anyGpuEventSynchronize      hipEventSynchronize 
 #define anyGpuEventElapsedTime      hipEventElapsedTime
 #endif
-
 #else
+constexpr int WARP_SIZE    = 32;
 #define GPU_CODE 0
 #include <cmath>
 #include <cstring>
