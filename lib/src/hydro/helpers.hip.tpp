@@ -337,7 +337,7 @@ namespace simbi{
     }; // end dtWarpReduce
 
     template<typename T>
-    GPU_LAUNCHABLE void deviceReduceKernel(T *self, int nmax) {
+    GPU_LAUNCHABLE void deviceReduceKernel(T *self) {
         #if GPU_CODE
         real min = INFINITY;
         int gx   = blockIdx.x * blockDim.x + threadIdx.x;
@@ -348,7 +348,7 @@ namespace simbi{
         int gid  = self->active_zones * gy + gx;
 
         //reduce multiple elements per thread
-        for (int i = gid; i < nmax; i += nt) {
+        for (int i = gid; i < self->active_zones; i += nt) {
             min = helpers::my_min(self->dt_min[i], min);
         }
         min = blockReduceMin(min);

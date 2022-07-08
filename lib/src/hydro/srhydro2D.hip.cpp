@@ -252,7 +252,7 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
             
             case simbi::Geometry::SPHERICAL:
                 compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>> (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
-                deviceReduceKernel<SRHD2D><<<p.gridSize,p.blockSize>>>(dev, dev->active_zones);
+                deviceReduceKernel<SRHD2D><<<p.gridSize,p.blockSize>>>(dev);
                 // deviceReduceKernel<SRHD2D><<<p.gridSize,p.blockSize>>>(dev, p.blockSize.x*p.blockSize.y);
                 // dtWarpReduce<SRHD2D, Primitive, 64><<<p.gridSize,p.blockSize,dt_buff_width>>>(dev);
                 break;

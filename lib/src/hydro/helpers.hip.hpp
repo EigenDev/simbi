@@ -122,6 +122,7 @@ namespace simbi
         const bool reflecting_theta = true);
 
     inline GPU_DEV real warpReduceMin(real val) {
+        // int mask = __match_any_sync(__activemask(), (unsigned long long)ptr);
         for (int offset = WARP_SIZE/2; offset > 0; offset /= 2) {
             real next_val = __shfl_down_sync(FULL_MASK, val, offset);
             val = (val < next_val) ? val : next_val;
@@ -149,7 +150,7 @@ namespace simbi
     };
 
     template<typename T>
-    GPU_LAUNCHABLE void deviceReduceKernel(T *self, int nmax);
+    GPU_LAUNCHABLE void deviceReduceKernel(T *self);
 } // end simbi
 
 #include "helpers.hip.tpp"
