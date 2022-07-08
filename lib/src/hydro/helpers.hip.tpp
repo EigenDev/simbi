@@ -322,19 +322,42 @@ namespace simbi{
             dt_buff[tid] = min;
             __syncthreads();
 
-            if (tid < 32)
-            {
-                warpReduceMin<blockSize>(dt_buff, tid);
-            }
-            if(tid == 0)
-            {
-                self->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
-                self->dt = self->dt_min[0];
-            }
+            // if (tid < 32)
+            // {
+            //     warpReduceMin<blockSize>(dt_buff, tid);
+            // }
+            // if(tid == 0)
+            // {
+            //     self->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
+            //     self->dt = self->dt_min[0];
+            // }
         } // end if
     #endif
 
     }; // end dtWarpReduce
+
+    template<typename T>
+    GPU_LAUNCHABLE void deviceReduceKernel(T *self, int nmax) {
+        #if GPU_CODE
+        real min = INFINITY;
+        int gx   = blockIdx.x * blockDim.x + threadIdx.x;
+        int gy   = blockIdx.y * blockDim.y + threadIdx.y;
+        int tid  = threadIdx.y * blockDim.x + threadIdx.x;
+        int bid  = blockIdx.y * gridDim.x + blockIdx.x;
+        int nt   = blockDim.x * blockDim.y * gridDim.x * gridDim.y;
+        int gid  = self->active_zones * gy + gx;
+
+        //reduce multiple elements per thread
+        for (int i = gid; i < nmax; i += nt) {
+            min = helpers::my_min(self->dt_min[i], min);
+        }
+        min = blockReduceMin(min);
+        if (tid==0) {
+            self->dt_min[bid]=min;
+            self->dt = self->dt_min[0];
+        }
+        #endif 
+    };
 
     template<typename T, typename N, unsigned int blockSize>
     GPU_LAUNCHABLE typename std::enable_if<is_3D_primitive<N>::value>::type

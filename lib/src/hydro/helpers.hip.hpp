@@ -1,6 +1,8 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
+#define FULL_MASK 0xffffffff
+
 #include "build_options.hpp"
 #include "common/enums.hpp"
 #include "common/hydro_structs.hpp"
@@ -119,6 +121,35 @@ namespace simbi
         const simbi::BoundaryCondition boundary_condition,
         const bool reflecting_theta = true);
 
+    inline GPU_DEV real warpReduceMin(real val) {
+        for (int offset = WARP_SIZE/2; offset > 0; offset /= 2) {
+            real next_val = __shfl_down_sync(FULL_MASK, val, offset);
+            val = (val < next_val) ? val : next_val;
+        }
+        return val;
+    };
+
+    inline GPU_DEV real blockReduceMin(real val) {
+        static __shared__ real shared[WARP_SIZE]; // Shared mem for 32 (Nvidia) / 64 (AMD) partial mins
+        const int tid = threadIdx.y * blockDim.x + threadIdx.x;
+        const int bid = blockIdx.y * gridDim.x + blockIdx.x;
+        int lane      = tid % WARP_SIZE;
+        int wid       = tid / WARP_SIZE;
+
+        val = warpReduceMin(val);     // Each warp performs partial reduction
+
+        if (lane==0) shared[wid] = val; // Write reduced value to shared memory
+        __syncthreads();              // Wait for all partial reductions
+
+        //read from shared memory only if that warp existed
+        val = (tid < bid / WARP_SIZE) ? shared[lane] : 0;
+
+        if (wid==0) val = warpReduceMin(val); //Final reduce within first warp
+        return val;
+    };
+
+    template<typename T>
+    GPU_LAUNCHABLE void deviceReduceKernel(T *self, int nmax);
 } // end simbi
 
 #include "helpers.hip.tpp"
