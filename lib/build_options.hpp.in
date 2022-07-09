@@ -47,11 +47,12 @@ constexpr Platform BuildPlatform = Platform::GPU;
 #define GPU_CALLABLE_MEMBER            __host__ __device__
 #define GPU_CALLABLE_INLINE_MEMBER     __host__ __device__ inline
 #define EXTERN_SHARED                  extern __shared__
-#define GPU_SHARED_DYN                 extern __shared__
+#define STATIC_SHARED                  static __shared__
 #define GPU_CAPTURE                    [=, *this]
 
 #if defined(__NVCC__) && !defined(__HIP__)
 #include <cuda_runtime.h>
+#define CUDA_CODE 1
 using simbiStream_t = cudaStream_t;
 constexpr int WARP_SIZE    = 32;
 #define anyGpuMalloc                cudaMalloc
@@ -72,6 +73,7 @@ constexpr int WARP_SIZE    = 32;
 #define anyGpuEventElapsedTime      cudaEventElapsedTime
 #else 
 #include "hip/hip_runtime.h"
+#define HIP_CODE 1
 using simbiStream_t = hipStream_t;
 constexpr int WARP_SIZE    = 64;
 #define anyGpuMalloc                hipMalloc
@@ -94,6 +96,8 @@ constexpr int WARP_SIZE    = 64;
 #else
 constexpr int WARP_SIZE    = 32;
 #define GPU_CODE 0
+#define CUDA_CODE 0
+#define HIP_CODE 0
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -109,9 +113,10 @@ constexpr Platform BuildPlatform = Platform::CPU;
 #define GPU_CALLABLE_MEMBER        
 #define GPU_CALLABLE_INLINE_MEMBER   inline
 #define GPU_DEV_INLINE               inline 
-#define __shared__ static
-#define GPU_SHARED_DYN                 extern __shared__
-#define GPU_CAPTURE                    [this]
+#define __shared__                   static
+#define GPU_SHARED_DYN               extern __shared__
+#define GPU_CAPTURE                  [this]
+#define STATIC_SHARED                static
 // Define a bunch of ghost functions to make the compiler
 // happy and avoid a bunch if #ifdefs throughout code
 // Don't get too mad at me... I'm a physicist, not a programmer :-)
