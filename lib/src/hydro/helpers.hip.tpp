@@ -322,38 +322,47 @@ namespace simbi{
             dt_buff[tid] = min;
             __syncthreads();
 
-            // if (tid < 32)
-            // {
-            //     warpReduceMin<blockSize>(dt_buff, tid);
-            // }
-            // if(tid == 0)
-            // {
-            //     self->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
-            //     self->dt = self->dt_min[0];
-            // }
+            if (tid < 32)
+            {
+                warpReduceMin<blockSize>(dt_buff, tid);
+            }
+            if(tid == 0)
+            {
+                self->dt_min[blockIdx.x + blockIdx.y * gridDim.x] = dt_buff[0]; // dt_min[0] == minimum
+                self->dt = self->dt_min[0];
+            }
         } // end if
     #endif
 
     }; // end dtWarpReduce
 
-    template<typename T>
-    GPU_LAUNCHABLE void deviceReduceKernel(T *self) {
+    template<typename T, int dim>
+    GPU_LAUNCHABLE void deviceReduceKernel(T *self, lint nmax) {
         #if GPU_CODE
         real min = INFINITY;
-        int gx   = blockIdx.x * blockDim.x + threadIdx.x;
-        int gy   = blockIdx.y * blockDim.y + threadIdx.y;
-        int tid  = threadIdx.y * blockDim.x + threadIdx.x;
-        int bid  = blockIdx.y * gridDim.x + blockIdx.x;
-        int nt   = blockDim.x * blockDim.y * gridDim.x * gridDim.y;
-        int gid  = self->active_zones * gy + gx;
+        luint ii   = blockIdx.x * blockDim.x + threadIdx.x;
+        luint jj   = blockIdx.y * blockDim.y + threadIdx.y;
+        luint kk   = blockIdx.z * blockDim.z + threadIdx.z;
+        luint tid  = threadIdx.z * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+        luint bid  = blockIdx.z * gridDim.x * gridDim.y + blockIdx.y * gridDim.x + blockIdx.x;
+        luint nt   = blockDim.x * blockDim.y * blockDim.z * gridDim.x * gridDim.y * gridDim.z;
+        luint gid;
+        if constexpr(dim == 1) {
+            gid = ii;
+        } else if constexpr(dim == 2) {
+            gid  = self->xphysical_grid * jj + ii;
+        } else if constexpr(dim == 3) {
+            gid  = self->yphysical_grid * self->xphysical_grid * kk + self->xphysical_grid * jj + ii;
+        }
 
-        //reduce multiple elements per thread
-        for (int i = gid; i < self->active_zones; i += nt) {
+        // reduce multiple elements per thread
+        for (luint i = gid; i < nmax; i += nt) {
+            // printf("dt min: %f\n", self->dt_min[i]);
             min = helpers::my_min(self->dt_min[i], min);
         }
         min = blockReduceMin(min);
         if (tid==0) {
-            self->dt_min[bid]=min;
+            self->dt_min[bid] = min;
             self->dt = self->dt_min[0];
         }
         #endif 

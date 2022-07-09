@@ -189,9 +189,13 @@ void Newtonian1D::adapt_dt(Newtonian1D *dev, luint blockSize, luint tblock)
     #if GPU_CODE
     {
         compute_dt<Newtonian1D, Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
-        dtWarpReduce<Newtonian1D, Primitive, 16><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
+        deviceReduceKernel<Newtonian1D, 1><<<blockSize, BLOCK_SIZE>>>(dev, active_zones);
+        deviceReduceKernel<Newtonian1D, 1><<<1,1024>>>(dev, blockSize);
         simbi::gpu::api::deviceSynch();
-        simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
+        this->dt = dev->dt;
+        // dtWarpReduce<Newtonian1D, Primitive, 16><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
+        // simbi::gpu::api::deviceSynch();
+        // simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
     }
     #endif
 };
@@ -581,8 +585,15 @@ void Newtonian1D::advance(
     luint   nfold   = 0;
     luint   ncheck  = 0;
     real     zu_avg = 0;
+    #if GPU_CODE
+    anyGpuEvent_t t1, t2;
+    anyGpuEventCreate(&t1);
+    anyGpuEventCreate(&t2);
+    float delta_t;
+    #else 
     high_resolution_clock::time_point t1, t2;
-    std::chrono::duration<real> delta_t;
+    double delta_t;
+    #endif
 
     // Copy the current SRHD instance over to the device
     Newtonian1D *device_self;
@@ -615,26 +626,28 @@ void Newtonian1D::advance(
     {  
         while (t < tend && !inFailureState)
         {
-            t1 = high_resolution_clock::now();
+            helpers::recordEvent(t1);
             advance(radius, geometry, activeP, self, shBlockSize, memside);
             cons2prim(fullP, self, memside);
             if (!periodic) config_ghosts1D(fullP, self, nx, true, bc);
-
+            helpers::recordEvent(t2);
             t += dt; 
             
-            if (n >= nfold){
-                simbi::gpu::api::deviceSynch();
+             if (n >= nfold){
+                anyGpuEventSynchronize(t2);
+                helpers::recordDuration(delta_t, t1, t2);
+                if (BuildPlatform == Platform::GPU) {
+                    delta_t *= 1e-3;
+                }
                 ncheck += 1;
-                t2 = high_resolution_clock::now();
-                delta_t = t2 - t1;
-                zu_avg += nx / delta_t.count();
+                zu_avg += nx / delta_t;
                 if constexpr(BuildPlatform == Platform::GPU) {
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
-                    const real gtx_emperical_bw       = total_zones * sizeof(Primitive) * (1.0 + 2.0 * radius) / (delta_t.count() * 1e9);
-                    writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, total_zones/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 2.0 * radius) / (delta_t * 1e9);
+                    writefl("\riteration:{>08}   dt:{>08}   time:{>08}   zones/sec:{>08}   effective bw(%):{>08}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
-                    writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, total_zones/delta_t.count());
+                    writefl("\riteration:{>08}    dt: {>08}    time: {>08}    zones/sec: {>08}", n, dt, t, total_zones/delta_t);
                 }
                 nfold += 100;
             }
@@ -659,7 +672,7 @@ void Newtonian1D::advance(
     } else {
         while (t < tend && !inFailureState)
         {
-            t1 = high_resolution_clock::now();
+            helpers::recordEvent(t1);
             // First Half Step
             cons2prim(fullP, self, memside);
             advance(radius, geometry, activeP, self, shBlockSize, memside);
@@ -669,23 +682,25 @@ void Newtonian1D::advance(
             cons2prim(fullP, self, memside);
             advance(radius, geometry, activeP, self, shBlockSize, memside);
             if (!periodic) config_ghosts1D(fullP, self, nx, false, bc);
-            simbi::gpu::api::deviceSynch();
+            helpers::recordEvent(t2);
             t += dt; 
             
 
-            if (n >= nfold){
-                // simbi::gpu::api::deviceSynch();
+             if (n >= nfold){
+                anyGpuEventSynchronize(t2);
+                helpers::recordDuration(delta_t, t1, t2);
+                if (BuildPlatform == Platform::GPU) {
+                    delta_t *= 1e-3;
+                }
                 ncheck += 1;
-                t2 = high_resolution_clock::now();
-                delta_t = t2 - t1;
-                zu_avg += nx / delta_t.count();
+                zu_avg += nx / delta_t;
                 if constexpr(BuildPlatform == Platform::GPU) {
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
-                    const real gtx_emperical_bw       = total_zones * sizeof(Primitive) * (1.0 + 2.0 * radius) / (delta_t.count() * 1e9);
-                    writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, nx/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 2.0 * radius) / (delta_t * 1e9);
+                    writefl("\riteration:{>08}   dt:{>08}   time:{>08}   zones/sec:{>08}   effective bw(%):{>08}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
-                    writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, nx/delta_t.count());
+                    writefl("\riteration:{>08}    dt: {>08}    time: {>08}    zones/sec: {>08}", n, dt, t, total_zones/delta_t);
                 }
                 nfold += 100;
             }
