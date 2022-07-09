@@ -1244,7 +1244,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             config_ghosts2D(fullP, this, nx, ny, first_order, bc);
         }
     }
-    
+
     const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive);
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP, device_self, simbi::MemSide::Dev);
@@ -1447,12 +1447,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 simbi::gpu::api::deviceSynch();
             }
 
-            anyGpuEventSynchronize(t2);
-            const auto t3 = high_resolution_clock::now();
-            const duration<real> dt_while = t3 - t0;
-            writeln("Time for 1 iteration: {}", dt_while.count());
-            writeln("dt: {}", dt);
-            helpers::pause_program();
+            // anyGpuEventSynchronize(t2);
+            // const auto t3 = high_resolution_clock::now();
+            // const duration<real> dt_while = t3 - t0;
+            // writeln("Time for 1 iteration: {}", dt_while.count());
+            // writeln("dt: {}", dt);
+            // helpers::pause_program();
         }
     }
     if (ncheck > 0) {
