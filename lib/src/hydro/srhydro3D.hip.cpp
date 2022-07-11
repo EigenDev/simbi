@@ -1212,14 +1212,14 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                     delta_t *= 1e-3;
                 }
                 ncheck += 1;
-                zu_avg += nx / delta_t;
+                zu_avg += total_zones / delta_t;
                 if constexpr(BuildPlatform == Platform::GPU) {
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
-                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 6.0 * radius) / (delta_t * 1e9);
-                    writefl("\riteration:{>08}   dt:{>08}   time:{>08}   zones/sec:{>08}   effective bw(%):{>08}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);
+                    writefl("\riteration:{>06} dt:{>08} time:{>08} zones/sec:{>08} ebw(%):{>08}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
-                    writefl("\riteration:{>08}    dt: {>08}    time: {>08}    zones/sec: {>08}", n, dt, t, total_zones/delta_t);
+                    writefl("\riteration:{>06}    dt: {>08}    time: {>08}    zones/sec: {>08}", n, dt, t, total_zones/delta_t);
                 }
                 nfold += 100;
             }
@@ -1270,14 +1270,14 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                     delta_t *= 1e-3;
                 }
                 ncheck += 1;
-                zu_avg += nx / delta_t;
-                if constexpr(BuildPlatform == Platform::GPU) {
+                zu_avg += total_zones / delta_t;
+                 if constexpr(BuildPlatform == Platform::GPU) {
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
-                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 6.0 * radius) / (delta_t * 1e9);
-                    writefl("\riteration:{>08}   dt:{>08}   time:{>08}   zones/sec:{>08}   effective bw(%):{>08}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);
+                    writefl("\riteration:{>06} dt:{>08} time:{>08} zones/sec:{>08} ebw(%):{>08}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
-                    writefl("\riteration:{>08}    dt: {>08}    time: {>08}    zones/sec: {>08}", n, dt, t, total_zones/delta_t);
+                    writefl("\riteration:{>06}    dt: {>08}    time: {>08}    zones/sec: {>08}", n, dt, t, total_zones/delta_t);
                 }
                 nfold += 100;
             }
