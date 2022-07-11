@@ -24,7 +24,7 @@ struct DataWriteMembers
     real t, ad_gamma;
     real x1min, x1max, x2min, x2max, zmin, zmax, dt;
     int nx, ny, nz, xactive_zones, yactive_zones, zactive_zones;
-    bool linspace, first_order;
+    bool linspace, first_order, using_fourvelocity;
     std::string coord_system, boundarycond;
 };
 

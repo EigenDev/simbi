@@ -130,6 +130,10 @@ namespace simbi
                     att.write(bool_type, &setup.linspace);
                     att.close();
 
+                    att = sim_info.createAttribute("using_gamma_beta", bool_type, att_space);
+                    att.write(bool_type, &setup.using_fourvelocity);
+                    att.close();
+
                     att = sim_info.createAttribute("first_order", bool_type, att_space);
                     att.write(bool_type, &setup.first_order);
                     att.close();

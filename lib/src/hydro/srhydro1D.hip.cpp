@@ -719,6 +719,7 @@ SRHD::simulate1D(
     setup.first_order    = first_order;
     setup.coord_system   = coord_system;
     setup.boundarycond   = boundary_condition;
+    setup.using_fourvelocity = false;
 
     cons.resize(nx);
     prims.resize(nx);

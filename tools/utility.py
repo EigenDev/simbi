@@ -2,6 +2,7 @@
 
 # Utility functions for visualization scripts 
 
+from math import gamma
 import h5py 
 import astropy.constants as const 
 import astropy.units as units
@@ -418,7 +419,17 @@ def read_1d_file(filename: str) -> dict:
         p   = p  [2:-2]
         xactive = nx - 4
         
-        W    = 1/np.sqrt(1 - v**2)
+        try:
+            using_gamma_beta = ds.attrs['using_gamma_beta']
+        except:
+            using_gamma_beta = False
+            
+        if using_gamma_beta:
+            W = np.sqrt(1 + v * v)
+            gamma_beta = v
+        else:
+            W = 1/np.sqrt(1 - v**2)
+            gamma_beta = W * v
         
         a    = (4 * const.sigma_sb.cgs / c)
         k    = const.k_B.cgs
@@ -441,7 +452,7 @@ def read_1d_file(filename: str) -> dict:
         ofield['p']           = p
         ofield['W']           = W
         ofield['enthalpy']    = h
-        ofield['gamma_beta']  = W*v
+        ofield['gamma_beta']  = gamma_beta
         ofield['temperature'] = T_eV
         mesh['xlims']         = x1min, x1max
         
