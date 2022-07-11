@@ -63,7 +63,7 @@ class Hydro:
         
         #Check dimensions of state
         if len(initial_state) == 2:
-            print('Initializing the 1D Discontinuity...')
+            print('Initializing the 1D Discontinuity...', flush=True)
             
             discontinuity = True
             left_state  = initial_state[0]
@@ -73,14 +73,14 @@ class Hydro:
             self.right_state = right_state 
             
             if len(left_state) != len(right_state):
-                print("ERROR: The left and right states must have the same number of variables")
-                print('Left State:',   left_state)
-                print('Right State:', right_state)
+                print("ERROR: The left and right states must have the same number of variables", flush=True)
+                print('Left State:',   left_state, flush=True)
+                print('Right State:', right_state, flush=True)
                 sys.exit()
                 
             elif len(left_state) > 4 and len(right_state) > 4:
                 print("Your state arrays contain too many variables. This version takes a maximum\n"
-                    "of 4 state variables")
+                    "of 4 state variables", flush=True)
                 
             elif len(left_state) == 3 and len(right_state) == 3:
                 self.dimensions = 1
@@ -177,8 +177,8 @@ class Hydro:
             
         elif len(initial_state) == 4:
             self.dimensions = 2
-            print('Initializing 2D Setup...')
-            print('')
+            print('Initializing 2D Setup...', flush=True)
+            print('',flush=True)
             
             left_x, right_x = geometry[0]
             left_y, right_y = geometry[1]
@@ -221,8 +221,8 @@ class Hydro:
             
         elif len(initial_state) == 5:
             self.dimensions = 3
-            print('Initializing 3D Setup...')
-            print('')
+            print('Initializing 3D Setup...', flush=True)
+            print('', flush=True)
             
             left_x, right_x = geometry[0]
             left_y, right_y = geometry[1]
@@ -379,8 +379,8 @@ class Hydro:
             try:
                 from gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
             except Exception as e:
-                print("Error in loading GPU extension. Loading CPU instead...")
-                print(f"For reference, the gpu_ext had the follow error: {e}")
+                print("Error in loading GPU extension. Loading CPU instead...", flush=True)
+                print(f"For reference, the gpu_ext had the follow error: {e}", flush=True)
                 from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
                 
         self.u = np.asarray(self.u)
@@ -402,12 +402,12 @@ class Hydro:
         if not os.path.exists(data_directory):
             # Create a new directory because it does not exist 
             os.makedirs(data_directory)
-            print("No default data directory specified. Creating one...!")
+            print("No default data directory specified. Creating one...!", flush=True)
             
         if first_order:
-            print("Computing First Order Solution...")
+            print("Computing First Order Solution...", flush=True)
         else:
-            print('Computing Second Order Solution...')
+            print('Computing Second Order Solution...', flush=True)
         
         # if there is mesh motion, convert the volumetric conserved vairables into their element-wise conserved
         

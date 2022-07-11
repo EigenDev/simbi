@@ -275,24 +275,28 @@ void Newtonian2D::adapt_dt(Newtonian2D *dev, const simbi::Geometry geometry, con
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
-            compute_dt<Newtonian2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
-            (dev, geometry, psize, dx1, dx2);
-            dtWarpReduce<Newtonian2D, Primitive, 1><<<p.gridSize,p.blockSize,bytes>>>
-            (dev);
+            compute_dt<Newtonian2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>(dev, geometry, psize, dx1, dx2);
+            deviceReduceKernel<Newtonian2D, 2><<<p.gridSize,p.blockSize>>>(dev, active_zones);
+            deviceReduceKernel<Newtonian2D, 2><<<1,1024>>>(dev, p.gridSize.x * p.gridSize.y);
+            // dtWarpReduce<Newtonian2D, Primitive, 1><<<p.gridSize,p.blockSize,bytes>>>
+            // (dev);
             break;
         
         case simbi::Geometry::SPHERICAL:
-            compute_dt<Newtonian2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>
-            (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
-            dtWarpReduce<Newtonian2D, Primitive, 1><<<p.gridSize,p.blockSize,bytes>>>
-            (dev);
+            compute_dt<Newtonian2D, Primitive><<<p.gridSize,p.blockSize, bytes>>> (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
+            deviceReduceKernel<Newtonian2D, 2><<<p.gridSize,p.blockSize>>>(dev, active_zones);
+            deviceReduceKernel<Newtonian2D, 2><<<1,1024>>>(dev, p.gridSize.x * p.gridSize.y);
+            // dtWarpReduce<Newtonian2D, Primitive, 1><<<p.gridSize,p.blockSize,bytes>>>
+            // (dev);
             break;
         case simbi::Geometry::CYLINDRICAL:
             // TODO: Implement Cylindrical coordinates at some point
             break;
         }
         simbi::gpu::api::deviceSynch();
-        simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
+        this->dt = dev->dt;
+        // simbi::gpu::api::deviceSynch();
+        // simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
     }
     #endif
 }
@@ -915,8 +919,15 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     luint  nfold   = 0;
     luint  ncheck  = 0;
     real    zu_avg = 0;
+    #if GPU_CODE
+    anyGpuEvent_t t1, t2;
+    anyGpuEventCreate(&t1);
+    anyGpuEventCreate(&t2);
+    float delta_t;
+    #else 
     high_resolution_clock::time_point t1, t2;
-    std::chrono::duration<real> delta_t;
+    double delta_t;
+    #endif
 
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
@@ -926,26 +937,29 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         while (t < tend && !inFailureState)
         {
             // Advance a full step
-            t1 = high_resolution_clock::now();
+            helpers::recordEvent(t1);
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
             if (!periodic) config_ghosts2D(fullP, self, nx, ny, true, bc);
+            helpers::recordEvent(t2);
             t += dt; 
             
             // Output to stdout
             if (n >= nfold){
-                simbi::gpu::api::deviceSynch();
+                anyGpuEventSynchronize(t2);
+                helpers::recordDuration(delta_t, t1, t2);
+                if (BuildPlatform == Platform::GPU) {
+                    delta_t *= 1e-3;
+                }
                 ncheck += 1;
-                t2 = high_resolution_clock::now();
-                delta_t = t2 - t1;
-                zu_avg += total_zones / delta_t.count();
+                zu_avg += nx / delta_t;
                 if constexpr(BuildPlatform == Platform::GPU) {
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
-                    const real gtx_emperical_bw       = total_zones * sizeof(Primitive) * (1.0 + 4.0 * radius)/ (delta_t.count() * 1e9);
-                    writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, total_zones/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);
+                    writefl("\riteration:{>08}   dt:{>08}   time:{>08}   zones/sec:{>08}   effective bw(%):{>08}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
-                    writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, total_zones/delta_t.count());
+                    writefl("\riteration:{>08}    dt: {>08}    time: {>08}    zones/sec: {>08}", n, dt, t, total_zones/delta_t);
                 }
                 nfold += 100;
             }
@@ -977,7 +991,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     } else {
         while (t < tend && !inFailureState)
         {
-            t1 = high_resolution_clock::now();
+            helpers::recordEvent(t1);
             // First Half Step
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
@@ -987,22 +1001,24 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
             if (!periodic) config_ghosts2D(fullP, self, nx, ny, false, bc);
-
+            helpers::recordEvent(t2);
             t += dt; 
 
             if (n >= nfold){
+                anyGpuEventSynchronize(t2);
+                helpers::recordDuration(delta_t, t1, t2);
+                if (BuildPlatform == Platform::GPU) {
+                    delta_t *= 1e-3;
+                }
                 ncheck += 1;
-                simbi::gpu::api::deviceSynch();
-                t2 = high_resolution_clock::now();
-                delta_t = t2 - t1;
-                zu_avg += total_zones/ delta_t.count();
-                 if constexpr(BuildPlatform == Platform::GPU) {
+                zu_avg += nx / delta_t;
+                if constexpr(BuildPlatform == Platform::GPU) {
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
-                    const real gtx_emperical_bw       = total_zones * sizeof(Primitive) * (1.0 + 4.0 * radius) / (delta_t.count() * 1e9);
-                    writefl("Iteration:{>05}  dt:{>11}  time:{>11}  Zones/sec:{>11}  Effective BW(%):{>10}\r", n, dt, t, total_zones/delta_t.count(), static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);
+                    writefl("\riteration:{>08}   dt:{>08}   time:{>08}   zones/sec:{>08}   effective bw(%):{>08}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
-                    writefl("Iteration: {>08} \t dt: {>08} \t Time: {>08} \t Zones/sec: {>08} \t\r", n, dt, t, total_zones/delta_t.count());
+                    writefl("\riteration:{>08}    dt: {>08}    time: {>08}    zones/sec: {>08}", n, dt, t, total_zones/delta_t);
                 }
                 nfold += 100;
             }

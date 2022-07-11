@@ -12,7 +12,7 @@ https://user-images.githubusercontent.com/29236993/173423001-53ab2b60-4159-4ce5-
 2) Cython 
 3) HDF5 libraries
 ### For GPU capability
-4) HIP/RocM if wanting to run on GPUs
+4) HIP/RocM if wanting to run on NVIDIA or AMD GPUs, or just CUDA if running purely NVIDIA
 
 
 ### Quick setup guide

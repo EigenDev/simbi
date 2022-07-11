@@ -7,7 +7,6 @@
 
 #include "hydro_structs.hpp"
 
-
 //==========================================================================
 //                  PRIMTIIVE TYPE TRAITS
 //==========================================================================
@@ -97,6 +96,43 @@ struct is_relativistic<sr3d::Conserved>
 {
     static constexpr bool value = true;
 };
+
+// template<typename T>
+// struct is_1D_class {
+//     static const bool value = false;
+// };
+// template<>
+// struct is_1D_class<simbi::Newtonian1D> {
+//     static const bool value = true;
+// };
+// template<>
+// struct is_1D_class<simbi::SRHD> {
+//     static const bool value = true;
+// };
+// template<typename T>
+// struct is_2D_class {
+//     static const bool value = false;
+// };
+// template<>
+// struct is_2D_class<simbi::SRHD2D> {
+//     static const bool value = true;
+// };
+// template<>
+// struct is_2D_class <simbi::Newtonian2D> {
+//     static const bool value = true;
+// };
+// template<typename T>
+// struct is_3D_class {
+//     static const bool value = false;
+// };
+// template<>
+// struct is_3D_class<simbi::SRHD3D> {
+//     static const bool value = true;
+// };
+// template<>
+// struct is_1D_class {
+//     static const bool value = false;
+// }
 // template<>
 // struct is_relativistic<simbi::SRHD>
 // {

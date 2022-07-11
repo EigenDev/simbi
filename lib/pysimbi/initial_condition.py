@@ -6,7 +6,7 @@ import h5py
 import pysimbi.helpers as helpers 
  
 def load_checkpoint(model, filename, dim, mesh_motion):
-    print(f"Loading from checkpoint: {filename}...")
+    print(f"Loading from checkpoint: {filename}...", flush=True)
     volume_factor = 1.0
     with h5py.File(filename, 'r+') as hf:
         t = 0
@@ -54,13 +54,9 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                         nghosts = 1 
                     else:
                         nghosts = 2 
-                    print(model.u[0])
-                    zzz = input('')
                     model.u[:, nghosts:-nghosts] *= volume_factor
                     model.u[:, 0:nghosts]        *= volume_factor[0]
                     model.u[:, -nghosts: ]       *= volume_factor[-1]
-                    print(model.u[0])
-                    zzz = input('')
         else:
             rho         = hf.get("rho")[:]
             v1          = hf.get("v1")[:]

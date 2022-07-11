@@ -122,35 +122,49 @@ namespace simbi
         const bool reflecting_theta = true);
 
     inline GPU_DEV real warpReduceMin(real val) {
-        // int mask = __match_any_sync(__activemask(), (unsigned long long)ptr);
+        #if CUDA_CODE
+        int mask = __match_any_sync(__activemask(), val);
         for (int offset = WARP_SIZE/2; offset > 0; offset /= 2) {
-            real next_val = __shfl_down_sync(FULL_MASK, val, offset);
+            real next_val = __shfl_down_sync(mask, val, offset);
             val = (val < next_val) ? val : next_val;
         }
         return val;
+        #elif HIP_CODE
+        for (int offset = WARP_SIZE/2; offset > 0; offset /= 2) {
+            real next_val = __shfl_down(val, offset);
+            val = (val < next_val) ? val : next_val;
+        }
+        return val;
+        #endif
     };
 
     inline GPU_DEV real blockReduceMin(real val) {
-        static __shared__ real shared[WARP_SIZE]; // Shared mem for 32 (Nvidia) / 64 (AMD) partial mins
-        const int tid = threadIdx.y * blockDim.x + threadIdx.x;
-        const int bid = blockIdx.y * gridDim.x + blockIdx.x;
+        #if GPU_CODE
+        STATIC_SHARED real shared[WARP_SIZE]; // Shared mem for 32 (Nvidia) / 64 (AMD) partial mins
+        const int tid = threadIdx.z * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+        const int bid = blockIdx.z * gridDim.x * gridDim.y + blockIdx.y * gridDim.x + blockIdx.x;
         int lane      = tid % WARP_SIZE;
         int wid       = tid / WARP_SIZE;
 
         val = warpReduceMin(val);     // Each warp performs partial reduction
 
-        if (lane==0) shared[wid] = val; // Write reduced value to shared memory
-        __syncthreads();              // Wait for all partial reductions
+        if (lane==0) 
+            shared[wid] = val; // Write reduced value to shared memory
+        __syncthreads();       // Wait for all partial reductions
 
         //read from shared memory only if that warp existed
-        val = (tid < bid / WARP_SIZE) ? shared[lane] : 0;
+        if (tid < bid / WARP_SIZE)
+            val = shared[wid];
+        // val = (tid < bid / WARP_SIZE) ? shared[lane] : val;
 
-        if (wid==0) val = warpReduceMin(val); //Final reduce within first warp
+        if (wid==0) 
+            val = warpReduceMin(val); //Final reduce within first warp
         return val;
+        #endif
     };
 
     template<typename T>
-    GPU_LAUNCHABLE void deviceReduceKernel(T *self);
+    GPU_LAUNCHABLE void deviceReduceKernel(T *self, lint nmax);
 } // end simbi
 
 #include "helpers.hip.tpp"
