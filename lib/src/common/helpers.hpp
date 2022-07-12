@@ -31,30 +31,57 @@ namespace simbi
 {
     namespace helpers
     {
+        /*
+        @param a
+        @param b 
+        @return maximum between values a and b
+        */
         template<typename T>
         GPU_CALLABLE_INLINE
         constexpr T my_max(const T a, const T b) {
             return a > b ? a : b;
         }
 
+        /*
+        @param a
+        @param b 
+        @return minimum between values a and b
+        */
         template<typename T>
         GPU_CALLABLE_INLINE
         constexpr T my_min(const T a, const T b) {
             return a < b ? a : b;
         }
 
+        /*
+        @param a
+        @param b 
+        @param c
+        @return maximum between values a, b, cand c
+        */
         template<typename T>
         GPU_CALLABLE_INLINE
         constexpr T my_max3(const T a, const T b, const T c) {
             return (a > b) ? (a > c ? a : c) : b > c ? b : c;
         }
 
+        /*
+        @param a
+        @param b 
+        @param c
+        @return minimum between values a, b, and c
+        */
         template<typename T>
         GPU_CALLABLE_INLINE
         constexpr T my_min3(const T a, const T b, const T c) {
             return (a < b) ? (a < c ? a : c) : b < c ? b : c;
         }
         
+        /*
+        @param index the index you want to shift to
+        @param size the total size of the array
+        @return the peridoically shifted index, accounting for negative values
+        */
         GPU_CALLABLE_INLINE lint mod(const lint index, const lint size)
         {
             return (index % size + size) % size;
