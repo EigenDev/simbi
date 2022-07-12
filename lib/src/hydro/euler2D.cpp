@@ -957,9 +957,9 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
                     const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);
-                    writefl("\riteration:{>06} dt:{>08} time:{>08} zones/sec:{>08} ebw(%):{>08}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                    writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
-                    writefl("\riteration:{>06}    dt: {>08}    time: {>08}    zones/sec: {>08}", n, dt, t, total_zones/delta_t);
+                    writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
                 }
                 nfold += 100;
             }
@@ -1016,9 +1016,9 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
                     const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);
-                    writefl("\riteration:{>06} dt:{>08} time:{>08} zones/sec:{>08} ebw(%):{>08}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                    writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
-                    writefl("\riteration:{>06}    dt: {>08}    time: {>08}    zones/sec: {>08}", n, dt, t, total_zones/delta_t);
+                    writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
                 }
                 nfold += 100;
             }
@@ -1051,7 +1051,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     }
     
     if (ncheck > 0) {
-         writeln("Average zone update/sec for:{>5} iterations was {>5} zones/sec", n, zu_avg/ncheck);
+         writeln("\nAverage zone update/sec for:{:>5.2e} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
     }
 
     if constexpr(BuildPlatform == Platform::GPU)

@@ -1,5 +1,5 @@
-#ifndef PRINT_HPP
-#define PRINT_HPP
+#ifndef PRINTB_HPP
+#define PRINTB_HPP
 
 #include <sstream>
 #include <string>
@@ -11,6 +11,12 @@ namespace simbi
 {
     namespace util
     {   
+
+        inline bool is_number(const std::string& s)
+        {
+            long double ld;
+            return((std::istringstream(s) >> ld >> std::ws).eof());
+        }
         template <typename ...ARGS>
         void write(std::string const & fmt, ARGS... args);
 
@@ -19,16 +25,6 @@ namespace simbi
 
         template <typename ...ARGS> 
         void writefl(std::string const & fmt, ARGS... args);
-
-        // inline void write (std::string const & str) {
-        //         std::cout << std::fixed << std::setprecision(3) << std::scientific << str;
-        // }
-        // inline void writeln(std::string const & str) {
-        //         std::cout << std::fixed << std::setprecision(3) << std::scientific << str << '\n';
-        // }
-        // inline void writefl(std::string const & str) {
-        //         std::cout << std::fixed << std::setprecision(3) << std::scientific <<  str << std::flush;
-        // }
     } // namespace util
     
 } // namespace simbi
