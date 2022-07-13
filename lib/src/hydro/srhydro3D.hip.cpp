@@ -1306,7 +1306,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     }
     
     if (ncheck > 0) {
-        writeln("\nAverage zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
+        writeln("Averageverage zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
     }
 
     if constexpr(BuildPlatform == Platform::GPU)

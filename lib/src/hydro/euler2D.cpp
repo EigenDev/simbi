@@ -1051,7 +1051,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     }
     
     if (ncheck > 0) {
-         writeln("\nAverage zone update/sec for:{:>5.2e} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
+         writeln("Averageverage zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
     }
 
     if constexpr(BuildPlatform == Platform::GPU)

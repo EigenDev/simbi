@@ -99,12 +99,6 @@ void SRHD::advance(
     auto p                      = simbi::ExecutionPolicy(nx);
     p.blockSize                 = BLOCK_SIZE;
     p.sharedMemBytes            = shBlockBytes;
-
-    #if GPU_CODE
-    const real hubble_param         = this->hubble_param;
-    const real decay_constant       = this->decay_constant;
-    #endif 
-
     const real xpg            = this->active_zones;
     const lint bx             = (BuildPlatform == Platform::GPU) ? sh_block_size : self->nx;
     const lint  pseudo_radius = (first_order) ? 1 : 2;
@@ -141,8 +135,8 @@ void SRHD::advance(
 
         const real x1l    = self->get_xface(ii, geometry, 0);
         const real x1r    = self->get_xface(ii, geometry, 1);
-        const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
-        const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
+        const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1l * self->hubble_param;
+        const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1r * self->hubble_param;
         if (self->first_order)
         {
             // Set up the left and right state interfaces for i+1/2
@@ -238,16 +232,16 @@ void SRHD::advance(
                 const real sR     = rrf * rrf; 
                 const real sL     = rlf * rlf; 
                 const real dV     = rmean * rmean * (rrf - rlf);    
-                const real factor = (mesh_motion) ? dV : 1;         
+                const real factor = (self->mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
 
                 #if GPU_CODE
                     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                    const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
+                    const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * self->decay_constant;
                     self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt * factor;
                 #else 
                     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                    const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
+                    const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * self->decay_constant;
                     cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt * factor;
                 #endif 
                 
@@ -267,11 +261,11 @@ void SRHD::advance(
                 
                 #if GPU_CODE
                     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                    const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
+                    const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * self->decay_constant;
                     self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt;
                 #else 
                     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                    const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
+                    const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * self->decay_constant;
                     cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt;
                 #endif 
                 
@@ -492,18 +486,24 @@ void SRHD::adapt_dt()
     }   
 
     dt = cfl * min_dt;
+    // writeln("dt: {}", dt);
+    // helpers::pause_program();
 };
 
 void SRHD::adapt_dt(SRHD *dev, luint blockSize)
 {   
+    real min_dt = INFINITY;
     #if GPU_CODE
         compute_dt<SRHD, Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
         deviceReduceKernel<SRHD, 1><<<blockSize, BLOCK_SIZE>>>(dev, active_zones);
-        deviceReduceKernel<SRHD, 1><<<1,1024>>>(dev, blockSize);
+        deviceReduceKernel<SRHD, 1><<<1, 1024>>>(dev, blockSize);
         simbi::gpu::api::deviceSynch();
         this->dt = dev->dt;
         // dtWarpReduce<SRHD, Primitive, 4><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
         // simbi::gpu::api::deviceSynch();
+        // this->dt = dev->dt;
+        // writeln("dt: {}, dev_h {}, host_h: {}", dt, dev->hubble_param, hubble_param);
+        // helpers::pause_program();
         // simbi::gpu::api::copyDevToHost(&dt, &(dev->dt), sizeof(real));
     #endif
 };
@@ -921,7 +921,7 @@ SRHD::simulate1D(
         }
     }
     if (ncheck > 0) {
-         writeln("\nAverage zone update/sec for:{:>5.2e} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
+         writeln("Averageverage zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
     }
    
 

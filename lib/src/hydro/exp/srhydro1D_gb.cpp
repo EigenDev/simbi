@@ -920,7 +920,7 @@ SRHD::simulate1D(
         }
     }
     if (ncheck > 0) {
-         writeln("\nAverage zone update/sec for:{:>5.2e} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
+         writeln("Averageverage zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
     }
    
 

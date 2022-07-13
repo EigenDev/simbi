@@ -132,6 +132,7 @@ namespace simbi
         }
 
         template <typename ...ARGS> void writeln(std::string const & fmt, ARGS... args) {
+                std::cout << "\n";
                 write(fmt, args...);
                 std::cout << '\n';
         }
