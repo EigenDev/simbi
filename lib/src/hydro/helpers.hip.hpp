@@ -126,7 +126,7 @@ namespace simbi
         int mask = __match_any_sync(__activemask(), val);
         for (int offset = WARP_SIZE/2; offset > 0; offset /= 2) {
             real next_val = __shfl_down_sync(mask, val, offset);
-            val = (val < next_val) ? val : next_val;
+            val           = (val < next_val) ? val : next_val;
         }
         return val;
         #elif HIP_CODE
@@ -142,7 +142,7 @@ namespace simbi
         #if GPU_CODE
         STATIC_SHARED real shared[WARP_SIZE]; // Shared mem for 32 (Nvidia) / 64 (AMD) partial mins
         const int tid = threadIdx.z * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
-        const int bid = blockIdx.z * gridDim.x * gridDim.y + blockIdx.y * gridDim.x + blockIdx.x;
+        const int bsz = blockDim.x * blockDim.y * blockDim.z;
         int lane      = tid % WARP_SIZE;
         int wid       = tid / WARP_SIZE;
 
@@ -153,9 +153,7 @@ namespace simbi
         __syncthreads();       // Wait for all partial reductions
 
         //read from shared memory only if that warp existed
-        if (tid < bid / WARP_SIZE)
-            val = shared[wid];
-        // val = (tid < bid / WARP_SIZE) ? shared[lane] : val;
+        val = (tid < bsz / WARP_SIZE) ? shared[lane] : val;
 
         if (wid==0) 
             val = warpReduceMin(val); //Final reduce within first warp

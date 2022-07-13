@@ -24,20 +24,18 @@ namespace simbi{
         int aid  = ii + self->idx_active;
         if (ii < self->active_zones)
         {
-            prim_buff[tid] = self->gpu_prims[aid];
-            __syncthreads();
-            const real rho = prim_buff[tid].rho;
-            const real p   = prim_buff[tid].p;
+            const real rho = self->gpu_prims[aid].rho;
+            const real p   = self->gpu_prims[aid].p;
         
             if constexpr(is_relativistic<N>::value)
             {
-                const real v  = prim_buff[tid].v;
+                const real v  = self->gpu_prims[aid].v;
                 const real h  = 1. + gamma * p / (rho * (gamma - 1.));
                 const real cs = std::sqrt(gamma * p / (rho * h));
                 vPlus         = (v + cs) / (1 + v * cs);
                 vMinus        = (v - cs) / (1 - v * cs);
             } else {
-                const real v  = prim_buff[tid].v;
+                const real v  = self->gpu_prims[aid].v;
                 const real cs = std::sqrt(gamma * p / rho );
                 vPlus         = (v + cs);
                 vMinus        = (v - cs);
@@ -47,7 +45,7 @@ namespace simbi{
             const real dx1    = x1r - x1l;
             const real vfaceL = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1l * self->hubble_param;
             const real vfaceR = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1r * self->hubble_param;
-            const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPlus), std::abs(vMinus)));
+            const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPlus - vfaceR), std::abs(vMinus - vfaceL)));
             self->dt_min[ii]  = self->cfl * cfl_dt;
         }
         #endif
@@ -132,14 +130,11 @@ namespace simbi{
         const luint aid = (col_maj) ? ia * self-> ny + ja : ja * self->nx + ia;
         if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid))
         {
-             prim_buff[tid] = self->gpu_prims[aid];
-             __syncthreads();
             real plus_v1 , plus_v2 , minus_v1, minus_v2;
-
-            real rho  = prim_buff[tid].rho;
-            real p    = prim_buff[tid].p;
-            real v1   = prim_buff[tid].v1;
-            real v2   = prim_buff[tid].v2;
+            real rho  = self->gpu_prims[aid].rho;
+            real p    = self->gpu_prims[aid].p;
+            real v1   = self->gpu_prims[aid].v1;
+            real v2   = self->gpu_prims[aid].v2;
 
             if constexpr(is_relativistic<N>::value)
             {
@@ -226,14 +221,12 @@ namespace simbi{
         const luint aid = (col_maj) ? ia * self-> ny + ja : ka * self->nx * self->ny + ja * self->nx + ia;
         if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid) && (kk < self->zphysical_grid))
         {
-             prim_buff[tid] = self->gpu_prims[aid];
-             __syncthreads();
             real plus_v1 , plus_v2 , minus_v1, minus_v2, plus_v3, minus_v3;
-            real rho  = prim_buff[tid].rho;
-            real p    = prim_buff[tid].p;
-            real v1   = prim_buff[tid].v1;
-            real v2   = prim_buff[tid].v2;
-            real v3   = prim_buff[tid].v3;
+            real rho  = self->gpu_prims[aid].rho;
+            real p    = self->gpu_prims[aid].p;
+            real v1   = self->gpu_prims[aid].v1;
+            real v2   = self->gpu_prims[aid].v2;
+            real v3   = self->gpu_prims[aid].v3;
 
             if constexpr(is_relativistic<N>::value)
             {
@@ -354,16 +347,14 @@ namespace simbi{
         } else if constexpr(dim == 3) {
             gid  = self->yphysical_grid * self->xphysical_grid * kk + self->xphysical_grid * jj + ii;
         }
-
         // reduce multiple elements per thread
         for (luint i = gid; i < nmax; i += nt) {
-            // printf("dt min: %f\n", self->dt_min[i]);
             min = helpers::my_min(self->dt_min[i], min);
         }
         min = blockReduceMin(min);
         if (tid==0) {
             self->dt_min[bid] = min;
-            self->dt = self->dt_min[0];
+            self->dt          = self->dt_min[0];
         }
         #endif 
     };
