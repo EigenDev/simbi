@@ -921,27 +921,27 @@ def plot_hist(
     gbs       = np.logspace(np.log10(1.e-3), np.log10(u.max()), 128)
     var       = np.asarray([var[u > gb].sum() for gb in gbs]) 
     
-    if case == 0:
-        oned_field, setups1d, mesh1d   = util.read_1d_file(args.oned_files[0])
-        calc_1d_hist(oned_field, mesh1d)
-    if case == 2:
-        oned_field, setups1d, mesh1d   = util.read_1d_file(args.oned_files[1])
-        calc_1d_hist(oned_field, mesh1d)
+    # if case == 0:
+    #     oned_field, setups1d, mesh1d   = util.read_1d_file(args.oned_files[0])
+    #     calc_1d_hist(oned_field, mesh1d)
+    # if case == 2:
+    #     oned_field, setups1d, mesh1d   = util.read_1d_file(args.oned_files[1])
+    #     calc_1d_hist(oned_field, mesh1d)
         
-    # if ax_col == 0:     
-    #     if args.anot_loc is not None:
-    #         etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
-    #         place_anotation(args, fields, ax, etot)
+    if ax_col == 0:     
+        if args.anot_loc is not None:
+            etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
+            place_anotation(args, fields, ax, etot)
         
-    #     #1D Comparison 
-    #     if args.oned_files is not None:
-    #         if args.sub_split is None:
-    #             for file in args.oned_files:
-    #                 oned_field, oned_setup, oned_mesh = util.read_1d_file(file)
-    #                 calc_1d_hist(oned_field, oned_mesh)
-    #         else:
-    #             oned_field, one_setup, one_mesh = util.read_1d_file(args.oned_files[ax_num])
-    #             calc_1d_hist(oned_field)
+        #1D Comparison 
+        if args.oned_files is not None:
+            if args.sub_split is None:
+                for file in args.oned_files:
+                    oned_field, oned_setup, oned_mesh = util.read_1d_file(file)
+                    calc_1d_hist(oned_field, oned_mesh)
+            else:
+                oned_field, one_setup, one_mesh = util.read_1d_file(args.oned_files[ax_num])
+                calc_1d_hist(oned_field)
 
     if args.norm:
         var /= var.max()
