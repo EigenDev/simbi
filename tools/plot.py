@@ -1424,7 +1424,7 @@ def main():
     parser.add_argument('--inset', dest='inset', action= 'store_true', default=False)
     parser.add_argument('--png', dest='png', action= 'store_true', default=False)
     parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
-    parser.add_argument('--fig_dims', dest='fig_dims', default = [3.35, 9], type=float, nargs=2)
+    parser.add_argument('--fig_dims', dest='fig_dims', default = [4, 4], type=float, nargs=2)
     parser.add_argument('--legend', dest='legend', default=True, action=argparse.BooleanOptionalAction)
     parser.add_argument('--save', dest='save', type=str,default=None,help='Save the fig with some name')
     args = parser.parse_args()
