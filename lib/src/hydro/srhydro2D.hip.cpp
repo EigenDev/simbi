@@ -59,76 +59,75 @@ SRHD2D::~SRHD2D() {}
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 GPU_CALLABLE_MEMBER
-Eigenvals SRHD2D::calc_eigenvals(const Primitive &prims_l,
-                                 const Primitive &prims_r,
+Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
+                                 const Primitive &primsR,
                                  const luint nhat = 1) const
 {
     // Separate the left and right Primitive
-    const real rho_l = prims_l.rho;
-    const real p_l   = prims_l.p;
-    const real h_l   = static_cast<real>(1.0) + gamma * p_l / (rho_l * (gamma - static_cast<real>(1.0)));
+    const real rhoL = primsL.rho;
+    const real pL   = primsL.p;
+    const real hL   = static_cast<real>(1.0) + gamma * pL / (rhoL * (gamma - static_cast<real>(1.0)));
 
-    const real rho_r = prims_r.rho;
-    const real p_r   = prims_r.p;
-    const real h_r   = static_cast<real>(1.0) + gamma * p_r / (rho_r * (gamma - static_cast<real>(1.0)));
+    const real rhoR  = primsR.rho;
+    const real pR    = primsR.p;
+    const real hR    = static_cast<real>(1.0) + gamma * pR  / (rhoR  * (gamma - static_cast<real>(1.0)));
 
-    const real cs_r = std::sqrt(gamma * p_r / (h_r * rho_r));
-    const real cs_l = std::sqrt(gamma * p_l / (h_l * rho_l));
+    const real csR  = std::sqrt(gamma * pR  / (hR  * rhoR));
+    const real csL = std::sqrt(gamma * pL / (hL * rhoL));
 
-    const real v_l = prims_l.vcomponent(nhat);
-    const real v_r = prims_r.vcomponent(nhat);
+    const real vL = primsL.vcomponent(nhat);
+    const real vR  = primsR.vcomponent(nhat);
 
     //-----------Calculate wave speeds based on Shneider et al. 1992
     switch (comp_wave_speed)
     {
     case simbi::WaveSpeeds::SCHNEIDER_ET_AL_93:
         {
-            const real vbar  = static_cast<real>(0.5) * (v_l + v_r);
-            const real cbar  = static_cast<real>(0.5) * (cs_l + cs_r);
+            const real vbar  = static_cast<real>(0.5) * (vL + vR);
+            const real cbar  = static_cast<real>(0.5) * (csL + csR);
             const real bl    = (vbar - cbar)/(static_cast<real>(1.0) - cbar*vbar);
             const real br    = (vbar + cbar)/(static_cast<real>(1.0) + cbar*vbar);
-            const real aL    = helpers::my_min(bl, (v_l - cs_l)/(static_cast<real>(1.0) - v_l*cs_l));
-            const real aR    = helpers::my_max(br, (v_r + cs_r)/(static_cast<real>(1.0) + v_r*cs_r));
+            const real aL    = helpers::my_min(bl, (vL - csL)/(static_cast<real>(1.0) - vL*csL));
+            const real aR    = helpers::my_max(br, (vR  + csR)/(static_cast<real>(1.0) + vR*csR));
 
-            return Eigenvals(aL, aR, cs_l, cs_r);
+            return Eigenvals(aL, aR, csL, csR);
         }
     
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
-            //--------Calc the wave speeds based on Mignone and Bodo (2005)
-            const real sL = cs_l * cs_l * (static_cast<real>(1.0) / (gamma * gamma * (static_cast<real>(1.0) - cs_l * cs_l)));
-            const real sR = cs_r * cs_r * (static_cast<real>(1.0) / (gamma * gamma * (static_cast<real>(1.0) - cs_r * cs_r)));
-
+            // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
+            const real sL = csL*csL/(gamma*gamma*(static_cast<real>(1.0) - csL*csL));
+            const real sR = csR*csR/(gamma*gamma*(static_cast<real>(1.0) - csR*csR));
             // Define temporaries to save computational cycles
             const real qfL   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
             const real qfR   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
-            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0)- v_r * v_r + sR));
-            const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0)- v_l * v_l + sL));
+            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0) - vR  * vR  + sR));
+            const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0) - vL * vL + sL));
 
-            const real lamLm = (v_l - sqrtL) * qfL;
-            const real lamRm = (v_r - sqrtR) * qfR;
-            const real lamLp = (v_l + sqrtL) * qfL;
-            const real lamRp = (v_r + sqrtR) * qfR;
+            const real lamLm = (vL - sqrtL) * qfL;
+            const real lamRm = (vR  - sqrtR) * qfR;
+            const real lamLp = (vL + sqrtL) * qfL;
+            const real lamRp = (vR  + sqrtR) * qfR;
 
-            real aL = lamLm < lamRm ? lamLm : lamRm;
-            real aR = lamLp > lamRp ? lamLp : lamRp;
+            const real aL = lamLm < lamRm ? lamLm : lamRm;
+            const real aR = lamLp > lamRp ? lamLp : lamRp;
 
             // Smoothen for rarefaction fan
-            aL = helpers::my_min(aL, (v_l - cs_l) / (1 - v_l * cs_l));
-            aR = helpers::my_max(aR, (v_r + cs_r) / (1 + v_r * cs_r));
+            // aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
+            // aR = helpers::my_max(aR, (vR  + csR) / (1 + vR  * csR));
 
-            return Eigenvals(aL, aR, cs_l, cs_r);
+            return Eigenvals(aL, aR, csL, csR);
         }
     case simbi::WaveSpeeds::NAIVE:
         {
-            const real aLm = (v_l - cs_l) / (1 - v_l * cs_l);
-            const real aLp = (v_l + cs_l) / (1 + v_l * cs_l);
-            const real aRm = (v_r - cs_r) / (1 - v_r * cs_r);
-            const real aRp = (v_r + cs_r) / (1 + v_r * cs_r);
+            const real aLm = (vL - csL) / (1 - vL * csL);
+            const real aLp = (vL + csL) / (1 + vL * csL);
+            const real aRm = (vR  - csR) / (1 - vR  * csR);
+            const real aRp = (vR  + csR) / (1 + vR  * csR);
 
             const real aL = helpers::my_min(aLm, aRm);
             const real aR = helpers::my_max(aLp, aRp);
-            return Eigenvals(aL, aR, cs_l, cs_r);
+            return Eigenvals(aL, aR, csL, csR);
         }
     }
 };
@@ -400,123 +399,120 @@ Conserved SRHD2D::calc_hllc_flux(
     // constexpr real ma_lim   = static_cast<real>(0.10);
 
     //--------------Compute the L Star State----------
-    real pressure = left_prims.p;
-    real D        = left_state.d;
-    real S1       = left_state.s1;
-    real S2       = left_state.s2;
-    real tau      = left_state.tau;
-    real E        = tau + D;
-    real cofactor = static_cast<real>(1.0) / (aL - aStar);
+    // real pressure = left_prims.p;
+    // real D        = left_state.d;
+    // real S1       = left_state.s1;
+    // real S2       = left_state.s2;
+    // real tau      = left_state.tau;
+    // real E        = tau + D;
+    // real cofactor = static_cast<real>(1.0) / (aL - aStar);
 
-    const real vL           =  left_prims.vcomponent(nhat);
-    const real vR           = right_prims.vcomponent(nhat);
-    const auto kdelta       = kronecker(nhat, 1);
-    // Left Star State in x-direction of coordinate lattice
-    real Dstar              = cofactor * (aL - vL) * D;
-    real S1star             = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
-    real S2star             = cofactor * (S2 * (aL - vL) + !kdelta * (-pressure + pStar) );
-    real Estar              = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
-    real tauStar            = Estar - Dstar;
-    const auto starStateL   = Conserved{Dstar, S1star, S2star, tauStar};
+    // const real vL           =  left_prims.vcomponent(nhat);
+    // const real vR           = right_prims.vcomponent(nhat);
+    // const auto kdelta       = kronecker(nhat, 1);
+    // // Left Star State in x-direction of coordinate lattice
+    // real Dstar              = cofactor * (aL - vL) * D;
+    // real S1star             = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
+    // real S2star             = cofactor * (S2 * (aL - vL) + !kdelta * (-pressure + pStar) );
+    // real Estar              = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
+    // real tauStar            = Estar - Dstar;
+    // const auto starStateL   = Conserved{Dstar, S1star, S2star, tauStar};
 
-    pressure = right_prims.p;
-    D        = right_state.d;
-    S1       = right_state.s1;
-    S2       = right_state.s2;
-    tau      = right_state.tau;
-    E        = tau + D;
-    cofactor = static_cast<real>(1.0) / (aR - aStar);
+    // pressure = right_prims.p;
+    // D        = right_state.d;
+    // S1       = right_state.s1;
+    // S2       = right_state.s2;
+    // tau      = right_state.tau;
+    // E        = tau + D;
+    // cofactor = static_cast<real>(1.0) / (aR - aStar);
 
-    Dstar                 = cofactor * (aR - vR) * D;
-    S1star                = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
-    S2star                = cofactor * (S2 * (aR - vR) + !kdelta * (-pressure + pStar) );
-    Estar                 = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
-    tauStar               = Estar - Dstar;
-    const auto starStateR = Conserved{Dstar, S1star, S2star, tauStar};
+    // Dstar                 = cofactor * (aR - vR) * D;
+    // S1star                = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
+    // S2star                = cofactor * (S2 * (aR - vR) + !kdelta * (-pressure + pStar) );
+    // Estar                 = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
+    // tauStar               = Estar - Dstar;
+    // const auto starStateR = Conserved{Dstar, S1star, S2star, tauStar};
 
-    // const real voL      =  left_prims.vcomponent(!nhat);
-    // const real voR      = right_prims.vcomponent(!nhat);
-    // const real ma_local = helpers::my_max(std::abs(vL / cL), std::abs(vR / cR));
-    // const real phi      = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
-    // const real aL_lm    = (phi != 0) ? phi * aL : aL;
-    // const real aR_lm    = (phi != 0) ? phi * aR : aR;
+    // // const real voL      =  left_prims.vcomponent(!nhat);
+    // // const real voR      = right_prims.vcomponent(!nhat);
+    // // const real ma_local = helpers::my_max(std::abs(vL / cL), std::abs(vR / cR));
+    // // const real phi      = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
+    // // const real aL_lm    = (phi != 0) ? phi * aL : aL;
+    // // const real aR_lm    = (phi != 0) ? phi * aR : aR;
 
-    const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
-    Conserved net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL
-                        + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR) * static_cast<real>(0.5) - face_starState * vface;
+    // const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
+    // Conserved net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL
+    //                     + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR) * static_cast<real>(0.5) - face_starState * vface;
 
-    // upwind the concentration flux 
-    if (net_flux.d < static_cast<real>(0.0))
-        net_flux.chi = right_prims.chi * net_flux.d;
-    else
-        net_flux.chi = left_prims.chi  * net_flux.d;
-
-    return net_flux;
-
-    // if (-aL <= (aStar - aL))
-    // {
-    //     const real pressure = left_prims.p;
-    //     const real D        = left_state.d;
-    //     const real S1       = left_state.s1;
-    //     const real S2       = left_state.s2;
-    //     const real tau      = left_state.tau;
-    //     const real chi      = left_state.chi;
-    //     const real E        = tau + D;
-    //     const real cofactor = static_cast<real>(1.0) / (aL - aStar);
-
-    //     const real vL           =  left_prims.vcomponent(nhat);
-    //     auto       kdelta       = kronecker(nhat, 1);
-    //     // Left Star State in x-direction of coordinate lattice
-    //     const real Dstar         = cofactor * (aL - vL) * D;
-    //     const real chistar       = cofactor * (aL - vL) * chi;
-    //     const real S1star        = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
-    //     const real S2star        = cofactor * (S2 * (aL - vL) + !kdelta * (-pressure + pStar) );
-    //     const real Estar         = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
-    //     const real tauStar       = Estar - Dstar;
-    //     auto starStateL    = Conserved{Dstar, S1star, S2star, tauStar, chistar};
-
-    //     auto hllc_flux = left_flux + (starStateL - left_state) * aL;
-
-    //     // upwind the concentration flux 
-    //     if (hllc_flux.d < static_cast<real>(0.0))
-    //         hllc_flux.chi = right_prims.chi * hllc_flux.d;
-    //     else
-    //         hllc_flux.chi = left_prims.chi  * hllc_flux.d;
-
-    //     return hllc_flux;
-    // }
+    // // upwind the concentration flux 
+    // if (net_flux.d < static_cast<real>(0.0))
+    //     net_flux.chi = right_prims.chi * net_flux.d;
     // else
-    // {
-    //     const real pressure = right_prims.p;
-    //     const real D        = right_state.d;
-    //     const real S1       = right_state.s1;
-    //     const real S2       = right_state.s2;
-    //     const real tau      = right_state.tau;
-    //     const real chi      = right_state.chi;
-    //     const real E        = tau + D;
-    //     const real cofactor = static_cast<real>(1.0) / (aR - aStar);
+    //     net_flux.chi = left_prims.chi  * net_flux.d;
 
-    //     const real vR         = right_prims.vcomponent(nhat);
-    //     auto       kdelta     = kronecker(nhat, 1);
+    // return net_flux;
 
-    //     const real Dstar      = cofactor * (aR - vR) * D;
-    //     const real chistar    = cofactor * (aR - vR) * chi;
-    //     const real S1star     = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
-    //     const real S2star     = cofactor * (S2 * (aR - vR) + !kdelta * (-pressure + pStar) );
-    //     const real Estar      = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
-    //     const real tauStar    = Estar - Dstar;
-    //     auto starStateR = Conserved{Dstar, S1star, S2star, tauStar, chistar};
+    if (vface <= aStar)
+    {
+        const real pressure = left_prims.p;
+        const real D        = left_state.d;
+        const real S1       = left_state.s1;
+        const real S2       = left_state.s2;
+        const real tau      = left_state.tau;
+        const real chi      = left_state.chi;
+        const real E        = tau + D;
+        const real cofactor = static_cast<real>(1.0) / (aL - aStar);
 
-    //     auto hllc_flux = right_flux + (starStateR - right_state) * aR;
+        const real vL     =  left_prims.vcomponent(nhat);
+        const auto kdelta = kronecker(nhat, 1);
+        // Left Star State in x-direction of coordinate lattice
+        const real Dstar         = cofactor * (aL - vL) * D;
+        const real chistar       = cofactor * (aL - vL) * chi;
+        const real S1star        = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
+        const real S2star        = cofactor * (S2 * (aL - vL) + !kdelta * (-pressure + pStar) );
+        const real Estar         = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
+        const real tauStar       = Estar - Dstar;
+        auto starStateL          = Conserved{Dstar, S1star, S2star, tauStar, chistar};
 
-    //     // upwind the concentration flux 
-    //     if (hllc_flux.d < static_cast<real>(0.0))
-    //         hllc_flux.chi = right_prims.chi * hllc_flux.d;
-    //     else
-    //         hllc_flux.chi = left_prims.chi  * hllc_flux.d;
+        auto hllc_flux = left_flux + (starStateL - left_state) * aL - starStateL * vface;
 
-    //     return hllc_flux;
-    // }
+        // upwind the concentration flux 
+        if (hllc_flux.d < static_cast<real>(0.0))
+            hllc_flux.chi = right_prims.chi * hllc_flux.d;
+        else
+            hllc_flux.chi = left_prims.chi  * hllc_flux.d;
+
+        return hllc_flux;
+    } else {
+        const real pressure = right_prims.p;
+        const real D        = right_state.d;
+        const real S1       = right_state.s1;
+        const real S2       = right_state.s2;
+        const real tau      = right_state.tau;
+        const real chi      = right_state.chi;
+        const real E        = tau + D;
+        const real cofactor = static_cast<real>(1.0) / (aR - aStar);
+
+        const real vR         = right_prims.vcomponent(nhat);
+        const auto kdelta     = kronecker(nhat, 1);
+        const real Dstar      = cofactor * (aR - vR) * D;
+        const real chistar    = cofactor * (aR - vR) * chi;
+        const real S1star     = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
+        const real S2star     = cofactor * (S2 * (aR - vR) + !kdelta * (-pressure + pStar) );
+        const real Estar      = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
+        const real tauStar    = Estar - Dstar;
+        auto starStateR       = Conserved{Dstar, S1star, S2star, tauStar, chistar};
+
+        auto hllc_flux = right_flux + (starStateR - right_state) * aR - starStateR * vface;
+
+        // upwind the concentration flux 
+        if (hllc_flux.d < static_cast<real>(0.0))
+            hllc_flux.chi = right_prims.chi * hllc_flux.d;
+        else
+            hllc_flux.chi = left_prims.chi  * hllc_flux.d;
+
+        return hllc_flux;
+    }
 
     // if (-aL <= (aStar - aL))
     // {
@@ -811,9 +807,9 @@ void SRHD2D::advance(
         const auto txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
         const auto tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
 
-        Conserved ux_l, ux_r, uy_l, uy_r;
-        Conserved f_l, f_r, g_l, g_r, frf, flf, grf, glf;
-        Primitive xprims_l, xprims_r, yprims_l, yprims_r;
+        Conserved uxL, uxR, uyL, uyR;
+        Conserved fL, fR, gL, gR, frf, flf, grf, glf;
+        Primitive xprimsL, xprimsR, yprimsL, yprimsR;
 
         const auto aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
         #if GPU_CODE
@@ -846,63 +842,63 @@ void SRHD2D::advance(
         const real vfaceL = x1l * hubble_param;
         if (self->first_order)
         {
-            xprims_l = prim_buff[( (txa + 0) * sy + (tya + 0) * sx)];
-            xprims_r = prim_buff[( (txa + 1) * sy + (tya + 0) * sx)];
+            xprimsL = prim_buff[( (txa + 0) * sy + (tya + 0) * sx)];
+            xprimsR  = prim_buff[( (txa + 1) * sy + (tya + 0) * sx)];
             //j+1/2
-            yprims_l = prim_buff[( (txa + 0) * sy + (tya + 0) * sx)];
-            yprims_r = prim_buff[( (txa + 0) * sy + (tya + 1) * sx)];
+            yprimsL = prim_buff[( (txa + 0) * sy + (tya + 0) * sx)];
+            yprimsR  = prim_buff[( (txa + 0) * sy + (tya + 1) * sx)];
             
             // i+1/2
-            ux_l = self->prims2cons(xprims_l); 
-            ux_r = self->prims2cons(xprims_r); 
+            uxL = self->prims2cons(xprimsL); 
+            uxR  = self->prims2cons(xprimsR); 
             // j+1/2
-            uy_l = self->prims2cons(yprims_l);  
-            uy_r = self->prims2cons(yprims_r); 
+            uyL = self->prims2cons(yprimsL);  
+            uyR  = self->prims2cons(yprimsR); 
 
-            f_l = self->prims2flux(xprims_l, 1);
-            f_r = self->prims2flux(xprims_r, 1);
+            fL = self->prims2flux(xprimsL, 1);
+            fR  = self->prims2flux(xprimsR, 1);
 
-            g_l = self->prims2flux(yprims_l, 2);
-            g_r = self->prims2flux(yprims_r, 2);
+            gL = self->prims2flux(yprimsL, 2);
+            gR  = self->prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i+1/2 interface
             if (hllc)
             {
-                frf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceR);
-                grf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                frf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                grf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
             } else {
-                frf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceR);
-                grf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                frf = self->calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                grf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
             }
 
             // Set up the left and right state interfaces for i-1/2
-            xprims_l = prim_buff[( (txa - 1) * sy + (tya + 0) * sx )];
-            xprims_r = prim_buff[( (txa - 0) * sy + (tya + 0) * sx )];
+            xprimsL = prim_buff[( (txa - 1) * sy + (tya + 0) * sx )];
+            xprimsR  = prim_buff[( (txa - 0) * sy + (tya + 0) * sx )];
             //j+1/2
-            yprims_l = prim_buff[( (txa - 0) * sy + (tya - 1) * sx )]; 
-            yprims_r = prim_buff[( (txa + 0) * sy + (tya - 0) * sx )]; 
+            yprimsL = prim_buff[( (txa - 0) * sy + (tya - 1) * sx )]; 
+            yprimsR  = prim_buff[( (txa + 0) * sy + (tya - 0) * sx )]; 
 
             // i+1/2
-            ux_l = self->prims2cons(xprims_l); 
-            ux_r = self->prims2cons(xprims_r); 
+            uxL = self->prims2cons(xprimsL); 
+            uxR  = self->prims2cons(xprimsR); 
             // j+1/2
-            uy_l = self->prims2cons(yprims_l);  
-            uy_r = self->prims2cons(yprims_r); 
+            uyL = self->prims2cons(yprimsL);  
+            uyR  = self->prims2cons(yprimsR); 
 
-            f_l = self->prims2flux(xprims_l, 1);
-            f_r = self->prims2flux(xprims_r, 1);
+            fL = self->prims2flux(xprimsL, 1);
+            fR  = self->prims2flux(xprimsR, 1);
 
-            g_l = self->prims2flux(yprims_l, 2);
-            g_r = self->prims2flux(yprims_r, 2);
+            gL = self->prims2flux(yprimsL, 2);
+            gR  = self->prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i-1/2 interface
             if (self->hllc)
             {
-                flf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceL);
-                glf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                flf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                glf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
             } else {
-                flf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceL);
-                glf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                flf = self->calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                glf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
             }   
         } else {
             Primitive xleft_most, xright_most, xleft_mid, xright_mid, center;
@@ -921,89 +917,89 @@ void SRHD2D::advance(
             yright_most = prim_buff[(txa * sy + (tya + 2) * sx) % nbs];
 
             // Reconstructed left X Primitive vector at the i+1/2 interface
-            xprims_l = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
-            xprims_r = xright_mid - helpers::minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
-            yprims_l = center     + helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
-            yprims_r = yright_mid - helpers::minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
+            xprimsL = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
+            xprimsR  = xright_mid - helpers::minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
+            yprimsL = center     + helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
+            yprimsR  = yright_mid - helpers::minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
 
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
-            ux_l = self->prims2cons(xprims_l);
-            ux_r = self->prims2cons(xprims_r);
-            uy_l = self->prims2cons(yprims_l);
-            uy_r = self->prims2cons(yprims_r);
+            uxL = self->prims2cons(xprimsL);
+            uxR  = self->prims2cons(xprimsR);
+            uyL = self->prims2cons(yprimsL);
+            uyR  = self->prims2cons(yprimsR);
 
-            f_l = self->prims2flux(xprims_l, 1);
-            f_r = self->prims2flux(xprims_r, 1);
-            g_l = self->prims2flux(yprims_l, 2);
-            g_r = self->prims2flux(yprims_r, 2);
+            fL = self->prims2flux(xprimsL, 1);
+            fR  = self->prims2flux(xprimsR, 1);
+            gL = self->prims2flux(yprimsL, 2);
+            gR  = self->prims2flux(yprimsR, 2);
 
             if (self->hllc)
             {
                 if(quirk_smoothing)
                 {
-                    if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
-                        frf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceR);
+                    if (quirk_strong_shock(xprimsL.p, xprimsR.p) ){
+                        frf = self->calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                     } else {
-                        frf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceR);
+                        frf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                     }
 
-                    if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
-                        grf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                    if (quirk_strong_shock(yprimsL.p, yprimsR.p)){
+                        grf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
                     } else {
-                        grf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                        grf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
                     }
                 } else {
-                    frf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceR);
-                    grf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                    frf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                    grf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
                 }
             }
             else
             {
-                frf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceR);
-                grf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                frf = self->calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                grf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
             }
 
             // Do the same thing, but for the left side interface [i - 1/2]
-            xprims_l = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
-            xprims_r = center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
-            yprims_l = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
-            yprims_r = center    - helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
+            xprimsL = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
+            xprimsR  = center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
+            yprimsL = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
+            yprimsR  = center    - helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
-            ux_l = self->prims2cons(xprims_l);
-            ux_r = self->prims2cons(xprims_r);
-            uy_l = self->prims2cons(yprims_l);
-            uy_r = self->prims2cons(yprims_r);
+            uxL = self->prims2cons(xprimsL);
+            uxR  = self->prims2cons(xprimsR);
+            uyL = self->prims2cons(yprimsL);
+            uyR  = self->prims2cons(yprimsR);
 
-            f_l = self->prims2flux(xprims_l, 1);
-            f_r = self->prims2flux(xprims_r, 1);
-            g_l = self->prims2flux(yprims_l, 2);
-            g_r = self->prims2flux(yprims_r, 2);
+            fL = self->prims2flux(xprimsL, 1);
+            fR  = self->prims2flux(xprimsR, 1);
+            gL = self->prims2flux(yprimsL, 2);
+            gR  = self->prims2flux(yprimsR, 2);
 
             if (self->hllc) {
                 if (quirk_smoothing)
                 {
-                    if (quirk_strong_shock(xprims_l.p, xprims_r.p) ){
-                        flf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceL);
+                    if (quirk_strong_shock(xprimsL.p, xprimsR.p) ){
+                        flf = self->calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
                     } else {
-                        flf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceL);
+                        flf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
                     }
                     
-                    if (quirk_strong_shock(yprims_l.p, yprims_r.p)){
-                        glf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                    if (quirk_strong_shock(yprimsL.p, yprimsR.p)){
+                        glf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
                     } else {
-                        glf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                        glf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
                     } 
                 } else {
-                    flf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceL);
-                    glf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                    flf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                    glf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
                 }
             } else {
-                flf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1, vfaceL);
-                glf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2, 0.0);
+                flf = self->calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                glf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
             }
         }
 
@@ -1020,14 +1016,14 @@ void SRHD2D::advance(
                         const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS2[real_loc];
                         const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceTau[real_loc];
                         const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
-                        self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf)/ dx2 - source_terms) * step;
+                        self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf)/ dx2 - source_terms) * step * self->dt;
                     #else
                         const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : sourceD[real_loc];
                         const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : sourceS1[real_loc];
                         const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : sourceS2[real_loc];
                         const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : sourceTau[real_loc];
                         const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
-                        cons[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step;
+                        cons[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step * self->dt;
                     #endif
                 
 
@@ -1037,22 +1033,22 @@ void SRHD2D::advance(
             case simbi::Geometry::SPHERICAL:
                 {
                 // #if GPU_CODE
-                const real rl           = x1l + vfaceL * step * dt; 
-                const real rr           = x1r + vfaceR * step * dt;
+                const real rl           = x1l + vfaceL * step * self->dt; 
+                const real rr           = x1r + vfaceR * step * self->dt;
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
                 const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
                 const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                const real s1R          = rr * rr; 
-                const real s1L          = rl * rl; 
-                const real s2R          = std::sin(tr);
-                const real s2L          = std::sin(tl);
                 const real thmean       = static_cast<real>(0.5) * (tl + tr);
-                const real sint         = std::sin(thmean);
-                const real dV1          = rmean * rmean * (rr - rl);             
-                const real dV2          = rmean * sint * (tr - tl); 
-                const real cot          = std::cos(thmean) / sint;
+                // const real sint         = std::sin(thmean);
+                // const real dV1          = rmean * rmean * (rr - rl);             
+                // const real dV2          = rmean * sint * (tr - tl); 
+                const real cot          = std::cos(thmean) / std::sin(thmean);
                 const real dcos         = std::cos(tl) - std::cos(tr);
-                const real dVtot        = (2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos);
+                const real dVtot        = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
+                const real s1R          = 2.0 * M_PI * rr * rr * dcos; 
+                const real s1L          = 2.0 * M_PI * rl * rl * dcos; 
+                const real s2R          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tr); // std::sin(tr);
+                const real s2L          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tl); // std::sin(tl);
                 const real factor       = (self->mesh_motion) ? dVtot : 1;  
 
                 #if GPU_CODE
@@ -1076,13 +1072,19 @@ void SRHD2D::advance(
                 const real hc   = static_cast<real>(1.0) + gamma * pc/(rhoc * (gamma - static_cast<real>(1.0)));
                 const real gam2 = static_cast<real>(1.0)/(static_cast<real>(1.0) - (uc * uc + vc * vc));
 
-                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , static_cast<real>(0.0)};
+                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) / dVtot, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dVtot , static_cast<real>(0.0)};
                 const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
-                const auto factorio = ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 - geom_source - source_terms) * dt * step * factor;
+                const auto factorio = ( (frf * s1R - flf * s1L) / dVtot + (grf * s2R - glf * s2L) / dVtot - geom_source - source_terms) * self->dt * step * factor;
+
                 #if GPU_CODE 
-                    self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 - geom_source - source_terms) * self->dt * step * factor;
+                    self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) / dVtot + (grf * s2R - glf * s2L) / dVtot - geom_source - source_terms) * self->dt * step * factor;
                 #else
-                    cons[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 - geom_source - source_terms) * self->dt * step * factor;
+                    if (ii == 10 && jj == 0) {
+                        // writeln("[{}], vfaceR: {:.2e}, vfaceL: {:.2e}, rr: {:.2e}, rl: {:.2e}", ii, vfaceR, vfaceL, rr, rl);
+                        writeln("advance flux: {:.3e}", factorio.d);
+                        helpers::pause_program();
+                    }
+                    cons[aid] -= ( (frf * s1R - flf * s1L) / dVtot + (grf * s2R - glf * s2L) / dVtot - geom_source - source_terms) * self->dt * step * factor;
                 #endif
                 break;
                 }
@@ -1096,8 +1098,8 @@ void SRHD2D::advance(
     const real x1r    = self->get_x1face(xphysical_grid, geometry, 1);
     const real vfaceR = x1r * hubble_param;
     const real vfaceL = x1l * hubble_param;
-    self->x1min      += step * dt * vfaceL;
-    self->x1max      += step * dt * vfaceR;
+    self->x1min      += step * self->dt * vfaceL;
+    self->x1max      += step * self->dt * vfaceR;
     if constexpr(BuildPlatform == Platform::GPU) {
         this->x1max = self->x1max;
         this->x1min = self->x1min;
