@@ -116,9 +116,9 @@ void SRHD::advance(
         auto* const prim_buff = &prims[0];
         #endif 
 
-        Conserved u_l, u_r;
-        Conserved f_l, f_r, frf, flf;
-        Primitive prims_l, prims_r;
+        Conserved uL, uR;
+        Conserved fL, fR, frf, flf;
+        Primitive primsL, primsR;
 
         lint ia = ii + radius;
         lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
@@ -146,37 +146,37 @@ void SRHD::advance(
         if (self->first_order)
         {
             // Set up the left and right state interfaces for i+1/2
-            prims_l = prim_buff[(txa + 0) % bx];
-            prims_r = prim_buff[(txa + 1) % bx];
-            u_l     = self->prims2cons(prims_l);
-            u_r     = self->prims2cons(prims_r);
-            f_l     = self->prims2flux(prims_l);
-            f_r     = self->prims2flux(prims_r);
+            primsL = prim_buff[(txa + 0) % bx];
+            primsR  = prim_buff[(txa + 1) % bx];
+            uL     = self->prims2cons(primsL);
+            uR      = self->prims2cons(primsR);
+            fL     = self->prims2flux(primsL);
+            fR      = self->prims2flux(primsR);
 
             // Calc HLL Flux at i+1/2 interface
             if (self->hllc)
             {
-                frf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceR);
+                frf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
             }
             else
             {
-                frf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceR);
+                frf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
             }
 
             // Set up the left and right state interfaces for i-1/2
-            prims_l = prim_buff[helpers::mod(txa - 1, bx)];
-            prims_r = prim_buff[(txa - 0) % bx];
+            primsL = prim_buff[helpers::mod(txa - 1, bx)];
+            primsR  = prim_buff[(txa - 0) % bx];
 
-            u_l = self->prims2cons(prims_l);
-            u_r = self->prims2cons(prims_r);
-            f_l = self->prims2flux(prims_l);
-            f_r = self->prims2flux(prims_r);
+            uL = self->prims2cons(primsL);
+            uR  = self->prims2cons(primsR);
+            fL = self->prims2flux(primsL);
+            fR  = self->prims2flux(primsR);
 
             // Calc HLL Flux at i-1/2 interface
             if (self->hllc) {
-                flf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceL);
+                flf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
             } else {
-                flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceL);
+                flf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
             }   
         } else {
             const Primitive left_most  = prim_buff[helpers::mod(txa - 2, bx)];
@@ -187,36 +187,36 @@ void SRHD::advance(
 
             // Compute the reconstructed primitives at the i+1/2 interface
             // Reconstructed left primitives vector
-            prims_l = center    + helpers::minmod((center - left_mid)*self->plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*self->plm_theta)*static_cast<real>(0.5); 
-            prims_r = right_mid - helpers::minmod((right_mid - center)*self->plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most - right_mid)*self->plm_theta)*static_cast<real>(0.5);
+            primsL = center    + helpers::minmod((center - left_mid)*self->plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*self->plm_theta)*static_cast<real>(0.5); 
+            primsR  = right_mid - helpers::minmod((right_mid - center)*self->plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most - right_mid)*self->plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM primitives
-            u_l = self->prims2cons(prims_l);
-            u_r = self->prims2cons(prims_r);
-            f_l = self->prims2flux(prims_l);
-            f_r = self->prims2flux(prims_r);
+            uL = self->prims2cons(primsL);
+            uR  = self->prims2cons(primsR);
+            fL = self->prims2flux(primsL);
+            fR  = self->prims2flux(primsR);
 
             if (self->hllc) {
-                frf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceR);
+                frf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
             } else {
-                frf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceR);
+                frf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
             }
             
             // Do the same thing, but for the right side interface [i - 1/2]
-            prims_l = left_mid + helpers::minmod((left_mid - left_most)*self->plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*self->plm_theta)*static_cast<real>(0.5);
-            prims_r = center   - helpers::minmod((center - left_mid)*self->plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*self->plm_theta)*static_cast<real>(0.5);
+            primsL = left_mid + helpers::minmod((left_mid - left_most)*self->plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*self->plm_theta)*static_cast<real>(0.5);
+            primsR  = center   - helpers::minmod((center - left_mid)*self->plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*self->plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
-            u_l = self->prims2cons(prims_l);
-            u_r = self->prims2cons(prims_r);
-            f_l = self->prims2flux(prims_l);
-            f_r = self->prims2flux(prims_r);
+            uL = self->prims2cons(primsL);
+            uR  = self->prims2cons(primsR);
+            fL = self->prims2flux(primsL);
+            fR  = self->prims2flux(primsR);
 
             if (self->hllc) {
-                flf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceL);
+                flf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
             } else {
-                flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r, vfaceL);
+                flf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
             }
         }
 
@@ -395,67 +395,67 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 //----------------------------------------------------------------------------------------------------------
 GPU_CALLABLE_MEMBER
 Eigenvals SRHD::calc_eigenvals(
-    const Primitive &prims_l,
-    const Primitive &prims_r) const
+    const Primitive &primsL,
+    const Primitive &primsR) const
 {
     // Compute L/R Sound Speeds
-    const real rho_l = prims_l.rho;
-    const real p_l   = prims_l.p;
-    const real v_l   = prims_l.v / std::sqrt(1.0 + prims_l.v * prims_l.v);
-    const real h_l   = static_cast<real>(1.0) + gamma * p_l / (rho_l * (gamma - 1));
-    const real cs_l  = std::sqrt(gamma * p_l / (rho_l * h_l));
+    const real rhoL = primsL.rho;
+    const real pL   = primsL.p;
+    const real vL   = primsL.v / std::sqrt(1.0 + primsL.v * primsL.v);
+    const real hL   = static_cast<real>(1.0) + gamma * pL / (rhoL * (gamma - 1));
+    const real csL  = std::sqrt(gamma * pL / (rhoL * hL));
 
-    const real rho_r = prims_r.rho;
-    const real p_r   = prims_r.p;
-    const real v_r   = prims_r.v / std::sqrt(1.0 + prims_r.v * prims_r.v);
-    const real h_r   = static_cast<real>(1.0) + gamma * p_r / (rho_r * (gamma - 1));
-    const real cs_r  = std::sqrt(gamma * p_r / (rho_r * h_r));
+    const real rhoR  = primsR.rho;
+    const real pR    = primsR.p;
+    const real vR    = primsR.v / std::sqrt(1.0 + primsR.v * primsR.v);
+    const real hR    = static_cast<real>(1.0) + gamma * pR  / (rhoR  * (gamma - 1));
+    const real csR   = std::sqrt(gamma * pR  / (rhoR  * hR));
 
     switch (comp_wave_speed)
     {
     case simbi::WaveSpeeds::SCHNEIDER_ET_AL_93:
         {
             // Compute waves based on Schneider et al. 1993 Eq(31 - 33)
-            const real vbar = static_cast<real>(0.5) * (v_l + v_r);
-            const real cbar = static_cast<real>(0.5) * (cs_r + cs_l);
+            const real vbar = static_cast<real>(0.5) * (vL + vR);
+            const real cbar = static_cast<real>(0.5) * (csR  + csL);
 
             const real bR   = (vbar + cbar) / (1 + vbar * cbar);
             const real bL   = (vbar - cbar) / (1 - vbar * cbar);
 
-            const real aL = helpers::my_min(bL, (v_l - cs_l) / (1 - v_l * cs_l));
-            const real aR = helpers::my_max(bR, (v_r + cs_r) / (1 + v_r * cs_r));
+            const real aL = helpers::my_min(bL, (vL - csL) / (1 - vL * csL));
+            const real aR = helpers::my_max(bR, (vR  + csR) / (1 + vR  * csR));
 
             return Eigenvals(aL, aR);
         }
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
             // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-            const real sL = cs_l*cs_l/(gamma*gamma*(static_cast<real>(1.0) - cs_l*cs_l));
-            const real sR = cs_r*cs_r/(gamma*gamma*(static_cast<real>(1.0) - cs_r*cs_r));
+            const real sL = csL*csL/(gamma*gamma*(static_cast<real>(1.0) - csL*csL));
+            const real sR = csR*csR/(gamma*gamma*(static_cast<real>(1.0) - csR*csR));
             // Define temporaries to save computational cycles
             const real qfL   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
             const real qfR   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
-            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0) - v_r * v_r + sR));
-            const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0) - v_l * v_l + sL));
+            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0) - vR  * vR  + sR));
+            const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0) - vL * vL + sL));
 
-            const real lamLm = (v_l - sqrtL) * qfL;
-            const real lamRm = (v_r - sqrtR) * qfR;
-            const real lamLp = (v_l + sqrtL) * qfL;
-            const real lamRp = (v_r + sqrtR) * qfR;
+            const real lamLm = (vL - sqrtL) * qfL;
+            const real lamRm = (vR  - sqrtR) * qfR;
+            const real lamLp = (vL + sqrtL) * qfL;
+            const real lamRp = (vR  + sqrtR) * qfR;
 
             real aL = lamLm < lamRm ? lamLm : lamRm;
             real aR = lamLp > lamRp ? lamLp : lamRp;
 
             // Smoothen for rarefaction fan
-            aL = helpers::my_min(aL, (v_l - cs_l) / (1 - v_l * cs_l));
-            aR = helpers::my_max(aR, (v_r + cs_r) / (1 + v_r * cs_r));
+            aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
+            aR = helpers::my_max(aR, (vR  + csR) / (1 + vR  * csR));
 
             return Eigenvals(aL, aR);
         }
     case simbi::WaveSpeeds::NAIVE:
     {
-        const real aL = helpers::my_min((v_r - cs_r) / (1 - v_r * cs_r), (v_l - cs_l) / (1 - v_l * cs_l));
-        const real aR = helpers::my_max((v_l + cs_l) / (1 + v_l * cs_l), (v_r + cs_r) / (1 + v_r * cs_r));
+        const real aL = helpers::my_min((vR  - csR) / (1 - vR  * csR), (vL - csL) / (1 - vL * csL));
+        const real aR = helpers::my_max((vL + csL) / (1 + vL * csL), (vR  + csR) / (1 + vR  * csR));
 
         return Eigenvals(aL, aR);
     }

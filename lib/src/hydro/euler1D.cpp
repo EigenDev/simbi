@@ -101,55 +101,55 @@ GPU_CALLABLE_MEMBER
 Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitive &right_prim)
 {
     // Separate the left and right state components
-    const real rho_l    = left_prim.rho;
-    const real v_l      = left_prim.v;
-    const real p_l      = left_prim.p;
-    const real rho_r    = right_prim.rho;
-    const real v_r      = right_prim.v;
-    const real p_r      = right_prim.p;
+    const real rhoL    = left_prim.rho;
+    const real vL      = left_prim.v;
+    const real pL      = left_prim.p;
+    const real rhoR   = right_prim.rho;
+    const real vR     = right_prim.v;
+    const real pR     = right_prim.p;
 
-    const real cs_r = std::sqrt(gamma * p_r/rho_r);
-    const real cs_l = std::sqrt(gamma * p_l/rho_l);
+    const real csR= std::sqrt(gamma * pR/rhoR);
+    const real csL = std::sqrt(gamma * pL/rhoL);
 
     switch (sim_solver)
     {
     case SOLVER::HLLE:
         {
-        const real aR = helpers::my_max(helpers::my_max(v_l + cs_l, v_r + cs_r), static_cast<real>(0.0)); 
-        const real aL = helpers::my_min(helpers::my_min(v_l - cs_l, v_r - cs_r), static_cast<real>(0.0));
+        const real aR = helpers::my_max(helpers::my_max(vL + csL, vR+ csR), static_cast<real>(0.0)); 
+        const real aL = helpers::my_min(helpers::my_min(vL - csL, vR- csR), static_cast<real>(0.0));
         return Eigenvals{aL, aR};
         }
     case SOLVER::HLLC:
-        real cbar   = static_cast<real>(0.5)*(cs_l + cs_r);
-        real rhoBar = static_cast<real>(0.5)*(rho_l + rho_r);
-        real pStar  = static_cast<real>(0.5)*(p_l + p_r) + static_cast<real>(0.5)*(v_l - v_r)*cbar*rhoBar;
+        real cbar   = static_cast<real>(0.5)*(csL + csR);
+        real rhoBar = static_cast<real>(0.5)*(rhoL + rhoR);
+        real pStar  = static_cast<real>(0.5)*(pL + pR) + static_cast<real>(0.5)*(vL - vR)*cbar*rhoBar;
 
         // Steps to Compute HLLC as described in Toro et al. 2019
         real z      = (gamma - 1.)/(2.*gamma);
-        real num    = cs_l + cs_r - ( gamma-1.)/2 *(v_r - v_l);
-        real denom  = cs_l/std::pow(p_l,z) + cs_r/std::pow(p_r, z);
+        real num    = csL + csR- ( gamma-1.)/2 *(vR- vL);
+        real denom  = csL/std::pow(pL,z) + csR/std::pow(pR, z);
         real p_term = num/denom;
         real qL, qR;
 
         pStar = std::pow(p_term, (1./z));
 
-        if (pStar <= p_l){
+        if (pStar <= pL){
             qL = 1.;
         } else {
-            qL = std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_l - 1.));
+            qL = std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pL - 1.));
         }
 
-        if (pStar <= p_r){
+        if (pStar <= pR){
             qR = 1.;
         } else {
-            qR = std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/p_r - 1.));
+            qR = std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pR- 1.));
         }
 
-        real aL = v_l - qL*cs_l;
-        real aR = v_r + qR*cs_r;
+        real aL = vL - qL*csL;
+        real aR = vR+ qR*csR;
 
-        real aStar = ( (p_r - p_l + rho_l*v_l*(aL - v_l) - rho_r*v_r*(aR - v_r))/
-                        (rho_l*(aL - v_l) - rho_r*(aR - v_r) ) );
+        real aStar = ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR))/
+                        (rhoL*(aL - vL) - rhoR*(aR - vR) ) );
 
         return Eigenvals{aL, aR, aStar, pStar};
     }
@@ -344,9 +344,9 @@ void Newtonian1D::advance(
         auto* const prim_buff = &prims[0];
         #endif 
 
-        Conserved u_l, u_r;
-        Conserved f_l, f_r, frf, flf;
-        Primitive prims_l, prims_r;
+        Conserved uL, uR;
+        Conserved fL, fR, frf, flf;
+        Primitive primsL, primsR;
 
         lint ia = ii + radius;
         lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
@@ -371,41 +371,41 @@ void Newtonian1D::advance(
         const real vfaceR = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
         if (self->first_order)
         {
-            prims_l = prim_buff[(txa + 0) % bx];
-            prims_r = prim_buff[(txa + 1) % bx];
+            primsL = prim_buff[(txa + 0) % bx];
+            primsR= prim_buff[(txa + 1) % bx];
             
-            u_l = self->prims2cons(prims_l);
-            u_r = self->prims2cons(prims_r);
-            f_l = self->prims2flux(prims_l);
-            f_r = self->prims2flux(prims_r);
+            uL = self->prims2cons(primsL);
+            uR= self->prims2cons(primsR);
+            fL = self->prims2flux(primsL);
+            fR= self->prims2flux(primsR);
 
             // Calc HLL Flux at i+1/2 luinterface
             if (self->hllc)
             {
-                frf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                frf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
             }
             else
             {
-                frf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                frf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
 
             // Set up the left and right state luinterfaces for i-1/2
-            prims_l = prim_buff[helpers::mod(txa - 1, bx)];
-            prims_r = prim_buff[(txa + 0) % bx];
+            primsL = prim_buff[helpers::mod(txa - 1, bx)];
+            primsR= prim_buff[(txa + 0) % bx];
             
-            u_l = self->prims2cons(prims_l);
-            u_r = self->prims2cons(prims_r);
-            f_l = self->prims2flux(prims_l);
-            f_r = self->prims2flux(prims_r);
+            uL = self->prims2cons(primsL);
+            uR= self->prims2cons(primsR);
+            fL = self->prims2flux(primsL);
+            fR= self->prims2flux(primsR);
 
             // Calc HLL Flux at i-1/2 luinterface
             if (self->hllc)
             {
-                flf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                flf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
             }
             else
             {
-                flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                flf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
         }
         else
@@ -421,43 +421,43 @@ void Newtonian1D::advance(
             // Compute the reconstructed primitives at the i+1/2 luinterface
 
             // Reconstructed left primitives vector
-            prims_l = center    + helpers::minmod((center - left_mid) * plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center) * plm_theta) * static_cast<real>(0.5);
-            prims_r = right_mid - helpers::minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most- right_mid) * plm_theta) * static_cast<real>(0.5);
+            primsL = center    + helpers::minmod((center - left_mid) * plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center) * plm_theta) * static_cast<real>(0.5);
+            primsR= right_mid - helpers::minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most- right_mid) * plm_theta) * static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
-            u_l = self->prims2cons(prims_l);
-            u_r = self->prims2cons(prims_r);
-            f_l = self->prims2flux(prims_l);
-            f_r = self->prims2flux(prims_r);
+            uL = self->prims2cons(primsL);
+            uR= self->prims2cons(primsR);
+            fL = self->prims2flux(primsL);
+            fR= self->prims2flux(primsR);
 
             if (self->hllc)
             {
-                frf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                frf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
             }
             else
             {
-                frf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                frf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
 
             // Do the same thing, but for the right side luinterface [i - 1/2]
-            prims_l = left_mid + helpers::minmod((left_mid - left_most) * plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
-            prims_r = center   - helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
+            primsL = left_mid + helpers::minmod((left_mid - left_most) * plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
+            primsR= center   - helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
-            u_l = self->prims2cons(prims_l);
-            u_r = self->prims2cons(prims_r);
-            f_l = self->prims2flux(prims_l);
-            f_r = self->prims2flux(prims_r);
+            uL = self->prims2cons(primsL);
+            uR= self->prims2cons(primsR);
+            fL = self->prims2flux(primsL);
+            fR= self->prims2flux(primsR);
 
             if (self->hllc)
             {
-                flf = self->calc_hllc_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                flf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
             }
             else
             {
-                flf = self->calc_hll_flux(prims_l, prims_r, u_l, u_r, f_l, f_r);
+                flf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
         }
         const auto step = (self->first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);

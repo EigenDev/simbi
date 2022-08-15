@@ -69,8 +69,8 @@ namespace simbi
           void cons2prim(ExecutionPolicy<> p, SRHD *dev = nullptr, simbi::MemSide user = simbi::MemSide::Host);
 
           GPU_CALLABLE_MEMBER
-          sr1d::Eigenvals calc_eigenvals(const sr1d::Primitive &prims_l,
-                                         const sr1d::Primitive &prims_r) const;
+          sr1d::Eigenvals calc_eigenvals(const sr1d::Primitive &primsL,
+                                         const sr1d::Primitive &primsR) const;
 
           void adapt_dt();
           void adapt_dt(SRHD *dev, luint blockSize);

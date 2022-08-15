@@ -181,72 +181,72 @@ void SRHD3D::cons2prim(
 //----------------------------------------------------------------------------------------------------------
 GPU_CALLABLE_MEMBER
 Eigenvals SRHD3D::calc_Eigenvals(
-    const Primitive &prims_l,
-    const Primitive &prims_r,
+    const Primitive &primsL,
+    const Primitive &primsR,
     const luint nhat)
 {
     // Separate the left and right Primitive
-    const real rho_l = prims_l.rho;
-    const real p_l   = prims_l.p;
-    const real h_l   = static_cast<real>(1.0) + gamma * p_l / (rho_l * (gamma - static_cast<real>(1.0)));
+    const real rhoL = primsL.rho;
+    const real pL   = primsL.p;
+    const real hL   = static_cast<real>(1.0) + gamma * pL / (rhoL * (gamma - static_cast<real>(1.0)));
 
-    const real rho_r = prims_r.rho;
-    const real p_r   = prims_r.p;
-    const real h_r   = static_cast<real>(1.0) + gamma * p_r / (rho_r * (gamma - static_cast<real>(1.0)));
+    const real rhoR  = primsR.rho;
+    const real pR    = primsR.p;
+    const real hR    = static_cast<real>(1.0) + gamma * pR  / (rhoR  * (gamma - static_cast<real>(1.0)));
 
-    const real cs_r = std::sqrt(gamma * p_r / (h_r * rho_r));
-    const real cs_l = std::sqrt(gamma * p_l / (h_l * rho_l));
+    const real csR  = std::sqrt(gamma * pR  / (hR  * rhoR));
+    const real csL = std::sqrt(gamma * pL / (hL * rhoL));
 
-    const real v_l = prims_l.vcomponent(nhat);
-    const real v_r = prims_r.vcomponent(nhat);
+    const real vL = primsL.vcomponent(nhat);
+    const real vR  = primsR.vcomponent(nhat);
 
     //-----------Calculate wave speeds based on Shneider et al. 1992
     switch (comp_wave_speed)
     {
     case simbi::WaveSpeeds::SCHNEIDER_ET_AL_93:
         {
-            const real vbar  = static_cast<real>(0.5) * (v_l + v_r);
-            const real cbar  = static_cast<real>(0.5) * (cs_l + cs_r);
+            const real vbar  = static_cast<real>(0.5) * (vL + vR);
+            const real cbar  = static_cast<real>(0.5) * (csL + csR);
             const real bl    = (vbar - cbar)/(static_cast<real>(1.0) - cbar*vbar);
             const real br    = (vbar + cbar)/(static_cast<real>(1.0) + cbar*vbar);
-            const real aL    = helpers::my_min(bl, (v_l - cs_l)/(static_cast<real>(1.0) - v_l*cs_l));
-            const real aR    = helpers::my_max(br, (v_r + cs_r)/(static_cast<real>(1.0) + v_r*cs_r));
+            const real aL    = helpers::my_min(bl, (vL - csL)/(static_cast<real>(1.0) - vL*csL));
+            const real aR    = helpers::my_max(br, (vR  + csR)/(static_cast<real>(1.0) + vR*csR));
 
-            return Eigenvals(aL, aR, cs_l, cs_r);
+            return Eigenvals(aL, aR, csL, csR);
         }
     
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
             //--------Calc the wave speeds based on Mignone and Bodo (2005)
-            const real sL = cs_l * cs_l * (static_cast<real>(1.0) / (gamma * gamma * (static_cast<real>(1.0) - cs_l * cs_l)));
-            const real sR = cs_r * cs_r * (static_cast<real>(1.0) / (gamma * gamma * (static_cast<real>(1.0) - cs_r * cs_r)));
+            const real sL = csL * csL * (static_cast<real>(1.0) / (gamma * gamma * (static_cast<real>(1.0) - csL * csL)));
+            const real sR = csR  * csR  * (static_cast<real>(1.0) / (gamma * gamma * (static_cast<real>(1.0) - csR  * csR)));
 
             // Define temporaries to save computational cycles
             const real qfL   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
             const real qfR   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
-            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0)- v_r * v_r + sR));
-            const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0)- v_l * v_l + sL));
+            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0)- vR  * vR  + sR));
+            const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0)- vL * vL + sL));
 
-            const real lamLm = (v_l - sqrtL) * qfL;
-            const real lamRm = (v_r - sqrtR) * qfR;
-            const real lamLp = (v_l + sqrtL) * qfL;
-            const real lamRp = (v_r + sqrtR) * qfR;
+            const real lamLm = (vL - sqrtL) * qfL;
+            const real lamRm = (vR  - sqrtR) * qfR;
+            const real lamLp = (vL + sqrtL) * qfL;
+            const real lamRp = (vR  + sqrtR) * qfR;
 
             const real aL = lamLm < lamRm ? lamLm : lamRm;
             const real aR = lamLp > lamRp ? lamLp : lamRp;
 
-            return Eigenvals(aL, aR, cs_l, cs_r);
+            return Eigenvals(aL, aR, csL, csR);
         }
     case simbi::WaveSpeeds::NAIVE:
         {
-            const real aLm = (v_l - cs_l) / (1 - v_l * cs_l);
-            const real aLp = (v_l + cs_l) / (1 + v_l * cs_l);
-            const real aRm = (v_r - cs_r) / (1 - v_r * cs_r);
-            const real aRp = (v_r + cs_r) / (1 + v_r * cs_r);
+            const real aLm = (vL - csL) / (1 - vL * csL);
+            const real aLp = (vL + csL) / (1 + vL * csL);
+            const real aRm = (vR  - csR) / (1 - vR  * csR);
+            const real aRp = (vR  + csR) / (1 + vR  * csR);
 
             const real aL = helpers::my_min(aLm, aRm);
             const real aR = helpers::my_max(aLp, aRp);
-            return Eigenvals(aL, aR, cs_l, cs_r);
+            return Eigenvals(aL, aR, csL, csR);
         }
     }
 };
@@ -705,9 +705,9 @@ void SRHD3D::advance(
         const luint tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
         const luint tza = (BuildPlatform == Platform::GPU) ? tz + radius : ka;
 
-        Conserved ux_l, ux_r, uy_l, uy_r, uz_l, uz_r;
-        Conserved f_l, f_r, g_l, g_r, h_l, h_r, frf, flf, grf, glf, hrf, hlf;
-        Primitive xprims_l, xprims_r, yprims_l, yprims_r, zprims_l, zprims_r;
+        Conserved uxL, uxR, uyL, uyR, uzL, uzR;
+        Conserved fL, fR, gL, gR, hL, hR, frf, flf, grf, glf, hrf, hlf;
+        Primitive xprimsL, xprimsR, yprimsL, yprimsR, zprimsL, zprimsR;
 
         luint aid = ka * nx * ny + ja * nx + ia;
         #if GPU_CODE
@@ -745,85 +745,85 @@ void SRHD3D::advance(
         #endif
         
         if (self->first_order){
-            xprims_l = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
-            xprims_r = prim_buff[tza * bx * by + tya * bx + (txa + 1)];
+            xprimsL = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
+            xprimsR  = prim_buff[tza * bx * by + tya * bx + (txa + 1)];
             //j+1/2
-            yprims_l = prim_buff[tza * bx * by + (tya + 0) * bx + txa];
-            yprims_r = prim_buff[tza * bx * by + (tya + 1) * bx + txa];
+            yprimsL = prim_buff[tza * bx * by + (tya + 0) * bx + txa];
+            yprimsR  = prim_buff[tza * bx * by + (tya + 1) * bx + txa];
             //j+1/2
-            zprims_l = prim_buff[(tza + 0) * bx * by + tya * bx + txa];
-            zprims_r = prim_buff[(tza + 1) * bx * by + tya * bx + txa];
+            zprimsL = prim_buff[(tza + 0) * bx * by + tya * bx + txa];
+            zprimsR  = prim_buff[(tza + 1) * bx * by + tya * bx + txa];
 
-            ux_l = self->prims2cons(xprims_l);
-            ux_r = self->prims2cons(xprims_r);
+            uxL = self->prims2cons(xprimsL);
+            uxR  = self->prims2cons(xprimsR);
 
-            uy_l = self->prims2cons(yprims_l);
-            uy_r = self->prims2cons(yprims_r);
+            uyL = self->prims2cons(yprimsL);
+            uyR  = self->prims2cons(yprimsR);
 
-            uz_l = self->prims2cons(zprims_l);
-            uz_r = self->prims2cons(zprims_r);
+            uzL = self->prims2cons(zprimsL);
+            uzR  = self->prims2cons(zprimsR);
 
-            f_l = self->calc_Flux(xprims_l, 1);
-            f_r = self->calc_Flux(xprims_r, 1);
+            fL = self->calc_Flux(xprimsL, 1);
+            fR  = self->calc_Flux(xprimsR, 1);
 
-            g_l = self->calc_Flux(yprims_l, 2);
-            g_r = self->calc_Flux(yprims_r, 2);
+            gL = self->calc_Flux(yprimsL, 2);
+            gR  = self->calc_Flux(yprimsR, 2);
 
-            h_l = self->calc_Flux(zprims_l, 3);
-            h_r = self->calc_Flux(zprims_r, 3);
+            hL = self->calc_Flux(zprimsL, 3);
+            hR  = self->calc_Flux(zprimsR, 3);
 
             // Calc HLL Flux at i+1/2 interface
             if (self->hllc)
             {
-                frf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                grf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                hrf = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                frf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
+                grf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
+                hrf = self->calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
 
             } else {
-                frf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                grf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                hrf = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                frf = self->calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
+                grf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
+                hrf = self->calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
             }
 
             // Set up the left and right state interfaces for i-1/2
-            xprims_l = prim_buff[tza * bx * by + tya * bx + (txa - 1)];
-            xprims_r = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
+            xprimsL = prim_buff[tza * bx * by + tya * bx + (txa - 1)];
+            xprimsR  = prim_buff[tza * bx * by + tya * bx + (txa + 0)];
             //j+1/2
-            yprims_l = prim_buff[tza * bx * by + (tya - 1) * bx + txa]; 
-            yprims_r = prim_buff[tza * bx * by + (tya + 0) * bx + txa]; 
+            yprimsL = prim_buff[tza * bx * by + (tya - 1) * bx + txa]; 
+            yprimsR  = prim_buff[tza * bx * by + (tya + 0) * bx + txa]; 
             //k+1/2
-            zprims_l = prim_buff[(tza - 1) * bx * by + tya * bx + txa]; 
-            zprims_r = prim_buff[(tza - 0) * bx * by + tya * bx + txa]; 
+            zprimsL = prim_buff[(tza - 1) * bx * by + tya * bx + txa]; 
+            zprimsR  = prim_buff[(tza - 0) * bx * by + tya * bx + txa]; 
 
-            ux_l = self->prims2cons(xprims_l);
-            ux_r = self->prims2cons(xprims_r);
+            uxL = self->prims2cons(xprimsL);
+            uxR  = self->prims2cons(xprimsR);
 
-            uy_l = self->prims2cons(yprims_l);
-            uy_r = self->prims2cons(yprims_r);
+            uyL = self->prims2cons(yprimsL);
+            uyR  = self->prims2cons(yprimsR);
 
-            uz_l = self->prims2cons(zprims_l);
-            uz_r = self->prims2cons(zprims_r);
+            uzL = self->prims2cons(zprimsL);
+            uzR  = self->prims2cons(zprimsR);
 
-            f_l = self->calc_Flux(xprims_l, 1);
-            f_r = self->calc_Flux(xprims_r, 1);
+            fL = self->calc_Flux(xprimsL, 1);
+            fR  = self->calc_Flux(xprimsR, 1);
 
-            g_l = self->calc_Flux(yprims_l, 2);
-            g_r = self->calc_Flux(yprims_r, 2);
+            gL = self->calc_Flux(yprimsL, 2);
+            gR  = self->calc_Flux(yprimsR, 2);
 
-            h_l = self->calc_Flux(zprims_l, 3);
-            h_r = self->calc_Flux(zprims_r, 3);
+            hL = self->calc_Flux(zprimsL, 3);
+            hR  = self->calc_Flux(zprimsR, 3);
 
             // Calc HLL Flux at i-1/2 interface
             if (self-> hllc)
             {
-                flf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                glf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                hlf = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                flf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
+                glf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
+                hlf = self->calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
 
             } else {
-                flf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                glf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                hlf = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                flf = self->calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
+                glf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
+                hlf = self->calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
             }   
         } else{
             Primitive xleft_most, xright_most, xleft_mid, xright_mid, center;
@@ -850,77 +850,77 @@ void SRHD3D::advance(
             zright_most = prim_buff[(tza + 2) * bx * by + tya * bx + txa];
             
             // Reconstructed left X Primitive vector at the i+1/2 interface
-            xprims_l = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
-            xprims_r = xright_mid - helpers::minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
-            yprims_l = center     + helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
-            yprims_r = yright_mid - helpers::minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
-            zprims_l = center     + helpers::minmod((center - zleft_mid)*plm_theta, (zright_mid - zleft_mid)*static_cast<real>(0.5), (zright_mid - center) * plm_theta) * static_cast<real>(0.5);  
-            zprims_r = zright_mid - helpers::minmod((zright_mid - center) * plm_theta, (zright_most - center) * static_cast<real>(0.5), (zright_most - zright_mid)*plm_theta) * static_cast<real>(0.5);
+            xprimsL = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
+            xprimsR  = xright_mid - helpers::minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
+            yprimsL = center     + helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
+            yprimsR  = yright_mid - helpers::minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
+            zprimsL = center     + helpers::minmod((center - zleft_mid)*plm_theta, (zright_mid - zleft_mid)*static_cast<real>(0.5), (zright_mid - center) * plm_theta) * static_cast<real>(0.5);  
+            zprimsR  = zright_mid - helpers::minmod((zright_mid - center) * plm_theta, (zright_most - center) * static_cast<real>(0.5), (zright_most - zright_mid)*plm_theta) * static_cast<real>(0.5);
 
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
-            ux_l = self->prims2cons(xprims_l);
-            ux_r = self->prims2cons(xprims_r);
+            uxL = self->prims2cons(xprimsL);
+            uxR  = self->prims2cons(xprimsR);
 
-            uy_l = self->prims2cons(yprims_l);
-            uy_r = self->prims2cons(yprims_r);
+            uyL = self->prims2cons(yprimsL);
+            uyR  = self->prims2cons(yprimsR);
 
-            uz_l = self->prims2cons(zprims_l);
-            uz_r = self->prims2cons(zprims_r);
+            uzL = self->prims2cons(zprimsL);
+            uzR  = self->prims2cons(zprimsR);
 
-            f_l = self->calc_Flux(xprims_l, 1);
-            f_r = self->calc_Flux(xprims_r, 1);
+            fL = self->calc_Flux(xprimsL, 1);
+            fR  = self->calc_Flux(xprimsR, 1);
 
-            g_l = self->calc_Flux(yprims_l, 2);
-            g_r = self->calc_Flux(yprims_r, 2);
+            gL = self->calc_Flux(yprimsL, 2);
+            gR  = self->calc_Flux(yprimsR, 2);
 
-            h_l = self->calc_Flux(zprims_l, 3);
-            h_r = self->calc_Flux(zprims_r, 3);
+            hL = self->calc_Flux(zprimsL, 3);
+            hR  = self->calc_Flux(zprimsR, 3);
 
             if (self->hllc) {
-                frf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                grf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                hrf = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                frf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
+                grf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
+                hrf = self->calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
             } else {
-                frf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                grf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                hrf = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                frf = self->calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
+                grf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
+                hrf = self->calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
             }
 
             // Do the same thing, but for the left side interface [i - 1/2]
             // Do the same thing, but for the left side interface [i - 1/2]
-            xprims_l = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
-            xprims_r = center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
-            yprims_l = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
-            yprims_r = center    - helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
-            zprims_l = zleft_mid + helpers::minmod((zleft_mid - zleft_most) * plm_theta, (center - zleft_most) * static_cast<real>(0.5), (center - zleft_mid)*plm_theta) * static_cast<real>(0.5);
-            zprims_r = center    - helpers::minmod((center - zleft_mid)*plm_theta, (zright_mid - zleft_mid)*static_cast<real>(0.5), (zright_mid - center)*plm_theta)*static_cast<real>(0.5);
+            xprimsL = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
+            xprimsR  = center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
+            yprimsL = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
+            yprimsR  = center    - helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
+            zprimsL = zleft_mid + helpers::minmod((zleft_mid - zleft_most) * plm_theta, (center - zleft_most) * static_cast<real>(0.5), (center - zleft_mid)*plm_theta) * static_cast<real>(0.5);
+            zprimsR  = center    - helpers::minmod((center - zleft_mid)*plm_theta, (zright_mid - zleft_mid)*static_cast<real>(0.5), (zright_mid - center)*plm_theta)*static_cast<real>(0.5);
 
 
             // Calculate the left and right states using the reconstructed PLM Primitive
-            ux_l = self->prims2cons(xprims_l);
-            ux_r = self->prims2cons(xprims_r);
-            uy_l = self->prims2cons(yprims_l);
-            uy_r = self->prims2cons(yprims_r);
-            uz_l = self->prims2cons(zprims_l);
-            uz_r = self->prims2cons(zprims_r);
+            uxL = self->prims2cons(xprimsL);
+            uxR  = self->prims2cons(xprimsR);
+            uyL = self->prims2cons(yprimsL);
+            uyR  = self->prims2cons(yprimsR);
+            uzL = self->prims2cons(zprimsL);
+            uzR  = self->prims2cons(zprimsR);
 
-            f_l = self->calc_Flux(xprims_l, 1);
-            f_r = self->calc_Flux(xprims_r, 1);
-            g_l = self->calc_Flux(yprims_l, 2);
-            g_r = self->calc_Flux(yprims_r, 2);
-            h_l = self->calc_Flux(zprims_l, 3);
-            h_r = self->calc_Flux(zprims_r, 3);
+            fL = self->calc_Flux(xprimsL, 1);
+            fR  = self->calc_Flux(xprimsR, 1);
+            gL = self->calc_Flux(yprimsL, 2);
+            gR  = self->calc_Flux(yprimsR, 2);
+            hL = self->calc_Flux(zprimsL, 3);
+            hR  = self->calc_Flux(zprimsR, 3);
 
             if (self->hllc) {
-                flf = self->calc_hllc_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                glf = self->calc_hllc_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                hlf = self->calc_hllc_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                flf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
+                glf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
+                hlf = self->calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
             } else {
-                flf = self->calc_hll_flux(ux_l, ux_r, f_l, f_r, xprims_l, xprims_r, 1);
-                glf = self->calc_hll_flux(uy_l, uy_r, g_l, g_r, yprims_l, yprims_r, 2);
-                hlf = self->calc_hll_flux(uz_l, uz_r, h_l, h_r, zprims_l, zprims_r, 3);
+                flf = self->calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
+                glf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
+                hlf = self->calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
             }
 
         }// end else 

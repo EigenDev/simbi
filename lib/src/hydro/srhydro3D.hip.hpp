@@ -79,8 +79,8 @@ namespace simbi
 
         GPU_CALLABLE_MEMBER
         sr3d::Eigenvals calc_Eigenvals(
-            const sr3d::Primitive &prims_l,
-            const sr3d::Primitive &prims_r,
+            const sr3d::Primitive &primsL,
+            const sr3d::Primitive &primsR,
             const luint nhat);
 
         GPU_CALLABLE_MEMBER
