@@ -59,8 +59,8 @@ namespace simbi
         //================================= Methods ==================================================
         GPU_CALLABLE_MEMBER
         sr2d::Eigenvals calc_eigenvals(
-            const sr2d::Primitive &prims_l,
-            const sr2d::Primitive &prims_r,
+            const sr2d::Primitive &primsL,
+            const sr2d::Primitive &primsR,
             const luint nhat) const;
 
         GPU_CALLABLE_MEMBER
