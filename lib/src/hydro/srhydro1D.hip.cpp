@@ -241,13 +241,13 @@ void SRHD::advance(
                     self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt * factor;
                 #else 
                     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                    const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * self->decay_constant;
-                    const auto factorio = ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt * factor;
-                    if (ii == 10) {
-                        // writeln("[{}], vfaceR: {:.2e}, vfaceL: {:.2e}, rr: {:.2e}, rl: {:.2e}", ii, vfaceR, vfaceL, rrf, rlf);
-                        writeln("advance flux: {:.3e}", factorio.d);
-                        helpers::pause_program();
-                    }
+                    const auto sources      = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * self->decay_constant;
+                    // const auto factorio     = ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt * factor;
+                    // if (ii == 10) {
+                    //     // writeln("[{}], vfaceR: {:.2e}, vfaceL: {:.2e}, rr: {:.2e}, rl: {:.2e}", ii, vfaceR, vfaceL, rrf, rlf);
+                    //     writeln("advance flux: {:.3e}, dt: {:.3e}, volume: {:.3e}", factorio.d, self->dt, factor);
+                    //     helpers::pause_program();
+                    // }
                     cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt * factor;
                 #endif 
                 

@@ -109,12 +109,12 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
             const real lamLp = (vL + sqrtL) * qfL;
             const real lamRp = (vR  + sqrtR) * qfR;
 
-            const real aL = lamLm < lamRm ? lamLm : lamRm;
-            const real aR = lamLp > lamRp ? lamLp : lamRp;
+            real aL = lamLm < lamRm ? lamLm : lamRm;
+            real aR = lamLp > lamRp ? lamLp : lamRp;
 
             // Smoothen for rarefaction fan
-            // aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
-            // aR = helpers::my_max(aR, (vR  + csR) / (1 + vR  * csR));
+            aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
+            aR = helpers::my_max(aR, (vR  + csR) / (1 + vR  * csR));
 
             return Eigenvals(aL, aR, csL, csR);
         }
@@ -216,8 +216,8 @@ void SRHD2D::adapt_dt()
                             {
                                 const real vfaceL   = x1l * hubble_param;
                                 const real vfaceR   = x1r * hubble_param;
-                                v1p = std::abs(plus_v1  - vfaceL);
-                                v1m = std::abs(minus_v1 - vfaceR);
+                                v1p = std::abs(plus_v1  - vfaceR);
+                                v1m = std::abs(minus_v1 - vfaceL);
                             }
                             cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
                         }
@@ -917,22 +917,22 @@ void SRHD2D::advance(
             yright_most = prim_buff[(txa * sy + (tya + 2) * sx) % nbs];
 
             // Reconstructed left X Primitive vector at the i+1/2 interface
-            xprimsL = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
+            xprimsL  = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
             xprimsR  = xright_mid - helpers::minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
-            yprimsL = center     + helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
+            yprimsL  = center     + helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
             yprimsR  = yright_mid - helpers::minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
 
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
-            uxL = self->prims2cons(xprimsL);
+            uxL  = self->prims2cons(xprimsL);
             uxR  = self->prims2cons(xprimsR);
-            uyL = self->prims2cons(yprimsL);
+            uyL  = self->prims2cons(yprimsL);
             uyR  = self->prims2cons(yprimsR);
 
-            fL = self->prims2flux(xprimsL, 1);
+            fL  = self->prims2flux(xprimsL, 1);
             fR  = self->prims2flux(xprimsR, 1);
-            gL = self->prims2flux(yprimsL, 2);
+            gL  = self->prims2flux(yprimsL, 2);
             gR  = self->prims2flux(yprimsR, 2);
 
             if (self->hllc)
@@ -962,21 +962,21 @@ void SRHD2D::advance(
             }
 
             // Do the same thing, but for the left side interface [i - 1/2]
-            xprimsL = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
+            xprimsL  = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
             xprimsR  = center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
-            yprimsL = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
+            yprimsL  = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
             yprimsR  = center    - helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
-            uxL = self->prims2cons(xprimsL);
+            uxL  = self->prims2cons(xprimsL);
             uxR  = self->prims2cons(xprimsR);
-            uyL = self->prims2cons(yprimsL);
+            uyL  = self->prims2cons(yprimsL);
             uyR  = self->prims2cons(yprimsR);
 
-            fL = self->prims2flux(xprimsL, 1);
+            fL  = self->prims2flux(xprimsL, 1);
             fR  = self->prims2flux(xprimsR, 1);
-            gL = self->prims2flux(yprimsL, 2);
+            gL  = self->prims2flux(yprimsL, 2);
             gR  = self->prims2flux(yprimsR, 2);
 
             if (self->hllc) {
@@ -1079,11 +1079,6 @@ void SRHD2D::advance(
                 #if GPU_CODE 
                     self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) / dVtot + (grf * s2R - glf * s2L) / dVtot - geom_source - source_terms) * self->dt * step * factor;
                 #else
-                    if (ii == 10 && jj == 0) {
-                        // writeln("[{}], vfaceR: {:.2e}, vfaceL: {:.2e}, rr: {:.2e}, rl: {:.2e}", ii, vfaceR, vfaceL, rr, rl);
-                        writeln("advance flux: {:.3e}", factorio.d);
-                        helpers::pause_program();
-                    }
                     cons[aid] -= ( (frf * s1R - flf * s1L) / dVtot + (grf * s2R - glf * s2L) / dVtot - geom_source - source_terms) * self->dt * step * factor;
                 #endif
                 break;
