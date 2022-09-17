@@ -20,13 +20,13 @@ https://user-images.githubusercontent.com/29236993/173423001-53ab2b60-4159-4ce5-
  `mkdir build`
 2) Change directories into that build directory, i.e, `cd build`, and do: `cmake ..`
 3) Make sure the necessary files were added by running `ls`. Afterwards, run `make install`.<br>
-If Cmake found HIP or CUDA, `make install` builds the gpu extension. If it did not, it builds to cpu extension.<br>
+If Cmake found HIP or CUDA, `make install` builds the gpu extension. If it did not, it builds tothe cpu extension.<br>
 You can check which extension was built by looking in the `build/lib/` directory for either<br>
 `gpu_ext.so` or `cpu_ext.so`
 
 4) If you want to have both extensions after installation, do `make gpu` if you do not have the `gpu_ext.so`
 library <br> 
-or do `make cpu` if you do not have the `cpu_ext.so` library. After those install, you should be up and
+or do `make cpu` if you do not have the `cpu_ext.so` library. After those are built, you should be up and
 running. 
 5) To test, try running the example scripts provided. For example<br>
  `./examples/sod_test.py --nzones 512 --mode cpu --cfl 0.1 --bc outflow --tend 0.2` 
