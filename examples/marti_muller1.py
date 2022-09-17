@@ -9,16 +9,17 @@ from pysimbi import Hydro
 
 def main():
     parser = argparse.ArgumentParser(description='Marti and Muller Test Problem 1 Params')
-    parser.add_argument('--gamma', '-g',  dest='gamma', type=float, default=1.4)
-    parser.add_argument('--tend', '-t',   dest='tend', type=float, default=0.4249  )
-    parser.add_argument('--nzones', '-n', dest='nzones', type=int, default=264)
-    parser.add_argument('--chint',        dest='chint', type=float, default=0.1)
-    parser.add_argument('--cfl',          dest='cfl', type=float, default=0.1)
-    parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
-    parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
-    parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
-    parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/')  
-    parser.add_argument('--plm_theta', dest='plm_theta', type=float, help='piecwise linear reconstruction slope', default=1.5)
+    parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=1.4)
+    parser.add_argument('--tend', '-t',       help = 'simulation end time', dest='tend', type=float, default=0.4)
+    parser.add_argument('--nzones', '-n',     help = 'number of x,y zones', dest='nzones', type=int, default=512)
+    parser.add_argument('--chint',            help = 'checkpoint interval', dest='chint', type=float, default=0.1)
+    parser.add_argument('--cfl',              help = 'Courant-Friedrichs-Lewy number', dest='cfl', type=float, default=0.1)
+    parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
+    parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
+    parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
+    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--forder',           help= 'First order flag', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--bc',               help= 'Boundary condition', dest='boundc', default='outflow', type=str, choices=['periodic', 'outflow'])
     args = parser.parse_args()
     fig, axs = plt.subplots(3, 1, figsize=(9,9), sharex=True)
     xmin, xmax = 0.0, 1.0 
@@ -29,6 +30,8 @@ def main():
     rhoR = 1.0 
     pR   = 1e-10
     vR   = 0.0
+    
+
     hydro2 = Hydro(gamma=args.gamma, initial_state = ((rhoL,pL,vL),(rhoR,pR,vR)),
             Npts=args.nzones, geometry=(xmin,xmax,xmid), n_vars=3, regime="relativistic")
 
@@ -41,7 +44,7 @@ def main():
             'compute_mode': args.mode,
             'boundary_condition': args.boundc,
             'cfl': args.cfl,
-            'hllc': False,
+            'hllc': args.hllc,
             'linspace': True,
             'plm_theta': args.plm_theta,
             'data_directory': args.data_dir,

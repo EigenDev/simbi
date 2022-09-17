@@ -12,20 +12,20 @@ from astropy import units as u
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Mignone and Bodo Test Problem 1/2 Params')
-    parser.add_argument('--gamma', '-g',  dest='gamma', type=float, default=5/3)
-    parser.add_argument('--tend', '-t',   dest='tend', type=float, default=0.1)
-    parser.add_argument('--npolar', '-n', dest='npolar', type=int, default=512)
-    parser.add_argument('--chint',        dest='chint', type=float, default=0.1)
-    parser.add_argument('--cfl',          dest='cfl', type=float, default=0.8)
-    parser.add_argument('--forder', '-f', dest='forder', action='store_true', default=False)
-    parser.add_argument('--plm',          dest='plm', type=float, default=1.5)
-    parser.add_argument('--omega',        dest='omega', type=float, default=0.0)
-    parser.add_argument('--bc', '-bc',    dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
-    parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
-    parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/') 
-    parser.add_argument('--plm_theta',    dest='plm_theta', type=float, default=1.5)
-
+    parser = argparse.ArgumentParser(description='Sedov-Taylor test problem')
+    parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=5/3)
+    parser.add_argument('--tend', '-t',       help = 'simulation end time', dest='tend', type=float, default=0.1)
+    parser.add_argument('--npolar', '-n',     help = 'number of polar zones', dest='npolar', type=int, default=512)
+    parser.add_argument('--chint',            help = 'checkpoint interval', dest='chint', type=float, default=0.1)
+    parser.add_argument('--cfl',              help = 'Courant-Friedrichs-Lewy number', dest='cfl', type=float, default=0.8)
+    parser.add_argument('--forder', '-f',     help = 'first order flag', dest='forder', action='store_true', default=False)
+    parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm', type=float, default=1.5)
+    parser.add_argument('--omega',            help = 'density power law index', dest='omega', type=float, default=0.0)
+    parser.add_argument('--bc', '-bc',        help = 'boundary condition', dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
+    parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
+    parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
+    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=argparse.BooleanOptionalAction, default=True)
+    
     args = parser.parse_args()
     def find_nearest(array, value):
         array = np.asarray(array)
@@ -97,7 +97,7 @@ def main():
         'compute_mode': args.mode,
         'boundary_condition': args.boundc,
         'cfl': args.cfl,
-        'hllc': True,
+        'hllc': args.hllc,
         'linspace': False,
         'plm_theta': args.plm_theta,
         'data_directory': args.data_dir,
@@ -116,7 +116,6 @@ def main():
     c2 = ax.pcolormesh(t2[::-1], rr, sol[0], cmap='inferno', shading = "auto")
 
     fig.suptitle('Spherical Explosion at t={} s on {} x {} grid'.format(args.tend, nr, ntheta), fontsize=15)
-    # ax.set_title(r'$\rho(\theta) = 1.0 - 0.95\cos(n \ \theta)$ with n = {}'.format(n), fontsize=10)
     cbar = fig.colorbar(c1)
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1)
@@ -129,7 +128,6 @@ def main():
     ax.set_thetamax(360)
 
     cbar.ax.set_ylabel('Velocity', fontsize=20)
-
     plt.show()
     
 if __name__ == "__main__":

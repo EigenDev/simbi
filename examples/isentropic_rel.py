@@ -7,16 +7,31 @@ import matplotlib.pyplot as  plt
 import argparse
 from pysimbi import Hydro
 
-# Define Constants 
+alpha_max = 2.0 
+alpha_min = 1e-3
+
+def range_limited_float_type(arg):
+    """ Type function for argparse - a float within some predefined bounds """
+    try:
+        f = float(arg)
+    except ValueError:    
+        raise argparse.ArgumentTypeError("Must be a floating point number")
+    if f < alpha_min or f >= alpha_max:
+        raise argparse.ArgumentTypeError("Argument must be < " + str(alpha_max) + " and > " + str(alpha_min))
+    return f
+
 def main():
     parser = argparse.ArgumentParser(description='Relativistic Isentropic Wave Params')
-    parser.add_argument('--gamma', '-g',  dest='gamma', type=float, default=1.4)
-    parser.add_argument('--chint',        dest='chint', type=float, default=0.1)
-    parser.add_argument('--cfl',          dest='cfl', type=float, default=0.1)
-    parser.add_argument('--alpha',        dest='alpha', type=float, default=0.5)
-    parser.add_argument('--mode', '-m',   dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
-    parser.add_argument('--data_dir', '-d',   dest='data_dir', type=str, default='data/')  
-    
+    parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=5/3)
+    parser.add_argument('--tend', '-t',       help = 'simulation end time', dest='tend', type=float, default=0.1)
+    parser.add_argument('--npolar', '-n',     help = 'number of polar zones', dest='npolar', type=int, default=512)
+    parser.add_argument('--chint',            help = 'checkpoint interval', dest='chint', type=float, default=0.1)
+    parser.add_argument('--cfl',              help = 'Courant-Friedrichs-Lewy number', dest='cfl', type=float, default=0.1)
+    parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
+    parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
+    parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
+    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--alpha',            help = 'wave amplitude', type=range_limited_float_type, default=0.5)
     args = parser.parse_args()
     
     gamma   = args.gamma
@@ -81,8 +96,8 @@ def main():
         first_o  = Hydro(gamma, initial_state=(r,p,v), Npts=npts, geometry=(0, 1.0), regime="relativistic")
         second_o = Hydro(gamma, initial_state=(r,p,v), Npts=npts, geometry=(0, 1.0), regime="relativistic")
         
-        rk1[npts] = first_o.simulate(tend=tend , first_order=True, boundary_condition='periodic', cfl=cfl,  compute_mode=mode, data_directory=args.data_dir)
-        rk2[npts] = second_o.simulate(tend=tend, first_order=False, boundary_condition='periodic', cfl=cfl, compute_mode=mode, data_directory=args.data_dir)
+        rk1[npts] = first_o.simulate(tend=tend , chkpt_interval=args.chint, plm_theta=args.plm_theta, hllc=args.hllc, first_order=True, boundary_condition='periodic', cfl=cfl,  compute_mode=mode, data_directory=args.data_dir)
+        rk2[npts] = second_o.simulate(tend=tend, chkpt_interval=args.chint, plm_theta=args.plm_theta, hllc=args.hllc, first_order=False, boundary_condition='periodic', cfl=cfl, compute_mode=mode, data_directory=args.data_dir)
 
         
     epsilon = []
