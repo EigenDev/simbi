@@ -63,35 +63,6 @@ typedef hydro2d::Eigenvals Eigenvals;
 //-----------------------------------------------------------------------------------------
 //                          GET THE PRIMITIVES
 //-----------------------------------------------------------------------------------------
-
-/**
- * Return a 1 + 2D matrix containing the primitive
- * variables density (rho), pressure, and
- * velocity (v)
- */
-void Newtonian2D::cons2prim()
-{
-    #pragma omp parallel
-    {
-        real rho, energy;
-        real v1, v2, pre;
-        for (luint jj = 0; jj < ny; jj++)
-        {  
-            #pragma omp for nowait schedule(static)
-            for (luint ii = 0; ii < nx; ii++)
-            {   
-                luint gid = jj * nx + ii;
-                rho     = cons[gid].rho;
-                v1      = cons[gid].m1/rho;
-                v2      = cons[gid].m2/rho;
-
-                pre = (gamma - 1.0)*(cons[gid].e_dens - 0.5 * rho * (v1 * v1 + v2 * v2));
-                prims [gid] = Primitive{rho, v1, v2, pre};
-            }
-        }
-    }
-};
-
 void Newtonian2D::cons2prim(
     ExecutionPolicy<> p, 
     Newtonian2D *dev, 
@@ -116,8 +87,8 @@ void Newtonian2D::cons2prim(
         #endif 
 
         const real rho     = cons_buff[tid].rho;
-        const real v1      = cons_buff[tid].m1/rho;
-        const real v2      = cons_buff[tid].m2/rho;
+        const real v1      = cons_buff[tid].m1 / rho;
+        const real v2      = cons_buff[tid].m2 / rho;
         const real rho_chi = cons_buff[tid].chi;
         const real pre     = (gamma - static_cast<real>(1.0))*(cons_buff[tid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2));
 
@@ -146,9 +117,9 @@ Eigenvals Newtonian2D::calc_eigenvals(
         const real pR  = right_prims.p;
         const real pL   = left_prims.p;
         const real rhoL = left_prims.rho;
-        const real rhoR= right_prims.rho;
+        const real rhoR = right_prims.rho;
 
-        const real csR= std::sqrt(gamma * pR/rhoR);
+        const real csR = std::sqrt(gamma * pR/rhoR);
         const real csL = std::sqrt(gamma * pL/rhoL);
 
         // Calculate the mean velocities of sound and fluid
@@ -181,7 +152,7 @@ Eigenvals Newtonian2D::calc_eigenvals(
         const real pR  = right_prims.p;
         const real pL   = left_prims.p;
         const real rhoL = left_prims.rho;
-        const real rhoR= right_prims.rho;
+        const real rhoR = right_prims.rho;
         const real csR = std::sqrt(gamma * pR/rhoR);
         const real csL  = std::sqrt(gamma * pL/rhoL);
 
@@ -545,23 +516,23 @@ void Newtonian2D::advance(
         if (self->first_order)
         {
             xprimsL = prim_buff[(txa + 0)      * sy + (tya + 0) * sx];
-            xprimsR= prim_buff[(txa + 1) % bx * sy + (tya + 0) * sx];
+            xprimsR = prim_buff[(txa + 1) % bx * sy + (tya + 0) * sx];
             //j+1/2
             yprimsL = prim_buff[(txa + 0) * sy + (tya + 0)      * sx];
-            yprimsR= prim_buff[(txa + 0) * sy + (tya + 1) % by * sx];
+            yprimsR = prim_buff[(txa + 0) * sy + (tya + 1) % by * sx];
             
             // i+1/2
             uxL = self->prims2cons(xprimsL); 
-            uxR= self->prims2cons(xprimsR); 
+            uxR = self->prims2cons(xprimsR); 
             // j+1/2
             uyL = self->prims2cons(yprimsL);  
-            uyR= self->prims2cons(yprimsR); 
+            uyR = self->prims2cons(yprimsR); 
 
             fL = self->prims2flux(xprimsL, 1);
-            fR= self->prims2flux(xprimsR, 1);
+            fR = self->prims2flux(xprimsR, 1);
 
             gL = self->prims2flux(yprimsL, 2);
-            gR= self->prims2flux(yprimsR, 2);
+            gR = self->prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i+1/2 luinterface
             if (self->hllc) {
@@ -573,22 +544,22 @@ void Newtonian2D::advance(
             }
 
             xprimsL = prim_buff[helpers::mod(txa - 1, bx) * sy + (tya + 0) * sx];
-            xprimsR= prim_buff[            (txa - 0)     * sy + (tya + 0) * sx];
+            xprimsR = prim_buff[            (txa - 0)     * sy + (tya + 0) * sx];
             //j+1/2
             yprimsL = prim_buff[(txa - 0) * sy + helpers::mod(tya - 1, by) * sx]; 
-            yprimsR= prim_buff[(txa + 0) * sy +             (tya - 0)     * sx]; 
+            yprimsR = prim_buff[(txa + 0) * sy +             (tya - 0)     * sx]; 
 
             // i+1/2
             uxL = self->prims2cons(xprimsL); 
-            uxR= self->prims2cons(xprimsR); 
+            uxR = self->prims2cons(xprimsR); 
             // j+1/2
             uyL = self->prims2cons(yprimsL);  
-            uyR= self->prims2cons(yprimsR); 
+            uyR = self->prims2cons(yprimsR); 
 
             fL = self->prims2flux(xprimsL, 1);
-            fR= self->prims2flux(xprimsR, 1);
+            fR = self->prims2flux(xprimsR, 1);
             gL = self->prims2flux(yprimsL, 2);
-            gR= self->prims2flux(yprimsR, 2);
+            gR = self->prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i-1/2 luinterface
             if (self->hllc)
@@ -620,22 +591,22 @@ void Newtonian2D::advance(
 
             // Reconstructed left X Primitive vector at the i+1/2 luinterface
             xprimsL = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
-            xprimsR= xright_mid - helpers::minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
+            xprimsR = xright_mid - helpers::minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
             yprimsL = center     + helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
-            yprimsR= yright_mid - helpers::minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
+            yprimsR = yright_mid - helpers::minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
 
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
             uxL = self->prims2cons(xprimsL);
-            uxR= self->prims2cons(xprimsR);
+            uxR = self->prims2cons(xprimsR);
             uyL = self->prims2cons(yprimsL);
-            uyR= self->prims2cons(yprimsR);
+            uyR = self->prims2cons(yprimsR);
 
             fL = self->prims2flux(xprimsL, 1);
-            fR= self->prims2flux(xprimsR, 1);
+            fR = self->prims2flux(xprimsR, 1);
             gL = self->prims2flux(yprimsL, 2);
-            gR= self->prims2flux(yprimsR, 2);
+            gR = self->prims2flux(yprimsR, 2);
 
             if (hllc)
             {
@@ -650,21 +621,21 @@ void Newtonian2D::advance(
 
             // Do the same thing, but for the left side luinterface [i - 1/2]
             xprimsL = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
-            xprimsR= center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
+            xprimsR = center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
             yprimsL = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
-            yprimsR= center    - helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
+            yprimsR = center    - helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
             uxL = self->prims2cons(xprimsL);
-            uxR= self->prims2cons(xprimsR);
+            uxR = self->prims2cons(xprimsR);
             uyL = self->prims2cons(yprimsL);
-            uyR= self->prims2cons(yprimsR);
+            uyR = self->prims2cons(yprimsR);
 
             fL = self->prims2flux(xprimsL, 1);
-            fR= self->prims2flux(xprimsR, 1);
+            fR = self->prims2flux(xprimsR, 1);
             gL = self->prims2flux(yprimsL, 2);
-            gR= self->prims2flux(yprimsR, 2);
+            gR = self->prims2flux(yprimsR, 2);
 
             
             if (self->hllc)
@@ -1007,12 +978,12 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             if (n >= nfold){
                 anyGpuEventSynchronize(t2);
                 helpers::recordDuration(delta_t, t1, t2);
-                if (BuildPlatform == Platform::GPU) {
+                if constexpr(BuildPlatform == Platform::GPU) {
                     delta_t *= 1e-3;
                 }
                 ncheck += 1;
                 zu_avg += total_zones / delta_t;
-                 if constexpr(BuildPlatform == Platform::GPU) {
+                if constexpr(BuildPlatform == Platform::GPU) {
                     // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
                     constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
                     const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);

@@ -108,7 +108,7 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
     const real vR     = right_prim.v;
     const real pR     = right_prim.p;
 
-    const real csR= std::sqrt(gamma * pR/rhoR);
+    const real csR = std::sqrt(gamma * pR/rhoR);
     const real csL = std::sqrt(gamma * pL/rhoL);
 
     switch (sim_solver)
@@ -372,12 +372,12 @@ void Newtonian1D::advance(
         if (self->first_order)
         {
             primsL = prim_buff[(txa + 0) % bx];
-            primsR= prim_buff[(txa + 1) % bx];
+            primsR = prim_buff[(txa + 1) % bx];
             
             uL = self->prims2cons(primsL);
-            uR= self->prims2cons(primsR);
+            uR = self->prims2cons(primsR);
             fL = self->prims2flux(primsL);
-            fR= self->prims2flux(primsR);
+            fR = self->prims2flux(primsR);
 
             // Calc HLL Flux at i+1/2 luinterface
             if (self->hllc)
@@ -391,12 +391,12 @@ void Newtonian1D::advance(
 
             // Set up the left and right state luinterfaces for i-1/2
             primsL = prim_buff[helpers::mod(txa - 1, bx)];
-            primsR= prim_buff[(txa + 0) % bx];
+            primsR = prim_buff[(txa + 0) % bx];
             
             uL = self->prims2cons(primsL);
-            uR= self->prims2cons(primsR);
+            uR = self->prims2cons(primsR);
             fL = self->prims2flux(primsL);
-            fR= self->prims2flux(primsR);
+            fR = self->prims2flux(primsR);
 
             // Calc HLL Flux at i-1/2 luinterface
             if (self->hllc)
@@ -422,14 +422,14 @@ void Newtonian1D::advance(
 
             // Reconstructed left primitives vector
             primsL = center    + helpers::minmod((center - left_mid) * plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center) * plm_theta) * static_cast<real>(0.5);
-            primsR= right_mid - helpers::minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most- right_mid) * plm_theta) * static_cast<real>(0.5);
+            primsR = right_mid - helpers::minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most- right_mid) * plm_theta) * static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
             uL = self->prims2cons(primsL);
-            uR= self->prims2cons(primsR);
+            uR = self->prims2cons(primsR);
             fL = self->prims2flux(primsL);
-            fR= self->prims2flux(primsR);
+            fR = self->prims2flux(primsR);
 
             if (self->hllc)
             {
@@ -442,14 +442,14 @@ void Newtonian1D::advance(
 
             // Do the same thing, but for the right side luinterface [i - 1/2]
             primsL = left_mid + helpers::minmod((left_mid - left_most) * plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
-            primsR= center   - helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
+            primsR = center   - helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
             uL = self->prims2cons(primsL);
-            uR= self->prims2cons(primsR);
+            uR = self->prims2cons(primsR);
             fL = self->prims2flux(primsL);
-            fR= self->prims2flux(primsR);
+            fR = self->prims2flux(primsR);
 
             if (self->hllc)
             {

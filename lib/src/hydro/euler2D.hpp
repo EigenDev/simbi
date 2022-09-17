@@ -60,7 +60,6 @@ namespace simbi {
 
         ~Newtonian2D();
 
-        void cons2prim();
         void cons2prim(
             ExecutionPolicy<> p, 
             Newtonian2D *dev = nullptr, 
