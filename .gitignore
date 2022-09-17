@@ -10,6 +10,8 @@ data/*
 tests/
 science/
 src/state.cpp
+jobs.py 
+nyujobs.py
 test.cpp
 call_obj.cpp
 call_obj.h 
@@ -28,3 +30,5 @@ ustate
 *.out
 *.pyc
 *.mp4
+*.xml 
+*.csv
