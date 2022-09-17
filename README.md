@@ -8,7 +8,7 @@ https://user-images.githubusercontent.com/29236993/173423001-53ab2b60-4159-4ce5-
 
 
 ## Requirements 
-1) GCC >= GCC-5 (for c++17 support)
+1) GCC >= GCC5 (for c++17 support)
 2) Cython 
 3) HDF5 libraries
 ### For GPU capability
@@ -20,7 +20,7 @@ https://user-images.githubusercontent.com/29236993/173423001-53ab2b60-4159-4ce5-
  `mkdir build`
 2) Change directories into that build directory, i.e, `cd build`, and do: `cmake ..`
 3) Make sure the necessary files were added by running `ls`. Afterwards, run `make install`.<br>
-If Cmake found HIP, `make install` builds the gpu extension. If it did not, it builds to cpu extension.<br>
+If Cmake found HIP or CUDA, `make install` builds the gpu extension. If it did not, it builds to cpu extension.<br>
 You can check which extension was built by looking in the `build/lib/` directory for either<br>
 `gpu_ext.so` or `cpu_ext.so`
 
