@@ -8,7 +8,7 @@ https://user-images.githubusercontent.com/29236993/173423001-53ab2b60-4159-4ce5-
 
 
 ## Requirements 
-1) GCC < GCC-11 (Cython doesn't play nicely with gcc 11 for some reason)
+1) GCC >= GCC-5 (for c++17 support)
 2) Cython 
 3) HDF5 libraries
 ### For GPU capability
