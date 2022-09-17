@@ -26,7 +26,7 @@ class CompilerParams():
         self.set_runtime_libs()
         
     def set_compiler_args(self):
-        cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-flto']
+        cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-flto=auto']
         if self.arch == 'gpu':
             gpu_compiler_args = { '${CMAKE_CXX_COMPILER}': cpu_compiler_args,
                                    'gpucc': []
@@ -252,20 +252,10 @@ else:
     ext = extensions(CompilerParams('gpu'), 'gpu_ext')
     
 setup(
-    name='PySIMBI',
-    author='Marcus DuPont',
-    author_email='md4469@nyu.edu',
-    description='Python module to solve hydrodynamic equations using a hip/c++ backend',
-    version='${PROJECT_VERSION}',
     ext_modules=ext,
     cmdclass={
         'build_ext': BuildPlatformCommand,
         'install': InstallCommand,
         'develop': DevelopCommand,
-        },
-    package_dir={'pysimbi': '${CMAKE_CURRENT_SOURCE_DIR}/pysimbi'},
-    packages=find_packages(),
-    install_requires=['numpy', 'cython'],
-    python_requires='>=3.6',
-    # Since the package has c++ code, the egg cannot be zipped
-    zip_safe=False)
+        }
+)

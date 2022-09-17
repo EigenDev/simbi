@@ -151,13 +151,16 @@ set(SRCS
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/pysimbi DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 if(PYTHON3)
     set(SETUP_PY_IN  "${CMAKE_CURRENT_SOURCE_DIR}/setup.py.in")
+    set(SETUP_CFG_IN "${CMAKE_CURRENT_SOURCE_DIR}/setup.cfg.in")
     set(SETUP_PY     "${CMAKE_CURRENT_BINARY_DIR}/setup.py")
+    set(SETUP_CFG     "${CMAKE_CURRENT_BINARY_DIR}/setup.cfg")
     set(DEPS         "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/__init__.py")
     # \set(DEPS        "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/core/__init__.py")
     set(OUTPUT       "${CMAKE_CURRENT_BINARY_DIR}/build")
 
     
     configure_file(${SETUP_PY_IN} ${SETUP_PY})
+    configure_file(${SETUP_CFG_IN} ${SETUP_CFG})
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/initial_condition.py ${CMAKE_CURRENT_BINARY_DIR}/pysimbi/initial_condition.py COPYONLY)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/simbi.py ${CMAKE_CURRENT_BINARY_DIR}/pysimbi/simbi.py COPYONLY)
 
