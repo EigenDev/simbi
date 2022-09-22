@@ -7,7 +7,7 @@ url              = https://github.com/eigendev/simbi
 description      = Special Relativistic Hydrodyanmics Code
 long_description = file: ${CMAKE_CURRENT_SOURCE_DIR}/README.md
 long_description_content_type = text/markdown
-keywords                      = physics, setuptools, hydrodyanmics, relativity
+keywords                      = physics, hydrodyanmics, relativity
 license                       = BSD 3-Clause License
 classifiers                   =
         Programming Language :: Python :: 3,
