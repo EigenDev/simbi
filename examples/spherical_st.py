@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--chint',            help = 'checkpoint interval', dest='chint', type=float, default=0.1)
     parser.add_argument('--cfl',              help = 'Courant-Friedrichs-Lewy number', dest='cfl', type=float, default=0.8)
     parser.add_argument('--forder', '-f',     help = 'first order flag', dest='forder', action='store_true', default=False)
-    parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm', type=float, default=1.5)
+    parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
     parser.add_argument('--omega',            help = 'density power law index', dest='omega', type=float, default=0.0)
     parser.add_argument('--bc', '-bc',        help = 'boundary condition', dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
