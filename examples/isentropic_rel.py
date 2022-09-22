@@ -22,7 +22,7 @@ def range_limited_float_type(arg):
 
 def main():
     parser = argparse.ArgumentParser(description='Relativistic Isentropic Wave Params')
-    parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=5/3)
+    parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=4/3)
     parser.add_argument('--tend', '-t',       help = 'simulation end time', dest='tend', type=float, default=0.1)
     parser.add_argument('--npolar', '-n',     help = 'number of polar zones', dest='npolar', type=int, default=512)
     parser.add_argument('--chint',            help = 'checkpoint interval', dest='chint', type=float, default=0.1)
@@ -46,24 +46,17 @@ def main():
         return np.sin(2*np.pi*x)
 
     def rho(alpha, x):
-        return 2.0 + alpha*func(x)
+        return 1.0 + alpha*func(x)
 
     def cs(rho, pressure):
-        return np.sqrt(gamma*pressure/rho)
+        h = 1.0 + gamma * pressure / (rho * (gamma - 1.0))
+        return np.sqrt(gamma*pressure/(rho * h))
 
     def pressure(gamma, rho):
         return p_ref*(rho/rho_ref)**gamma
 
     def velocity(gamma, rho, pressure):
-        a = np.sqrt(gamma - 1) + cs(rho, pressure)
-        b = np.sqrt(gamma - 1) - cs(rho, pressure)
-        
-        c = np.sqrt(gamma - 1) + cs(rho_ref, p_ref)
-        d = np.sqrt(gamma - 1) - cs(rho_ref, p_ref)
-        upsilon = 2/(np.sqrt(gamma - 1))
-        x = np.sign(a/b) * np.abs(a/b)**upsilon
-        y = np.sign(c/d)*np.abs(c/d)**(-upsilon)
-        xi = x*y
+        return 2/(gamma - 1.)*(cs(rho, pressure) - cs(rho_ref, p_ref))
         
         return (xi - 1)/(xi + 1)
 
