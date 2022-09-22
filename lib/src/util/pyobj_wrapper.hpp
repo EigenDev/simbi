@@ -42,6 +42,7 @@ public:
             const auto res = call_obj(held, x); 
             return res;
         }
+        return 0.0;
     }
 
     double operator()(double x, double y){
@@ -49,6 +50,7 @@ public:
             const auto res = call_obj2(held, x, y);
             return res;  
         }
+        return 0.0;
     }
 
     double operator()(double x, double y, double z){
@@ -56,6 +58,7 @@ public:
            const auto res = call_obj3(held, x, y, z);
            return res;
         }
+        return 0.0;
     }
 
 private:
