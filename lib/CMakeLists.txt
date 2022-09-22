@@ -12,14 +12,10 @@ configure_file(${BUILD_OPTS_IN} ${BUILD_OPTS})
 # Search for rocm in common locations
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
 
-# find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_program(PYTHON3 "python3")
 find_package(HDF5 REQUIRED COMPONENTS CXX HL)
 find_package(HIP)
 find_package(CUDA)
-# SET (HDF5_LIBS ${HDF5_LIBRARIES} "${HDF5_CPP_LIBRARIES}/../")
-# message(STATUS "HDF5 Lib Path: ${HDF5_CXX_LIBRARIES}")
-# message(STATUS "HDF5 Lib Path: ${HDF5_LIBRARIES}")
 
 # Determine HIP_PLATFORM
 if (HIP_FOUND)
@@ -67,17 +63,17 @@ if (HIP_FOUND)
 else()
 #----------------------------------------
 if(CUDA_FOUND)
-enable_language(CUDA)
-set(HIP_RUNTIME "cuda"  CACHE STRING "HIP Runtime")
-set(HIP_COMPILER "nvcc" CACHE STRING "HIP Compiler")
-set(HIP_PLATFORM "nvidia" CACHE STRING "HIP Platform")
-set(GPU_RUNTIME_LIBRARY_DIRS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
-set(GPUCC ${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc)
-set(GPU_INCLUDE_DIRS ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-set(CUDA_SM "86" CACHE STRING "Architecture of NVidia GPU")
-message(STATUS "CUDA_SM=${CUDA_SM}")
-message(STATUS "CUDA_TOOLKIT_PATH: ${CUDA_TOOLKIT_ROOT_DIR}")
-message(STATUS "CUDA INCLUDES: ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}")
+    enable_language(CUDA)
+    set(HIP_RUNTIME "cuda"  CACHE STRING "HIP Runtime")
+    set(HIP_COMPILER "nvcc" CACHE STRING "HIP Compiler")
+    set(HIP_PLATFORM "nvidia" CACHE STRING "HIP Platform")
+    set(GPU_RUNTIME_LIBRARY_DIRS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+    set(GPUCC ${CUDA_TOOLKIT_ROOT_DIR}/bin/nvcc)
+    set(GPU_INCLUDE_DIRS ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+    set(CUDA_SM "86" CACHE STRING "Architecture of NVidia GPU")
+    message(STATUS "CUDA_SM=${CUDA_SM}")
+    message(STATUS "CUDA_TOOLKIT_PATH: ${CUDA_TOOLKIT_ROOT_DIR}")
+    message(STATUS "CUDA INCLUDES: ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}")
 endif(CUDA_FOUND)
 
 #------------------------------------------
@@ -153,14 +149,14 @@ if(PYTHON3)
     set(SETUP_PY_IN  "${CMAKE_CURRENT_SOURCE_DIR}/setup.py.in")
     set(SETUP_CFG_IN "${CMAKE_CURRENT_SOURCE_DIR}/setup.cfg.in")
     set(SETUP_PY     "${CMAKE_CURRENT_BINARY_DIR}/setup.py")
-    set(SETUP_CFG     "${CMAKE_CURRENT_BINARY_DIR}/setup.cfg")
+    set(SETUP_CFG    "${CMAKE_CURRENT_BINARY_DIR}/setup.cfg")
     set(DEPS         "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/__init__.py")
-    # \set(DEPS        "${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/core/__init__.py")
     set(OUTPUT       "${CMAKE_CURRENT_BINARY_DIR}/build")
 
     
     configure_file(${SETUP_PY_IN} ${SETUP_PY})
     configure_file(${SETUP_CFG_IN} ${SETUP_CFG})
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pyproject.toml ${CMAKE_CURRENT_BINARY_DIR}/pyproject.toml)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/initial_condition.py ${CMAKE_CURRENT_BINARY_DIR}/pysimbi/initial_condition.py COPYONLY)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/pysimbi/simbi.py ${CMAKE_CURRENT_BINARY_DIR}/pysimbi/simbi.py COPYONLY)
 
@@ -188,11 +184,6 @@ if(PYTHON3)
         )
         add_custom_target(cpu DEPENDS ${OUTPUT}/pytimestamp_cpu)
         install(CODE "execute_process(COMMAND pip install ${_pip_args} -e ${CMAKE_CURRENT_BINARY_DIR})")
-
-        # add_custom_target(copy_assets
-        #     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_LIST_DIR}/copy-assets.cmake
-        # )
-        # add_dependencies(cpu gpu copy_assets)
 
     else()
         list(APPEND DEPS ${SRCS})
