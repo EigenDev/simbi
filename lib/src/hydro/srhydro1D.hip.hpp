@@ -21,22 +21,21 @@ namespace simbi
 {
      struct SRHD
      {
-          real dt, hubble_param;
-          real gamma, cfl;
-          std::string coord_system;
-          std::vector<real> x1, dt_arr;
+          // Init Params (order matters)
           std::vector<std::vector<real>> state;
+          real gamma;
+          real cfl;
+          std::vector<real> x1; 
+          std::string coord_system;
+
+          real dt, hubble_param;
+          std::vector<real> dt_arr;
           CLattice1D coord_lattice;
           simbi::BoundaryCondition bc;
           simbi::Geometry geometry;
           simbi::Cellspacing xcell_spacing;
           real dlogx1, dx1, x1min, x1max;  
           luint radius, total_zones;
-
-          SRHD();
-          SRHD(std::vector<std::vector<real>> state, real gamma, real cfl,
-               std::vector<real> x1, std::string coord_system);
-          ~SRHD();
 
           // SRHD* device_self;
 
@@ -50,6 +49,15 @@ namespace simbi
           bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
 
           std::vector<real> sourceD, sourceS, source0, pressure_guess;
+          
+          SRHD();
+          SRHD(
+               std::vector<std::vector<real>> state, 
+               real gamma, 
+               real cfl,
+               std::vector<real> x1, 
+               std::string coord_system);
+          ~SRHD();
 
           //===============================
           // Host Ptrs to underlying data
@@ -147,6 +155,9 @@ namespace simbi
                               return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                          }
                     }
+               case simbi::Geometry::CYLINDRICAL:
+                    // TODO: Implement
+                    break;
                }
           }
 

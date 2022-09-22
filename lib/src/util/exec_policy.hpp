@@ -12,10 +12,10 @@ struct ExecutionException : public std::exception {
 
 namespace simbi {
 
-    enum class AutoConfig {
-        GRID_SIZE  = 1 << 20,
-        BLOCK_SIZE = 32
-    };
+    // enum class AutoConfig {
+    //     GRID_SIZE  = 1 << 20,
+    //     BLOCK_SIZE = 32
+    // };
 
 
     template<typename T = luint, typename U = luint>
@@ -38,18 +38,20 @@ namespace simbi {
         }
 
         ExecutionPolicy(const T nzones, const U blockSize)
-        : stream(0) ,
+        : 
         blockSize(dim3(blockSize)),
-        sharedMemBytes(sharedMemBytes)  
+        sharedMemBytes(sharedMemBytes),  
+        stream(0)
         {
             const T nBlocks = compute_blocks(nzones, blockSize);
             this->gridSize  = dim3(nBlocks);
         }
         
         ExecutionPolicy(const T nzones, const U blockSize, const size_t sharedMemBytes)
-        : stream(0) ,
+        : 
         blockSize(dim3(blockSize)),
-        sharedMemBytes(sharedMemBytes)  
+        sharedMemBytes(sharedMemBytes),
+        stream(0)
         {
             const T nBlocks = compute_blocks(nzones, blockSize);
             this->gridSize  = dim3(nBlocks);
@@ -66,8 +68,9 @@ namespace simbi {
         }
 
         ExecutionPolicy(const std::vector<T> glist, const std::vector<U> blist)
-        : stream(0) ,
-        sharedMemBytes(0)
+        : 
+        sharedMemBytes(0),
+        stream(0)
         {
             try {
                 if (glist.size() != blist.size())
@@ -100,8 +103,9 @@ namespace simbi {
         }
 
         ExecutionPolicy(const std::vector<T> glist, const std::vector<U> blist, const size_t sharedMemBytes)
-        : stream(0) ,
-        sharedMemBytes(sharedMemBytes)
+        :
+        sharedMemBytes(sharedMemBytes),
+        stream(0)
         {
             try {
                 if (glist.size() != blist.size())
@@ -135,8 +139,9 @@ namespace simbi {
         }
 
         ExecutionPolicy(const std::vector<T> glist, const std::vector<U> blist, const size_t sharedMemBytes, const simbiStream_t stream)
-        : stream(stream),
-        sharedMemBytes(sharedMemBytes)
+        : 
+        sharedMemBytes(sharedMemBytes),
+        stream(stream)
         {
             try {
                 if (glist.size() != blist.size())

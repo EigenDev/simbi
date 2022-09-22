@@ -18,15 +18,25 @@
 
 namespace simbi {
     struct Newtonian2D {
-        std::vector<std::vector<real> > init_state, sources;
-        std::vector<hydro2d::Conserved> cons, cons_n;
+
+        // Init Params (order matters)
+        std::vector< std::vector<real> > init_state;
+        luint nx; 
+        luint ny;
+        real gamma;
+        std::vector<real> x1;
+        std::vector<real> x2;
+        real cfl;
+        std::string coord_system;
+
+        // Simulation Params
+        std::vector<std::vector<real> > sources;
+        std::vector<hydro2d::Conserved> cons;
         std::vector<hydro2d::Primitive> prims;
         std::vector<real> sourceRho, sourceM1, sourceM2, sourceE;
-        real plm_theta, gamma, tend, cfl, dt, decay_const, hubble_param;
+        real plm_theta, tend, dt, decay_const, hubble_param;
         bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, quirk_smoothing, reflecting_theta;
-        std::string coord_system;
-        std::vector<real> x1, x2;
-        luint nzones, ny, nx, active_zones, idx_active, n;
+        luint nzones, active_zones, idx_active, n;
         luint xphysical_grid, yphysical_grid, total_zones;
         CLattice2D coord_lattice;
         simbi::Solver solver;
@@ -49,7 +59,8 @@ namespace simbi {
 
 
         Newtonian2D();
-        Newtonian2D(std::vector< std::vector<real> > init_state, 
+        Newtonian2D(
+            std::vector< std::vector<real> > init_state, 
             luint nx, 
             luint ny,
             real gamma, 
@@ -113,10 +124,13 @@ namespace simbi {
                         if (side == 0) {
                             return rl;
                         } else {
-                            return (ii < xphysical_grid - 1) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
+                            return (ii < static_cast<lint>(xphysical_grid - 1)) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
                         }
                         break;
                 }
+            case simbi::Geometry::CYLINDRICAL:
+                // TODO: Implement
+                break;
             }
         }
 
@@ -174,6 +188,9 @@ namespace simbi {
                             return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                         }
                 }
+            case simbi::Geometry::CYLINDRICAL:
+                // TODO: Implement
+                break;
             }
         }
 
@@ -195,8 +212,8 @@ namespace simbi {
         {
             const real xl     = get_x1face(ii, geometry, 0);
             const real xr     = get_x1face(ii, geometry, 1);
-            const real xlf    = xl * (1.0 + step * dt * hubble_param);
-            const real xrf    = xr * (1.0 + step * dt * hubble_param);
+            // const real xlf    = xl * (1.0 + step * dt * hubble_param);
+            // const real xrf    = xr * (1.0 + step * dt * hubble_param);
             const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
             const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
             const real dcos   = std::cos(tl) - std::cos(tr);

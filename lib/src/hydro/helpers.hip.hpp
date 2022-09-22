@@ -135,6 +135,8 @@ namespace simbi
             val = (val < next_val) ? val : next_val;
         }
         return val;
+        #else 
+        return 0.0;
         #endif
     };
 
@@ -158,6 +160,8 @@ namespace simbi
         if (wid==0) 
             val = warpReduceMin(val); //Final reduce within first warp
         return val;
+        #else 
+        return 0.0;
         #endif
     };
 

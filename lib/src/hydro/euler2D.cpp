@@ -43,13 +43,13 @@ Newtonian2D::Newtonian2D(
     init_state(init_state),
     nx(nx),
     ny(ny),
-    nzones(init_state[0].size()),
     gamma(gamma),
     x1(x1),
     x2(x2),
     cfl(cfl),
     coord_system(coord_system),
-    inFailureState(false)
+    inFailureState(false),
+    nzones(init_state[0].size())
 {}
 
 // Destructor 
@@ -95,7 +95,7 @@ void Newtonian2D::cons2prim(
         #if GPU_CODE
         self->gpu_prims[gid] = Primitive{rho, v1, v2, pre, rho_chi / rho};
         #else
-        prims[gid] = Primitive{rho, v1, v2, pre, rho_chi / rho};
+        self->prims[gid] = Primitive{rho, v1, v2, pre, rho_chi / rho};
         #endif
 
     });
@@ -123,8 +123,8 @@ Eigenvals Newtonian2D::calc_eigenvals(
         const real csL = std::sqrt(gamma * pL/rhoL);
 
         // Calculate the mean velocities of sound and fluid
-        const real cbar   = 0.5*(csL + csR);
-        const real rhoBar = 0.5*(rhoL + rhoR);
+        // const real cbar   = 0.5*(csL + csR);
+        // const real rhoBar = 0.5*(rhoL + rhoR);
         const real z      = (gamma - 1.)/(2.0*gamma);
         const real num    = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
         const real denom  = csL/std::pow(pL,z) + csR/std::pow(pR, z);
@@ -168,7 +168,7 @@ Eigenvals Newtonian2D::calc_eigenvals(
 //                              CALCULATE THE STATE TENSOR
 //-----------------------------------------------------------------------------------------
 
-// Get the 2-Dimensional (4, 1) state tensor for computation. 
+// Get the 2-Dimensional (4, 1) state array for computation. 
 // It is being doing poluintwise in this case as opposed to over
 // the entire array since we are in c++
 GPU_CALLABLE_MEMBER
@@ -433,17 +433,17 @@ void Newtonian2D::advance(
     const luint ypg                   = this->yphysical_grid;
     const luint extent                = (BuildPlatform == Platform::GPU) ? 
                                             p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
-    const luint xextent               = p.blockSize.x;
-    const luint yextent               = p.blockSize.y;
 
     #if GPU_CODE
+    const luint xextent               = p.blockSize.x;
+    const luint yextent               = p.blockSize.y;
     const bool first_order         = this->first_order;
-    const bool periodic            = this->periodic;
+    // const bool periodic            = this->periodic;
     const bool hllc                = this->hllc;
     const real dt                  = this->dt;
-    const real decay_const         = this->decay_const;
+    // const real decay_const         = this->decay_const;
     const real plm_theta           = this->plm_theta;
-    const real gamma               = this->gamma;
+    // const real gamma               = this->gamma;
     const lint nx                  = this->nx;
     const lint ny                  = this->ny;
     const real dx2                 = this->dx2;
@@ -454,9 +454,9 @@ void Newtonian2D::advance(
     const real x2min               = this->x2min;
     const real x2max               = this->x2max;
     const real pow_dlogr           = std::pow(10, dlogx1);
-    const auto nzones              = nx * ny;
+    // const auto nzones              = nx * ny;
     #endif
-    const luint nbs                = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
+    // const luint nbs                = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
 
     // Compile-time choice of coloumn major indexing
     const lint sx            = (col_maj) ? 1  : bx;
@@ -689,7 +689,7 @@ void Newtonian2D::advance(
                 const real sint         = std::sin(thmean);
                 const real dV1          = rmean * rmean * (rr - rl);             
                 const real dV2          = rmean * sint * (tr - tl); 
-                const real cot          = std::cos(thmean) / sint;
+                // const real cot          = std::cos(thmean) / sint;
 
                 #if GPU_CODE
                 const real rho_source  = (self->rho_all_zeros) ? static_cast<real>(0.0) : self->gpu_sourceRho[real_loc];
@@ -1022,7 +1022,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     }
     
     if (ncheck > 0) {
-         writeln("Averageverage zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
+         writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
     }
 
     if constexpr(BuildPlatform == Platform::GPU)

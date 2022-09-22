@@ -31,21 +31,26 @@ constexpr auto write2file = helpers::write_to_file<simbi::SRHD2D, sr2d::Primitiv
 SRHD2D::SRHD2D() {}
 
 // Overloaded Constructor
-SRHD2D::SRHD2D(std::vector<std::vector<real>> state2D, luint nx, luint ny, real gamma,
-               std::vector<real> x1, std::vector<real> x2, real cfl,
-               std::string coord_system = "cartesian")
+SRHD2D::SRHD2D(
+    std::vector<std::vector<real>> state2D, 
+    luint nx, 
+    luint ny, 
+    real gamma,
+    std::vector<real> x1, 
+    std::vector<real> x2, 
+    real cfl,
+    std::string coord_system = "cartesian")
 :
-
+    state2D(state2D),
     nx(nx),
     ny(ny),
-    nzones(state2D[0].size()),
-    state2D(state2D),
     gamma(gamma),
     x1(x1),
     x2(x2),
     cfl(cfl),
     coord_system(coord_system),
-    inFailureState(false)
+    inFailureState(false),
+    nzones(state2D[0].size())
 {
     d_all_zeros  = false;
     s1_all_zeros = false;
@@ -239,7 +244,6 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
     #if GPU_CODE
     {
         const luint psize         = p.blockSize.x*p.blockSize.y;
-        const luint dt_buff_width = bytes * sizeof(real) / sizeof(Primitive);
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -359,8 +363,8 @@ Conserved SRHD2D::calc_hllc_flux(
 
     const real aL = lambda.aL;
     const real aR = lambda.aR;
-    const real cL = lambda.csL;
-    const real cR = lambda.csR;
+    // const real cL = lambda.csL;
+    // const real cR = lambda.csR;
 
     const real aLm = aL < static_cast<real>(0.0) ? aL : static_cast<real>(0.0);
     const real aRp = aR > static_cast<real>(0.0) ? aR : static_cast<real>(0.0);
@@ -752,15 +756,12 @@ void SRHD2D::advance(
     const auto xpg      = this->xphysical_grid;
     const auto ypg      = this->yphysical_grid;
     const auto extent   = (BuildPlatform == Platform::GPU) ? p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
-    const auto xextent  = p.blockSize.x;
-    const auto yextent  = p.blockSize.y;
     const real step     = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
 
     #if GPU_CODE
-    const bool first_order         = this->first_order;
-    const bool periodic            = this->periodic;
+    const auto xextent  = p.blockSize.x;
+    const auto yextent  = p.blockSize.y;
     const bool hllc                = this->hllc;
-    const real dt                  = this->dt;
     const real decay_const         = this->decay_const;
     const real plm_theta           = this->plm_theta;
     const real gamma               = this->gamma;
@@ -773,8 +774,6 @@ void SRHD2D::advance(
     const bool s1_all_zeros        = this->s1_all_zeros;
     const bool s2_all_zeros        = this->s2_all_zeros;
     const bool e_all_zeros         = this->e_all_zeros;
-    const real x1min               = this->x1min;
-    const real x1max               = this->x1max;
     const real x2min               = this->x2min;
     const real x2max               = this->x2max;
     const bool quirk_smoothing     = this->quirk_smoothing;
@@ -1038,11 +1037,11 @@ void SRHD2D::advance(
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
                 const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
                 const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                const real thmean       = static_cast<real>(0.5) * (tl + tr);
+                // const real thmean       = static_cast<real>(0.5) * (tl + tr);
                 // const real sint         = std::sin(thmean);
                 // const real dV1          = rmean * rmean * (rr - rl);             
                 // const real dV2          = rmean * sint * (tr - tl); 
-                const real cot          = std::cos(thmean) / std::sin(thmean);
+                // const real cot          = std::cos(thmean) / std::sin(thmean);
                 const real dcos         = std::cos(tl) - std::cos(tr);
                 const real dVtot        = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
                 const real s1R          = 2.0 * M_PI * rr * rr * dcos; 
@@ -1074,8 +1073,7 @@ void SRHD2D::advance(
 
                 const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) / dVtot, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dVtot , static_cast<real>(0.0)};
                 const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
-                const auto factorio = ( (frf * s1R - flf * s1L) / dVtot + (grf * s2R - glf * s2L) / dVtot - geom_source - source_terms) * self->dt * step * factor;
-
+                // const auto factorio = ( (frf * s1R - flf * s1L) / dVtot + (grf * s2R - glf * s2L) / dVtot - geom_source - source_terms) * self->dt * step * factor;
                 #if GPU_CODE 
                     self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) / dVtot + (grf * s2R - glf * s2L) / dVtot - geom_source - source_terms) * self->dt * step * factor;
                 #else
@@ -1186,9 +1184,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         auto Dchi         = state2D[4][i];
         auto S            = std::sqrt(S1 * S1 + S2 * S2);
         cons[i]           = Conserved(D, S1, S2, E, Dchi);
-        const auto ii = i % nx;
-        const auto jj = i / nx;
-        if (ii == 0)
         pressure_guess[i] = std::abs(S - D - E);
     }
 
@@ -1258,7 +1253,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     Conserved *outer_zones = nullptr;
     Conserved *dev_outer_zones = nullptr;
     // Fill outer zones if user-defined conservative functions provided
-    const real step = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+    // const real step = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
     if (d_outer)
     {
         if constexpr(BuildPlatform == Platform::GPU) {
@@ -1266,9 +1261,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         }
 
         outer_zones = new Conserved[ny];
-        lint jreal = 0;
         // #pragma omp parallel for 
-        for (int jj = 0; jj < ny; jj++) {
+        for (luint jj = 0; jj < ny; jj++) {
             const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
             const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
             outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
@@ -1349,7 +1343,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
             if (d_outer) {
                 // #pragma omp parallel for 
-                for (int jj = 0; jj < ny; jj++) {
+                for (luint jj = 0; jj < ny; jj++) {
                     const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
                     const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
                     outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
@@ -1374,7 +1368,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     } else {
         while (t < tend && !inFailureState)
         {
-            const auto t0 = high_resolution_clock::now();
+            // const auto t0 = high_resolution_clock::now();
             helpers::recordEvent(t1);
             // First Half Step
             advance(self, activeP, bx, by, radius, geometry, memside);
@@ -1430,7 +1424,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             //====================== Update the outer boundaries with the user input ==================
             if (d_outer) {
                 // #pragma omp parallel for 
-                for (int jj = 0; jj < ny; jj++) {
+                for (luint jj = 0; jj < ny; jj++) {
                     const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
                     const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
                     outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
@@ -1457,7 +1451,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         }
     }
     if (ncheck > 0) {
-        writeln("Averageverage zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
+        writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
     }
 
     if constexpr(BuildPlatform == Platform::GPU)

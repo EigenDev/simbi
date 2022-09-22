@@ -19,18 +19,26 @@ namespace simbi
     class SRHD2D
     {
     public:
+
+        // Initial state vars
+        std::vector<std::vector<real>> state2D;
+        luint nx; 
+        luint ny;
+        real gamma;
+        std::vector<real> x1;
+        std::vector<real> x2;
+        real cfl;
+        std::string coord_system;
+
         /* Shared Data Members */
         std::vector<sr2d::Primitive> prims;
         std::vector<sr2d::Conserved> cons;
-        std::vector<std::vector<real>> state2D;
-        real plm_theta, gamma, reflecting_theta, hubble_param;
-        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion;
-        real cfl, dt, decay_const;
-        luint nx, ny, nzones, n, block_size, xphysical_grid, yphysical_grid;
+        real plm_theta, hubble_param;
+        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, reflecting_theta;
+        real dt, decay_const;
+        luint nzones, n, block_size, xphysical_grid, yphysical_grid;
         luint active_zones, idx_active, total_zones;
-        luint i_start, i_bound, j_start, j_bound;
-        std::string coord_system;
-        std::vector<real> x1, x2, sourceD, sourceS1, sourceS2, sourceTau, pressure_guess;
+        std::vector<real> sourceD, sourceS1, sourceS2, sourceTau, pressure_guess;
         CLattice2D coord_lattice;
         simbi::Geometry geometry;
         simbi::BoundaryCondition bc;
@@ -46,7 +54,8 @@ namespace simbi
 
         /* Methods */
         SRHD2D();
-        SRHD2D(std::vector<std::vector<real>> state2D, 
+        SRHD2D(
+            std::vector<std::vector<real>> state2D, 
             luint nx, 
             luint ny, 
             real gamma, 
@@ -133,6 +142,9 @@ namespace simbi
                             return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                         }
                 }
+            case simbi::Geometry::CYLINDRICAL:
+                // TODO: Implement
+                break;
             }
         }
 

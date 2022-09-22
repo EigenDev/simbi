@@ -145,8 +145,8 @@ namespace simbi
             luint rbytes  = nzones * sizeof(real);
 
             luint rrbytes  = nzreal * sizeof(real);
-            luint r1bytes  = nxreal * sizeof(real);
-            luint r2bytes  = nyreal * sizeof(real);
+            // luint r1bytes  = nxreal * sizeof(real);
+            // luint r2bytes  = nyreal * sizeof(real);
 
             //--------Allocate the memory for pointer objects-------------------------
             simbi::gpu::api::gpuMalloc(&host_u0,              cbytes  );
@@ -203,10 +203,10 @@ namespace simbi
             simbi::gpu::api::copyHostToDevice(&(device->cfl)  ,       &host.cfl     ,    sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->nx),          &host.nx      ,    sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->ny),          &host.ny      ,    sizeof(int));
-            simbi::gpu::api::copyHostToDevice(&(device->i_bound),     &host.i_bound,     sizeof(int));
-            simbi::gpu::api::copyHostToDevice(&(device->i_start),     &host.i_start,     sizeof(int));
-            simbi::gpu::api::copyHostToDevice(&(device->j_bound),     &host.j_bound,     sizeof(int));
-            simbi::gpu::api::copyHostToDevice(&(device->j_start),     &host.j_start,     sizeof(int));
+            // simbi::gpu::api::copyHostToDevice(&(device->i_bound),     &host.i_bound,     sizeof(int));
+            // simbi::gpu::api::copyHostToDevice(&(device->i_start),     &host.i_start,     sizeof(int));
+            // simbi::gpu::api::copyHostToDevice(&(device->j_bound),     &host.j_bound,     sizeof(int));
+            // simbi::gpu::api::copyHostToDevice(&(device->j_start),     &host.j_start,     sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->idx_active),  &host.idx_active,  sizeof(int));
             simbi::gpu::api::copyHostToDevice(&(device->decay_const), &host.decay_const, sizeof(real));
             simbi::gpu::api::copyHostToDevice(&(device->xphysical_grid),&host.xphysical_grid,  sizeof(int));
@@ -235,8 +235,8 @@ namespace simbi
             luint rbytes  = nzones * sizeof(real);
 
             luint rrbytes  = nzreal * sizeof(real);
-            luint r1bytes  = nxreal * sizeof(real);
-            luint r2bytes  = nyreal * sizeof(real);
+            // luint r1bytes  = nxreal * sizeof(real);
+            // luint r2bytes  = nyreal * sizeof(real);
 
             //--------Allocate the memory for pointer objects-------------------------
             simbi::gpu::api::gpuMalloc(&host_u0,              cbytes  );
@@ -355,9 +355,9 @@ namespace simbi
             luint rbytes  = nzones * sizeof(real);
 
             luint rrbytes  = nzones_real * sizeof(real);
-            luint r1bytes  = nxreal * sizeof(real);
-            luint r2bytes  = nyreal * sizeof(real);
-            luint r3bytes  = nzreal * sizeof(real);
+            // luint r1bytes  = nxreal * sizeof(real);
+            // luint r2bytes  = nyreal * sizeof(real);
+            // luint r3bytes  = nzreal * sizeof(real);
 
             //--------Allocate the memory for pointer objects-------------------------
             simbi::gpu::api::gpuMalloc(&host_u0,              cbytes);

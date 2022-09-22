@@ -17,19 +17,30 @@ namespace simbi
     struct SRHD3D
     {
     public:
+
+        // Constructor vars (order important) 
+        std::vector<std::vector<real>> state3D;
+        luint nx; 
+        luint ny;
+        luint nz; 
+        real gamma;
+        std::vector<real> x1;
+        std::vector<real> x2; 
+        std::vector<real> x3;
+        real cfl;
+        std::string coord_system;
+
         /* Shared Data Members */
-        sr3d::Eigenvals lambda;
         std::vector<sr3d::Primitive> prims;
         std::vector<sr3d::Conserved> cons;
-        std::vector<std::vector<real>> state3D, sources;
+        std::vector<std::vector<real>> sources;
         float tend, tstart;
-        real plm_theta, gamma, reflecting_theta, hubble_param;
-        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion;
-        real cfl, dt, decay_const;
-        luint nx, ny, nz, nzones, n, block_size, xphysical_grid, yphysical_grid, zphysical_grid;
+        real plm_theta, hubble_param;
+        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, reflecting_theta;
+        real dt, decay_const;
+        luint nzones, n, block_size, xphysical_grid, yphysical_grid, zphysical_grid;
         luint active_zones, idx_active, total_zones;
-        std::string coord_system;
-        std::vector<real> x1, x2, x3, sourceD, sourceS1, sourceS2, sourceS3, sourceTau, pressure_guess;
+        std::vector<real> sourceD, sourceS1, sourceS2, sourceS3, sourceTau, pressure_guess;
         CLattice3D coord_lattice;
         simbi::Geometry geometry;
         simbi::BoundaryCondition bc;
@@ -169,6 +180,9 @@ namespace simbi
                             return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                         }
                 }
+            case simbi::Geometry::CYLINDRICAL:
+                // TODO: Implement
+                break;
             }
         }
 
@@ -201,8 +215,8 @@ namespace simbi
         {
             const real x1l     = get_x1face(ii, geometry, 0);
             const real x1r     = get_x1face(ii, geometry, 1);
-            const real x1lf    = x1l * (1.0 + step * dt * hubble_param);
-            const real x1rf    = x1r * (1.0 + step * dt * hubble_param);
+            // const real x1lf    = x1l * (1.0 + step * dt * hubble_param);
+            // const real x1rf    = x1r * (1.0 + step * dt * hubble_param);
             const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
             const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
             const real dcos   = std::cos(tl) - std::cos(tr);

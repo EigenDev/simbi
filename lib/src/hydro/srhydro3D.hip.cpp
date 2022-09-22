@@ -41,18 +41,18 @@ SRHD3D::SRHD3D(
     real cfl,
     std::string coord_system = "cartesian")
 :
+    state3D(state3D),
     nx(nx),
     ny(ny),
     nz(nz),
-    nzones(state3D[0].size()),
-    state3D(state3D),
     gamma(gamma),
     x1(x1),
     x2(x2),
     x3(x3),
     cfl(cfl),
     coord_system(coord_system),
-    inFailureState(false)
+    inFailureState(false),
+    nzones(state3D[0].size())
 {
 
 }
@@ -76,7 +76,7 @@ void SRHD3D::cons2prim(
 {
     const luint xpg    = xphysical_grid;
     const luint ypg    = yphysical_grid;
-    const luint zpg    = zphysical_grid;
+    // const luint zpg    = zphysical_grid;
     const luint radius = (first_order) ? 1 : 2;
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
@@ -89,7 +89,6 @@ void SRHD3D::cons2prim(
         auto *const conserved_buff = &cons[0];
         #endif 
 
-        auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * blockDim.y * threadIdx.z + blockDim.x * threadIdx.y + threadIdx.x : gid;
         luint iter  = 0;
         real D    = conserved_buff[gid].d;
         real S1   = conserved_buff[gid].s1;
@@ -99,6 +98,7 @@ void SRHD3D::cons2prim(
         real S    = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
         
         #if GPU_CODE
+        auto tid = blockDim.x * blockDim.y * threadIdx.z + blockDim.x * threadIdx.y + threadIdx.x;
         real peq = self->gpu_pressure_guess[gid];
         #else 
         real peq = pressure_guess[gid];
@@ -372,8 +372,6 @@ void SRHD3D::adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const Executi
                 (dev, geometry, psize, dx1, dx2, dx3);
                 deviceReduceKernel<SRHD3D, 3><<<p.gridSize,p.blockSize>>>(dev, active_zones);
                 deviceReduceKernel<SRHD3D, 3><<<1,1024>>>(dev, p.gridSize.x * p.gridSize.y);
-                // dtWarpReduce<SRHD3D, Primitive, 2><<<p.gridSize,p.blockSize,bytes>>>
-                (dev);
                 break;
             
             case simbi::Geometry::SPHERICAL:
@@ -381,7 +379,6 @@ void SRHD3D::adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const Executi
                 (dev, geometry, psize, dlogx1, dx2, dx3, x1min, x1max, x2min, x2max, x3min, x3max);
                 deviceReduceKernel<SRHD3D, 3><<<p.gridSize,p.blockSize>>>(dev, active_zones);
                 deviceReduceKernel<SRHD3D, 3><<<1,1024>>>(dev, p.gridSize.x * p.gridSize.y);
-                (dev);
                 break;
             case simbi::Geometry::CYLINDRICAL:
                 // TODO: Implement Cylindrical coordinates at some point
@@ -669,17 +666,17 @@ void SRHD3D::advance(
     const luint nx                  = this->nx;
     const luint ny                  = this->ny;
     const luint nz                  = this->nz;
-    #endif 
-    const luint extent              = (BuildPlatform == Platform::GPU) ? 
-                                            p.blockSize.z * p.gridSize.z * p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
     const luint xextent             = p.blockSize.x;
     const luint yextent             = p.blockSize.y;
     const luint zextent             = p.blockSize.z;
+    #endif 
+    const luint extent              = (BuildPlatform == Platform::GPU) ? 
+                                            p.blockSize.z * p.gridSize.z * p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
     const auto step                 = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
     // Choice of column major striding by user
-    const luint sx = (col_maj) ? 1  : bx;
-    const luint sy = (col_maj) ? by :  1;
-    const luint sz = (col_maj) ? bz :  1;
+    // const luint sx = (col_maj) ? 1  : bx;
+    // const luint sy = (col_maj) ? by :  1;
+    // const luint sz = (col_maj) ? bz :  1;
 
     simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
@@ -1306,7 +1303,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     }
     
     if (ncheck > 0) {
-        writeln("Averageverage zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
+        writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
     }
 
     if constexpr(BuildPlatform == Platform::GPU)

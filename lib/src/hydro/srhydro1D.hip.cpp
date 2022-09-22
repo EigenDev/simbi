@@ -34,16 +34,20 @@ constexpr auto write2file = helpers::write_to_file<simbi::SRHD, sr1d::PrimitiveA
 SRHD::SRHD(){}
 
 // Overloaded Constructor
-SRHD::SRHD(std::vector<std::vector<real>> state, real gamma, real cfl,
-           std::vector<real> x1, std::string coord_system = "cartesian") :
-
-    inFailureState(false),
+SRHD::SRHD(
+    std::vector<std::vector<real>> state, 
+    real gamma, 
+    real cfl,
+    std::vector<real> x1, 
+    std::string coord_system = "cartesian") 
+:
     state(state),
     gamma(gamma),
+    cfl(cfl),
     x1(x1),
-    nx(state[0].size()),
     coord_system(coord_system),
-    cfl(cfl)
+    nx(state[0].size()),
+    inFailureState(false)
 {
 
 }
@@ -70,6 +74,7 @@ real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geome
                 return xl;
             } else {
                 const real xr = helpers::my_min(xl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)),  x1max);
+                return xr;
             }
         }
     case simbi::Geometry::CARTESIAN:
@@ -94,12 +99,12 @@ void SRHD::advance(
 {
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
 
-    const bool mesh_motion      = (hubble_param != 0);
+    // const bool mesh_motion      = (hubble_param != 0);
     const unsigned shBlockBytes = sh_block_size * sizeof(Primitive);
     auto p                      = simbi::ExecutionPolicy(nx);
     p.blockSize                 = BLOCK_SIZE;
     p.sharedMemBytes            = shBlockBytes;
-    const real xpg            = this->active_zones;
+    // const real xpg            = this->active_zones;
     const lint bx             = (BuildPlatform == Platform::GPU) ? sh_block_size : self->nx;
     const lint  pseudo_radius = (first_order) ? 1 : 2;
     const auto step           = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
@@ -262,7 +267,7 @@ void SRHD::advance(
                 const real sR     = rrf; 
                 const real sL     = rlf; 
                 const real dV     = rmean * (rrf - rlf);    
-                const real factor = (mesh_motion) ? dV : 1;         
+                // const real factor = (mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
                 
                 #if GPU_CODE
@@ -467,8 +472,6 @@ void SRHD::adapt_dt()
     real min_dt = INFINITY;
     #pragma omp parallel 
     {   
-        real vfaceL = 0.0;
-        real vfaceR = 0.0;
         // Compute the minimum timestep given cfl
         #pragma omp for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++)
@@ -498,7 +501,6 @@ void SRHD::adapt_dt()
 
 void SRHD::adapt_dt(SRHD *dev, luint blockSize)
 {   
-    real min_dt = INFINITY;
     #if GPU_CODE
         compute_dt<SRHD, Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
         deviceReduceKernel<SRHD, 1><<<blockSize, BLOCK_SIZE>>>(dev, active_zones);
@@ -750,7 +752,7 @@ SRHD::simulate1D(
     this->radius              = (periodic) ? 0 : (first_order) ? 1 : 2;
     const luint pseudo_radius = (first_order) ? 1 : 2;
     const luint shBlockSize   = BLOCK_SIZE + 2 * pseudo_radius;
-    const luint shBlockBytes  = shBlockSize * sizeof(Primitive);
+    // const luint shBlockBytes  = shBlockSize * sizeof(Primitive);
 
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP, device_self, simbi::MemSide::Dev);
@@ -927,7 +929,7 @@ SRHD::simulate1D(
         }
     }
     if (ncheck > 0) {
-         writeln("Averageverage zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
+         writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
     }
    
 

@@ -97,6 +97,11 @@ namespace simbi {
                             return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                         }
                 }
+            case simbi::Geometry::CYLINDRICAL:
+            {
+                //  TODO: Implement
+                break;
+            }
             }
         }
 

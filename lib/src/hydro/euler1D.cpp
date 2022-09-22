@@ -40,14 +40,15 @@ Newtonian1D::Newtonian1D(
     real gamma, 
     real cfl, 
     std::vector<real> x1,
-    std::string coord_system = "cartesian") :
+    std::string coord_system = "cartesian") 
+    :
     state(state),
     gamma(gamma),
-    x1(x1),
-    nx(state[0].size()),
-    coord_system(coord_system),
     cfl(cfl),
-    inFailureState(false)
+    x1(x1),
+    coord_system(coord_system),
+    inFailureState(false),
+    nx(state[0].size())
     {
 
     }
@@ -204,12 +205,11 @@ void Newtonian1D::adapt_dt(Newtonian1D *dev, luint blockSize, luint tblock)
 //----------------------------------------------------------------------------------------------------
 
 
-// Get the (3,1) state tensor for computation. Used for Higher Order Reconstruction
+// Get the (3,1) state array for computation. Used for Higher Order Reconstruction
 GPU_CALLABLE_MEMBER
 Conserved Newtonian1D::prims2cons(const Primitive &prim)
 {
     real energy = prim.p/(gamma - static_cast<real>(1.0)) + static_cast<real>(0.5) * prim.rho * prim.v * prim.v;
-
     return Conserved{prim.rho, prim.rho * prim.v, energy};
 };
 
@@ -241,7 +241,7 @@ Conserved Newtonian1D::calc_hll_flux(
     const Conserved &right_flux)
 {
     Eigenvals lambda;
-    lambda = calc_eigenvals(left_prims, right_prims);
+    lambda  = calc_eigenvals(left_prims, right_prims);
     real am = lambda.aL;
     real ap = lambda.aR;
 
@@ -723,7 +723,7 @@ void Newtonian1D::advance(
         }
     }
     if (ncheck > 0) {
-         writeln("Averageverage zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
+         writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
     }
 
     if constexpr(BuildPlatform == Platform::GPU)
