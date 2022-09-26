@@ -1,13 +1,16 @@
 #ifndef BUILD_OPTIONS_HPP
 #define BUILD_OPTIONS_HPP
 
-
-#cmakedefine01 FLOAT_PRECISION
+#mesondefine FLOAT_PRECISION
 enum class Platform: int {CPU = 0, GPU = 1};
 
 #include "stdint.h"
 #include <functional>
 #include <chrono>
+#include <signal.h>
+#include <cstdlib>
+#include <exception>
+
 using luint = uint64_t;
 using lint  = int64_t;
 constexpr int BLOCK_SIZE   = 128;
@@ -204,15 +207,9 @@ namespace simbi {
 using namespace simbi;
 
 #endif
-
-constexpr int inf      = std::numeric_limits<int>::max();
-constexpr int dt_inf   = 100000;
 // #if FLOAT_PRECISION
 // const auto sqrt = sqrtf;
 // #else 
 // const auto sqrt = static_cast<double(*)(const double)>(std::sqrt);
 // #endif
-
-
-
 #endif

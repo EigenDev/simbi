@@ -110,9 +110,9 @@ class CompilerParams():
             if file.endswith('.cpp') and file != 'cpu_ext.cpp' and file != 'call_obj.cpp' and file != 'gpu_ext.cpp':
                 self.sources.append(pjoin(agno_src, file))
         if self.arch == 'cpu':
-            self.sources.insert(0, pjoin(agno_src, 'cpu_ext.pyx'))
+            self.sources.insert(0, pjoin(src_dir, 'cpu_ext.pyx'))
         else:
-            self.sources.insert(0, pjoin(agno_src, 'gpu_ext.pyx'))
+            self.sources.insert(0, pjoin(src_dir, 'gpu_ext.pyx'))
             
         self.sources.insert(1, pjoin(util_src, 'call_obj.pyx'))
 

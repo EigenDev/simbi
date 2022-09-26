@@ -1,0 +1,18 @@
+option(
+    'gpu_compilation',
+    type: 'feature',
+    value: 'disabled'
+)
+
+option(
+    'float_precision',
+    type: 'boolean', 
+    value: false
+)
+
+option(
+    'profile',
+    type: 'combo', 
+    choices: ['default', 'develop'],
+    value: 'default'
+)
