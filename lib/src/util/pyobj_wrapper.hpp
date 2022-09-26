@@ -2,7 +2,7 @@
 #define PYOBJ_WRAPPER_HPP
 
 #include <Python.h>
-#include "util/call_obj.h" // cython helper file
+#include "../call_obj.h" // cython helper file
 
 class PyObjWrapper {
 public:

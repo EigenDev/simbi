@@ -102,8 +102,8 @@ class CompilerParams():
         self.sources   = [pjoin(com_src,  file) for file in os.listdir(com_src)  if file.endswith('.cpp')]
         self.sources  += [pjoin(util_src, file) for file in os.listdir(util_src) if file.endswith('.cpp')]
         self.sources  += [pjoin(src_dir,  file) for file in os.listdir(src_dir)  if file.endswith('.cpp')]
-        if f'{util_src}/call_obj.cpp' in self.sources:
-            self.sources.remove(f'{util_src}/call_obj.cpp')
+        if f'{src_dir}/call_obj.cpp' in self.sources:
+            self.sources.remove(f'{src_dir}/call_obj.cpp')
             
         agno_src = pjoin(src_dir, 'hydro')
         for file in os.listdir(agno_src):
@@ -114,7 +114,7 @@ class CompilerParams():
         else:
             self.sources.insert(0, pjoin(agno_src, 'gpu_ext.pyx'))
             
-        self.sources.insert(1, pjoin(util_src, 'call_obj.pyx'))
+        self.sources.insert(1, pjoin(src_dir, 'call_obj.pyx'))
 
 def extensions(comp: CompilerParams, name: str = 'state'):
     '''
