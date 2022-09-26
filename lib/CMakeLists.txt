@@ -10,7 +10,7 @@ set(BUILD_OPTS_IN  "${CMAKE_CURRENT_SOURCE_DIR}/build_options.hpp.in")
 set(BUILD_OPTS     "${CMAKE_CURRENT_SOURCE_DIR}/src/build_options.hpp")
 configure_file(${BUILD_OPTS_IN} ${BUILD_OPTS})
 # Search for rocm in common locations
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
+list(APPEND CMAKE_PREFIX_PATH "/opt/rocm/hip" "/opt/rocm")
 
 find_program(PYTHON3 "python3")
 find_package(HDF5 REQUIRED COMPONENTS CXX HL)
