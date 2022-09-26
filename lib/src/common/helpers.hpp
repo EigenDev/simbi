@@ -31,6 +31,20 @@ namespace simbi
 {
     namespace helpers
     {
+        class InterruptException : public std::exception
+        {
+            public:
+            InterruptException(int s);
+            const char* what();
+            int status;
+        };
+        
+        /*
+        Catch keyboard Ctrl+C and other signals and pass
+        back to python to kill
+        */
+        void catch_signals();
+        
         /*
         @param a
         @param b 

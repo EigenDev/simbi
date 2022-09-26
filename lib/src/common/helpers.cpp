@@ -6,13 +6,39 @@
 
 #include "helpers.hpp" 
 #include "hydro_structs.hpp"
-#include <cstdarg>
 
 using namespace H5;
 namespace simbi
 {
     namespace helpers
     {
+        InterruptException::InterruptException(int s)
+        : status(s)
+        {
+
+        }
+
+        const char* InterruptException::what()
+        {
+            const std::string message = "Signal" + std::to_string(status) + " detected. Saving last checkpoint...";
+            return "Keyboard interrupt detected. Saving last checkpoint...";
+        }
+
+        // void catch_signals() {
+        //     // Adapted from answer to "How can I catch a ctrl-c event? (C++)"
+        //     struct sigaction sigBreakHandler;
+        //     sigBreakHandler.sa_handler = [](int stat) {throw InterruptException(stat) ;};
+        //     sigemptyset(&sigBreakHandler.sa_mask);
+        //     sigBreakHandler.sa_flags = 0;
+        //     sigaction(SIGINT, &sigBreakHandler, NULL);
+        // }
+
+        void catch_signals() {
+            auto handler = [](int code) { throw std::runtime_error("SIGNAL " + std::to_string(code)); };
+            signal(SIGINT, handler);
+            signal(SIGTERM, handler);
+            signal(SIGKILL, handler);
+        }
         // =========================================================================================================
         //        HELPER FUNCTIONS FOR COMPUTATION
         // =========================================================================================================
