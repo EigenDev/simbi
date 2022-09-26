@@ -1359,7 +1359,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             if (inFailureState) {
                 simbi::gpu::api::deviceSynch();
             }
-
+            
             // const auto t3 = high_resolution_clock::now();
             // const duration<real> dt_while = t3 - t1;
             // writeln("Time for 1 iteration: {}", dt_while.count());
@@ -1441,7 +1441,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             if (inFailureState) {
                 simbi::gpu::api::deviceSynch();
             }
-
+            
             // anyGpuEventSynchronize(t2);
             // const auto t3 = high_resolution_clock::now();
             // const duration<real> dt_while = t3 - t0;

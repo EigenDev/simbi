@@ -860,6 +860,7 @@ SRHD::simulate1D(
             }
             if (inFailureState)
                 simbi::gpu::api::deviceSynch();
+            
         }
     } else {
         while (t < tend && !inFailureState)
@@ -926,6 +927,7 @@ SRHD::simulate1D(
             }
             if (inFailureState)
                 simbi::gpu::api::deviceSynch();
+            
         }
     }
     if (ncheck > 0) {

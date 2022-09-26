@@ -668,6 +668,7 @@ void Newtonian1D::advance(
             } else {
                 adapt_dt();
             }
+            
         }
     } else {
         while (t < tend && !inFailureState)
@@ -720,6 +721,8 @@ void Newtonian1D::advance(
             } else {
                 adapt_dt();
             }
+            
+
         }
     }
     if (ncheck > 0) {

@@ -1243,6 +1243,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             if (inFailureState) {
                 simbi::gpu::api::deviceSynch();
             }
+            
         }
     } else {
         while (t < tend && !inFailureState)
@@ -1299,6 +1300,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             if (inFailureState) {
                 simbi::gpu::api::deviceSynch();
             }
+            
         }
     }
     
