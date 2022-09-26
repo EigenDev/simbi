@@ -267,6 +267,7 @@ meson.add_install_script(
     'pip',
     'install',
     meson.current_source_dir(),
+    f'@pip_args@',
 )
 # install_subdir(
 #     'pysimbi',
