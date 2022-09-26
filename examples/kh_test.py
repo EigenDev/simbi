@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import time
 import argparse
 import matplotlib.colors as mcolors
+from numpy.random import default_rng
 try:
     import cmasher
 except:
@@ -62,10 +63,10 @@ def main():
     p[np.where(np.abs(y) < 0.25)] = pR
 
     # Seed the KH instability with random velocities
-    seed = np.random.seed(0)
+    rng     = default_rng()
     sin_arr = 0.01*np.sin(2*np.pi*x)
-    vx_rand = np.random.choice(sin_arr, size=vx.shape)
-    vy_rand = np.random.choice(sin_arr, size=vy.shape)
+    vx_rand = rng.choice(sin_arr, size=vx.shape)
+    vy_rand = rng.choice(sin_arr, size=vy.shape)
 
     vx += vx_rand
     vy += vy_rand
@@ -98,7 +99,7 @@ def main():
     rho, vx, vy, pre, chi = hllc_result
 
     rnorm = mcolors.LogNorm(vmin=0.9, vmax=2.1)
-
+    ax.grid(False)
     c1 = ax.pcolormesh(xx, yy, rho, cmap=args.cmap, edgecolors='none', shading ='auto', vmin=0.9, vmax=2.1)
 
     fig.suptitle('SIMBI: KH Instability Test at t={} s on {} x {} grid.'.format(args.tend, xnpts, ynpts), fontsize=20)
