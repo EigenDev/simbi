@@ -16,3 +16,24 @@ option(
     choices: ['default', 'develop'],
     value: 'default'
 )
+
+option(
+    'gpu_arch',
+    type: 'integer',
+    min: 20,
+    max: 86,
+    value: 70
+    # choices: [20, 21, 30, 35, 32, 50, 52, 53, 60, 61, 62, 70, 72, 75, 80, 86]
+)
+
+option(
+    'gpu_include_dir',
+    type: 'string',
+    value: '/opt/cuda/include',
+)
+
+option(
+    'hdf5_include_dir',
+    type: 'string',
+    value: '/usr/include/hdf5/serial',
+)

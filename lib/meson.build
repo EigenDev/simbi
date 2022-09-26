@@ -51,13 +51,14 @@ if get_option('gpu_compilation').enabled()
         check_hip_config = run_command('/opt/rocm/hip/bin/hipconfig','--platform', check: true)
         hip_platform     = check_hip_config.stdout().strip()
         hip_platform_err = check_hip_config.stderr().strip()
-        gpu_arch = 70
+        gpu_arch = get_option('gpu_arch')
         if hip_platform == 'nvidia'
             hip_runtime  = 'cuda'
             hip_compiler = 'nvcc'
             gpu_depends += [cuda]
             gpu_linkers += ['-lcudart']
             gpu_comp_args = [
+                '-D__HIP_PLATFORM_NVIDIA__=1',
                 '-std=c++17',
                 f'-arch=sm_@gpu_arch@', 
                 f'-ccbin=@host_compiler@',
@@ -71,6 +72,13 @@ if get_option('gpu_compilation').enabled()
             hip_compiler = 'hipcc'
             gpu_depends += [hip]
             gpu_linkers += ['-lamdhip64']
+            gpu_comp_args = [
+                '-D__HIP_PLATFORM_AMD__=1',
+                '-std=c++17',
+                '-fPIC', 
+                '-O3', 
+                '-march=native'
+            ]
         endif
         env.set('HIP_PLATFORM', hip_platform)
         env.set('HIP_RUNTIME',  hip_runtime)
@@ -81,9 +89,11 @@ if get_option('gpu_compilation').enabled()
     elif cuda.found()
         gpu_depends += [cuda]
         gpu_linkers += ['-lcudart']
+        gpu_arch = get_option('gpu_arch')
         gpu_comp_args = [
                 '-std=c++17',
-                # '-arch=sm_${CUDA_SM}', 
+                '-D__HIP_PLATFORM_NVIDIA__=1',
+                f'-arch=sm_@gpu_arch@', 
                 f'-ccbin=@host_compiler@',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
@@ -188,7 +198,8 @@ if get_option('gpu_compilation').enabled()
         gpu_libs = []
         gpu_includes = ['-I../src', '-I/', '-I'+meson.current_build_dir()]
         gpu_libs = []
-        gpu_includes += ['-I/usr/include/hdf5/serial', '-I/usr/lib/cuda-11.2/include/']
+        gpu_includes += ['-I' + get_option('gpu_include_dir'), '-I' + get_option('hdf5_include_dir')]
+        # gpu_includes += ['-I/usr/include/hdf5/serial', '-I/usr/lib/cuda-11.2/include/']
         # hdf5_lib = hdf5.get_variable(cmake: 'HDF5_CXX_LIBRARIES')
         # This won't work
         # foreach dep : depends
@@ -228,30 +239,6 @@ if get_option('gpu_compilation').enabled()
             install: false, 
             build_by_default: true,
         )
-        # gpu_cc =  hip.found() ? 'hipcc' : 'nvcc'
-        # gpu_compiler = find_program(f'@gpu_cc@')
-        # gpu_lib = custom_target(
-        #     'libsimbi_gpu',
-        #     output: 'libsimbi_gpu.a',
-        #     input: sources,
-        #     command: [gpu_compiler, '@INPUT@', '@OUTPUT@'],
-        #     depend_files: sources,
-        #     install: false,
-        #     build_by_default: true,
-        # )
-        # gen = generator(gpu_compiler,
-        #         output  : '@BASENAME@.o',
-        #         arguments : ['-c', '@INPUT@', '-o', '@OUTPUT@', '--out_dir=@BUILD_DIR@'])
-        # gen_objs = gen.process(sources)
-        # gpu_lib = static_library(
-        #     'simbi_gpu',
-        #     # objects: gen_objs,
-        #     sources,
-        #     include_directories: all_inc,
-        #     native: false,
-        #     link_args: linker_args + gpu_linkers,
-        #     dependencies: depends + gpu_depends,
-        # )
         gpu_ext = py3.extension_module(
             'gpu_ext',
             ['src/gpu_ext.pyx', 'src/call_obj.pyx'],
@@ -265,7 +252,23 @@ if get_option('gpu_compilation').enabled()
     endif
 endif
 
-install_subdir(
-    'pysimbi',
-    install_dir: py3.get_install_dir()
+
+# ensure the install directory recognizes conda environment
+py3_purelib  = py3.get_path('purelib')
+conda_prefix = py3.get_variable('prefix', 'empty')
+if conda_prefix == 'empty'
+    pip_args = ''
+else
+    pip_args = '--user'
+endif
+
+message(f'Potential install directory?: @py3_purelib@')
+meson.add_install_script(
+    'pip',
+    'install',
+    meson.current_source_dir(),
 )
+# install_subdir(
+#     'pysimbi',
+#     install_dir: py3_purelib
+# )
