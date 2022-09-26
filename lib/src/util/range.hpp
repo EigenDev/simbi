@@ -6,7 +6,14 @@
 template <typename T>
 struct range_t
 {
-    struct iter : std::iterator<std::input_iterator_tag, T>{
+    struct iter {
+        // inheriting from std::iterator deperecated
+        // must include explicity category and value_type 
+        // Note: there are three other types one could include
+        // such as difference_type, pointer, reference
+        using iterator_category = std::input_iterator_tag;
+        using value_type = T;
+
         GPU_CALLABLE
         iter(T current, T step) : current(current), step(step) { }
 
