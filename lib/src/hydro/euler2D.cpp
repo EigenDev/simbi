@@ -13,7 +13,6 @@
 #include "util/printb.hpp"
 #include "helpers.hip.hpp"
 
-
 using namespace simbi;
 using namespace simbi::util;
 using namespace std::chrono;
@@ -54,7 +53,6 @@ Newtonian2D::Newtonian2D(
 
 // Destructor 
 Newtonian2D::~Newtonian2D() {}
-
 
 // Typedefs because I'm lazy
 typedef hydro2d::Conserved Conserved;
@@ -958,6 +956,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             if (inFailureState) {
                 simbi::gpu::api::deviceSynch();
             }
+            
         }
     } else {
         while (t < tend && !inFailureState)
@@ -1018,6 +1017,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             if (inFailureState) {
                 simbi::gpu::api::deviceSynch();
             }
+            helpers::catch_signals();
         }
     }
     
