@@ -145,7 +145,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
                     ovmax = None if len(args.cbar) == 2 else args.cbar[idx+2]
                 kwargs[field] = {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
                 kwargs[field] =  {'norm': mcolors.PowerNorm(gamma=1.0, vmin=ovmin, vmax=ovmax)} if field in lin_fields else {'norm': mcolors.LogNorm(vmin = ovmin, vmax = ovmax)} 
-
+        ax.grid(False)
         if x2max < np.pi:
             cs[0] = ax.pcolormesh(tt[:: 1], rr,  var[0], cmap=color_map, shading='auto', **kwargs[field1])
             cs[1] = ax.pcolormesh(t2[::-1], rr,  var[1], cmap=args.cmap2, shading='auto', **kwargs[field2])
@@ -458,7 +458,7 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     x2min        = ds["x2min"]
     
     vmin,vmax = args.cbar
-
+    ax.grid(False)
     if args.log:
         kwargs = {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)}
     else:
@@ -584,6 +584,7 @@ def main():
     init_setup = util.read_2d_file(args, flist[0])[1]
     if init_setup["is_cartesian"]:
         fig, ax = plt.subplots(1, 1, figsize=(11,10), constrained_layout=False)
+        ax.grid(False)
         divider = make_axes_locatable(ax)
         if not args.pictorial:
             cbaxes = divider.append_axes('right', size='5%', pad=0.05)
@@ -649,8 +650,10 @@ def main():
         if isinstance(ax, (list, np.ndarray)):
             for axs in ax:
                 axs.cla()
+                ax.grid(False)
         else:
             ax.cla()
+            ax.grid(False)
         # Not strictly neccessary, just so we know we are stealing these from
         # the global scope
         if not args.pictorial:
