@@ -1,261 +1,261 @@
-# Cython Compile the Hydro Code
+# # Cython Compile the Hydro Code
 
-import os
-import sys
-from os.path import join as pjoin
-from setuptools import setup, find_packages
-from setuptools.extension import Extension
-from distutils.core import Command
-from distutils import sysconfig
-from Cython.Build import cythonize
-from setuptools.command.build_ext import build_ext as build_ext_orig
-from setuptools.command.install import install
-from setuptools.command.develop import develop
+# import os
+# import sys
+# from os.path import join as pjoin
+# from setuptools import setup, find_packages
+# from setuptools.extension import Extension
+# from distutils.core import Command
+# from distutils import sysconfig
+# from Cython.Build import cythonize
+# from setuptools.command.build_ext import build_ext as build_ext_orig
+# from setuptools.command.install import install
+# from setuptools.command.develop import develop
 
-class CompilerParams():
-    def __init__(self, arch='cpu'):
-        self.arch     = arch 
-        self.language = 'c++'
-        self.set_sources()
-        self.set_compiler_args()
-        self.set_define_macros()
-        self.set_extra_includes()
-        self.set_libraries()
-        self.set_library_dirs()
-        self.set_linker_args()
-        self.set_runtime_libs()
+# # class CompilerParams():
+# #     def __init__(self, arch='cpu'):
+# #         self.arch     = arch 
+# #         self.language = 'c++'
+# #         self.set_sources()
+# #         self.set_compiler_args()
+# #         self.set_define_macros()
+# #         self.set_extra_includes()
+# #         self.set_libraries()
+# #         self.set_library_dirs()
+# #         self.set_linker_args()
+# #         self.set_runtime_libs()
         
-    def set_compiler_args(self):
-        cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-flto=auto']
-        if self.arch == 'gpu':
-            gpu_compiler_args = { '${CMAKE_CXX_COMPILER}': cpu_compiler_args,
-                                   'gpucc': []
-                                 }
-            if bool('${HIP_FOUND}') == True:
-                if '${HIP_PLATFORM}' == 'nvidia':
-                    gpu_compiler_args['gpucc'] += ['-std=c++17', '-arch=sm_${CUDA_SM}', '-ccbin=${CMAKE_CXX_COMPILER}',
-                                                '--ptxas-options=-v', '--extended-lambda',
-                                                '--compiler-options', '-fPIC', '-O3', '-x=cu']
+# #     def set_compiler_args(self):
+# #         cpu_compiler_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-flto=auto']
+# #         if self.arch == 'gpu':
+# #             gpu_compiler_args = { '${CMAKE_CXX_COMPILER}': cpu_compiler_args,
+# #                                    'gpucc': []
+# #                                  }
+# #             if bool('${HIP_FOUND}') == True:
+# #                 if '${HIP_PLATFORM}' == 'nvidia':
+# #                     gpu_compiler_args['gpucc'] += ['-std=c++17', '-arch=sm_${CUDA_SM}', '-ccbin=${CMAKE_CXX_COMPILER}',
+# #                                                 '--ptxas-options=-v', '--extended-lambda',
+# #                                                 '--compiler-options', '-fPIC', '-O3', '-x=cu']
                     
-                else:
-                    gpu_compiler_args['gpucc'] += ['-std=c++17', '-O3', '-fPIC', '-march=native']
-            else:
-                gpu_compiler_args['gpucc'] += ['-std=c++17', '-arch=sm_${CUDA_SM}', '-ccbin=${CMAKE_CXX_COMPILER}',
-                                                '--ptxas-options=-v', '--extended-lambda',
-                                                '--compiler-options', '-fPIC', '-O3', '-lineinfo']
+# #                 else:
+# #                     gpu_compiler_args['gpucc'] += ['-std=c++17', '-O3', '-fPIC', '-march=native']
+# #             else:
+# #                 gpu_compiler_args['gpucc'] += ['-std=c++17', '-arch=sm_${CUDA_SM}', '-ccbin=${CMAKE_CXX_COMPILER}',
+# #                                                 '--ptxas-options=-v', '--extended-lambda',
+# #                                                 '--compiler-options', '-fPIC', '-O3', '-lineinfo']
                 
-        self.compiler_args = cpu_compiler_args if self.arch == 'cpu' else gpu_compiler_args
+# #         self.compiler_args = cpu_compiler_args if self.arch == 'cpu' else gpu_compiler_args
                 
-    def set_linker_args(self):
-        self.linker_args = ['-lhdf5_cpp', '-fopenmp']
-        if self.arch != 'cpu':
-            if '${HIP_PLATFORM}' == 'nvidia':
-                self.linker_args += ['-lcudart']
-            else:
-                self.linker_args += ['-lamdhip64']
+# #     def set_linker_args(self):
+# #         self.linker_args = ['-lhdf5_cpp', '-fopenmp']
+# #         if self.arch != 'cpu':
+# #             if '${HIP_PLATFORM}' == 'nvidia':
+# #                 self.linker_args += ['-lcudart']
+# #             else:
+# #                 self.linker_args += ['-lamdhip64']
     
-    def set_libraries(self):
-        self.libraries = ['hdf5_cpp']
-        if self.arch != 'cpu':
-            if bool('${HIP_FOUND}') == True:
-                if '${HIP_PLATFORM}' == 'nvidia':
-                    self.libraries += ['cudart']
-                else:
-                    self.libraries += ['amdhip64']
-            else:
-                self.libraries = ['cudart']
+# #     def set_libraries(self):
+# #         self.libraries = ['hdf5_cpp']
+# #         if self.arch != 'cpu':
+# #             if bool('${HIP_FOUND}') == True:
+# #                 if '${HIP_PLATFORM}' == 'nvidia':
+# #                     self.libraries += ['cudart']
+# #                 else:
+# #                     self.libraries += ['amdhip64']
+# #             else:
+# #                 self.libraries = ['cudart']
     
-    def set_runtime_libs(self):
-        hdf5_cxx_libs     = [lib for lib in '${HDF5_CXX_LIBRARIES}'.split(';')]
-        self.runtime_libs = [os.path.dirname(file) for file in hdf5_cxx_libs]
-        if self.arch != 'cpu':
-            rtimelibs = [lib for lib in '${GPU_RUNTIME_LIBRARY_DIRS}'.split(';')]
-            self.runtime_libs += rtimelibs
+# #     def set_runtime_libs(self):
+# #         hdf5_cxx_libs     = [lib for lib in '${HDF5_CXX_LIBRARIES}'.split(';')]
+# #         self.runtime_libs = [os.path.dirname(file) for file in hdf5_cxx_libs]
+# #         if self.arch != 'cpu':
+# #             rtimelibs = [lib for lib in '${GPU_RUNTIME_LIBRARY_DIRS}'.split(';')]
+# #             self.runtime_libs += rtimelibs
     
-    def set_define_macros(self):
-        self.define_macros = []
-        if self.arch != 'cpu':
-            if bool('${HIP_FOUND}') == True:
-                if '${HIP_PLATFORM}' == 'nvidia':
-                    self.define_macros = [('__HIP_PLATFORM_NVIDIA__', '1')]
-                else:
-                    self.define_macros = [('__HIP_PLATFORM_AMD__', '1')]
+# #     def set_define_macros(self):
+# #         self.define_macros = []
+# #         if self.arch != 'cpu':
+# #             if bool('${HIP_FOUND}') == True:
+# #                 if '${HIP_PLATFORM}' == 'nvidia':
+# #                     self.define_macros = [('__HIP_PLATFORM_NVIDIA__', '1')]
+# #                 else:
+# #                     self.define_macros = [('__HIP_PLATFORM_AMD__', '1')]
                     
-    def set_library_dirs(self):
-        hdf5_cxx_libs     = [lib for lib in '${HDF5_CXX_LIBRARIES}'.split(';')]
-        self.library_dirs = [os.path.dirname(file) for file in hdf5_cxx_libs]
-        if self.arch != 'cpu':
-            gpu_libs = [lib for lib in '${GPU_RUNTIME_LIBRARY_DIRS}'.split(';')]
-            self.library_dirs += gpu_libs
+# #     def set_library_dirs(self):
+# #         hdf5_cxx_libs     = [lib for lib in '${HDF5_CXX_LIBRARIES}'.split(';')]
+# #         self.library_dirs = [os.path.dirname(file) for file in hdf5_cxx_libs]
+# #         if self.arch != 'cpu':
+# #             gpu_libs = [lib for lib in '${GPU_RUNTIME_LIBRARY_DIRS}'.split(';')]
+# #             self.library_dirs += gpu_libs
         
-    def set_extra_includes(self):
-        hdflist = '${HDF5_INCLUDE_DIRS}'.split(';')
-        self.extra_includes = ['${CMAKE_CURRENT_SOURCE_DIR}/src'] + hdflist 
-        if self.arch != 'cpu':
-            gpu_includes = '${GPU_INCLUDE_DIRS}'.split(';')
-            self.extra_includes += gpu_includes
+# #     def set_extra_includes(self):
+# #         hdflist = '${HDF5_INCLUDE_DIRS}'.split(';')
+# #         self.extra_includes = ['${CMAKE_CURRENT_SOURCE_DIR}/src'] + hdflist 
+# #         if self.arch != 'cpu':
+# #             gpu_includes = '${GPU_INCLUDE_DIRS}'.split(';')
+# #             self.extra_includes += gpu_includes
     
-    def set_sources(self):
-        src_dir  = os.path.dirname('${CMAKE_CURRENT_SOURCE_DIR}/src/')
-        com_src  = pjoin(src_dir, 'common')
-        util_src = pjoin(src_dir, 'util')
-        self.sources   = [pjoin(com_src,  file) for file in os.listdir(com_src)  if file.endswith('.cpp')]
-        self.sources  += [pjoin(util_src, file) for file in os.listdir(util_src) if file.endswith('.cpp')]
-        self.sources  += [pjoin(src_dir,  file) for file in os.listdir(src_dir)  if file.endswith('.cpp')]
-        if f'{util_src}/call_obj.cpp' in self.sources:
-            self.sources.remove(f'{util_src}/call_obj.cpp')
+# #     def set_sources(self):
+# #         src_dir  = os.path.dirname('${CMAKE_CURRENT_SOURCE_DIR}/src/')
+# #         com_src  = pjoin(src_dir, 'common')
+# #         util_src = pjoin(src_dir, 'util')
+# #         self.sources   = [pjoin(com_src,  file) for file in os.listdir(com_src)  if file.endswith('.cpp')]
+# #         self.sources  += [pjoin(util_src, file) for file in os.listdir(util_src) if file.endswith('.cpp')]
+# #         self.sources  += [pjoin(src_dir,  file) for file in os.listdir(src_dir)  if file.endswith('.cpp')]
+# #         if f'{util_src}/call_obj.cpp' in self.sources:
+# #             self.sources.remove(f'{util_src}/call_obj.cpp')
             
-        agno_src = pjoin(src_dir, 'hydro')
-        for file in os.listdir(agno_src):
-            if file.endswith('.cpp') and file != 'cpu_ext.cpp' and file != 'call_obj.cpp' and file != 'gpu_ext.cpp':
-                self.sources.append(pjoin(agno_src, file))
-        if self.arch == 'cpu':
-            self.sources.insert(0, pjoin(src_dir, 'cpu_ext.pyx'))
-        else:
-            self.sources.insert(0, pjoin(src_dir, 'gpu_ext.pyx'))
+# #         agno_src = pjoin(src_dir, 'hydro')
+# #         for file in os.listdir(agno_src):
+# #             if file.endswith('.cpp') and file != 'cpu_ext.cpp' and file != 'call_obj.cpp' and file != 'gpu_ext.cpp':
+# #                 self.sources.append(pjoin(agno_src, file))
+# #         if self.arch == 'cpu':
+# #             self.sources.insert(0, pjoin(src_dir, 'cpu_ext.pyx'))
+# #         else:
+# #             self.sources.insert(0, pjoin(src_dir, 'gpu_ext.pyx'))
             
-        self.sources.insert(1, pjoin(util_src, 'call_obj.pyx'))
+# #         self.sources.insert(1, pjoin(util_src, 'call_obj.pyx'))
 
-def extensions(comp: CompilerParams, name: str = 'state'):
-    '''
-    Handle generation of extensions (a.k.a 'managing cython compilery').
-    '''
-    try:
-        from Cython.Build import cythonize
-    except ImportError:
-        def cythonize(*args, **kwargs):
-            print('Hint: Wrapping import of cythonize in extensions()')
-            from Cython.Build import cythonize
-            return cythonize(*args, **kwargs)
+# # def extensions(comp: CompilerParams, name: str = 'state'):
+# #     '''
+# #     Handle generation of extensions (a.k.a 'managing cython compilery').
+# #     '''
+# #     try:
+# #         from Cython.Build import cythonize
+# #     except ImportError:
+# #         def cythonize(*args, **kwargs):
+# #             print('Hint: Wrapping import of cythonize in extensions()')
+# #             from Cython.Build import cythonize
+# #             return cythonize(*args, **kwargs)
 
-    try:
-        import numpy
-        npIncludes = [numpy.get_include()]
-    except ImportError:
-        npIncludes = []
+# #     try:
+# #         import numpy
+# #         npIncludes = [numpy.get_include()]
+# #     except ImportError:
+# #         npIncludes = []
 
-    extensionArguments = {
-        'include_dirs':          npIncludes + comp.extra_includes,
-        'library_dirs':          comp.library_dirs,
-        'extra_compile_args':    comp.compiler_args,
-        'extra_link_args':       comp.linker_args,
-        'libraries':             comp.libraries,
-        'runtime_library_dirs':  comp.runtime_libs,
-        'language':              comp.language,
-        'define_macros':         comp.define_macros
-    }
+# #     extensionArguments = {
+# #         'include_dirs':          npIncludes + comp.extra_includes,
+# #         'library_dirs':          comp.library_dirs,
+# #         'extra_compile_args':    comp.compiler_args,
+# #         'extra_link_args':       comp.linker_args,
+# #         'libraries':             comp.libraries,
+# #         'runtime_library_dirs':  comp.runtime_libs,
+# #         'language':              comp.language,
+# #         'define_macros':         comp.define_macros
+# #     }
 
-    return cythonize([Extension(name, comp.sources, **extensionArguments)], language_level = '3', nthreads=2)
+# #     return cythonize([Extension(name, comp.sources, **extensionArguments)], language_level = '3', nthreads=2)
 
-# Adpated from https://github.com/rmcgibbo/npcuda-example/blob/master/cython/setup.py
-def customize_compiler_for_hipcc(self):
-    '''Inject deep into distutils to customize how the dispatch
-    to gcc/hipcc works.
+# # # Adpated from https://github.com/rmcgibbo/npcuda-example/blob/master/cython/setup.py
+# # def customize_compiler_for_hipcc(self):
+# #     '''Inject deep into distutils to customize how the dispatch
+# #     to gcc/hipcc works.
 
-    If you subclass UnixCCompiler, it's not trivial to get your subclass
-    injected in, and still have the right customizations (i.e.
-    distutils.sysconfig.customize_compiler) run on it. So instead of going
-    the OO route, I have this. Note, it's kind've like a weird functional
-    subclassing going on.
-    '''
+# #     If you subclass UnixCCompiler, it's not trivial to get your subclass
+# #     injected in, and still have the right customizations (i.e.
+# #     distutils.sysconfig.customize_compiler) run on it. So instead of going
+# #     the OO route, I have this. Note, it's kind've like a weird functional
+# #     subclassing going on.
+# #     '''
 
-    # Tell the compiler it can processes .hip.cpp
-    self.src_extensions.append('.hip.cpp')
+# #     # Tell the compiler it can processes .hip.cpp
+# #     self.src_extensions.append('.hip.cpp')
 
-    # Save references to the default compiler_so and _comple methods
-    default_compiler_so = self.compiler_so
-    super = self._compile
+# #     # Save references to the default compiler_so and _comple methods
+# #     default_compiler_so = self.compiler_so
+# #     super = self._compile
 
-    # Now redefine the _compile method. This gets executed for each
-    # object but distutils doesn't have the ability to change compilers
-    # based on source extension: we add it.
-    def _compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
-        if src != '${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_ext.cpp':
-            # use the hip for .hip.cpp files
-            self.set_executable('compiler_so', '${GPUCC}')
-            #self.set_executable('linker_so', '${HIPCC}')
-            # use only a subset of the extra_postargs, which are 1-1
-            # translated from the extra_compile_args in the Extension class
-            postargs = extra_postargs['gpucc']
-        else:
-            postargs = extra_postargs['${CMAKE_CXX_COMPILER}']
+# #     # Now redefine the _compile method. This gets executed for each
+# #     # object but distutils doesn't have the ability to change compilers
+# #     # based on source extension: we add it.
+# #     def _compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
+# #         if src != '${CMAKE_CURRENT_SOURCE_DIR}/src/hydro/gpu_ext.cpp':
+# #             # use the hip for .hip.cpp files
+# #             self.set_executable('compiler_so', '${GPUCC}')
+# #             #self.set_executable('linker_so', '${HIPCC}')
+# #             # use only a subset of the extra_postargs, which are 1-1
+# #             # translated from the extra_compile_args in the Extension class
+# #             postargs = extra_postargs['gpucc']
+# #         else:
+# #             postargs = extra_postargs['${CMAKE_CXX_COMPILER}']
 
-        super(obj, src, ext, cc_args, postargs, pp_opts)
-        # Reset the default compiler_so, which we might have changed for hip
-        self.compiler_so = default_compiler_so
+# #         super(obj, src, ext, cc_args, postargs, pp_opts)
+# #         # Reset the default compiler_so, which we might have changed for hip
+# #         self.compiler_so = default_compiler_so
 
-    # Inject our redefined _compile method into the class
-    self._compile = _compile
+# #     # Inject our redefined _compile method into the class
+# #     self._compile = _compile
 
-class CommandMixin(object):
-    user_options = [
-        ('cpu', None, 'install in pure cpu mode'),
-    ]
+# # class CommandMixin(object):
+# #     user_options = [
+# #         ('cpu', None, 'install in pure cpu mode'),
+# #     ]
 
-    def initialize_options(self):
-        super().initialize_options()
-        # Initialize options
-        self.cpu = None
+# #     def initialize_options(self):
+# #         super().initialize_options()
+# #         # Initialize options
+# #         self.cpu = None
 
-    def finalize_options(self):
-        # Validate options
-        super().finalize_options()
+# #     def finalize_options(self):
+# #         # Validate options
+# #         super().finalize_options()
 
-    def run(self):
-        # Use options
-        global cpu
-        cpu = self.cpu 
-        super().run()
+# #     def run(self):
+# #         # Use options
+# #         global cpu
+# #         cpu = self.cpu 
+# #         super().run()
 
-class InstallCommand(CommandMixin, install):
-    user_options = getattr(install, 'user_options', []) + CommandMixin.user_options
+# # class InstallCommand(CommandMixin, install):
+# #     user_options = getattr(install, 'user_options', []) + CommandMixin.user_options
 
-class DevelopCommand(CommandMixin, develop):
-    user_options = getattr(develop, 'user_options', []) + CommandMixin.user_options
+# # class DevelopCommand(CommandMixin, develop):
+# #     user_options = getattr(develop, 'user_options', []) + CommandMixin.user_options
 
 
-class BuildPlatformCommand(build_ext_orig):
-    '''A custom command to choose to build on CPU, GPU, or both.'''
+# # class BuildPlatformCommand(build_ext_orig):
+# #     '''A custom command to choose to build on CPU, GPU, or both.'''
 
-    description = 'build for the CPU/GPU architecture'
-    user_options = build_ext_orig.user_options + [
-        # The format is (long option, short option, description).
-        ('cpu',  None,  None),
-    ]
-    def initialize_options(self):
-        '''Set default values for options.'''
-        # Each user option must be listed here with their default value.
-        build_ext_orig.initialize_options(self)
-        self.cpu  = None
+# #     description = 'build for the CPU/GPU architecture'
+# #     user_options = build_ext_orig.user_options + [
+# #         # The format is (long option, short option, description).
+# #         ('cpu',  None,  None),
+# #     ]
+# #     def initialize_options(self):
+# #         '''Set default values for options.'''
+# #         # Each user option must be listed here with their default value.
+# #         build_ext_orig.initialize_options(self)
+# #         self.cpu  = None
 
-    def finalize_options(self):
-        '''Post-process options.'''
-        # set the compiler params based on selected option
-        build_ext_orig.finalize_options(self)
+# #     def finalize_options(self):
+# #         '''Post-process options.'''
+# #         # set the compiler params based on selected option
+# #         build_ext_orig.finalize_options(self)
         
-    def get_ext_filename(self, ext_name):
-        filename = super().get_ext_filename(ext_name)
-        suffix = sysconfig.get_config_var('EXT_SUFFIX')
-        ext = os.path.splitext(filename)[1]
-        return filename.replace(suffix, '') + ext
+# #     def get_ext_filename(self, ext_name):
+# #         filename = super().get_ext_filename(ext_name)
+# #         suffix = sysconfig.get_config_var('EXT_SUFFIX')
+# #         ext = os.path.splitext(filename)[1]
+# #         return filename.replace(suffix, '') + ext
     
-    def build_extensions(self):
-        if self.cpu is None:
-            customize_compiler_for_hipcc(self.compiler)
-        build_ext_orig.build_extensions(self)
+# #     def build_extensions(self):
+# #         if self.cpu is None:
+# #             customize_compiler_for_hipcc(self.compiler)
+# #         build_ext_orig.build_extensions(self)
 
-# Initialize default CPU extension
-ext = None
-if '--cpu' in sys.argv:
-    ext = extensions(CompilerParams('cpu'), 'cpu_ext')
-else:
-    ext = extensions(CompilerParams('gpu'), 'gpu_ext')
+# # # Initialize default CPU extension
+# # ext = None
+# # if '--cpu' in sys.argv:
+# #     ext = extensions(CompilerParams('cpu'), 'cpu_ext')
+# # else:
+# #     ext = extensions(CompilerParams('gpu'), 'gpu_ext')
     
-setup(
-    ext_modules=ext,
-    cmdclass={
-        'build_ext': BuildPlatformCommand,
-        'install': InstallCommand,
-        'develop': DevelopCommand,
-        }
-)
+# setup(
+#     # ext_modules=ext,
+#     # cmdclass={
+#     #     'build_ext': BuildPlatformCommand,
+#     #     'install': InstallCommand,
+#     #     'develop': DevelopCommand,
+#     #     }
+# )

@@ -1,13 +1,12 @@
 [build-system]
-requires = ["setuptools", "wheel", "numpy", "cython", "meson"],
+requires = ["setuptools", "wheel", "numpy", "h5py", "cython", "meson"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "simbi"
 description = "Python module to solve hydrodynamic equations using a hip/cuda/c++ backend"
-readme = "README.md"
 requires-python = ">=3"
-keywords = ["one", "two"]
+keywords = ["physics", "relativity"]
 license = {text = "MIT"}
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -20,4 +19,15 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
-dynamic = ["version"]
+dynamic = ["version", "readme"]
+
+[tool.setuptools.packages]
+find = {}  # Scanning implicit namespaces is active by default
+
+[tool.setuptools.dynamic]
+version = {attr = "pysimbi.version"}
+readme = {file = ["README.md"]}
+
+[project.urls]
+repository = "https://github.com/EigenDev/simbi"
+documentation = "https://github.com/EigenDev/simbi"
