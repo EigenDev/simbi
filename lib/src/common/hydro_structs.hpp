@@ -61,7 +61,7 @@ namespace hydro1d {
     struct Conserved {
         real rho, m, e_dens;
         GPU_CALLABLE_MEMBER Conserved() {}
-        GPU_CALLABLE_MEMBER ~Conserved() = default;
+        GPU_CALLABLE_MEMBER ~Conserved() {};
         GPU_CALLABLE_MEMBER Conserved(real rho, real m, real e_dens) : rho(rho), m(m), e_dens(e_dens) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &cons) : rho(cons.rho), m(cons.m), e_dens(cons.e_dens) {}
 
@@ -136,7 +136,7 @@ namespace sr1d {
     struct Conserved {
         real d, s, tau;
         GPU_CALLABLE_MEMBER Conserved() {}
-        GPU_CALLABLE_MEMBER ~Conserved() = default;
+        GPU_CALLABLE_MEMBER ~Conserved() {};
         GPU_CALLABLE_MEMBER Conserved(real d, real s, real tau) : d(d), s(s), tau(tau) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &cons) : d(cons.d), s(cons.s), tau(cons.tau) {}
 
