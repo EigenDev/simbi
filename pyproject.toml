@@ -30,10 +30,9 @@ zip_safe = false
 
 [tool.setuptools]
 packages = ["pysimbi"]
-# find = {pysimbi}  # Scanning implicit namespaces is active by default
 
 [tool.setuptools.dynamic]
-version = {attr = "pysimbi.__version__"}
+version = {file = "pysimbi/VERSION"}
 readme = {file = ["README.md"]}
 
 [project.urls]

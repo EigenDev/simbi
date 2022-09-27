@@ -1,2 +1,2 @@
 from .simbi import Hydro
-from .version import __version__, __short_version__
+from .version import __version__
