@@ -1,4 +1,4 @@
-project('simbi', 'cpp', 'cython',
+project('pysimbi', 'cpp', 'cython',
     version : '0.8.0', 
     license : 'MIT',
     default_options : [ 'cpp_std=c++17' ],
@@ -22,9 +22,18 @@ py3     = pymod.find_installation('python3', required: true)
 py3_dep = py3.dependency()
 omp     = dependency('openmp')
 hdf5    = dependency('hdf5', language: 'cpp', required: true)
+# ensure the install directory recognizes conda environment
+py3_purelib   = py3.get_path('purelib')
+py3env_prefix = py3.get_variable('prefix', 'empty')
 message('python path -- ' + py3.path())
-message('python install_dir -- ' + py3.get_install_dir())
-
+message('python install_dir -- ' + py3env_prefix)
+if py3_purelib.endswith('site-packages')
+py3_install_dir = py3_purelib
+elif py3env_prefix.endswith('site-packages')
+py3_install_dir = py3env_prefix
+else
+py3_install_dir = py3.get_installation_dir()
+endif
 #################################################################
 # SOME BOOK KEEPING FOR ALL INSTALLS
 ##################################################################
@@ -135,50 +144,6 @@ sources = [
     'src/util/device_api.cpp',
 ]
 
-src_hdrs = [
-    #######################
-    ### Common DEPENDENCIES
-    #######################
-    'src/common/enums.hpp',
-    'src/common/clattice1D.hpp',
-    'src/common/clattice2D.hpp',
-    'src/common/clattice3D.hpp',
-    'src/common/helpers.hpp',
-    'src/common/helpers.tpp',
-    'src/common/hydro_structs.hpp',
-    'src/common/traits.hpp',
-    #######################
-    # GPU / CPU DEPENDCIES
-    #######################
-    'src/hydro/euler1D.hpp',
-    'src/hydro/euler2D.hpp',
-    'src/hydro/srhydro1D.hip.hpp',
-    'src/hydro/srhydro1D.hip.hpp',
-    'src/hydro/srhydro2D.hip.hpp',
-    'src/hydro/srhydro3D.hip.hpp',
-    'src/hydro/helpers.hip.hpp',
-    'src/hydro/srhydro3D.hip.hpp',
-    'src/hydro/helpers.hip.hpp',
-    'src/hydro/helpers.hip.tpp',
-    'src/hydro/srhydro2D.hip.hpp',
-    'src/hydro/euler2D.hpp',
-    'src/hydro/euler1D.hpp',
-    
-    #######################
-    # UTIL DEPENDENCIES
-    #######################
-    'src/util/exec_policy.hpp',
-    'src/util/kernel.hpp',
-    'src/util/launch.hpp',
-    'src/util/launch.tpp',
-    'src/util/printb.hpp',
-    'src/util/dual.hpp',
-    'src/util/dual.tpp',
-    'src/util/printb.tpp',
-    'src/util/parallel_for.hpp',
-    'src/util/device_api.hpp',
-]
-
 run_command('python', '-m', 'cython', '--cplus', 'src/call_obj.pyx', check: true)
 cpu_ext = py3.extension_module(
     'cpu_ext',
@@ -188,6 +153,7 @@ cpu_ext = py3.extension_module(
     dependencies: depends,
     override_options: ['cython_language=cpp'],
     install: true,
+    install_dir: py3_install_dir,
 )
 
 if get_option('gpu_compilation').enabled()
@@ -248,28 +214,31 @@ if get_option('gpu_compilation').enabled()
             dependencies: depends + gpu_depends,
             override_options: ['cython_language=cpp'],
             install: true,
+            install_dir: py3_install_dir,
         )
     endif
 endif
 
-
-# ensure the install directory recognizes conda environment
-py3_purelib  = py3.get_path('purelib')
-conda_prefix = py3.get_variable('prefix', 'empty')
-if conda_prefix == 'empty'
+if py3env_prefix == 'empty'
     pip_args = ''
 else
     pip_args = '--user'
 endif
 
 message(f'Potential install directory?: @py3_purelib@')
-meson.add_install_script(
-    'pip',
-    'install',
-    meson.current_source_dir(),
-    f'@pip_args@',
-)
-# install_subdir(
-#     'pysimbi',
-#     install_dir: py3_purelib
-# )
+if get_option('profile') == 'default'
+    meson.add_install_script(
+        'pip',
+        'install',
+        meson.current_source_dir(),
+        f'@pip_args@',
+    )
+else 
+    meson.add_install_script(
+        'pip',
+        'install',
+        '-e',
+        meson.current_source_dir(),
+        f'@pip_args@',
+    )
+endif

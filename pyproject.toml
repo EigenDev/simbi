@@ -3,11 +3,15 @@ requires = ["setuptools", "wheel", "numpy", "h5py", "cython", "meson"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "simbi"
+name = "pysimbi"
+authors = [
+    {name = "Marcus DuPont"},
+    {email = "md4469@nyu.edu"}
+]
 description = "Python module to solve hydrodynamic equations using a hip/cuda/c++ backend"
 requires-python = ">=3"
 keywords = ["physics", "relativity"]
-license = {text = "MIT"}
+license = {file = 'LICENSE.md'}
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: C++",
@@ -21,11 +25,15 @@ classifiers = [
 ]
 dynamic = ["version", "readme"]
 
-[tool.setuptools.packages]
-find = {}  # Scanning implicit namespaces is active by default
+[options]
+zip_safe = false
+
+[tool.setuptools]
+packages = ["pysimbi"]
+# find = {pysimbi}  # Scanning implicit namespaces is active by default
 
 [tool.setuptools.dynamic]
-version = {attr = "pysimbi.version"}
+version = {attr = "pysimbi.__version__"}
 readme = {file = ["README.md"]}
 
 [project.urls]
