@@ -10,28 +10,21 @@ https://user-images.githubusercontent.com/29236993/173423001-53ab2b60-4159-4ce5-
 ## Requirements 
 1) GCC >= GCC5 (for c++17 support)
 2) Cython 
+3) [meson](https://mesonbuild.com/Getting-meson.html) `pip install meson` will usually suffice
+4) [ninja](https://github.com/ninja-build/ninja/wiki/Pre-built-Ninja-packages), pre-built packages depending on your system
 3) HDF5 libraries
 ### For GPU capability
 4) HIP/RocM if wanting to run on NVIDIA or AMD GPUs, or just CUDA if running purely NVIDIA
 
 
 ### Quick setup guide
-1) Create a build directory for out-of-source compilation:<br>
- `mkdir build`
-2) Change directories into that build directory, i.e, `cd build`, and do: `cmake ..`
-3) Make sure the necessary files were added by running `ls`. Afterwards, run `make install`.<br>
-If Cmake found HIP or CUDA, `make install` builds the gpu extension. If it did not, it builds tothe cpu extension.<br>
-You can check which extension was built by looking in the `build/lib/` directory for either<br>
-`gpu_ext.so` or `cpu_ext.so`
-
-4) If you want to have both extensions after installation, do `make gpu` if you do not have the `gpu_ext.so`
-library <br> 
-or do `make cpu` if you do not have the `cpu_ext.so` library. After those are built, you should be up and
-running. 
-5) To test, try running the example scripts provided. For example<br>
+1) Run `meson setup <build_dir>` from project root. It is important that this directory is not named `build` because the `install` call with create `build` dir for the `pip` installation part. 
+2) Run `ninja -v -C <build_dir> install`
+3) If `meson` detected `hip` or `cuda`, the install script will install both the cpu and gpu extensions into your system
+4) If all is well, we can test. To test, try running the example scripts provided. For example<br>
  `./examples/sod_test.py --nzones 512 --mode cpu --cfl 0.1 --bc outflow --tend 0.2` 
-6) ???
-7) Profit
+5) ???
+6) Profit
 
 ### Note!
 For some reason, the GPU runs work best when at least one of the dimensions is a multiple of 32. Until I can figure out how to 
