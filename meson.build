@@ -85,9 +85,9 @@ if get_option('gpu_compilation').enabled()
                 '-fPIC', '-O3', '-x=cu'
             ]
         elif hip_platform == 'amd' 
-            hip_runtime = 'rocm'
+            hip_runtime  = 'rocm'
             hip_compiler = 'hipcc'
-            # gpu_depends += [hip]
+            gpu_depends += [hip]
             gpu_linkers += ['-lamdhip64']
             gpu_comp_args = [
                 '-D__HIP_PLATFORM_AMD__=1',
