@@ -87,7 +87,6 @@ if get_option('gpu_compilation').enabled()
         elif hip_platform == 'amd' 
             hip_runtime  = 'rocm'
             hip_compiler = 'hipcc'
-            gpu_depends += [hip]
             gpu_linkers += ['-lamdhip64']
             gpu_comp_args = [
                 '-D__HIP_PLATFORM_AMD__=1',
@@ -96,6 +95,14 @@ if get_option('gpu_compilation').enabled()
                 '-O3', 
                 '-march=native'
             ]
+
+            # Meson has support for hip yet, so we manually
+            # decalre the dependency
+            hip_dep = declare_dependency(
+                link_args: ['-L/opt/rocm/lib', '-L/opt/rocm/hip/lib', '-lamdhip64'],
+                include_directories: ['/opt/rocm/hip/include', '/opt/rocm/include']
+            )
+            gpu_depends += [hip_dep]
         endif
         env.set('HIP_PLATFORM', hip_platform)
         env.set('HIP_RUNTIME',  hip_runtime)
@@ -218,7 +225,6 @@ if get_option('gpu_compilation').enabled()
             ['src/gpu_ext.pyx', 'src/call_obj.pyx'],
             link_with: [gpu_lib],
             include_directories: all_inc,
-            # link_args: linker_args + gpu_linkers,
             dependencies: depends + gpu_depends,
             override_options: ['cython_language=cpp'],
             install: true,
