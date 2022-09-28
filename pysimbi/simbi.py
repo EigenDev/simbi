@@ -204,7 +204,6 @@ class Hydro:
                 
                 self.W = 1/np.sqrt(1 - vsq)
                 self.init_h = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
-                
                 self.initD  = self.init_rho*self.W
                 self.initS1 = self.init_h*self.init_rho*self.W**2*self.init_v1
                 self.initS2 = self.init_h*self.init_rho*self.W**2*self.init_v2 
@@ -283,7 +282,7 @@ class Hydro:
         self, 
         tstart: float = 0,
         tend: float = 0.1,
-        dt: float = 1.e-4,
+        dlogt: float = 0.0,
         plm_theta: float = 1.5,
         first_order: bool = True,
         linspace: bool = True,
@@ -309,7 +308,7 @@ class Hydro:
         Parameters:
             tstart      (flaot):         The start time of the simulation
             tend        (float):         The desired time to end the simulation
-            dt          (float):         The desired timestep
+            dlogt       (float):         The desired logarithmic spacing in checkpoints
             plm_theta   (float):         The Piecewise Linear Reconstructed slope parameter
             first_order (boolean):       First order RK1 or the RK2 PLM.
             linspace    (boolean):       Prompts a linearly spaced mesh or log spaced if False
@@ -418,7 +417,7 @@ class Hydro:
                 sources = sources,
                 tstart = start_time,
                 tend = tend,
-                dt = dt,
+                dlogt = dlogt,
                 plm_theta = plm_theta,
                 engine_duration = engine_duration,
                 chkpt_interval = chkpt_interval,
@@ -441,7 +440,7 @@ class Hydro:
                     sources            = sources,
                     tstart             = start_time,
                     tend               = tend,
-                    dt                 = dt,
+                    dlogt              = dlogt,
                     plm_theta          = plm_theta,
                     engine_duration    = engine_duration,
                     chkpt_interval     = chkpt_interval,
@@ -463,7 +462,7 @@ class Hydro:
                     sources         = sources,
                     tstart          = start_time,
                     tend            = tend,
-                    dt              = dt,
+                    dlogt           = dlogt,
                     plm_theta       = plm_theta,
                     engine_duration = engine_duration,
                     chkpt_interval  = chkpt_interval,
@@ -499,7 +498,7 @@ class Hydro:
                 sources         = sources,
                 tstart          = tstart,
                 tend            = tend,
-                dt              = dt,
+                dlogt           = dlogt,
                 plm_theta       = plm_theta,
                 engine_duration = engine_duration,
                 chkpt_interval  = chkpt_interval,
