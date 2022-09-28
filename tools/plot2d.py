@@ -1380,6 +1380,12 @@ def plot_vs_time(
     time: np.ndarray,
     data: np.ndarray) -> None:
     
+    xlabel = util.get_field_str(args)
+    ax.set_xlabel(r'$t$')
+    ax.set_ylabel(xlabel)
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    # ax.set_xlim(0.5, 2.0)
     # ax.scatter(time, data, label=label, s=80, facecolors='none', edgecolors=color)
     ax.scatter(time, data, label=label, color=color, alpha=0.3)
     if args.log:
@@ -1440,7 +1446,8 @@ def main():
     parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
     parser.add_argument('--fig_dims', dest='fig_dims', default = [4, 4], type=float, nargs=2)
     parser.add_argument('--legend', dest='legend', default=True, action=argparse.BooleanOptionalAction)
-    parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=0, nargs='+')
+    parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=[0], nargs='+')
+    parser.add_argument('--plot_max_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
     parser.add_argument('--save', dest='save', type=str,default=None,help='Save the fig with some name')
     args = parser.parse_args()
     
@@ -1517,44 +1524,64 @@ def main():
         ax_shift = True
         ax_num   = 0    
         if isinstance(flist, (list, np.ndarray)):
-            for idx, file in enumerate(flist):
-                fields, setup, mesh = util.read_2d_file(args, file)
-                i += 1
-                if args.hist and (not args.de_domega and not args.dm_domega):
-                    if args.sub_split is None:
-                        plot_hist(fields, args, mesh, setup, overplot=True, ax=ax, case=idx, ax_col=idx)
+            if args.plot_max_vs_time:
+                max_vars = []
+                times = []
+                colors = ['red', 'black']
+                label = args.labels[0] if args.labels else None
+                for idx, file in enumerate(flist):
+                    fields, setup, mesh = util.read_2d_file(args, file)
+                    viewing_angle       = np.deg2rad(args.viewing[0])
+                    tidx, _             = util.find_nearest(setup['x2'], viewing_angle)
+                    
+                    if args.fields[0] in derived:
+                        var = util.prims2var(fields, args.fields[0])
                     else:
-                        if ax_shift:
-                            ax_col   = 0
-                            ax       = next(axs_iter)   
-                            ax_shift = False
-                        plot_hist(fields, args, mesh, setup, overplot=True, ax=ax, ax_num=ax_num, case=i-1, ax_col=ax_col)
-                elif args.de_domega or args.dm_domega:
-                    if args.sub_split is None:
-                        plot_dx_domega(fields, args, mesh, setup, overplot=True, ax=ax, case=i-1, ax_col=idx)
+                        var = fields[args.fields[0]]
+                    max_var             = np.max(var[tidx])
+                    max_vars           += [max_var]
+                    times              += [setup['time']]
+
+                plot_vs_time(args, ax, fig, label, colors[0], times, max_vars)
+            else:
+                for idx, file in enumerate(flist):
+                    fields, setup, mesh = util.read_2d_file(args, file)
+                    i += 1
+                    if args.hist and (not args.de_domega and not args.dm_domega):
+                        if args.sub_split is None:
+                            plot_hist(fields, args, mesh, setup, overplot=True, ax=ax, case=idx, ax_col=idx)
+                        else:
+                            if ax_shift:
+                                ax_col   = 0
+                                ax       = next(axs_iter)   
+                                ax_shift = False
+                            plot_hist(fields, args, mesh, setup, overplot=True, ax=ax, ax_num=ax_num, case=i-1, ax_col=ax_col)
+                    elif args.de_domega or args.dm_domega:
+                        if args.sub_split is None:
+                            plot_dx_domega(fields, args, mesh, setup, overplot=True, ax=ax, case=i-1, ax_col=idx)
+                        else:
+                            if ax_shift:
+                                ax_col   = 0
+                                ax       = next(axs_iter)   
+                                ax_shift = False
+                            plot_dx_domega(fields, args, mesh, setup, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
+                    elif args.x is not None:
+                        plot_per_theta(fields, args, mesh, setup, True, ax, idx)
+                    elif args.dec_rad:
+                        plot_dec_rad(fields, args, mesh, setup, True, ax, idx)
                     else:
-                        if ax_shift:
-                            ax_col   = 0
-                            ax       = next(axs_iter)   
-                            ax_shift = False
-                        plot_dx_domega(fields, args, mesh, setup, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
-                elif args.x is not None:
-                    plot_per_theta(fields, args, mesh, setup, True, ax, idx)
-                elif args.dec_rad:
-                    plot_dec_rad(fields, args, mesh, setup, True, ax, idx)
-                else:
-                    plot_1d_curve(fields, args, mesh, setup, True, ax, idx)
-                
-                ax_col += 1
-                if i == lines_per_plot:
-                    i        = 0
-                    ax_num  += 1
-                    ax_shift = True
-                    try:
-                        if num_subplots > 1:
-                            lines_per_plot = next(subplot_iter)
-                    except StopIteration:
-                        break
+                        plot_1d_curve(fields, args, mesh, setup, True, ax, idx)
+                    
+                    ax_col += 1
+                    if i == lines_per_plot:
+                        i        = 0
+                        ax_num  += 1
+                        ax_shift = True
+                        try:
+                            if num_subplots > 1:
+                                lines_per_plot = next(subplot_iter)
+                        except StopIteration:
+                            break
         else:
             # fig, ax = plt.subplots(figsize=args.fig_dims)
             ax.set_xlabel(r'$t [\rm s]$')
