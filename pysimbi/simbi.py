@@ -6,8 +6,8 @@ import pysimbi.helpers as helpers
 import numpy as np 
 import os
 import sys 
-import h5py 
 import pysimbi.initial_condition as simbi_ic 
+import warnings
 from typing import Callable
 
 regimes             = ['classical', 'relativistic']
@@ -194,10 +194,7 @@ class Hydro:
                 
                 v2 = self.init_vx**2 + self.init_vy**2
                 
-                self.init_energy =  ( self.init_pressure/(self.gamma - 1.) + 
-                                    0.5*self.init_rho*v2 )
-                
-                
+                self.init_energy =  ( self.init_pressure/(self.gamma - 1.) +  0.5*self.init_rho*v2 )
             else:
                 self.init_rho      = initial_state[0]
                 self.init_pressure = initial_state[1]
@@ -205,7 +202,7 @@ class Hydro:
                 self.init_v2       = initial_state[3]
                 vsq                = self.init_v1**2 + self.init_v2**2
                 
-                self.W = 1/np.sqrt(1 - vsq**2)
+                self.W = 1/np.sqrt(1 - vsq)
                 self.init_h = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
                 
                 self.initD  = self.init_rho*self.W
@@ -214,9 +211,6 @@ class Hydro:
                 
                 self.init_tau = (self.init_rho*self.init_h*(self.W)**2 - self.init_pressure
                                   - self.init_rho*(self.W))
-                
-            
-            
             self.u = None 
             
         elif len(initial_state) == 5:
@@ -241,19 +235,16 @@ class Hydro:
                 
                 v2 = self.init_vx**2 + self.init_vy**2 + self.init_xz**2
                 
-                self.init_energy =  ( self.init_pressure/(self.gamma - 1.) + 
-                                    0.5*self.init_rho*v2 )
-                
-                
+                self.init_energy =  ( self.init_pressure/(self.gamma - 1.) +  0.5*self.init_rho*v2 )
             else:
                 self.init_rho      = initial_state[0]
                 self.init_pressure = initial_state[1]
                 self.init_v1       = initial_state[2]
                 self.init_v2       = initial_state[3]
                 self.init_v3       = initial_state[4]
-                total_v            = np.sqrt(self.init_v1**2 + self.init_v2**2 + self.init_v3**2)
+                vsq                = self.init_v1**2 + self.init_v2**2 + self.init_v3**2
                 
-                self.W = 1/np.sqrt(1 - total_v**2)
+                self.W = 1/np.sqrt(1 - vsq)
                 
                 self.init_h = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
                 
@@ -262,8 +253,7 @@ class Hydro:
                 self.initS2 = self.init_h*self.init_rho*self.W**2*self.init_v2 
                 self.initS3 = self.init_h*self.init_rho*self.W**2*self.init_v3 
                 
-                self.init_tau = (self.init_rho*self.init_h*(self.W)**2 - self.init_pressure
-                                  - self.init_rho*(self.W))
+                self.init_tau = (self.init_rho*self.init_h*(self.W)**2 - self.init_pressure - self.init_rho*(self.W))
                 
             
             
@@ -371,7 +361,7 @@ class Hydro:
             volume_factor = 1.0
                 
         if boundary_condition not in boundary_conditions:
-            raise ValueError("Invalid boundary condition. Expected one of: %s" % boundary_conditions)
+            raise ValueError(f"Invalid boundary condition. Expected one of: {boundary_conditions}")
         
         if compute_mode == 'cpu':
             from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
@@ -379,8 +369,8 @@ class Hydro:
             try:
                 from gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
             except Exception as e:
-                print("Error in loading GPU extension. Loading CPU instead...", flush=True)
-                print(f"For reference, the gpu_ext had the follow error: {e}", flush=True)
+                warnings.warn("Error in loading GPU extension. Loading CPU instead...", GPUExtNotBuiltWarning, flush=True)
+                warnings.warn(f"For reference, the gpu_ext had the follow error: {e}", GPUExtNotBuiltWarning, flush=True)
                 from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
                 
         self.u = np.asarray(self.u)
@@ -408,10 +398,7 @@ class Hydro:
             print("Computing First Order Solution...", flush=True)
         else:
             print('Computing Second Order Solution...', flush=True)
-        
-        # if there is mesh motion, convert the volumetric conserved vairables into their element-wise conserved
-        
-            
+          
         if self.dimensions == 1:
             sources = np.zeros(self.u.shape) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
@@ -524,4 +511,5 @@ class Hydro:
         
         return self._cleanup(solution, first_order) if not periodic else solution
         
-    
+class GPUExtNotBuiltWarning(UserWarning):
+    pass
