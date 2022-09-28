@@ -233,7 +233,7 @@ else
     pip_args = '--user'
 endif
 
-message(f'Potential install directory?: @py3_purelib@')
+message(f'Potential install directory?: @py3_install_dir@')
 if get_option('profile') == 'default'
     meson.add_install_script(
         'pip',
