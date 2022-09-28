@@ -96,8 +96,8 @@ if get_option('gpu_compilation').enabled()
                 '-march=native'
             ]
 
-            # Meson has support for hip yet, so we manually
-            # decalre the dependency
+            # Meson does not support hip yet, so we manually
+            # declare the dependency
             hip_dep = declare_dependency(
                 link_args: ['-L/opt/rocm/lib', '-L/opt/rocm/hip/lib', '-lamdhip64'],
                 include_directories: ['/opt/rocm/hip/include', '/opt/rocm/include']
