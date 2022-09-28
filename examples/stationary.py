@@ -4,9 +4,8 @@ import numpy as np
 import time
 import argparse
 import matplotlib.pyplot as plt 
-
 from pysimbi import Hydro
-
+    
 def main():
     parser = argparse.ArgumentParser(description='Stationary Wave Problem')
     parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=1.4)
@@ -17,7 +16,7 @@ def main():
     parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
-    parser.add_argument('--forder',           help = 'First order flag', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--forder',           help = 'First order flag', action='store_true', default=False)
     parser.add_argument('--bc',               help = 'Boundary condition', dest='boundc', default='outflow', type=str, choices=['periodic', 'outflow'])
     parser.add_argument('--tex',              help = 'flag for latex plot rendering', dest='tex', action='store_true', default=False)
     args = parser.parse_args()

@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import argparse
+import sys
 import matplotlib.colors as mcolors
 from numpy.random import default_rng
 try:
@@ -14,6 +15,11 @@ except:
 from pysimbi import Hydro 
 from astropy import units as u 
 
+if sys.version_info <= (3,9):
+    action = 'store_false'
+else:
+    action = argparse.BooleanOptionalAction
+    
 def main():
     parser = argparse.ArgumentParser(description="KH Instability Test")
     parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=5/3)
@@ -24,9 +30,9 @@ def main():
     parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
-    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
     parser.add_argument('--cmap', '-c',       help = 'colormap for output plot', dest='cmap', type=str, default='gist_ncar')
-    parser.add_argument('--forder',           help= ' First order flag', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--forder',           help= ' First order flag', action=action, default=False)
     args = parser.parse_args()
     xmin = -0.5
     xmax = 0.5
