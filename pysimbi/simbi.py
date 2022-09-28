@@ -368,8 +368,8 @@ class Hydro:
             try:
                 from gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
             except Exception as e:
-                warnings.warn("Error in loading GPU extension. Loading CPU instead...", GPUExtNotBuiltWarning, flush=True)
-                warnings.warn(f"For reference, the gpu_ext had the follow error: {e}", GPUExtNotBuiltWarning, flush=True)
+                warnings.warn("Error in loading GPU extension. Loading CPU instead...", GPUExtNotBuiltWarning)
+                warnings.warn(f"For reference, the gpu_ext had the follow error: {e}", GPUExtNotBuiltWarning)
                 from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
                 
         self.u = np.asarray(self.u)
