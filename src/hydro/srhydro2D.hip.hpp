@@ -43,7 +43,7 @@ namespace simbi
         simbi::Geometry geometry;
         simbi::BoundaryCondition bc;
         simbi::Cellspacing x1cell_spacing, x2cell_spacing;
-        real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
+        real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1, dlogt;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
 
         //==============GPU Mirrors================
@@ -178,7 +178,7 @@ namespace simbi
             std::vector<std::vector<real>> &sources,
             real tstart,
             real tend,
-            real init_dt,
+            real dlogt,
             real plm_theta,
             real engine_duration,
             real chkpt_interval,

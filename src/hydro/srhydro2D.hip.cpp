@@ -1106,7 +1106,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::vector<std::vector<real>> & sources,
     real tstart,
     real tend,
-    real init_dt,
+    real dlogt,
     real plm_theta,
     real engine_duration,
     real chkpt_interval,
@@ -1140,7 +1140,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->hllc            = hllc;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
-    this->dt              = init_dt;
+    this->dlogt           = dlogt;
     this->xphysical_grid  = (first_order) ? nx - 2 : nx - 4;
     this->yphysical_grid  = (first_order) ? ny - 2 : ny - 4;
     this->idx_active      = (periodic) ? 0 : (first_order) ? 1 : 2;
@@ -1328,7 +1328,11 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             /* Write to a File every tenth of a second */
             if (t >= t_interval && t != INFINITY) {
                 write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-                t_interval += chkpt_interval;
+                if (dlogt != 0) {
+                    t_interval *= std::pow(10, dlogt);
+                } else {
+                    t_interval += chkpt_interval;
+                }
             }
             n++;
             // // Adapt the timestep
@@ -1404,7 +1408,11 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             //========================== Write to a File every nth of a second ============================
             if (t >= t_interval && t != INFINITY) {
                 write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-                t_interval += chkpt_interval;
+                if (dlogt != 0) {
+                    t_interval *= std::pow(10, dlogt);
+                } else {
+                    t_interval += chkpt_interval;
+                }
             }
             n++;
 

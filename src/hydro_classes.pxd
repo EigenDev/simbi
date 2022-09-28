@@ -22,7 +22,7 @@ cdef extern from "hydro/euler1D.hpp" namespace "simbi":
     cdef cppclass Newtonian1D:
         Newtonian1D() except +
         Newtonian1D(vector[vector[real]], real, real, vector[real], string) except + 
-        real theta, gamma, tend, dt, cfl
+        real theta, gamma, tend, dlogt, cfl
         bool first_order, linspace
         string coord_system
         vector[real] r
@@ -31,7 +31,7 @@ cdef extern from "hydro/euler1D.hpp" namespace "simbi":
             vector[vector[real]] sources,
             real tstart,
             real tend,
-            real dt,
+            real dlogt,
             real plm_theta,
             real engine_duration,
             real chkpt_interval,
@@ -54,7 +54,7 @@ cdef extern from "hydro/euler2D.hpp" namespace "simbi":
             vector[vector[real]] sources,
             real tstart, 
             real tend, 
-            real dt, 
+            real dlogt, 
             real plm_theta,
             real engine_duration, 
             real chkpt_interval ,
@@ -69,7 +69,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD:
         SRHD() except +
         SRHD(vector[vector[real]], real, real, vector[real], string) except + 
-        real theta, gamma, tend, dt, cfl
+        real theta, gamma, tend, dlogt, cfl
         bool first_order, linspace
         string coord_system
         vector[real] r
@@ -78,7 +78,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             vector[vector[real]] sources, 
             real tstart,
             real tend, 
-            real dt, 
+            real dlogt, 
             real plm_theta, 
             real engine_duration,
             real chkpt_interval, 
@@ -94,7 +94,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             vector[vector[real]] sources, 
             real tstart,
             real tend, 
-            real dt, 
+            real dlogt, 
             real plm_theta, 
             real engine_duration,
             real chkpt_interval, 
@@ -123,7 +123,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
             vector[vector[real]] sources,
             real tstart,
             real tend,
-            real dt,
+            real dlogt,
             real plm_theta,
             real engine_duration,
             real chkpt_interval,
@@ -140,7 +140,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
             vector[vector[real]] sources,
             real tstart,
             real tend,
-            real dt,
+            real dlogt,
             real plm_theta,
             real engine_duration,
             real chkpt_interval,
@@ -180,7 +180,7 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
             vector[vector[real]] sources,
             real tstart,
             real tend,
-            real dt,
+            real dlogt,
             real plm_theta,
             real engine_duration,
             real chkpt_interval,

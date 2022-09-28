@@ -670,7 +670,7 @@ SRHD::simulate1D(
     std::vector<std::vector<real>> &sources,
     real tstart,
     real tend,
-    real init_dt,
+    real dlogt,
     real plm_theta,
     real engine_duration,
     real chkpt_interval,
@@ -834,7 +834,11 @@ SRHD::simulate1D(
             /* Write to a file every nth of a second */
             if (t >= t_interval && t != INFINITY) {
                 write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-                t_interval += chkpt_interval;
+                if (dlogt != 0) {
+                    t_interval *= std::pow(10, dlogt);
+                } else {
+                    t_interval += chkpt_interval;
+                }
             }
             n++;
             // Adapt the timestep
@@ -901,7 +905,11 @@ SRHD::simulate1D(
             /* Write to a fike every nth of a second */
             if (t >= t_interval && t != INFINITY) {
                 write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-                t_interval += chkpt_interval;
+                if (dlogt != 0) {
+                    t_interval *= std::pow(10, dlogt);
+                } else {
+                    t_interval += chkpt_interval;
+                }
             }
             n++;
 

@@ -509,7 +509,7 @@ void Newtonian1D::advance(
     std::vector<std::vector<real>> &sources,
     real tstart,
     real tend,
-    real init_dt,
+    real dlogt,
     real plm_theta,
     real engine_duration,
     real chkpt_interval,
@@ -529,7 +529,6 @@ void Newtonian1D::advance(
     this->hllc            = hllc;
     this->engine_duration = engine_duration;
     this->t               = tstart;
-    this->dt              = init_dt;
     // Define the swap vector for the integrated state
     this->bc              = helpers::boundary_cond_map.at(boundary_condition);
     this->geometry        = helpers::geometry_map.at(coord_system);
@@ -656,7 +655,11 @@ void Newtonian1D::advance(
             if (t >= t_interval)
             {
                 write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-                t_interval += chkpt_interval;
+                if (dlogt != 0) {
+                    t_interval *= std::pow(10, dlogt);
+                } else {
+                    t_interval += chkpt_interval;
+                }
             }
             n++;
             
@@ -710,7 +713,11 @@ void Newtonian1D::advance(
             if (t >= t_interval && t != INFINITY)
             {
                 write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-                t_interval += chkpt_interval;
+                if (dlogt != 0) {
+                    t_interval *= std::pow(10, dlogt);
+                } else {
+                    t_interval += chkpt_interval;
+                }
             }
             n++;
             simbi::gpu::api::copyDevToHost(&inFailureState, &(device_self->inFailureState),  sizeof(bool));

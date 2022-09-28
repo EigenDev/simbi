@@ -47,7 +47,7 @@ namespace simbi
         simbi::Cellspacing x1cell_spacing, x2cell_spacing, x3cell_spacing;
 
 
-        real x3max, x3min, x2max, x2min, x1min, x1max, dx3, dx2, dx1, dlogx1;
+        real x3max, x3min, x2max, x2min, x1min, x1max, dx3, dx2, dx1, dlogx1, dlogt;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, s3_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
 
 
@@ -145,17 +145,17 @@ namespace simbi
 
         std::vector<std::vector<real>> simulate3D(
             const std::vector<std::vector<real>> sources,
-            real tstart = 0, 
-            real tend = 0.1, 
-            real init_dt = 1.e-4, 
-            real plm_theta = 1.5,
-            real engine_duration = 10, 
-            real chkpt_interval = 0.1,
-            std::string data_directory = "data/", 
-            std::string boundary_condition = "outflow",
-            bool first_order = true,
-            bool linspace = true, 
-            bool hllc = false);
+            real tstart, 
+            real tend, 
+            real dlogt, 
+            real plm_theta,
+            real engine_duration, 
+            real chkpt_interval,
+            std::string data_directory, 
+            std::string boundary_condition,
+            bool first_order,
+            bool linspace, 
+            bool hllc);
 
         GPU_CALLABLE_INLINE
         constexpr real get_x1face(const lint ii, const simbi::Geometry geometry, const int side)

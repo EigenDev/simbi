@@ -45,7 +45,7 @@ namespace simbi
 
           luint nx, active_zones, idx_active, i_start, i_bound;
           real tend;
-          real plm_theta, engine_duration, t, decay_constant;
+          real plm_theta, engine_duration, t, decay_constant, dlogt;
           bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
 
           std::vector<real> sourceD, sourceS, source0, pressure_guess;
@@ -114,7 +114,7 @@ namespace simbi
                std::vector<std::vector<real>> &sources, 
                real tstart,
                real tend, 
-               real dt,\
+               real dlogt,
                real plm_theta, 
                real engine_duraction,
                real chkpt_interval, 

@@ -1016,7 +1016,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     const std::vector<std::vector<real>> sources,
     real tstart, 
     real tend, 
-    real init_dt, 
+    real dlogt, 
     real plm_theta,
     real engine_duration, 
     real chkpt_interval,
@@ -1046,7 +1046,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->hllc            = hllc;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
-    this->dt              = init_dt;
     this->bc              = helpers::boundary_cond_map.at(boundary_condition);
     this->geometry        = helpers::geometry_map.at(coord_system);
     this->xphysical_grid  = (first_order) ? nx - 2: nx - 4;
@@ -1225,7 +1224,11 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             if (t >= t_interval)
             {
                 write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, zphysical_grid);
-                t_interval += chkpt_interval;
+                if (dlogt != 0) {
+                    t_interval *= std::pow(10, dlogt);
+                } else {
+                    t_interval += chkpt_interval;
+                }
             }
 
             n++;
@@ -1283,7 +1286,11 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             if (t >= t_interval)
             {
                 write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, zphysical_grid);
-                t_interval += chkpt_interval;
+                if (dlogt != 0) {
+                    t_interval *= std::pow(10, dlogt);
+                } else {
+                    t_interval += chkpt_interval;
+                }
             }
             n++;
             //Adapt the timestep
