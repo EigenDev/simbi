@@ -542,7 +542,7 @@ def plot_1d_curve(
     case:       int =0) -> None:
     
     num_fields = len(args.fields)
-    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
+    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.files)))
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
@@ -627,7 +627,7 @@ def plot_per_theta(
     case:      int =0) -> None:
     print('plotting vs theta...')
     
-    colors = plt.cm.viridis(np.linspace(0.1, 0.90, len(args.filename)))
+    colors = plt.cm.viridis(np.linspace(0.1, 0.90, len(args.files)))
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
@@ -728,7 +728,7 @@ def plot_dec_rad(
     case:      int =0) -> None:
     print('plotting deceleration radius...')
     
-    file_num = len(args.filename)
+    file_num = len(args.files)
     
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
@@ -837,7 +837,7 @@ def plot_hist(
     
     # Check if subplots are split amonst the file inputs. If so, roll the colors
     # to reset when on a different axes object
-    color_len = args.sub_split[ax_num] if args.sub_split is not None else len(args.filename)
+    color_len = args.sub_split[ax_num] if args.sub_split is not None else len(args.files)
     if args.cmap == 'grayscale':
         colors = plt.cm.gray(np.linspace(0.05, 0.75, color_len+1))
     else:
@@ -871,7 +871,7 @@ def plot_hist(
         
         label = r'$\varepsilon = 0$'
         if args.labels is not None:
-            if len(args.labels) == len(args.filename) and not args.sub_split:
+            if len(args.labels) == len(args.files) and not args.sub_split:
                 etot         = np.sum(util.prims2var(fields, "energy") * dV_1d * util.e_scale.value)
                 order_of_mag = np.floor(np.log10(etot))
                 scale        = int(etot / 1e51)
@@ -949,7 +949,7 @@ def plot_hist(
     if args.labels is not None:
         label = '%s'%(args.labels[case])
             
-        if len(args.labels) == len(args.filename) and not args.sub_split:
+        if len(args.labels) == len(args.files) and not args.sub_split:
             etot         = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
             order_of_mag = np.floor(np.log10(etot))
             scale        = int(etot / 1e51)
@@ -1082,7 +1082,7 @@ def plot_dx_domega(
         return de / dwplot_dx_d
     
     col       = case % len(args.sub_split) if args.sub_split is not None else case
-    color_len = len(args.sub_split) if args.sub_split is not None else len(args.filename)
+    color_len = len(args.sub_split) if args.sub_split is not None else len(args.files)
     colors    = plt.cm.viridis(np.linspace(0.1, 0.80, color_len if color_len > 1 else len(args.cutoffs)))
     coloriter = cycle(colors)
     
@@ -1370,13 +1370,27 @@ def plot_dx_domega(
                 ax2.legend(fontsize=size, loc=args.legend_loc, fancybox=True, framealpha=0.1, borderpad=0.3)
                 if 'ax0' in locals():
                     ax0.legend(fontsize=size, loc='best', fancybox=True, framealpha=0.1, borderpad=0.3)
+
+def plot_vs_time(
+    args: argparse.ArgumentParser,
+    ax: plt.Axes,
+    fig: plt.figure,
+    label: str,
+    color: float,
+    time: np.ndarray,
+    data: np.ndarray) -> None:
+    
+    # ax.scatter(time, data, label=label, s=80, facecolors='none', edgecolors=color)
+    ax.scatter(time, data, label=label, color=color, alpha=0.3)
+    if args.log:
+        ax.set(xscale = 'log')
     
 def main():
     parser = argparse.ArgumentParser(
         description='Plot a 2D Figure From a File (H5).',
         epilog='This Only Supports H5 Files Right Now')
     
-    parser.add_argument('filename', metavar='Filename', nargs='+', help='A Data Source to Be Plotted')
+    parser.add_argument('files', metavar='files', nargs='+', help='A Data Source to Be Plotted')
     parser.add_argument('setup', metavar='Setup', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
     parser.add_argument('--fields', dest = 'fields', metavar='Field Variable', nargs='+', help='The name of the field variable you\'d like to plot',choices=field_choices, default=['rho'])
     parser.add_argument('--1d_files', dest='oned_files', nargs='+', help='1D files to check against', default=None)
@@ -1426,6 +1440,7 @@ def main():
     parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
     parser.add_argument('--fig_dims', dest='fig_dims', default = [4, 4], type=float, nargs=2)
     parser.add_argument('--legend', dest='legend', default=True, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=0, nargs='+')
     parser.add_argument('--save', dest='save', type=str,default=None,help='Save the fig with some name')
     args = parser.parse_args()
     
@@ -1459,11 +1474,12 @@ def main():
         plt.style.use('dark_background')
         
     
-    num_subplots   = len(args.sub_split) if args.sub_split is not None else 1
-    if len(args.filename) > 1:
+    num_subplots = len(args.sub_split) if args.sub_split is not None else 1
+    flist, _     = util.get_file_list(args.files)
+    if len(flist) > 1 or isinstance(flist, dict):
         if num_subplots == 1:
             fig, ax = plt.subplots(1, 1, figsize=(8,8))
-            lines_per_plot = len(args.filename)
+            lines_per_plot = len(args.files)
         else:
             fig,axs = plt.subplots(num_subplots, 1, figsize=(8,4 * num_subplots), sharex=True, tight_layout=False)
             if args.setup != "":
@@ -1500,51 +1516,74 @@ def main():
         ax_col   = 0
         ax_shift = True
         ax_num   = 0    
-        
-        for idx, file in enumerate(args.filename):
-            fields, setup, mesh = util.read_2d_file(args, file)
-            i += 1
-            if args.hist and (not args.de_domega and not args.dm_domega):
-                if args.sub_split is None:
-                    plot_hist(fields, args, mesh, setup, overplot=True, ax=ax, case=idx, ax_col=idx)
+        if isinstance(flist, (list, np.ndarray)):
+            for idx, file in enumerate(flist):
+                fields, setup, mesh = util.read_2d_file(args, file)
+                i += 1
+                if args.hist and (not args.de_domega and not args.dm_domega):
+                    if args.sub_split is None:
+                        plot_hist(fields, args, mesh, setup, overplot=True, ax=ax, case=idx, ax_col=idx)
+                    else:
+                        if ax_shift:
+                            ax_col   = 0
+                            ax       = next(axs_iter)   
+                            ax_shift = False
+                        plot_hist(fields, args, mesh, setup, overplot=True, ax=ax, ax_num=ax_num, case=i-1, ax_col=ax_col)
+                elif args.de_domega or args.dm_domega:
+                    if args.sub_split is None:
+                        plot_dx_domega(fields, args, mesh, setup, overplot=True, ax=ax, case=i-1, ax_col=idx)
+                    else:
+                        if ax_shift:
+                            ax_col   = 0
+                            ax       = next(axs_iter)   
+                            ax_shift = False
+                        plot_dx_domega(fields, args, mesh, setup, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
+                elif args.x is not None:
+                    plot_per_theta(fields, args, mesh, setup, True, ax, idx)
+                elif args.dec_rad:
+                    plot_dec_rad(fields, args, mesh, setup, True, ax, idx)
                 else:
-                    if ax_shift:
-                        ax_col   = 0
-                        ax       = next(axs_iter)   
-                        ax_shift = False
-                    plot_hist(fields, args, mesh, setup, overplot=True, ax=ax, ax_num=ax_num, case=i-1, ax_col=ax_col)
-            elif args.de_domega or args.dm_domega:
-                if args.sub_split is None:
-                    plot_dx_domega(fields, args, mesh, setup, overplot=True, ax=ax, case=i-1, ax_col=idx)
-                else:
-                    if ax_shift:
-                        ax_col   = 0
-                        ax       = next(axs_iter)   
-                        ax_shift = False
-                    plot_dx_domega(fields, args, mesh, setup, overplot=True, ax=ax, ax_num=ax_num, case=idx, ax_col=ax_col)
-            elif args.x is not None:
-                plot_per_theta(fields, args, mesh, setup, True, ax, idx)
-            elif args.dec_rad:
-                plot_dec_rad(fields, args, mesh, setup, True, ax, idx)
-            else:
-                plot_1d_curve(fields, args, mesh, setup, True, ax, idx)
-            
-            ax_col += 1
-            if i == lines_per_plot:
-                i        = 0
-                ax_num  += 1
-                ax_shift = True
-                try:
-                    if num_subplots > 1:
-                        lines_per_plot = next(subplot_iter)
-                except StopIteration:
-                    break
+                    plot_1d_curve(fields, args, mesh, setup, True, ax, idx)
                 
+                ax_col += 1
+                if i == lines_per_plot:
+                    i        = 0
+                    ax_num  += 1
+                    ax_shift = True
+                    try:
+                        if num_subplots > 1:
+                            lines_per_plot = next(subplot_iter)
+                    except StopIteration:
+                        break
+        else:
+            # fig, ax = plt.subplots(figsize=args.fig_dims)
+            ax.set_xlabel(r'$t [\rm s]$')
+            ax.set_ylabel(r'$\Gamma \beta$')
+            ax.set_xlim(0.5, 2.0)
+            ax.spines['right'].set_visible(False)
+            ax.spines['top'].set_visible(False)
+            max_vars = []
+            times = []
+            colors = ['red', 'black']
+            for key in flist.keys():
+                label = args.labels[key] if args.labels else key
+                for idx, file in enumerate(flist[key]):
+                    fields, setup, mesh = util.read_2d_file(args, file)
+                    viewing_angle = np.deg2rad(args.viewing[key % len(args.viewing)])
+                    tidx, _ = util.find_nearest(setup['x2'], viewing_angle)
+                    max_var = np.max(fields[args.fields[0]][tidx])
+                    max_vars += [max_var]
+                    times    += [setup['time']]
+
+                plot_vs_time(args, ax, fig, label, colors[key], times, max_vars)
+                    
+                
+            ax.legend()
         if args.sub_split is not None:
             for ax in axs:
                 ax.label_outer()
     else:
-        fields, setup, mesh = util.read_2d_file(args, args.filename[0])
+        fields, setup, mesh = util.read_2d_file(args, args.files[0])
         if args.hist and (not args.de_domega and not args.dm_domega):
             plot_hist(fields, args, mesh, setup)
         elif args.tidx != None:

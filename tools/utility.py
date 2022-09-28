@@ -29,6 +29,11 @@ e_scale    = m * c **2
 edens_scale  = e_scale / (4./3. * np.pi * R_0**3)
 time_scale = R_0 / c
 
+e_scale_bmk   = 1e53 * units.erg
+rho_scale_bmk = 1.0 * const.m_p.cgs / units.cm**3
+ell_scale     = (e_scale_bmk / rho_scale_bmk / const.c.cgs**2)**(1/3)
+t_scale       = const.c.cgs * ell_scale
+
 
 def calc_rverticies(r: np.ndarray) -> np.ndarray:
     rvertices = np.sqrt(r[1:] * r[:-1])
@@ -527,7 +532,10 @@ def fill_below_intersec(x: np.ndarray, y: np.ndarray, constraint: float, color: 
     
 def get_file_list(inputs: str) -> list:
     files = []
-    for obj in inputs:
+    file_dict = {}
+    dircount  = 0
+    multidir = False
+    for idx, obj in enumerate(inputs):
         #check if path is a file
         isFile = os.path.isfile(obj)
 
@@ -536,11 +544,22 @@ def get_file_list(inputs: str) -> list:
         
         if isDirectory:
             file_path = os.path.join(obj, '')
-            files += sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
-            break 
+            if dircount == 0:
+                files += sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
+            else:
+                multidir = True
+                if dircount == 1:
+                    file_dict[idx - 1] = files
+                file_dict[idx]     = sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
+            dircount += 1
         else:
             files += sorted([file for file in inputs])
             break
-    # sort by length of strings now
-    files.sort(key=len, reverse=False)
-    return files, len(files)
+    
+    if not multidir:
+        # sort by length of strings now
+        files.sort(key=len, reverse=False)
+        return files, len(files)
+    else:
+        [file_dict[key].sort(key=len, reverse=False) for key in file_dict.keys()]
+        return file_dict, isDirectory
