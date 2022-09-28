@@ -27,11 +27,20 @@ py3env_prefix = py3.get_variable('prefix', 'empty')
 message('python path -- ' + py3.path())
 message('python install_dir -- ' + py3env_prefix)
 if py3_purelib.endswith('site-packages')
-py3_install_dir = py3_purelib
+    py3_install_dir = py3_purelib
 elif py3env_prefix.endswith('site-packages')
-py3_install_dir = py3env_prefix
+    py3_install_dir = py3env_prefix
 else
-py3_install_dir = py3.get_installation_dir()
+    py3_install_dir = py3.get_installation_dir()
+endif
+
+install_dir_permission = run_command(py3,
+  ['-c', f'import os; print(os.access("@py3_install_dir@", os.W_OK))'],
+  check : true
+).stdout().strip()
+
+if install_dir_permission == 'False'
+    py3_install_dir = run_command('python -m site --user-site', check: true).stdout().strip()
 endif
 #################################################################
 # SOME BOOK KEEPING FOR ALL INSTALLS
@@ -78,7 +87,7 @@ if get_option('gpu_compilation').enabled()
         elif hip_platform == 'amd' 
             hip_runtime = 'rocm'
             hip_compiler = 'hipcc'
-            gpu_depends += [hip]
+            # gpu_depends += [hip]
             gpu_linkers += ['-lamdhip64']
             gpu_comp_args = [
                 '-D__HIP_PLATFORM_AMD__=1',
