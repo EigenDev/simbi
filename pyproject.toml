@@ -36,5 +36,5 @@ version = {file = "pysimbi/VERSION"}
 readme = {file = ["README.md"]}
 
 [project.urls]
-repository = "https://github.com/EigenDev/simbi"
+repository    = "https://github.com/EigenDev/simbi"
 documentation = "https://github.com/EigenDev/simbi"
