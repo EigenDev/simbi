@@ -39,8 +39,10 @@ install_dir_permission = run_command(py3,
   check : true
 ).stdout().strip()
 
+pip_args = []
 if install_dir_permission == 'False'
     py3_install_dir = run_command('python', '-m', 'site', '--user-site', check: true).stdout().strip()
+    pip_args = '--user'
 endif
 #################################################################
 # SOME BOOK KEEPING FOR ALL INSTALLS
@@ -95,7 +97,6 @@ if get_option('gpu_compilation').enabled()
                 '-O3', 
                 '-march=native'
             ]
-
             # Meson does not support hip yet, so we manually
             # declare the dependency
             hip_dep = declare_dependency(
@@ -233,19 +234,13 @@ if get_option('gpu_compilation').enabled()
     endif
 endif
 
-if py3env_prefix == 'empty'
-    pip_args = ''
-else
-    pip_args = '--user'
-endif
-
 message(f'Potential install directory?: @py3_install_dir@')
 if get_option('profile') == 'default'
     meson.add_install_script(
         'pip',
         'install',
         meson.current_source_dir(),
-        f'@pip_args@',
+        pip_args,
     )
 else 
     meson.add_install_script(
@@ -253,6 +248,6 @@ else
         'install',
         '-e',
         meson.current_source_dir(),
-        f'@pip_args@',
+        pip_args,
     )
 endif
