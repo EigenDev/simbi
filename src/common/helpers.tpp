@@ -150,7 +150,20 @@ namespace simbi
             // Transform vector of primitive structs to struct of primitive vectors
             auto transfer_prims = vec2struct<U, V>(sim_state_host->prims);
             writeToProd<U, V>(&transfer_prims, &prods);
-            const auto tnow     = create_step_str(t_interval, tchunk);
+            std::string tnow;
+            if (sim_state_host->dlogt != 0)
+            {
+                static double step = 0.0;
+                const auto time_order_of_mag = std::floor(std::log10(step));
+                if (time_order_of_mag > tchunk_order_of_mag) {
+                    tchunk.insert(0, "0");
+                    tchunk_order_of_mag += 1;
+                }
+                tnow = create_step_str(step, tchunk);
+                step++;
+            } else {
+                tnow = create_step_str(t_interval, tchunk);
+            }
             const auto filename = string_format("%d.chkpt." + tnow + ".h5", chkpt_zone_label);
 
             setup.t             = t;

@@ -696,6 +696,7 @@ SRHD::simulate1D(
     this->engine_duration = engine_duration;
     this->t               = tstart;
     this->tend            = tend;
+    this->dlogt           = dlogt;
     this->bc              = helpers::boundary_cond_map.at(boundary_condition);
     this->geometry        = helpers::geometry_map.at(coord_system);
     this->idx_active      = (periodic) ? 0  : (first_order) ? 1 : 2;

@@ -44,7 +44,7 @@ namespace simbi {
         simbi::BoundaryCondition bc;
         simbi::Cellspacing x1cell_spacing, x2cell_spacing;
 
-        real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1;
+        real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1, dlogt;
         bool rho_all_zeros, m1_all_zeros, m2_all_zeros, e_all_zeros;
         
         //==============================================================

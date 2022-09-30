@@ -27,7 +27,7 @@ namespace simbi {
         std::vector<real> x1;
         std::string coord_system;
 
-        real plm_theta, tend, dt, engine_duration, t, decay_constant, hubble_param, x1min , x1max, dlogx1, dx1;
+        real plm_theta, tend, dt, engine_duration, t, decay_constant, hubble_param, x1min , x1max, dlogx1, dx1, dlogt;
         bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
 
         

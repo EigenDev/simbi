@@ -529,6 +529,7 @@ void Newtonian1D::advance(
     this->hllc            = hllc;
     this->engine_duration = engine_duration;
     this->t               = tstart;
+    this->dlogt           = dlogt;
     // Define the swap vector for the integrated state
     this->bc              = helpers::boundary_cond_map.at(boundary_condition);
     this->geometry        = helpers::geometry_map.at(coord_system);

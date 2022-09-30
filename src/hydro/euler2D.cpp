@@ -759,6 +759,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->first_order     = first_order;
     this->periodic        = boundary_condition == "periodic";
     this->hllc            = hllc;
+    this->dlogt           = dlogt;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
     this->xphysical_grid  = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;

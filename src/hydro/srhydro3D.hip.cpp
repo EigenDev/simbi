@@ -1044,6 +1044,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->first_order     = first_order;
     this->periodic        = boundary_condition == "periodic";
     this->hllc            = hllc;
+    this->dlogt           = dlogt;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
     this->bc              = helpers::boundary_cond_map.at(boundary_condition);
