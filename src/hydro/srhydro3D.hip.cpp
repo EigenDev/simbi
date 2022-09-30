@@ -161,16 +161,16 @@ void SRHD3D::cons2prim(
             } while (std::abs(peq - pre) >= tol);
 
             real inv_et = static_cast<real>(1.0) / (tau + D + peq); 
-            real vx = S1 * inv_et;
-            real vy = S2 * inv_et;
-            real vz = S3 * inv_et;
+            real v1 = S1 * inv_et;
+            real v2 = S2 * inv_et;
+            real v3 = S3 * inv_et;
             
             #if GPU_CODE
                 self->gpu_pressure_guess[gid] = peq;
-                self->gpu_prims[gid]          = Primitive{rho, vx, vy, vz, peq};
+                self->gpu_prims[gid]          = Primitive{rho, v1, v2, v3, peq};
             #else
                 pressure_guess[gid] = peq;
-                prims[gid]          = Primitive{rho, vx, vy, vz,  peq};
+                prims[gid]          = Primitive{rho, v1, v2, v3,  peq};
             #endif
             workLeftToDo = false;
         }
@@ -258,18 +258,18 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD3D::prims2cons(const Primitive &prims)
 {
     const real rho = prims.rho;
-    const real vx = prims.v1;
-    const real vy = prims.v2;
-    const real vz = prims.v3;
+    const real v1 = prims.v1;
+    const real v2 = prims.v2;
+    const real v3 = prims.v3;
     const real pressure = prims.p;
-    const real lorentz_gamma = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (vx * vx + vy * vy + vz * vz));
+    const real lorentz_gamma = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2 + v3 * v3));
     const real h = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - 1));
 
     return Conserved{
         rho * lorentz_gamma, 
-        rho * h * lorentz_gamma * lorentz_gamma * vx,
-        rho * h * lorentz_gamma * lorentz_gamma * vy,
-        rho * h * lorentz_gamma * lorentz_gamma * vz,
+        rho * h * lorentz_gamma * lorentz_gamma * v1,
+        rho * h * lorentz_gamma * lorentz_gamma * v2,
+        rho * h * lorentz_gamma * lorentz_gamma * v3,
         rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma};
 };
 //---------------------------------------------------------------------
@@ -399,23 +399,23 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD3D::calc_Flux(const Primitive &prims, const luint nhat = 1)
 {
     const real rho      = prims.rho;
-    const real vx       = prims.v1;
-    const real vy       = prims.v2;
-    const real vz       = prims.v3;
+    const real v1       = prims.v1;
+    const real v2       = prims.v2;
+    const real v3       = prims.v3;
     const real pressure = prims.p;
-    const real lorentz_gamma = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (vx * vx + vy * vy + vz*vz));
+    const real lorentz_gamma = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2 + v3*v3));
 
     const real h  = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
     const real D  = rho * lorentz_gamma;
-    const real S1 = rho * lorentz_gamma * lorentz_gamma * h * vx;
-    const real S2 = rho * lorentz_gamma * lorentz_gamma * h * vy;
-    const real S3 = rho * lorentz_gamma * lorentz_gamma * h * vz;
+    const real S1 = rho * lorentz_gamma * lorentz_gamma * h * v1;
+    const real S2 = rho * lorentz_gamma * lorentz_gamma * h * v2;
+    const real S3 = rho * lorentz_gamma * lorentz_gamma * h * v3;
     const real tau =
                     rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma;
 
-    return (nhat == 1) ? Conserved{D * vx, S1 * vx + pressure, S2 * vx, S3 * vx,  (tau + pressure) * vx}
-          :(nhat == 2) ? Conserved{D * vy, S1 * vy, S2 * vy + pressure, S3 * vy,  (tau + pressure) * vy}
-          :              Conserved{D * vz, S1 * vz, S2 * vz, S3 * vz + pressure,  (tau + pressure) * vz};
+    return (nhat == 1) ? Conserved{D * v1, S1 * v1 + pressure, S2 * v1, S3 * v1,  (tau + pressure) * v1}
+          :(nhat == 2) ? Conserved{D * v2, S1 * v2, S2 * v2 + pressure, S3 * v2,  (tau + pressure) * v2}
+          :              Conserved{D * v3, S1 * v3, S2 * v3, S3 * v3 + pressure,  (tau + pressure) * v3};
 };
 
 GPU_CALLABLE_MEMBER

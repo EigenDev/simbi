@@ -173,12 +173,12 @@ GPU_CALLABLE_MEMBER
 Conserved Newtonian2D::prims2cons(const Primitive &prims)
  {
     const real rho = prims.rho;
-    const real vx  = prims.v1;
-    const real vy  = prims.v2;
+    const real v1  = prims.v1;
+    const real v2  = prims.v2;
     const real pre = prims.p;
-    const real et  = pre/(gamma - 1.0) + 0.5 * rho * (vx*vx + vy*vy);
+    const real et  = pre/(gamma - 1.0) + 0.5 * rho * (v1*v1 + v2*v2);
 
-    return Conserved{rho, rho*vx, rho*vy, et};
+    return Conserved{rho, rho*v1, rho*v2, et};
 }
 
 //---------------------------------------------------------------------
@@ -279,14 +279,14 @@ Conserved Newtonian2D::prims2flux(const Primitive &prims, const luint ehat)
 {
     const auto vn  = prims.vcomponent(ehat);
     const auto rho = prims.rho;
-    const auto vx  = prims.v1;
-    const auto vy  = prims.v2;
+    const auto v1  = prims.v1;
+    const auto v2  = prims.v2;
     const auto pre = prims.p;
-    const auto et  = pre/(gamma - 1.0) + 0.5 * rho * (vx*vx + vy*vy);
+    const auto et  = pre/(gamma - 1.0) + 0.5 * rho * (v1*v1 + v2*v2);
     
     const auto dens  = rho*vn;
-    const auto momx  = rho*vx*vn + pre * kronecker(1, ehat);
-    const auto momy  = rho*vy*vn + pre * kronecker(2, ehat);
+    const auto momx  = rho*v1*vn + pre * kronecker(1, ehat);
+    const auto momy  = rho*v2*vn + pre * kronecker(2, ehat);
     const auto edens = (et + pre)*vn;
 
     return Conserved{dens, momx, momy, edens};
