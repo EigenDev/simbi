@@ -2,6 +2,8 @@ plots/
 pysimbi/__pycache__/
 SIMBI_2D_Hydro_Code.egg-info/
 build/
+builddir/
+pysimbi.egg-info/
 data/
 lib/src/gpu_state.pyx
 lib/src/cpu_state.pyx

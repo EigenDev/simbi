@@ -4,9 +4,14 @@ import numpy as np
 import time
 import argparse
 import matplotlib.pyplot as plt 
-
+import sys
 from pysimbi import Hydro
 
+if sys.version_info <= (3,9):
+    action = 'store_false'
+else:
+    action = argparse.BooleanOptionalAction
+    
 def main():
     parser = argparse.ArgumentParser(description='Marti and Muller Test Problem 1 Params')
     parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=5/3)
@@ -17,9 +22,9 @@ def main():
     parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
-    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
     parser.add_argument('--adot',             help = 'speed of moving mesh faces in units of c', dest='adot', type=float, default=0.1)
-    parser.add_argument('--forder',           help= 'First order flag', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--forder',           help= 'First order flag', action='store_true', default=False)
     parser.add_argument('--bc',               help= 'Boundary condition', dest='boundc', default='outflow', type=str, choices=['periodic', 'outflow'])
     args = parser.parse_args()
     fig, axs = plt.subplots(3, 1, figsize=(9,9), sharex=True)

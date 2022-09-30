@@ -5,8 +5,14 @@
 import numpy as np 
 import matplotlib.pyplot as plt
 import argparse
+import sys
 from pysimbi import Hydro
 
+if sys.version_info <= (3,9):
+    action = 'store_false'
+else:
+    action = argparse.BooleanOptionalAction
+    
 alpha_max = 1.0 
 alpha_min = 1e-3
 
@@ -30,7 +36,7 @@ def main():
     parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
-    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
     parser.add_argument('--alpha',            help = 'wave amplitude', type=range_limited_float_type, default=0.5)
     args = parser.parse_args()
     # Define Constants 

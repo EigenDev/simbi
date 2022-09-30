@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools", "wheel", "numpy", "h5py", "cython", "meson", "ninja"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pysimbi"
+authors = [
+    {name = "Marcus DuPont"},
+    {email = "md4469@nyu.edu"}
+]
+description = "Python module to solve hydrodynamic equations using a hip/cuda/c++ backend"
+requires-python = ">=3"
+keywords = ["physics", "relativity"]
+license = {file = 'LICENSE.md'}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+    "Programming Language :: HIP",
+    "Programming Language :: CUDA",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dynamic = ["version", "readme"]
+
+[options]
+zip_safe = false
+
+[tool.setuptools]
+packages = ["pysimbi"]
+
+[tool.setuptools.dynamic]
+version = {file = "pysimbi/VERSION"}
+readme = {file = ["README.md"]}
+
+[project.urls]
+repository    = "https://github.com/EigenDev/simbi"
+documentation = "https://github.com/EigenDev/simbi"

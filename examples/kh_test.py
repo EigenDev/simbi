@@ -4,7 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import argparse
+import sys
 import matplotlib.colors as mcolors
+from numpy.random import default_rng
 try:
     import cmasher
 except:
@@ -13,6 +15,11 @@ except:
 from pysimbi import Hydro 
 from astropy import units as u 
 
+if sys.version_info <= (3,9):
+    action = 'store_false'
+else:
+    action = argparse.BooleanOptionalAction
+    
 def main():
     parser = argparse.ArgumentParser(description="KH Instability Test")
     parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=5/3)
@@ -23,9 +30,9 @@ def main():
     parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
-    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
     parser.add_argument('--cmap', '-c',       help = 'colormap for output plot', dest='cmap', type=str, default='gist_ncar')
-    parser.add_argument('--forder',           help= ' First order flag', action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument('--forder',           help= ' First order flag', action=action, default=False)
     args = parser.parse_args()
     xmin = -0.5
     xmax = 0.5
@@ -62,10 +69,10 @@ def main():
     p[np.where(np.abs(y) < 0.25)] = pR
 
     # Seed the KH instability with random velocities
-    seed = np.random.seed(0)
+    rng     = default_rng()
     sin_arr = 0.01*np.sin(2*np.pi*x)
-    vx_rand = np.random.choice(sin_arr, size=vx.shape)
-    vy_rand = np.random.choice(sin_arr, size=vy.shape)
+    vx_rand = rng.choice(sin_arr, size=vx.shape)
+    vy_rand = rng.choice(sin_arr, size=vy.shape)
 
     vx += vx_rand
     vy += vy_rand
@@ -98,7 +105,7 @@ def main():
     rho, vx, vy, pre, chi = hllc_result
 
     rnorm = mcolors.LogNorm(vmin=0.9, vmax=2.1)
-
+    ax.grid(False)
     c1 = ax.pcolormesh(xx, yy, rho, cmap=args.cmap, edgecolors='none', shading ='auto', vmin=0.9, vmax=2.1)
 
     fig.suptitle('SIMBI: KH Instability Test at t={} s on {} x {} grid.'.format(args.tend, xnpts, ynpts), fontsize=20)
