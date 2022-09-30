@@ -547,12 +547,10 @@ def plot_1d_curve(
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
     r, theta = mesh['r'], mesh['th']
-    theta    = theta * 180 / np.pi 
-    
+    theta    = theta
+    tidx,_   = util.find_nearest(theta, np.deg2rad(args.viewing))
     x1max        = dset['x1max']
     x1min        = dset['x1min']
-    x2max        = dset['x2max']
-    x2min        = dset['x2min']
     
     vmin,vmax = args.cbar[:2]
     var = [field for field in args.fields] if num_fields > 1 else args.fields[0]
@@ -565,11 +563,11 @@ def plot_1d_curve(
         mass        = dV * fields['W'] * fields['rho']
         # linestyle = '-.'
         if args.labels is None:
-            ax.loglog(r, mass[args.tidx]/ np.max(mass[args.tidx]), label = 'mass', linestyle='-.', color=colors[case])
-            ax.loglog(r, fields['p'][args.tidx] / np.max(fields['p'][args.tidx]), label = 'pressure', color=colors[case])
+            ax.loglog(r, mass[tidx]/ np.max(mass[tidx]), label = 'mass', linestyle='-.', color=colors[case])
+            ax.loglog(r, fields['p'][tidx] / np.max(fields['p'][tidx]), label = 'pressure', color=colors[case])
         else:
-            ax.loglog(r, mass[args.tidx]/ np.max(mass[args.tidx]), label = f'{args.labels[case]} mass', linestyle='-.', color=colors[case])
-            ax.loglog(r, fields['p'][args.tidx] / np.max(fields['p'][args.tidx]), label = f'{args.labels[case]} pressure', color=colors[case])
+            ax.loglog(r, mass[tidx]/ np.max(mass[tidx]), label = f'{args.labels[case]} mass', linestyle='-.', color=colors[case])
+            ax.loglog(r, fields['p'][tidx] / np.max(fields['p'][tidx]), label = f'{args.labels[case]} pressure', color=colors[case])
         ax.legend(fontsize=20)
         ax.axvline(0.65, linestyle='--', color='red')
         ax.axvline(1.00, linestyle='--', color='blue')
@@ -593,7 +591,7 @@ def plot_1d_curve(
                 
             if len(args.fields) > 1:
                 label = field_labels[idx] + ', ' + label
-            ax.loglog(r, var[args.tidx], label=label)
+            ax.loglog(r, var[tidx], label=label)
             if args.oned_files is not None:
                 for one_file in args.oned_files:
                     oned_var = util.read_1d_file(one_file)[0]
@@ -601,7 +599,7 @@ def plot_1d_curve(
     
     
     ax.set_xlim(x1min, x1max)
-    ax.set_xlabel(r'$r/R_\odot$', fontsize=20)
+    ax.set_xlabel(r'$r/R_0$', fontsize=20)
     ax.tick_params(axis='both', labelsize=10)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
@@ -612,7 +610,7 @@ def plot_1d_curve(
         
     
     if args.setup != "":
-        ax.set_title(r'$\theta = {:.2f}$ time: {:.3f}'.format(mesh['th'][args.tidx] * 180 / np.pi, tend))
+        ax.set_title(r'$\theta = {:.2f}^{{\circ}}$ time: {:.3f}'.format(mesh['th'][tidx] * 180 / np.pi, tend))
     if not overplot:
         return fig
     # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup,theta[args.tidx], tend), fontsize=20, y=0.95)
@@ -1424,7 +1422,6 @@ def main():
     parser.add_argument('--ax_anchor', dest='ax_anchor', type=str, nargs='+', default=None,  help='Anchor annotation text for each plot')
     parser.add_argument('--norm', dest='norm', action='store_true', default=False, help='True if you want the plot normalized to max value')
     parser.add_argument('--labels', dest='labels', nargs='+', default = None, help='Optionally give a list of labels for multi-file plotting')
-    parser.add_argument('--tidx', dest='tidx', type=int, default = None, help='Set to a value if you wish to plot a 1D curve about some angle')
     parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
     parser.add_argument('--cbar_orient', dest='cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
     parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 70, 110], type=float, nargs=4, help="wedge limits")
@@ -1613,7 +1610,7 @@ def main():
         fields, setup, mesh = util.read_2d_file(args, args.files[0])
         if args.hist and (not args.de_domega and not args.dm_domega):
             plot_hist(fields, args, mesh, setup)
-        elif args.tidx != None:
+        elif args.viewing != None:
             plot_1d_curve(fields, args, mesh, setup)
         elif args.de_domega or args.dm_domega:
             plot_dx_domega(fields, args, mesh, setup)
