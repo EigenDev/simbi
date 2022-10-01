@@ -143,6 +143,7 @@ sources = [
     'src/common/clattice3D.cpp',
     'src/common/helpers.cpp',
     'src/common/hydro_structs.cpp',
+    'src/common/helpers.hip.cpp',
     # 'src/common/viscous_diff.cpp'
     # 'src/common/viscous_diff.hpp'
 
@@ -154,7 +155,6 @@ sources = [
     'src/hydro/srhydro1D.hip.cpp',
     'src/hydro/srhydro2D.hip.cpp',
     'src/hydro/srhydro3D.hip.cpp',
-    'src/hydro/helpers.hip.cpp',
 
     #######################
     #### UTIL IMPLEMENTATIONS
