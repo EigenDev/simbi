@@ -46,6 +46,28 @@ namespace simbi
                 auto status = simbi::gpu::error::status_t(anyGpuMemset(obj, val, bytes));
                 simbi::gpu::error::check_err(status, "Failed to memset");
             };
+
+            void gpuEventSynchronize(anyGpuEvent_t a)
+            {
+                auto status = simbi::gpu::error::status_t(anyGpuEventSynchronize(a));
+                simbi::gpu::error::check_err(status, "Failed to synchronize event");
+            };
+
+            void gpuEventCreate(anyGpuEvent_t *a)
+            {
+                auto status = simbi::gpu::error::status_t(anyGpuEventCreate(a));
+                simbi::gpu::error::check_err(status, "Failed to create event");
+            };
+            void gpuEventRecoird(anyGpuEvent_t a)
+            {
+                auto status = simbi::gpu::error::status_t(anyGpuEventRecord(a));
+                simbi::gpu::error::check_err(status, "Failed to record event");
+            };
+            void gpuEventElapsedTime(float *time, anyGpuEvent_t a, anyGpuEvent_t b)
+            {
+                auto status = simbi::gpu::error::status_t(anyGpuEventElapsedTime(time, a, b));
+                simbi::gpu::error::check_err(status, "Failed to get event elapsed time");
+            };
         } // namespace api
     
     } // namespace gpu
