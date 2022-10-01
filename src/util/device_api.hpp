@@ -96,6 +96,10 @@ namespace simbi
             void gpuMalloc(void *obj, size_t bytes);
             void gpuMallocManaged(void *obj, size_t bytes);
             void gpuFree(void *obj);
+            void gpuEventSynchronize(anyGpuEvent_t a);
+            void gpuEventCreate(anyGpuEvent_t *a);
+            void gpuEventRecoird(anyGpuEvent_t a);
+            void gpuEventElapsedTime(float *time, anyGpuEvent_t a, anyGpuEvent_t b);
 
             void gpuMemset(void *obj, int val, size_t bytes);
 

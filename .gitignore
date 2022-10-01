@@ -5,6 +5,7 @@ build/
 builddir/
 pysimbi.egg-info/
 data/
+src/hydro/exp/
 lib/src/gpu_state.pyx
 lib/src/cpu_state.pyx
 lib/src/build_options.hpp 

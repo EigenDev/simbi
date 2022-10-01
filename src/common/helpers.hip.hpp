@@ -7,11 +7,11 @@
 #include "common/enums.hpp"
 #include "common/hydro_structs.hpp"
 #include "common/helpers.hpp"
-#include "euler1D.hpp"
-#include "euler2D.hpp"
-#include "srhydro1D.hip.hpp"
-#include "srhydro2D.hip.hpp"
-#include "srhydro3D.hip.hpp"
+#include "hydro/euler1D.hpp"
+#include "hydro/euler2D.hpp"
+#include "hydro/srhydro1D.hip.hpp"
+#include "hydro/srhydro2D.hip.hpp"
+#include "hydro/srhydro3D.hip.hpp"
 namespace simbi
 {
     //======================================

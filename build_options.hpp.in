@@ -2,6 +2,9 @@
 #define BUILD_OPTIONS_HPP
 
 #mesondefine FLOAT_PRECISION
+#mesondefine ONED_BLOCK_SIZE
+#mesondefine TWOD_BLOCK_SIZE
+#mesondefine THREED_BLOCK_SIZE
 enum class Platform: int {CPU = 0, GPU = 1};
 
 #include "stdint.h"
@@ -13,9 +16,9 @@ enum class Platform: int {CPU = 0, GPU = 1};
 
 using luint = uint64_t;
 using lint  = int64_t;
-constexpr int BLOCK_SIZE   = 128;
-constexpr int BLOCK_SIZE2D = 16;
-constexpr int BLOCK_SIZE3D = 4;
+constexpr int BLOCK_SIZE   = ONED_BLOCK_SIZE;
+constexpr int BLOCK_SIZE2D = TWOD_BLOCK_SIZE;
+constexpr int BLOCK_SIZE3D = THREED_BLOCK_SIZE;
 constexpr int MAX_ITER     = 1000;
 // Precision preprocessing
 #if FLOAT_PRECISION
