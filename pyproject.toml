@@ -24,6 +24,15 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 dynamic = ["version", "readme"]
+dependencies = [
+    "setuptools", 
+    "wheel", 
+    "numpy", 
+    "h5py", 
+    "cython", 
+    "meson", 
+    "ninja"
+]
 
 [options]
 zip_safe = false
