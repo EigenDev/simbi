@@ -6,8 +6,10 @@ project('pysimbi', 'c', 'cpp', 'cython',
 
 # BUILD CONFIG
 conf_data = configuration_data()
-conf_data.set('version', meson.project_version())
 conf_data.set10('FLOAT_PRECISION', get_option('float_precision'))
+conf_data.set('ONED_BLOCK_SIZE', get_option('1d_block_size'))
+conf_data.set('TWOD_BLOCK_SIZE', get_option('2d_block_size'))
+conf_data.set('THREED_BLOCK_SIZE', get_option('3d_block_size'))
 configure_file(
     input:  'build_options.hpp.in',
     output: 'build_options.hpp',
@@ -95,7 +97,8 @@ if get_option('gpu_compilation').enabled()
                 '-std=c++17',
                 '-fPIC', 
                 '-O3', 
-                '-march=native'
+                '-march=native',
+                'flt=auto'
             ]
             # Meson does not support hip yet, so we manually
             # declare the dependency
@@ -177,24 +180,14 @@ if get_option('gpu_compilation').enabled()
         gpu_cc =  hip.found() ? 'hipcc' : 'nvcc'
         gpu_compiler = find_program(f'@gpu_cc@')
         gpu_objs = []
-        gpu_libs = []
-        gpu_includes = ['-I../src', '-I/', '-I'+meson.current_build_dir()]
-        gpu_libs = []
+        gpu_includes = ['-I../src', '-I.', '-I'+meson.current_build_dir()]
         gpu_includes += ['-I' + get_option('gpu_include_dir'), '-I' + get_option('hdf5_include_dir')]
-        # gpu_includes += ['-I/usr/include/hdf5/serial', '-I/usr/lib/cuda-11.2/include/']
-        # hdf5_lib = hdf5.get_variable(cmake: 'HDF5_CXX_LIBRARIES')
-        # This won't work
-        # foreach dep : depends
-        #     gpu_includes += ['-I' + dep.include_dir()]
-        #     gpu_libs += ['-L' + dep.library_dir()]
-        # endforeach
         foreach source : sources
             gpu_trg = custom_target(
                 fs.name(source) + '_target',
                 command : [
                     gpu_compiler,
                     gpu_includes,
-                    gpu_libs,
                     gpu_comp_args,
                     '-c',
                     '@INPUT@',
@@ -234,7 +227,7 @@ if get_option('gpu_compilation').enabled()
     endif
 endif
 
-message(f'Potential install directory?: @py3_install_dir@')
+message(f'Designated install directory: @py3_install_dir@')
 if get_option('profile') == 'default'
     meson.add_install_script(
         'pip',
