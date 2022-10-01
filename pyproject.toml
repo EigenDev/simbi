@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel", "numpy", "h5py", "cython", "meson", "ninja"]
+requires = ["setuptools", "wheel", "cython", "meson", "ninja"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -25,13 +25,10 @@ classifiers = [
 ]
 dynamic = ["version", "readme"]
 dependencies = [
-    "setuptools", 
-    "wheel", 
     "numpy", 
     "h5py", 
     "cython", 
-    "meson", 
-    "ninja"
+    "meson"
 ]
 
 [options]
