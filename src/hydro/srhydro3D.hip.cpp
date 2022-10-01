@@ -10,7 +10,7 @@
 #include "util/dual.hpp"
 #include "util/parallel_for.hpp"
 #include "util/printb.hpp"
-#include "helpers.hip.hpp"
+#include "common/helpers.hip.hpp"
 #include "srhydro3D.hip.hpp"
 #include <chrono>
 #include <cmath>

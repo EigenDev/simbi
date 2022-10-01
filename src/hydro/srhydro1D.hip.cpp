@@ -8,7 +8,7 @@
  */
 
 #include "srhydro1D.hip.hpp"
-#include "helpers.hip.hpp"
+#include "common/helpers.hip.hpp"
 #include "util/device_api.hpp"
 #include "util/dual.hpp"
 #include "util/printb.hpp"

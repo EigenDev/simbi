@@ -1,4 +1,4 @@
-#include "helpers.hip.hpp"
+#include "common/helpers.hip.hpp"
 #include "util/parallel_for.hpp"
 
 //==================================

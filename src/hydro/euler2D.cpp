@@ -11,7 +11,7 @@
 #include "util/parallel_for.hpp"
 #include "util/dual.hpp"
 #include "util/printb.hpp"
-#include "helpers.hip.hpp"
+#include "common/helpers.hip.hpp"
 
 using namespace simbi;
 using namespace simbi::util;

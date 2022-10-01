@@ -10,7 +10,7 @@
 #include <iomanip>
 #include "util/device_api.hpp"
 #include "util/dual.hpp"
-#include "helpers.hip.hpp"
+#include "common/helpers.hip.hpp"
 #include "srhydro2D.hip.hpp"
 #include "util/printb.hpp"
 #include "util/parallel_for.hpp"
