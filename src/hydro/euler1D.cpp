@@ -128,7 +128,7 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
         // Steps to Compute HLLC as described in Toro et al. 2019
         real z      = (gamma - 1.)/(2.*gamma);
         real num    = csL + csR- ( gamma-1.)/2 *(vR- vL);
-        real denom  = csL/std::pow(pL,z) + csR/std::pow(pR, z);
+        real denom  = csL * std::pow(pL, -z) + csR * std::pow(pR, -z);
         real p_term = num/denom;
         real qL, qR;
 
@@ -147,7 +147,7 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
         }
 
         real aL = vL - qL*csL;
-        real aR = vR+ qR*csR;
+        real aR = vR + qR*csR;
 
         real aStar = ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR))/
                         (rhoL*(aL - vL) - rhoR*(aR - vR) ) );

@@ -111,8 +111,8 @@ Eigenvals Newtonian2D::calc_eigenvals(
     if (hllc)
     {
         const real vL   = left_prims.vcomponent(ehat);
-        const real vR  = right_prims.vcomponent(ehat);
-        const real pR  = right_prims.p;
+        const real vR   = right_prims.vcomponent(ehat);
+        const real pR   = right_prims.p;
         const real pL   = left_prims.p;
         const real rhoL = left_prims.rho;
         const real rhoR = right_prims.rho;
@@ -125,7 +125,7 @@ Eigenvals Newtonian2D::calc_eigenvals(
         // const real rhoBar = 0.5*(rhoL + rhoR);
         const real z      = (gamma - 1.)/(2.0*gamma);
         const real num    = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
-        const real denom  = csL/std::pow(pL,z) + csR/std::pow(pR, z);
+        const real denom  = csL * std::pow(pL, - z) + csR * std::pow(pR, - z);
         const real p_term = num/denom;
         const real pStar  = std::pow(p_term, (1./z));
 
@@ -154,8 +154,8 @@ Eigenvals Newtonian2D::calc_eigenvals(
         const real csR = std::sqrt(gamma * pR/rhoR);
         const real csL  = std::sqrt(gamma * pL/rhoL);
 
-        const real aL = helpers::my_min(vL - csL, vR- csR);
-        const real aR = helpers::my_max(vL + csL, vR+ csR);
+        const real aL = helpers::my_min(vL - csL, vR - csR);
+        const real aR = helpers::my_max(vL + csL, vR + csR);
 
         return Eigenvals(aL, aR);
 
