@@ -89,8 +89,8 @@ def main():
     rho         = np.ones((ntheta , nr), float) * (r / r[0])**(-args.omega)
     chi         = np.zeros_like(rho)
     p_zones     = find_nearest(r, dr)[0]
-    epsilon_0   = np.sum(rho[:, :p_zones] * dV[:, :p_zones])
-    epsilon_exp = exp_scale * epsilon_0
+    m_rest      = np.sum(rho[:, :p_zones] * dV[:, :p_zones])
+    epsilon_exp = exp_scale * m_rest   
 
     p_c              = (args.gamma - 1.) * (epsilon_exp / dV[:, : p_zones].sum())
     jet_angle        = 0.1 

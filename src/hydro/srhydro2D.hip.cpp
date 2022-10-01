@@ -144,18 +144,19 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD2D::prims2cons(const Primitive &prims) const
 {
     const real rho = prims.rho;
-    const real vx = prims.v1;
-    const real vy = prims.v2;
+    const real v1 = prims.v1;
+    const real v2 = prims.v2;
     const real pressure = prims.p;
-    const real lorentz_gamma = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (vx * vx + vy * vy));
+    const real lorentz_gamma = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2));
     const real h = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
 
     return Conserved{
         rho * lorentz_gamma, 
-        rho * h * lorentz_gamma * lorentz_gamma * vx,
-        rho * h * lorentz_gamma * lorentz_gamma * vy,
+        rho * h * lorentz_gamma * lorentz_gamma * v1,
+        rho * h * lorentz_gamma * lorentz_gamma * v2,
         rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma,
-        rho * lorentz_gamma * prims.chi};
+        rho * lorentz_gamma * prims.chi
+    };
 };
 
 //---------------------------------------------------------------------
@@ -290,15 +291,15 @@ Conserved SRHD2D::prims2flux(const Primitive &prims, luint nhat = 1) const
     const real vn              = prims.vcomponent(nhat);
     const auto kron            = kronecker(nhat, 1);
     const real rho             = prims.rho;
-    const real vx              = prims.v1;
-    const real vy              = prims.v2;
+    const real v1              = prims.v1;
+    const real v2              = prims.v2;
     const real pressure        = prims.p;
-    const real lorentz_gamma   = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (vx * vx + vy * vy));
+    const real lorentz_gamma   = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2));
 
     const real h   = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
     const real D   = rho * lorentz_gamma;
-    const real S1  = rho * lorentz_gamma * lorentz_gamma * h * vx;
-    const real S2  = rho * lorentz_gamma * lorentz_gamma * h * vy;
+    const real S1  = rho * lorentz_gamma * lorentz_gamma * h * v1;
+    const real S2  = rho * lorentz_gamma * lorentz_gamma * h * v2;
     const real Sj  = (nhat == 1) ? S1 : S2;
 
     return Conserved{D * vn, S1 * vn + kron * pressure, S2 * vn + !kron * pressure, Sj - D * vn, D * vn * prims.chi};
@@ -729,14 +730,14 @@ void SRHD2D::cons2prim(
             } while (std::abs(peq - pre) >= tol);
 
             const real inv_et = static_cast<real>(1.0) / (tau + D + peq);
-            const real vx     = S1 * inv_et;
-            const real vy     = S2 * inv_et;
+            const real v1     = S1 * inv_et;
+            const real v2     = S2 * inv_et;
             #if GPU_CODE
                 self->gpu_pressure_guess[gid] = peq;
-                self->gpu_prims[gid]          = Primitive{D / W, vx, vy, peq, Dchi / D};
+                self->gpu_prims[gid]          = Primitive{D / W, v1, v2, peq, Dchi / D};
             #else
                 self->pressure_guess[gid] = peq;
-                self->prims[gid]          = Primitive{D / W, vx, vy, peq, Dchi / D};
+                self->prims[gid]          = Primitive{D / W, v1, v2, peq, Dchi / D};
             #endif
             workLeftToDo = false;
         }
