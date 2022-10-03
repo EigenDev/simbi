@@ -591,7 +591,11 @@ def plot_1d_curve(
                 
             if len(args.fields) > 1:
                 label = field_labels[idx] + ', ' + label
-            ax.loglog(r, var[tidx], label=label)
+            ax.plot(r, var[tidx], label=label)
+            if args.log:
+                ax.set_xscale('log')
+                if field not in lin_fields:
+                    ax.set_yscale('log')
             if args.oned_files is not None:
                 for one_file in args.oned_files:
                     oned_var = util.read_1d_file(one_file)[0]
