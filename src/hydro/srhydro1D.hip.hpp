@@ -44,8 +44,7 @@ namespace simbi
           std::vector<sr1d::Primitive> prims;
 
           luint nx, active_zones, idx_active, i_start, i_bound;
-          real tend;
-          real plm_theta, engine_duration, t, decay_constant, dlogt;
+          real plm_theta, engine_duration, t, decay_constant, dlogt, tend;
           bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
 
           std::vector<real> sourceD, sourceS, source0, pressure_guess;
