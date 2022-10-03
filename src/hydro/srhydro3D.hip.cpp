@@ -1211,8 +1211,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                 ncheck += 1;
                 zu_avg += total_zones / delta_t;
                 if constexpr(BuildPlatform == Platform::GPU) {
-                    // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
-                    constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
                     const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);
                     writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
@@ -1274,8 +1272,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
                 ncheck += 1;
                 zu_avg += total_zones / delta_t;
                  if constexpr(BuildPlatform == Platform::GPU) {
-                    // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
-                    constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
                     const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);
                     writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
                 } else {
