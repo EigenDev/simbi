@@ -4,7 +4,6 @@
 */
 #include "clattice2D.hpp"
 #include <cmath>
-#include <iostream>
 
 simbi::CLattice2D::CLattice2D () {}
 
