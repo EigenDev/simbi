@@ -7,7 +7,6 @@
  */
 #include <chrono>
 #include <cmath>
-#include <iomanip>
 #include "util/device_api.hpp"
 #include "util/dual.hpp"
 #include "common/helpers.hip.hpp"

@@ -14,7 +14,6 @@
 #include "srhydro3D.hip.hpp"
 #include <chrono>
 #include <cmath>
-#include <iomanip>
 
 using namespace simbi;
 using namespace simbi::util;
