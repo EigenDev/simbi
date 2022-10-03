@@ -10,8 +10,6 @@
 #include "euler1D.hpp" 
 #include <cmath>
 #include <chrono>
-#include <iomanip>
-#include <map>
 #include "util/parallel_for.hpp"
 #include "util/exec_policy.hpp"
 #include "util/dual.hpp"
