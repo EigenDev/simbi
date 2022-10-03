@@ -17,16 +17,9 @@ namespace simbi
     //======================================
     //          GPU TEMPLATES
     //======================================
-    template <unsigned int blockSize>
-    GPU_DEV void warpReduceMin(volatile real* smem, unsigned int tid);
-
     template<typename T, typename N>
     GPU_LAUNCHABLE  typename std::enable_if<is_1D_primitive<N>::value>::type 
     compute_dt(T *s);
-
-    template<typename T, typename N, unsigned int blockSize>
-    GPU_LAUNCHABLE typename std::enable_if<is_1D_primitive<N>::value>::type 
-    dtWarpReduce(T *s);
 
     template<typename T, typename N>
     GPU_LAUNCHABLE  typename std::enable_if<is_2D_primitive<N>::value>::type 
@@ -54,14 +47,6 @@ namespace simbi
     real x2max = 0,
     real x3min = 0,
     real x3max = 0);
-
-    template<typename T, typename N, unsigned int blockSize>
-    GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<N>::value>::type
-    dtWarpReduce(T *s);
-
-    template<typename T, typename N, unsigned int blockSize>
-    GPU_LAUNCHABLE typename std::enable_if<is_3D_primitive<N>::value>::type 
-    dtWarpReduce(T *s);
 
     //======================================
     //              HELPER OVERLOADS

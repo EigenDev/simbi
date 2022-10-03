@@ -138,6 +138,7 @@ def main():
     rr, t2 = np.meshgrid(r, theta_mirror)
 
     fig, ax= plt.subplots(1, 1, figsize=(8,10), subplot_kw=dict(projection='polar'), constrained_layout=True)
+    ax.grid(False)
     c1 = ax.pcolormesh(tt, rr, ufour, cmap='inferno', shading = "auto")
     c2 = ax.pcolormesh(t2[::-1], rr, ufour, cmap='inferno', shading = "auto")
 
