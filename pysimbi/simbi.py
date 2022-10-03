@@ -208,8 +208,8 @@ class Hydro:
                 self.initS1 = self.init_h*self.init_rho*self.W**2*self.init_v1
                 self.initS2 = self.init_h*self.init_rho*self.W**2*self.init_v2 
                 
-                self.init_tau = (self.init_rho*self.init_h*(self.W)**2 - self.init_pressure
-                                  - self.init_rho*(self.W))
+                self.init_tau = (self.init_rho*self.init_h*self.W**2 - self.init_pressure
+                                  - self.init_rho*self.W)
             self.u = None 
             
         elif len(initial_state) == 5:
