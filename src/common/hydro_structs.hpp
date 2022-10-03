@@ -36,13 +36,9 @@ namespace hydro1d {
         GPU_CALLABLE_MEMBER Primitive(real rho, real v, real p) : rho(rho), v(v), p(p) {}
         GPU_CALLABLE_MEMBER Primitive(const Primitive &prim) : rho(prim.rho), v(prim.v), p(prim.p) {}
         GPU_CALLABLE_MEMBER Primitive operator +(const Primitive &prim) const {return Primitive(rho + prim.rho, v + prim.v, p + prim.p); }
-
         GPU_CALLABLE_MEMBER Primitive operator -(const Primitive &prim) const {return Primitive(rho - prim.rho, v - prim.v, p - prim.p); }
-
         GPU_CALLABLE_MEMBER Primitive operator /(const real c) const {return Primitive(rho/c, v/c, p/c); }
-
         GPU_CALLABLE_MEMBER Primitive operator *(const real c) const {return Primitive(rho*c, v*c, p*c); }
-
         GPU_CALLABLE_MEMBER Primitive & operator +=(const Primitive &prims) {
             rho    += prims.rho;
             v      += prims.v;
@@ -64,15 +60,10 @@ namespace hydro1d {
         GPU_CALLABLE_MEMBER ~Conserved() {};
         GPU_CALLABLE_MEMBER Conserved(real rho, real m, real e_dens) : rho(rho), m(m), e_dens(e_dens) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &cons) : rho(cons.rho), m(cons.m), e_dens(cons.e_dens) {}
-
         GPU_CALLABLE_MEMBER Conserved operator +(const Conserved &cons) const {return Conserved(rho + cons.rho, m + cons.m, e_dens + cons.e_dens); }
-
         GPU_CALLABLE_MEMBER Conserved operator -(const Conserved &cons) const {return Conserved(rho - cons.rho, m - cons.m, e_dens - cons.e_dens); }
-
         GPU_CALLABLE_MEMBER Conserved operator /(const real c) const {return Conserved(rho/c, m/c, e_dens/c); }
-
         GPU_CALLABLE_MEMBER Conserved operator *(const real c) const {return Conserved(rho*c, m*c, e_dens*c); }
-
         GPU_CALLABLE_MEMBER Conserved & operator +=(const Conserved &cons) {
             rho       += cons.rho;
             m         += cons.m;
@@ -111,13 +102,9 @@ namespace sr1d {
         GPU_CALLABLE_MEMBER Primitive(real rho, real v, real p) : rho(rho), v(v), p(p) {}
         GPU_CALLABLE_MEMBER Primitive(const Primitive &prim) : rho(prim.rho), v(prim.v), p(prim.p) {}
         GPU_CALLABLE_MEMBER Primitive operator +(const Primitive &prim) const {return Primitive(rho + prim.rho, v + prim.v, p + prim.p); }
-
         GPU_CALLABLE_MEMBER Primitive operator -(const Primitive &prim) const {return Primitive(rho - prim.rho, v - prim.v, p - prim.p); }
-
         GPU_CALLABLE_MEMBER Primitive operator /(const real c) const {return Primitive(rho/c, v/c, p/c); }
-
         GPU_CALLABLE_MEMBER Primitive operator *(const real c) const {return Primitive(rho*c, v*c, p*c); }
-
         GPU_CALLABLE_MEMBER Primitive & operator +=(const Primitive &prims) {
             rho    += prims.rho;
             v      += prims.v;
@@ -139,15 +126,10 @@ namespace sr1d {
         GPU_CALLABLE_MEMBER ~Conserved() {};
         GPU_CALLABLE_MEMBER Conserved(real d, real s, real tau) : d(d), s(s), tau(tau) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &cons) : d(cons.d), s(cons.s), tau(cons.tau) {}
-
         GPU_CALLABLE_MEMBER Conserved operator +(const Conserved &cons) const {return Conserved(d + cons.d, s + cons.s, tau + cons.tau); }
-
         GPU_CALLABLE_MEMBER Conserved operator -(const Conserved &cons) const {return Conserved(d - cons.d, s - cons.s, tau - cons.tau); }
-
         GPU_CALLABLE_MEMBER Conserved operator /(const real c) const {return Conserved(d/c, s/c, tau/c); }
-
         GPU_CALLABLE_MEMBER Conserved operator *(const real c) const {return Conserved(d*c, s*c, tau*c); }
-
         GPU_CALLABLE_MEMBER Conserved & operator +=(const Conserved &cons) {
             d      += cons.d;
             s      += cons.s;
