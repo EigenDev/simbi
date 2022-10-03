@@ -392,7 +392,7 @@ class Hydro:
             # Create a new directory because it does not exist 
             os.makedirs(data_directory)
             print("No default data directory specified. Creating one...!", flush=True)
-            
+        
         if first_order:
             print("Computing First Order Solution...", flush=True)
         else:
@@ -401,7 +401,6 @@ class Hydro:
         if self.dimensions == 1:
             sources = np.zeros(self.u.shape) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
-                
             kwargs = {}
             if self.regime == "classical":
                 state = PyState(self.u, self.gamma, cfl, r = self.x1, coord_system = coordinates)
