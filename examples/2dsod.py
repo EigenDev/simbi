@@ -25,9 +25,7 @@ def main():
     parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
     parser.add_argument('--bc', '-bc',        help = 'boundary condition', dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
-    parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
-    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
-    
+    parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/')     
     args = parser.parse_args()
     theta_min = 0
     theta_max = np.pi/2
@@ -38,7 +36,7 @@ def main():
 
     # Choose dtheta carefully such that the grid zones remain roughly square
     dtheta = (theta_max - theta_min) / ynpts
-    xnpts = int(1 + np.log10(rmax/rmin)/dtheta)
+    xnpts  = int(1 + np.log10(rmax/rmin)/dtheta)
 
     rhoL = 1.0
     vL   = 0.0
@@ -74,7 +72,7 @@ def main():
             'compute_mode': args.mode,
             'boundary_condition': args.boundc,
             'cfl':  args.cfl,
-            'hllc': args.hllc,
+            'hllc': False,
             'linspace': False,
             'plm_theta': args.plm_theta,
             'data_directory': args.data_dir,
