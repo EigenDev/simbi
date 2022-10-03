@@ -61,30 +61,15 @@ def main():
     def velocity(gamma, rho, pressure):
         return 2/(gamma - 1.)*(cs(rho, pressure) - cs(rho_ref, p_ref))
 
-    def find_nearest(array, value):
-        array = np.asarray(array)
-        idx = (np.abs(array - value)).argmin()
-        return idx, array[idx]
-
     ns = [16, 32, 64, 128, 256, 512, 1024, 2048]
     rk2 = {}
     rk1 = {}
-    sod = ((1.0,1.0,0.0),(0.1,0.125,0.0))
     for npts in ns:
         x = np.linspace(0, 1, npts, dtype=float)
         r = rho(alpha, x)
         p = pressure(gamma, r)
         v = velocity(gamma, r, p)
-        
-        # Get velocity at center of the wave
-        center, coordinate = find_nearest(x, 0.5)
-        v_wave = v[center]
-        lx = x[-1] - x[0]
-        dx = lx/npts
-        dt = 1.e-4
-        
         tend = 0.1
-        
         first_o  = Hydro(gamma, initial_state=(r,p,v), Npts=npts, geometry=(0, 1.0))
         second_o = Hydro(gamma, initial_state=(r,p,v), Npts=npts, geometry=(0, 1.0))
         
@@ -106,18 +91,6 @@ def main():
         
         r_2 = rk2[key][0]
         p_2 = rk2[key][2]
-
-        exp  = rk1[key][0]
-        exp2 = rk2[key][0]
-        
-        # Slice points to divvy up solution
-        # arrays to match length of N < N_max values
-        s_1 = int(ns[-1]/exp.size)
-        s_2 = int(ns[-1]/exp2.size)
-        
-        # True Solutions Divided up evenly
-        r_ref = r_sol[::s_1]
-        s_ref = s_sol[::s_2]
 
         # epsilons for the first/higher order methods
         first_eps = np.sum(np.absolute(p_1 * r_1**(-gamma) - 1.))

@@ -63,14 +63,7 @@ def main():
 
     def velocity(gamma, rho, pressure):
         return 2/(gamma - 1.)*(cs(rho, pressure) - cs(rho_ref, p_ref))
-        
-        return (xi - 1)/(xi + 1)
-
-    def find_nearest(array, value):
-        array = np.asarray(array)
-        idx = (np.abs(array - value)).argmin()
-        return idx, array[idx]
-
+    
     mode = args.mode
     ns = [16, 32, 64, 128, 256, 512, 1024, 2048]
     rk2 = {}
@@ -81,14 +74,6 @@ def main():
         p = pressure(gamma, r)
         v = velocity(gamma, r, p)
         #v *= -1.
-        
-        # Get velocity at center of the wave
-        center, coordinate = find_nearest(x, 0.5)
-        v_wave = v[center]
-        lx = x[-1] - x[0]
-        dx = lx/npts
-        dt = 1.e-4
-        
         tend = 0.1
         
         cfl = 10.0/npts
@@ -102,23 +87,12 @@ def main():
     epsilon = []
     beta = []
 
-    r_sol = rk1[ns[-1]][0]
-    s_sol = rk2[ns[-1]][0]
-
-
     for idx, key in enumerate(rk2.keys()):
         r_1 = rk1[key][0]
         p_1 = rk1[key][2]
 
         r_2 = rk2[key][0]
         p_2 = rk2[key][2]
-        exp = rk1[key][0]
-        exp2 = rk2[key][0]
-        
-        # Slice points to divvy up solution
-        # arrays to match length of N < N_max values
-        s_1 = int(ns[-1]/exp.size)
-        s_2 = int(ns[-1]/exp2.size)
         
         # epsilons for the first/higher order methods
         first_eps = np.sum(np.absolute(p_1*r_1**(-gamma) - 1.0))
@@ -139,7 +113,7 @@ def main():
 
     # Plot everything except the true N=4096 solution
     ax.loglog(ns, epsilon,'-d', label='First Order')
-    ax.loglog(ns, beta,'-s', label='Higher Order')
+    ax.loglog(ns, beta,'-s', label='Second Order')
     ax.loglog(ns, 1/ns,'--', label='$N^{-1}$')
     ax.set_title(r"""Relativistic isentropic wave at t = {} s""".format(tend), fontsize=20)
     ax.set_ylabel(r'$\sum 1/N|P/\rho^\gamma - K|$', fontsize=20)
