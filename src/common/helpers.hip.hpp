@@ -1,8 +1,6 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
-#define FULL_MASK 0xffffffff
-
 #include "build_options.hpp"
 #include "common/enums.hpp"
 #include "common/hydro_structs.hpp"
