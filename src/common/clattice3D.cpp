@@ -1,10 +1,9 @@
 /**
- * Implementation for the 2D coordinate lattice 
+ * Implementation for the 3D coordinate lattice 
  * header file
 */
 #include "clattice3D.hpp"
 #include <cmath>
-#include <iostream>
 
 simbi::CLattice3D::CLattice3D () {}
 

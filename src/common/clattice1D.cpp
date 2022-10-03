@@ -1,10 +1,9 @@
 /**
- * Implementation for the 2D coordinate lattice 
+ * Implementation for the 1D coordinate lattice 
  * header file
 */
 #include "clattice1D.hpp"
 #include <cmath>
-#include <iostream>
 
 simbi::CLattice1D::CLattice1D () {}
 
