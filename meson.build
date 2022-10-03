@@ -158,7 +158,6 @@ sources = [
     #######################
     #### UTIL IMPLEMENTATIONS
     #######################
-    'src/util/printb.cpp',
     'src/util/device_api.cpp',
 ]
 
