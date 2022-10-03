@@ -7,8 +7,6 @@
 #include <omp.h>
 namespace simbi 
 {
-	// class ExecutionPolicy; // forward decl
-
 	template <typename index_type, typename F>
 	void parallel_for(index_type first, index_type last, F function)  {
 		ExecutionPolicy p(last - first);

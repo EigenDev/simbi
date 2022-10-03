@@ -4,6 +4,7 @@
 #include "build_options.hpp"
 #include <vector>
 #include <iostream>
+
 struct ExecutionException : public std::exception {
    const char * what () const throw () {
       return "Invalid constructor args";
@@ -11,12 +12,6 @@ struct ExecutionException : public std::exception {
 };
 
 namespace simbi {
-
-    // enum class AutoConfig {
-    //     GRID_SIZE  = 1 << 20,
-    //     BLOCK_SIZE = 32
-    // };
-
 
     template<typename T = luint, typename U = luint>
     struct ExecutionPolicy
