@@ -2,9 +2,6 @@
 #define DUAL_HPP
 
 #include "build_options.hpp"
-#include "common/clattice1D.hpp"
-#include "common/clattice2D.hpp"
-#include "common/clattice3D.hpp"
 #include "device_api.hpp"
 #include "hydro/euler1D.hpp"
 #include "hydro/euler2D.hpp"
@@ -42,7 +39,6 @@ namespace simbi
             real            *host_dV;
 
             luint n, nreal, cbytes, pbytes, rbytes, rrbytes, fabytes;
-            CLattice1D      *host_clattice;
 
             real host_dt;
             real host_x1min;
@@ -118,7 +114,6 @@ namespace simbi
             real            *host_sourceS1;
             real            *host_sourceS2;
             real            *host_dtmin;
-            CLattice2D      *host_clattice;
 
             real host_dt;
             real host_x1min;
@@ -161,7 +156,6 @@ namespace simbi
             real            *host_sourceM1;
             real            *host_sourceM2;
             real            *host_dtmin;
-            CLattice2D      *host_clattice;
 
             real host_dt;
             real host_x1min;
