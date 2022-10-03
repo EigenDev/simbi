@@ -11,14 +11,12 @@ namespace simbi{
         Dev,
     };
 
-    enum class Cellspacing
-    {
+    enum class Cellspacing {
         LINSPACE,
         LOGSPACE,
     };
 
-    enum class Geometry
-    {
+    enum class Geometry {
         CARTESIAN,
         SPHERICAL,
         CYLINDRICAL,
@@ -30,22 +28,19 @@ namespace simbi{
         SECOND_ORDER,
     };
 
-    enum class Solver
-    {
+    enum class Solver {
         HLLC,
         HLLE,
     };
 
-    enum class BoundaryCondition
-    {
+    enum class BoundaryCondition {
         REFLECTING,
         OUTFLOW,
         INFLOW,
         PERIODIC,
     };
 
-    enum class WaveSpeeds
-    {
+    enum class WaveSpeeds {
         SCHNEIDER_ET_AL_93,
         MIGNONE_AND_BODO_05,
         NAIVE,
