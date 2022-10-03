@@ -22,7 +22,6 @@ def main():
     parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
-    parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
     parser.add_argument('--forder',           help= 'First order flag', action='store_true', default=False)
     parser.add_argument('--bc',               help= 'Boundary condition', dest='boundc', default='outflow', type=str, choices=['periodic', 'outflow'])
     args = parser.parse_args()
@@ -49,7 +48,7 @@ def main():
             'compute_mode': args.mode,
             'boundary_condition': args.boundc,
             'cfl': args.cfl,
-            'hllc': args.hllc,
+            'hllc': False,
             'linspace': True,
             'plm_theta': args.plm_theta,
             'data_directory': args.data_dir,
