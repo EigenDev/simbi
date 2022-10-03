@@ -151,12 +151,11 @@ namespace simbi{
         const bool reflecting_theta)
     {
         const int extent = (BuildPlatform == Platform::GPU) ? p.gridSize.x * p.blockSize.x * p.gridSize.y * p.blockSize.y : x1grid_size * x2grid_size; 
+        const int sx     = (col_maj) ? 1 : x1grid_size;
+        const int sy     = (col_maj) ? x2grid_size : 1;
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
             const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % x1grid_size;
             const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / x1grid_size;
-
-            const int sx = (col_maj) ? 1 : x1grid_size;
-            const int sy = (col_maj) ? x2grid_size : 1;
 
             #if GPU_CODE
             sr2d::Conserved *u_state = sim->gpu_cons;
