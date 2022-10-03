@@ -4,6 +4,7 @@
 #include <Python.h>
 #include "call_obj.h" // cython helper file
 
+// Adapted from: https://stackoverflow.com/questions/39044063/pass-a-closure-from-cython-to-c
 class PyObjWrapper {
 public:
     // constructors and destructors mostly do reference counting
