@@ -1376,15 +1376,14 @@ def plot_dx_domega(
 def plot_vs_time(
     args: argparse.ArgumentParser,
     ax: plt.Axes,
-    fig: plt.figure,
     label: str,
     color: float,
     time: np.ndarray,
-    data: np.ndarray) -> None:
-    
+    data: np.ndarray,
+    ylog: bool = False) -> None:
     xlabel = util.get_field_str(args)
     ax.set_xlabel(r'$t$')
-    ax.set_ylabel(xlabel)
+    ax.set_ylabel(f"Max {xlabel}")
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     # ax.set_xlim(0.5, 2.0)
@@ -1392,6 +1391,8 @@ def plot_vs_time(
     ax.scatter(time, data, label=label, color=color, alpha=0.3)
     if args.log:
         ax.set(xscale = 'log')
+        if ylog:
+            ax.set(yscale = 'log')
     
 def main():
     parser = argparse.ArgumentParser(
@@ -1543,7 +1544,7 @@ def main():
                     max_vars           += [max_var]
                     times              += [setup['time']]
 
-                plot_vs_time(args, ax, fig, label, colors[0], times, max_vars)
+                plot_vs_time(args, ax, label, colors[0], times, max_vars, ylog = (args.fields[0] not in lin_fields))
             else:
                 for idx, file in enumerate(flist):
                     fields, setup, mesh = util.read_2d_file(args, file)
@@ -1584,9 +1585,9 @@ def main():
                         except StopIteration:
                             break
         else:
-            # fig, ax = plt.subplots(figsize=args.fig_dims)
+            ylabel = util.get_field_str(args)
             ax.set_xlabel(r'$t [\rm s]$')
-            ax.set_ylabel(r'$\Gamma \beta$')
+            ax.set_ylabel(ylabel)
             ax.set_xlim(0.5, 2.0)
             ax.spines['right'].set_visible(False)
             ax.spines['top'].set_visible(False)
@@ -1603,7 +1604,7 @@ def main():
                     max_vars += [max_var]
                     times    += [setup['time']]
 
-                plot_vs_time(args, ax, fig, label, colors[key], times, max_vars)
+                plot_vs_time(args, ax, label, colors[key], times, max_vars, ylog = args.fields[0] not in lin_fields)
                     
                 
             ax.legend()
