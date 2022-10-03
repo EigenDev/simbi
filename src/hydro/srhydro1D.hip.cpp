@@ -257,8 +257,7 @@ void SRHD::advance(
                 const real rmean  = static_cast<real>(0.75) * (rrf * rrf * rrf * rrf - rlf * rlf * rlf * rlf) / (rrf * rrf * rrf - rlf * rlf * rlf);
                 const real sR     = rrf; 
                 const real sL     = rlf; 
-                const real dV     = rmean * (rrf - rlf);    
-                // const real factor = (mesh_motion) ? dV : 1;         
+                const real dV     = rmean * (rrf - rlf);           
                 const real pc     = prim_buff[txa].p;
                 
                 #if GPU_CODE
@@ -442,8 +441,8 @@ Eigenvals SRHD::calc_eigenvals(
             real aR = lamLp > lamRp ? lamLp : lamRp;
 
             // Smoothen for rarefaction fan
-            // aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
-            // aR = helpers::my_max(aR, (vR  + csR) / (1 + vR  * csR));
+            aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
+            aR = helpers::my_max(aR, (vR  + csR) / (1 + vR  * csR));
 
             return Eigenvals(aL, aR);
         }
@@ -484,10 +483,7 @@ void SRHD::adapt_dt()
             min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
         }
     }   
-
     dt = cfl * min_dt;
-    // writeln("dt: {}", dt);
-    // helpers::pause_program();
 };
 
 void SRHD::adapt_dt(SRHD *dev, luint blockSize)
@@ -498,12 +494,6 @@ void SRHD::adapt_dt(SRHD *dev, luint blockSize)
         deviceReduceKernel<SRHD, 1><<<1, 1024>>>(dev, blockSize);
         simbi::gpu::api::deviceSynch();
         this->dt = dev->dt;
-        // dtWarpReduce<SRHD, Primitive, 4><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
-        // simbi::gpu::api::deviceSynch();
-        // this->dt = dev->dt;
-        // writeln("dt: {}, dev_h {}, host_h: {}", dt, dev->hubble_param, hubble_param);
-        // helpers::pause_program();
-        // simbi::gpu::api::copyDevToHost(&dt, &(dev->dt), sizeof(real));
     #endif
 };
 

@@ -240,7 +240,6 @@ void SRHD2D::adapt_dt()
 
 void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, luint bytes)
 {
-    // const auto t1 = high_resolution_clock::now();
     #if GPU_CODE
     {
         const luint psize         = p.blockSize.x*p.blockSize.y;
@@ -272,10 +271,6 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
         this->dt = dev->dt;
     }
     #endif
-    // const auto t2 = high_resolution_clock::now();
-    // const std::chrono::duration<real> delta_t = t2 - t1;
-    // writeln("dt: {}, tim to calc dt on gpu: {}", dt, delta_t.count());
-    // helpers::pause_program();
 }
 
 //===================================================================================================================
@@ -1361,11 +1356,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             if (inFailureState) {
                 simbi::gpu::api::deviceSynch();
             }
-            
-            // const auto t3 = high_resolution_clock::now();
-            // const duration<real> dt_while = t3 - t1;
-            // writeln("Time for 1 iteration: {}", dt_while.count());
-            // helpers::pause_program();
         }
     } else {
         while (t < tend && !inFailureState)
@@ -1445,13 +1435,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             if (inFailureState) {
                 simbi::gpu::api::deviceSynch();
             }
-            
-            // anyGpuEventSynchronize(t2);
-            // const auto t3 = high_resolution_clock::now();
-            // const duration<real> dt_while = t3 - t0;
-            // writeln("Time for 1 iteration: {}", dt_while.count());
-            // writeln("dt: {}", dt);
-            // helpers::pause_program();
         }
     }
     if (ncheck > 0) {
