@@ -236,7 +236,7 @@ void SRHD::advance(
                 const real dV     = rmean * rmean * (rrf - rlf);    
                 const real factor = (self->mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
-
+                
                 #if GPU_CODE
                     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                     const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * self->decay_constant;
@@ -362,7 +362,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
 
             } while (std::abs(peq - pre) >= tol);
 
-            real v = std::sqrt(v2); //  / (tau + D + peq);
+            real v = S / (tau + D + peq);
             // real mach_ceiling = 100.0;
             // real u            = v /std::sqrt(1 - v * v);
             // real e            = peq / rho * 3.0;
