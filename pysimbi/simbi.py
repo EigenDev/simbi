@@ -281,7 +281,8 @@ class Hydro:
     
     def _print_params(self, frame):
         params = inspect.getargvalues(frame)
-        print("\nSimulation Parameters")
+        print("="*80)
+        print("Simulation Parameters")
         print("="*80)
         for key, value in params.locals.items():
             if key != 'self':
