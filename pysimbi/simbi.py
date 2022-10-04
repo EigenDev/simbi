@@ -296,6 +296,18 @@ class Hydro:
                 
                 my_str = str(key).ljust(30, '.')
                 print(f"{my_str} {val_str}")
+        system_dict = {
+            'adiabatic_gamma' : self.gamma,
+            'dimensions'      : self.Npts,
+            'geometry'        : self.geometry,
+            'coord_system'    : self.coord_system,
+            'regime'          : self.regime,
+        }
+        
+        for key, val in system_dict.items():
+            my_str = str(key).ljust(30, '.')
+            print(f"{my_str} {val}")
+        
         print("="*80)
                 
     def simulate(
