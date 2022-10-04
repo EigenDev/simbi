@@ -666,10 +666,7 @@ SRHD::simulate1D(
     std::function<double(double)> s_outer,
     std::function<double(double)> e_outer)
 {
-    // Print GPU properties if they exist
-    if (BuildPlatform == Platform::GPU) {
-        gpuDisplayProps();
-    }
+    anyDisplayProps();
     this->periodic        = boundary_condition == "periodic";
     this->first_order     = first_order;
     this->plm_theta       = plm_theta;

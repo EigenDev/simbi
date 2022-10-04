@@ -517,10 +517,7 @@ void Newtonian1D::advance(
     bool linspace,
     bool hllc)
 {
-    // Print GPU properties if they exist
-    if (BuildPlatform == Platform::GPU) {
-        gpuDisplayProps();
-    }
+    anyDisplayProps();
     this->periodic        = boundary_condition == "periodic";
     this->first_order     = first_order;
     this->plm_theta       = plm_theta;

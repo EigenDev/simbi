@@ -1,5 +1,6 @@
 #include "common/helpers.hip.hpp"
 #include "util/parallel_for.hpp"
+#include <thread>
 //==================================
 //              GPU HELPERS
 //==================================
@@ -536,7 +537,7 @@ namespace simbi{
         
     };
 
-    void gpuDisplayProps()
+    void anyDisplayProps()
     {
         // Adapted from: https://stackoverflow.com/questions/5689028/how-to-get-card-specs-programmatically-in-cuda
         #if GPU_CODE 
@@ -564,6 +565,10 @@ namespace simbi{
                 std::cout << "  Max grid dimensions:  [ " << props.maxGridSize[0] << ", " << props.maxGridSize[1]  << ", " << props.maxGridSize[2] << " ]" << std::endl;
                 std::cout << std::endl;
             }
+        #else 
+        const auto processor_count = std::thread::hardware_concurrency();
+        std::cout << std::string(80, '=')  << "\n";
+        std::cout << "CPU Compute Core(s): " << processor_count << std::endl;
         #endif
     }
 }
