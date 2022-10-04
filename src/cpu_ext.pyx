@@ -159,27 +159,20 @@ cdef class PyState2D:
         bool linspace, 
         bool hllc):
 
-        try:
-            result = self.c_state.simulate2D(
-                sources,
-                tstart, 
-                tend, 
-                dlogt, 
-                plm_theta,
-                engine_duration, 
-                chkpt_interval,
-                data_directory,
-                boundary_condition, 
-                first_order,
-                linspace, 
-                hllc)
-        except RuntimeError as e:
-            if "SIGNAL" in str(e):
-                code = int(str(e).rsplit(" ", 1)[1])
-                sys.exit(128 + code)
-            raise
-
-
+        result = self.c_state.simulate2D(
+            sources,
+            tstart, 
+            tend, 
+            dlogt, 
+            plm_theta,
+            engine_duration, 
+            chkpt_interval,
+            data_directory,
+            boundary_condition, 
+            first_order,
+            linspace, 
+            hllc)
+            
         result = np.asarray(result)
         result = result.reshape(5, self.c_state.ny, self.c_state.nx)
 

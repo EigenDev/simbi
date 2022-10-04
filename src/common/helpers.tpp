@@ -164,6 +164,9 @@ namespace simbi
             } else {
                 tnow = create_step_str(t_interval, tchunk);
             }
+            if (t_interval == INFINITY) {
+                tnow = "interrupted";
+            }
             const auto filename = string_format("%d.chkpt." + tnow + ".h5", chkpt_zone_label);
 
             setup.t             = t;

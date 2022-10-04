@@ -961,67 +961,74 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             
         }
     } else {
-        while (t < tend && !inFailureState)
-        {
-            helpers::recordEvent(t1);
-            // First Half Step
-            advance(self, activeP, bx, by, radius, geometry, memside);
-            cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts2D(fullP, self, nx, ny, false, bc);
-
-            // Final Half Step
-            advance(self, activeP, bx, by, radius, geometry, memside);
-            cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts2D(fullP, self, nx, ny, false, bc);
-            helpers::recordEvent(t2);
-            t += dt; 
-
-            if (n >= nfold){
-                anyGpuEventSynchronize(t2);
-                helpers::recordDuration(delta_t, t1, t2);
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    delta_t *= 1e-3;
-                }
-                ncheck += 1;
-                zu_avg += total_zones / delta_t;
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);
-                    writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
-                } else {
-                    writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
-                }
-                nfold += 100;
-            }
-            
-            /* Write to a File every tenth of a second */
-            if (t >= t_interval)
+        try {
+            while (t < tend && !inFailureState)
             {
-                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-                if (dlogt != 0) {
-                    t_interval *= std::pow(10, dlogt);
-                } else {
-                    t_interval += chkpt_interval;
+                helpers::recordEvent(t1);
+                // First Half Step
+                advance(self, activeP, bx, by, radius, geometry, memside);
+                cons2prim(fullP, self, memside);
+                if (!periodic) config_ghosts2D(fullP, self, nx, ny, false, bc);
+
+                // Final Half Step
+                advance(self, activeP, bx, by, radius, geometry, memside);
+                cons2prim(fullP, self, memside);
+                if (!periodic) config_ghosts2D(fullP, self, nx, ny, false, bc);
+                helpers::recordEvent(t2);
+                t += dt; 
+
+                if (n >= nfold){
+                    anyGpuEventSynchronize(t2);
+                    helpers::recordDuration(delta_t, t1, t2);
+                    if constexpr(BuildPlatform == Platform::GPU) {
+                        delta_t *= 1e-3;
+                    }
+                    ncheck += 1;
+                    zu_avg += total_zones / delta_t;
+                    if constexpr(BuildPlatform == Platform::GPU) {
+                        const real gtx_emperical_bw       = total_zones * (sizeof(Primitive) + sizeof(Conserved)) * (1.0 + 4.0 * radius) / (delta_t * 1e9);
+                        writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gtx_emperical_bw / gtx_theoretical_bw);
+                    } else {
+                        writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
+                    }
+                    nfold += 100;
                 }
-            }
-            n++;
-            //Adapt the timestep
-            if constexpr(BuildPlatform == Platform::GPU)
-            {
-                adapt_dt(device_self, geometry, activeP, dtShBytes);
-            } else {
-                adapt_dt();
+                
+                /* Write to a File every tenth of a second */
+                if (t >= t_interval)
+                {
+                    write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
+                    if (dlogt != 0) {
+                        t_interval *= std::pow(10, dlogt);
+                    } else {
+                        t_interval += chkpt_interval;
+                    }
+                }
+                n++;
+                //Adapt the timestep
+                if constexpr(BuildPlatform == Platform::GPU)
+                {
+                    adapt_dt(device_self, geometry, activeP, dtShBytes);
+                } else {
+                    adapt_dt();
+                }
+
+                // Update engine decay constant
+                decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
+
+                if constexpr(BuildPlatform == Platform::GPU) {
+                    this->inFailureState = device_self->inFailureState;
+                }
+                if (inFailureState) {
+                    simbi::gpu::api::deviceSynch();
+                }
+                helpers::catch_signals();
             }
 
-            // Update engine decay constant
-            decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
-
-            if constexpr(BuildPlatform == Platform::GPU) {
-                this->inFailureState = device_self->inFailureState;
-            }
-            if (inFailureState) {
-                simbi::gpu::api::deviceSynch();
-            }
-            helpers::catch_signals();
+        } catch (helpers::InterruptException & e) {
+            writeln("{}", e.what());
+            t_interval = INFINITY;
+            write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
         }
     }
     
