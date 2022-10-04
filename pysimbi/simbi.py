@@ -281,13 +281,16 @@ class Hydro:
     
     def _print_params(self, frame):
         params = inspect.getargvalues(frame)
-        print("="*80)
-        print("Simulation Parameters")
-        print("="*80)
+        print("="*80, flush=True)
+        print("Simulation Parameters", flush=True)
+        print("="*80, flush=True)
         for key, value in params.locals.items():
             if key != 'self':
                 try:
-                    val_str = str(value)
+                    if type(value) == float or type(value) == np.float64:
+                        val_str = f"{value:.2f}"
+                    else:
+                        val_str = str(value)
                 except:
                     if value == 'None':
                         val_str = 'None'
@@ -295,7 +298,7 @@ class Hydro:
                         val_str = 'function object'
                 
                 my_str = str(key).ljust(30, '.')
-                print(f"{my_str} {val_str}")
+                print(f"{my_str} {val_str}", flush=True)
         system_dict = {
             'adiabatic_gamma' : self.gamma,
             'dimensions'      : self.Npts,
@@ -306,13 +309,25 @@ class Hydro:
         
         for key, val in system_dict.items():
             my_str = str(key).ljust(30, '.')
-            print(f"{my_str} {val}")
-        
-        print("="*80)
+            if type(val) == float:
+                val_str = f"{val:.2f}"
+            elif type(val) == tuple:
+                val_str = ''
+                for tup in val:
+                    if type(tup) == int:
+                        val_str = str(val)
+                        break
+                    elif type(tup) == tuple:
+                        val_str += '(' + ', '.join('{0:.3f}'.format(t) for t in tup) + ')'
+            else:
+                val_str = str(val)
+                
+            print(f"{my_str} {val_str}", flush=True)
+        print("="*80, flush=True)
                 
     def simulate(
         self, 
-        tstart: float = 0,
+        tstart: float = 0.0,
         tend: float = 0.1,
         dlogt: float = 0.0,
         plm_theta: float = 1.5,
