@@ -152,6 +152,30 @@ namespace simbi
     GPU_LAUNCHABLE void deviceReduceKernel(T *self, lint nmax);
 
     void anyDisplayProps();
+
+    /**
+     * @brief Get the Flops countin GB / s
+     * 
+     * @tparam T Consrved type
+     * @tparam U Primitive type
+     * @param radius halo radius
+     * @param total_zones total number of zones in sim
+     * @param real_zones total number of active zones in mesh
+     * @param delta_t time for event completion
+     * @return float
+     */
+    template<typename T, typename U>
+    inline real getFlops(
+        const luint radius,
+        const luint total_zones, 
+        const luint real_zones,
+        const float delta_t
+    ) {
+        const float advance_contr    = total_zones * radius * sizeof(T) * (1.0 + 4.0 * radius);
+        const float cons2prim_contr  = total_zones * radius * sizeof(U);
+        const float ghost_conf_contr = (total_zones - real_zones)  * radius * sizeof(T);
+        return (advance_contr + cons2prim_contr + ghost_conf_contr) / (delta_t * 1e9);
+    }
 } // end simbi
 
 #include "helpers.hip.tpp"
