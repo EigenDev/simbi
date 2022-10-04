@@ -26,7 +26,3 @@ For the `-D<build_option>` part, check the `meson_options.txt` file for availabl
  `./examples/sod_test.py --nzones 512 --mode cpu --cfl 0.1 --bc outflow --tend 0.2` 
 5) ???
 6) Profit
-
-### Note!
-For some reason, the GPU runs work best when at least one of the dimensions is a multiple of 32. Until I can figure out how to 
-make the gpu kernels as general as possible + shared memory, please adhere to this warning
