@@ -6,6 +6,7 @@ import pysimbi.helpers as helpers
 import numpy as np 
 import os
 import sys 
+import inspect
 import pysimbi.initial_condition as simbi_ic 
 import warnings
 from typing import Callable
@@ -258,26 +259,44 @@ class Hydro:
             
             self.u = None 
     
-    def _cleanup(self, state, first_order=True):
+    def _cleanup(self, first_order=True):
         """
         Cleanup the ghost cells from the final simulation
         results
         """
         if first_order:
             if self.dimensions == 1:
-                return state[:, 1: -1]
+                self.solution = self.solution[:, 1: -1]
             elif self.dimensions == 2:
-                return state[:, 1:-1, 1:-1]
+                self.solution = self.solution[:, 1:-1, 1:-1]
             else:
-                return state[:, 1:-1, 1:-1, 1:-1]
+                self.solution = self.solution[:, 1:-1, 1:-1, 1:-1]
         else:
             if self.dimensions == 1:
-                return state[:, 2: -2]
+                self.solution = self.solution[:, 2: -2]
             elif self.dimensions == 2:
-                return state[:, 2:-2, 2:-2]
+                self.solution = self.solution[:, 2:-2, 2:-2]
             else:
-                return state[:, 2:-2, 2:-2, 2:-2]
+                self.solution = self.solution[:, 2:-2, 2:-2, 2:-2]
     
+    def _print_params(self, frame):
+        params = inspect.getargvalues(frame)
+        print("\nSimulation Parameters")
+        print("="*80)
+        for key, value in params.locals.items():
+            if key != 'self':
+                try:
+                    val_str = str(value)
+                except:
+                    if value == 'None':
+                        val_str = 'None'
+                    else:
+                        val_str = 'function object'
+                
+                my_str = str(key).ljust(30, '.')
+                print(f"{my_str} {val_str}")
+        print("="*80)
+                
     def simulate(
         self, 
         tstart: float = 0,
@@ -332,6 +351,7 @@ class Hydro:
         Returns:
             u (array): The hydro solution containing the primitive variables
         """
+        self._print_params(inspect.currentframe())
         if a == None:
             a = lambda t: 1.0 
         if adot == None:
@@ -412,7 +432,7 @@ class Hydro:
                     kwargs['s_outer'] =  mom_outer
                     kwargs['e_outer'] =  edens_outer
                 
-            solution = state.simulate(
+            self.solution = state.simulate(
                 sources = sources,
                 tstart = start_time,
                 tend = tend,
@@ -435,7 +455,7 @@ class Hydro:
             kwargs = {}
             if self.regime == "classical":
                 state = PyState2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=coordinates)
-                solution = state.simulate(
+                self.solution = state.simulate(
                     sources            = sources,
                     tstart             = start_time,
                     tend               = tend,
@@ -457,7 +477,7 @@ class Hydro:
                     kwargs['e_outer']  =  edens_outer
                     
                 state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=coordinates)
-                solution = state.simulate(
+                self.solution = state.simulate(
                     sources         = sources,
                     tstart          = start_time,
                     tend            = tend,
@@ -493,7 +513,7 @@ class Hydro:
             else:
                 state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, x3=self.x3, coord_system=coordinates)
             
-            solution = state.simulate(
+            self.solution = state.simulate(
                 sources         = sources,
                 tstart          = tstart,
                 tend            = tend,
@@ -507,7 +527,15 @@ class Hydro:
                 linspace        = linspace,
                 hllc            = hllc)  
         
-        return self._cleanup(solution, first_order) if not periodic else solution
-        
+        if not periodic:
+            self._cleanup(first_order)
+        return self.solution
+
+def __enter__(self):
+    return self 
+
+def __exit__(self, exc_type, exc_value, traceback):
+    pass
+
 class GPUExtNotBuiltWarning(UserWarning):
     pass
