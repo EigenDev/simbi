@@ -4,6 +4,7 @@
 //==================================
 //              GPU HELPERS
 //==================================
+real gpu_theoretical_bw = 1;
 namespace simbi{
     //==================================================
     //               1D
@@ -552,7 +553,7 @@ namespace simbi{
             {
                 anyGpuProp_t props;
                 anyGpuGetDeviceProperties(&props, i);
-                std::cout << "  Device idx:      " << i << std::endl;
+                std::cout << "  Device number:   " << i << std::endl;
                 std::cout << "  Device name:     " << props.name << ": " << props.major << "." << props.minor << std::endl;
                 std::cout << "  Global memory:   " << props.totalGlobalMem / mb << "mb" << std::endl;
                 std::cout << "  Shared memory:   " << props.sharedMemPerBlock / kb << "kb" << std::endl;
@@ -563,7 +564,11 @@ namespace simbi{
                 std::cout << "  Threads per block: " << props.maxThreadsPerBlock << std::endl;
                 std::cout << "  Max block dimensions: [ " << props.maxThreadsDim[0] << ", " << props.maxThreadsDim[1]  << ", " << props.maxThreadsDim[2] << " ]" << std::endl;
                 std::cout << "  Max grid dimensions:  [ " << props.maxGridSize[0] << ", " << props.maxGridSize[1]  << ", " << props.maxGridSize[2] << " ]" << std::endl;
+                std::cout << "  Memory Clock Rate (KHz): " <<  props.memoryClockRate << std::endl;
+                std::cout << "  Memory Bus Width (bits): " <<  props.memoryBusWidth << std::endl;
+                std::cout << "  Peak Memory Bandwidth (GB/s): " << 2.0*props.memoryClockRate*(props.memoryBusWidth/8)/1.0e6 << std::endl;
                 std::cout << std::endl;
+                gpu_theoretical_bw = 2.0*props.memoryClockRate*(props.memoryBusWidth/8)/1.0e6;
             }
         #else 
         const auto processor_count = std::thread::hardware_concurrency();

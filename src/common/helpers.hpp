@@ -27,7 +27,7 @@ constexpr real QUIRK_THRESHOLD = 1e-4;
 // Calculate a static PI
 constexpr double PI = 3.14159265358979323846;
 // Calculation derived from: https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
-constexpr real gtx_theoretical_bw = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
+extern real gpu_theoretical_bw; //  = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
 
 namespace simbi
 {
