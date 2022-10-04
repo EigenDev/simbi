@@ -1118,6 +1118,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::function<double(double, double)> s2_outer,
     std::function<double(double, double)> e_outer)
 {
+    // Print GPU properties if they exist
+    if (BuildPlatform == Platform::GPU) {
+        gpuDisplayProps();
+    }
     real round_place = 1 / chkpt_interval;
     real t = tstart;
     real t_interval =

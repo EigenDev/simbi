@@ -666,6 +666,10 @@ SRHD::simulate1D(
     std::function<double(double)> s_outer,
     std::function<double(double)> e_outer)
 {
+    // Print GPU properties if they exist
+    if (BuildPlatform == Platform::GPU) {
+        gpuDisplayProps();
+    }
     this->periodic        = boundary_condition == "periodic";
     this->first_order     = first_order;
     this->plm_theta       = plm_theta;
@@ -779,7 +783,6 @@ SRHD::simulate1D(
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
     const auto ozones  = (BuildPlatform == Platform::GPU) ? dev_outer_zones : outer_zones;
-
     // Simulate :)
     if (first_order)
     {  

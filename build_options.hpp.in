@@ -77,6 +77,9 @@ constexpr int WARP_SIZE    = 32;
 #define anyGpuEventRecord           cudaEventRecord 
 #define anyGpuEventSynchronize      cudaEventSynchronize 
 #define anyGpuEventElapsedTime      cudaEventElapsedTime
+#define anyGpuProp_t                cudaDeviceProp
+#define anyGpuGetDeviceProperties   cudaGetDeviceProperties
+#define anyGpuGetDeviceCount        cudaGetDeviceCount
 #else 
 #include "hip/hip_runtime.h"
 #define HIP_CODE 1
@@ -98,6 +101,9 @@ constexpr int WARP_SIZE    = 64;
 #define anyGpuEventRecord           hipEventRecord 
 #define anyGpuEventSynchronize      hipEventSynchronize 
 #define anyGpuEventElapsedTime      hipEventElapsedTime
+#define anyGpuProp_t                hipDeviceProp_t
+#define anyGpuGetDeviceProperties   hipGetDeviceProperties
+#define anyGpuGetDeviceCount        hipGetDeviceCount
 #endif
 #else
 constexpr int WARP_SIZE    = 32;

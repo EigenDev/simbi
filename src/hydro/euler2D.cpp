@@ -744,6 +744,11 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     bool linspace, 
     bool hllc)
 {    
+    // Print GPU properties if they exist
+    if (BuildPlatform == Platform::GPU) {
+        gpuDisplayProps();
+    }
+    
     real round_place = 1 / chkpt_interval;
     real t = tstart;
     real t_interval =

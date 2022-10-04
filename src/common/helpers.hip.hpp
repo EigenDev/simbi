@@ -150,6 +150,8 @@ namespace simbi
 
     template<typename T>
     GPU_LAUNCHABLE void deviceReduceKernel(T *self, lint nmax);
+
+    void gpuDisplayProps();
 } // end simbi
 
 #include "helpers.hip.tpp"

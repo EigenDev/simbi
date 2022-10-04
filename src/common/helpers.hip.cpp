@@ -1,6 +1,5 @@
 #include "common/helpers.hip.hpp"
 #include "util/parallel_for.hpp"
-
 //==================================
 //              GPU HELPERS
 //==================================
@@ -537,4 +536,34 @@ namespace simbi{
         
     };
 
+    void gpuDisplayProps()
+    {
+        // Adapted from: https://stackoverflow.com/questions/5689028/how-to-get-card-specs-programmatically-in-cuda
+        #if GPU_CODE 
+            const int kb = 1024;
+            const int mb = kb * kb;
+            int devCount;
+            anyGpuGetDeviceCount(&devCount);
+            std::cout << std::string(80, '=')  << "\n";
+            std::cout << "GPU Device(s): " << std::endl << std::endl;
+
+            for(int i = 0; i < devCount; ++i)
+            {
+                anyGpuProp_t props;
+                anyGpuGetDeviceProperties(&props, i);
+                std::cout << "  Device idx:      " << i << std::endl;
+                std::cout << "  Device name:     " << props.name << ": " << props.major << "." << props.minor << std::endl;
+                std::cout << "  Global memory:   " << props.totalGlobalMem / mb << "mb" << std::endl;
+                std::cout << "  Shared memory:   " << props.sharedMemPerBlock / kb << "kb" << std::endl;
+                std::cout << "  Constant memory: " << props.totalConstMem / kb << "kb" << std::endl;
+                std::cout << "  Block registers: " << props.regsPerBlock << std::endl << std::endl;
+
+                std::cout << "  Warp size:         " << props.warpSize << std::endl;
+                std::cout << "  Threads per block: " << props.maxThreadsPerBlock << std::endl;
+                std::cout << "  Max block dimensions: [ " << props.maxThreadsDim[0] << ", " << props.maxThreadsDim[1]  << ", " << props.maxThreadsDim[2] << " ]" << std::endl;
+                std::cout << "  Max grid dimensions:  [ " << props.maxGridSize[0] << ", " << props.maxGridSize[1]  << ", " << props.maxGridSize[2] << " ]" << std::endl;
+                std::cout << std::endl;
+            }
+        #endif
+    }
 }
