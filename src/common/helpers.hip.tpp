@@ -128,6 +128,9 @@ namespace simbi{
                     break;
                 }
                 case simbi::Geometry::CYLINDRICAL:
+                {
+                    break;
+                }
                 // TODO: Implement
             } // end switch
             
@@ -211,6 +214,7 @@ namespace simbi{
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
+                {    
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
                     const real rl           = helpers::my_max(rmin * std::pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
                     const real rr           = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
@@ -224,6 +228,11 @@ namespace simbi{
                                       rmean * (tr - tl) / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
                        rmean * std::sin(th) * (qr - ql) / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
                     break;
+                 }
+                case simbi::Geometry::CYLINDRICAL:
+                {
+                    break;
+                }
             } // end switch
             
             self->dt_min[kk * self->xphysical_grid * self->yphysical_grid + jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
