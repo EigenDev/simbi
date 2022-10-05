@@ -99,7 +99,6 @@ if get_option('gpu_compilation').enabled()
                 '-fPIC', 
                 '-O3', 
                 '-march=native',
-                '-flto'
             ]
             # Meson does not support hip yet, so we manually
             # declare the dependency
