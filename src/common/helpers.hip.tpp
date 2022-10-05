@@ -17,7 +17,11 @@ namespace simbi{
         
             if constexpr(is_relativistic<N>::value)
             {
-                const real v  = self->gpu_prims[aid].v;
+                real v  = self->gpu_prims[aid].v;
+                if constexpr(VelocityType == Velocity::FourVelocity) {
+                    real lorentz  = std::sqrt(1 + v * v);
+                    v /= lorentz;
+                }
                 const real h  = 1. + gamma * p / (rho * (gamma - 1.));
                 const real cs = std::sqrt(gamma * p / (rho * h));
                 vPlus         = (v + cs) / (1 + v * cs);
@@ -76,6 +80,11 @@ namespace simbi{
             {
                 real h   = 1 + gamma * p / (rho * (gamma - 1));
                 real cs  = std::sqrt(gamma * p / (rho * h));
+                if constexpr(VelocityType == Velocity::FourVelocity) {
+                    real lorentz  = std::sqrt(1 + (v1 * v1 + v2 * v2));
+                    v1           /= lorentz;
+                    v2           /= lorentz;
+                }
                 plus_v1  = (v1 + cs) / (static_cast<real>(1.0) + v1 * cs);
                 plus_v2  = (v2 + cs) / (static_cast<real>(1.0) + v2 * cs);
                 minus_v1 = (v1 - cs) / (static_cast<real>(1.0) - v1 * cs);
@@ -100,6 +109,7 @@ namespace simbi{
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
+                {
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
                     const real rl  = helpers::my_max(rmin * std::pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
                     const real rr  = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
@@ -116,6 +126,9 @@ namespace simbi{
                     cfl_dt = helpers::my_min((rr - rl) / (helpers::my_max(v1p, v1m)),
                                      rmean * (tr - tl) / (helpers::my_max(v2p, v2m)));
                     break;
+                }
+                case simbi::Geometry::CYLINDRICAL:
+                // TODO: Implement
             } // end switch
             
             self->dt_min[jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
@@ -167,6 +180,12 @@ namespace simbi{
             {
                 real h   = 1 + gamma * p / (rho * (gamma - 1));
                 real cs  = std::sqrt(gamma * p / (rho * h));
+                if constexpr(VelocityType == Velocity::FourVelocity) {
+                    real lorentz  = std::sqrt(1 + (v1 * v1 + v2 * v2 + v3 * v3));
+                    v1           /= lorentz;
+                    v2           /= lorentz;
+                    v3           /= lorentz;
+                }
                 plus_v1  = (v1 + cs) / (static_cast<real>(1.0) + v1 * cs);
                 plus_v2  = (v2 + cs) / (static_cast<real>(1.0) + v2 * cs);
                 plus_v3  = (v3 + cs) / (static_cast<real>(1.0) + v3 * cs);
