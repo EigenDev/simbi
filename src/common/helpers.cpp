@@ -101,7 +101,7 @@ namespace simbi
             H5::DataType  datatype(H5::PredType::NATIVE_DOUBLE);
             
             hid_t dtype_str = H5Tcopy(H5T_C_S1);
-            size_t size_str = setup.coord_system.size();                    
+            size_t size_str = 100;                    
             H5Tset_size(dtype_str, size_str);
 
             switch (dim)
@@ -191,6 +191,10 @@ namespace simbi
                     att = sim_info.createAttribute("boundary_condition", dtype_str, att_space);
                     att.write(dtype_str, setup.boundarycond.c_str());
                     att.close();
+
+                    att = sim_info.createAttribute("regime", dtype_str, att_space);
+                    att.write(dtype_str, setup.regime.c_str());
+                    att.close();
                     
                     sim_info.close();
                     break;
@@ -271,6 +275,10 @@ namespace simbi
                     att = sim_info.createAttribute("first_order", bool_type, att_space);
                     att.write(bool_type, &setup.first_order);
                     att.close();
+
+                    att = sim_info.createAttribute("using_gamma_beta", bool_type, att_space);
+                    att.write(bool_type, &setup.using_fourvelocity);
+                    att.close();
                     
                     att = sim_info.createAttribute("x1max", real_type, att_space);
                     att.write(real_type, &setup.x1max);
@@ -314,6 +322,10 @@ namespace simbi
 
                     att = sim_info.createAttribute("boundary_condition", dtype_str, att_space);
                     att.write(dtype_str, setup.boundarycond.c_str());
+                    att.close();
+
+                    att = sim_info.createAttribute("regime", dtype_str, att_space);
+                    att.write(dtype_str, setup.regime.c_str());
                     att.close();
 
                     sim_info.close();
@@ -401,6 +413,10 @@ namespace simbi
                     att = sim_info.createAttribute("first_order", bool_type, att_space);
                     att.write(bool_type, &setup.first_order);
                     att.close();
+
+                    att = sim_info.createAttribute("using_gamma_beta", bool_type, att_space);
+                    att.write(bool_type, &setup.using_fourvelocity);
+                    att.close();
                     
                     att = sim_info.createAttribute("x1max", real_type, att_space);
                     att.write(real_type, &setup.x1max);
@@ -460,6 +476,10 @@ namespace simbi
 
                     att = sim_info.createAttribute("boundary_condition", dtype_str, att_space);
                     att.write(dtype_str, setup.boundarycond.c_str());
+                    att.close();
+
+                    att = sim_info.createAttribute("regime", dtype_str, att_space);
+                    att.write(dtype_str, setup.regime.c_str());
                     att.close();
 
                     sim_info.close();
