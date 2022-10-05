@@ -362,19 +362,37 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         if coord_sysem == 'cartesian':
             is_cartesian = True
         
-        # if (v1**2 + v2**2).any() >= 1.0:
-        #     W = 0
-        # else:
-        #     W = 1/np.sqrt(1.0 -(v1**2 + v2**2))
-        W = 1/np.sqrt(1.0 -(v1**2 + v2**2))
-        beta = np.sqrt(v1**2 + v2**2)
+        if ds.attrs['regime'].decode("utf-8") == 'relativistic':
+            try:
+                using_gamma_beta = ds.attrs['using_gamma_beta']
+            except:
+                using_gamma_beta = False
+                
+            if using_gamma_beta:
+                W = np.sqrt(1 + v1 ** 2 + v2 ** 2)
+                gamma_beta = np.sqrt(v1**2 + v2**2)
+                v1 /= W 
+                v2 /= W 
+            else:
+                W = 1/np.sqrt(1 - (v1**2 + v2**2))
+                gamma_beta = W * np.sqrt(v1**2 + v2**2)
+        
+            a    = (4 * const.sigma_sb.cgs / c)
+            k    = const.k_B.cgs
+            T    = (3 * p * edens_scale  / a)**(1./4.)
+            T_eV = (k * T).to(units.eV)
+            h = 1.0 + gamma * p / (rho * (gamma - 1))
+        
+            fields['W']           = W
+            fields['enthalpy']    = h
+            fields['gamma_beta']  = gamma_beta
+            fields['temperature'] = T_eV
         
         fields['rho']          = rho
         fields['v1']           = v1 
         fields['v2']           = v2 
         fields['p']            = p
         fields['chi']          = chi
-        fields['gamma_beta']   = W*beta
         fields['ad_gamma']     = gamma
         setup['is_cartesian']  = is_cartesian
         
@@ -419,46 +437,51 @@ def read_1d_file(filename: str) -> dict:
         except:
             is_linspace = False
             
+        try:
+            gamma = ds.attrs['adiabatic_gamma']
+        except:
+            gamma = 4./3.
+            
         rho = rho[2:-2]
         v   = v  [2:-2]
         p   = p  [2:-2]
         xactive = nx - 4
-        
-        try:
-            using_gamma_beta = ds.attrs['using_gamma_beta']
-        except:
-            using_gamma_beta = False
-            
-        if using_gamma_beta:
-            W = np.sqrt(1 + v * v)
-            gamma_beta = v
-        else:
-            W = 1/np.sqrt(1 - v**2)
-            gamma_beta = W * v
-        
-        a    = (4 * const.sigma_sb.cgs / c)
-        k    = const.k_B.cgs
-        T    = (3 * p * edens_scale  / a)**(1./4.)
-        T_eV = (k * T).to(units.eV)
-        
-        h = 1.0 + 4/3 * p / (rho * (4/3 - 1))
-        
         if is_linspace:
             mesh['r'] = np.linspace(x1min, x1max, xactive)
         else:
             mesh['r'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
+        
+        if ds.attrs['regime'].decode("utf-8") == 'relativistic':
+            try:
+                using_gamma_beta = ds.attrs['using_gamma_beta']
+            except:
+                using_gamma_beta = False
+                
+            if using_gamma_beta:
+                W = np.sqrt(1 + v * v)
+                gamma_beta = v
+            else:
+                W = 1/np.sqrt(1 - v**2)
+                gamma_beta = W * v
+        
+            a    = (4 * const.sigma_sb.cgs / c)
+            k    = const.k_B.cgs
+            T    = (3 * p * edens_scale  / a)**(1./4.)
+            T_eV = (k * T).to(units.eV)
+            h = 1.0 + gamma * p / (rho * (gamma - 1))
+        
+            ofield['W']        = W
+            ofield['enthalpy'] = h
+            ofield['gamma_beta']  = gamma_beta
+            ofield['temperature'] = T_eV
             
-        setups['ad_gamma']    = 4./3.
+        setups['ad_gamma']    = ds.attrs['adiabatic_gamma']
         setups['time']        = t
         setups['linspace']    = is_linspace
-        ofield['ad_gamma']    = 4./3.
+        ofield['ad_gamma']    = ds.attrs['adiabatic_gamma']
         ofield['rho']         = rho
         ofield['v']           = v
         ofield['p']           = p
-        ofield['W']           = W
-        ofield['enthalpy']    = h
-        ofield['gamma_beta']  = gamma_beta
-        ofield['temperature'] = T_eV
         mesh['xlims']         = x1min, x1max
         
     return ofield, setups, mesh
