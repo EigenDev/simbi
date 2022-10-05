@@ -61,3 +61,9 @@ option(
     max: 8,
     value: 8
 )
+
+option(
+    'four_velocity',
+    type: 'boolean',
+    value: false
+)

@@ -7,9 +7,10 @@ project('pysimbi', 'c', 'cpp', 'cython',
 # BUILD CONFIG
 conf_data = configuration_data()
 conf_data.set10('FLOAT_PRECISION', get_option('float_precision'))
-conf_data.set('ONED_BLOCK_SIZE', get_option('1d_block_size'))
-conf_data.set('TWOD_BLOCK_SIZE', get_option('2d_block_size'))
+conf_data.set('ONED_BLOCK_SIZE',   get_option('1d_block_size'))
+conf_data.set('TWOD_BLOCK_SIZE',   get_option('2d_block_size'))
 conf_data.set('THREED_BLOCK_SIZE', get_option('3d_block_size'))
+conf_data.set10('FOUR_VELOCITY',   get_option('four_velocity'))
 configure_file(
     input:  'build_options.hpp.in',
     output: 'build_options.hpp',
@@ -151,15 +152,27 @@ sources = [
     #######################
     'src/hydro/euler1D.cpp',
     'src/hydro/euler2D.cpp',
-    'src/hydro/srhydro1D.hip.cpp',
-    'src/hydro/srhydro2D.hip.cpp',
-    'src/hydro/srhydro3D.hip.cpp',
 
     #######################
     #### UTIL IMPLEMENTATIONS
     #######################
     'src/util/device_api.cpp',
 ]
+
+if get_option('four_velocity')
+sources += [
+    'src/hydro/srhydro1D_gb.hip.cpp',
+    'src/hydro/srhydro2D_gb.hip.cpp',
+    'src/hydro/srhydro3D_gb.hip.cpp',
+]
+else 
+sources += [
+    'src/hydro/srhydro1D.hip.cpp',
+    'src/hydro/srhydro2D.hip.cpp',
+    'src/hydro/srhydro3D.hip.cpp',
+]
+endif
+
 
 run_command('python', '-m', 'cython', '--cplus', 'src/call_obj.pyx', check: true)
 cpu_ext = py3.extension_module(
