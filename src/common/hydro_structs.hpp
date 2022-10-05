@@ -25,7 +25,7 @@ struct DataWriteMembers
     real x1min, x1max, x2min, x2max, zmin, zmax, dt;
     int nx, ny, nz, xactive_zones, yactive_zones, zactive_zones;
     bool linspace, first_order, using_fourvelocity;
-    std::string coord_system, boundarycond;
+    std::string coord_system, boundarycond, regime;
 };
 
 namespace hydro1d {
@@ -234,6 +234,14 @@ namespace sr2d {
         GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {return (nhat == 1 ? v1 : v2); }
 
+        GPU_CALLABLE_MEMBER inline real calc_lorentz_gamma() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return 1 / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2));
+            } else {
+                return std::sqrt(static_cast<real>(1.0) + (v1 * v1 + v2 * v2));
+            }
+        }
+
     };
 
     struct PrimitiveData {
@@ -413,6 +421,14 @@ namespace sr3d {
 
         GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {return (nhat == 1 ? v1 : (nhat == 2) ? v2 : v3); }
+
+        GPU_CALLABLE_MEMBER inline real calc_lorentz_gamma() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return 1 / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2 + v3 * v3));
+            } else {
+                return std::sqrt(static_cast<real>(1.0) + (v1 * v1 + v2 * v2 + v3 * v3));
+            }
+        }
     };
 
     struct PrimitiveData {
