@@ -5,8 +5,7 @@
 #mesondefine ONED_BLOCK_SIZE
 #mesondefine TWOD_BLOCK_SIZE
 #mesondefine THREED_BLOCK_SIZE
-enum class Platform: int {CPU = 0, GPU = 1};
-
+#mesondefine FOUR_VELOCITY
 #include "stdint.h"
 #include <functional>
 #include <chrono>
@@ -16,6 +15,15 @@ enum class Platform: int {CPU = 0, GPU = 1};
 
 using luint = uint64_t;
 using lint  = int64_t;
+
+enum class Platform: int {CPU = 0, GPU = 1};
+enum class Velocity: int {Beta = 0, FourVelocity = 1};
+#if FOUR_VELOCITY
+constexpr Velocity VelocityType = Velocity::FourVelocity;
+#else
+constexpr Velocity VelocityType = Velocity::Beta;
+#endif
+
 constexpr int BLOCK_SIZE   = ONED_BLOCK_SIZE;
 constexpr int BLOCK_SIZE2D = TWOD_BLOCK_SIZE;
 constexpr int BLOCK_SIZE3D = THREED_BLOCK_SIZE;
@@ -133,11 +141,6 @@ constexpr Platform BuildPlatform = Platform::CPU;
 // happy and avoid a bunch if #ifdefs throughout code
 // Don't get too mad at me... I'm a physicist, not a programmer :-)
 namespace simbi {
-    // struct BuildOptions
-    // {
-    //     constexpr static bool gpu_on = static_cast<bool>(GPU_CODE);
-    // };
-
     struct u3
     {
         ~u3() = default;
@@ -158,13 +161,14 @@ namespace simbi {
 
     using simbiStream_t = int;
     using anyGpuError_t = int;
+    using dim3 = u3;
+
     using anyGpuEvent_t = std::chrono::high_resolution_clock::time_point;
     enum anyGpuMemcpyType {
         anyGpuMemcpyHostToDevice,
         anyGpuMemcpyDeviceToDevice,
         anyGpuMemcpyDeviceToHost
     };
-    using dim3 = u3;
     inline dim3 blockIdx(1, 1, 1); 
     inline dim3 blockDim(1, 1, 1); 
     inline dim3 gridDim(1, 1, 1); 
