@@ -748,7 +748,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     real round_place = 1 / chkpt_interval;
     real t = tstart;
     real t_interval =
-        t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
+        t == 0 ? 0
+               : dlogt !=0 ? tstart
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
     // Define the simulation memebers
@@ -807,6 +808,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     setup.first_order    = first_order;
     setup.coord_system   = coord_system;
     setup.boundarycond   = boundary_condition;
+    setup.regime         = "classical";
 
     cons.resize(nzones);
     prims.resize(nzones);

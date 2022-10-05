@@ -1029,7 +1029,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     real round_place = 1 / chkpt_interval;
     real t = tstart;
     real t_interval =
-        t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
+        t == 0 ? 0
+               : dlogt !=0 ? tstart
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
     std::string filename;
@@ -1101,6 +1102,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     setup.first_order    = first_order;
     setup.coord_system   = coord_system;
     setup.boundarycond   = boundary_condition;
+    setup.using_fourvelocity = false;
+    setup.regime = "relativistic";
     
     cons.resize(nzones);
     prims.resize(nzones);

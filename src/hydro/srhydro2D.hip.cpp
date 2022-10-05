@@ -642,6 +642,7 @@ void SRHD2D::cons2prim(
 {
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
     const luint radius = (first_order) ? 1 : 2;
+    const auto n = this->n;
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
          #if GPU_CODE
         auto* const conserved_buff = self->gpu_cons;
@@ -728,11 +729,15 @@ void SRHD2D::cons2prim(
             const real v2     = S2 * inv_et;
             #if GPU_CODE
                 self->gpu_pressure_guess[gid] = peq;
-                self->gpu_prims[gid]          = Primitive{D / W, v1, v2, peq, Dchi / D};
+                self->gpu_prims[gid]          = Primitive{rho, v1, v2, peq, Dchi / D};
             #else
                 self->pressure_guess[gid] = peq;
-                self->prims[gid]          = Primitive{D / W, v1, v2, peq, Dchi / D};
+                self->prims[gid]          = Primitive{rho, v1, v2, peq, Dchi / D};
             #endif
+            // if (n == 0) {
+            //     printf("[%lu, %lu] -- dt: %.2e n: %lu, v1: %.2e, v2: %.2e, peq: %.2e, rho: %.2e\n", gid % self->nx, gid / self-> nx, self->dt, n, v1, v2, peq, D / W);
+            //     // printf("[%lu, %lu] -- dt: %.2e n: %lu, fL: %.2e, fR: %.2e\n", ii, jj, self->dt, n, frf.d, flf.d);
+            // }
             workLeftToDo = false;
         }
     });
@@ -858,8 +863,7 @@ void SRHD2D::advance(
             gR = self->prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i+1/2 interface
-            if (hllc)
-            {
+            if (hllc) {
                 frf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                 grf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
             } else {
@@ -869,10 +873,10 @@ void SRHD2D::advance(
 
             // Set up the left and right state interfaces for i-1/2
             xprimsL = prim_buff[( (txa - 1) * sy + (tya + 0) * sx )];
-            xprimsR  = prim_buff[( (txa - 0) * sy + (tya + 0) * sx )];
+            xprimsR = prim_buff[( (txa - 0) * sy + (tya + 0) * sx )];
             //j+1/2
             yprimsL = prim_buff[( (txa - 0) * sy + (tya - 1) * sx )]; 
-            yprimsR  = prim_buff[( (txa + 0) * sy + (tya - 0) * sx )]; 
+            yprimsR = prim_buff[( (txa + 0) * sy + (tya - 0) * sx )]; 
 
             // i+1/2
             uxL = self->prims2cons(xprimsL); 
@@ -885,11 +889,10 @@ void SRHD2D::advance(
             fR = self->prims2flux(xprimsR, 1);
 
             gL = self->prims2flux(yprimsL, 2);
-            gR= self->prims2flux(yprimsR, 2);
+            gR = self->prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i-1/2 interface
-            if (self->hllc)
-            {
+            if (self->hllc) {
                 flf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
                 glf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
             } else {
@@ -897,20 +900,18 @@ void SRHD2D::advance(
                 glf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
             }   
         } else {
-            Primitive xleft_most, xright_most, xleft_mid, xright_mid, center;
-            Primitive yleft_most, yright_most, yleft_mid, yright_mid;
             // Coordinate X
-            xleft_most  = prim_buff[((txa - 2) * sy + tya * sx) % nbs];
-            xleft_mid   = prim_buff[((txa - 1) * sy + tya * sx) % nbs];
-            center      = prim_buff[((txa + 0) * sy + tya * sx) % nbs];
-            xright_mid  = prim_buff[((txa + 1) * sy + tya * sx) % nbs];
-            xright_most = prim_buff[((txa + 2) * sy + tya * sx) % nbs];
+            const Primitive xleft_most  = prim_buff[((txa - 2) * sy + tya * sx) % nbs];
+            const Primitive xleft_mid   = prim_buff[((txa - 1) * sy + tya * sx) % nbs];
+            const Primitive center      = prim_buff[((txa + 0) * sy + tya * sx) % nbs];
+            const Primitive xright_mid  = prim_buff[((txa + 1) * sy + tya * sx) % nbs];
+            const Primitive xright_most = prim_buff[((txa + 2) * sy + tya * sx) % nbs];
 
             // Coordinate Y
-            yleft_most  = prim_buff[(txa * sy + (tya - 2) * sx) % nbs];
-            yleft_mid   = prim_buff[(txa * sy + (tya - 1) * sx) % nbs];
-            yright_mid  = prim_buff[(txa * sy + (tya + 1) * sx) % nbs];
-            yright_most = prim_buff[(txa * sy + (tya + 2) * sx) % nbs];
+            const Primitive yleft_most  = prim_buff[(txa * sy + (tya - 2) * sx) % nbs];
+            const Primitive yleft_mid   = prim_buff[(txa * sy + (tya - 1) * sx) % nbs];
+            const Primitive yright_mid  = prim_buff[(txa * sy + (tya + 1) * sx) % nbs];
+            const Primitive yright_most = prim_buff[(txa * sy + (tya + 2) * sx) % nbs];
 
             // Reconstructed left X Primitive vector at the i+1/2 interface
             xprimsL  = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
@@ -1126,7 +1127,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     real round_place = 1 / chkpt_interval;
     real t = tstart;
     real t_interval =
-        t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
+        t == 0 ? 0
+               : dlogt !=0 ? tstart
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
     // Define the source terms
@@ -1219,6 +1221,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     setup.first_order    = first_order;
     setup.coord_system   = coord_system;
     setup.boundarycond   = boundary_condition;
+    setup.regime         = "relativistic";
+    setup.using_fourvelocity = false;
 
     // // Setup the system
     const luint xblockdim       = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
@@ -1270,10 +1274,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             simbi::gpu::api::copyHostToDevice(dev_outer_zones, outer_zones, ny * sizeof(Conserved));
         }
     }
-    
+     
     if (t == 0) {
         write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-        t_interval += chkpt_interval;
+        t_interval += (tstart == 0) ? chkpt_interval : tstart;
     }
     // Some benchmarking tools 
     this->n        = 0;

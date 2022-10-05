@@ -695,7 +695,8 @@ SRHD::simulate1D(
     PrimData prods;
     real round_place = 1 / chkpt_interval;
     real t_interval =
-        t == 0 ? floor(tstart * round_place + static_cast<real>(0.5)) / round_place
+        t == 0 ? 0
+               : dlogt !=0 ? tstart
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
     this->hubble_param = adot(t) / a(t);
@@ -711,7 +712,7 @@ SRHD::simulate1D(
     setup.coord_system   = coord_system;
     setup.boundarycond   = boundary_condition;
     setup.using_fourvelocity = false;
-
+    setup.regime = "relativistic";
     cons.resize(nx);
     prims.resize(nx);
     pressure_guess.resize(nx);
