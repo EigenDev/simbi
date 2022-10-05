@@ -18,10 +18,8 @@ namespace simbi
 
         }
 
-        const char* InterruptException::what()
-        {
-            const std::string message = "Signal" + std::to_string(status) + " detected. Saving last checkpoint...";
-            return "Keyboard interrupt detected. Saving last checkpoint...";
+        const char* InterruptException::what() {
+            return "Simulation interrupted. Saving last checkpoint...";
         }
 
         void catch_signals() {
@@ -34,7 +32,7 @@ namespace simbi
         }
 
         // void catch_signals() {
-        //     auto handler = [](int code) { throw std::runtime_error("SIGNAL " + std::to_string(code)); };
+        //     auto handler = [](int stat) { throw InterruptException(stat) ;};
         //     signal(SIGINT, handler);
         //     signal(SIGTERM, handler);
         //     signal(SIGKILL, handler);

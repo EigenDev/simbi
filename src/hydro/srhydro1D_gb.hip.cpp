@@ -796,137 +796,153 @@ SRHD::simulate1D(
     // Simulate :)
     if (first_order)
     {  
-        while (t < tend && !inFailureState)
-        {
-            helpers::recordEvent(t1);
-            advance(self, shBlockSize, radius, geometry, memside);
-            cons2prim(fullP, device_self, memside);
-            if (!periodic) {
-                config_ghosts1D(fullP, self, nx, true, bc, ozones);
-            }
-            helpers::recordEvent(t2);
-            t += dt; 
-            
-            if (n >= nfold){
-                anyGpuEventSynchronize(t2);
-                helpers::recordDuration(delta_t, t1, t2);
-                if (BuildPlatform == Platform::GPU) {
-                    delta_t *= 1e-3;
-                }
-                ncheck += 1;
-                zu_avg += nx / delta_t;
-                 if constexpr(BuildPlatform == Platform::GPU) {
-                    const real gpu_emperical_bw = getFlops<Conserved, Primitive>(radius, total_zones, active_zones, delta_t);
-                    writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
-                } else {
-                    writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
-                }
-                nfold += 100;
-            }
-
-            /* Write to a file every nth of a second */
-            if (t >= t_interval && t != INFINITY) {
-                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-                if (dlogt != 0) {
-                    t_interval *= std::pow(10, dlogt);
-                } else {
-                    t_interval += chkpt_interval;
-                }
-            }
-            n++;
-            // Adapt the timestep
-            if constexpr(BuildPlatform == Platform::GPU)
+        try {
+            while (t < tend && !inFailureState)
             {
-                adapt_dt(device_self, activeP.gridSize.x);
-            } else {
-                adapt_dt();
-            }
-
-            // Update the outer zones with the necessary configs if they exists
-            if (d_outer) {
-                const real dV  = get_cell_volume(active_zones - 1, geometry);
-                outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    simbi::gpu::api::copyHostToDevice(ozones, outer_zones, 2 * sizeof(Conserved));
+                helpers::recordEvent(t1);
+                advance(self, shBlockSize, radius, geometry, memside);
+                cons2prim(fullP, device_self, memside);
+                if (!periodic) {
+                    config_ghosts1D(fullP, self, nx, true, bc, ozones);
                 }
+                helpers::recordEvent(t2);
+                t += dt; 
+                
+                if (n >= nfold){
+                    anyGpuEventSynchronize(t2);
+                    helpers::recordDuration(delta_t, t1, t2);
+                    if (BuildPlatform == Platform::GPU) {
+                        delta_t *= 1e-3;
+                    }
+                    ncheck += 1;
+                    zu_avg += nx / delta_t;
+                    if constexpr(BuildPlatform == Platform::GPU) {
+                        const real gpu_emperical_bw = getFlops<Conserved, Primitive>(radius, total_zones, active_zones, delta_t);
+                        writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
+                    } else {
+                        writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
+                    }
+                    nfold += 100;
+                }
+
+                /* Write to a file every nth of a second */
+                if (t >= t_interval && t != INFINITY) {
+                    write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
+                    if (dlogt != 0) {
+                        t_interval *= std::pow(10, dlogt);
+                    } else {
+                        t_interval += chkpt_interval;
+                    }
+                }
+                n++;
+                // Adapt the timestep
+                if constexpr(BuildPlatform == Platform::GPU)
+                {
+                    adapt_dt(device_self, activeP.gridSize.x);
+                } else {
+                    adapt_dt();
+                }
+
+                // Update the outer zones with the necessary configs if they exists
+                if (d_outer) {
+                    const real dV  = get_cell_volume(active_zones - 1, geometry);
+                    outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
+                    if constexpr(BuildPlatform == Platform::GPU) {
+                        simbi::gpu::api::copyHostToDevice(ozones, outer_zones, 2 * sizeof(Conserved));
+                    }
+                }
+
+                hubble_param = adot(t) / a(t);
+                if constexpr(BuildPlatform == Platform::GPU){
+                    this->inFailureState = self->inFailureState;
+                }
+                if (inFailureState)
+                    simbi::gpu::api::deviceSynch();
+                    
+                helpers::catch_signals();
             }
 
-            hubble_param = adot(t) / a(t);
-            if constexpr(BuildPlatform == Platform::GPU){
-                this->inFailureState = self->inFailureState;
-            }
-            if (inFailureState)
-                simbi::gpu::api::deviceSynch();
-            
+        } catch (helpers::InterruptException &e) {
+            writeln("{}", e.what());
+            t_interval = INFINITY;
+            write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
         }
     } else {
-        while (t < tend && !inFailureState)
-        {
-            helpers::recordEvent(t1);
-            advance(self, shBlockSize, radius, geometry, memside);
-            cons2prim(fullP, device_self, memside);
-            if (!periodic) {
-                config_ghosts1D(fullP, self, nx, false, bc, ozones);
-            }
-            advance(self, shBlockSize, radius, geometry, memside);
-            cons2prim(fullP, device_self, memside);
-            if (!periodic) {
-                config_ghosts1D(fullP, self, nx, false, bc, ozones);
-            }
-            helpers::recordEvent(t2);
-            t += dt; 
-            
-            if (n >= nfold){
-                anyGpuEventSynchronize(t2);
-                helpers::recordDuration(delta_t, t1, t2);
-                if (BuildPlatform == Platform::GPU) {
-                    delta_t *= 1e-3; // convert from milliseconds
+        try {
+            while (t < tend && !inFailureState)
+            {
+                helpers::recordEvent(t1);
+                advance(self, shBlockSize, radius, geometry, memside);
+                cons2prim(fullP, device_self, memside);
+                if (!periodic) {
+                    config_ghosts1D(fullP, self, nx, false, bc, ozones);
                 }
-                ncheck += 1;
-                zu_avg += nx / delta_t;
+                advance(self, shBlockSize, radius, geometry, memside);
+                cons2prim(fullP, device_self, memside);
+                if (!periodic) {
+                    config_ghosts1D(fullP, self, nx, false, bc, ozones);
+                }
+                helpers::recordEvent(t2);
+                t += dt; 
+                
+                if (n >= nfold){
+                    anyGpuEventSynchronize(t2);
+                    helpers::recordDuration(delta_t, t1, t2);
+                    if (BuildPlatform == Platform::GPU) {
+                        delta_t *= 1e-3; // convert from milliseconds
+                    }
+                    ncheck += 1;
+                    zu_avg += nx / delta_t;
+                    if constexpr(BuildPlatform == Platform::GPU) {
+                        const real gpu_emperical_bw = getFlops<Conserved, Primitive>(radius, total_zones, active_zones, delta_t);
+                        writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
+                    } else {
+                        writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
+                    }
+                    nfold += 100;
+                }
+                
+                /* Write to a fike every nth of a second */
+                if (t >= t_interval && t != INFINITY) {
+                    write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
+                    if (dlogt != 0) {
+                        t_interval *= std::pow(10, dlogt);
+                    } else {
+                        t_interval += chkpt_interval;
+                    }
+                }
+                n++;
+
+                //Adapt the timestep
                 if constexpr(BuildPlatform == Platform::GPU) {
-                    const real gpu_emperical_bw = getFlops<Conserved, Primitive>(radius, total_zones, active_zones, delta_t);
-                    writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
+                    adapt_dt(device_self, activeP.gridSize.x);
                 } else {
-                    writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
+                    adapt_dt();
                 }
-                nfold += 100;
-            }
-            
-            /* Write to a fike every nth of a second */
-            if (t >= t_interval && t != INFINITY) {
-                write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-                if (dlogt != 0) {
-                    t_interval *= std::pow(10, dlogt);
-                } else {
-                    t_interval += chkpt_interval;
-                }
-            }
-            n++;
 
-            //Adapt the timestep
-            if constexpr(BuildPlatform == Platform::GPU) {
-                adapt_dt(device_self, activeP.gridSize.x);
-            } else {
-                adapt_dt();
-            }
-
-            // Update the outer zones with the necessary configs if they exists
-            if (d_outer) {
-                const real dV  = get_cell_volume(active_zones - 1, geometry);
-                outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    simbi::gpu::api::copyHostToDevice(ozones, outer_zones, 2 * sizeof(Conserved));
+                // Update the outer zones with the necessary configs if they exists
+                if (d_outer) {
+                    const real dV  = get_cell_volume(active_zones - 1, geometry);
+                    outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
+                    if constexpr(BuildPlatform == Platform::GPU) {
+                        simbi::gpu::api::copyHostToDevice(ozones, outer_zones, 2 * sizeof(Conserved));
+                    }
                 }
+
+                hubble_param = adot(t) / a(t);
+                if constexpr(BuildPlatform == Platform::GPU){
+                    this->inFailureState = self->inFailureState;
+                }
+                if (inFailureState)
+                    simbi::gpu::api::deviceSynch();
+                    
+                helpers::catch_signals();
             }
 
-            hubble_param = adot(t) / a(t);
-            if constexpr(BuildPlatform == Platform::GPU){
-                this->inFailureState = self->inFailureState;
-            }
-            if (inFailureState)
-                simbi::gpu::api::deviceSynch();
-            
+        } catch (helpers::InterruptException &e) {
+            writeln("{}", e.what());
+            t_interval = INFINITY;
+            write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
         }
     }
     if (ncheck > 0) {
