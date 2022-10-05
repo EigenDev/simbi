@@ -1588,7 +1588,7 @@ def main():
             ylabel = util.get_field_str(args)
             ax.set_xlabel(r'$t [\rm s]$')
             ax.set_ylabel(ylabel)
-            ax.set_xlim(0.5, 2.0)
+            # ax.set_xlim(0.5, 2.0)
             ax.spines['right'].set_visible(False)
             ax.spines['top'].set_visible(False)
             max_vars = []
@@ -1598,11 +1598,16 @@ def main():
                 label = args.labels[key] if args.labels else key
                 for idx, file in enumerate(flist[key]):
                     fields, setup, mesh = util.read_2d_file(args, file)
-                    viewing_angle = np.deg2rad(args.viewing[key % len(args.viewing)])
-                    tidx, _ = util.find_nearest(setup['x2'], viewing_angle)
-                    max_var = np.max(fields[args.fields[0]][tidx])
-                    max_vars += [max_var]
-                    times    += [setup['time']]
+                    viewing_angle       = np.deg2rad(args.viewing[key])
+                    tidx, _             = util.find_nearest(setup['x2'], viewing_angle)
+                    
+                    if args.fields[0] in derived:
+                        var = util.prims2var(fields, args.fields[0])
+                    else:
+                        var = fields[args.fields[0]]
+                    max_var             = np.max(var[tidx])
+                    max_vars           += [max_var]
+                    times              += [setup['time']]
 
                 plot_vs_time(args, ax, label, colors[key], times, max_vars, ylog = args.fields[0] not in lin_fields)
                     
