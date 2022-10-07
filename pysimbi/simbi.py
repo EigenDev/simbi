@@ -500,8 +500,7 @@ class Hydro:
                 #     linspace           = linspace,
                 #     hllc               = hllc) 
             else:
-                kwargs = {'a': a, 'adot': adot}
-                kwargs = {'qurik_smoothing': quirk_smoothing}
+                kwargs = {'a': a, 'adot': adot, 'quirk_smoothing': quirk_smoothing}
                 if dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer']  =  dens_outer
                     kwargs['s1_outer'] =  mom_outer[0]
