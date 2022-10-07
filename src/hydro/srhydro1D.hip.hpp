@@ -43,10 +43,9 @@ namespace simbi
           std::vector<sr1d::Conserved> cons;
           std::vector<sr1d::Primitive> prims;
 
-          luint nx, active_zones, idx_active, i_start, i_bound;
-          real plm_theta, engine_duration, t, decay_constant, dlogt, tend;
+          luint nx, active_zones, idx_active, i_start, i_bound, init_chkpt_idx;
+          real plm_theta, engine_duration, t, decay_constant, dlogt, tend, tstart;
           bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
-
           std::vector<real> sourceD, sourceS, source0, pressure_guess;
           
           SRHD();
@@ -117,6 +116,7 @@ namespace simbi
                real plm_theta, 
                real engine_duraction,
                real chkpt_interval, 
+               int  chkpt_idx,
                std::string data_directory,
                std::string boundary_condition,
                bool first_order, 

@@ -34,11 +34,10 @@ namespace simbi
         std::vector<sr3d::Primitive> prims;
         std::vector<sr3d::Conserved> cons;
         std::vector<std::vector<real>> sources;
-        float tend, tstart;
-        real plm_theta, hubble_param;
+        real plm_theta, hubble_param, tstart, tend;
         bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, reflecting_theta;
         real dt, decay_const;
-        luint nzones, n, block_size, xphysical_grid, yphysical_grid, zphysical_grid;
+        luint nzones, n, block_size, xphysical_grid, yphysical_grid, zphysical_grid, init_chkpt_idx;
         luint active_zones, idx_active, total_zones;
         std::vector<real> sourceD, sourceS1, sourceS2, sourceS3, sourceTau, pressure_guess;
         CLattice3D coord_lattice;
@@ -151,6 +150,7 @@ namespace simbi
             real plm_theta,
             real engine_duration, 
             real chkpt_interval,
+            int  chkpt_idx,
             std::string data_directory, 
             std::string boundary_condition,
             bool first_order,

@@ -35,9 +35,9 @@ namespace simbi
         std::vector<sr2d::Conserved> cons;
         real plm_theta, hubble_param;
         bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, reflecting_theta;
-        real dt, decay_const;
+        real dt, decay_const, tstart;
         luint nzones, n, block_size, xphysical_grid, yphysical_grid;
-        luint active_zones, idx_active, total_zones;
+        luint active_zones, idx_active, total_zones, init_chkpt_idx;
         std::vector<real> sourceD, sourceS1, sourceS2, sourceTau, pressure_guess;
         CLattice2D coord_lattice;
         simbi::Geometry geometry;
@@ -182,6 +182,7 @@ namespace simbi
             real plm_theta,
             real engine_duration,
             real chkpt_interval,
+            int  chkpt_idx,
             std::string data_directory,
             std::string boundary_condition,
             bool first_order,

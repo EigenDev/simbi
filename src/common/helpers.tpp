@@ -138,7 +138,8 @@ namespace simbi
             setup.x1min = sim_state_host->x1min;
 
             PrimData prods;
-            static double tbefore           = 0.0;
+            static auto step                = sim_state_host->init_chkpt_idx;
+            static autp tbefore             = sim_state_host->tstart;
             static std::string tchunk       = "000000";
             static lint tchunk_order_of_mag = 2;
             const auto time_order_of_mag    = std::floor(std::log10(t));
@@ -153,14 +154,12 @@ namespace simbi
             std::string tnow;
             if (sim_state_host->dlogt != 0)
             {
-                static double step = 0.0;
                 const auto time_order_of_mag = std::floor(std::log10(step));
                 if (time_order_of_mag > tchunk_order_of_mag) {
                     tchunk.insert(0, "0");
                     tchunk_order_of_mag += 1;
                 }
                 tnow = create_step_str(step, tchunk);
-                step++;
             } else {
                 tnow = create_step_str(t_interval, tchunk);
             }
@@ -171,7 +170,9 @@ namespace simbi
 
             setup.t             = t;
             setup.dt            = t - tbefore;
+            setup.chkpt_idx     = step;
             tbefore             = t;
+            step++;
             write_hdf5(data_directory, filename, prods, setup, X, sim_state_host->total_zones);
         }
         

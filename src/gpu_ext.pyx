@@ -6,12 +6,11 @@
 cimport numpy as np 
 
 import numpy as np 
-
+import sys
 from hydro_classes cimport *
 from libcpp.vector cimport vector 
 from libcpp cimport bool
 from libcpp.string cimport string 
-
 
 # Creating the cython wrapper class
 cdef class PyState:
@@ -34,6 +33,7 @@ cdef class PyState:
         real plm_theta,
         real engine_duration,
         real chkpt_interval,
+        int  chkpt_idx,
         string data_directory,
         string boundary_condition,
         bool first_order,
@@ -48,6 +48,7 @@ cdef class PyState:
             plm_theta,
             engine_duration,
             chkpt_interval,
+            chkpt_idx,
             data_directory,
             boundary_condition,
             first_order,
@@ -76,6 +77,7 @@ cdef class PyStateSR:
         real plm_theta, 
         real engine_duration,
         real chkpt_interval, 
+        int  chkpt_idx,
         string data_directory,
         string boundary_condition,
         bool first_order, 
@@ -102,6 +104,7 @@ cdef class PyStateSR:
                 plm_theta, 
                 engine_duration,
                 chkpt_interval, 
+                chkpt_idx,
                 data_directory,
                 boundary_condition,
                 first_order, 
@@ -121,6 +124,7 @@ cdef class PyStateSR:
                 plm_theta, 
                 engine_duration,
                 chkpt_interval, 
+                chkpt_idx,
                 data_directory,
                 boundary_condition,
                 first_order, 
@@ -154,6 +158,7 @@ cdef class PyState2D:
         real plm_theta,
         real engine_duration, 
         real chkpt_interval,
+        int  chkpt_idx,
         string data_directory, 
         string boundary_condition,
         bool first_order,
@@ -168,12 +173,13 @@ cdef class PyState2D:
             plm_theta,
             engine_duration, 
             chkpt_interval,
+            chkpt_idx,
             data_directory,
             boundary_condition, 
             first_order,
             linspace, 
             hllc)
-
+            
         result = np.asarray(result)
         result = result.reshape(5, self.c_state.ny, self.c_state.nx)
 
@@ -206,6 +212,7 @@ cdef class PyStateSR2D:
         real plm_theta,
         real engine_duration,
         real chkpt_interval,
+        int  chkpt_idx,
         string data_directory,
         string boundary_condition,
         bool first_order,
@@ -235,6 +242,7 @@ cdef class PyStateSR2D:
                 plm_theta,
                 engine_duration,
                 chkpt_interval,
+                chkpt_idx,
                 data_directory,
                 boundary_condition,
                 first_order,
@@ -256,6 +264,7 @@ cdef class PyStateSR2D:
                 plm_theta,
                 engine_duration,
                 chkpt_interval,
+                chkpt_idx,
                 data_directory,
                 boundary_condition,
                 first_order,
@@ -300,6 +309,7 @@ cdef class PyStateSR3D:
         real plm_theta,
         real engine_duration,
         real chkpt_interval,
+        int  chkpt_idx,
         string data_directory,
         string boundary_condition,
         bool first_order,
@@ -314,6 +324,7 @@ cdef class PyStateSR3D:
             plm_theta,
             engine_duration,
             chkpt_interval,
+            chkpt_idx,
             data_directory,
             boundary_condition,
             first_order,

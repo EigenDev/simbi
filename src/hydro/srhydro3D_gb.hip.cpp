@@ -951,6 +951,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     real plm_theta,
     real engine_duration, 
     real chkpt_interval,
+    int  chkpt_idx,
     std::string data_directory, 
     std::string boundary_condition,
     bool first_order,
@@ -973,7 +974,11 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->sourceS2       = sources[2];
     this->sourceS3       = sources[3];
     this->sourceTau      = sources[4];
-    this->total_zones    = nx * ny * nz;
+
+    // Define simulation params
+    this->tstart          = tstart;
+    this->init_chkpt_idx  = chkpt_idx;
+    this->total_zones     = nx * ny * nz;
     this->first_order     = first_order;
     this->periodic        = boundary_condition == "periodic";
     this->hllc            = hllc;

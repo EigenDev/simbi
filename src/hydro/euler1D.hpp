@@ -27,14 +27,14 @@ namespace simbi {
         std::vector<real> x1;
         std::string coord_system;
 
-        real plm_theta, tend, dt, engine_duration, t, decay_constant, hubble_param, x1min , x1max, dlogx1, dx1, dlogt;
+        real plm_theta, tend, dt, engine_duration, t, decay_constant, hubble_param, x1min , x1max, dlogx1, dx1, dlogt, tstart;
         bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
 
         
         std::vector<hydro1d::Conserved> cons, cons_n; 
         std::vector<hydro1d::Primitive> prims;
         std::vector<real> xvertices, sourceRho, sourceMom, sourceE;
-        luint nzones, active_zones, idx_active, total_zones, n, nx;
+        luint nzones, active_zones, idx_active, total_zones, n, nx, init_chkpt_idx;
         simbi::SOLVER sim_solver;
         CLattice1D coord_lattice;
         simbi::BoundaryCondition bc;
@@ -139,6 +139,7 @@ namespace simbi {
             real plm_theta,
             real engine_duration,
             real chkpt_luinterval,
+            int  chkpt_idx,
             std::string data_directory,
             std::string boundary_condition,
             bool first_order,

@@ -1123,6 +1123,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     real plm_theta,
     real engine_duration,
     real chkpt_interval,
+    int  chkpt_idx,
     std::string data_directory,
     std::string boundary_condition,
     bool first_order,
@@ -1149,6 +1150,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->sourceS1        = sources[1];
     this->sourceS2        = sources[2];
     this->sourceTau       = sources[3];
+
+    // Define state params
+    this->tstart          = tstart;
+    this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny;
     this->first_order     = first_order;
     this->periodic        = boundary_condition == "periodic";

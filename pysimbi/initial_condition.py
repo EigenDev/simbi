@@ -30,6 +30,11 @@ def load_checkpoint(model, filename, dim, mesh_motion):
             except:
                 ad_gamma = 4./3.
             
+            try:
+                model.ckpt_idx = ds.attrs['chkpt_idx']
+            except:
+                model.chkpt_idx = 0
+            
             if mesh_motion:
                 nx_active = ds.attrs['xactive_zones']
                 if ds.attrs['linspace']:
@@ -90,6 +95,11 @@ def load_checkpoint(model, filename, dim, mesh_motion):
             except:
                 ad_gamma = 4./3.
 
+            try:
+                model.chkpt_idx = ds.attrs['chkpt_idx']
+            except:
+                model.chkpt_idx = 0
+                
             if mesh_motion:
                 nx_active = ds.attrs['xactive_zones']
                 ny_active = ds.attrs['yactive_zones']
@@ -120,14 +130,18 @@ def load_checkpoint(model, filename, dim, mesh_motion):
             scalars = scalars.reshape(ny,nx)
             
             h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
-            
-            W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
+            if ds.attrs['using_gamma_beta']:
+                W = np.sqrt(1 + (v1*v1 + v2 * v2))
+                v1 /= W 
+                v2 /= W
+            else:
+                W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
             model.D    = rho * W              
             model.S1   = W*W*rho*h*v1         
             model.S2   = W*W*rho*h*v2         
             model.tau  = W*W*rho*h - p - rho*W
             model.Dchi = model.D * scalars    
-            model.u = np.array([model.D, model.S1, model.S2, model.tau, model.Dchi])
+            model.u    = np.array([model.D, model.S1, model.S2, model.tau, model.Dchi])
             if mesh_motion:
                 if ds.attrs['boundary_condition'] == 'periodic':
                     model.u   *= volume_factor

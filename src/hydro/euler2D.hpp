@@ -34,9 +34,9 @@ namespace simbi {
         std::vector<hydro2d::Conserved> cons;
         std::vector<hydro2d::Primitive> prims;
         std::vector<real> sourceRho, sourceM1, sourceM2, sourceE;
-        real plm_theta, tend, dt, decay_const, hubble_param;
+        real plm_theta, tend, dt, decay_const, hubble_param, tstart;
         bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, quirk_smoothing, reflecting_theta;
-        luint nzones, active_zones, idx_active, n;
+        luint nzones, active_zones, idx_active, n, init_chkpt_idx;
         luint xphysical_grid, yphysical_grid, total_zones;
         CLattice2D coord_lattice;
         simbi::Solver solver;
@@ -158,6 +158,7 @@ namespace simbi {
             real plm_theta,
             real engine_duration, 
             real chkpt_luinterval,
+            int  chkpt_idx,
             std::string data_directory, 
             std::string boundary_condition,
             bool first_order,

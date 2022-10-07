@@ -174,8 +174,12 @@ namespace simbi
                     att.write(real_type, &setup.x1min);
                     att.close();
 
-                    att = sim_info.createAttribute("Nx", int_type, att_space);
+                    att = sim_info.createAttribute("nx", int_type, att_space);
                     att.write(int_type, &setup.nx);
+                    att.close();
+
+                    att = sim_info.createAttribute("chkpt_idx", int_type, att_space);
+                    att.write(int_type, &setup.chkpt_idx);
                     att.close();
 
                     att = sim_info.createAttribute("xactive_zones", int_type, att_space);
@@ -304,6 +308,10 @@ namespace simbi
 
                     att = sim_info.createAttribute("ny", int_type, att_space);
                     att.write(int_type, &setup.ny);
+                    att.close();
+
+                    att = sim_info.createAttribute("chkpt_idx", int_type, att_space);
+                    att.write(int_type, &setup.chkpt_idx);
                     att.close();
 
                     att = sim_info.createAttribute("xactive_zones", int_type, att_space);
@@ -454,6 +462,10 @@ namespace simbi
 
                     att = sim_info.createAttribute("nz", int_type, att_space);
                     att.write(int_type, &setup.nz);
+                    att.close();
+
+                    att = sim_info.createAttribute("chkpt_idx", int_type, att_space);
+                    att.write(int_type, &setup.chkpt_idx);
                     att.close();
 
                     att = sim_info.createAttribute("xactive_zones", int_type, att_space);

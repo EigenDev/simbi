@@ -422,6 +422,7 @@ class Hydro:
                 
         self.u = np.asarray(self.u)
         self.t = 0
+        self.chkpt_idx = 0
         
         if not chkpt:
             simbi_ic.initializeModel(self, first_order, boundary_condition, scalars, volume_factor=volume_factor)
@@ -461,18 +462,19 @@ class Hydro:
                     kwargs['e_outer'] =  edens_outer
                 
             self.solution = state.simulate(
-                sources = sources,
-                tstart = start_time,
-                tend = tend,
-                dlogt = dlogt,
-                plm_theta = plm_theta,
-                engine_duration = engine_duration,
-                chkpt_interval = chkpt_interval,
-                data_directory = data_directory,
+                sources            = sources,
+                tstart             = start_time,
+                tend               = tend,
+                dlogt              = dlogt,
+                plm_theta          = plm_theta,
+                engine_duration    = engine_duration,
+                chkpt_interval     = chkpt_interval,
+                chkpt_idx          = self.chkpt_idx,
+                data_directory     = data_directory,
                 boundary_condition = boundary_condition,
-                first_order = first_order,
-                linspace = linspace,
-                hllc = hllc,
+                first_order        = first_order,
+                linspace           = linspace,
+                hllc               = hllc,
                 **kwargs)  
                 
         elif self.dimensions == 2:            
@@ -483,19 +485,20 @@ class Hydro:
             kwargs = {}
             if self.regime == "classical":
                 state = PyState2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=coordinates)
-                self.solution = state.simulate(
-                    sources            = sources,
-                    tstart             = start_time,
-                    tend               = tend,
-                    dlogt              = dlogt,
-                    plm_theta          = plm_theta,
-                    engine_duration    = engine_duration,
-                    chkpt_interval     = chkpt_interval,
-                    data_directory     = data_directory,
-                    boundary_condition = boundary_condition,
-                    first_order        = first_order,
-                    linspace           = linspace,
-                    hllc               = hllc) 
+                # self.solution = state.simulate(
+                #     sources            = sources,
+                #     tstart             = start_time,
+                #     tend               = tend,
+                #     dlogt              = dlogt,
+                #     plm_theta          = plm_theta,
+                #     engine_duration    = engine_duration,
+                #     chkpt_interval     = chkpt_interval,
+                #     chkpt_idx          = chkpt_idx,
+                #     data_directory     = data_directory,
+                #     boundary_condition = boundary_condition,
+                #     first_order        = first_order,
+                #     linspace           = linspace,
+                #     hllc               = hllc) 
             else:
                 kwargs = {'a': a, 'adot': adot}
                 if dens_outer and mom_outer and edens_outer:
@@ -505,21 +508,22 @@ class Hydro:
                     kwargs['e_outer']  =  edens_outer
                     
                 state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=coordinates)
-                self.solution = state.simulate(
-                    sources         = sources,
-                    tstart          = start_time,
-                    tend            = tend,
-                    dlogt           = dlogt,
-                    plm_theta       = plm_theta,
-                    engine_duration = engine_duration,
-                    chkpt_interval  = chkpt_interval,
-                    data_directory  = data_directory,
-                    boundary_condition = boundary_condition,
-                    first_order     = first_order,
-                    linspace        = linspace,
-                    hllc            = hllc,
-                    quirk_smoothing = quirk_smoothing,
-                    **kwargs)  
+            self.solution = state.simulate(
+                sources         = sources,
+                tstart          = start_time,
+                tend            = tend,
+                dlogt           = dlogt,
+                plm_theta       = plm_theta,
+                engine_duration = engine_duration,
+                chkpt_interval  = chkpt_interval,
+                chkpt_idx       = self.chkpt_idx,
+                data_directory  = data_directory,
+                boundary_condition = boundary_condition,
+                first_order     = first_order,
+                linspace        = linspace,
+                hllc            = hllc,
+                quirk_smoothing = quirk_smoothing,
+                **kwargs)  
 
         else:
             if (linspace):
@@ -549,6 +553,7 @@ class Hydro:
                 plm_theta       = plm_theta,
                 engine_duration = engine_duration,
                 chkpt_interval  = chkpt_interval,
+                chkpt_idx       = self.chkpt_idx,
                 data_directory  = data_directory,
                 boundary_condition = boundary_condition,
                 first_order     = first_order,

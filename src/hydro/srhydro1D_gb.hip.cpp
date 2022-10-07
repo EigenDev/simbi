@@ -666,6 +666,7 @@ SRHD::simulate1D(
     real plm_theta,
     real engine_duration,
     real chkpt_interval,
+    int  chkpt_idx,
     std::string data_directory,
     std::string boundary_condition,
     bool first_order,
@@ -678,6 +679,8 @@ SRHD::simulate1D(
     std::function<double(double)> e_outer)
 {
     anyDisplayProps();
+    this->tstart          = tstart;
+    this->init_chkpt_idx  = chkpt_idx;
     this->periodic        = boundary_condition == "periodic";
     this->first_order     = first_order;
     this->plm_theta       = plm_theta;

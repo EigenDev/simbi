@@ -738,6 +738,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     real plm_theta,
     real engine_duration, 
     real chkpt_interval,
+    int  chkpt_idx,
     std::string data_directory, 
     std::string boundary_condition,
     bool first_order,
@@ -752,7 +753,9 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
                : dlogt !=0 ? tstart
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
-    // Define the simulation memebers
+    // Define the simulation members
+    this->tstart          = tstart;
+    this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny;
     this->sourceRho       = sources[0];
     this->sourceM1        = sources[1];
