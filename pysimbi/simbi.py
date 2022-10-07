@@ -485,20 +485,6 @@ class Hydro:
             kwargs = {}
             if self.regime == "classical":
                 state = PyState2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=coordinates)
-                # self.solution = state.simulate(
-                #     sources            = sources,
-                #     tstart             = start_time,
-                #     tend               = tend,
-                #     dlogt              = dlogt,
-                #     plm_theta          = plm_theta,
-                #     engine_duration    = engine_duration,
-                #     chkpt_interval     = chkpt_interval,
-                #     chkpt_idx          = chkpt_idx,
-                #     data_directory     = data_directory,
-                #     boundary_condition = boundary_condition,
-                #     first_order        = first_order,
-                #     linspace           = linspace,
-                #     hllc               = hllc) 
             else:
                 kwargs = {'a': a, 'adot': adot, 'quirk_smoothing': quirk_smoothing}
                 if dens_outer and mom_outer and edens_outer:
