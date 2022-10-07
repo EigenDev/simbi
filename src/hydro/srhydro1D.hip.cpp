@@ -857,7 +857,8 @@ SRHD::simulate1D(
             write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
         }
     } else {
-        try {
+        // try 
+        {
             while (t < tend && !inFailureState)
             {
                 helpers::recordEvent(t1);
@@ -926,11 +927,12 @@ SRHD::simulate1D(
                     simbi::gpu::api::deviceSynch();
                 
             }
-        } catch (helpers::InterruptException &e) {
-            writeln("{}", e.what());
-            t_interval = INFINITY;
-            write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-        }   
+        } 
+        // catch (helpers::InterruptException &e) {
+        //     writeln("{}", e.what());
+        //     t_interval = INFINITY;
+        //     write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
+        // }   
     }
     if (ncheck > 0) {
          writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
