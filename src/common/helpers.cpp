@@ -7,6 +7,7 @@
 #include "helpers.hpp" 
 #include "hydro_structs.hpp"
 
+volatile sig_atomic_t killFlag = 0;
 using namespace H5;
 namespace simbi
 {
@@ -25,10 +26,16 @@ namespace simbi
         void catch_signals() {
             // Adapted from answer to "How can I catch a ctrl-c event? (C++)"
             struct sigaction sigBreakHandler;
-            sigBreakHandler.sa_handler = [](int stat) {throw InterruptException(stat) ;};
+            sigBreakHandler.sa_handler = [](int sig) {killFlag = 1;};
             sigemptyset(&sigBreakHandler.sa_mask);
             sigBreakHandler.sa_flags = 0;
-            sigaction(SIGINT, &sigBreakHandler, NULL);
+            sigaction(SIGINT,  &sigBreakHandler, NULL);
+            sigaction(SIGTERM, &sigBreakHandler, NULL);
+            sigaction(SIGKILL, &sigBreakHandler, NULL);
+            if (killFlag) {
+                throw helpers::InterruptException(1);
+                killFlag = 0;
+            }
         }
 
         // void catch_signals() {
