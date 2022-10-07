@@ -139,7 +139,7 @@ namespace simbi
 
             PrimData prods;
             static auto step                = sim_state_host->init_chkpt_idx;
-            static autp tbefore             = sim_state_host->tstart;
+            static auto tbefore             = sim_state_host->tstart;
             static std::string tchunk       = "000000";
             static lint tchunk_order_of_mag = 2;
             const auto time_order_of_mag    = std::floor(std::log10(t));
