@@ -1,5 +1,5 @@
 project('pysimbi', 'c', 'cpp', 'cython',
-    version : run_command('python', 'pysimbi/version.py', check: true).stdout().strip(), 
+    version : files('pysimbi/VERSION'), 
     license : 'MIT',
     default_options : [ 'cpp_std=c++17' ],
 )
