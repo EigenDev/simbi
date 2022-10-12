@@ -5,7 +5,7 @@ import time
 import matplotlib.pyplot as plt 
 import argparse 
 import sys 
-from pysimbi import Hydro
+from pysimbi import Hydro, print_problem_params
     
 def main():
     parser = argparse.ArgumentParser(description='Sod Shock Tube Params')
@@ -18,14 +18,11 @@ def main():
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
     parser.add_argument('--forder',           help= 'First order flag', action='store_true', default=False)
-    parser.add_argument('--bc',               help= 'Boundary condition', dest='boundc', default='outflow', type=str, choices=['periodic', 'outflow'])
+    parser.add_argument('--bc',               help= 'Boundary condition', default='outflow', type=str, choices=['periodic', 'outflow'])
     args = parser.parse_args()
     
-    print("\nProblem paramters:\n")
-    for arg in vars(args):
-        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
-    print("\n")
-    
+    print_problem_params(args, parser)
+    zzz = input("Press Enter key to continue...")
     sod   = ((1.0,1.0,0.0),(0.1,0.125,0.0))
     fig, ax = plt.subplots(1, 1, figsize=(10,10))
 
@@ -40,7 +37,7 @@ def main():
         'tend': args.tend,
         'first_order': args.forder,
         'compute_mode': args.mode,
-        'boundary_condition': args.boundc,
+        'boundary_condition': args.bc,
         'cfl': args.cfl,
         'hllc': False,
         'linspace': True,

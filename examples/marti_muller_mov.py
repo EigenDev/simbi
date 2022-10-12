@@ -5,7 +5,7 @@ import time
 import argparse
 import matplotlib.pyplot as plt 
 import sys
-from pysimbi import Hydro
+from pysimbi import Hydro, print_problem_params
 
 if sys.version_info <= (3,9):
     action = 'store_false'
@@ -25,14 +25,11 @@ def main():
     parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
     parser.add_argument('--adot',             help = 'speed of moving mesh faces in units of c', dest='adot', type=float, default=0.1)
     parser.add_argument('--forder',           help= 'First order flag', action='store_true', default=False)
-    parser.add_argument('--bc',               help= 'Boundary condition', dest='boundc', default='outflow', type=str, choices=['periodic', 'outflow'])
+    parser.add_argument('--bc',               help= 'Boundary condition', default='outflow', type=str, choices=['periodic', 'outflow'])
     args = parser.parse_args()
     
-    print("\nProblem paramters:\n")
-    for arg in vars(args):
-        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
-    print("\n")
-    
+    print_problem_params(args, parser)
+    zzz = input("Press Enter key to continue...")
     fig, axs = plt.subplots(3, 1, figsize=(9,9), sharex=True)
     xmin, xmax = 0.0, 1.0 
     xmid       = (xmax - xmin) * 0.5 
@@ -73,7 +70,7 @@ def main():
             'tend': args.tend,
             'first_order': args.forder,
             'compute_mode': args.mode,
-            'boundary_condition': args.boundc,
+            'boundary_condition': args.bc,
             'cfl': args.cfl,
             'hllc': False,
             'linspace': True,

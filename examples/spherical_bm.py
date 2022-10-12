@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import argparse
-from pysimbi import Hydro 
+from pysimbi import Hydro, print_problem_params 
 import sys
 from astropy import units as u
 
@@ -50,16 +50,12 @@ def main():
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
     parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
     parser.add_argument('--forder',           help = 'First order flag', action='store_true', default=False)
-    parser.add_argument('--bc',               help = 'Boundary condition', dest='boundc', default='outflow', type=str, choices=['periodic', 'outflow'])
+    parser.add_argument('--bc',               help = 'Boundary condition', default='outflow', type=str, choices=['periodic', 'outflow'])
     parser.add_argument('--e_scale',          help = 'energy scale in units of 1e53 erg', dest='e_scale', type=float, default=1.0)
     parser.add_argument('--omega',            help = 'density power law index', dest='omega', type=float, default=2.0)
     args = parser.parse_args()
     
-    print("\nProblem paramters:\n")
-    for arg in vars(args):
-        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
-    print("\n")
-    
+    print_problem_params(args, parser)
     def find_nearest(array, value):
         array = np.asarray(array)
         idx   = (np.abs(array - value)).argmin()
@@ -110,7 +106,7 @@ def main():
 
     print("Central Pressure:", p_c)
     print("Dimensions: {} x {}".format(ntheta, nr))
-    zzz = input("Press any key to continue...")
+    zzz = input("Press Enter key to continue...")
 
     vx = np.zeros((ntheta ,nr))
     vy = np.zeros((ntheta ,nr))
@@ -125,7 +121,7 @@ def main():
         'tend': args.tend,
         'first_order': args.forder,
         'compute_mode': args.mode,
-        'boundary_condition': args.boundc,
+        'boundary_condition': args.bc,
         'cfl': args.cfl,
         'hllc': args.hllc,
         'linspace': False,

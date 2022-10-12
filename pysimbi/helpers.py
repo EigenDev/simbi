@@ -1,5 +1,4 @@
 import numpy as np 
-
 def calc_cell_volume1D(r: np.ndarray) -> np.ndarray:
     rvertices = np.sqrt(r[1:] * r[:-1])
     rvertices = np.insert(rvertices,  0, r[0])
@@ -20,3 +19,14 @@ def calc_cell_volume2D(r: np.ndarray, theta: np.ndarray) -> np.ndarray:
     rvertices = np.insert(rvertices, rvertices.shape[1], rr[:, -1], axis=1)
     dr        = rvertices[:, 1:] - rvertices[:, :-1]
     return (2.0 * np.pi *  (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos)
+
+def print_problem_params(args, parser) -> None:
+    print("\nProblem paramters:")
+    print("="*90)
+    for arg in vars(args):
+        description = parser._option_string_actions[f'--{arg}'].help
+        val = getattr(args, arg)
+        if (isinstance(val ,float)):
+            val = round(val, 3)
+        val = str(val)
+        print(f"{arg:.<30} {val:<15} {description}")

@@ -12,7 +12,7 @@ try:
 except:
     print("Can't find CMasher, so defaulting to matplotlib colors")
 
-from pysimbi import Hydro 
+from pysimbi import Hydro, print_problem_params 
 from astropy import units as u 
 
 if sys.version_info <= (3,9):
@@ -35,11 +35,8 @@ def main():
     parser.add_argument('--forder',           help= ' First order flag', action=action, default=False)
     args = parser.parse_args()
     
-    print("\nProblem paramters:\n")
-    for arg in vars(args):
-        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
-    print("\n")
-    
+    print_problem_params(args, parser)
+    zzz = input("Press Enter key to continue...")
     xmin = -0.5
     xmax = 0.5
     ymin = -0.5

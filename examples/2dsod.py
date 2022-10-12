@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import time
 import argparse
 import sys
-from pysimbi import Hydro 
+from pysimbi import Hydro, print_problem_params 
 from astropy import units as u
 
 if sys.version_info <= (3,9):
@@ -23,15 +23,13 @@ def main():
     parser.add_argument('--cfl',              help = 'Courant-Friedrichs-Lewy number', dest='cfl', type=float, default=0.1)
     parser.add_argument('--forder', '-f',     help = 'first order flag', dest='forder', action='store_true', default=False)
     parser.add_argument('--plm_theta',        help = 'piecewise linear reconstruction parameter', dest='plm_theta', type=float, default=1.5)
-    parser.add_argument('--bc', '-bc',        help = 'boundary condition', dest='boundc', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
+    parser.add_argument('--bc', '-bc',        help = 'boundary condition', type=str, default='outflow', choices=['outflow', 'inflow', 'reflecting', 'periodic'])
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/')     
     args = parser.parse_args()
     
-    print("\nProblem paramters:\n")
-    for arg in vars(args):
-        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
-    print("\n")
+    print_problem_params(args, parser)
+    zzz = input("Press Enter key to continue...")
     
     theta_min = 0
     theta_max = np.pi/2
@@ -76,7 +74,7 @@ def main():
             'tend': args.tend,
             'first_order': args.forder,
             'compute_mode': args.mode,
-            'boundary_condition': args.boundc,
+            'boundary_condition': args.bc,
             'cfl':  args.cfl,
             'hllc': False,
             'linspace': False,

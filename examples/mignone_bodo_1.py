@@ -5,7 +5,7 @@ import time
 import argparse
 import matplotlib.pyplot as plt 
 import sys 
-from pysimbi import Hydro
+from pysimbi import Hydro, print_problem_params
 
 if sys.version_info <= (3,9):
     action = 'store_false'
@@ -24,15 +24,12 @@ def main():
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
     parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
     parser.add_argument('--forder',           help= 'First order flag', action='store_true', default=False)
-    parser.add_argument('--bc',               help= 'Boundary condition', dest='boundc', default='outflow', type=str, choices=['periodic', 'outflow'])
+    parser.add_argument('--bc',               help= 'Boundary condition', default='outflow', type=str, choices=['periodic', 'outflow'])
     parser.add_argument('--prob2',            help='flag for problem 2', default=False, action='store_true')
     args = parser.parse_args()
     
-    print("\nProblem paramters:\n")
-    for arg in vars(args):
-        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
-    print("\n")
-
+    print_problem_params(args, parser)
+    zzz = input("Press Enter key to continue...")
     if args.prob2:
         rhol = 1 
         rhor = 10 
@@ -62,7 +59,7 @@ def main():
         'tend': args.tend,
         'first_order': args.forder,
         'compute_mode': args.mode,
-        'boundary_condition': args.boundc,
+        'boundary_condition': args.bc,
         'cfl': args.cfl,
         'hllc': True,
         'linspace': True,

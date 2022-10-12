@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 import sys
-from pysimbi import Hydro
+from pysimbi import Hydro, print_problem_params
 
 if sys.version_info <= (3,9):
     action = 'store_false'
@@ -40,11 +40,8 @@ def main():
     parser.add_argument('--alpha',            help = 'wave amplitude', type=range_limited_float_type, default=0.5)
     args = parser.parse_args()
     
-    print("\nProblem paramters:\n")
-    for arg in vars(args):
-        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
-    print("\n")
-    
+    print_problem_params(args, parser)
+    zzz = input("Press Enter key to continue...")
     # Define Constants 
     gamma   = args.gamma
     alpha   = args.alpha
