@@ -21,6 +21,11 @@ def main():
     parser.add_argument('--tex',              help = 'flag for latex plot rendering', dest='tex', action='store_true', default=False)
     args = parser.parse_args()
     
+    print("\nProblem paramters:\n")
+    for arg in vars(args):
+        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
+    print("\n")
+    
     if args.tex:
         plt.rc('text', usetex=True)
         

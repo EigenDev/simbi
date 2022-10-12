@@ -27,6 +27,11 @@ def main():
     parser.add_argument('--bc',               help= 'Boundary condition', dest='boundc', default='outflow', type=str, choices=['periodic', 'outflow'])
     parser.add_argument('--prob2',            help='flag for problem 2', default=False, action='store_true')
     args = parser.parse_args()
+    
+    print("\nProblem paramters:\n")
+    for arg in vars(args):
+        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
+    print("\n")
 
     if args.prob2:
         rhol = 1 

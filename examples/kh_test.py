@@ -34,6 +34,12 @@ def main():
     parser.add_argument('--cmap', '-c',       help = 'colormap for output plot', dest='cmap', type=str, default='gist_ncar')
     parser.add_argument('--forder',           help= ' First order flag', action=action, default=False)
     args = parser.parse_args()
+    
+    print("\nProblem paramters:\n")
+    for arg in vars(args):
+        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
+    print("\n")
+    
     xmin = -0.5
     xmax = 0.5
     ymin = -0.5

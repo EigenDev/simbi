@@ -29,8 +29,13 @@ def main():
     parser.add_argument('--mode', '-m',       help = 'compute mode [gpu,cpu]', dest='mode', type=str, default='cpu', choices=['gpu', 'cpu'])    
     parser.add_argument('--data_dir', '-d',   help = 'data directory', dest='data_dir', type=str, default='data/') 
     parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
-    
     args = parser.parse_args()
+    
+    print("\nProblem paramters:\n")
+    for arg in vars(args):
+        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
+    print("\n")
+    
     def find_nearest(array, value):
         array = np.asarray(array)
         idx = (np.abs(array - value)).argmin()

@@ -25,6 +25,12 @@ def main():
     parser.add_argument('--forder',           help= 'First order flag', action='store_true', default=False)
     parser.add_argument('--bc',               help= 'Boundary condition', dest='boundc', default='outflow', type=str, choices=['periodic', 'outflow'])
     args = parser.parse_args()
+    
+    print("\nProblem paramters:\n")
+    for arg in vars(args):
+        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
+    print("\n")
+    
     fig, axs = plt.subplots(3, 1, figsize=(9,9), sharex=True)
     xmin, xmax = 0.0, 1.0 
     xmid       = (xmax - xmin) * 0.5 

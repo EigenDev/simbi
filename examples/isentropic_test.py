@@ -39,6 +39,12 @@ def main():
     parser.add_argument('--hllc',             help = 'HLLC flag', dest='hllc', action=action, default=True)
     parser.add_argument('--alpha',            help = 'wave amplitude', type=range_limited_float_type, default=0.5)
     args = parser.parse_args()
+    
+    print("\nProblem paramters:\n")
+    for arg in vars(args):
+        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
+    print("\n")
+    
     # Define Constants 
     gamma   = args.gamma
     alpha   = args.alpha

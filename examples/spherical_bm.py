@@ -54,6 +54,12 @@ def main():
     parser.add_argument('--e_scale',          help = 'energy scale in units of 1e53 erg', dest='e_scale', type=float, default=1.0)
     parser.add_argument('--omega',            help = 'density power law index', dest='omega', type=float, default=2.0)
     args = parser.parse_args()
+    
+    print("\nProblem paramters:\n")
+    for arg in vars(args):
+        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
+    print("\n")
+    
     def find_nearest(array, value):
         array = np.asarray(array)
         idx   = (np.abs(array - value)).argmin()

@@ -55,6 +55,12 @@ def main():
     parser.add_argument('--omega',            help = 'density power law index', dest='omega', type=float, default=2.0)
     parser.add_argument('--vouter',           help = 'velocity scale of each moving face in units of c', dest='vouter', default=0.1, type=float)
     args = parser.parse_args()
+    
+    print("\nProblem paramters:\n")
+    for arg in vars(args):
+        print(f"{str(arg).ljust(30, '.')} {getattr(args, arg)}")
+    print("\n")
+    
     def find_nearest(array, value):
         array = np.asarray(array)
         idx   = (np.abs(array - value)).argmin()
