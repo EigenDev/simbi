@@ -22,7 +22,7 @@ else:
     
 def main():
     parser = argparse.ArgumentParser(description="KH Instability Test")
-    parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=5/3)
+    parser.add_argument('--gamma', '-g',      help = 'adiabatic gas index', dest='gamma', type=float, default=5/3)
     parser.add_argument('--tend', '-t',       help = 'simulation end time', dest='tend', type=float, default=0.1)
     parser.add_argument('--nzones', '-n',     help = 'number of x,y zones', dest='nzones', type=int, default=512)
     parser.add_argument('--chint',            help = 'checkpoint interval', dest='chint', type=float, default=0.1)

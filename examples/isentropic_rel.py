@@ -28,7 +28,7 @@ def range_limited_float_type(arg):
 
 def main():
     parser = argparse.ArgumentParser(description='Relativistic Isentropic Wave Params')
-    parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=4/3)
+    parser.add_argument('--gamma', '-g',      help = 'adiabatic gas index', dest='gamma', type=float, default=4/3)
     parser.add_argument('--tend', '-t',       help = 'simulation end time', dest='tend', type=float, default=0.1)
     parser.add_argument('--npolar', '-n',     help = 'number of polar zones', dest='npolar', type=int, default=512)
     parser.add_argument('--chint',            help = 'checkpoint interval', dest='chint', type=float, default=0.1)

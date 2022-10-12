@@ -14,7 +14,7 @@ else:
     
 def main():
     parser = argparse.ArgumentParser(description='Marti and Muller Test Problem 1 Params')
-    parser.add_argument('--gamma', '-g',      help = 'adbatic gas index', dest='gamma', type=float, default=1.4)
+    parser.add_argument('--gamma', '-g',      help = 'adiabatic gas index', dest='gamma', type=float, default=1.4)
     parser.add_argument('--tend', '-t',       help = 'simulation end time', dest='tend', type=float, default=0.4)
     parser.add_argument('--nzones', '-n',     help = 'number of x,y zones', dest='nzones', type=int, default=512)
     parser.add_argument('--chint',            help = 'checkpoint interval', dest='chint', type=float, default=0.1)
