@@ -1381,16 +1381,21 @@ def plot_vs_time(
     time: np.ndarray,
     data: np.ndarray,
     ylog: bool = False) -> None:
+    
     xlabel = util.get_field_str(args)
     ax.set_xlabel(r'$t$')
     ax.set_ylabel(f"Max {xlabel}")
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
-    # ax.set_xlim(0.5, 2.0)
-    # ax.scatter(time, data, label=label, s=80, facecolors='none', edgecolors=color)
-    ax.scatter(time, data, label=label, color=color, alpha=0.3)
+    time = np.asarray(time)
+    ax.plot(time, data, label=label, color=color, alpha=0.3)
+    if args.fields[0] == 'gamma_beta':
+        max_idx = np.argmax(data)
+        ax.plot(time[max_idx:], data[max_idx] * (time[max_idx:] / time[max_idx]) ** (-3/2), label ='$\propto t^{-3/2}$', color='black', linestyle='--')
+        ax.plot(time[max_idx:], data[max_idx] * np.exp(1.0 - time[max_idx:] / time[max_idx]), label ='$\propto \exp(-t)$', color='red', linestyle='--')
+        
     if args.log:
-        ax.set(xscale = 'log')
+        ax.set_xscale('log')
         if ylog:
             ax.set(yscale = 'log')
     
@@ -1545,6 +1550,7 @@ def main():
                     times              += [setup['time']]
 
                 plot_vs_time(args, ax, label, colors[0], times, max_vars, ylog = (args.fields[0] not in lin_fields))
+                ax.legend()
             else:
                 for idx, file in enumerate(flist):
                     fields, setup, mesh = util.read_2d_file(args, file)

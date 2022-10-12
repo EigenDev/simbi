@@ -423,7 +423,7 @@ def read_1d_file(filename: str) -> dict:
         rho         = hf.get('rho')[:]
         v           = hf.get('v')[:]
         p           = hf.get('p')[:]
-        nx          = ds.attrs['Nx']
+        nx          = ds.attrs['nx']
         t           = ds.attrs['current_time']
         try:
             x1max = ds.attrs['x1max']

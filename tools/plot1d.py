@@ -24,7 +24,7 @@ except:
 
 derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'mach']
 field_choices = ['rho', 'c', 'p', 'gamma_beta', 'chi'] + derived
-
+lin_fields    = ['chi', 'gamma_beta']
 def plot_profile(args, fields, mesh, setup, ax = None, overplot = False, subplot = False, case = 0):
     ncols = len(args.filename) * len(args.fields)
     vmin, vmax = args.clims 
@@ -65,13 +65,17 @@ def plot_profile(args, fields, mesh, setup, ax = None, overplot = False, subplot
         if len(args.fields) > 1:
             label = field_labels[idx] + ' ' + label
             
-        # print(case % ncols)
         ax.plot(r, var * unit_scale, color=colors[case], label=label, linestyle=next(linecycler))
+        if case == 0:
+            if args.fields[0] == 'gamma_beta':
+                max_idx = np.argmax(var)
+                ax.plot(r[max_idx:], var[max_idx] * (r[max_idx:] / r[max_idx]) ** (-3/2), label='$\propto r^{-3/2}$', color='black', linestyle='--')
 
     ax.tick_params(axis='both')
     if args.log:
         ax.set_xscale('log')
-        ax.set_yscale('log')
+        if args.fields[0] not in lin_fields:
+            ax.set_yscale('log')
     elif not setup['linspace']:
         ax.set_xscale('log')
     
