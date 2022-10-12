@@ -440,7 +440,7 @@ class Hydro:
         if not os.path.exists(data_directory):
             # Create a new directory because it does not exist 
             os.makedirs(data_directory)
-            print("No default data directory specified. Creating one...!", flush=True)
+            print("The data directory provided does not exist. Creating the: {data_directory}!", flush=True)
         
         if first_order:
             print("Computing First Order Solution...", flush=True)
