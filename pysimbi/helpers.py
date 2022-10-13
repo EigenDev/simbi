@@ -22,7 +22,7 @@ def calc_cell_volume2D(r: np.ndarray, theta: np.ndarray) -> np.ndarray:
 
 def print_problem_params(args, parser) -> None:
     print("\nProblem paramters:")
-    print("="*90)
+    print("="*80)
     for arg in vars(args):
         description = parser._option_string_actions[f'--{arg}'].help
         val = getattr(args, arg)
