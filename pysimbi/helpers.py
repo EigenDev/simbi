@@ -29,4 +29,4 @@ def print_problem_params(args, parser) -> None:
         if (isinstance(val ,float)):
             val = round(val, 3)
         val = str(val)
-        print(f"{arg:.<30} {val:<15} {description}")
+        print(f"{arg:.<30} {val:<15} {description}", flush = True)
