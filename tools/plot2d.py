@@ -118,24 +118,24 @@ def plot_polar_plot(
         for field in args.fields:
             if field in derived:
                 if x2max == np.pi:
-                    var += np.split(util.prims2var(fields, field), 2)
+                    var += np.array_split(util.prims2var(fields, field), 2)
                 else:
                     var.append(util.prims2var(fields, field))
             else:
                 if x2max == np.pi:
-                    var += np.split(fields[field], 2)
+                    var += np.array_split(fields[field], 2)
                 else:
                     var.append(fields[field])
                 
         if x2max == np.pi: 
             units  = np.repeat(units, 2)
             
-        var    = np.asarray(var)
-        var    = np.array([units[idx] * var[idx] for idx in range(var.shape[0])])
+        var    = np.asarray(var, dtype='object')
+        var    = np.array([units[idx] * var[idx] for idx in range(var.shape[0])], dtype='object')
         
-        tchop  = np.split(tt, 2)
-        trchop = np.split(t2, 2)
-        rchop  = np.split(rr, 2)
+        tchop  = np.array_split(tt, 2)
+        trchop = np.array_split(t2, 2)
+        rchop  = np.array_split(rr, 2)
         
         quadr = {}
         field1 = args.fields[0]
@@ -1548,7 +1548,6 @@ def main():
                     max_var             = np.max(var[tidx])
                     max_vars           += [max_var]
                     times              += [setup['time']]
-
                 plot_vs_time(args, ax, label, colors[0], times, max_vars, ylog = (args.fields[0] not in lin_fields))
                 ax.legend()
             else:
