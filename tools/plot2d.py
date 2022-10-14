@@ -5,20 +5,21 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr
 import matplotlib.colors as mcolors
 import argparse 
-import h5py 
-import astropy.constants as const
 import astropy.units as u 
-import mpl_toolkits.axisartist.floating_axes as floating_axes
 import utility as util 
-
-from utility import DEFAULT_SIZE, SMALL_SIZE, BIGGER_SIZE
-from matplotlib.transforms import Affine2D
+import sys 
+from utility import DEFAULT_SIZE, SMALL_SIZE
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from typing import Union
 from matplotlib.offsetbox import AnchoredText
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from itertools import cycle
 
+if sys.version_info <= (3,9):
+    action = 'store_false'
+else:
+    action = argparse.BooleanOptionalAction
+    
 try:
     import cmasher as cmr 
 except:
@@ -1388,11 +1389,15 @@ def plot_vs_time(
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     time = np.asarray(time)
-    ax.plot(time, data, label=label, color=color, alpha=0.3)
+    data = np.asarray(data)
+    ax.plot(time, data, label=label, color=color, alpha=1.0)
     if args.fields[0] == 'gamma_beta':
-        max_idx = np.argmax(data)
-        ax.plot(time[max_idx:], data[max_idx] * (time[max_idx:] / time[max_idx]) ** (-3/2), label ='$\propto t^{-3/2}$', color='black', linestyle='--')
-        ax.plot(time[max_idx:], data[max_idx] * np.exp(1.0 - time[max_idx:] / time[max_idx]), label ='$\propto \exp(-t)$', color='red', linestyle='--')
+        max_idx      = np.argmax(data)
+        beta         = data / (1 + data**2)**0.5
+        scale_factor = 1.0 * time[max_idx:] 
+        norm         = 1.0 * time[max_idx]
+        ax.plot(time[max_idx:], data[max_idx] * (scale_factor / norm) ** (-3/2), label =r'$\propto t^{-3/2}$', color=color, linestyle='--')
+        ax.plot(time[max_idx:], data[max_idx] * np.exp(1.0 - scale_factor / norm), label =r'$\propto \exp(-t)$', color=color, linestyle='-.')
         
     if args.log:
         ax.set_xscale('log')
@@ -1452,7 +1457,7 @@ def main():
     parser.add_argument('--png', dest='png', action= 'store_true', default=False)
     parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
     parser.add_argument('--fig_dims', dest='fig_dims', default = [4, 4], type=float, nargs=2)
-    parser.add_argument('--legend', dest='legend', default=True, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--legend', dest='legend', default=True, action=action)
     parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=None, nargs='+')
     parser.add_argument('--plot_max_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
     parser.add_argument('--save', dest='save', type=str,default=None,help='Save the fig with some name')
@@ -1596,10 +1601,10 @@ def main():
             # ax.set_xlim(0.5, 2.0)
             ax.spines['right'].set_visible(False)
             ax.spines['top'].set_visible(False)
-            max_vars = []
-            times = []
             colors = ['red', 'black']
             for key in flist.keys():
+                max_vars = []
+                times = []
                 label = args.labels[key] if args.labels else key
                 for idx, file in enumerate(flist[key]):
                     fields, setup, mesh = util.read_2d_file(args, file)
