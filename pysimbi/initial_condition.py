@@ -164,16 +164,16 @@ def load_checkpoint(model, filename, dim, mesh_motion):
 
 def initializeModel(model, first_order = False, boundary_condition = "outflow", scalars = 0, volume_factor = 1):
     # Check if u-array is empty. If it is, generate an array.
-    if model.dimensions == 1:
+    if model.dimensionality  == 1:
         if not model.u.any():
             if boundary_condition == "periodic":
                 if model.regime == "classical":
-                    model.u = np.empty(shape = (model.n_vars, model.Npts), dtype = float)
+                    model.u = np.empty(shape = (3, model.dimensions), dtype = float)
                     
                     model.u[:, :] = np.array([model.init_rho, model.init_rho*model.init_v, 
                                             model.init_energy])
                 else:
-                    model.u = np.empty(shape = (model.n_vars, model.Npts), dtype = float)
+                    model.u = np.empty(shape = (3, model.dimensions), dtype = float)
                     
                     model.u[:, :] = np.array([model.initD, model.initS, 
                                             model.init_tau])
@@ -182,12 +182,12 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
             else:
                 if first_order:
                     if model.regime == "classical":
-                        model.u = np.empty(shape = (model.n_vars, model.Npts), dtype=float)
+                        model.u = np.empty(shape = (3, model.dimensions), dtype=float)
                         model.u[:, :] = np.array([model.init_rho, model.init_rho*model.init_v, 
                                             model.init_energy])
                         
                     else:
-                        model.u = np.empty(shape = (model.n_vars, model.Npts), dtype=float)
+                        model.u = np.empty(shape = (3, model.dimensions), dtype=float)
                         model.u[:, :] = np.array([model.initD, model.initS, 
                                             model.init_tau])
                     
@@ -200,11 +200,11 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                     model.u = np.insert(model.u, 0, left_ghost , axis=1)
                 else:
                     if model.regime == "classical":
-                        model.u = np.empty(shape = (model.n_vars, model.Npts), dtype=float)
+                        model.u = np.empty(shape = (3, model.dimensions), dtype=float)
                         model.u[:, :] = np.array([model.init_rho, model.init_rho*model.init_v, 
                                             model.init_energy])
                     else:
-                        model.u = np.empty(shape = (model.n_vars, model.Npts), dtype=float)
+                        model.u = np.empty(shape = (3, model.dimensions), dtype=float)
                         model.u[:, :] = np.array([model.initD, model.initS, 
                                             model.init_tau])
                         
@@ -233,9 +233,9 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                     model.u = np.insert(model.u, 0, (left_ghost,left_ghost) , axis=1)
                 
                     
-    elif model.dimensions == 2:
+    elif model.dimensionality  == 2:
         if not model.u.any():
-            model.u = np.empty(shape = (model.n_vars+1, model.yNpts, model.xNpts), dtype=float)
+            model.u = np.empty(shape = (5, model.ydimensions, model.xdimensions), dtype=float)
             if model.regime == "classical":
                 model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,
                                         model.init_rho*model.init_vy, model.init_energy, model.init_rho * scalars])
@@ -285,7 +285,7 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
     else:
         if not model.u.any():
             if boundary_condition == "periodic":
-                model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype = float)
+                model.u = np.empty(shape = (5, model.zdimensions, model.ydimensions, model.xdimensions), dtype = float)
                 
                 model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,
                                             model.init_rho*model.init_vy, model.init_rho*model.init_vz,
@@ -294,7 +294,7 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                 model.u *= volume_factor
             else:
                 if model.regime == "classical":
-                    model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype=float)
+                    model.u = np.empty(shape = (5, model.zdimensions, model.ydimensions, model.xdimensions), dtype=float)
                     model.u[:, :, :, :] = np.array([model.init_rho, 
                                                     model.init_rho*model.init_vx,
                                                     model.init_rho*model.init_vy,
@@ -302,7 +302,7 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                                                     model.init_energy])
                     model.u *= volume_factor
                 else:
-                    model.u = np.empty(shape = (model.n_vars, model.zNpts, model.yNpts, model.xNpts), dtype=float)
+                    model.u = np.empty(shape = (5, model.zdimensions, model.ydimensions, model.xdimensions), dtype=float)
                     model.u[:, :, :] = np.array([model.initD, model.initS1,
                                                 model.initS2, model.initS3, model.init_tau])
                     model.u *= volume_factor
