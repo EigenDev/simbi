@@ -12,7 +12,7 @@ import warnings
 from typing import Callable
 
 regimes             = ['classical', 'relativistic']
-coord_systems       = ['spherical', 'cartesian'] #TODO: Implement Cylindrical
+coord_systems       = ['spherical', 'cartesian'] # TODO: Implement Cylindrical
 boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
 
 class Hydro:
@@ -20,11 +20,12 @@ class Hydro:
     def __init__(self, 
                  gamma: float,
                  initial_state: tuple,
-                 Npts: tuple,
+                 dimensions: tuple,
                  geometry: tuple=None,
                  n_vars: int = 3,
                  coord_system:str = 'cartesian',
-                 regime: str = "classical"):
+                 regime: str = "classical",
+                 setup = None):
         """
         The initial conditions of the hydrodynamic system (1D for now)
         
@@ -35,7 +36,7 @@ class Hydro:
                                             Ex. state = ((1.0, 1.0, 0.0), (0.1,0.125,0.0)) for Sod Shock Tube
                                             state = (array_like rho, array_like pressure, array_like velocity)
                                     
-            Npts (int, tuple):              Number of grid points in 1D/2D Coordinate Lattice
+            dimensions (int, tuple):              Number of grid points in 1D/2D Coordinate Lattice
             
             geometry (tuple):               The first starting point, the last, and an optional midpoint in the grid
                                             Ex. geometry = (0.0, 1.0, 0.5) for Sod Shock Tube
@@ -51,12 +52,27 @@ class Hydro:
         Return:
             None
         """
-        # TODO: Add an example Instantiation Here for the Sod Problem
+        if setup:
+            coord_system                  = setup.coord_system 
+            regime                        = setup.regime 
+            initial_state                 = setup.initial_state 
+            gamma                         = setup.gamma 
+            dimensions                    = setup.dimensions 
+            geometry                      = setup.geometry 
+            self.linspace                 = setup.linspace 
+            self.sources                  = setup.sources 
+            self.scalars                  = setup.scalars 
+            self.scale_factor             = setup.scale_factor 
+            self.scale_factor_derivative  = setup.scale_factor_derivative
+            self.edens_outer              = setup.edens_outer
+            self.mom_outer                = setup.mom_outer 
+            self.dens_outer               = setup.dens_outer 
+        
         if coord_system not in coord_systems:
-            raise ValueError("Invalid coordinate system. Expected one of: %s" % coord_systems)
+            raise ValueError(f"Invalid coordinate system. Expected one of: {coord_systems}")
         
         if regime not in regimes:
-            raise ValueError("Invalid simulation regime. Expected one of: %s" % regimes)
+            raise ValueError(f"Invalid simulation regime. Expected one of: {regimes}")
         
         self.coord_system = coord_system
         self.regime       = regime
@@ -84,21 +100,19 @@ class Hydro:
                     "of 4 state variables", flush=True)
                 
             elif len(left_state) == 3 and len(right_state) == 3:
-                self.dimensions = 1
+                self.dimensionality  = 1
                 
             elif len(left_state) == 4 and len(right_state) == 4:
-                self.dimensions = 2
+                self.dimensionality  = 2
                 
             elif len(left_state) == 5 and len(right_state) == 5:
-                self.dimensions = 3
+                self.dimensionality  = 3
         
-        self.gamma    = gamma 
-        self.geometry = geometry
-        self.Npts     = Npts 
-        self.n_vars   = n_vars
+        self.gamma          = gamma 
+        self.geometry       = geometry
+        self.dimensions     = dimensions 
                                         
         # Initial Conditions
-        
         # Check for Discontinuity
         if discontinuity:
             # Primitive Variables on LHS
@@ -134,7 +148,7 @@ class Hydro:
             
 
             # Initialize conserved u-tensor and flux tensors (defaulting to 2 ghost cells)
-            self.u = np.empty(shape = (3, self.Npts), dtype=float)
+            self.u = np.empty(shape = (3, self.dimensions), dtype=float)
 
             left_bound  = self.geometry[0]
             right_bound = self.geometry[1]
@@ -142,7 +156,7 @@ class Hydro:
             
             size        = abs(right_bound - left_bound)
             break_pt    = size/midpoint                                              # Define the fluid breakpoint
-            slice_point = int((self.Npts+2)/break_pt)                             # Define the array slicepoint
+            slice_point = int((self.dimensions+2)/break_pt)                             # Define the array slicepoint
             
             if self.regime == "classical":
                 self.u[:, : slice_point] = np.array([rho_l, rho_l*v_l, energy_l]).reshape(3,1)              # Left State
@@ -152,9 +166,8 @@ class Hydro:
                 self.u[:, slice_point: ] = np.array([D_r, S_r, tau_r]).reshape(3,1)              # Right State
                 
         elif len(initial_state) == 3:
-            self.dimensions = 1
+            self.dimensionality  = 1
             
-            self.n_vars        = n_vars
             self.init_rho      = initial_state[0]
             self.init_pressure = initial_state[1]
             
@@ -172,20 +185,13 @@ class Hydro:
                 self.init_tau = (self.init_rho*self.init_h*self.W**2 - self.init_pressure
                                   - self.init_rho*self.W)
             
-            self.u= None 
-            
-            
+            self.u = None 
             
         elif len(initial_state) == 4:
-            self.dimensions = 2
+            self.dimensionality  = 2
             print('Initializing 2D Setup...', flush=True)
             print('',flush=True)
-            
-            left_x, right_x = geometry[0]
-            left_y, right_y = geometry[1]
-            
-            self.xNpts, self.yNpts = Npts 
-            self.n_vars = n_vars 
+            self.xdimensions, self.ydimensions = dimensions 
             
             if self.regime == "classical":
                 self.init_rho      = initial_state[0]
@@ -214,7 +220,7 @@ class Hydro:
             self.u = None 
             
         elif len(initial_state) == 5:
-            self.dimensions = 3
+            self.dimensionality  = 3
             print('Initializing 3D Setup...', flush=True)
             print('', flush=True)
             
@@ -222,9 +228,7 @@ class Hydro:
             left_y, right_y = geometry[1]
             left_z, right_z = geometry[2]
             
-            self.xNpts, self.yNpts, self.zNpts = Npts 
-            
-            self.n_vars = n_vars 
+            self.xdimensions, self.ydimensions, self.zdimensions = dimensions  
             
             if self.regime == "classical":
                 self.init_rho      = initial_state[0]
@@ -233,9 +237,9 @@ class Hydro:
                 self.init_vy       = initial_state[3]
                 self.init_vz       = initial_state[4]
                 
-                v2 = self.init_vx**2 + self.init_vy**2 + self.init_xz**2
+                vsq = self.init_vx**2 + self.init_vy**2 + self.init_xz**2
                 
-                self.init_energy =  ( self.init_pressure/(self.gamma - 1.) +  0.5*self.init_rho*v2 )
+                self.init_energy =  ( self.init_pressure/(self.gamma - 1.) + 0.5*self.init_rho*vsq )
             else:
                 self.init_rho      = initial_state[0]
                 self.init_pressure = initial_state[1]
@@ -255,9 +259,11 @@ class Hydro:
                 
                 self.init_tau = (self.init_rho*self.init_h*(self.W)**2 - self.init_pressure - self.init_rho*(self.W))
                 
-            
-            
             self.u = None 
+    
+    @classmethod
+    def gen_from_setup(cls, setup):
+        return cls(*[0]*7, setup=setup)
     
     def _cleanup(self, first_order=True):
         """
@@ -265,16 +271,16 @@ class Hydro:
         results
         """
         if first_order:
-            if self.dimensions == 1:
+            if self.dimensionality  == 1:
                 self.solution = self.solution[:, 1: -1]
-            elif self.dimensions == 2:
+            elif self.dimensionality  == 2:
                 self.solution = self.solution[:, 1:-1, 1:-1]
             else:
                 self.solution = self.solution[:, 1:-1, 1:-1, 1:-1]
         else:
-            if self.dimensions == 1:
+            if self.dimensionality  == 1:
                 self.solution = self.solution[:, 2: -2]
-            elif self.dimensions == 2:
+            elif self.dimensionality  == 2:
                 self.solution = self.solution[:, 2:-2, 2:-2]
             else:
                 self.solution = self.solution[:, 2:-2, 2:-2, 2:-2]
@@ -301,7 +307,7 @@ class Hydro:
                 print(f"{my_str} {val_str}", flush=True)
         system_dict = {
             'adiabatic_gamma' : self.gamma,
-            'dimensions'      : self.Npts,
+            'dimensions'      : self.dimensions,
             'geometry'        : self.geometry,
             'coord_system'    : self.coord_system,
             'regime'          : self.regime,
@@ -336,7 +342,7 @@ class Hydro:
         cfl: float = 0.4,
         sources: np.ndarray = None,
         scalars: np.ndarray = 0,
-        hllc: bool =False,
+        hllc: bool = False,
         chkpt: str = None,
         chkpt_interval:float = 0.1,
         data_directory:str = "data/",
@@ -344,8 +350,8 @@ class Hydro:
         engine_duration: float = 10.0,
         compute_mode: str = 'cpu',
         quirk_smoothing: bool = True,
-        a: Callable = None,
-        adot: Callable = None,
+        scale_factor: Callable = None,
+        scale_factor_derivative: Callable = None,
         dens_outer: Callable = None,
         mom_outer: Callable = None,
         edens_outer: Callable = None) -> np.ndarray:
@@ -370,8 +376,8 @@ class Hydro:
             engine_duration (float):     The duration the source terms will last in the simulation
             compute_mode (string):       The compute mode for simulation execution (cpu or gpu)
             quirksmoothing (bool):       The switch that controls the Quirk (1960) shock smoothing method
-            a              (Callable):   The scalar function for moving mesh. Think cosmology
-            adot           (Callable):   The first derivative of the scalar function for moving mesh
+            scale_factor              (Callable):   The scalar function for moving mesh. Think cosmology
+            scale_factor_derivative   (Callable):   The first derivative of the scalar function for moving mesh
             dens_outer     (Callable):   The density to be fed into outer zones if moving mesh
             mom_outer      (Callables):  idem but for momentum density
             edens_outer    (Callable):   idem but for energy density
@@ -380,10 +386,10 @@ class Hydro:
             u (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
-        if a == None:
-            a = lambda t: 1.0 
-        if adot == None:
-            adot = lambda t: 0.0
+        if scale_factor == None:
+            scale_factor = lambda t: 1.0 
+        if scale_factor_derivative == None:
+            scale_factor_derivative = lambda t: 0.0
         
         if linspace:
             genspace = np.linspace 
@@ -419,7 +425,7 @@ class Hydro:
         if not chkpt:
             simbi_ic.initializeModel(self, first_order, boundary_condition, scalars, volume_factor=volume_factor)
         else:
-            simbi_ic.load_checkpoint(self, chkpt, self.dimensions, mesh_motion)
+            simbi_ic.load_checkpoint(self, chkpt, self.dimensionality , mesh_motion)
         
         periodic = boundary_condition == 'periodic'
         start_time  = tstart if self.t == 0 else self.t
@@ -439,16 +445,15 @@ class Hydro:
         else:
             print('Computing Second Order Solution...', flush=True)
           
-        if self.dimensions == 1:
-            x1      = genspace(self.geometry[0], self.geometry[1], self.Npts)
+        if self.dimensionality  == 1:
             sources = np.zeros(self.u.shape) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             kwargs  = {}
             if self.regime == "classical":
                 state = PyState(self.u, self.gamma, cfl, x1 = x1, coord_system = coordinates)
             else:   
-                state = PyStateSR(self.u, self.gamma, cfl, x1 = x1, coord_system = coordinates)
-                kwargs = {'a': a, 'adot': adot}
+                state = PyStateSR(self.u, self.gamma, cfl, r = self.x1, coord_system = coordinates)
+                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative}
                 if dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] =  dens_outer
                     kwargs['s_outer'] =  mom_outer
@@ -470,9 +475,8 @@ class Hydro:
                 hllc               = hllc,
                 **kwargs)  
                 
-        elif self.dimensions == 2:      
-            x1 = genspace(*self.geometry[0], self.xNpts)
-            x2 = np.linspace(*self.geometry[1], self.yNpts)      
+        elif self.dimensionality  == 2:            
+            # ignore the chi term
             sources = np.zeros(self.u[:-1].shape, dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             
@@ -480,7 +484,7 @@ class Hydro:
             if self.regime == "classical":
                 state = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
             else:
-                kwargs = {'a': a, 'adot': adot, 'quirk_smoothing': quirk_smoothing}
+                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'quirk_smoothing': quirk_smoothing}
                 if dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer']  =  dens_outer
                     kwargs['s1_outer'] =  mom_outer[0]

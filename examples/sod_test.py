@@ -27,10 +27,10 @@ def main():
     fig, ax = plt.subplots(1, 1, figsize=(10,10))
 
     hydro = Hydro(gamma=args.gamma, initial_state = sod,
-            Npts=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3)
+            dimensions=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3)
 
     hydro2 = Hydro(gamma=args.gamma, initial_state = sod,        
-            Npts=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3)
+            dimensions=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3)
             
 
     sim_params = {

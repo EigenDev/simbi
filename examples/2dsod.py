@@ -84,7 +84,7 @@ def main():
     }
     
     SodHLLE = Hydro(gamma = args.gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
-                Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
+                dimensions=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
     t1 = (time.time()*u.s).to(u.min)
     hlle_result = SodHLLE.simulate(**sim_params)
@@ -92,7 +92,7 @@ def main():
 
     # HLLC Simulation
     SodHLLC = Hydro(gamma = args.gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
-                Npts=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
+                dimensions=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)), n_vars=4)
 
     sim_params['hllc'] = True 
     t1 = (time.time()*u.s).to(u.min)

@@ -73,8 +73,8 @@ def main():
         p = pressure(gamma, r)
         v = velocity(gamma, r, p)
         tend = 0.1
-        first_o  = Hydro(gamma, initial_state=(r,p,v), Npts=npts, geometry=(0, 1.0))
-        second_o = Hydro(gamma, initial_state=(r,p,v), Npts=npts, geometry=(0, 1.0))
+        first_o  = Hydro(gamma, initial_state=(r,p,v), dimensions=npts, geometry=(0, 1.0))
+        second_o = Hydro(gamma, initial_state=(r,p,v), dimensions=npts, geometry=(0, 1.0))
         
         cfl = 10.0/npts
         rk1[npts] = first_o.simulate(tend=tend , chkpt_interval=args.chint, plm_theta=args.plm_theta, hllc=args.hllc, first_order=True, boundary_condition='periodic', cfl=cfl,  compute_mode=mode, data_directory=args.data_dir)
@@ -99,7 +99,7 @@ def main():
         first_eps = np.sum(np.absolute(p_1 * r_1**(-gamma) - 1.))
         high_eps  = np.sum(np.absolute(p_2 * r_2**(-gamma) - 1.))
         
-        # Divide by the reference Npts
+        # Divide by the reference dimensions
         first_ratio = first_eps/ns[idx]
         high_ratio  = high_eps/ns[idx]
         

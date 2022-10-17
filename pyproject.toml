@@ -31,6 +31,9 @@ dependencies = [
     "meson"
 ]
 
+[project.scripts]
+pysimbi = "pysimbi.__main__:main"
+
 [options]
 zip_safe = false
 

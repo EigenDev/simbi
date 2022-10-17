@@ -40,10 +40,10 @@ def main():
     
 
     hydro2 = Hydro(gamma=args.gamma, initial_state = ((rhoL,pL,vL),(rhoR,pR,vR)),
-            Npts=args.nzones, geometry=(xmin,xmax,xmid), n_vars=3, regime="relativistic")
+            dimensions=args.nzones, geometry=(xmin,xmax,xmid), n_vars=3, regime="relativistic")
 
     hydro = Hydro(gamma=args.gamma, initial_state = ((rhoL,pL,vL),(rhoR,pR,vR)),
-            Npts=args.nzones, geometry=(xmin,xmax, xmid), n_vars=3, regime="relativistic")
+            dimensions=args.nzones, geometry=(xmin,xmax, xmid), n_vars=3, regime="relativistic")
 
     sim_params = {
             'tend': args.tend,
