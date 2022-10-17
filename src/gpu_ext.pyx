@@ -20,10 +20,10 @@ cdef class PyState:
         np.ndarray[np.double_t, ndim=2] state, 
         real gamma, 
         real cfl=0.4,
-        vector[real] r = [0], 
+        vector[real] x1 = [0], 
         string coord_system = "cartesian".encode('ascii')):
 
-        self.c_state = Newtonian1D(state, gamma,cfl, r, coord_system)
+        self.c_state = Newtonian1D(state, gamma,cfl, x1, coord_system)
 
     def simulate(self, 
         vector[vector[real]] sources,
@@ -65,9 +65,9 @@ cdef class PyStateSR:
         np.ndarray[np.double_t, ndim=2] state, 
         real gamma, 
         real cfl=0.4,
-        vector[real] r = [0], 
+        vector[real] x1 = [0], 
         string coord_system = "cartesian".encode('ascii')):
-        self.c_state = SRHD(state, gamma,cfl, r, coord_system)
+        self.c_state = SRHD(state, gamma,cfl, x1, coord_system)
         
     def simulate(self,
         vector[vector[real]] sources,
