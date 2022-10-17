@@ -29,11 +29,11 @@ class BaseConfig:
     
     @property
     def scalars(self):
-        return None 
+        return 0.0 
     
     @property
     def passive_scalars(self):
-        return None
+        return 0.0
     
     @property
     def scale_factor(self):

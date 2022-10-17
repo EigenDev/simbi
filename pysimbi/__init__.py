@@ -1,6 +1,7 @@
 from .simbi import Hydro
 from .config import BaseConfig 
-from .helpers import print_problem_params
+from .free_arg import DynamicArg
+from .helpers import print_problem_params, compute_num_polar_zones
 from pathlib import Path
 
 script_path = Path(__file__, '..').resolve()

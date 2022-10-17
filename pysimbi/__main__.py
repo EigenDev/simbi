@@ -2,6 +2,7 @@ import argparse
 import os 
 import ast
 import sys
+import importlib
 from pysimbi import Hydro
 from pathlib import Path
 
@@ -11,7 +12,12 @@ def valid_pyscript(param):
         raise argparse.ArgumentTypeError('File must have a .py extension')
     return param
 
-def configure_state(script: str):
+def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
+    import sys 
+    script_dirname = os.path.dirname(script)
+    base_script    = Path(os.path.abspath(script)).stem
+    sys.path.insert(0, f'{script_dirname}')
+    
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
     
@@ -25,12 +31,10 @@ def configure_state(script: str):
     if len(setup_class) == 1:
         setup_class = setup_class[0]
     
-    script_dirname = os.path.dirname(script)
-    base_script = Path(os.path.abspath(script)).stem
-    eval(compile("import sys", "<string>", "exec"))
-    eval(compile(f"sys.path.insert(0, '{script_dirname}')", "<string>", "exec"))
-    eval(compile(f"from {base_script} import {setup_class}", "<string>", "exec"))
-    config = eval(setup_class)()
+    problem_class = getattr(importlib.import_module(f'{base_script}'), f'{setup_class}')
+    config = problem_class()
+    if argv:
+        config.parse_args(parser)
     print("="*80)
     print(config.__doc__, flush=True)
     print("="*80)
@@ -48,6 +52,7 @@ def configure_state(script: str):
 
 def main():
     parser = argparse.ArgumentParser("Primitive parameters for PySimbi simulation configuration")
+    # sub_parser = parser.add_subparsers(help='extra args for problem-specific class')
     parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
     parser.add_argument('--tstart',    help='start time for simulation', default=0.0, type=float)
     parser.add_argument('--tend',    help='end time for simulation', default=1.0, type=float)
@@ -63,10 +68,11 @@ def main():
     parser.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=0.0, type=float)
     parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
     parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
-    # print help message if no args supplied
-    args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
     
-    sim_state, kwargs = configure_state(args.setup_script)
+    # print help message if no args supplied
+    args, argv = parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
+
+    sim_state, kwargs = configure_state(args.setup_script, parser, argv)
     for arg in vars(args):
         if arg == 'setup_script':
             continue
