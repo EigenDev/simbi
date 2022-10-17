@@ -385,25 +385,17 @@ class Hydro:
         if adot == None:
             adot = lambda t: 0.0
         
-        mesh_motion = adot(1.0) / a(1.0) != 0
-        if self.dimensions == 1:
-            if linspace:
-                self.x1 = np.linspace(self.geometry[0], self.geometry[1], self.Npts)
-            else:
-                self.x1 = np.logspace(np.log10(self.geometry[0]), np.log10(self.geometry[1]), self.Npts)
+        if linspace:
+            genspace = np.linspace 
         else:
-            if (linspace):
-                self.x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
-                self.x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-            else:
-                self.x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
-                self.x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-
+            genspace = np.geomspace 
+            
+        mesh_motion = adot(1.0) / a(1.0) != 0
         if mesh_motion and self.coord_system != 'cartesian':
             if self.dimensions == 1:
-                volume_factor = helpers.calc_cell_volume1D(self.x1)
+                volume_factor = helpers.calc_cell_volume1D(x1)
             elif self.dimensions == 2:
-                volume_factor = helpers.calc_cell_volume2D(self.x1, self.x2)
+                volume_factor = helpers.calc_cell_volume2D(x1, x2)
         else:
             volume_factor = 1.0
                 
@@ -420,8 +412,8 @@ class Hydro:
                 warnings.warn(f"For reference, the gpu_ext had the follow error: {e}", GPUExtNotBuiltWarning)
                 from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
                 
-        self.u = np.asarray(self.u)
-        self.t = 0
+        self.u         = np.asarray(self.u)
+        self.t         = 0
         self.chkpt_idx = 0
         
         if not chkpt:
@@ -440,7 +432,7 @@ class Hydro:
         if not os.path.exists(data_directory):
             # Create a new directory because it does not exist 
             os.makedirs(data_directory)
-            print("The data directory provided does not exist. Creating the: {data_directory}!", flush=True)
+            print("The data directory provided does not exist. Creating the {data_directory} now!", flush=True)
         
         if first_order:
             print("Computing First Order Solution...", flush=True)
@@ -448,13 +440,14 @@ class Hydro:
             print('Computing Second Order Solution...', flush=True)
           
         if self.dimensions == 1:
+            x1      = genspace(self.geometry[0], self.geometry[1], self.Npts)
             sources = np.zeros(self.u.shape) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
-            kwargs = {}
+            kwargs  = {}
             if self.regime == "classical":
-                state = PyState(self.u, self.gamma, cfl, r = self.x1, coord_system = coordinates)
+                state = PyState(self.u, self.gamma, cfl, x1 = x1, coord_system = coordinates)
             else:   
-                state = PyStateSR(self.u, self.gamma, cfl, r = self.x1, coord_system = coordinates)
+                state = PyStateSR(self.u, self.gamma, cfl, x1 = x1, coord_system = coordinates)
                 kwargs = {'a': a, 'adot': adot}
                 if dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] =  dens_outer
@@ -477,14 +470,15 @@ class Hydro:
                 hllc               = hllc,
                 **kwargs)  
                 
-        elif self.dimensions == 2:            
-            # ignore the chi term
+        elif self.dimensions == 2:      
+            x1 = genspace(*self.geometry[0], self.xNpts)
+            x2 = np.linspace(*self.geometry[1], self.yNpts)      
             sources = np.zeros(self.u[:-1].shape, dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             
             kwargs = {}
             if self.regime == "classical":
-                state = PyState2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=coordinates)
+                state = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
             else:
                 kwargs = {'a': a, 'adot': adot, 'quirk_smoothing': quirk_smoothing}
                 if dens_outer and mom_outer and edens_outer:
@@ -493,7 +487,8 @@ class Hydro:
                     kwargs['s2_outer'] =  mom_outer[1]
                     kwargs['e_outer']  =  edens_outer
                     
-                state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=coordinates)
+                state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                
             self.solution = state.simulate(
                 sources         = sources,
                 tstart          = start_time,
@@ -511,14 +506,9 @@ class Hydro:
                 **kwargs)  
 
         else:
-            if (linspace):
-                self.x1 = np.linspace(self.geometry[0][0], self.geometry[0][1], self.xNpts)
-                self.x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-                self.x3 = np.linspace(self.geometry[2][0], self.geometry[2][1], self.zNpts)
-            else:
-                self.x1 = np.logspace(np.log10(self.geometry[0][0]), np.log10(self.geometry[0][1]), self.xNpts)
-                self.x2 = np.linspace(self.geometry[1][0], self.geometry[1][1], self.yNpts)
-                self.x3 = np.linspace(self.geometry[2][0], self.geometry[2][1], self.zNpts)
+            x1 = genspace(*self.geometry[0], self.xNpts)
+            x2 = np.linpace(*self.geometry[1], self.yNpts)
+            x3 = np.linpace(*self.geometry[2], self.zNpts)
             
             sources = np.zeros(self.u.shape[:-1], dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
@@ -526,9 +516,9 @@ class Hydro:
             if self.regime == "classical":
                 # TODO: Implement Newtonian 3D
                 pass
-                # b = PyState3D(u, self.gamma, cfl=cfl, self.x1=self.x1, x2=x2, coord_system=coordinates)
+                # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
             else:
-                state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, x3=self.x3, coord_system=coordinates)
+                state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
             
             self.solution = state.simulate(
                 sources         = sources,
