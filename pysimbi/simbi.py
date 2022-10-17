@@ -461,7 +461,7 @@ class Hydro:
                 state = PyState(self.u, self.gamma, cfl, r = self.x1, coord_system = coordinates)
             else:   
                 state = PyStateSR(self.u, self.gamma, cfl, r = self.x1, coord_system = coordinates)
-                kwargs = {'a': a, 'scale_factor_derivative': scale_factor_derivative}
+                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative}
                 if dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] =  dens_outer
                     kwargs['s_outer'] =  mom_outer
@@ -492,7 +492,7 @@ class Hydro:
             if self.regime == "classical":
                 state = PyState2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=coordinates)
             else:
-                kwargs = {'a': scale_factor, 'scale_factor_derivative': scale_factor_derivative, 'quirk_smoothing': quirk_smoothing}
+                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'quirk_smoothing': quirk_smoothing}
                 if dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer']  =  dens_outer
                     kwargs['s1_outer'] =  mom_outer[0]
