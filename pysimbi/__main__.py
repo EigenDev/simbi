@@ -64,10 +64,11 @@ def main() -> argparse.ArgumentParser:
     parser.add_argument('--compute_mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'])
     parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
     # print help message if no args supplied
-    if len(sys.argv)==1:
-        parser.print_help(sys.stderr)
-        sys.exit(1)
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except:
+        parser.print_help()
+        sys.exit(0)
     
     sim_state, kwargs = configure_state(args.setup_script)
     for arg in vars(args):
