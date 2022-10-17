@@ -79,8 +79,8 @@ def main():
         tend = 0.1
         
         cfl = 10.0/npts
-        first_o  = Hydro(gamma, initial_state=(r,p,v), Npts=npts, geometry=(0, 1.0), regime="relativistic")
-        second_o = Hydro(gamma, initial_state=(r,p,v), Npts=npts, geometry=(0, 1.0), regime="relativistic")
+        first_o  = Hydro(gamma, initial_state=(r,p,v), dimensions=npts, geometry=(0, 1.0), regime="relativistic")
+        second_o = Hydro(gamma, initial_state=(r,p,v), dimensions=npts, geometry=(0, 1.0), regime="relativistic")
         
         rk1[npts] = first_o.simulate(tend=tend , chkpt_interval=args.chint, plm_theta=args.plm_theta, hllc=args.hllc, first_order=True, boundary_condition='periodic', cfl=cfl,  compute_mode=mode, data_directory=args.data_dir)
         rk2[npts] = second_o.simulate(tend=tend, chkpt_interval=args.chint, plm_theta=args.plm_theta, hllc=args.hllc, first_order=False, boundary_condition='periodic', cfl=cfl, compute_mode=mode, data_directory=args.data_dir)
@@ -100,7 +100,7 @@ def main():
         first_eps = np.sum(np.absolute(p_1*r_1**(-gamma) - 1.0))
         high_eps = np.sum(np.absolute(p_2*r_2**(-gamma) - 1.0))
         
-        # Divide by the reference Npts
+        # Divide by the reference dimensions
         first_ratio = first_eps/ns[idx]
         high_ratio = high_eps/ns[idx]
         

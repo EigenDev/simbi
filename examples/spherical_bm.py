@@ -112,7 +112,7 @@ def main():
     vy = np.zeros((ntheta ,nr))
 
     bm = Hydro(gamma = args.gamma, initial_state=(rho, p, vx, vy), 
-                Npts=(nr, ntheta), 
+                dimensions=(nr, ntheta), 
                 geometry=((rmin, rmax),(theta_min, theta_max)), 
                 n_vars=4, regime="relativistic", coord_system="spherical")
 

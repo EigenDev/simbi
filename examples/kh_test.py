@@ -98,7 +98,7 @@ def main():
     }
     # HLLC Simulation
     SodHLLC = Hydro(gamma = args.gamma, initial_state=(rho, p, vx, vy), 
-                Npts=(xnpts, ynpts), geometry=((xmin, xmax),(ymin, ymax)), n_vars=4)
+                dimensions=(xnpts, ynpts), geometry=((xmin, xmax),(ymin, ymax)), n_vars=4)
 
     t1 = (time.time()*u.s).to(u.min)
     hllc_result = SodHLLC.simulate(**sim_params)
