@@ -30,3 +30,7 @@ def print_problem_params(args, parser) -> None:
             val = round(val, 3)
         val = str(val)
         print(f"{arg:.<30} {val:<15} {description}", flush = True)
+        
+def compute_num_polar_zones(rmin: float, rmax: float, nr: float, theta_bounds: tuple = (0.0, np.pi)):
+    dlogr = np.log(rmax / rmin) / nr
+    return int(1 + (theta_bounds[1] - theta_bounds[0]) / dlogr)
