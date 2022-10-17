@@ -46,7 +46,7 @@ def configure_state(script: str):
     kwargs['dens_outer']               = state.dens_outer 
     return state, kwargs 
 
-def main() -> argparse.ArgumentParser:
+def main():
     parser = argparse.ArgumentParser("Primitive parameters for PySimbi simulation configuration")
     parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
     parser.add_argument('--tstart',    help='start time for simulation', default=0.0, type=float)
