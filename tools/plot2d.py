@@ -131,8 +131,8 @@ def plot_polar_plot(
         if x2max == np.pi: 
             units  = np.repeat(units, 2)
             
-        var    = np.asarray(var, dtype='object')
-        var    = np.array([units[idx] * var[idx] for idx in range(var.shape[0])], dtype='object')
+        var    = np.asarray(var, dtype=float)
+        var    = np.array([units[idx] * var[idx] for idx in range(var.shape[0])], dtype=float)
         
         tchop  = np.array_split(tt, 2)
         trchop = np.array_split(t2, 2)
@@ -1543,14 +1543,15 @@ def main():
                 label = args.labels[0] if args.labels else None
                 for idx, file in enumerate(flist):
                     fields, setup, mesh = util.read_2d_file(args, file)
-                    viewing_angle       = np.deg2rad(args.viewing[0])
-                    tidx, _             = util.find_nearest(setup['x2'], viewing_angle)
+                    if args.viewing:
+                        viewing_angle       = np.deg2rad(args.viewing[0])
+                        tidx, _             = util.find_nearest(setup['x2'], viewing_angle)
                     
                     if args.fields[0] in derived:
                         var = util.prims2var(fields, args.fields[0])
                     else:
                         var = fields[args.fields[0]]
-                    max_var             = np.max(var[tidx])
+                    max_var             = np.max(var[tidx] if args.viewing else var)
                     max_vars           += [max_var]
                     times              += [setup['time']]
                 plot_vs_time(args, ax, label, colors[0], times, max_vars, ylog = (args.fields[0] not in lin_fields))
