@@ -395,12 +395,22 @@ class Hydro:
             genspace = np.linspace 
         else:
             genspace = np.geomspace 
+        
+        if self.dimensionality == 1:
+            x1 = genspace(self.geometry[0], self.geometry[1], self.dimensions)
+        elif self.dimensionality == 2:
+            x1 = genspace(*self.geometry[0], self.xdimensions)
+            x2 = np.linpace(*self.geometry[1], self.ydimensions)
+        else:
+            x1 = genspace(*self.geometry[0], self.xdimensions)
+            x2 = np.linpace(*self.geometry[1], self.ydimensions)
+            x3 = np.linpace(*self.geometry[2], self.zdimensions)
             
-        mesh_motion = adot(1.0) / a(1.0) != 0
+        mesh_motion = scale_factor_derivative(1.0) / scale_factor(1.0) != 0
         if mesh_motion and self.coord_system != 'cartesian':
-            if self.dimensions == 1:
+            if self.dimensionality == 1:
                 volume_factor = helpers.calc_cell_volume1D(x1)
-            elif self.dimensions == 2:
+            elif self.dimensionality == 2:
                 volume_factor = helpers.calc_cell_volume2D(x1, x2)
         else:
             volume_factor = 1.0
@@ -427,7 +437,7 @@ class Hydro:
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensionality , mesh_motion)
         
-        periodic = boundary_condition == 'periodic'
+        periodic    = boundary_condition == 'periodic'
         start_time  = tstart if self.t == 0 else self.t
         #Convert strings to byte arrays
         data_directory     = os.path.join(data_directory, '').encode('utf-8')
@@ -438,7 +448,7 @@ class Hydro:
         if not os.path.exists(data_directory):
             # Create a new directory because it does not exist 
             os.makedirs(data_directory)
-            print("The data directory provided does not exist. Creating the {data_directory} now!", flush=True)
+            print(f"The data directory provided does not exist. Creating the {data_directory} now!", flush=True)
         
         if first_order:
             print("Computing First Order Solution...", flush=True)
@@ -510,10 +520,6 @@ class Hydro:
                 **kwargs)  
 
         else:
-            x1 = genspace(*self.geometry[0], self.xNpts)
-            x2 = np.linpace(*self.geometry[1], self.yNpts)
-            x3 = np.linpace(*self.geometry[2], self.zNpts)
-            
             sources = np.zeros(self.u.shape[:-1], dtype=float) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
                 

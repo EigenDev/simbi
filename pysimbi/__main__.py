@@ -61,7 +61,7 @@ def main():
     parser.add_argument('--data_directory', help='directory to save checpoint files', default='data/', type=str)
     parser.add_argument('--boundary_condition', help='boundary condition for inner boundary', default='outflow', choices=['reflecting', 'outflow', 'inflow', 'periodic'])
     parser.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=0.0, type=float)
-    parser.add_argument('--compute_mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'])
+    parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
     parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
     # print help message if no args supplied
     args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
