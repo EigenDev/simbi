@@ -208,7 +208,6 @@ class Hydro:
                 self.init_v1       = initial_state[2]
                 self.init_v2       = initial_state[3]
                 vsq                = self.init_v1**2 + self.init_v2**2
-                
                 self.W = 1/np.sqrt(1 - vsq)
                 self.init_h = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
                 self.initD  = self.init_rho*self.W
@@ -400,11 +399,11 @@ class Hydro:
             x1 = genspace(self.geometry[0], self.geometry[1], self.dimensions)
         elif self.dimensionality == 2:
             x1 = genspace(*self.geometry[0], self.xdimensions)
-            x2 = np.linpace(*self.geometry[1], self.ydimensions)
+            x2 = np.linspace(*self.geometry[1], self.ydimensions)
         else:
             x1 = genspace(*self.geometry[0], self.xdimensions)
-            x2 = np.linpace(*self.geometry[1], self.ydimensions)
-            x3 = np.linpace(*self.geometry[2], self.zdimensions)
+            x2 = np.linspace(*self.geometry[1], self.ydimensions)
+            x3 = np.linspace(*self.geometry[2], self.zdimensions)
             
         mesh_motion = scale_factor_derivative(1.0) / scale_factor(1.0) != 0
         if mesh_motion and self.coord_system != 'cartesian':
