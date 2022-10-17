@@ -118,6 +118,8 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
             field_str_list.append("T [K]" if args.units else "T")
         elif field == 'mach':
             field_str_list.append('M')
+        elif field == 'v':
+            field_str_list.append('$v / v_0$')
         else:
             field_str_list.append(field)
 

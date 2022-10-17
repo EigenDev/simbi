@@ -23,7 +23,7 @@ except:
     pass 
 
 derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'mach']
-field_choices = ['rho', 'c', 'p', 'gamma_beta', 'chi'] + derived
+field_choices = ['rho', 'v', 'p', 'gamma_beta', 'chi'] + derived
 lin_fields    = ['chi', 'gamma_beta']
 def plot_profile(args, fields, mesh, setup, ax = None, overplot = False, subplot = False, case = 0):
     ncols = len(args.filename) * len(args.fields)
@@ -195,7 +195,7 @@ def main():
     
     parser.add_argument('filename', metavar='Filename', nargs='+', help='A Data Source to Be Plotted')
     parser.add_argument('setup', metavar='Setup', nargs='+', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable(s)', nargs='+', help='The name of the field variable(s) you\'d like to plot', choices=field_choices, default='rho')
+    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable(s)', nargs='+', help='The name of the field variable(s) you\'d like to plot', choices=field_choices, default=['rho'])
     parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max', default = 0.0, help='The domain range')
     parser.add_argument('--xlims', dest = 'xlims', metavar='Domain',default = None, help='The domain range', nargs='+', type=float)
     parser.add_argument('--fill_scale', dest = 'fill_scale', metavar='Filler maximum', type=float, default = None, help='Set the y-scale to start plt.fill_between')
