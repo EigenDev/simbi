@@ -91,7 +91,7 @@ def main():
     dt     = 0.1 * np.minimum(dr, r[0]*dtheta)
 
     bm = Hydro(gamma = args.gamma, initial_state=(rho, p, vx, vy), 
-                Npts=(nr, ntheta), 
+                dimensions=(nr, ntheta), 
                 geometry=((rmin, rmax),(theta_min, theta_max)), 
                 n_vars=4, regime="classical", coord_system="spherical")
 
