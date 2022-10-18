@@ -58,6 +58,9 @@ class BaseConfig:
        return None
     
     def find_dynamic_args(self):
+        """
+        Find all derived class member's members defined as DynamicArg class instances 
+        """
         members = [attr for attr in dir(self) if not callable(getattr(self, attr)) and not attr.startswith("__")]
         self.dynamic_args = [getattr(self, member) for member in members if isinstance(getattr(self,member), DynamicArg)]
         
@@ -97,16 +100,23 @@ class BaseConfig:
                 var.default = vars(args)[var.name]
 
     def print_problem_params(self):
+        """
+        Read from problem params and print to stdout
+        """
         if not self.dynamic_args:
             self.find_dynamic_args()
+            
         print("\nProblem Parameters:", flush=True)
         print("="*80, flush=True)
         for member in self.args:
-            val = member
-            if (isinstance(member.default ,float)):
+            val = member.default
+            if (isinstance(val, float)):
                 val = round(val, 3)
             val = str(val)
-            print(f"{member.name:.<30} {member.default:<15} {member.help}", flush = True)
+            print(f"{member.name:.<30} {val:<15} {member.help}", flush = True)
     
     def __del__(self):
+        """
+        Print problem params on class destruction
+        """
         self.print_problem_params()
