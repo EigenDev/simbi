@@ -98,6 +98,8 @@ class BaseConfig:
         for var in self.dynamic_args:
             if var.name in vars(args):
                 var.default = vars(args)[var.name]
+        
+        self.__init__()
 
     def print_problem_params(self):
         """
