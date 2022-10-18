@@ -1495,6 +1495,7 @@ def main():
     
     num_subplots = len(args.sub_split) if args.sub_split is not None else 1
     flist, _     = util.get_file_list(args.files)
+    print(flist)
     if len(flist) > 1 or isinstance(flist, dict):
         if num_subplots == 1:
             fig, ax = plt.subplots(1, 1, figsize=(8,8))
