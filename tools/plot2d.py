@@ -1599,7 +1599,7 @@ def main():
             ylabel = util.get_field_str(args)
             ax.set_xlabel(r'$t [\rm s]$')
             ax.set_ylabel(ylabel)
-            # ax.set_xlim(0.5, 2.0)
+            print("Plotting two of them!")
             ax.spines['right'].set_visible(False)
             ax.spines['top'].set_visible(False)
             colors = ['red', 'black']
