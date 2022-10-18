@@ -4,7 +4,8 @@ class SodProblem(BaseConfig):
     """
     Sod's Shock Tube Problem in 1D Newtonian Fluid
     """
-    nzones = DynamicArg("nzones", 1000, help="number of grid zones", var_type=int)
+    nzones    = DynamicArg("nzones", 1000, help="number of grid zones", var_type=int)
+    ad_gamma  = DynamicArg("gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type = float)
     @property
     def initial_state(self):
         return ((1.0, 1.0, 0.0), (0.125, 0.1, 0.0))
@@ -23,13 +24,11 @@ class SodProblem(BaseConfig):
 
     @property
     def dimensions(self):
-        if isinstance(self.nzones, DynamicArg):
-            return self.nzones.default 
-        return self.nzones
+        return self.nzones.default 
     
     @property
     def gamma(self):
-        return 1.4 
+        return self.ad_gamma.default 
     
     @property
     def regime(self):
