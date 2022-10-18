@@ -10,8 +10,7 @@ class MignoneBodo(BaseConfig):
     def initial_state(self):
         if self.problem == 1:
             return ((1.0, 10.0, -0.6), (10.0, 20.0, 0.5))
-        else:
-            return ((1.0, 1.0, 0.9), (1.0, 10.0, 0.5))
+        return ((1.0, 1.0, 0.9), (1.0, 10.0, 0.5))
     
     @property
     def geometry(self):
