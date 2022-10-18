@@ -112,7 +112,7 @@ class DynamicArg:
         return  self.default * (-1.0)
     
     def __bool__(self):
-        if isinstance(default, bool):
+        if isinstance(self.default, bool):
             return self.default
         return self.default != None
     
