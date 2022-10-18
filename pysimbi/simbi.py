@@ -459,7 +459,7 @@ class Hydro:
             if self.regime == "classical":
                 state = PyState(self.u, self.gamma, cfl, x1 = x1, coord_system = coordinates)
             else:   
-                state = PyStateSR(self.u, self.gamma, cfl, r = self.x1, coord_system = coordinates)
+                state = PyStateSR(self.u, self.gamma, cfl, x1 = x1, coord_system = coordinates)
                 kwargs = {'a': scale_factor, 'adot': scale_factor_derivative}
                 if dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] =  dens_outer
