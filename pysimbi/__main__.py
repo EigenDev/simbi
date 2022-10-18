@@ -44,6 +44,8 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     print("="*80, flush=True)
     state: Hydro = Hydro.gen_from_setup(config)
     kwargs = {}
+    kwargs['tstart']                   = config.start_time
+    kwargs['tend']                     = config.end_time
     kwargs['linspace']                 = state.linspace 
     kwargs['sources']                  = state.sources 
     kwargs['scalars']                  = state.scalars 
@@ -79,6 +81,11 @@ def main():
     for arg in vars(args):
         if arg == 'setup_script':
             continue
+        if arg == 'tend' and kwargs[arg]:
+            continue 
+        if arg == 'tstart' and kwargs[arg]:
+            continue
+        
         kwargs[arg] = getattr(args, arg)
     sim_state.simulate(**kwargs)
     

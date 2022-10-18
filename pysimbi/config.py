@@ -56,6 +56,14 @@ class BaseConfig:
     @property
     def dens_outer(self):
        return None
+   
+    @property
+    def start_time(self):
+       return None
+   
+    @property
+    def end_time(self):
+       return None
     
     def find_dynamic_args(self):
         """
@@ -76,12 +84,12 @@ class BaseConfig:
             self.find_dynamic_args()
             
         for member in self.args:
-            if type(member.default) == bool:
+            if type(member.value) == bool:
                 parser.add_argument(
                     f'--{member.name}',
                     help    = member.help,
                     action  = member.action,
-                    default = member.default,
+                    default = member.value,
                 )
             else:
                 parser.add_argument(
@@ -90,14 +98,14 @@ class BaseConfig:
                     action  = member.action,
                     type    = member.var_type,
                     choices = member.choices,
-                    default = member.default,
+                    default = member.value,
                 )
                     
         args = parser.parse_args()
         # Update dynamic var attributes to reflect new values passed from cli
         for var in self.dynamic_args:
             if var.name in vars(args):
-                var.default = vars(args)[var.name]
+                var.value = vars(args)[var.name]
         
         self.__init__()
 
@@ -111,7 +119,7 @@ class BaseConfig:
         print("\nProblem Parameters:", flush=True)
         print("="*80, flush=True)
         for member in self.args:
-            val = member.default
+            val = member.value
             if (isinstance(val, float)):
                 val = round(val, 3)
             val = str(val)

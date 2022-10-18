@@ -42,7 +42,7 @@ class IsentropicRelWave(BaseConfig):
     rho_ref = 1.0
     p_ref   = 1.0
     K       = p_ref*rho_ref**(-ad_gamma)
-    x       = np.linspace(0, 1, nzones.default, dtype=float)
+    x       = np.linspace(0, 1, nzones.value, dtype=float)
     density = rho(alpha, x)
     pre     = pressure(p_ref, ad_gamma, density, rho_ref)
     beta    = velocity(ad_gamma, density, rho_ref, pre, p_ref)
@@ -65,11 +65,11 @@ class IsentropicRelWave(BaseConfig):
 
     @property
     def dimensions(self):
-        return self.nzones.default 
+        return self.nzones.value 
     
     @property
     def gamma(self):
-        return self.ad_gamma.default 
+        return self.ad_gamma.value 
     
     @property
     def regime(self):

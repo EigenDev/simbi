@@ -26,11 +26,11 @@ class MignoneBodo(BaseConfig):
 
     @property
     def dimensions(self):
-        return self.nzones.default 
+        return self.nzones.value 
     
     @property
     def gamma(self):
-        return self.ad_gamma.default 
+        return self.ad_gamma.value 
     
     @property
     def regime(self):

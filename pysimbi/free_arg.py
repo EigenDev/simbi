@@ -2,13 +2,13 @@ from typing import Any
 class DynamicArg:
     def __init__(self, 
                  name: str, 
-                 default: Any, 
+                 value: Any, 
                  help: str, 
                  var_type: type,
                  choices: list = None, 
                  action: str = 'store') -> None:
         self.name     = name
-        self.default  = default
+        self.value  = value
         self.help     = help 
         self.var_type = var_type
         self.choices  = choices
@@ -16,8 +16,8 @@ class DynamicArg:
         
     def __add__(self, operand: Any):
         if isinstance(operand, DynamicArg):
-            return self.default + operand.default
-        return self.default + operand 
+            return self.value + operand.value
+        return self.value + operand 
     
     def __radd__(self, operand: Any):
         return self.__add__(operand)
@@ -27,11 +27,11 @@ class DynamicArg:
     
     def __mul__(self, operand: Any):
         if isinstance(operand, DynamicArg):
-            return self.default * operand.default
-        return self.default * operand 
+            return self.value * operand.value
+        return self.value * operand 
     
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
-        return ufunc.__call__(inputs[0], self.default)
+        return ufunc.__call__(inputs[0], self.value)
     
     def __rmul__(self, operand: Any):
         return self.__mul__(operand)
@@ -41,80 +41,80 @@ class DynamicArg:
     
     def __sub__(self, operand: Any):
         if isinstance(operand, DynamicArg):
-            return self.default - operand.default 
-        return self.default - operand 
+            return self.value - operand.value 
+        return self.value - operand 
     
     def __isub__(self, operand: Any):
         return self.__sub__(operand) 
     
     def __rsub__(self, operand: Any):
         if isinstance(operand, DynamicArg):
-            return operand.default - self.default
-        return operand - self.default
+            return operand.value - self.value
+        return operand - self.value
     
     def __truediv__(self, operand: Any):
         if isinstance(operand, DynamicArg):
-            return self.default / operand.default
-        return self.default / operand 
+            return self.value / operand.value
+        return self.value / operand 
     
     def __rtruediv__(self, operand: Any):
         if isinstance(operand, DynamicArg):
-            return operand.default / self.default
-        return operand / self.default
+            return operand.value / self.value
+        return operand / self.value
     
     def __floordiv__(self, operand: Any):
         if isinstance(operand, DynamicArg):
-            return self.default // operand.default
-        return self.default // operand  
+            return self.value // operand.value
+        return self.value // operand  
     
     def __rfloordiv__(self, operand: Any):
         if isinstance(operand, DynamicArg):
-            return operand.default // self.default
-        return operand // self.default  
+            return operand.value // self.value
+        return operand // self.value  
     
     def __abs__(self):
-        return abs(self.default)
+        return abs(self.value)
     
     def __eq__(self, other: Any):
         if isinstance(other, DynamicArg):
-            return self.default == other.default
-        return self.default == other 
+            return self.value == other.value
+        return self.value == other 
     
     def __ne__(self, other: Any):
         if isinstance(other, DynamicArg):
-            return self.default != other.default
-        return self.default != other 
+            return self.value != other.value
+        return self.value != other 
     
     def __pow__(self, power: Any):
-        return self.default ** power 
+        return self.value ** power 
     
     def __lt__(self, other: Any):
         if isinstance(other, DynamicArg):
-            return self.default < other.default
-        return self.default < other 
+            return self.value < other.value
+        return self.value < other 
     
     def __le__(self, other: Any):
         if isinstance(other, DynamicArg):
-            return self.default <= other.default
-        return self.default <= other 
+            return self.value <= other.value
+        return self.value <= other 
     
     def _ge__(self, other: Any):
         if isinstance(other, DynamicArg):
-            return self.default >= other.default
-        return self.default >= other 
+            return self.value >= other.value
+        return self.value >= other 
     
     def __gt__(self, other: Any):
         if isinstance(other, DynamicArg):
-            return self.default > other.default
-        return self.default > other 
+            return self.value > other.value
+        return self.value > other 
     
     def __neg__(self):
-        return  self.default * (-1.0)
+        return  self.value * (-1.0)
     
     def __bool__(self):
-        if isinstance(self.default, bool):
-            return self.default
-        return self.default != None
+        if isinstance(self.value, bool):
+            return self.value
+        return self.value != None
     
     def __str__(self):
-        return str(self.default)
+        return str(self.value)
