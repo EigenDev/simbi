@@ -23,15 +23,17 @@ For the `-D<build_option>` part, check the `meson_options.txt` file for availabl
 2) Run `ninja -v -C <build_dir> install` or  `meson install -C <build_dir>`
 3) If `meson` detected `hip` or `cuda`, the install script will install both the cpu and gpu extensions into your system site-packages or `--user` site-packages depending on privileges.  
 4) If all is well, we can test. To test, try running the example scripts provided. For example<br>
- `./examples/sod_test.py --nzones 512 --mode cpu --cfl 0.1 --bc outflow --tend 0.2` 
+ ```bash
+ ./examples/sod_test.py --nzones 512 --mode cpu --cfl 0.1 --bc outflow --tend 0.2
+``` 
 5) ???
 6) Profit
 
 ### Bonus
 Another way to run the code is to create some configuration script and invoke it using the entry point. You would then run it like so:<br>
-`
+```bash
 $ pysimbi config/marti_muller.py --mode gpu --nzones 100 --gamma 1.4 
-`
+```
 <br>
 where `--mode` is a global command line option available for every config script, and `--nzones` and `--gamma` are problem-specific options that are dynamically parsed based on whatever `DynamicArg` variables exist in the config script you create.
 Check out how to create one of these configuration scripts in the `config/` folder!
