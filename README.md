@@ -18,13 +18,24 @@ https://user-images.githubusercontent.com/29236993/173423001-53ab2b60-4159-4ce5-
 
 
 ### Quick setup guide
-1) Run `CXX=<your_cpp_compiler> meson setup <build_dir> -D<some_option>` from project root. It is important that this directory is not named `build` because the `install` call with create `build` dir for the `pip` installation part. 
+1) Run 
+```bash 
+CXX=<your_cpp_compiler> meson setup <build_dir> -D<some_option>
+``` 
+from project root. It is important that this directory is not named `build` because the `install` call with create `build` dir for the `pip` installation part. 
 For the `-D<build_option>` part, check the `meson_options.txt` file for available build options. 
-2) Run `ninja -v -C <build_dir> install` or  `meson install -C <build_dir>`
+2) Run 
+```bash 
+$ ninja -v -C <build_dir> install
+``` 
+or  
+```bash 
+$ meson install -C <build_dir>
+```
 3) If `meson` detected `hip` or `cuda`, the install script will install both the cpu and gpu extensions into your system site-packages or `--user` site-packages depending on privileges.  
 4) If all is well, we can test. To test, try running the example scripts provided. For example<br>
  ```bash
- ./examples/sod_test.py --nzones 512 --mode cpu --cfl 0.1 --bc outflow --tend 0.2
+ $ ./examples/sod_test.py --nzones 512 --mode cpu --cfl 0.1 --bc outflow --tend 0.2
 ``` 
 5) ???
 6) Profit
