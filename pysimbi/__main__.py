@@ -13,6 +13,10 @@ def valid_pyscript(param):
     return param
 
 def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
+    """
+    Configure the Hydro state based on the Config class that exists in the passed
+    in setup script. Once configured, pass it back to main to be simulated 
+    """
     import sys 
     script_dirname = os.path.dirname(script)
     base_script    = Path(os.path.abspath(script)).stem
