@@ -35,9 +35,9 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     config = problem_class()
     if argv:
         config.parse_args(parser)
-    print("="*80)
-    print(config.__doc__, flush=True)
-    print("="*80)
+    print("="*80, flush=True)
+    print(f"{config.__doc__:<40}", flush=True)
+    print("="*80, flush=True)
     state: Hydro = Hydro.gen_from_setup(config)
     kwargs = {}
     kwargs['linspace']                 = state.linspace 

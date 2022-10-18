@@ -1,8 +1,4 @@
-from email.policy import default
 from typing import Any
-
-
-from typing import Any 
 class DynamicArg:
     def __init__(self, 
                  name: str, 
@@ -121,4 +117,4 @@ class DynamicArg:
         return self.default != None
     
     def __str__(self):
-        return self.default
+        return str(self.default)

@@ -1,9 +1,10 @@
-from pysimbi import BaseConfig 
+from pysimbi import BaseConfig, DynamicArg
 
 class SodProblem(BaseConfig):
     """
     Sod's Shock Tube Problem in 1D Newtonian Fluid
     """
+    nzones = DynamicArg("nzones", 1000, help="number of grid zones", var_type=int)
     @property
     def initial_state(self):
         return ((1.0, 1.0, 0.0), (0.125, 0.1, 0.0))
@@ -22,7 +23,9 @@ class SodProblem(BaseConfig):
 
     @property
     def dimensions(self):
-        return 1000
+        if isinstance(self.nzones, DynamicArg):
+            return self.nzones.default 
+        return self.nzones
     
     @property
     def gamma(self):

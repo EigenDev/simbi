@@ -1,4 +1,6 @@
+from .free_arg import DynamicArg
 class BaseConfig:
+    dynamic_args = None 
     @property
     def initial_state(self):
         raise NotImplementedError("Your subclass need to implement the initial_state property")
@@ -54,3 +56,57 @@ class BaseConfig:
     @property
     def dens_outer(self):
        return None
+    
+    def find_dynamic_args(self):
+        members = [attr for attr in dir(self) if not callable(getattr(self, attr)) and not attr.startswith("__")]
+        self.dynamic_args = [getattr(self, member) for member in members if isinstance(getattr(self,member), DynamicArg)]
+        
+    @property
+    def args(self):
+        return self.dynamic_args
+    
+    def parse_args(self, parser):
+        """
+        Parse extra problem-specific args from command line
+        """
+        if not self.dynamic_args:
+            self.find_dynamic_args()
+            
+        for member in self.args:
+            if type(member.default) == bool:
+                parser.add_argument(
+                    f'--{member.name}',
+                    help    = member.help,
+                    action  = member.action,
+                    default = member.default,
+                )
+            else:
+                parser.add_argument(
+                    f'--{member.name}',
+                    help    = member.help,
+                    action  = member.action,
+                    type    = member.var_type,
+                    choices = member.choices,
+                    default = member.default,
+                )
+                    
+        args = parser.parse_args()
+        # Update dynamic var attributes to reflect new values passed from cli
+        for var in self.dynamic_args:
+            if var.name in vars(args):
+                var.default = vars(args)[var.name]
+
+    def print_problem_params(self):
+        if not self.dynamic_args:
+            self.find_dynamic_args()
+        print("\nProblem Parameters:", flush=True)
+        print("="*80, flush=True)
+        for member in self.args:
+            val = member
+            if (isinstance(member.default ,float)):
+                val = round(val, 3)
+            val = str(val)
+            print(f"{member.name:.<30} {member.default:<15} {member.help}", flush = True)
+    
+    def __del__(self):
+        self.print_problem_params()

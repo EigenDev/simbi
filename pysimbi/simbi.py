@@ -10,7 +10,7 @@ import inspect
 import pysimbi.initial_condition as simbi_ic 
 import warnings
 from typing import Callable
-
+from time import sleep 
 regimes             = ['classical', 'relativistic']
 coord_systems       = ['spherical', 'cartesian'] # TODO: Implement Cylindrical
 boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
@@ -67,7 +67,7 @@ class Hydro:
             self.edens_outer              = setup.edens_outer
             self.mom_outer                = setup.mom_outer 
             self.dens_outer               = setup.dens_outer 
-        
+            
         if coord_system not in coord_systems:
             raise ValueError(f"Invalid coordinate system. Expected one of: {coord_systems}")
         
@@ -111,7 +111,7 @@ class Hydro:
         self.gamma          = gamma 
         self.geometry       = geometry
         self.dimensions     = dimensions 
-                                        
+        
         # Initial Conditions
         # Check for Discontinuity
         if discontinuity:
@@ -317,13 +317,10 @@ class Hydro:
             if type(val) == float:
                 val_str = f"{val:.2f}"
             elif type(val) == tuple:
-                val_str = ''
-                for tup in val:
-                    if type(tup) == int:
-                        val_str = str(val)
-                        break
-                    elif type(tup) == tuple:
-                        val_str += '(' + ', '.join('{0:.3f}'.format(t) for t in tup) + ')'
+                val_str = str(val)
+                for elem in val:
+                    if isinstance(elem, tuple):
+                        val_str += '(' + ', '.join('{0:.3f}'.format(t) for t in elem) + ')'
             else:
                 val_str = str(val)
                 
@@ -385,6 +382,7 @@ class Hydro:
             u (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
+        sleep(1.5)
         if scale_factor == None:
             scale_factor = lambda t: 1.0 
         if scale_factor_derivative == None:
