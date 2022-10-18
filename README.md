@@ -33,7 +33,7 @@ or
 $ meson install -C <build_dir>
 ```
 3) If `meson` detected `hip` or `cuda`, the install script will install both the cpu and gpu extensions into your system site-packages or `--user` site-packages depending on privileges.  
-4) If all is well, we can test. To test, try running the example scripts provided. For example<br>
+4) If all is well, we can test. To test, try running the example scripts provided. For example
  ```bash
  $ ./examples/sod_test.py --nzones 512 --mode cpu --cfl 0.1 --bc outflow --tend 0.2
 ``` 
@@ -41,10 +41,9 @@ $ meson install -C <build_dir>
 6) Profit
 
 ### Bonus
-Another way to run the code is to create some configuration script and invoke it using the entry point. You would then run it like so:<br>
+Another way to run the code is to create some configuration script and invoke it using the entry point. You would then run it like so:
 ```bash
 $ pysimbi config/marti_muller.py --mode gpu --nzones 100 --gamma 1.4 
 ```
-<br>
 where `--mode` is a global command line option available for every config script, and `--nzones` and `--gamma` are problem-specific options that are dynamically parsed based on whatever `DynamicArg` variables exist in the config script you create.
 Check out how to create one of these configuration scripts in the `config/` folder!
