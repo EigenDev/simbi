@@ -30,7 +30,7 @@ For the `-D<build_option>` part, check the `meson_options.txt` file for availabl
 ### Bonus
 Another way to run the code is to create some configuration script and invoke it using the entry point. You would then run it like so:<br>
 `
-'> pysimbi config/marti_muller.py --mode gpu --nzones 100 --gamma 1.4 
+$ pysimbi config/marti_muller.py --mode gpu --nzones 100 --gamma 1.4 
 `
 <br>
 where `--mode` is a global command line option available for every config script, and `--nzones` and `--gamma` are problem-specific options that are dynamically parsed based on whatever `DynamicArg` variables exist in the config script you create.
