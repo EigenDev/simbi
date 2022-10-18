@@ -20,10 +20,11 @@ https://user-images.githubusercontent.com/29236993/173423001-53ab2b60-4159-4ce5-
 ### Quick setup guide
 1) Run 
 ```bash 
-CXX=<your_cpp_compiler> meson setup <build_dir> -D<some_option>
+$ CXX=<your_cpp_compiler> meson setup <build_dir> -D<some_option>
 ``` 
 from project root. It is important that this directory is not named `build` because the `install` call with create `build` dir for the `pip` installation part. 
 For the `-D<build_option>` part, check the `meson_options.txt` file for available build options. 
+
 2) Run 
 ```bash 
 $ ninja -v -C <build_dir> install
