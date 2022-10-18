@@ -314,9 +314,9 @@ class Hydro:
         
         for key, val in system_dict.items():
             my_str = str(key).ljust(30, '.')
-            if type(val) == float:
+            if isinstance(val, float):
                 val_str = f"{val:.2f}"
-            elif type(val) == tuple:
+            elif isinstance(val, tuple()):
                 val_str = str(val)
                 for elem in val:
                     if isinstance(elem, tuple):
