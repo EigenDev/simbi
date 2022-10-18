@@ -52,7 +52,6 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
 
 def main():
     parser = argparse.ArgumentParser("Primitive parameters for PySimbi simulation configuration")
-    # sub_parser = parser.add_subparsers(help='extra args for problem-specific class')
     parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
     parser.add_argument('--tstart',    help='start time for simulation', default=0.0, type=float)
     parser.add_argument('--tend',    help='end time for simulation', default=1.0, type=float)
