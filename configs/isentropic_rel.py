@@ -33,7 +33,7 @@ def velocity(gamma, rho, rho_ref, pressure, p_ref):
 
 class IsentropicRelWave(BaseConfig):
     """
-    Mignone & Bodo (2005), Relativistic Test Problems in 1D Fluid
+    Relativistic Isentropic Pulse in 1D, Entropy conserving
     """
     nzones    = DynamicArg("nzones", 1000, help="number of grid zones", var_type=int)
     ad_gamma  = DynamicArg("gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
