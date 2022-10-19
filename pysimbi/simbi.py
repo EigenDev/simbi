@@ -451,7 +451,7 @@ class Hydro:
             print("Computing First Order Solution...", flush=True)
         else:
             print('Computing Second Order Solution...', flush=True)
-          
+        
         if self.dimensionality  == 1:
             sources = np.zeros(self.u.shape) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)

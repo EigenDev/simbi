@@ -1,6 +1,7 @@
 # Module to config the initial condition for the SIMBI
 # hydro setup. From here on, I will fragment the code 
 # to try and reduce the confusion between functions
+from statistics import mode
 import numpy as np 
 import h5py 
 import pysimbi.helpers as helpers 
@@ -18,22 +19,11 @@ def load_checkpoint(model, filename, dim, mesh_motion):
             p           = hf.get("p")[:]
             nx          = ds.attrs["Nx"]
             model.t     = ds.attrs["current_time"]
-            try:
-                x1max = ds.attrs["x1max"]
-                x1min = ds.attrs["x1min"]
-            except:
-                x1max = ds.attrs["xmax"]
-                x1min = ds.attrs["xmin"]
-                
-            try:
-                ad_gamma = ds.attrs["ad_gamma"]
-            except:
-                ad_gamma = 4./3.
             
-            try:
-                model.ckpt_idx = ds.attrs['chkpt_idx']
-            except:
-                model.chkpt_idx = 0
+            x1max          = ds.attrs["x1max"]
+            x1min          = ds.attrs["x1min"]
+            ad_gamma       = ds.attrs["adiabatic_gamma"]
+            model.ckpt_idx = ds.attrs['chkpt_idx']
             
             if mesh_motion:
                 nx_active = ds.attrs['xactive_zones']
@@ -63,43 +53,23 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                     model.u[:, 0:nghosts]        *= volume_factor[0]
                     model.u[:, -nghosts: ]       *= volume_factor[-1]
         else:
-            rho         = hf.get("rho")[:]
-            v1          = hf.get("v1")[:]
-            v2          = hf.get("v2")[:]
-            p           = hf.get("p")[:]
-            try:
-                nx          = ds.attrs["NX"]
-                ny          = ds.attrs["NY"]
-            except:
-                nx          = ds.attrs["nx"]
-                ny          = ds.attrs["ny"]
-                
-            try:
-                scalars    = hf.get("chi")[:]
-            except:
-                scalars    = np.zeros((ny, nx))
-                
-            model.t     = ds.attrs["current_time"]
-            try:
-                x1max        = ds.attrs["x1max"]
-                x1min        = ds.attrs["x1min"]
-                x2max        = ds.attrs["x2max"]
-                x2min        = ds.attrs["x2min"]
-            except:
-                x1max        = ds.attrs["xmax"]
-                x1min        = ds.attrs["xmin"]
-                x2max        = ds.attrs["ymax"]
-                x2min        = ds.attrs["ymin"]
-            try:
-                ad_gamma = ds.attrs["ad_gamma"]
-            except:
-                ad_gamma = 4./3.
+            rho     = hf.get("rho")[:]
+            v1      = hf.get("v1")[:]
+            v2      = hf.get("v2")[:]
+            p       = hf.get("p")[:]
+            nx      = ds.attrs["nx"]
+            ny      = ds.attrs["ny"]
+            scalars = hf.get("chi")[:]
 
-            try:
-                model.chkpt_idx = ds.attrs['chkpt_idx']
-            except:
-                model.chkpt_idx = 0
-                
+            model.t = ds.attrs["current_time"]
+            x1max   = ds.attrs["x1max"]
+            x1min   = ds.attrs["x1min"]
+            x2max   = ds.attrs["x2max"]
+            x2min   = ds.attrs["x2min"]
+
+            ad_gamma = ds.attrs["adiabatic_gamma"]
+            model.chkpt_idx = ds.attrs['chkpt_idx']
+            
             if mesh_motion:
                 nx_active = ds.attrs['xactive_zones']
                 ny_active = ds.attrs['yactive_zones']
@@ -129,19 +99,23 @@ def load_checkpoint(model, filename, dim, mesh_motion):
             p       = p.reshape(ny, nx)
             scalars = scalars.reshape(ny,nx)
             
-            h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
-            if ds.attrs['using_gamma_beta']:
-                W = np.sqrt(1 + (v1*v1 + v2 * v2))
-                v1 /= W 
-                v2 /= W
+            if ds.attrs['regime'].decode("utf-8") == 'relativistic':
+                h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
+                if ds.attrs['using_gamma_beta']:
+                    W = np.sqrt(1 + (v1*v1 + v2 * v2))
+                    v1 /= W 
+                    v2 /= W
+                else:
+                    W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
+                model.D    = rho * W              
+                model.S1   = W*W*rho*h*v1         
+                model.S2   = W*W*rho*h*v2         
+                model.tau  = W*W*rho*h - p - rho*W
+                model.Dchi = model.D * scalars    
+                model.u    = np.array([model.D, model.S1, model.S2, model.tau, model.Dchi])
             else:
-                W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
-            model.D    = rho * W              
-            model.S1   = W*W*rho*h*v1         
-            model.S2   = W*W*rho*h*v2         
-            model.tau  = W*W*rho*h - p - rho*W
-            model.Dchi = model.D * scalars    
-            model.u    = np.array([model.D, model.S1, model.S2, model.tau, model.Dchi])
+                model.u    = np.array([rho, rho * v1, rho * v2, p / (ad_gamma - 1) + 0.5 * rho * (v1 ** 2 + v2 ** 2), rho * scalars])
+            
             if mesh_motion:
                 if ds.attrs['boundary_condition'] == 'periodic':
                     model.u   *= volume_factor
