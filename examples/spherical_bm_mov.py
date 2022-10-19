@@ -112,8 +112,10 @@ def main():
     rho0 = rho[0, 0]
     r0   = r[0]
     k    = args.omega
+    
     def a(t):
         return 1.0 
+    
     def adot(t):
         return args.vouter                                                  
     
@@ -153,8 +155,8 @@ def main():
         'plm_theta': args.plm_theta,
         'data_directory': args.data_dir,
         'chkpt_interval': args.chint,
-        'adot': adot,
-        'a': a,
+        'scale_factor_derivative': adot,
+        'scale_factor': a,
         'dens_outer': rho_outer,
         'mom_outer':  [s1, s2],
         'edens_outer': edens

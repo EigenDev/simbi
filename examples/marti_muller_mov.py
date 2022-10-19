@@ -77,8 +77,8 @@ def main():
             'plm_theta': args.plm_theta,
             'data_directory': args.data_dir,
             'chkpt_interval': args.chint,
-            'a': a,
-            'adot': adot,
+            'scale_factor': a,
+            'scale_factor_derivative': adot,
             'dens_outer': rho,
             'mom_outer': s,
             'edens_outer': tau
