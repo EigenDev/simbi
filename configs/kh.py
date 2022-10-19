@@ -3,7 +3,7 @@ from pysimbi import BaseConfig, DynamicArg
 
 class KelvinHelmholtz(BaseConfig):
     """
-    Kelvin Helmholtz problem
+    Kelvin Helmholtz problem in Newtonian Fluid
     """
     npts = DynamicArg("npts", 256, help="Number of zones in x and y dimensions", var_type=int)
     
