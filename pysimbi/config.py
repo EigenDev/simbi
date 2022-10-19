@@ -65,6 +65,30 @@ class BaseConfig:
     @property
     def end_time(self):
        return None
+   
+    @property
+    def use_hllc_solver(self):
+       return None
+   
+    @property
+    def boundary_condition(self):
+       return None 
+   
+    @property
+    def plm_theta(self):
+        return None 
+    
+    @property
+    def data_directory(self):
+        return None
+    
+    @property 
+    def dlogt(self):
+        return None 
+    
+    @property
+    def args(self):
+        return self.dynamic_args
     
     def find_dynamic_args(self):
         """
@@ -73,9 +97,6 @@ class BaseConfig:
         members = [attr for attr in dir(self) if not callable(getattr(self, attr)) and not attr.startswith("__")]
         self.dynamic_args = [getattr(self, member) for member in members if isinstance(getattr(self,member), DynamicArg)]
         
-    @property
-    def args(self):
-        return self.dynamic_args
     
     def parse_args(self, parser):
         """

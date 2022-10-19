@@ -6,6 +6,7 @@ import importlib
 from pysimbi import Hydro
 from pathlib import Path
 
+overideable_args = ['tstart', 'tend', 'hllc', 'bc', 'plm_theta', 'dlogt', 'data_directory']
 def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
@@ -46,6 +47,11 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     kwargs = {}
     kwargs['tstart']                   = config.start_time
     kwargs['tend']                     = config.end_time
+    kwargs['hllc']                     = config.use_hllc_solver 
+    kwargs['boundary_condition']       = config.boundary_condition
+    kwargs['plm_theta']                = config.plm_theta
+    kwargs['dlogt']                    = config.dlogt
+    kwargs['data_directory']           = config.data_directory
     kwargs['linspace']                 = state.linspace 
     kwargs['sources']                  = state.sources 
     kwargs['scalars']                  = state.scalars 
@@ -81,10 +87,8 @@ def main():
     for arg in vars(args):
         if arg == 'setup_script':
             continue
-        if arg == 'tend' and kwargs[arg]:
+        if arg in overideable_args and kwargs[arg]:
             continue 
-        if arg == 'tstart' and kwargs[arg]:
-            continue
         
         kwargs[arg] = getattr(args, arg)
     sim_state.simulate(**kwargs)
