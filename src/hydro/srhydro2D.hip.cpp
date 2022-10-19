@@ -1233,6 +1233,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const luint xblockdim       = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
     const luint yblockdim       = yphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : yphysical_grid;
     const luint radius          = (periodic) ? 0 : (first_order) ? 1 : 2;
+    const luint pseudo_radius   = (first_order) ? 1 : 2;
     const luint bx              = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
     const luint by              = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
     const luint shBlockSpace    = bx * by;
@@ -1324,7 +1325,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                     ncheck += 1;
                     zu_avg += total_zones / delta_t;
                     if constexpr(BuildPlatform == Platform::GPU) {
-                        const real gpu_emperical_bw = getFlops<Conserved, Primitive>(radius, total_zones, active_zones, delta_t);
+                        const real gpu_emperical_bw = getFlops<Conserved, Primitive>(pseudo_radius, total_zones, active_zones, delta_t);
                         writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
                     } else {
                         writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
@@ -1405,7 +1406,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                     ncheck += 1;
                     zu_avg += total_zones / delta_t;
                     if constexpr(BuildPlatform == Platform::GPU) {
-                        const real gpu_emperical_bw = getFlops<Conserved, Primitive>(radius, total_zones, active_zones, delta_t);
+                        const real gpu_emperical_bw = getFlops<Conserved, Primitive>(pseudo_radius, total_zones, active_zones, delta_t);
                         writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
                     } else {
                         writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
