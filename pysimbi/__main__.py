@@ -6,7 +6,7 @@ import importlib
 from pysimbi import Hydro
 from pathlib import Path
 
-overideable_args = ['tstart', 'tend', 'hllc', 'bc', 'plm_theta', 'dlogt', 'data_directory']
+overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta', 'dlogt', 'data_directory']
 def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
