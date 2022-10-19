@@ -34,3 +34,6 @@ def print_problem_params(args, parser) -> None:
 def compute_num_polar_zones(rmin: float, rmax: float, nr: float, theta_bounds: tuple = (0.0, np.pi)):
     dlogr = np.log(rmax / rmin) / nr
     return int(1 + (theta_bounds[1] - theta_bounds[0]) / dlogr)
+
+def calc_dlogt(tmin: float, tmax: float, ncheckpoints: int):
+    return np.log10(tmax / tmin) / (ncheckpoints - 1)
