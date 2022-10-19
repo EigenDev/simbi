@@ -1,6 +1,6 @@
 import numpy as np
 from pysimbi import BaseConfig, DynamicArg
-
+SEED = 12345
 class KelvinHelmholtz(BaseConfig):
     """
     Kelvin Helmholtz problem in Newtonian Fluid
@@ -37,7 +37,7 @@ class KelvinHelmholtz(BaseConfig):
         self.p[np.where(np.abs(y) < 0.25)] = self.pR
 
         # Seed the KH instability with random velocities
-        rng     = np.random.default_rng()
+        rng     = np.random.default_rng(SEED)
         sin_arr = 0.01 * np.sin(2 * np.pi * x)
         vx_rand = rng.choice(sin_arr, size=self.vx.shape)
         vy_rand = rng.choice(sin_arr, size=self.vy.shape)
