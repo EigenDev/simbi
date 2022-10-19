@@ -292,8 +292,8 @@ Conserved SRHD2D::prims2flux(const Primitive &prims, luint nhat = 1) const
 
     const real h   = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
     const real D   = rho * lorentz_gamma;
-    const real S1  = D   * lorentz_gamma * h * v1;
-    const real S2  = D   * lorentz_gamma * h * v2;
+    const real S1  = rho * lorentz_gamma * lorentz_gamma * h * v1;
+    const real S2  = rho * lorentz_gamma * lorentz_gamma * h * v2;
     const real Sj  = (nhat == 1) ? S1 : S2;
 
     return Conserved{D * vn, S1 * vn + kron * pressure, S2 * vn + !kron * pressure, Sj - D * vn, D * vn * prims.chi};
