@@ -1,3 +1,4 @@
+from typing import Callable, Union, Tuple
 from .free_arg import DynamicArg
 class BaseConfig:
     dynamic_args = None 
@@ -38,23 +39,23 @@ class BaseConfig:
         return 0.0
     
     @property
-    def scale_factor(self):
+    def scale_factor(self) -> Callable:
         return None 
     
     @property
-    def scale_factor_derivative(self):
+    def scale_factor_derivative(self) -> Callable:
        return None
     
     @property
-    def edens_outer(self):
+    def edens_outer(self) -> Callable:
         return None 
     
     @property
-    def mom_outer(self):
+    def mom_outer(self) -> Union[Callable, Tuple[Callable]]:
         return None
-
+    
     @property
-    def dens_outer(self):
+    def dens_outer(self) -> Callable:
        return None
    
     @property
