@@ -437,9 +437,9 @@ class Hydro:
         periodic    = boundary_condition == 'periodic'
         start_time  = tstart if self.t == 0 else self.t
         #Convert strings to byte arrays
-        data_directory     = os.path.join(data_directory, '').encode('utf-8')
-        coordinates        = self.coord_system.encode('utf-8')
-        boundary_condition = boundary_condition.encode('utf-8')
+        cython_data_directory     = os.path.join(data_directory, '').encode('utf-8')
+        cython_coordinates        = self.coord_system.encode('utf-8')
+        cython_boundary_condition = boundary_condition.encode('utf-8')
         
         # Check whether the specified path exists or not
         if not os.path.exists(data_directory):
@@ -457,9 +457,9 @@ class Hydro:
             sources = sources.reshape(sources.shape[0], -1)
             kwargs  = {}
             if self.regime == "classical":
-                state = PyState(self.u, self.gamma, cfl, x1 = x1, coord_system = coordinates)
+                state = PyState(self.u, self.gamma, cfl, x1 = x1, coord_system = cython_coordinates)
             else:   
-                state = PyStateSR(self.u, self.gamma, cfl, x1 = x1, coord_system = coordinates)
+                state = PyStateSR(self.u, self.gamma, cfl, x1 = x1, coord_system = cython_coordinates)
                 kwargs = {'a': scale_factor, 'adot': scale_factor_derivative}
                 if dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] =  dens_outer
@@ -475,8 +475,8 @@ class Hydro:
                 engine_duration    = engine_duration,
                 chkpt_interval     = chkpt_interval,
                 chkpt_idx          = self.chkpt_idx,
-                data_directory     = data_directory,
-                boundary_condition = boundary_condition,
+                data_directory     = cython_data_directory,
+                boundary_condition = cython_boundary_condition,
                 first_order        = first_order,
                 linspace           = linspace,
                 hllc               = hllc,
@@ -489,7 +489,7 @@ class Hydro:
             
             kwargs = {}
             if self.regime == "classical":
-                state = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                state = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
             else:
                 kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'quirk_smoothing': quirk_smoothing}
                 if dens_outer and mom_outer and edens_outer:
@@ -498,7 +498,7 @@ class Hydro:
                     kwargs['s2_outer'] =  mom_outer[1]
                     kwargs['e_outer']  =  edens_outer
                     
-                state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
                 
             self.solution = state.simulate(
                 sources         = sources,
@@ -509,8 +509,8 @@ class Hydro:
                 engine_duration = engine_duration,
                 chkpt_interval  = chkpt_interval,
                 chkpt_idx       = self.chkpt_idx,
-                data_directory  = data_directory,
-                boundary_condition = boundary_condition,
+                data_directory  = cython_data_directory,
+                boundary_condition = cython_boundary_condition,
                 first_order     = first_order,
                 linspace        = linspace,
                 hllc            = hllc,
@@ -523,9 +523,9 @@ class Hydro:
             if self.regime == "classical":
                 # TODO: Implement Newtonian 3D
                 pass
-                # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=coordinates)
+                # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
             else:
-                state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=coordinates)
+                state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=cython_coordinates)
             
             self.solution = state.simulate(
                 sources         = sources,
@@ -536,8 +536,8 @@ class Hydro:
                 engine_duration = engine_duration,
                 chkpt_interval  = chkpt_interval,
                 chkpt_idx       = self.chkpt_idx,
-                data_directory  = data_directory,
-                boundary_condition = boundary_condition,
+                data_directory  = cython_data_directory,
+                boundary_condition = cython_boundary_condition,
                 first_order     = first_order,
                 linspace        = linspace,
                 hllc            = hllc)  
