@@ -452,17 +452,13 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
     
 def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     xx, yy = mesh['xx'], mesh['yy']
-    x1max        = ds["x1max"]
-    x1min        = ds["x1min"]
-    x2max        = ds["x2max"]
-    x2min        = ds["x2min"]
     
     vmin,vmax = args.cbar
-    ax.grid(False)
     if args.log:
         kwargs = {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)}
     else:
-        kwargs = {'norm': mcolors.PowerNorm(2.0, vmin=vmin, vmax=vmax)}
+        kwargs = {'vmin': vmin, 'vmax': vmax}
+        # kwargs = {'norm': mcolors.PowerNorm(2.0, vmin=vmin, vmax=vmax)}
         
     if args.rcmap:
         color_map = (plt.cm.get_cmap(args.cmap)).reversed()
@@ -470,8 +466,9 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
         color_map = plt.cm.get_cmap(args.cmap)
         
     tend = ds["time"]
-    ax.yaxis.grid(True, alpha=0.1)
-    ax.xaxis.grid(True, alpha=0.1)
+    ax.grid(False)
+    # ax.yaxis.grid(True, alpha=0.1)
+    # ax.xaxis.grid(True, alpha=0.1)
     c = ax.pcolormesh(xx, yy, field_dict[args.fields[0]], cmap=color_map, shading='auto', **kwargs)
 
     if args.log:
@@ -484,7 +481,6 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
     
     # Change the format of the field
     field_str = util.get_field_str(args)
-    
     if args.log:
         cbar.ax.set_ylabel(r'$\log$ {}'.format(field_str), fontsize=20)
     else:
@@ -685,7 +681,7 @@ def main():
         plt.show()
     else:
         dpi = 600
-        animation.save("{}.mp4".format(args.save.replace(" ", "_")), codec="libx264", extra_args=['-pix_fmt', 'yuv420p'])
+        animation.save("{}.mp4".format(args.save.replace(" ", "_")), codec="libx264")
     
     
     
