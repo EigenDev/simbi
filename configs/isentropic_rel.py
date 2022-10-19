@@ -16,7 +16,7 @@ def range_limited_float_type(arg):
     return f
 
 def func(x):
-        return np.sin(2*np.pi*x)
+    return np.sin(2*np.pi*x)
 
 def rho(alpha, x):
     return 1.0 + alpha*func(x)
