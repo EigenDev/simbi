@@ -167,18 +167,16 @@ namespace simbi
                         const real x1l = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
                         if (side == 0) {
                             return x1l;
-                        } else {
-                            return helpers::my_min(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                         }
+                        return helpers::my_min(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                 }
             case simbi::Geometry::SPHERICAL:
                 {
                         const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                         if (side == 0) {
                             return rl;
-                        } else {
-                            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                         }
+                        return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                 }
             case simbi::Geometry::CYLINDRICAL:
                 // TODO: Implement
@@ -193,9 +191,8 @@ namespace simbi
             const real x2l = helpers::my_max(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
             if (side == 0) {
                 return x2l;
-            } else {
-                return helpers::my_min(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
-            }
+            } 
+            return helpers::my_min(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
         }
 
         GPU_CALLABLE_INLINE
@@ -205,9 +202,8 @@ namespace simbi
             const real x3l = helpers::my_max(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
             if (side == 0) {
                 return x3l;
-            } else {
-                return helpers::my_min(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
-            }
+            } 
+            return helpers::my_min(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
         }
 
         GPU_CALLABLE_INLINE

@@ -142,12 +142,12 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
 GPU_CALLABLE_MEMBER
 Conserved SRHD2D::prims2cons(const Primitive &prims) const
 {
-    const real rho = prims.rho;
-    const real v1 = prims.v1;
-    const real v2 = prims.v2;
-    const real pressure = prims.p;
+    const real rho           = prims.rho;
+    const real v1            = prims.v1;
+    const real v2            = prims.v2;
+    const real pressure      = prims.p;
     const real lorentz_gamma = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2));
-    const real h = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
+    const real h             = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
 
     return Conserved{
         rho * lorentz_gamma, 
@@ -292,8 +292,8 @@ Conserved SRHD2D::prims2flux(const Primitive &prims, luint nhat = 1) const
 
     const real h   = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
     const real D   = rho * lorentz_gamma;
-    const real S1  = rho * lorentz_gamma * lorentz_gamma * h * v1;
-    const real S2  = rho * lorentz_gamma * lorentz_gamma * h * v2;
+    const real S1  = D   * lorentz_gamma * h * v1;
+    const real S2  = D   * lorentz_gamma * h * v2;
     const real Sj  = (nhat == 1) ? S1 : S2;
 
     return Conserved{D * vn, S1 * vn + kron * pressure, S2 * vn + !kron * pressure, Sj - D * vn, D * vn * prims.chi};
@@ -395,123 +395,123 @@ Conserved SRHD2D::calc_hllc_flux(
 
     // Apply the low-Mach HLLC fix found in Fleichman et al 2020: 
     // https://www.sciencedirect.com/science/article/pii/S0021999120305362
-    // constexpr real ma_lim   = static_cast<real>(0.10);
+    constexpr real ma_lim   = static_cast<real>(0.10);
 
-    //--------------Compute the L Star State----------
-    // real pressure = left_prims.p;
-    // real D        = left_state.d;
-    // real S1       = left_state.s1;
-    // real S2       = left_state.s2;
-    // real tau      = left_state.tau;
-    // real E        = tau + D;
-    // real cofactor = static_cast<real>(1.0) / (aL - aStar);
+    // --------------Compute the L Star State----------
+    real pressure = left_prims.p;
+    real D        = left_state.d;
+    real S1       = left_state.s1;
+    real S2       = left_state.s2;
+    real tau      = left_state.tau;
+    real E        = tau + D;
+    real cofactor = static_cast<real>(1.0) / (aL - aStar);
 
-    // const real vL           =  left_prims.vcomponent(nhat);
-    // const real vR           = right_prims.vcomponent(nhat);
-    // const auto kdelta       = kronecker(nhat, 1);
-    // // Left Star State in x-direction of coordinate lattice
-    // real Dstar              = cofactor * (aL - vL) * D;
-    // real S1star             = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
-    // real S2star             = cofactor * (S2 * (aL - vL) + !kdelta * (-pressure + pStar) );
-    // real Estar              = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
-    // real tauStar            = Estar - Dstar;
-    // const auto starStateL   = Conserved{Dstar, S1star, S2star, tauStar};
+    const real vL           = left_prims.vcomponent(nhat);
+    const real vR           = right_prims.vcomponent(nhat);
+    const auto kdelta       = kronecker(nhat, 1);
+    // Left Star State in x-direction of coordinate lattice
+    real Dstar              = cofactor * (aL - vL) * D;
+    real S1star             = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
+    real S2star             = cofactor * (S2 * (aL - vL) + !kdelta * (-pressure + pStar) );
+    real Estar              = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
+    real tauStar            = Estar - Dstar;
+    const auto starStateL   = Conserved{Dstar, S1star, S2star, tauStar};
 
-    // pressure = right_prims.p;
-    // D        = right_state.d;
-    // S1       = right_state.s1;
-    // S2       = right_state.s2;
-    // tau      = right_state.tau;
-    // E        = tau + D;
-    // cofactor = static_cast<real>(1.0) / (aR - aStar);
+    pressure = right_prims.p;
+    D        = right_state.d;
+    S1       = right_state.s1;
+    S2       = right_state.s2;
+    tau      = right_state.tau;
+    E        = tau + D;
+    cofactor = static_cast<real>(1.0) / (aR - aStar);
 
-    // Dstar                 = cofactor * (aR - vR) * D;
-    // S1star                = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
-    // S2star                = cofactor * (S2 * (aR - vR) + !kdelta * (-pressure + pStar) );
-    // Estar                 = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
-    // tauStar               = Estar - Dstar;
-    // const auto starStateR = Conserved{Dstar, S1star, S2star, tauStar};
+    Dstar                 = cofactor * (aR - vR) * D;
+    S1star                = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
+    S2star                = cofactor * (S2 * (aR - vR) + !kdelta * (-pressure + pStar) );
+    Estar                 = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
+    tauStar               = Estar - Dstar;
+    const auto starStateR = Conserved{Dstar, S1star, S2star, tauStar};
 
-    // // const real voL      =  left_prims.vcomponent(!nhat);
-    // // const real voR      = right_prims.vcomponent(!nhat);
-    // // const real ma_local = helpers::my_max(std::abs(vL / cL), std::abs(vR / cR));
-    // // const real phi      = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
-    // // const real aL_lm    = (phi != 0) ? phi * aL : aL;
-    // // const real aR_lm    = (phi != 0) ? phi * aR : aR;
+    // const real voL      =  left_prims.vcomponent(!nhat);
+    // const real voR      = right_prims.vcomponent(!nhat);
+    // const real ma_local = helpers::my_max(std::abs(vL / cL), std::abs(vR / cR));
+    // const real phi      = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
+    // const real aL_lm    = (phi != 0) ? phi * aL : aL;
+    // const real aR_lm    = (phi != 0) ? phi * aR : aR;
 
-    // const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
-    // Conserved net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL
-    //                     + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR) * static_cast<real>(0.5) - face_starState * vface;
+    const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
+    Conserved net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL
+                        + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR) * static_cast<real>(0.5) - face_starState * vface;
 
-    // // upwind the concentration flux 
-    // if (net_flux.d < static_cast<real>(0.0))
-    //     net_flux.chi = right_prims.chi * net_flux.d;
-    // else
-    //     net_flux.chi = left_prims.chi  * net_flux.d;
+    // upwind the concentration flux 
+    if (net_flux.d < static_cast<real>(0.0))
+        net_flux.chi = right_prims.chi * net_flux.d;
+    else
+        net_flux.chi = left_prims.chi  * net_flux.d;
 
-    // return net_flux;
+    return net_flux;
 
-    if (vface <= aStar)
-    {
-        const real pressure = left_prims.p;
-        const real D        = left_state.d;
-        const real S1       = left_state.s1;
-        const real S2       = left_state.s2;
-        const real tau      = left_state.tau;
-        const real chi      = left_state.chi;
-        const real E        = tau + D;
-        const real cofactor = static_cast<real>(1.0) / (aL - aStar);
+    // if (vface <= aStar)
+    // {
+    //     const real pressure = left_prims.p;
+    //     const real D        = left_state.d;
+    //     const real S1       = left_state.s1;
+    //     const real S2       = left_state.s2;
+    //     const real tau      = left_state.tau;
+    //     const real chi      = left_state.chi;
+    //     const real E        = tau + D;
+    //     const real cofactor = static_cast<real>(1.0) / (aL - aStar);
 
-        const real vL     =  left_prims.vcomponent(nhat);
-        const auto kdelta = kronecker(nhat, 1);
-        // Left Star State in x-direction of coordinate lattice
-        const real Dstar         = cofactor * (aL - vL) * D;
-        const real chistar       = cofactor * (aL - vL) * chi;
-        const real S1star        = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
-        const real S2star        = cofactor * (S2 * (aL - vL) + !kdelta * (-pressure + pStar) );
-        const real Estar         = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
-        const real tauStar       = Estar - Dstar;
-        auto starStateL          = Conserved{Dstar, S1star, S2star, tauStar, chistar};
+    //     const real vL     =  left_prims.vcomponent(nhat);
+    //     const auto kdelta = kronecker(nhat, 1);
+    //     // Left Star State in x-direction of coordinate lattice
+    //     const real Dstar         = cofactor * (aL - vL) * D;
+    //     const real chistar       = cofactor * (aL - vL) * chi;
+    //     const real S1star        = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
+    //     const real S2star        = cofactor * (S2 * (aL - vL) + !kdelta * (-pressure + pStar) );
+    //     const real Estar         = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
+    //     const real tauStar       = Estar - Dstar;
+    //     auto starStateL          = Conserved{Dstar, S1star, S2star, tauStar, chistar};
 
-        auto hllc_flux = left_flux + (starStateL - left_state) * aL - starStateL * vface;
+    //     auto hllc_flux = left_flux + (starStateL - left_state) * aL - starStateL * vface;
 
-        // upwind the concentration flux 
-        if (hllc_flux.d < static_cast<real>(0.0))
-            hllc_flux.chi = right_prims.chi * hllc_flux.d;
-        else
-            hllc_flux.chi = left_prims.chi  * hllc_flux.d;
+    //     // upwind the concentration flux 
+    //     if (hllc_flux.d < static_cast<real>(0.0))
+    //         hllc_flux.chi = right_prims.chi * hllc_flux.d;
+    //     else
+    //         hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
-        return hllc_flux;
-    } else {
-        const real pressure = right_prims.p;
-        const real D        = right_state.d;
-        const real S1       = right_state.s1;
-        const real S2       = right_state.s2;
-        const real tau      = right_state.tau;
-        const real chi      = right_state.chi;
-        const real E        = tau + D;
-        const real cofactor = static_cast<real>(1.0) / (aR - aStar);
+    //     return hllc_flux;
+    // } else {
+    //     const real pressure = right_prims.p;
+    //     const real D        = right_state.d;
+    //     const real S1       = right_state.s1;
+    //     const real S2       = right_state.s2;
+    //     const real tau      = right_state.tau;
+    //     const real chi      = right_state.chi;
+    //     const real E        = tau + D;
+    //     const real cofactor = static_cast<real>(1.0) / (aR - aStar);
 
-        const real vR         = right_prims.vcomponent(nhat);
-        const auto kdelta     = kronecker(nhat, 1);
-        const real Dstar      = cofactor * (aR - vR) * D;
-        const real chistar    = cofactor * (aR - vR) * chi;
-        const real S1star     = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
-        const real S2star     = cofactor * (S2 * (aR - vR) + !kdelta * (-pressure + pStar) );
-        const real Estar      = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
-        const real tauStar    = Estar - Dstar;
-        auto starStateR       = Conserved{Dstar, S1star, S2star, tauStar, chistar};
+    //     const real vR         = right_prims.vcomponent(nhat);
+    //     const auto kdelta     = kronecker(nhat, 1);
+    //     const real Dstar      = cofactor * (aR - vR) * D;
+    //     const real chistar    = cofactor * (aR - vR) * chi;
+    //     const real S1star     = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
+    //     const real S2star     = cofactor * (S2 * (aR - vR) + !kdelta * (-pressure + pStar) );
+    //     const real Estar      = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
+    //     const real tauStar    = Estar - Dstar;
+    //     auto starStateR       = Conserved{Dstar, S1star, S2star, tauStar, chistar};
 
-        auto hllc_flux = right_flux + (starStateR - right_state) * aR - starStateR * vface;
+    //     auto hllc_flux = right_flux + (starStateR - right_state) * aR - starStateR * vface;
 
-        // upwind the concentration flux 
-        if (hllc_flux.d < static_cast<real>(0.0))
-            hllc_flux.chi = right_prims.chi * hllc_flux.d;
-        else
-            hllc_flux.chi = left_prims.chi  * hllc_flux.d;
+    //     // upwind the concentration flux 
+    //     if (hllc_flux.d < static_cast<real>(0.0))
+    //         hllc_flux.chi = right_prims.chi * hllc_flux.d;
+    //     else
+    //         hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
-        return hllc_flux;
-    }
+    //     return hllc_flux;
+    // }
 
     // if (-aL <= (aStar - aL))
     // {
@@ -734,10 +734,6 @@ void SRHD2D::cons2prim(
                 self->pressure_guess[gid] = peq;
                 self->prims[gid]          = Primitive{rho, v1, v2, peq, Dchi / D};
             #endif
-            // if (n == 0) {
-            //     printf("[%lu, %lu] -- dt: %.2e n: %lu, v1: %.2e, v2: %.2e, peq: %.2e, rho: %.2e\n", gid % self->nx, gid / self-> nx, self->dt, n, v1, v2, peq, D / W);
-            //     // printf("[%lu, %lu] -- dt: %.2e n: %lu, fL: %.2e, fR: %.2e\n", ii, jj, self->dt, n, frf.d, flf.d);
-            // }
             workLeftToDo = false;
         }
     });
@@ -1028,7 +1024,6 @@ void SRHD2D::advance(
             
             case simbi::Geometry::SPHERICAL:
                 {
-                // #if GPU_CODE
                 const real rl           = x1l + vfaceL * step * self->dt; 
                 const real rr           = x1r + vfaceR * step * self->dt;
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
@@ -1041,6 +1036,7 @@ void SRHD2D::advance(
                 // const real cot          = std::cos(thmean) / std::sin(thmean);
                 const real dcos         = std::cos(tl) - std::cos(tr);
                 const real dVtot        = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
+                const real invdV        = 1.0 / dVtot;
                 const real s1R          = 2.0 * M_PI * rr * rr * dcos; 
                 const real s1L          = 2.0 * M_PI * rl * rl * dcos; 
                 const real s2R          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tr); // std::sin(tr);
@@ -1070,14 +1066,10 @@ void SRHD2D::advance(
 
                 const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) / dVtot, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dVtot , static_cast<real>(0.0)};
                 const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
-                // if (n == 1) {
-                //     printf("[%lu, %lu] -- dt: %.2e n: %lu, vL: %.2e, vR: %.2e, fL: %.2e, fR: %.2e\n", ii, jj, self->dt, n, xprimsL.v1, xprimsR.v1, fL.d, fR.d);
-                //     // printf("[%lu, %lu] -- dt: %.2e n: %lu, fL: %.2e, fR: %.2e\n", ii, jj, self->dt, n, frf.d, flf.d);
-                // }
                 #if GPU_CODE 
-                    self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) / dVtot + (grf * s2R - glf * s2L) / dVtot - geom_source - source_terms) * self->dt * step * factor;
+                    self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * self->dt * step * factor;
                 #else
-                    cons[aid] -= ( (frf * s1R - flf * s1L) / dVtot + (grf * s2R - glf * s2L) / dVtot - geom_source - source_terms) * self->dt * step * factor;
+                    cons[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * self->dt * step * factor;
                 #endif
                 break;
                 }

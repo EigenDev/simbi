@@ -34,7 +34,8 @@ namespace simbi
         std::vector<sr2d::Primitive> prims;
         std::vector<sr2d::Conserved> cons;
         real plm_theta, hubble_param;
-        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, reflecting_theta;
+        volatile bool inFailureState;
+        bool first_order, periodic, hllc, linspace, mesh_motion, reflecting_theta;
         real dt, decay_const, tstart;
         luint nzones, n, block_size, xphysical_grid, yphysical_grid;
         luint active_zones, idx_active, total_zones, init_chkpt_idx;
@@ -129,18 +130,16 @@ namespace simbi
                         const real xl = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
                         if (side == 0) {
                             return xl;
-                        } else {
-                            return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
-                        }
+                        } 
+                        return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                 }
             case simbi::Geometry::SPHERICAL:
                 {
                         const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                         if (side == 0) {
                             return rl;
-                        } else {
-                            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
-                        }
+                        } 
+                        return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                 }
             case simbi::Geometry::CYLINDRICAL:
                 // TODO: Implement
@@ -152,13 +151,11 @@ namespace simbi
         GPU_CALLABLE_INLINE
         constexpr real get_x2face(const lint ii, const int side)
         {
-
             const real yl = helpers::my_max(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
             if (side == 0) {
                 return yl;
-            } else {
-                return helpers::my_min(yl + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
-            }
+            } 
+            return helpers::my_min(yl + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
         }
 
         GPU_CALLABLE_INLINE
