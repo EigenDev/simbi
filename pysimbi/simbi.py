@@ -291,16 +291,15 @@ class Hydro:
         print("="*80, flush=True)
         for key, value in params.locals.items():
             if key != 'self':
-                try:
-                    if type(value) == float or type(value) == np.float64:
-                        val_str = f"{value:.2f}"
-                    else:
-                        val_str = str(value)
-                except:
-                    if value == 'None':
-                        val_str = 'None'
-                    else:
-                        val_str = 'function object'
+                if isinstance(value, (float, np.float64)):
+                    val_str = f"{value:.2f}"
+                elif isinstance(value, Callable):
+                    val_str = f"user-defined {key} function"
+                elif isinstance(value, tuple):
+                    if isinstance(value[0], Callable):
+                        val_str = f"user-defined {key} function(s)"
+                else:
+                    val_str = str(value)
                 
                 my_str = str(key).ljust(30, '.')
                 print(f"{my_str} {val_str}", flush=True)
@@ -316,10 +315,11 @@ class Hydro:
             my_str = str(key).ljust(30, '.')
             if isinstance(val, float):
                 val_str = f"{val:.2f}"
-            elif isinstance(val, tuple()):
+            elif isinstance(val, tuple):
                 val_str = str(val)
-                for elem in val:
-                    if isinstance(elem, tuple):
+                if isinstance(val[0], tuple):
+                    val_str = ''
+                    for elem in val:
                         val_str += '(' + ', '.join('{0:.3f}'.format(t) for t in elem) + ')'
             else:
                 val_str = str(val)
