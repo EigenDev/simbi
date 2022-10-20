@@ -120,6 +120,10 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
             field_str_list.append('M')
         elif field == 'v':
             field_str_list.append('$v / v_0$')
+        elif field == 'u1':
+            field_str_list.append(r'$\Gamma \beta_1$')
+        elif field == 'u2':
+            field_str_list.append(r'$\Gamma \beta_2$')
         else:
             field_str_list.append(field)
 
@@ -527,6 +531,10 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
         beta2 = 1.0 - (1.0 + fields['gamma_beta']**2)**(-1)
         cs2   = fields['ad_gamma'] * fields['p'] / fields['rho'] / h
         return np.sqrt(beta2 / cs2)
+    elif var == 'u1':
+        return W * fields['v1']
+    elif var == 'u2':
+        return W * fields['v2']
 
 def get_colors(interval: np.ndarray, cmap: plt.cm, vmin: float = None, vmax: float = None):
     """

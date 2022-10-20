@@ -27,7 +27,7 @@ except:
     
     
 derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'chi_dens',
-                 'gamma_beta_1', 'gamma_beta_2', 'mach']
+                 'gamma_beta_1', 'gamma_beta_2', 'mach', 'u1', 'u2']
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'chi'] + derived
 lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
 
@@ -109,7 +109,7 @@ def plot_polar_plot(
     else:
         color_map = plt.get_cmap(args.cmap)
         
-    tend = dset['time'] * util.time_scale
+    tend = dset['time'] #* util.time_scale
     # If plotting multiple fields on single polar projection, split the 
     # field projections into their own quadrants
     if num_fields > 1:
@@ -1388,7 +1388,7 @@ def plot_vs_time(
     time = np.asarray(time)
     data = np.asarray(data)
     ax.plot(time, data, label=label, color=color, alpha=1.0)
-    if args.fields[0] == 'gamma_beta':
+    if args.fields[0] == 'gamma_beta' or args.fields[0] == 'u1':
         max_idx      = np.argmax(data)
         beta         = data / (1 + data**2)**0.5
         scale_factor = 1.0 * time[max_idx:] 
