@@ -38,6 +38,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
                     setup_classes += [node.name]
     
     states = []
+    state_docs = []
     kwargs = {}
     for idx, setup_class in enumerate(setup_classes):
         problem_class = getattr(importlib.import_module(f'{base_script}'), f'{setup_class}')
@@ -45,13 +46,11 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
         if argv:
             config.parse_args(parser)
             
-        print("="*80, flush=True)
-        try:
-            print(f"{config.__doc__:<40}", flush=True)
-        except TypeError:
-            print("No docstring for problem class given", flush=True)
-        print("="*80, flush=True)
         
+        if config.__doc__:
+            state_docs += [f"{config.__doc__}"]
+        else:
+            state_docs += [f"Not docstring for problem class: {setup_class}"]
         state: Hydro = Hydro.gen_from_setup(config)
         kwargs[idx] = {}
         kwargs[idx]['tstart']                   = config.start_time
@@ -71,7 +70,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
         kwargs[idx]['dens_outer']               = state.dens_outer 
         states.append(state)
         
-    return states, kwargs 
+    return states, kwargs, state_docs 
 
 def main():
     parser = argparse.ArgumentParser("Primitive parameters for PySimbi simulation configuration")
@@ -94,7 +93,7 @@ def main():
     # print help message if no args supplied
     args, argv = parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
-    sim_states, kwargs = configure_state(args.setup_script, parser, argv)
+    sim_states, kwargs, state_docs  = configure_state(args.setup_script, parser, argv)
     for idx, sim_state in enumerate(sim_states):
         for arg in vars(args):
             if arg == 'setup_script':
@@ -103,7 +102,9 @@ def main():
                 continue 
             
             kwargs[idx][arg] = getattr(args, arg)
-            
+        print("="*80, flush=True)
+        print(state_docs[idx], flush=True)
+        print("="*80, flush=True)
         sim_state.simulate(**kwargs[idx])
     
     
