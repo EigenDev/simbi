@@ -33,8 +33,8 @@ namespace simbi
             sigaction(SIGTERM, &sigBreakHandler, NULL);
             sigaction(SIGKILL, &sigBreakHandler, NULL);
             if (killFlag) {
-                throw helpers::InterruptException(1);
                 killFlag = 0;
+                throw helpers::InterruptException(1);
             }
         }
 
