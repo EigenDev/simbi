@@ -50,7 +50,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
         if config.__doc__:
             state_docs += [f"{config.__doc__}"]
         else:
-            state_docs += [f"Not docstring for problem class: {setup_class}"]
+            state_docs += [f"No docstring for problem class: {setup_class}"]
         state: Hydro = Hydro.gen_from_setup(config)
         kwargs[idx] = {}
         kwargs[idx]['tstart']                   = config.start_time
