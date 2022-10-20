@@ -16,7 +16,7 @@
 using luint = uint64_t;
 using lint  = int64_t;
 
-// Flag that detects whether prgram was terminated by external fources
+// Flag that detects whether prgram was terminated by external forces
 extern volatile sig_atomic_t killFlag;
 
 enum class Platform: int {CPU = 0, GPU = 1};
