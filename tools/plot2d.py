@@ -487,7 +487,6 @@ def plot_cartesian_plot(
     mesh: dict, 
     dset: dict) -> None:
     fig, ax = plt.subplots(1, 1, figsize=(10,10), constrained_layout=False)
-
     xx, yy = mesh['xx'], mesh['yy']
     x1max        = dset['x1max']
     x1min        = dset['x1min']
@@ -519,8 +518,6 @@ def plot_cartesian_plot(
         else:
             cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes)
 
-    ax.yaxis.grid(True, alpha=0.1)
-    ax.xaxis.grid(True, alpha=0.1)
     ax.tick_params(axis='both', labelsize=10)
     
     # Change the format of the field
@@ -1397,7 +1394,8 @@ def plot_vs_time(
         scale_factor = 1.0 * time[max_idx:] 
         norm         = 1.0 * time[max_idx]
         ax.plot(time[max_idx:], data[max_idx] * (scale_factor / norm) ** (-3/2), label =r'$\propto t^{-3/2}$', color=color, linestyle='--')
-        ax.plot(time[max_idx:], data[max_idx] * np.exp(1.0 - scale_factor / norm), label =r'$\propto \exp(-t)$', color=color, linestyle='-.')
+        ax.plot(time[max_idx:], data[max_idx] * (scale_factor / norm) ** (-3), label =r'$\propto t^{-3}$', color=color, linestyle='--')
+        # ax.plot(time[max_idx:], data[max_idx] * np.exp(1.0 - scale_factor / norm), label =r'$\propto \exp(-t)$', color=color, linestyle='-.')
         
     if args.log:
         ax.set_xscale('log')
