@@ -26,41 +26,52 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
     
-    setup_class = []
+    setup_classes = []
     for node in root.body:
         if isinstance(node, ast.ClassDef):
             for base in node.bases:
                 if base.id == 'BaseConfig':
-                    setup_class += [node.name]
-        
-    if len(setup_class) == 1:
-        setup_class = setup_class[0]
+                    setup_classes += [node.name]
+                elif base.id in setup_classes:
+                    # if the setup class inherited from another setup class
+                    # then we already know it is a descendant of the BaseConfig
+                    setup_classes += [node.name]
     
-    problem_class = getattr(importlib.import_module(f'{base_script}'), f'{setup_class}')
-    config = problem_class()
-    if argv:
-        config.parse_args(parser)
-    print("="*80, flush=True)
-    print(f"{config.__doc__:<40}", flush=True)
-    print("="*80, flush=True)
-    state: Hydro = Hydro.gen_from_setup(config)
+    states = []
     kwargs = {}
-    kwargs['tstart']                   = config.start_time
-    kwargs['tend']                     = config.end_time
-    kwargs['hllc']                     = config.use_hllc_solver 
-    kwargs['boundary_condition']       = config.boundary_condition
-    kwargs['plm_theta']                = config.plm_theta
-    kwargs['dlogt']                    = config.dlogt
-    kwargs['data_directory']           = config.data_directory
-    kwargs['linspace']                 = state.linspace 
-    kwargs['sources']                  = state.sources 
-    kwargs['scalars']                  = state.scalars 
-    kwargs['scale_factor']             = state.scale_factor 
-    kwargs['scale_factor_derivative']  = state.scale_factor_derivative
-    kwargs['edens_outer']              = state.edens_outer
-    kwargs['mom_outer']                = state.mom_outer 
-    kwargs['dens_outer']               = state.dens_outer 
-    return state, kwargs 
+    for idx, setup_class in enumerate(setup_classes):
+        problem_class = getattr(importlib.import_module(f'{base_script}'), f'{setup_class}')
+        config = problem_class()
+        if argv:
+            config.parse_args(parser)
+            
+        print("="*80, flush=True)
+        try:
+            print(f"{config.__doc__:<40}", flush=True)
+        except TypeError:
+            print("No docstring for problem class given", flush=True)
+        print("="*80, flush=True)
+        
+        state: Hydro = Hydro.gen_from_setup(config)
+        kwargs[idx] = {}
+        kwargs[idx]['tstart']                   = config.start_time
+        kwargs[idx]['tend']                     = config.end_time
+        kwargs[idx]['hllc']                     = config.use_hllc_solver 
+        kwargs[idx]['boundary_condition']       = config.boundary_condition
+        kwargs[idx]['plm_theta']                = config.plm_theta
+        kwargs[idx]['dlogt']                    = config.dlogt
+        kwargs[idx]['data_directory']           = config.data_directory
+        kwargs[idx]['linspace']                 = state.linspace 
+        kwargs[idx]['sources']                  = state.sources 
+        kwargs[idx]['scalars']                  = state.scalars 
+        kwargs[idx]['scale_factor']             = state.scale_factor 
+        kwargs[idx]['scale_factor_derivative']  = state.scale_factor_derivative
+        kwargs[idx]['edens_outer']              = state.edens_outer
+        kwargs[idx]['mom_outer']                = state.mom_outer 
+        kwargs[idx]['dens_outer']               = state.dens_outer 
+        states.append(state)
+        
+    return states, kwargs 
 
 def main():
     parser = argparse.ArgumentParser("Primitive parameters for PySimbi simulation configuration")
@@ -83,15 +94,17 @@ def main():
     # print help message if no args supplied
     args, argv = parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
-    sim_state, kwargs = configure_state(args.setup_script, parser, argv)
-    for arg in vars(args):
-        if arg == 'setup_script':
-            continue
-        if arg in overideable_args and kwargs[arg]:
-            continue 
-        
-        kwargs[arg] = getattr(args, arg)
-    sim_state.simulate(**kwargs)
+    sim_states, kwargs = configure_state(args.setup_script, parser, argv)
+    for idx, sim_state in enumerate(sim_states):
+        for arg in vars(args):
+            if arg == 'setup_script':
+                continue
+            if arg in overideable_args and kwargs[idx][arg]:
+                continue 
+            
+            kwargs[idx][arg] = getattr(args, arg)
+            
+        sim_state.simulate(**kwargs[idx])
     
     
 if __name__ == '__main__':

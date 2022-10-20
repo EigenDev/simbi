@@ -104,24 +104,28 @@ class BaseConfig:
         """
         if not self.dynamic_args:
             self.find_dynamic_args()
-            
+        
         for member in self.args:
-            if type(member.value) == bool:
-                parser.add_argument(
-                    f'--{member.name}',
-                    help    = member.help,
-                    action  = member.action,
-                    default = member.value,
-                )
-            else:
-                parser.add_argument(
-                    f'--{member.name}',
-                    help    = member.help,
-                    action  = member.action,
-                    type    = member.var_type,
-                    choices = member.choices,
-                    default = member.value,
-                )
+            try:
+                if type(member.value) == bool:
+                    parser.add_argument(
+                        f'--{member.name}',
+                        help    = member.help,
+                        action  = member.action,
+                        default = member.value,
+                    )
+                else:
+                    parser.add_argument(
+                        f'--{member.name}',
+                        help    = member.help,
+                        action  = member.action,
+                        type    = member.var_type,
+                        choices = member.choices,
+                        default = member.value,
+                    )
+            except:
+                # ignore duplicate arguments if inheriting from another problem setup 
+                pass
                     
         args = parser.parse_args()
         # Update dynamic var attributes to reflect new values passed from cli
