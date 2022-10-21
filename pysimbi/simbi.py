@@ -441,6 +441,11 @@ class Hydro:
         cython_coordinates        = self.coord_system.encode('utf-8')
         cython_boundary_condition = boundary_condition.encode('utf-8')
         
+        # Offset the start time from zero if wanting log 
+        # checkpoints, but with initial time of zero
+        if dlogt !=0 and start_time == 0:
+            start_time = 1e-16 
+            
         # Check whether the specified path exists or not
         if not os.path.exists(data_directory):
             # Create a new directory because it does not exist 
