@@ -1,4 +1,3 @@
-from lib2to3.pytree import Base
 from pysimbi import BaseConfig, DynamicArg
 
 class StationaryWaveHLL(BaseConfig):
