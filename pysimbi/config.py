@@ -1,41 +1,38 @@
-from typing import Callable, Union, Tuple
+from typing import Callable, Union, Tuple, final
 from .free_arg import DynamicArg
 class BaseConfig:
     dynamic_args = None 
+    
     @property
-    def initial_state(self):
+    def initial_state(self) -> tuple:
         raise NotImplementedError("Your subclass need to implement the initial_state property")
     
     @property
-    def coord_system(self):
+    def coord_system(self) -> str:
         raise NotImplementedError("Your subclass needs to implement the coord_system property")
     
     @property
-    def regime(self):
+    def regime(self) -> str:
         raise NotImplementedError("Your subclass needs to implement the regime property")
         
     @property
-    def dimensions(self):
+    def dimensions(self) -> tuple:
         raise NotImplementedError("Your subclass needs to implement the dimensions property")
     
     @property
-    def geometry(self):
+    def geometry(self) -> tuple:
         raise NotImplementedError("Your subclass needs to implement the geometry property")
     
     @property
-    def linspace(self):
+    def linspace(self) -> bool:
         return False
     
     @property
-    def sources(self):
+    def sources(self) -> tuple:
        return None
     
     @property
-    def scalars(self):
-        return 0.0 
-    
-    @property
-    def passive_scalars(self):
+    def passive_scalars(self) -> tuple:
         return 0.0
     
     @property
@@ -59,46 +56,48 @@ class BaseConfig:
        return None
    
     @property
-    def start_time(self):
+    def start_time(self) -> float:
        return None
    
     @property
-    def end_time(self):
+    def end_time(self) -> float:
        return None
    
     @property
-    def use_hllc_solver(self):
+    def use_hllc_solver(self) -> bool:
        return None
    
     @property
-    def boundary_condition(self):
+    def boundary_condition(self) -> str:
        return None 
    
     @property
-    def plm_theta(self):
+    def plm_theta(self) -> float:
         return None 
     
     @property
-    def data_directory(self):
+    def data_directory(self) -> str:
         return None
     
     @property 
-    def dlogt(self):
+    def dlogt(self) -> float:
         return None 
     
     @property
-    def args(self):
+    @final
+    def args(self) -> list:
         return self.dynamic_args
     
-    def find_dynamic_args(self):
+    @final
+    def find_dynamic_args(self) -> None:
         """
         Find all derived class member's members defined as DynamicArg class instances 
         """
         members = [attr for attr in dir(self) if not callable(getattr(self, attr)) and not attr.startswith("__")]
         self.dynamic_args = [getattr(self, member) for member in members if isinstance(getattr(self,member), DynamicArg)]
         
-    
-    def parse_args(self, parser):
+    @final
+    def parse_args(self, parser) -> None:
         """
         Parse extra problem-specific args from command line
         """
@@ -135,6 +134,7 @@ class BaseConfig:
         
         self.__init__()
 
+    @final
     def print_problem_params(self):
         """
         Read from problem params and print to stdout
@@ -151,6 +151,7 @@ class BaseConfig:
             val = str(val)
             print(f"{member.name:.<30} {val:<15} {member.help}", flush = True)
     
+    @final
     def __del__(self):
         """
         Print problem params on class destruction

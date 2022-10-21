@@ -61,7 +61,7 @@ class Hydro:
             geometry                      = setup.geometry 
             self.linspace                 = setup.linspace 
             self.sources                  = setup.sources 
-            self.scalars                  = setup.scalars 
+            self.passive_scalars                  = setup.passive_scalars 
             self.scale_factor             = setup.scale_factor 
             self.scale_factor_derivative  = setup.scale_factor_derivative
             self.edens_outer              = setup.edens_outer
@@ -337,7 +337,7 @@ class Hydro:
         linspace: bool = True,
         cfl: float = 0.4,
         sources: np.ndarray = None,
-        scalars: np.ndarray = 0,
+        passive_scalars: np.ndarray = 0,
         hllc: bool = False,
         chkpt: str = None,
         chkpt_interval:float = 0.1,
@@ -363,7 +363,7 @@ class Hydro:
             linspace    (boolean):       Prompts a linearly spaced mesh or log spaced if False
             cfl         (float):         The cfl number for min adaptive timestep
             sources     (array_like):    The source terms for the simulations
-            scalars     (array_like):    The array of passive scalars
+            passive_scalars  (array_like):    The array of passive passive_scalars
             hllc        (boolean):       Tells the simulation whether to perform HLLC or HLLE
             chkpt       (string):        The path to the checkpoint file to read into the simulation
             chkpt_interval (float):      The interval at which to save the checkpoints
@@ -430,7 +430,7 @@ class Hydro:
         self.chkpt_idx = 0
         
         if not chkpt:
-            simbi_ic.initializeModel(self, first_order, boundary_condition, scalars, volume_factor=volume_factor)
+            simbi_ic.initializeModel(self, first_order, boundary_condition, passive_scalars, volume_factor=volume_factor)
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensionality , mesh_motion)
         
