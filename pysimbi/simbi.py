@@ -548,11 +548,5 @@ class Hydro:
             self._cleanup(first_order)
         return self.solution
 
-def __enter__(self):
-    return self 
-
-def __exit__(self, exc_type, exc_value, traceback):
-    pass
-
 class GPUExtNotBuiltWarning(UserWarning):
     pass
