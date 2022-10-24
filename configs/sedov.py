@@ -17,7 +17,7 @@ class SedovTaylor(BaseConfig):
     # Dynamic Args to be fed to argparse 
     e0            = DynamicArg("e0", 1.0,             help='energy scale',  var_type=float)                        
     rho0          = DynamicArg("rho0", 1.0,           help='density scale', var_type=float)                      
-    rinit         = DynamicArg("rinit", 0.1,         help='intial grid radius', var_type=float)
+    rinit         = DynamicArg("rinit", 0.1,          help='intial grid radius', var_type=float)
     rend          = DynamicArg("rend", 1.0,           help='time for simulation end', var_type=float)
     k             = DynamicArg("k", 0.0,              help='density power law k', var_type=float) 
     full_sphere   = DynamicArg("full_sphere", False,  help='flag for full_sphere computation',  var_type=bool, action='store_true') 
