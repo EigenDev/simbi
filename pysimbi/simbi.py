@@ -61,7 +61,7 @@ class Hydro:
             geometry                      = setup.geometry 
             self.linspace                 = setup.linspace 
             self.sources                  = setup.sources 
-            self.passive_scalars                  = setup.passive_scalars 
+            self.passive_scalars          = setup.passive_scalars 
             self.scale_factor             = setup.scale_factor 
             self.scale_factor_derivative  = setup.scale_factor_derivative
             self.edens_outer              = setup.edens_outer
