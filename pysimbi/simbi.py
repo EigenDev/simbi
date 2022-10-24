@@ -259,7 +259,7 @@ class Hydro:
     
     @classmethod
     def gen_from_setup(cls, setup):
-        return cls(*[0]*7, setup=setup)
+        return cls(*[0]*6, setup=setup)
     
     def _cleanup(self, first_order=True):
         """
