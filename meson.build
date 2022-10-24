@@ -100,11 +100,12 @@ if get_option('gpu_compilation').enabled()
                 '-O3', 
                 '-march=native',
             ]
+            rocm_path = run_command('hipconfig', '--rocmpath', check: true).stdout().strip()
             # Meson does not support hip yet, so we manually
             # declare the dependency
             hip_dep = declare_dependency(
-                link_args: ['-L/opt/rocm/lib', '-L/opt/rocm/hip/lib', '-lamdhip64'],
-                include_directories: ['/opt/rocm/hip/include', '/opt/rocm/include']
+                link_args: [f'-L@rocm_path@/lib', f'-L@rocm_path@/hip/lib', '-lamdhip64'],
+                include_directories: ['@rocm_path@/include']
             )
             gpu_depends += [hip_dep]
         endif
@@ -240,14 +241,14 @@ endif
 message(f'Designated install directory: @py3_install_dir@')
 if get_option('profile') == 'default'
     meson.add_install_script(
-        'pip',
+        'pip3',
         'install',
         meson.current_source_dir(),
         pip_args,
     )
 else 
     meson.add_install_script(
-        'pip',
+        'pip3',
         'install',
         '-e',
         meson.current_source_dir(),
