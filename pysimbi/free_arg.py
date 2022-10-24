@@ -8,7 +8,7 @@ class DynamicArg:
                  choices: list = None, 
                  action: str = 'store') -> None:
         self.name     = name
-        self.value  = value
+        self.value    = value
         self.help     = help 
         self.var_type = var_type
         self.choices  = choices
