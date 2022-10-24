@@ -240,14 +240,14 @@ endif
 message(f'Designated install directory: @py3_install_dir@')
 if get_option('profile') == 'default'
     meson.add_install_script(
-        'pip',
+        'pip3',
         'install',
         meson.current_source_dir(),
         pip_args,
     )
 else 
     meson.add_install_script(
-        'pip',
+        'pip3',
         'install',
         '-e',
         meson.current_source_dir(),
