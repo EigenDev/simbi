@@ -72,8 +72,8 @@ def main():
         p = pressure(gamma, r)
         v = velocity(gamma, r, p)
         tend = 0.1
-        first_o  = Hydro(gamma, initial_state=(r,p,v), dimensions=npts, geometry=(0, 1.0))
-        second_o = Hydro(gamma, initial_state=(r,p,v), dimensions=npts, geometry=(0, 1.0))
+        first_o  = Hydro(gamma, initial_state=(r,p,v), resolution=npts, geometry=(0, 1.0))
+        second_o = Hydro(gamma, initial_state=(r,p,v), resolution=npts, geometry=(0, 1.0))
         
         cfl = 10.0/npts
         rk1[npts] = first_o.simulate(tend=tend , chkpt_interval=args.chint, plm_theta=args.plm_theta, hllc=args.hllc, first_order=True, boundary_condition='periodic', cfl=cfl,  compute_mode=mode, data_directory=args.data_dir)

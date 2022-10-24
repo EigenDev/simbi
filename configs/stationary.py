@@ -24,7 +24,7 @@ class StationaryWaveHLL(BaseConfig):
         return "cartesian"
 
     @property
-    def dimensions(self):
+    def resolution(self):
         return self.nzones.value 
     
     @property

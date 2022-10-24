@@ -20,9 +20,8 @@ class Hydro:
     def __init__(self, 
                  gamma: float,
                  initial_state: tuple,
-                 dimensions: tuple,
+                 resolution: tuple,
                  geometry: tuple=None,
-                 n_vars: int = 3,
                  coord_system:str = 'cartesian',
                  regime: str = "classical",
                  setup = None):
@@ -36,13 +35,11 @@ class Hydro:
                                             Ex. state = ((1.0, 1.0, 0.0), (0.1,0.125,0.0)) for Sod Shock Tube
                                             state = (array_like rho, array_like pressure, array_like velocity)
                                     
-            dimensions (int, tuple):              Number of grid points in 1D/2D Coordinate Lattice
+            resolution (int, tuple):              Number of grid points in 1D/2D Coordinate Lattice
             
             geometry (tuple):               The first starting point, the last, and an optional midpoint in the grid
                                             Ex. geometry = (0.0, 1.0, 0.5) for Sod Shock Tube
                                             Ex. geometry = ((x1min, x1max), (x2min, x2max))
-                                
-            n_vars (int):                   Number of primitives in the problem
             
             coord_system (string):          The coordinate system the problem uses. Currently only supports Cartesian 
                                             and Spherical Coordinate Lattces
@@ -57,7 +54,7 @@ class Hydro:
             regime                        = setup.regime 
             initial_state                 = setup.initial_state 
             gamma                         = setup.gamma 
-            dimensions                    = setup.dimensions 
+            resolution                    = setup.resolution 
             geometry                      = setup.geometry 
             self.linspace                 = setup.linspace 
             self.sources                  = setup.sources 
@@ -110,7 +107,7 @@ class Hydro:
         
         self.gamma          = gamma 
         self.geometry       = geometry
-        self.dimensions     = dimensions 
+        self.resolution     = resolution 
         
         # Initial Conditions
         # Check for Discontinuity
@@ -148,7 +145,7 @@ class Hydro:
             
 
             # Initialize conserved u-tensor and flux tensors (defaulting to 2 ghost cells)
-            self.u = np.empty(shape = (3, self.dimensions), dtype=float)
+            self.u = np.empty(shape = (3, self.resolution), dtype=float)
 
             left_bound  = self.geometry[0]
             right_bound = self.geometry[1]
@@ -156,7 +153,7 @@ class Hydro:
             
             size        = abs(right_bound - left_bound)
             break_pt    = size/midpoint                                              # Define the fluid breakpoint
-            slice_point = int((self.dimensions+2)/break_pt)                             # Define the array slicepoint
+            slice_point = int((self.resolution+2)/break_pt)                             # Define the array slicepoint
             
             if self.regime == "classical":
                 self.u[:, : slice_point] = np.array([rho_l, rho_l*v_l, energy_l]).reshape(3,1)              # Left State
@@ -191,7 +188,7 @@ class Hydro:
             self.dimensionality  = 2
             print('Initializing 2D Setup...', flush=True)
             print('',flush=True)
-            self.xdimensions, self.ydimensions = dimensions 
+            self.xresolution, self.yresolution = resolution 
             
             if self.regime == "classical":
                 self.init_rho      = initial_state[0]
@@ -227,7 +224,7 @@ class Hydro:
             left_y, right_y = geometry[1]
             left_z, right_z = geometry[2]
             
-            self.xdimensions, self.ydimensions, self.zdimensions = dimensions  
+            self.xresolution, self.yresolution, self.zresolution = resolution  
             
             if self.regime == "classical":
                 self.init_rho      = initial_state[0]
@@ -305,7 +302,7 @@ class Hydro:
                 print(f"{my_str} {val_str}", flush=True)
         system_dict = {
             'adiabatic_gamma' : self.gamma,
-            'dimensions'      : self.dimensions,
+            'resolution'      : self.resolution,
             'geometry'        : self.geometry,
             'coord_system'    : self.coord_system,
             'regime'          : self.regime,
@@ -394,14 +391,14 @@ class Hydro:
             genspace = np.geomspace 
         
         if self.dimensionality == 1:
-            x1 = genspace(self.geometry[0], self.geometry[1], self.dimensions)
+            x1 = genspace(self.geometry[0], self.geometry[1], self.resolution)
         elif self.dimensionality == 2:
-            x1 = genspace(*self.geometry[0], self.xdimensions)
-            x2 = np.linspace(*self.geometry[1], self.ydimensions)
+            x1 = genspace(*self.geometry[0], self.xresolution)
+            x2 = np.linspace(*self.geometry[1], self.yresolution)
         else:
-            x1 = genspace(*self.geometry[0], self.xdimensions)
-            x2 = np.linspace(*self.geometry[1], self.ydimensions)
-            x3 = np.linspace(*self.geometry[2], self.zdimensions)
+            x1 = genspace(*self.geometry[0], self.xresolution)
+            x2 = np.linspace(*self.geometry[1], self.yresolution)
+            x3 = np.linspace(*self.geometry[2], self.zresolution)
             
         mesh_motion = scale_factor_derivative(1.0) / scale_factor(1.0) != 0
         if mesh_motion and self.coord_system != 'cartesian':

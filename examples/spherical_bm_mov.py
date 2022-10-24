@@ -138,9 +138,9 @@ def main():
     vy = np.zeros((ntheta ,nr))
 
     bm = Hydro(gamma = args.gamma, initial_state=(rho, p, vx, vy), 
-                dimensions=(nr, ntheta), 
+                resolution=(nr, ntheta), 
                 geometry=((rmin, rmax),(theta_min, theta_max)), 
-                n_vars=4, regime="relativistic", coord_system="spherical")
+                regime="relativistic", coord_system="spherical")
 
 
     sim_params = {
@@ -148,7 +148,7 @@ def main():
         'first_order': args.forder,
         'compute_mode': args.mode,
         'boundary_condition': args.bc,
-        'scalars': chi,
+        'passive_scalars': chi,
         'cfl': args.cfl,
         'hllc': args.hllc,
         'linspace': False,

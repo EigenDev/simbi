@@ -31,7 +31,7 @@ derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperatu
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'chi'] + derived
 lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
 
-def place_anotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, etot: float) -> None:
+def place_annotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, etot: float) -> None:
     order_of_mag = np.floor(np.log10(etot))
     front_factor = int(etot / 10**order_of_mag)
     if front_factor != 1:
@@ -710,7 +710,7 @@ def plot_per_theta(
         if args.anot_loc is not None:
             dV = util.calc_cell_volume2D(mesh['rr'], mesh['theta'])
             etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
-            place_anotation(args, fields, ax, etot)
+            place_annotation(args, fields, ax, etot)
             
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
@@ -808,7 +808,7 @@ def plot_dec_rad(
         if args.anot_loc is not None:
             dV = util.calc_cell_volume2D(mesh['rr'], mesh['theta'])
             etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
-            place_anotation(args, fields, ax, etot)
+            place_annotation(args, fields, ax, etot)
             
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
@@ -931,7 +931,7 @@ def plot_hist(
     if ax_col == 0:     
         if args.anot_loc is not None:
             etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
-            place_anotation(args, fields, ax, etot)
+            place_annotation(args, fields, ax, etot)
         
         #1D Comparison 
         if args.oned_files is not None:
@@ -1096,10 +1096,10 @@ def plot_dx_domega(
         if args.anot_loc is not None:
             etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
             if not energy_and_mass:
-                place_anotation(args, fields, ax, etot)
+                place_annotation(args, fields, ax, etot)
             else:
-                place_anotation(args, fields, ax1, etot)
-                place_anotation(args, fields, ax2, etot)
+                place_annotation(args, fields, ax1, etot)
+                place_annotation(args, fields, ax2, etot)
             
         #1D Comparison 
         if args.oned_files is not None:

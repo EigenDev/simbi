@@ -62,7 +62,7 @@ class KelvinHelmholtz(BaseConfig):
         return "cartesian"
 
     @property
-    def dimensions(self):
+    def resolution(self):
         return (self.npts.value, self.npts.value)
     
     @property

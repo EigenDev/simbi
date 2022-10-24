@@ -4,7 +4,7 @@ from .free_arg import DynamicArg
 
 class_props = [
     'boundary_condition', 'coord_system', 'data_directory', 
-    'dens_outer', 'dimensions', 'dlogt', 'dynamic_args', 
+    'dens_outer', 'resolution', 'dlogt', 'dynamic_args', 
     'edens_outer', 'end_time', 'find_dynamic_args', 'gamma', 
     'geometry', 'initial_state', 'linspace', 'mom_outer', 
     'parse_args', 'passive_scalars', 'plm_theta', 
@@ -29,8 +29,8 @@ class BaseConfig:
         raise NotImplementedError("Your subclass needs to implement the regime property")
         
     @property
-    def dimensions(self) -> tuple:
-        raise NotImplementedError("Your subclass needs to implement the dimensions property")
+    def resolution(self) -> tuple:
+        raise NotImplementedError("Your subclass needs to implement the resolution property")
     
     @property
     def geometry(self) -> tuple:

@@ -50,10 +50,10 @@ def main():
     fig, axs = plt.subplots(3, 1, figsize=(9,9), sharex=True)
 
     hydro2 = Hydro(gamma=args.gamma, initial_state = init,
-            dimensions=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3, regime="relativistic")
+            resolution=args.nzones, geometry=(0.0,1.0,0.5), regime="relativistic")
 
     hydro = Hydro(gamma=args.gamma, initial_state = init,
-            dimensions=args.nzones, geometry=(0.0,1.0,0.5), n_vars=3, regime="relativistic")
+            resolution=args.nzones, geometry=(0.0,1.0,0.5), regime="relativistic")
 
     sim_params = {
         'tend': args.tend,
