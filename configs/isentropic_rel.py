@@ -36,16 +36,15 @@ class IsentropicRelWave(BaseConfig):
     Relativistic Isentropic Pulse in 1D, Entropy conserving
     """
     nzones    = DynamicArg("nzones", 1000, help="number of grid zones", var_type=int)
-    ad_gamma  = DynamicArg("gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
+    ad_gamma  = DynamicArg("ad_gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
     alpha     = DynamicArg("alpha", 0.5, help = "Wave amplitude", var_type=range_limited_float_type)
-    
     rho_ref = 1.0
     p_ref   = 1.0
-    K       = p_ref*rho_ref**(-ad_gamma)
-    x       = np.linspace(0, 1, nzones.value, dtype=float)
-    density = rho(alpha, x)
-    pre     = pressure(p_ref, ad_gamma, density, rho_ref)
-    beta    = velocity(ad_gamma, density, rho_ref, pre, p_ref)
+    def __init__(self):
+        x            = np.linspace(0, 1, self.nzones.value, dtype=float)
+        self.density = rho(self.alpha, x)
+        self.pre     = pressure(self.p_ref, self.ad_gamma, self.density, self.rho_ref)
+        self.beta    = velocity(self.ad_gamma, self.density, self.rho_ref, self.pre, self.p_ref)
     
     @property
     def initial_state(self):

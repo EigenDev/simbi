@@ -1,5 +1,18 @@
 from typing import Callable, Union, Tuple, final
 from .free_arg import DynamicArg
+
+
+class_props = [
+    'boundary_condition', 'coord_system', 'data_directory', 
+    'dens_outer', 'dimensions', 'dlogt', 'dynamic_args', 
+    'edens_outer', 'end_time', 'find_dynamic_args', 'gamma', 
+    'geometry', 'initial_state', 'linspace', 'mom_outer', 
+    'parse_args', 'passive_scalars', 'plm_theta', 
+    'regime', 'rho_ref', 'scale_factor',  'scale_factor_derivative', 
+    'sources', 'start_time', 'use_hllc_solver']
+
+__all__ = ['BaseConfig']
+    
 class BaseConfig:
     dynamic_args = None 
     
@@ -83,28 +96,27 @@ class BaseConfig:
     def dlogt(self) -> float:
         return None 
     
-    @property
     @final
-    def args(self) -> list:
-        return self.dynamic_args
-    
-    @final
-    def find_dynamic_args(self) -> None:
+    @classmethod
+    def find_dynamic_args(cls) -> None:
         """
         Find all derived class member's members defined as DynamicArg class instances 
         """
-        members = [attr for attr in dir(self) if not callable(getattr(self, attr)) and not attr.startswith("__")]
-        self.dynamic_args = [getattr(self, member) for member in members if isinstance(getattr(self,member), DynamicArg)]
+        members = [attr for attr in dir(cls) if attr not in class_props and not callable(getattr(cls, attr)) and not attr.startswith("__")]
+        cls.dynamic_args = [getattr(cls, member) for member in members if isinstance(getattr(cls,member), DynamicArg)]
+        for arg in cls.dynamic_args:
+            if arg.name in class_props:
+                raise ValueError(f"Your dynamic argument name ({arg.name}) is a reserved class property name. Please choose a different name")
         
     @final
-    def parse_args(self, parser) -> None:
+    @classmethod
+    def parse_args(cls, parser) -> None:
         """
         Parse extra problem-specific args from command line
         """
-        if not self.dynamic_args:
-            self.find_dynamic_args()
-        
-        for member in self.args:
+        if not cls.dynamic_args:
+            cls.find_dynamic_args()
+        for member in cls.dynamic_args:
             try:
                 if type(member.value) == bool:
                     parser.add_argument(
@@ -128,23 +140,25 @@ class BaseConfig:
                     
         args = parser.parse_args()
         # Update dynamic var attributes to reflect new values passed from cli
-        for var in self.dynamic_args:
+        for var in cls.dynamic_args:
             if var.name in vars(args):
                 var.value = vars(args)[var.name]
-        
-        self.__init__()
+                setattr(cls, var.name, DynamicArg(name=var.name, 
+                                                  help=var.help, var_type=var.var_type, 
+                                                  choices=var.choices, action = var.action, value=var.value))
 
     @final
-    def print_problem_params(self):
+    @classmethod
+    def print_problem_params(cls):
         """
         Read from problem params and print to stdout
         """
-        if not self.dynamic_args:
-            self.find_dynamic_args()
+        if not cls.dynamic_args:
+            cls.find_dynamic_args()
             
         print("\nProblem Parameters:", flush=True)
         print("="*80, flush=True)
-        for member in self.args:
+        for member in cls.dynamic_args:
             val = member.value
             if (isinstance(val, float)):
                 val = round(val, 3)

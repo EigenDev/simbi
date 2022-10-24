@@ -42,10 +42,12 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     kwargs = {}
     for idx, setup_class in enumerate(setup_classes):
         problem_class = getattr(importlib.import_module(f'{base_script}'), f'{setup_class}')
-        config = problem_class()
+        static_config = problem_class
         if argv:
-            config.parse_args(parser)
-            
+            static_config.parse_args(parser)
+        
+        # Call initializer once static vars modified
+        config = static_config()
         
         if config.__doc__:
             state_docs += [f"{config.__doc__}"]
@@ -73,7 +75,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     return states, kwargs, state_docs 
 
 def main():
-    parser = argparse.ArgumentParser("Primitive parameters for PySimbi simulation configuration")
+    parser = argparse.ArgumentParser(prog='pysimbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics mdoule")
     parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
     parser.add_argument('--tstart',    help='start time for simulation', default=0.0, type=float)
     parser.add_argument('--tend',    help='end time for simulation', default=1.0, type=float)

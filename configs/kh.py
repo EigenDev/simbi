@@ -47,11 +47,7 @@ class KelvinHelmholtz(BaseConfig):
             
     @property
     def initial_state(self):
-        # Get the initial condition if set. If not, pass and come back later
-        try:
-            return (self.rho, self.p, self.vx, self.vy)
-        except AttributeError:
-            pass 
+        return (self.rho, self.p, self.vx, self.vy)
     
     @property
     def geometry(self):

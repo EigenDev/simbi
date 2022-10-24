@@ -4,7 +4,7 @@ class MignoneBodo(BaseConfig):
     Mignone & Bodo (2005), Relativistic Test Problems in 1D Fluid
     """
     nzones    = DynamicArg("nzones", 1000, help="number of grid zones", var_type=int)
-    ad_gamma  = DynamicArg("gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
+    ad_gamma  = DynamicArg("ad_gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
     problem   = DynamicArg("problem", 1, help = "test problem to compute", var_type=int, choices=[1,2])
     @property
     def initial_state(self):
