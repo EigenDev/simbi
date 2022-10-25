@@ -64,6 +64,7 @@ gpu_comp_args = []
 ##################################################################
 # GPU CHECK
 ##################################################################
+message(extra_cpp_args)
 if get_option('gpu_compilation').enabled()
     hip  = dependency('HIP', cmake_module_path : '/opt/rocm', required: false)
     cuda = dependency('CUDA', required: false)
@@ -104,8 +105,8 @@ if get_option('gpu_compilation').enabled()
             # Meson does not support hip yet, so we manually
             # declare the dependency
             hip_dep = declare_dependency(
-                link_args: [f'-L@rocm_path@/lib', f'-L@rocm_path@/hip/lib', '-lamdhip64'],
-                include_directories: ['@rocm_path@/include']
+                link_args: [f'-L@rocm_path@/lib', f'-L@rocm_path@/hip/lib', '-lamdhip64', '-O3', '-lgcc_s', '-lpthread', '-lm', '-lrt'],
+                include_directories: ['@rocm_path@/include', '@rocm_path@/hsa/include', '@rocm_path@/hip/include']
             )
             gpu_depends += [hip_dep]
         endif
