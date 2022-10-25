@@ -64,7 +64,6 @@ gpu_comp_args = []
 ##################################################################
 # GPU CHECK
 ##################################################################
-message(extra_cpp_args)
 if get_option('gpu_compilation').enabled()
     hip  = dependency('HIP', cmake_module_path : '/opt/rocm', required: false)
     cuda = dependency('CUDA', required: false)
