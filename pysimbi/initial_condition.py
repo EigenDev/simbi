@@ -83,13 +83,17 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                         else:
                             nx_active -= 4
                             ny_active -= 4
-                        
-                if ds.attrs['linspace']:
-                    model.x1 = np.linspace(x1min, x1max, nx_active)
-                    model.x2 = np.linspace(x1min, x2max, ny_active)
-                else:
-                    model.x1 = np.geomspace(x1min, x1max, nx_active)
-                    model.x2 = np.linspace(x2min,  x2max, ny_active)
+                
+                try:
+                    model.x1 = hf.get('x1')[:]
+                    model.x2 = hf.get('x2')[:]
+                except:
+                    if ds.attrs['linspace']:
+                        model.x1 = np.linspace(x1min, x1max, nx_active)
+                        model.x2 = np.linspace(x1min, x2max, ny_active)
+                    else:
+                        model.x1 = np.geomspace(x1min, x1max, nx_active)
+                        model.x2 = np.linspace(x2min,  x2max, ny_active)
                 
                 volume_factor = helpers.calc_cell_volume2D(model.x1, model.x2)
                 
