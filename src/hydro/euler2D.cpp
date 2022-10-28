@@ -812,6 +812,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     setup.coord_system   = coord_system;
     setup.boundarycond   = boundary_condition;
     setup.regime         = "classical";
+    setup.x1             = x1;
+    setup.x2             = x2;
 
     cons.resize(nzones);
     prims.resize(nzones);

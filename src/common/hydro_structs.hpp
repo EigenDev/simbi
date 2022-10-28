@@ -26,6 +26,7 @@ struct DataWriteMembers
     int nx, ny, nz, xactive_zones, yactive_zones, zactive_zones, chkpt_idx;
     bool linspace, first_order, using_fourvelocity;
     std::string coord_system, boundarycond, regime;
+    std::vector<real> x1, x2, x3;
 };
 
 namespace hydro1d {

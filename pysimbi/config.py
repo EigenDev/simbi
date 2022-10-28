@@ -96,6 +96,18 @@ class BaseConfig:
     def dlogt(self) -> float:
         return None 
     
+    @property
+    def x1(self):
+        return None 
+    
+    @property
+    def x2(self):
+        return None 
+    
+    @property
+    def x3(self):
+        return None
+    
     @final
     @classmethod
     def find_dynamic_args(cls) -> None:

@@ -1220,6 +1220,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     setup.boundarycond   = boundary_condition;
     setup.regime         = "relativistic";
     setup.using_fourvelocity = false;
+    setup.x1                 = x1;
+    setup.x2                 = x2;
 
     // // Setup the system
     const luint xblockdim       = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;

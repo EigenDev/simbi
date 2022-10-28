@@ -571,6 +571,7 @@ void Newtonian1D::advance(
     setup.coord_system   = coord_system;
     setup.boundarycond   = boundary_condition;
     setup.regime         = "classical";
+    setup.x1             = x1;
 
 
 

@@ -358,12 +358,16 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
             setup['xactive'] = xactive
             setup['yactive'] = yactive
         
-        if is_linspace:
-            setup['x1'] = np.linspace(x1min, x1max, xactive)
-            setup['x2'] = np.linspace(x2min, x2max, yactive)
-        else:
-            setup['x1'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
-            setup['x2'] = np.linspace(x2min, x2max, yactive)
+        try:
+            setup['x1'] = hf.get('x1')[:]
+            setup['x2'] = hf.get('x2')[:]
+        except:
+            if is_linspace:
+                setup['x1'] = np.linspace(x1min, x1max, xactive)
+                setup['x2'] = np.linspace(x2min, x2max, yactive)
+            else:
+                setup['x1'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
+                setup['x2'] = np.linspace(x2min, x2max, yactive)
         
         if coord_sysem == 'cartesian':
             is_cartesian = True

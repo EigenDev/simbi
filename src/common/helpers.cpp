@@ -99,10 +99,16 @@ namespace simbi
             H5::H5File file(filePath + filename, H5F_ACC_TRUNC );
 
             // Dataset dims
-            hsize_t dimsf[1];
-            dimsf[0] = size;               
+            hsize_t dimsf[1], dimsf1[1], dimsf2[1], dimsf3[1];
+            dimsf[0]  = size;      
+            dimsf1[0] = setup.x1.capacity();
+            dimsf2[0] = setup.x2.capacity();
+            dimsf3[0] = setup.x3.capacity();         
             int rank = 1;
             H5::DataSpace dataspace(rank, dimsf);
+            H5::DataSpace dataspacex1(rank, dimsf1);
+            H5::DataSpace dataspacex2(rank, dimsf2);
+            H5::DataSpace dataspacex3(rank, dimsf3);
             H5::DataType  datatype(H5::PredType::NATIVE_DOUBLE);
             
             hid_t dtype_str = H5Tcopy(H5T_C_S1);
@@ -113,31 +119,33 @@ namespace simbi
             {
                 case 1:
                 {
-                    real* rho = new real[size];
-                    real* v   = new real[size];
-                    real* p   = new real[size];
+                    auto rho = std::unique_ptr<real>(new real[size]);
+                    auto v   = std::unique_ptr<real>(new real[size]);
+                    auto p   = std::unique_ptr<real>(new real[size]);
+                    auto x1  = std::unique_ptr<real>(new real[setup.x1.size()]);
 
-                    std::copy(prims.rho.begin(), prims.rho.begin() + size, rho);
-                    std::copy(prims.v.begin(), prims.v.begin() + size, v);
-                    std::copy(prims.p.begin(), prims.p.begin() + size, p);
+                    std::copy(prims.rho.begin(), prims.rho.begin() + size, rho.get());
+                    std::copy(prims.v.begin(), prims.v.begin() + size, v.get());
+                    std::copy(prims.p.begin(), prims.p.begin() + size, p.get());
+                    std::copy(setup.x1.begin(),  setup.x1.begin() + setup.x1.size(), x1.get());
                     H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
 
                     // Write the Primitives 
-                    dataset.write(rho, H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(rho.get(), H5::PredType::NATIVE_DOUBLE);
                     dataset.close();
                     
                     dataset = file.createDataSet("v", datatype, dataspace);
-                    dataset.write(v, H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(v.get(), H5::PredType::NATIVE_DOUBLE);
                     dataset.close();
 
                     dataset = file.createDataSet("p", datatype, dataspace);
-                    dataset.write(p, H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(p.get(), H5::PredType::NATIVE_DOUBLE);
                     dataset.close();
 
-                    // Free the heap
-                    delete[]rho;
-                    delete[]v;
-                    delete[]p;
+                    dataset = file.createDataSet("x1", datatype, dataspacex1);
+                    dataset.write(x1.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.close();
+
 
                     // Write Datset Attributes
                     H5::DataType real_type(H5::PredType::NATIVE_DOUBLE);
@@ -211,45 +219,50 @@ namespace simbi
                 case 2:
                     {
                     // Write the Primitives 
-                    real* rho = new real[size];
-                    real* v1  = new real[size];
-                    real* v2  = new real[size];
-                    real* p   = new real[size];
-                    real* chi = new real[size];
+                    auto rho = std::unique_ptr<real>(new real[size]);
+                    auto v1  = std::unique_ptr<real>(new real[size]);
+                    auto v2  = std::unique_ptr<real>(new real[size]);
+                    auto p   = std::unique_ptr<real>(new real[size]);
+                    auto chi = std::unique_ptr<real>(new real[size]);
+                    auto x1  = std::unique_ptr<real>(new real[setup.x1.size()]);
+                    auto x2  = std::unique_ptr<real>(new real[setup.x2.size()]);
 
-                    std::copy(prims.rho.begin(),  prims.rho.begin() + size, rho);
-                    std::copy(prims.v1.begin(),   prims.v1.begin()  + size, v1);
-                    std::copy(prims.v2.begin(),   prims.v2.begin()  + size, v2);
-                    std::copy(prims.p.begin(),    prims.p.begin()   + size, p);
-                    std::copy(prims.chi.begin(),  prims.chi.begin() + size, chi);
+                    std::copy(prims.rho.begin(),  prims.rho.begin() + size, rho.get());
+                    std::copy(prims.v1.begin(),   prims.v1.begin()  + size, v1.get());
+                    std::copy(prims.v2.begin(),   prims.v2.begin()  + size, v2.get());
+                    std::copy(prims.p.begin(),    prims.p.begin()   + size, p.get());
+                    std::copy(prims.chi.begin(),  prims.chi.begin() + size, chi.get());
+                    std::copy(setup.x1.begin(),  setup.x1.begin() + setup.x1.size(), x1.get());
+                    std::copy(setup.x2.begin(),  setup.x2.begin() + setup.x2.size(), x2.get());
                     H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
 
                     // Write the Primitives 
-                    dataset.write(rho, H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(rho.get(), H5::PredType::NATIVE_DOUBLE);
                     dataset.close();
                     
                     dataset = file.createDataSet("v1", datatype, dataspace);
-                    dataset.write(v1, H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(v1.get(), H5::PredType::NATIVE_DOUBLE);
                     dataset.close();
 
                     dataset = file.createDataSet("v2", datatype, dataspace);
-                    dataset.write(v2, H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(v2.get(), H5::PredType::NATIVE_DOUBLE);
                     dataset.close();
 
                     dataset = file.createDataSet("p", datatype, dataspace);
-                    dataset.write(p, H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(p.get(), H5::PredType::NATIVE_DOUBLE);
                     dataset.close();
 
                     dataset = file.createDataSet("chi", datatype, dataspace);
-                    dataset.write(chi, H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(chi.get(), H5::PredType::NATIVE_DOUBLE);
                     dataset.close();
 
-                    // Free the heap
-                    delete[] rho;
-                    delete[] v1;
-                    delete[] v2;
-                    delete[] p;
-                    delete[] chi;
+                    dataset = file.createDataSet("x1", datatype, dataspacex1);
+                    dataset.write(x1.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.close();
+
+                    dataset = file.createDataSet("x2", datatype, dataspacex2);
+                    dataset.write(x2.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.close();
 
                     // Write Datset Attributesauto real_type(H5::PredType::NATIVE_DOUBLE);
                     H5::DataType int_type(H5::PredType::NATIVE_INT);
@@ -347,19 +360,25 @@ namespace simbi
                 case 3:
                     {
                     // Write the Primitives 
-                    real* rho = new real[size];
-                    real* v1  = new real[size];
-                    real* v2  = new real[size];
-                    real* v3  = new real[size];
-                    real* p   = new real[size];
-                    real* chi = new real[size];
+                    auto rho = std::unique_ptr<real>(new real[size]);
+                    auto v1  = std::unique_ptr<real>(new real[size]);
+                    auto v2  = std::unique_ptr<real>(new real[size]);
+                    auto v3  = std::unique_ptr<real>(new real[size]);
+                    auto p   = std::unique_ptr<real>(new real[size]);
+                    auto chi = std::unique_ptr<real>(new real[size]);
+                    auto x1  = std::unique_ptr<real>(new real[setup.x1.size()]);
+                    auto x2  = std::unique_ptr<real>(new real[setup.x2.size()]);
+                    auto x3  = std::unique_ptr<real>(new real[setup.x3.size()]);
 
-                    std::copy(prims.rho.begin(), prims.rho.begin() + size, rho);
-                    std::copy(prims.v1.begin(), prims.v1.begin() + size, v1);
-                    std::copy(prims.v2.begin(), prims.v2.begin() + size, v2);
-                    std::copy(prims.v3.begin(), prims.v3.begin() + size, v3);
-                    std::copy(prims.p.begin(),  prims.p.begin() + size, p);
-                    std::copy(prims.chi.begin(),  prims.chi.begin() + size, chi);
+                    std::copy(prims.rho.begin(), prims.rho.begin() + size, rho.get());
+                    std::copy(prims.v1.begin(), prims.v1.begin() + size, v1.get());
+                    std::copy(prims.v2.begin(), prims.v2.begin() + size, v2.get());
+                    std::copy(prims.v3.begin(), prims.v3.begin() + size, v3.get());
+                    std::copy(prims.p.begin(),  prims.p.begin() + size, p.get());
+                    std::copy(prims.chi.begin(),  prims.chi.begin() + size, chi.get());
+                    std::copy(setup.x1.begin(),  setup.x1.begin() + setup.x1.size(), x1.get());
+                    std::copy(setup.x2.begin(),  setup.x2.begin() + setup.x2.size(), x2.get());
+                    std::copy(setup.x3.begin(),  setup.x3.begin() + setup.x3.size(), x3.get());
                     H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
                     
                     H5::DataType real_type;
@@ -371,35 +390,40 @@ namespace simbi
                     }
 
                     // Write the Primitives 
-                    dataset.write(rho, real_type);
+                    dataset.write(rho.get(), real_type);
                     dataset.close();
                     
                     dataset = file.createDataSet("v1", datatype, dataspace);
-                    dataset.write(v1, real_type);
+                    dataset.write(v1.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("v2", datatype, dataspace);
-                    dataset.write(v2, real_type);
+                    dataset.write(v2.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("v3", datatype, dataspace);
-                    dataset.write(v3, real_type);
+                    dataset.write(v3.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("p", datatype, dataspace);
-                    dataset.write(p, real_type);
+                    dataset.write(p.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("chi", datatype, dataspace);
-                    dataset.write(chi, real_type);
+                    dataset.write(chi.get(), real_type);
                     dataset.close();
 
-                    // Free the heap
-                    delete[] rho;
-                    delete[] v1;
-                    delete[] v2;
-                    delete[] p;
-                    delete[] chi;
+                    dataset = file.createDataSet("x1", datatype, dataspacex1);
+                    dataset.write(x1.get(), real_type);
+                    dataset.close();
+
+                    dataset = file.createDataSet("x2", datatype, dataspacex2);
+                    dataset.write(x2.get(), real_type);
+                    dataset.close();
+
+                    dataset = file.createDataSet("x3", datatype, dataspacex3);
+                    dataset.write(x3.get(), real_type);
+                    dataset.close();
 
                     // Write Datset Attributesauto real_type(real_type);
                     H5::DataType int_type(H5::PredType::NATIVE_INT);

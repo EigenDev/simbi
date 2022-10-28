@@ -715,6 +715,7 @@ SRHD::simulate1D(
     setup.coord_system   = coord_system;
     setup.boundarycond   = boundary_condition;
     setup.using_fourvelocity = false;
+    setup.x1                 = x1;
     setup.regime = "relativistic";
     cons.resize(nx);
     prims.resize(nx);

@@ -49,6 +49,9 @@ class Hydro:
         Return:
             None
         """
+        self.x1 = None 
+        self.x2 = None 
+        self.x3 = None
         if setup:
             coord_system                  = setup.coord_system 
             regime                        = setup.regime 
@@ -64,6 +67,9 @@ class Hydro:
             self.edens_outer              = setup.edens_outer
             self.mom_outer                = setup.mom_outer 
             self.dens_outer               = setup.dens_outer 
+            self.x1                       = setup.x1 
+            self.x2                       = setup.x2
+            self.x3                       = setup.x3
             
         if coord_system not in coord_systems:
             raise ValueError(f"Invalid coordinate system. Expected one of: {coord_systems}")
@@ -391,15 +397,15 @@ class Hydro:
             genspace = np.geomspace 
         
         if self.dimensionality == 1:
-            x1 = genspace(self.geometry[0], self.geometry[1], self.resolution)
+            x1 = genspace(self.geometry[0], self.geometry[1], self.resolution) if self.x1 is None else self.x1
         elif self.dimensionality == 2:
-            x1 = genspace(*self.geometry[0], self.xresolution)
-            x2 = np.linspace(*self.geometry[1], self.yresolution)
+            x1 = genspace(*self.geometry[0], self.xresolution)    if self.x1 is None else self.x1
+            x2 = np.linspace(*self.geometry[1], self.yresolution) if self.x2 is None else self.x2
         else:
-            x1 = genspace(*self.geometry[0], self.xresolution)
-            x2 = np.linspace(*self.geometry[1], self.yresolution)
-            x3 = np.linspace(*self.geometry[2], self.zresolution)
-            
+            x1 = genspace(*self.geometry[0], self.xresolution)    if self.x1 is None else self.x1
+            x2 = np.linspace(*self.geometry[1], self.yresolution) if self.x2 is None else self.x2
+            x3 = np.linspace(*self.geometry[2], self.zresolution) if self.x3 is None else self.x3
+        
         mesh_motion = scale_factor_derivative(1.0) / scale_factor(1.0) != 0
         if mesh_motion and self.coord_system != 'cartesian':
             if self.dimensionality == 1:
@@ -447,7 +453,7 @@ class Hydro:
         if not os.path.exists(data_directory):
             # Create a new directory because it does not exist 
             os.makedirs(data_directory)
-            print(f"The data directory provided does not exist. Creating the {data_directory} now!", flush=True)
+            print(f"The data directory provided does not exist. Creating the {data_directory} directory now!", flush=True)
         
         if first_order:
             print("Computing First Order Solution...", flush=True)

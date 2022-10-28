@@ -1108,7 +1108,10 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     setup.coord_system   = coord_system;
     setup.boundarycond   = boundary_condition;
     setup.using_fourvelocity = false;
-    setup.regime = "relativistic";
+    setup.regime             = "relativistic";
+    setup.x1                 = x1;
+    setup.x2                 = x2;
+    setup.x3                 = x3;
     
     cons.resize(nzones);
     prims.resize(nzones);
