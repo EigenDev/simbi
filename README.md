@@ -45,6 +45,9 @@ $ meson install -C <build_dir>
 Another way to run the code is to create some configuration script and invoke it using the entry point. You would then run it like so:
 ```bash
 $ pysimbi config/marti_muller.py --mode gpu --nzones 100 --gamma 1.4 
+# or one could do 
+$ pysimbi marti_muller --mode gpu --nzones 100 --gamma 1.4
+# since the entry point is built to recursively search the configs/ folder for valdi .py scripts now
 ```
 where `--mode` is a global command line option available for every config script, and `--nzones` and `--gamma` are problem-specific options that are dynamically parsed based on whatever `DynamicArg` variables exist in the config script you create.
-Check out how to create one of these configuration scripts in the `config/` folder!
+Check out how to create one of these configuration scripts in the `configs/` folder!
