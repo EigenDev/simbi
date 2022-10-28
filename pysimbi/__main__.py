@@ -10,7 +10,12 @@ overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta',
 def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
-        raise argparse.ArgumentTypeError('File must have a .py extension')
+        param = None
+        for path in Path('configs').rglob('*.py'):
+            if base == Path(path).stem:
+                param = path
+        if not param:
+            raise argparse.ArgumentTypeError('File must have a .py extension or exist in the configs directory')
     return param
 
 def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
