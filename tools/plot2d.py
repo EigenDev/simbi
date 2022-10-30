@@ -1485,7 +1485,7 @@ def main():
     if args.cmap == 'grayscale':
         plt.style.use('grayscale')
     else:
-        plt.style.use('seaborn-colorblind')
+        plt.style.use('seaborn-v0_8-colorblind')
     
     if args.dbg:
         plt.style.use('dark_background')
