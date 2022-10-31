@@ -26,7 +26,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     import sys 
     script_dirname = os.path.dirname(script)
     base_script    = Path(os.path.abspath(script)).stem
-    sys.path.insert(0, f'{script_dirname}')
+    sys.path.insert(1, f'{script_dirname}')
     
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
