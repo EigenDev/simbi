@@ -1,5 +1,5 @@
 from typing import Callable, Union, Tuple, final
-from .free_arg import DynamicArg
+from .dynarg import DynamicArg
 
 
 class_props = [

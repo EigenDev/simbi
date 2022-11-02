@@ -1,6 +1,6 @@
 from .simbi import Hydro
 from .config import * 
-from .free_arg import DynamicArg
+from .dynarg import DynamicArg
 from .helpers import print_problem_params, compute_num_polar_zones, calc_dlogt
 from pathlib import Path
 
