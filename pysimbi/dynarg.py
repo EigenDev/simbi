@@ -31,7 +31,13 @@ class DynamicArg:
         return self.value * operand 
     
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
-        return getattr(ufunc, method)(self.value, **kwargs)
+        sanitized_inputs = []
+        for arg in inputs:
+            if isinstance(arg, DynamicArg):
+                sanitized_inputs += [arg.value]
+            else:
+                sanitized_inputs += [arg]
+        return getattr(ufunc, method)(*sanitized_inputs, **kwargs)
     
     def __rmul__(self, operand: Any):
         return self.__mul__(operand)
