@@ -17,7 +17,7 @@ def load_checkpoint(model, filename, dim, mesh_motion):
             rho         = hf.get("rho")[:]
             v           = hf.get("v")[:]
             p           = hf.get("p")[:]
-            nx          = ds.attrs["Nx"]
+            nx          = ds.attrs["nx"]
             model.t     = ds.attrs["current_time"]
             
             x1max          = ds.attrs["x1max"]
