@@ -24,10 +24,10 @@ R_0 = const.R_sun.cgs
 c   = const.c.cgs
 m   = const.M_sun.cgs
  
-rho_scale  = m / (4./3. * np.pi * R_0 ** 3) 
-e_scale    = m * c **2
+rho_scale    = m / (4./3. * np.pi * R_0 ** 3) 
+e_scale      = m * c **2
 edens_scale  = e_scale / (4./3. * np.pi * R_0**3)
-time_scale = R_0 / c
+time_scale   = R_0 / c
 
 e_scale_bmk   = 1e53 * units.erg
 rho_scale_bmk = 1.0 * const.m_p.cgs / units.cm**3
@@ -223,14 +223,10 @@ def read_3d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
             setup['yactive'] = yactive
             setup['zactive'] = zactive
         
-        if is_linspace:
-            setup['x1'] = np.linspace(x1min, x1max, xactive)
-            setup['x2'] = np.linspace(x2min, x2max, yactive)
-            setup['x3'] = np.linspace(x3min, x3max, zactive)
-        else:
-            setup['x1'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
-            setup['x2'] = np.linspace(x2min, x2max, yactive)
-            setup['x3'] = np.linspace(x3min, x3max, zactive)
+        
+        setup['x1'] = hf.get('x1')[:]
+        setup['x2'] = hf.get('x2')[:]
+        setup['x3'] = hf.get('x3')[:]
         
         if coord_sysem == 'cartesian':
             is_cartesian = True
@@ -456,10 +452,8 @@ def read_1d_file(filename: str) -> dict:
         v   = v  [2:-2]
         p   = p  [2:-2]
         xactive = nx - 4
-        if is_linspace:
-            mesh['r'] = np.linspace(x1min, x1max, xactive)
-        else:
-            mesh['r'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
+        
+        mesh['x1'] = hf.get('x1')[:]
         
         if ds.attrs['regime'].decode("utf-8") == 'relativistic':
             try:
