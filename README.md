@@ -14,7 +14,7 @@ https://user-images.githubusercontent.com/29236993/173423001-53ab2b60-4159-4ce5-
 4) A build system like `make` or [ninja](https://github.com/ninja-build/ninja/wiki/Pre-built-Ninja-packages) -- pre-built packages depending on your system.
 5) HDF5 libraries
 ### For GPU capability
-6) HIP/RocM if wanting to run on NVIDIA or AMD GPUs, or just CUDA if running purely NVIDIA
+6) HIP/ROCm if wanting to run on NVIDIA or AMD GPUs, or just CUDA if running purely NVIDIA
 
 
 ### Quick setup guide
