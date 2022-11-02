@@ -31,7 +31,7 @@ class DynamicArg:
         return self.value * operand 
     
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
-        return ufunc.__call__(inputs[0], self.value)
+        return getattr(ufunc, method)(self.value, **kwargs)
     
     def __rmul__(self, operand: Any):
         return self.__mul__(operand)
