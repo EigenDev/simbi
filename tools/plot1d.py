@@ -35,7 +35,7 @@ def plot_profile(args, fields, mesh, setup, ax = None, overplot = False, subplot
     linestyles = ['--', '-', '-.']
     linecycler = cycle(linestyles)
     
-    r      = mesh['r']
+    r      = mesh['x1']
     tend   = setup['time']
     if args.units:
         tend *= util.time_scale 
@@ -102,7 +102,7 @@ def plot_profile(args, fields, mesh, setup, ax = None, overplot = False, subplot
     ########
     # r_outer = find_nearest(r, 0.55)[0]
     # r_slow  = find_nearest(r, 1.50)[0]
-    # dV      = util.calc_cell_volume1D(mesh['r']) 
+    # dV      = util.calc_cell_volume1D(mesh['x1']) 
     # mout    = (4./3.) * np.pi * np.sum(dV[r_outer:r_slow] * fields['rho'][r_outer: r_slow])
     # print(mout)
     # zzz = input('')
@@ -123,7 +123,7 @@ def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = Fals
 
     tend        = setup['time']
     edens_total = util.prims2var(fields, 'energy')
-    r           = mesh['r']
+    r           = mesh['x1']
     dV          = util.calc_cell_volume1D(r)
     
     if args.eks:
@@ -133,7 +133,6 @@ def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = Fals
         energy = (fields['enthalpy'] - 1.0) *  dV * util.e_scale.value
     else:
         energy = edens_total * dV * util.e_scale.value
-
 
     u = fields['gamma_beta']
     gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), 128)
