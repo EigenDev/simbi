@@ -49,15 +49,15 @@ option(
 option(
     '2d_block_size',
     type: 'integer',
-    min: 8,
-    max: 32,
+    min: 1,
+    max: 128,
     value: 16
 )
 
 option(
     '3d_block_size',
     type: 'integer',
-    min: 4,
+    min: 2,
     max: 8,
     value: 8
 )
