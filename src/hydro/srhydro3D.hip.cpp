@@ -669,9 +669,7 @@ void SRHD3D::advance(
     const luint yextent             = p.blockSize.y;
     const luint zextent             = p.blockSize.z;
     #endif 
-    const luint extent              = (BuildPlatform == Platform::GPU) ? 
-                                            p.blockSize.z * p.gridSize.z * p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
-    const auto step                 = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+    const auto step = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
     // Choice of column major striding by user
     // const luint sx = (col_maj) ? 1  : bx;
     // const luint sy = (col_maj) ? by :  1;
