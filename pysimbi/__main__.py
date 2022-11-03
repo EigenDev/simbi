@@ -79,8 +79,14 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
         
     return states, kwargs, state_docs 
 
+class CustomParser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.stderr.write(f'error: {message}\n')
+        self.print_help()
+        sys.exit(2)
+        
 def main():
-    parser = argparse.ArgumentParser(prog='pysimbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics mdoule")
+    parser = CustomParser(prog='pysimbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
     parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
     parser.add_argument('--tstart',    help='start time for simulation', default=0.0, type=float)
     parser.add_argument('--tend',    help='end time for simulation', default=1.0, type=float)
