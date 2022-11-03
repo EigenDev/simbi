@@ -751,7 +751,6 @@ void SRHD2D::advance(
     auto *self = (BuildPlatform == Platform::GPU) ? dev : this;
     const auto xpg      = this->xphysical_grid;
     const auto ypg      = this->yphysical_grid;
-    const auto extent   = (BuildPlatform == Platform::GPU) ? p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
     const real step     = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
 
     #if GPU_CODE
@@ -783,7 +782,7 @@ void SRHD2D::advance(
     // Choice of column major striding by user
     const luint sx = (col_maj) ? 1  : bx;
     const luint sy = (col_maj) ? by :  1;
-    simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx) {
+    simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (const luint idx) {
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
         // auto* const prim_buff = self->gpu_prims;
@@ -793,9 +792,6 @@ void SRHD2D::advance(
 
         const auto ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
         const auto jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
-        #if GPU_CODE 
-        if ((ii >= xpg) || (jj >= ypg)) return;
-        #endif
 
         const auto ia  = ii + radius;
         const auto ja  = jj + radius;

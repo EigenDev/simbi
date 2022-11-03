@@ -677,7 +677,7 @@ void SRHD3D::advance(
     // const luint sy = (col_maj) ? by :  1;
     // const luint sz = (col_maj) ? bz :  1;
 
-    simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
+    simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
         #else 
@@ -687,9 +687,6 @@ void SRHD3D::advance(
         const luint kk  = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(idx, xpg, ypg);
         const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(idx, xpg, ypg, kk);
         const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(idx, xpg, ypg, kk);
-        #if GPU_CODE
-        if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg)) return;
-        #endif 
         
         const luint ia  = ii + radius;
         const luint ja  = jj + radius;
