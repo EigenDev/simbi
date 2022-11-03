@@ -67,14 +67,14 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
         kwargs[idx]['plm_theta']                = config.plm_theta
         kwargs[idx]['dlogt']                    = config.dlogt
         kwargs[idx]['data_directory']           = config.data_directory
-        kwargs[idx]['linspace']                 = state.linspace 
-        kwargs[idx]['sources']                  = state.sources 
-        kwargs[idx]['passive_scalars']          = state.passive_scalars 
-        kwargs[idx]['scale_factor']             = state.scale_factor 
-        kwargs[idx]['scale_factor_derivative']  = state.scale_factor_derivative
-        kwargs[idx]['edens_outer']              = state.edens_outer
-        kwargs[idx]['mom_outer']                = state.mom_outer 
-        kwargs[idx]['dens_outer']               = state.dens_outer 
+        kwargs[idx]['linspace']                 = config.linspace 
+        kwargs[idx]['sources']                  = config.sources 
+        kwargs[idx]['passive_scalars']          = config.passive_scalars 
+        kwargs[idx]['scale_factor']             = config.scale_factor 
+        kwargs[idx]['scale_factor_derivative']  = config.scale_factor_derivative
+        kwargs[idx]['edens_outer']              = config.edens_outer
+        kwargs[idx]['mom_outer']                = config.mom_outer 
+        kwargs[idx]['dens_outer']               = config.dens_outer 
         states.append(state)
         
     return states, kwargs, state_docs 
