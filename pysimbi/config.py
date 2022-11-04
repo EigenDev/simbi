@@ -171,6 +171,8 @@ class BaseConfig:
         """
         import math
         def order_of_mag(val: float) -> int:
+            if val == 0:
+                return 0
             return int(math.floor(math.log10(val)))
         
         if not cls.dynamic_args:
