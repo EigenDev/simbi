@@ -6,7 +6,7 @@ import importlib
 from pysimbi import Hydro
 from pathlib import Path
 
-overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta', 'dlogt', 'data_directory']
+overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta', 'dlogt', 'data_directory', 'quirk_smoothing']
 def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
@@ -75,6 +75,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
         kwargs[idx]['edens_outer']              = config.edens_outer
         kwargs[idx]['mom_outer']                = config.mom_outer 
         kwargs[idx]['dens_outer']               = config.dens_outer 
+        kwargs[idx]['quirk_smoothing']          = config.use_quirk_smoothing
         states.append(state)
         
     return states, kwargs, state_docs 
