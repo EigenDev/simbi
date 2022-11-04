@@ -92,6 +92,8 @@ class DynamicArg:
         return self.value != other 
     
     def __pow__(self, power: Any):
+        if isinstance(power, DynamicArg):
+            return self.value ** power.value
         return self.value ** power 
     
     def __lt__(self, other: Any):
