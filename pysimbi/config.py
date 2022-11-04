@@ -97,6 +97,10 @@ class BaseConfig:
         return None 
     
     @property
+    def use_quirk_smoothing(self) -> bool:
+        return False
+    
+    @property
     def x1(self):
         return None 
     
@@ -165,6 +169,10 @@ class BaseConfig:
         """
         Read from problem params and print to stdout
         """
+        import math
+        def order_of_mag(val: float) -> int:
+            return int(math.floor(math.log10(val)))
+        
         if not cls.dynamic_args:
             cls.find_dynamic_args()
             
@@ -173,6 +181,9 @@ class BaseConfig:
         for member in cls.dynamic_args:
             val = member.value
             if (isinstance(val, float)):
+                if order_of_mag(val) < 0 or order_of_mag(val) > 1:
+                    print(f"{member.name:.<30} {val:<15.2e} {member.help}", flush = True)
+                    continue
                 val = round(val, 3)
             val = str(val)
             print(f"{member.name:.<30} {val:<15} {member.help}", flush = True)
