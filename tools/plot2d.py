@@ -29,7 +29,7 @@ except:
 derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'chi_dens',
                  'gamma_beta_1', 'gamma_beta_2', 'mach', 'u1', 'u2']
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'chi'] + derived
-lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
+lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2', 'u1', 'u2']
 
 def place_annotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, etot: float) -> None:
     order_of_mag = np.floor(np.log10(etot))
@@ -109,7 +109,7 @@ def plot_polar_plot(
     else:
         color_map = plt.get_cmap(args.cmap)
         
-    tend = dset['time'] #* util.time_scale
+    tend = dset['time'] * (util.time_scale if args.units else 1.0)
     # If plotting multiple fields on single polar projection, split the 
     # field projections into their own quadrants
     if num_fields > 1:
@@ -474,12 +474,11 @@ def plot_polar_plot(
                 else:
                     cbar.set_label(r'{}'.format(field_str), fontsize=fsize)
         
+        fsize = 25 if not args.print else DEFAULT_SIZE
         if args.setup != "":
-            fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=25, y=1)
+            fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=fsize, y=1.03)
         else:
-            pass
-            # fsize = 25 if not args.print else DEFAULT_SIZE
-            # fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.95)
+            fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.95)
 
 def plot_cartesian_plot(
     fields: dict, 
