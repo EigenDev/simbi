@@ -7,7 +7,6 @@
  */
 
 #include "util/device_api.hpp"
-#include "util/dual.hpp"
 #include "util/parallel_for.hpp"
 #include "util/printb.hpp"
 #include "common/helpers.hip.hpp"
