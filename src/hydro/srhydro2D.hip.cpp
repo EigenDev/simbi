@@ -1005,10 +1005,10 @@ void SRHD2D::advance(
 
         //Advance depending on geometry
         const luint real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
-        const real d_source  = 0.0; // dens_source[real_loc];
-        const real s1_source = 0.0; // mom1_source[real_loc];
-        const real s2_source = 0.0; // mom2_source[real_loc];
-        const real e_source  = 0.0; // erg_source[real_loc];
+        const real d_source  = dens_source[real_loc];
+        const real s1_source = mom1_source[real_loc];
+        const real s2_source = mom2_source[real_loc];
+        const real e_source  = erg_source[real_loc];
         const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_constant;
         switch (geometry)
         {
