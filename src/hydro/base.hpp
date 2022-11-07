@@ -15,7 +15,7 @@ namespace simbi
         std::vector<real> x1, x2, x3;
         std::string coord_system, data_directory;
 
-        // Common mmembers
+        // Common members
         DataWriteMembers setup;
         real dt, t, tend, t_interval, chkpt_interval, plm_theta, decay_constant, hubble_param; 
         real x1min, x1max, x2min, x2max, x3min, x3max;
