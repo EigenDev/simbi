@@ -1151,7 +1151,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         simbi::detail::with_timer(*this, [&](){
             advance(self, activeP, bx, by, bz, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts3D(fullP, cons.data(), nx, ny, nz, true, bc);
+            config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bc);
         });
 
         if constexpr(BuildPlatform == Platform::GPU) {
