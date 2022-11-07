@@ -775,6 +775,12 @@ SRHD::simulate1D(
             adapt_dt();
         }
         t += dt;
+
+        if constexpr(BuildPlatform == Platform::GPU) {
+            if (device_self->inFailureState) {
+                this->inFailureState = device_self->inFailureState;
+            }
+        }
     }
     if (detail::logger::ncheck > 0) {
         writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", detail::logger::n, detail::logger::zu_avg/ detail::logger::ncheck);
