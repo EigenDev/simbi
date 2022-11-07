@@ -183,7 +183,7 @@ class BaseConfig:
         for member in cls.dynamic_args:
             val = member.value
             if (isinstance(val, float)):
-                if order_of_mag(val) < 0 or order_of_mag(val) > 1:
+                if order_of_mag(val) < -3 or order_of_mag(val) > 3:
                     print(f"{member.name:.<30} {val:<15.2e} {member.help}", flush = True)
                     continue
                 val = round(val, 3)
