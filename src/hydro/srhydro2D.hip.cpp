@@ -12,7 +12,7 @@
 #include "srhydro2D.hip.hpp"
 #include "util/printb.hpp"
 #include "util/parallel_for.hpp"
-#include "util/timer.hpp"
+#include "util/logger.hpp"
 
 using namespace simbi;
 using namespace simbi::util;
@@ -1282,9 +1282,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         t += dt;
     }
 
-    // if (ncheck > 0) {
-    //     writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
-    // }
+    if (detail::logger::ncheck > 0) {
+        writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", detail::logger::n, detail::logger::zu_avg/ detail::logger::ncheck);
+    }
 
     if (outer_zones) {
         if constexpr(BuildPlatform == Platform::GPU) {

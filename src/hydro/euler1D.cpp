@@ -14,7 +14,7 @@
 #include "util/exec_policy.hpp"
 #include "util/device_api.hpp"
 #include "util/printb.hpp"
-#include "util/timer.hpp"
+#include "util/logger.hpp"
 #include "common/helpers.hip.hpp"
 
 using namespace simbi;
@@ -601,9 +601,9 @@ void Newtonian1D::advance(
         t += dt;
     }
 
-    // if (ncheck > 0) {
-    //      writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
-    // }
+    if (detail::logger::ncheck > 0) {
+         writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", detail::logger::n, detail::logger::zu_avg/ detail::logger::ncheck);
+    }
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
     for (luint ii = 0; ii < nx; ii++) {

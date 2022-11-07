@@ -12,7 +12,7 @@
 #include "util/printb.hpp"
 #include "common/helpers.hip.hpp"
 #include "srhydro3D.hip.hpp"
-#include "util/timer.hpp"
+#include "util/logger.hpp"
 
 using namespace simbi;
 using namespace simbi::util;
@@ -1162,9 +1162,9 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         t += dt;
     }
     
-    // if (ncheck > 0) {
-    //     writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
-    // }
+    if (detail::logger::ncheck > 0) {
+        writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", detail::logger::n, detail::logger::zu_avg / detail::logger::ncheck);
+    }
     
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
     for (luint ii = 0; ii < nx; ii++) {

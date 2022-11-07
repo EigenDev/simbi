@@ -7,6 +7,14 @@ namespace simbi
 {
     namespace detail
     {
+        namespace logger {
+            static luint n       = 0;
+            static luint nfold   = 0;
+            static luint ncheck  = 0;
+            static real  zu_avg  = 0.0;
+            static real delta_t  = 0.0;
+        };
+
         class Timer
         {
             using time_type     = std::conditional_t<BuildPlatform == Platform::GPU, anyGpuEvent_t, std::chrono::high_resolution_clock::time_point>;
@@ -62,12 +70,9 @@ namespace simbi
             using conserved_t = typename sim_state_t::conserved_t;
             using primitive_t = typename sim_state_t::primitive_t;
             constexpr auto write2file = helpers::write_to_file<typename sim_state_t::primitive_soa_t, sim_state_t::dimensions, sim_state_t>;
-            // Some benchmarking tools 
-            static luint n       = 0;
-            static luint nfold   = 0;
-            static luint ncheck  = 0;
-            static real  zu_avg  = 0;
-            static real delta_t  = 0.0;
+             // Some benchmarking tools 
+
+            using namespace logger;
             static auto timer    = Timer();
             try {
                 if (sim_state.first_order) {
