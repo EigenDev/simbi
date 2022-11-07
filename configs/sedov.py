@@ -21,12 +21,12 @@ class SedovTaylor(BaseConfig):
     rend          = DynamicArg("rend", 1.0,           help='radial extent', var_type=float)
     k             = DynamicArg("k", 0.0,              help='density power law k', var_type=float) 
     full_sphere   = DynamicArg("full_sphere", False,  help='flag for full_sphere computation',  var_type=bool, action='store_true') 
-    zpd           = DynamicArg("zpd", 100,            help='number of radial zones per decade', var_type=int)
+    zpd           = DynamicArg("zpd", 1024,            help='number of radial zones per decade', var_type=int)
     ad_gamma      = DynamicArg("ad_gamma", 5.0 / 3.0, help="Adiabtic gas index", var_type=float)
     
     def __init__(self):
         ndec        = np.log10(self.rend / self.rinit)
-        self.nr     = int(self.zpd * ndec)
+        self.nr     = round(self.zpd * ndec)
         r           = np.geomspace(self.rinit.value, self.rend.value, self.nr)
         self.theta_min   = 0
         self.theta_max   = np.pi if self.full_sphere else 0.5 * np.pi
