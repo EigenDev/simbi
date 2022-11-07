@@ -119,11 +119,9 @@ namespace simbi
             return sprims;
         }
 
-        template<typename T, typename U, typename V, typename W, int X>
+        template<typename U, typename V, int X, typename T>
         void write_to_file(
-            T *sim_state_host, 
-            T *sim_state_dev, 
-            W  &dual_memory_layer,
+            T &sim_state_host, 
             DataWriteMembers &setup,
             const std::string data_directory,
             const real t, 
@@ -131,49 +129,48 @@ namespace simbi
             const real chkpt_interval, 
             const luint chkpt_zone_label)
         {
-            if constexpr(BuildPlatform == Platform::GPU) {
-                dual_memory_layer.copyDevToHost(sim_state_dev, *sim_state_host);
-            }
-            setup.x1max = sim_state_host->x1max;
-            setup.x1min = sim_state_host->x1min;
+        //     sim_state_host.prims.copyFromGpu();
+        //     sim_state_host.cons.copyFromGpu();
+        //     setup.x1max = sim_state_host->x1max;
+        //     setup.x1min = sim_state_host->x1min;
 
-            PrimData prods;
-            static auto step                = sim_state_host->init_chkpt_idx;
-            static auto tbefore             = sim_state_host->tstart;
-            static std::string tchunk       = "000000";
-            static lint tchunk_order_of_mag = 2;
-            const auto time_order_of_mag    = std::floor(std::log10(t));
-            if (time_order_of_mag > tchunk_order_of_mag) {
-                tchunk.insert(0, "0");
-                tchunk_order_of_mag += 1;
-            }
+        //     PrimData prods;
+        //     static auto step                = sim_state_host.init_chkpt_idx;
+        //     static auto tbefore             = sim_state_host.tstart;
+        //     static std::string tchunk       = "000000";
+        //     static lint tchunk_order_of_mag = 2;
+        //     const auto time_order_of_mag    = std::floor(std::log10(t));
+        //     if (time_order_of_mag > tchunk_order_of_mag) {
+        //         tchunk.insert(0, "0");
+        //         tchunk_order_of_mag += 1;
+        //     }
 
-            // Transform vector of primitive structs to struct of primitive vectors
-            auto transfer_prims = vec2struct<U, V>(sim_state_host->prims);
-            writeToProd<U, V>(&transfer_prims, &prods);
-            std::string tnow;
-            if (sim_state_host->dlogt != 0)
-            {
-                const auto time_order_of_mag = std::floor(std::log10(step));
-                if (time_order_of_mag > tchunk_order_of_mag) {
-                    tchunk.insert(0, "0");
-                    tchunk_order_of_mag += 1;
-                }
-                tnow = create_step_str(step, tchunk);
-            } else {
-                tnow = create_step_str(t_interval, tchunk);
-            }
-            if (t_interval == INFINITY) {
-                tnow = "interrupted";
-            }
-            const auto filename = string_format("%d.chkpt." + tnow + ".h5", chkpt_zone_label);
+        //     // Transform vector of primitive structs to struct of primitive vectors
+        //     auto transfer_prims = vec2struct<U, V>(sim_state_host.prims);
+        //     writeToProd<U, V>(&transfer_prims, &prods);
+        //     std::string tnow;
+        //     if (sim_state_host->dlogt != 0)
+        //     {
+        //         const auto time_order_of_mag = std::floor(std::log10(step));
+        //         if (time_order_of_mag > tchunk_order_of_mag) {
+        //             tchunk.insert(0, "0");
+        //             tchunk_order_of_mag += 1;
+        //         }
+        //         tnow = create_step_str(step, tchunk);
+        //     } else {
+        //         tnow = create_step_str(t_interval, tchunk);
+        //     }
+        //     if (t_interval == INFINITY) {
+        //         tnow = "interrupted";
+        //     }
+        //     const auto filename = string_format("%d.chkpt." + tnow + ".h5", chkpt_zone_label);
 
-            setup.t             = t;
-            setup.dt            = t - tbefore;
-            setup.chkpt_idx     = step;
-            tbefore             = t;
-            step++;
-            write_hdf5(data_directory, filename, prods, setup, X, sim_state_host->total_zones);
+        //     setup.t             = t;
+        //     setup.dt            = t - tbefore;
+        //     setup.chkpt_idx     = step;
+        //     tbefore             = t;
+        //     step++;
+        //     write_hdf5(data_directory, filename, prods, setup, X, sim_state_host.total_zones);
         }
         
     } // namespace helpers

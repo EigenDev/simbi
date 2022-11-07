@@ -1,34 +1,101 @@
 
+#include "util/parallel_for.hpp"
 namespace simbi{
-    template<typename T, typename N>
-    GPU_LAUNCHABLE  typename std::enable_if<is_1D_primitive<N>::value>::type 
-    compute_dt(T *self)
+    template<typename T, typename U>
+    void config_ghosts1D_t(
+        const ExecutionPolicy<> p,
+        T &conserved_arr, 
+        const int grid_size,
+        const bool first_order, 
+        const simbi::BoundaryCondition boundary_condition,
+        const U *outer_zones) 
+    {
+        auto *cons = conserved_arr.data();
+        simbi::parallel_for(p, 0, 1, [=] GPU_LAMBDA (const int gid) {
+            if (first_order){
+                cons[0] = cons[1];
+                if (outer_zones)
+                {
+                    cons[grid_size - 1] = outer_zones[0];
+                } else {
+                    cons[grid_size - 1] = cons[grid_size - 2];
+                }
+                
+                
+                switch (boundary_condition)
+                {
+                case simbi::BoundaryCondition::INFLOW:
+                    cons[0] = cons[1];
+                    break;
+                case simbi::BoundaryCondition::REFLECTING:
+                    cons[0]   = cons[1];
+                    cons[0].m = - cons[1].m;
+                    break;
+                default:
+                    cons[0] = cons[1];
+                    break;
+                }
+            } else {
+                
+                if (outer_zones)
+                {
+                    cons[grid_size - 1] = outer_zones[0];
+                    cons[grid_size - 2] = outer_zones[0];
+                } else {
+                    cons[grid_size - 1] = cons[grid_size - 3];
+                    cons[grid_size - 2] = cons[grid_size - 3];
+                }
+                
+                switch (boundary_condition)
+                {
+                case simbi::BoundaryCondition::INFLOW:
+                    cons[0] =     cons[2];
+                    cons[1] =     cons[2];
+                    cons[0].m = - cons[2].m;
+                    cons[1].m = - cons[2].m;
+                    break;
+                case simbi::BoundaryCondition::REFLECTING:
+                    cons[0] =     cons[3];
+                    cons[1] =     cons[2];  
+                    cons[0].m = - cons[3].m;
+                    cons[1].m = - cons[2].m;
+                    break;
+                default:
+                    cons[0] = cons[2];
+                    cons[1] = cons[2];
+                    break;
+                }
+            }
+        });
+    };
+
+    template<typename T, typename U, typename V>
+    GPU_LAUNCHABLE  typename std::enable_if<is_1D_primitive<T>::value>::type 
+    compute_dt(U *self, const V* prim_buffer, real* dt_min)
     {
         #if GPU_CODE
-        __shared__  N prim_buff[BLOCK_SIZE];
         real vPlus, vMinus;
-        const real gamma     = self->gamma;
         int ii   = blockDim.x * blockIdx.x + threadIdx.x;
         int aid  = ii + self->idx_active;
         if (ii < self->active_zones)
         {
-            const real rho = self->gpu_prims[aid].rho;
-            const real p   = self->gpu_prims[aid].p;
+            const real rho = prim_buffer[aid].rho;
+            const real p   = prim_buffer[aid].p;
         
-            if constexpr(is_relativistic<N>::value)
+            if constexpr(is_relativistic<T>::value)
             {
-                real v  = self->gpu_prims[aid].v;
+                real v  = prim_buffer[aid].v;
                 if constexpr(VelocityType == Velocity::FourVelocity) {
                     real lorentz  = std::sqrt(1 + v * v);
                     v /= lorentz;
                 }
-                const real h  = 1. + gamma * p / (rho * (gamma - 1.));
-                const real cs = std::sqrt(gamma * p / (rho * h));
+                const real h  = 1. + self->gamma * p / (rho * (self->gamma - 1.));
+                const real cs = std::sqrt(self->gamma * p / (rho * h));
                 vPlus         = (v + cs) / (1 + v * cs);
                 vMinus        = (v - cs) / (1 - v * cs);
             } else {
-                const real v  = self->gpu_prims[aid].v;
-                const real cs = std::sqrt(gamma * p / rho );
+                const real v  = prim_buffer[aid].v;
+                const real cs = std::sqrt(self->gamma * p / rho );
                 vPlus         = (v + cs);
                 vMinus        = (v - cs);
             }
@@ -38,14 +105,16 @@ namespace simbi{
             const real vfaceL = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1l * self->hubble_param;
             const real vfaceR = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1r * self->hubble_param;
             const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPlus - vfaceR), std::abs(vMinus - vfaceL)));
-            self->dt_min[ii]  = self->cfl * cfl_dt;
+            dt_min[ii]        = self->cfl * cfl_dt;
         }
         #endif
     }
 
-    template<typename T, typename N>
-    GPU_LAUNCHABLE  typename std::enable_if<is_2D_primitive<N>::value>::type 
-    compute_dt(T *self, 
+    template<typename T, typename U, typename V>
+    GPU_LAUNCHABLE  typename std::enable_if<is_2D_primitive<T>::value>::type 
+    compute_dt(U *self, 
+    const V* prim_buffer,
+    real* dt_min,
     const simbi::Geometry geometry, 
     luint bytes,
     real dx1, 
@@ -56,7 +125,6 @@ namespace simbi{
     real x2max)
     {
         #if GPU_CODE
-        extern __shared__ N prim_buff[];
         real cfl_dt, v1p, v1m, v2p, v2m;
         const real gamma = self->gamma;
 
@@ -71,12 +139,12 @@ namespace simbi{
         if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid))
         {
             real plus_v1 , plus_v2 , minus_v1, minus_v2;
-            real rho  = self->gpu_prims[aid].rho;
-            real p    = self->gpu_prims[aid].p;
-            real v1   = self->gpu_prims[aid].v1;
-            real v2   = self->gpu_prims[aid].v2;
+            real rho  = prim_buffer[aid].rho;
+            real p    = prim_buffer[aid].p;
+            real v1   = prim_buffer[aid].v1;
+            real v2   = prim_buffer[aid].v2;
 
-            if constexpr(is_relativistic<N>::value)
+            if constexpr(is_relativistic<T>::value)
             {
                 real h   = 1 + gamma * p / (rho * (gamma - 1));
                 real cs  = std::sqrt(gamma * p / (rho * h));
@@ -134,14 +202,16 @@ namespace simbi{
                 // TODO: Implement
             } // end switch
             
-            self->dt_min[jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
+            dt_min[jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
         }
         #endif
     }
 
-    template<typename T, typename N>
-    GPU_LAUNCHABLE  typename std::enable_if<is_3D_primitive<N>::value>::type 
-    compute_dt(T *self, 
+    template<typename T, typename U, typename V>
+    GPU_LAUNCHABLE  typename std::enable_if<is_3D_primitive<T>::value>::type 
+    compute_dt(U *self, 
+    const V* prim_buffer,
+    real *dt_min,
     const simbi::Geometry geometry, 
     luint bytes,
     real dx1, 
@@ -155,7 +225,6 @@ namespace simbi{
     real x3max)
     {
         #if GPU_CODE
-        extern __shared__ N prim_buff[];
         real cfl_dt;
         const real gamma = self->gamma;
 
@@ -173,13 +242,13 @@ namespace simbi{
         if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid) && (kk < self->zphysical_grid))
         {
             real plus_v1 , plus_v2 , minus_v1, minus_v2, plus_v3, minus_v3;
-            real rho  = self->gpu_prims[aid].rho;
-            real p    = self->gpu_prims[aid].p;
-            real v1   = self->gpu_prims[aid].v1;
-            real v2   = self->gpu_prims[aid].v2;
-            real v3   = self->gpu_prims[aid].v3;
+            real rho  = prim_buffer[aid].rho;
+            real p    = prim_buffer[aid].p;
+            real v1   = prim_buffer[aid].v1;
+            real v2   = prim_buffer[aid].v2;
+            real v3   = prim_buffer[aid].v3;
 
-            if constexpr(is_relativistic<N>::value)
+            if constexpr(is_relativistic<T>::value)
             {
                 real h   = 1 + gamma * p / (rho * (gamma - 1));
                 real cs  = std::sqrt(gamma * p / (rho * h));
@@ -235,13 +304,13 @@ namespace simbi{
                 }
             } // end switch
             
-            self->dt_min[kk * self->xphysical_grid * self->yphysical_grid + jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
+            dt_min[kk * self->xphysical_grid * self->yphysical_grid + jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
         }
         #endif
     }
 
-    template<typename T, int dim>
-    GPU_LAUNCHABLE void deviceReduceKernel(T *self, lint nmax) {
+    template<int dim, typename T>
+    GPU_LAUNCHABLE void deviceReduceKernel(T *self, real *dt_min, lint nmax) {
         #if GPU_CODE
         real min = INFINITY;
         luint ii   = blockIdx.x * blockDim.x + threadIdx.x;
@@ -260,12 +329,12 @@ namespace simbi{
         }
         // reduce multiple elements per thread
         for (luint i = gid; i < nmax; i += nt) {
-            min = helpers::my_min(self->dt_min[i], min);
+            min = helpers::my_min(dt_min[i], min);
         }
         min = blockReduceMin(min);
         if (tid==0) {
-            self->dt_min[bid] = min;
-            self->dt          = self->dt_min[0];
+            dt_min[bid] = min;
+            self->dt    = dt_min[0];
         }
         #endif 
     };

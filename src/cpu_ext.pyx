@@ -14,16 +14,14 @@ from libcpp.string cimport string
 
 # Creating the cython wrapper class
 cdef class PyState:
-    cdef Newtonian1D c_state             # hold a c++ instance that we're wrapping           
-
-    def __cinit__(self, 
+    cdef Newtonian1D *c_state             # hold a c++ instance that we're wrapping           
+    def __init__(self, 
         np.ndarray[np.double_t, ndim=2] state, 
         real gamma, 
         real cfl=0.4,
         vector[real] x1 = [0], 
         string coord_system = "cartesian".encode('ascii')):
-
-        self.c_state = Newtonian1D(state, gamma,cfl, x1, coord_system)
+        self.c_state =  new Newtonian1D(state, gamma,cfl, x1, coord_system)
 
     def simulate(self, 
         vector[vector[real]] sources,
@@ -57,9 +55,12 @@ cdef class PyState:
 
         return np.asarray(result)
 
+    def __dealloc__(self):
+        del self.c_state
+
 # Relativisitc 1D Class
 cdef class PyStateSR:
-    cdef SRHD c_state             # hold a c++ instance that we're wrapping           
+    cdef SRHD *c_state             # hold a c++ instance that we're wrapping           
 
     def __cinit__(self, 
         np.ndarray[np.double_t, ndim=2] state, 
@@ -67,7 +68,7 @@ cdef class PyStateSR:
         real cfl=0.4,
         vector[real] x1 = [0], 
         string coord_system = "cartesian".encode('ascii')):
-        self.c_state = SRHD(state, gamma,cfl, x1, coord_system)
+        self.c_state = new SRHD(state, gamma,cfl, x1, coord_system)
         
     def simulate(self,
         vector[vector[real]] sources,
@@ -135,8 +136,10 @@ cdef class PyStateSR:
             
         return np.asarray(result)
 
+    def __dealloc__(self):
+        del self.c_state
 cdef class PyState2D:
-    cdef Newtonian2D c_state             # hold a c++ instance that we're wrapping           
+    cdef Newtonian2D *c_state             # hold a c++ instance that we're wrapping           
 
     def __cinit__(self, 
         np.ndarray[np.double_t, ndim=3] state, 
@@ -148,7 +151,7 @@ cdef class PyState2D:
 
         ny, nx = state[0].shape
         state_contig = state.reshape(state.shape[0], -1)
-        self.c_state =  Newtonian2D(state_contig, nx, ny, gamma, x1, x2, cfl, coord_system)
+        self.c_state =  new Newtonian2D(state_contig, nx, ny, gamma, x1, x2, cfl, coord_system)
     
     def simulate(self, 
         vector[vector[real]] sources,
@@ -185,8 +188,11 @@ cdef class PyState2D:
 
         return result
 
+    def __dealloc__(self):
+        del self.c_state
+
 cdef class PyStateSR2D:
-    cdef SRHD2D c_state             # hold a c++ instance that we're wrapping           
+    cdef SRHD2D *c_state             # hold a c++ instance that we're wrapping           
 
     def __cinit__(self,  
         np.ndarray[np.double_t, ndim=3] state, 
@@ -201,7 +207,7 @@ cdef class PyStateSR2D:
         if  col_maj:
             state = np.transpose(state, axes=(0,2,1))
         state_contig = state.reshape(state.shape[0], -1)
-        self.c_state = SRHD2D(state_contig, nx, ny, gamma, x1, x2, cfl, coord_system)
+        self.c_state = new SRHD2D(state_contig, nx, ny, gamma, x1, x2, cfl, coord_system)
     
 
     def simulate(self, 
@@ -283,8 +289,11 @@ cdef class PyStateSR2D:
         
         return result
 
+    def __dealloc__(self):
+        del self.c_state
+
 cdef class PyStateSR3D:
-    cdef SRHD3D c_state             # hold a c++ instance that we're wrapping           
+    cdef SRHD3D *c_state             # hold a c++ instance that we're wrapping           
 
     def __cinit__(self,  
         np.ndarray[np.double_t, ndim=4] state, 
@@ -298,7 +307,7 @@ cdef class PyStateSR3D:
         nz, ny, nx = state[0].shape
         state_contig = state.reshape(state.shape[0], -1)
 
-        self.c_state = SRHD3D(state_contig, nx, ny, nz, gamma, x1, x2, x3, cfl, coord_system)
+        self.c_state = new SRHD3D(state_contig, nx, ny, nz, gamma, x1, x2, x3, cfl, coord_system)
     
 
     def simulate(self, 
@@ -333,3 +342,6 @@ cdef class PyStateSR3D:
         result = np.asarray(result)
         result = result.reshape(5, self.c_state.nz, self.c_state.ny, self.c_state.nx)
         return result
+
+    def __dealloc__(self):
+        del self.c_state

@@ -473,7 +473,8 @@ class Hydro:
                     kwargs['d_outer'] =  dens_outer
                     kwargs['s_outer'] =  mom_outer
                     kwargs['e_outer'] =  edens_outer
-                
+            
+            
             self.solution = state.simulate(
                 sources            = sources,
                 tstart             = start_time,

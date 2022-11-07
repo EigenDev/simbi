@@ -15,10 +15,14 @@
 #include "common/enums.hpp"
 #include "common/helpers.hpp"
 #include "build_options.hpp"
+#include "util/ndarray.hpp"
 
 namespace simbi {
     struct Newtonian2D {
 
+        using primitive_t = hydro2d::Primitive;
+        using conserved_t = hydro2d::Conserved;
+        using primitive_soa_t = hydro2d::PrimitiveData;
         // Init Params (order matters)
         std::vector< std::vector<real> > init_state;
         luint nx; 
@@ -31,13 +35,13 @@ namespace simbi {
 
         // Simulation Params
         std::vector<std::vector<real> > sources;
-        std::vector<hydro2d::Conserved> cons;
-        std::vector<hydro2d::Primitive> prims;
-        std::vector<real> sourceRho, sourceM1, sourceM2, sourceE;
-        real plm_theta, tend, dt, decay_const, hubble_param, tstart;
+        ndarray<primitive_t> prims;
+        ndarray<conserved_t> cons;
+        ndarray<real> sourceRho, sourceM1, sourceM2, sourceE, dt_min;
+        real plm_theta, tend, dt, decay_const, hubble_param, tstart, t, chkpt_interval;
         bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, quirk_smoothing, reflecting_theta;
         luint nzones, active_zones, idx_active, n, init_chkpt_idx;
-        luint xphysical_grid, yphysical_grid, total_zones;
+        luint xphysical_grid, yphysical_grid, total_zones, radius, pseudo_radius;
         CLattice2D coord_lattice;
         simbi::Solver solver;
         simbi::Geometry geometry;
@@ -53,9 +57,6 @@ namespace simbi {
         //             GPU RESOURCES
         //==============================================================
         luint blockSize;
-        real *gpu_sourceRho,*gpu_sourceM1, *gpu_sourceM2, *gpu_sourceE, *dt_min;
-        hydro2d::Primitive  *gpu_prims;
-        hydro2d::Conserved  *gpu_cons;
 
 
         Newtonian2D();

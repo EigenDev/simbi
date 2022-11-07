@@ -15,13 +15,15 @@ namespace simbi
     //======================================
     //          GPU TEMPLATES
     //======================================
-    template<typename T, typename N>
-    GPU_LAUNCHABLE  typename std::enable_if<is_1D_primitive<N>::value>::type 
-    compute_dt(T *s);
+    template<typename T, typename U, typename V>
+    GPU_LAUNCHABLE  typename std::enable_if<is_1D_primitive<T>::value>::type 
+    compute_dt(U *s, const V* prim_buffer, real* dt_min);
 
-    template<typename T, typename N>
-    GPU_LAUNCHABLE  typename std::enable_if<is_2D_primitive<N>::value>::type 
-    compute_dt(T *s, 
+    template<typename T, typename U, typename V>
+    GPU_LAUNCHABLE  typename std::enable_if<is_2D_primitive<T>::value>::type 
+    compute_dt(U *s, 
+    const V* prim_buffer,
+    real *dt_min,
     const simbi::Geometry geometry, 
     luint bytes,
     real dx1, 
@@ -31,9 +33,11 @@ namespace simbi
     real x2min = 0,
     real x2max = 1);
 
-    template<typename T, typename N>
-    GPU_LAUNCHABLE  typename std::enable_if<is_3D_primitive<N>::value>::type 
-    compute_dt(T *s, 
+    template<typename T, typename U, typename V>
+    GPU_LAUNCHABLE  typename std::enable_if<is_3D_primitive<T>::value>::type 
+    compute_dt(U *s, 
+    const V* prim_buffer,
+    real *dt_min,
     const simbi::Geometry geometry, 
     luint bytes,
     real dx1, 
@@ -60,7 +64,7 @@ namespace simbi
 
     void config_ghosts1D(
         const ExecutionPolicy<> p,
-        SRHD *dev_sim, 
+        SRHD::conserved_t *cons, 
         const int grid_size,
         const bool first_order, 
         const simbi::BoundaryCondition boundary_condition,
@@ -68,7 +72,7 @@ namespace simbi
 
     void config_ghosts1D(
         const ExecutionPolicy<> p,
-        Newtonian1D *dev_sim, 
+        Newtonian1D::conserved_t *cons, 
         const int grid_size,
         const bool first_order, 
         const simbi::BoundaryCondition boundary_condition,
@@ -76,7 +80,7 @@ namespace simbi
         
     void config_ghosts2D(
         const ExecutionPolicy<> p,
-        SRHD2D *sim, 
+        SRHD2D::conserved_t *cons, 
         const int x1grid_size, 
         const int x2grid_size, 
         const bool first_order,
@@ -86,7 +90,7 @@ namespace simbi
 
     void config_ghosts2D(
         const ExecutionPolicy<> p,
-        Newtonian2D *sim, 
+        Newtonian2D::conserved_t *cons, 
         const int x1grid_size, 
         const int x2grid_size, 
         const bool first_order,
@@ -96,7 +100,7 @@ namespace simbi
 
     void config_ghosts3D(
         const ExecutionPolicy<> p,
-        SRHD3D *sim, 
+        SRHD3D::conserved_t *cons, 
         const int x1grid_size, 
         const int x2grid_size,
         const int x3grid_size,  

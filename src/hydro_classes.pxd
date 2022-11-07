@@ -20,13 +20,8 @@ cdef extern from "common/enums.hpp":
 
 cdef extern from "hydro/euler1D.hpp" namespace "simbi":
     cdef cppclass Newtonian1D:
-        Newtonian1D() except +
-        Newtonian1D(vector[vector[real]], real, real, vector[real], string) except + 
-        real theta, gamma, tend, dlogt, cfl
-        bool first_order, linspace
-        string coord_system
-        vector[real] r
-        vector[vector[real]] state
+        Newtonian1D() except + 
+        Newtonian1D(vector[vector[real]], real, real, vector[real], string) except +  
         vector[vector [real]] simulate1D(
             vector[vector[real]] sources,
             real tstart,

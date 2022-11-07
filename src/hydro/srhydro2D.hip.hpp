@@ -13,13 +13,15 @@
 #include "common/hydro_structs.hpp"
 #include "common/clattice2D.hpp"
 #include "util/exec_policy.hpp"
+#include "util/ndarray.hpp"
 
 namespace simbi
 {
-    class SRHD2D
+    struct SRHD2D
     {
-    public:
-
+        using primitive_t = sr2d::Primitive;
+        using conserved_t = sr2d::Conserved;
+        using primitive_soa_t = sr2d::PrimitiveData;
         // Initial state vars
         std::vector<std::vector<real>> state2D;
         luint nx; 
@@ -31,26 +33,21 @@ namespace simbi
         std::string coord_system;
 
         /* Shared Data Members */
-        std::vector<sr2d::Primitive> prims;
-        std::vector<sr2d::Conserved> cons;
+        ndarray<primitive_t> prims;
+        ndarray<conserved_t> cons;
+        ndarray<real> sourceD, sourceS1, sourceS2, sourceTau, pressure_guess, dt_min;
         real plm_theta, hubble_param;
         volatile bool inFailureState;
         bool first_order, periodic, hllc, linspace, mesh_motion, reflecting_theta;
-        real dt, decay_const, tstart;
+        real dt, decay_const, tstart, t;
         luint nzones, n, block_size, xphysical_grid, yphysical_grid;
-        luint active_zones, idx_active, total_zones, init_chkpt_idx;
-        std::vector<real> sourceD, sourceS1, sourceS2, sourceTau, pressure_guess;
+        luint active_zones, idx_active, total_zones, init_chkpt_idx, radius, pseudo_radius;
         CLattice2D coord_lattice;
         simbi::Geometry geometry;
         simbi::BoundaryCondition bc;
         simbi::Cellspacing x1cell_spacing, x2cell_spacing;
         real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1, dlogt;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
-
-        //==============GPU Mirrors================
-        real *gpu_sourceD, *gpu_sourceS1, *gpu_sourceS2, *gpu_sourceTau, *gpu_pressure_guess, *dt_min;
-        sr2d::Primitive *gpu_prims;
-        sr2d::Conserved *gpu_cons;
         
 
         /* Methods */
