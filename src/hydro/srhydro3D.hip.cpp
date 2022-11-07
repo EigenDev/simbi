@@ -1121,8 +1121,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
-    if (t == 0)
-    {
+    if (t == 0) {
         config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bc);
     }
 
