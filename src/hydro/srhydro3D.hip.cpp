@@ -1148,7 +1148,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     // Simulate :)
     while (t < tend & !inFailureState)
     {
-        simbi::detail::with_timer(*this, [&](){
+        simbi::detail::with_logger(*this, [&](){
             advance(self, activeP, bx, by, bz, radius, geometry, memside);
             cons2prim(fullP, self, memside);
             config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bc);

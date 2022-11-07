@@ -761,7 +761,7 @@ SRHD::simulate1D(
     // Simulate :)
     while (t < tend & !inFailureState)
     {
-        simbi::detail::with_timer(*this, [&](){
+        simbi::detail::with_logger(*this, [&](){
             advance(self, shBlockSize, radius, geometry, memside);
             cons2prim(fullP, device_self, memside);
             if (!periodic) {

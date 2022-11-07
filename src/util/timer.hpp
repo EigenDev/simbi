@@ -58,7 +58,7 @@ namespace simbi
         };
 
         template <typename sim_state_t, typename F>
-        void with_timer(sim_state_t &sim_state, F &&f) {
+        void with_logger(sim_state_t &sim_state, F &&f) {
             using conserved_t = typename sim_state_t::conserved_t;
             using primitive_t = typename sim_state_t::primitive_t;
             constexpr auto write2file = helpers::write_to_file<typename sim_state_t::primitive_soa_t, sim_state_t::dimensions, sim_state_t>;

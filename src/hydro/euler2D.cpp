@@ -861,7 +861,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     // Simulate :)
     while (t < tend & !inFailureState)
     {
-        simbi::detail::with_timer(*this, [&](){
+        simbi::detail::with_logger(*this, [&](){
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
             if (!periodic) config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc);

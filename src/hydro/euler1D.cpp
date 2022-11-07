@@ -587,7 +587,7 @@ void Newtonian1D::advance(
 
     while (t < tend & !inFailureState)
     {
-        simbi::detail::with_timer(*this, [&](){
+        simbi::detail::with_logger(*this, [&](){
             advance(radius, geometry, activeP, self, shBlockSize, memside);
             cons2prim(fullP, self, memside);
             if (!periodic) config_ghosts1D_t(fullP, cons, nx, first_order, bc, (conserved_t*)nullptr);
