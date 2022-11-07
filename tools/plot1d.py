@@ -25,8 +25,7 @@ except:
 derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'mach']
 field_choices = ['rho', 'v', 'p', 'gamma_beta', 'chi'] + derived
 lin_fields    = ['chi', 'gamma_beta']
-def plot_profile(args, fields, mesh, setup, ax = None, overplot = False, subplot = False, case = 0):
-    ncols = len(args.filename) * len(args.fields)
+def plot_profile(args, fields, mesh, setup, ncols: int, ax = None, overplot = False, subplot = False, case = 0):
     vmin, vmax = args.clims 
     cinterval  = np.linspace(vmin, vmax, ncols)
     cmap       = plt.cm.get_cmap(args.cmap)
@@ -66,16 +65,17 @@ def plot_profile(args, fields, mesh, setup, ax = None, overplot = False, subplot
             label = field_labels[idx] + ' ' + label
             
         ax.plot(r, var * unit_scale, color=colors[case], label=label, linestyle=next(linecycler))
-        if case == 0:
-            if args.fields[0] == 'gamma_beta':
-                max_idx = np.argmax(var)
-                ax.plot(r[max_idx:], var[max_idx] * (r[max_idx:] / r[max_idx]) ** (-3/2), label='$\propto r^{-3/2}$', color='black', linestyle='--')
+        # if case == 0:
+        #     if args.fields[0] == 'gamma_beta':
+        #         max_idx = np.argmax(var)
+        #         ax.plot(r[max_idx:], var[max_idx] * (r[max_idx:] / r[max_idx]) ** (-3/2), label='$\propto r^{-3/2}$', color='black', linestyle='--')
 
     ax.tick_params(axis='both')
     if args.log:
         ax.set_xscale('log')
-        if args.fields[0] not in lin_fields:
-            ax.set_yscale('log')
+        ax.set_yscale('log')
+        # if args.fields[0] not in lin_fields:
+        #     ax.set_yscale('log')
     elif not setup['linspace']:
         ax.set_xscale('log')
     
@@ -116,7 +116,7 @@ def plot_profile(args, fields, mesh, setup, ax = None, overplot = False, subplot
         return fig
     
 def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = False, case=0):
-    colors = plt.cm.twilight_shifted(np.linspace(0.25, 0.75, len(args.filename)))
+    colors = plt.cm.twilight_shifted(np.linspace(0.25, 0.75, len(args.files)))
     if not overplot:
         fig = plt.figure(figsize=[9, 9], constrained_layout=False)
         ax = fig.add_subplot(1, 1, 1)
@@ -192,7 +192,7 @@ def main():
         description='Plot a 2D Figure From a File (H5).',
         epilog='This Only Supports H5 Files Right Now')
     
-    parser.add_argument('filename', metavar='Filename', nargs='+', help='A Data Source to Be Plotted')
+    parser.add_argument('files', metavar='Filename', nargs='+', help='A Data Source to Be Plotted')
     parser.add_argument('setup', metavar='Setup', nargs='+', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
     parser.add_argument('--fields', dest = 'fields', metavar='Field Variable(s)', nargs='+', help='The name of the field variable(s) you\'d like to plot', choices=field_choices, default=['rho'])
     parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max', default = 0.0, help='The domain range')
@@ -221,24 +221,26 @@ def main():
         "font.sans-serif": ["Time New Roman"]})
     
     fig_size = args.fig_size
-    if len(args.filename) > 1:
+    flist, _ = util.get_file_list(args.files)
+    ncols    = len(flist) * len(args.fields)
+    if len(flist) > 1:
         if args.plots == 1:
             fig = plt.figure(figsize=(fig_size[0], fig_size[1]))
             ax = fig.add_subplot(1, 1, 1)
-            for idx, file in enumerate(args.filename):
+            for idx, file in enumerate(flist):
                 fields, setup, mesh = util.read_1d_file(file)
                 if args.ehist or args.eks or args.hhist:
                     plot_hist(args, fields, mesh, setup, ax = ax, overplot= True, case = idx)
                 else:
-                    plot_profile(args, fields, mesh, setup, ax = ax, overplot=True, case = idx)
+                    plot_profile(args, fields, mesh, setup,ncols,  ax = ax, overplot=True, case = idx)
         else:
             fig = plt.figure(figsize=(fig_size[0], fig_size[1]))
             ax1 = fig.add_subplot(1, 2, 1)
             ax2 = fig.add_subplot(1, 2, 2)
-            for idx, file in enumerate(args.filename):
+            for idx, file in enumerate(flist):
                 fields, setup, mesh = util.read_1d_file(file)
                 plot_hist(args, fields,mesh, setup,  ax = ax1, overplot= True, subplot = True, case = idx)
-                plot_profile(args, fields, mesh, setup, ax = ax2, overplot=True, subplot = True, case = idx)
+                plot_profile(args, fields, mesh, setup, ncols, ax = ax2, overplot=True, subplot = True, case = idx)
                 
             fig.suptitle('{}'.format(args.setup[0]))
             
@@ -246,11 +248,11 @@ def main():
             ax.legend()
             
     else:
-        fields, setup, mesh = util.read_1d_file(args.filename[0])
+        fields, setup, mesh = util.read_1d_file(flist[0])
         if args.ehist or args.hhist or args.eks:
             fig = plot_hist(args, fields, mesh, setup)
         else:
-            fig = plot_profile(args, fields, mesh, setup)
+            fig = plot_profile(args, fields, mesh, setup, ncols)
         
     
     

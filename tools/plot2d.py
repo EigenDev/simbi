@@ -29,7 +29,7 @@ except:
 derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'chi_dens',
                  'gamma_beta_1', 'gamma_beta_2', 'mach', 'u1', 'u2']
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'chi'] + derived
-lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
+lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2', 'u1', 'u2']
 
 def place_annotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, etot: float) -> None:
     order_of_mag = np.floor(np.log10(etot))
@@ -1371,6 +1371,14 @@ def plot_dx_domega(
                 if 'ax0' in locals():
                     ax0.legend(fontsize=size, loc='best', fancybox=True, framealpha=0.1, borderpad=0.3)
 
+def static_vars(**kwargs):
+    def decorate(func):
+        for k in kwargs:
+            setattr(func, k, kwargs[k])
+        return func
+    return decorate
+
+@static_vars(counter=0)
 def plot_vs_time(
     args: argparse.ArgumentParser,
     ax: plt.Axes,
@@ -1379,7 +1387,6 @@ def plot_vs_time(
     time: np.ndarray,
     data: np.ndarray,
     ylog: bool = False) -> None:
-    
     xlabel = util.get_field_str(args)
     ax.set_xlabel(r'$t$')
     ax.set_ylabel(f"Max {xlabel}")
@@ -1389,18 +1396,24 @@ def plot_vs_time(
     data = np.asarray(data)
     ax.plot(time, data, label=label, color=color, alpha=1.0)
     if args.fields[0] == 'gamma_beta' or args.fields[0] == 'u1':
-        max_idx      = np.argmax(data)
-        beta         = data / (1 + data**2)**0.5
-        scale_factor = 1.0 * time[max_idx:] 
-        norm         = 1.0 * time[max_idx]
-        ax.plot(time[max_idx:], data[max_idx] * (scale_factor / norm) ** (-3/2), label =r'$\propto t^{-3/2}$', color=color, linestyle='--')
-        ax.plot(time[max_idx:], data[max_idx] * (scale_factor / norm) ** (-3), label =r'$\propto t^{-3}$', color=color, linestyle='--')
-        # ax.plot(time[max_idx:], data[max_idx] * np.exp(1.0 - scale_factor / norm), label =r'$\propto \exp(-t)$', color=color, linestyle='-.')
-        
+        tref         = 0.22
+        tspread      = 0.36
+        tslope       = np.argmin(np.abs(time - tref))
+        tslope2      = np.argmin(np.abs(time - tspread))
+        scale_factor = 1.0 * time[tslope:] 
+        norm         = 1.0 * time[tslope]
+        if plot_vs_time.counter == 0:
+            ax.plot(time[tslope:], data[tslope]   * (scale_factor / norm) ** (-1.2), label =r'$\propto t^{-3/2}$', color='blue', linestyle='--')
+            ax.plot(time[tslope2:], data[tslope2] * (time[tslope2:] / time[tslope2]) ** (-3), label =r'$\propto t^{-3}$', color='blue', linestyle='--')
+            ax.plot(time[tslope2:], data[tslope2] * (time[tslope2:] / time[tslope2]) ** (-2.1), label =r'$\propto t^{-2.1}$', color='blue', linestyle='--')
+            # ax.plot(time[tslope:], data[tslope] * np.exp(- (scale_factor - tref) / norm), label =r'$\propto \exp(-t)$', color=color, linestyle='-.')
+    
     if args.log:
         ax.set_xscale('log')
         if ylog:
             ax.set(yscale = 'log')
+            
+    plot_vs_time.counter += 1
     
 def main():
     parser = argparse.ArgumentParser(
