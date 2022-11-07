@@ -25,7 +25,7 @@ using Primitive           = sr3d::Primitive;
 using Conserved           = sr3d::Conserved;
 using Eigenvals           = sr3d::Eigenvals;
 using dualType            = simbi::dual::DualSpace3D<Primitive, Conserved, SRHD3D>;
-constexpr auto write2file = helpers::write_to_file<simbi::SRHD3D, sr3d::PrimitiveData, Primitive, dualType, 3>;
+constexpr auto write2file = helpers::write_to_file<simbi::SRHD3D, sr3d::PrimitiveSOA, Primitive, dualType, 3>;
 
 // Default Constructor
 SRHD3D::SRHD3D() {}
@@ -1065,7 +1065,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
 
     // Declare I/O variables for Read/Write capability
     PrimData prods;
-    sr3d::PrimitiveData transfer_prims;
+    sr3d::PrimitiveSOA transfer_prims;
 
     SRHD3D *device_self;
     simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(SRHD3D));
@@ -1275,7 +1275,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         simbi::gpu::api::gpuFree(device_self);
     }
 
-    transfer_prims = helpers::vec2struct<sr3d::PrimitiveData, Primitive>(prims);
+    transfer_prims = helpers::vec2struct<sr3d::PrimitiveSOA, Primitive>(prims);
 
     std::vector<std::vector<real>> solution(5, std::vector<real>(nzones));
 

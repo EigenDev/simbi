@@ -24,7 +24,7 @@ using Primitive           = sr2d::Primitive;
 using Conserved           = sr2d::Conserved;
 using Eigenvals           = sr2d::Eigenvals;
 using dualType            = simbi::dual::DualSpace2D<Primitive, Conserved, SRHD2D>;
-constexpr auto write2file = helpers::write_to_file<simbi::SRHD2D, sr2d::PrimitiveData, Primitive, dualType, 2>;
+constexpr auto write2file = helpers::write_to_file<simbi::SRHD2D, sr2d::PrimitiveSOA, Primitive, dualType, 2>;
 
 // Default Constructor
 SRHD2D::SRHD2D() {}
@@ -1211,7 +1211,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     decay_const = 1 / (1 + std::exp(static_cast<real>(10.0) * (tstart - engine_duration)));
 
     // Declare I/O variables for Read/Write capability
-    sr2d::PrimitiveData transfer_prims;
+    sr2d::PrimitiveSOA transfer_prims;
     
     // Copy the current SRHD instance over to the device
     // if compiling for CPU, these functions do nothing
@@ -1499,7 +1499,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         }
     }
 
-    transfer_prims = helpers::vec2struct<sr2d::PrimitiveData, Primitive>(prims);
+    transfer_prims = helpers::vec2struct<sr2d::PrimitiveSOA, Primitive>(prims);
     std::vector<std::vector<real>> solution(5, std::vector<real>(nzones));
 
     solution[0] = transfer_prims.rho;

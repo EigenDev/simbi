@@ -390,14 +390,12 @@ DT* simbi::ndarray<DT>::host_data(){
 
 
 template<typename DT>
-GPU_CALLABLE_MEMBER
 DT* simbi::ndarray<DT>::dev_data(){
     return dev_arr.get();
 };
 
 
 template<typename DT>
-GPU_CALLABLE_MEMBER
 DT* simbi::ndarray<DT>::data(){
     if constexpr(BuildPlatform == Platform::GPU) {
         return dev_arr.get();

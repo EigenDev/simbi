@@ -18,40 +18,21 @@
 #include "util/exec_policy.hpp"
 #include "build_options.hpp"
 #include "util/ndarray.hpp"
+#include "base.hpp"
 
 namespace simbi
 {
-     struct SRHD
+     struct SRHD : public HydroBase
      {
           using conserved_t = sr1d::Conserved;
           using primitive_t = sr1d::Primitive;
-          // Init Params (order matters)
-          std::vector<std::vector<real>> state;
-          real gamma;
-          real cfl;
-          std::vector<real> x1; 
-          std::string coord_system;
-
-          real dt, hubble_param;
-          std::vector<real> dt_arr;
-          CLattice1D coord_lattice;
-          simbi::BoundaryCondition bc;
-          simbi::Geometry geometry;
-          simbi::Cellspacing xcell_spacing;
-          real dlogx1, dx1, x1min, x1max;  
-          luint radius, total_zones, pseudo_radius;
-
-          // SRHD* device_self;
+          using primitive_soa_t = sr1d::PrimitiveSOA;
+          const static int dimensions = 1;
 
           // Create vector instances that will live on host
           ndarray<conserved_t> cons; 
           ndarray<primitive_t> prims;
           ndarray<real> sourceD, sourceS, source0, pressure_guess, dt_min;
-
-          luint nx, active_zones, idx_active, i_start, i_bound, init_chkpt_idx;
-          real plm_theta, engine_duration, t, decay_constant, dlogt, tend, tstart;
-          bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
-          // std::vector<real> sourceD, sourceS, source0, pressure_guess;
           
           SRHD();
           SRHD(

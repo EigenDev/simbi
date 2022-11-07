@@ -16,45 +16,19 @@
 #include "build_options.hpp"
 #include "util/exec_policy.hpp"
 #include "util/ndarray.hpp"
+#include "base.hpp"
 
 namespace simbi {
-    enum class SOLVER{HLLE, HLLC};
 
-    struct Newtonian1D {
+    struct Newtonian1D : public HydroBase {
         using conserved_t = hydro1d::Conserved;
         using primitive_t = hydro1d::Primitive;
-        using primitive_soa_t = hydro1d::PrimitiveData;
-        // Initializer list args
-        std::vector<std::vector<real>> state;
-        real gamma;
-        real cfl;
-        std::vector<real> x1;
-        std::string coord_system, data_directory;
-
-        real plm_theta, tend, dt, engine_duration, t, decay_constant, hubble_param, x1min , x1max, dlogx1, dx1, dlogt, tstart;
-        bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
+        using primitive_soa_t = hydro1d::PrimitiveSOA;
+        const static int dimensions = 1;
 
         ndarray<conserved_t> cons; 
         ndarray<primitive_t> prims;
         ndarray<real> sourceRho, sourceMom, sourceE, dt_min;
-
-        std::vector<real> xvertices;
-        luint nzones, active_zones, idx_active, total_zones, n, nx, init_chkpt_idx, radius, pseudo_radius;
-        simbi::SOLVER sim_solver;
-        CLattice1D coord_lattice;
-        simbi::BoundaryCondition bc;
-        simbi::Geometry geometry;
-        simbi::Cellspacing xcell_spacing;
-
-        //==============================================================
-        // Create dynamic array instances that will live on device
-        //==============================================================
-        //             GPU RESOURCES
-        //==============================================================
-        luint blockSize;
-        hydro1d::Conserved *gpu_cons;
-        hydro1d::Primitive *gpu_prims;
-        real               *gpu_sourceRho, *gpu_sourceMom, *gpu_sourceE, *gdt_min;
         
         Newtonian1D() = default;
         Newtonian1D(

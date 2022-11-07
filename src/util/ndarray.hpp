@@ -118,10 +118,8 @@ namespace simbi
 		bool empty() const;
 
 		// get pointers to underlying data ambigiously, on host, or on gpu
-		GPU_CALLABLE_MEMBER
 		DT* data();
 		DT* host_data();
-		GPU_CALLABLE_MEMBER
 		DT* dev_data();
 		// Iterator Class
 		class iterator {

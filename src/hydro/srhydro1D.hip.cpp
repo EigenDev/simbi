@@ -18,7 +18,7 @@
 using namespace simbi;
 using namespace simbi::util;
 using namespace std::chrono;
-
+constexpr auto write2file = helpers::write_to_file<sr1d::PrimitiveSOA, 1, SRHD>;
 //================================================
 //              DATA STRUCTURES
 //================================================
@@ -37,13 +37,13 @@ SRHD::SRHD(
     std::vector<real> x1, 
     std::string coord_system = "cartesian") 
 :
-    state(state),
-    gamma(gamma),
-    cfl(cfl),
-    x1(x1),
-    coord_system(coord_system),
-    nx(state[0].size()),
-    inFailureState(false)
+    HydroBase(
+        state,
+        gamma,
+        cfl,
+        x1,
+        coord_system
+    )
 {
 
 }
@@ -107,6 +107,9 @@ void SRHD::advance(
     const real inv_dx           = 1.0 / this->dx1;
     auto* const cons_data       = cons.data();
     auto* const prim_data       = prims.data();
+    auto* const dens_source     = sourceD.data();
+    auto* const mom_source      = sourceS.data();
+    auto* const erg_source      = source0.data();
     simbi::parallel_for(p, (luint)0, self->active_zones, [=] GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
@@ -215,6 +218,7 @@ void SRHD::advance(
             }
         }
 
+        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * self->decay_constant;
         switch(geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -232,7 +236,6 @@ void SRHD::advance(
                 const real pc     = prim_buff[txa].p;
 
                 const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                const auto sources = Conserved{sourceD.data()[ii], sourceS.data()[ii], source0.data()[ii]} * self->decay_constant;
                 cons_data[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt * factor;
                 break;
             }
@@ -329,7 +332,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                     const luint idx       = helpers::get_real_idx(ii, radius, self->active_zones);
                     const real xl         = self->get_xface(idx, self->geometry, 0);
                     const real xr         = self->get_xface(idx, self->geometry, 1);
-                    const real xmean      = helpers::calc_any_mean(xl, xr, self->xcell_spacing);
+                    const real xmean      = helpers::calc_any_mean(xl, xr, self->x1cell_spacing);
                     printf("\nCons2Prim cannot converge\n");
                     printf("Density: %.3e, Pressure: %.3e, vsq: %.3e, coord: %.2e\n", rho, peq, v2, xmean);
                     self->dt             = INFINITY;
@@ -643,6 +646,8 @@ SRHD::simulate1D(
     std::function<double(double)> e_outer)
 {
     anyDisplayProps();
+    this->chkpt_interval  = chkpt_interval;
+    this->data_directory  = data_directory;
     this->tstart          = tstart;
     this->init_chkpt_idx  = chkpt_idx;
     this->periodic        = boundary_condition == "periodic";
@@ -665,21 +670,22 @@ SRHD::simulate1D(
     this->dx1             = (x1[active_zones - 1] - x1[0]) / (active_zones - 1);
     this->x1min           = x1[0];
     this->x1max           = x1[active_zones - 1];
-    this->xcell_spacing   = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
+    this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
     this->total_zones     = nx;
+    this->checkpoint_zones= active_zones;
     luint n = 0;
+    
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
     PrimData prods;
-    real round_place = 1 / chkpt_interval;
-    real t_interval =
+    real round_place = 1 / this->chkpt_interval;
+    this->t_interval =
         t == 0 ? 0
                : dlogt !=0 ? tstart
-               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
+               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + this->chkpt_interval;
 
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
-    DataWriteMembers setup;
     setup.x1max          = x1[active_zones - 1];
     setup.x1min          = x1[0];
     setup.xactive_zones  = active_zones;
@@ -735,10 +741,10 @@ SRHD::simulate1D(
         }
     }
     // Save initial condition
-    // if (t == 0) {
-    //     write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-    //     t_interval += chkpt_interval;
-    // }
+    if (t == 0) {
+        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
+        t_interval += chkpt_interval;
+    }
     // Determine the memory side and state position
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;

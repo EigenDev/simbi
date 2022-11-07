@@ -16,52 +16,24 @@
 #include "common/helpers.hpp"
 #include "build_options.hpp"
 #include "util/ndarray.hpp"
-
+#include "base.hpp"
 namespace simbi {
-    struct Newtonian2D {
+    struct Newtonian2D : public HydroBase {
 
         using primitive_t = hydro2d::Primitive;
         using conserved_t = hydro2d::Conserved;
-        using primitive_soa_t = hydro2d::PrimitiveData;
-        // Init Params (order matters)
-        std::vector< std::vector<real> > init_state;
-        luint nx; 
-        luint ny;
-        real gamma;
-        std::vector<real> x1;
-        std::vector<real> x2;
-        real cfl;
-        std::string coord_system;
+        using primitive_soa_t = hydro2d::PrimitiveSOA;
+        const static int dimensions = 2;
 
-        // Simulation Params
-        std::vector<std::vector<real> > sources;
+        // Simulation Param
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons;
         ndarray<real> sourceRho, sourceM1, sourceM2, sourceE, dt_min;
-        real plm_theta, tend, dt, decay_const, hubble_param, tstart, t, chkpt_interval;
-        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, quirk_smoothing, reflecting_theta;
-        luint nzones, active_zones, idx_active, n, init_chkpt_idx;
-        luint xphysical_grid, yphysical_grid, total_zones, radius, pseudo_radius;
-        CLattice2D coord_lattice;
-        simbi::Solver solver;
-        simbi::Geometry geometry;
-        simbi::BoundaryCondition bc;
-        simbi::Cellspacing x1cell_spacing, x2cell_spacing;
-
-        real x2max, x2min, x1min, x1max, dx2, dx1, dlogx1, dlogt;
         bool rho_all_zeros, m1_all_zeros, m2_all_zeros, e_all_zeros;
         
-        //==============================================================
-        // Create dynamic array instances that will live on device
-        //==============================================================
-        //             GPU RESOURCES
-        //==============================================================
-        luint blockSize;
-
-
         Newtonian2D();
         Newtonian2D(
-            std::vector< std::vector<real> > init_state, 
+            std::vector<std::vector<real>> state, 
             luint nx, 
             luint ny,
             real gamma, 

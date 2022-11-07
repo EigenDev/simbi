@@ -17,6 +17,7 @@
 using namespace simbi;
 using namespace simbi::util;
 using namespace std::chrono;
+constexpr auto write2file = helpers::write_to_file<sr2d::PrimitiveSOA, 2, SRHD2D>;
 
 /* Define typedefs because I am lazy */
 using Primitive           = sr2d::Primitive;
@@ -27,7 +28,7 @@ SRHD2D::SRHD2D() {}
 
 // Overloaded Constructor
 SRHD2D::SRHD2D(
-    std::vector<std::vector<real>> state2D, 
+    std::vector<std::vector<real>> state, 
     luint nx, 
     luint ny, 
     real gamma,
@@ -36,16 +37,16 @@ SRHD2D::SRHD2D(
     real cfl,
     std::string coord_system = "cartesian")
 :
-    state2D(state2D),
-    nx(nx),
-    ny(ny),
-    gamma(gamma),
-    x1(x1),
-    x2(x2),
-    cfl(cfl),
-    coord_system(coord_system),
-    inFailureState(false),
-    nzones(state2D[0].size())
+    HydroBase(
+        state,
+        nx,
+        ny,
+        gamma,
+        x1,
+        x2,
+        cfl,
+        coord_system
+    )
 {
     d_all_zeros  = false;
     s1_all_zeros = false;
@@ -755,7 +756,7 @@ void SRHD2D::advance(
     const auto xextent             = p.blockSize.x;
     const auto yextent             = p.blockSize.y;
     const bool hllc                = this->hllc;
-    const real decay_const         = this->decay_const;
+    const real decay_constant      = this->decay_constant;
     const real plm_theta           = this->plm_theta;
     const real gamma               = this->gamma;
     const luint nx                 = this->nx;
@@ -825,16 +826,16 @@ void SRHD2D::advance(
                 if (blockIdx.y == p.gridSize.y - 1 && (ja + yextent > ny - radius + ty)) {
                     tyl = ny - radius - ja + ty;
                 }
-                prim_buff[(tya - radius) * sx + txa] = prim_data[ja - radius, ny * nx + ia];
-                prim_buff[(tya + tyl) * sx + txa]    = prim_data[(ja + tyl) % ny * nx + ia]; 
+                prim_buff[(tya - radius) * sx + txa] = prim_data[(ja - radius) * nx + ia];
+                prim_buff[(tya + tyl   ) * sx + txa] = prim_data[(ja + tyl   ) * nx + ia]; 
             }
             if (tx < radius)
             {   
                 if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + tx)) {
                     txl = nx - radius - ia + tx;
                 }
-                prim_buff[tya * sx + txa - radius] =  prim_data[ja * nx + ia - radius, nx];
-                prim_buff[tya * sx + txa +    txl] =  prim_data[ja * nx +    (ia + txl) % nx]; 
+                prim_buff[tya * sx + txa - radius] =  prim_data[ja * nx + ia - radius];
+                prim_buff[tya * sx + txa +    txl] =  prim_data[ja * nx + ia + txl]; 
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -1004,11 +1005,11 @@ void SRHD2D::advance(
 
         //Advance depending on geometry
         const luint real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
-        const real d_source  = dens_source[real_loc];
-        const real s1_source = mom1_source[real_loc];
-        const real s2_source = mom2_source[real_loc];
-        const real e_source  = erg_source[real_loc];
-        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
+        const real d_source  = 0.0; // dens_source[real_loc];
+        const real s1_source = 0.0; // mom1_source[real_loc];
+        const real s2_source = 0.0; // mom2_source[real_loc];
+        const real e_source  = 0.0; // erg_source[real_loc];
+        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_constant;
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -1048,13 +1049,7 @@ void SRHD2D::advance(
                 const real hc   = static_cast<real>(1.0) + gamma * pc/(rhoc * (gamma - static_cast<real>(1.0)));
                 const real gam2 = static_cast<real>(1.0)/(static_cast<real>(1.0) - (uc * uc + vc * vc));
 
-                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) / dVtot, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dVtot , static_cast<real>(0.0)};
-                // if (std::isnan(frf.d)) {
-                //     printf("dr: %.2e, nan at [%lu, %lu]\n", self->dt, ii, jj);
-                // }
-                // // if ((ii == 0) & (jj == 0)) {
-                //     printf("dt: %.2e, d: %.2e\n", self->dt, cons_data[aid].d);
-                // }
+                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) / dVtot, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L) * invdV , static_cast<real>(0.0)};
                 cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * self->dt * step * factor;
                 break;
                 }
@@ -1104,7 +1099,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     anyDisplayProps();
     real round_place = 1 / chkpt_interval;
     this->t = tstart;
-    real t_interval =
+    this->t_interval =
         t == 0 ? 0
                : dlogt !=0 ? tstart
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
@@ -1116,6 +1111,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->sourceTau       = sources[3];
 
     // Define sim state params
+    this->chkpt_interval  = chkpt_interval;
+    this->data_directory  = data_directory;
     this->tstart          = tstart;
     this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny;
@@ -1141,7 +1138,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->x1max           = x1[xphysical_grid - 1];
     this->x2min           = x2[0];
     this->x2max           = x2[yphysical_grid - 1];
-
+    this->checkpoint_zones= yphysical_grid;
     this->d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
     this->s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
     this->s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
@@ -1154,29 +1151,29 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         this->reflecting_theta = true;
     }
 
-    cons.resize(total_zones);
-    prims.resize(total_zones);
+    cons.resize(nzones);
+    prims.resize(nzones);
     dt_min.resize(active_zones);
-    pressure_guess.resize(total_zones);
+    pressure_guess.resize(nzones);
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < nzones; i++)
     {
-        auto D            = state2D[0][i];
-        auto S1           = state2D[1][i];
-        auto S2           = state2D[2][i];
-        auto E            = state2D[3][i];
-        auto Dchi         = state2D[4][i];
+        auto D            = state[0][i];
+        auto S1           = state[1][i];
+        auto S2           = state[2][i];
+        auto E            = state[3][i];
+        auto Dchi         = state[4][i];
         auto S            = std::sqrt(S1 * S1 + S2 * S2);
         cons[i]           = Conserved(D, S1, S2, E, Dchi);
         pressure_guess[i] = std::abs(S - D - E);
     }
 
     // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_const = 1 / (1 + std::exp(static_cast<real>(10.0) * (tstart - engine_duration)));
+    decay_constant = 1 / (1 + std::exp(static_cast<real>(10.0) * (tstart - engine_duration)));
 
     // Declare I/O variables for Read/Write capability
-    sr2d::PrimitiveData transfer_prims;
+    sr2d::PrimitiveSOA transfer_prims;
     
     // Copy the current SRHD instance over to the device
     // if compiling for CPU, these functions do nothing
@@ -1193,7 +1190,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     sourceTau.copyToGpu();
 
     // Write some info about the setup for writeup later
-    DataWriteMembers setup;
     setup.x1max          = x1[xphysical_grid - 1];
     setup.x1min          = x1[0];
     setup.x2max          = x2[yphysical_grid - 1];
@@ -1259,10 +1255,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         }
     }
      
-    // if (t == 0) {
-    //     write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-    //     t_interval += (tstart == 0) ? chkpt_interval : tstart;
-    // }
+    // Save initial condition
+    if (t == 0) {
+        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
+        t_interval += chkpt_interval;
+    }
+    
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
     const auto ozones  = (BuildPlatform == Platform::GPU) ? dev_outer_zones : outer_zones;
@@ -1282,9 +1280,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             adapt_dt();
         }
         t += dt;
-        if constexpr(BuildPlatform == Platform::GPU){
-            this->inFailureState = device_self->inFailureState;
-        }
     }
 
     // if (ncheck > 0) {
@@ -1301,14 +1296,14 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         }
     }
 
-    // transfer_prims = helpers::vec2struct<sr2d::PrimitiveData, Primitive>(prims);
-    std::vector<std::vector<real>> solution(5, std::vector<real>(nzones));
+    std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
+    for (luint ii = 0; ii < nx; ii++) {
+        final_prims[0][ii] = prims[ii].rho;
+        final_prims[1][ii] = prims[ii].v1;
+        final_prims[2][ii] = prims[ii].v2;
+        final_prims[3][ii] = prims[ii].p;
+        final_prims[4][ii] = prims[ii].chi;
+    }
 
-    solution[0] = transfer_prims.rho;
-    solution[1] = transfer_prims.v1;
-    solution[2] = transfer_prims.v2;
-    solution[3] = transfer_prims.p;
-    solution[4] = transfer_prims.chi;
-
-    return solution;
+    return final_prims;
 };

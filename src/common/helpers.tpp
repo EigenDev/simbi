@@ -21,9 +21,8 @@ namespace simbi
             return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
         }
 
-        //Handle 2D primitive arrays whether SR or Newtonian
-        template<typename T, typename N>
-        typename std::enable_if<is_3D_primitive<N>::value>::type
+        template<typename T, typename U>
+        typename std::enable_if<is_3D_primitive<U>::value>::type
         writeToProd(T *from, PrimData *to){
             to->rho  = from->rho;
             to->v1   = from->v1;
@@ -34,8 +33,8 @@ namespace simbi
         }
 
         //Handle 2D primitive arrays whether SR or Newtonian
-        template<typename T, typename N>
-        typename std::enable_if<is_2D_primitive<N>::value>::type
+        template<typename T, typename U>
+        typename std::enable_if<is_2D_primitive<U>::value>::type
         writeToProd(T *from, PrimData *to){
             to->rho  = from->rho;
             to->v1   = from->v1;
@@ -44,17 +43,17 @@ namespace simbi
             to->chi  = from->chi;
         }
 
-        template<typename T, typename N>
-        typename std::enable_if<is_1D_primitive<N>::value>::type
+        template<typename T, typename U>
+        typename std::enable_if<is_1D_primitive<U>::value>::type
         writeToProd(T *from, PrimData *to){
             to->rho  = from->rho;
             to->v    = from->v;
             to->p    = from->p;
         }
 
-        template<typename T , typename N>
-        typename std::enable_if<is_3D_primitive<N>::value, T>::type
-        vec2struct(const std::vector<N> &p){
+        template<typename T , typename U, typename arr_type>
+        typename std::enable_if<is_3D_primitive<U>::value, T>::type
+        vec2struct(const arr_type &p){
             T sprims;
             size_t nzones = p.size();
 
@@ -64,12 +63,10 @@ namespace simbi
             sprims.v3.reserve(nzones);
             sprims.p.reserve(nzones);
             sprims.chi.reserve(nzones);
-            for (size_t i = 0; i < nzones; i++)
-            {
+            for (size_t i = 0; i < nzones; i++) {
                 sprims.rho.push_back(p[i].rho);
                 sprims.v1.push_back(p[i].v1);
                 sprims.v2.push_back(p[i].v2);
-                sprims.v3.push_back(p[i].v3);
                 sprims.p.push_back(p[i].p);
                 sprims.chi.push_back(p[i].chi);
             }
@@ -77,9 +74,9 @@ namespace simbi
             return sprims;
         }
 
-        template<typename T , typename N>
-        typename std::enable_if<is_2D_primitive<N>::value, T>::type
-        vec2struct(const std::vector<N> &p){
+        template<typename T , typename U, typename arr_type>
+        typename std::enable_if<is_2D_primitive<U>::value, T>::type
+        vec2struct(const arr_type &p){
             T sprims;
             size_t nzones = p.size();
 
@@ -88,8 +85,7 @@ namespace simbi
             sprims.v2.reserve(nzones);
             sprims.p.reserve(nzones);
             sprims.chi.reserve(nzones);
-            for (size_t i = 0; i < nzones; i++)
-            {
+            for (size_t i = 0; i < nzones; i++) {
                 sprims.rho.push_back(p[i].rho);
                 sprims.v1.push_back(p[i].v1);
                 sprims.v2.push_back(p[i].v2);
@@ -100,17 +96,16 @@ namespace simbi
             return sprims;
         }
 
-        template<typename T , typename N>
-        typename std::enable_if<is_1D_primitive<N>::value, T>::type
-        vec2struct(const std::vector<N> &p){
+        template<typename T , typename U, typename arr_type>
+        typename std::enable_if<is_1D_primitive<U>::value, T>::type
+        vec2struct(const arr_type &p){
             T sprims;
             size_t nzones = p.size();
 
             sprims.rho.reserve(nzones);
             sprims.v.reserve(nzones);
             sprims.p.reserve(nzones);
-            for (size_t i = 0; i < nzones; i++)
-            {
+            for (size_t i = 0; i < nzones; i++) {
                 sprims.rho.push_back(p[i].rho);
                 sprims.v.push_back(p[i].v);
                 sprims.p.push_back(p[i].p);
@@ -119,9 +114,9 @@ namespace simbi
             return sprims;
         }
 
-        template<typename U, typename V, int X, typename T>
+        template<typename Prim_type, int Ndim, typename Sim_type>
         void write_to_file(
-            T &sim_state_host, 
+            Sim_type &sim_state_host, 
             DataWriteMembers &setup,
             const std::string data_directory,
             const real t, 
@@ -129,48 +124,48 @@ namespace simbi
             const real chkpt_interval, 
             const luint chkpt_zone_label)
         {
-        //     sim_state_host.prims.copyFromGpu();
-        //     sim_state_host.cons.copyFromGpu();
-        //     setup.x1max = sim_state_host->x1max;
-        //     setup.x1min = sim_state_host->x1min;
+            sim_state_host.prims.copyFromGpu();
+            sim_state_host.cons.copyFromGpu();
+            setup.x1max = sim_state_host.x1max;
+            setup.x1min = sim_state_host.x1min;
 
-        //     PrimData prods;
-        //     static auto step                = sim_state_host.init_chkpt_idx;
-        //     static auto tbefore             = sim_state_host.tstart;
-        //     static std::string tchunk       = "000000";
-        //     static lint tchunk_order_of_mag = 2;
-        //     const auto time_order_of_mag    = std::floor(std::log10(t));
-        //     if (time_order_of_mag > tchunk_order_of_mag) {
-        //         tchunk.insert(0, "0");
-        //         tchunk_order_of_mag += 1;
-        //     }
+            PrimData prods;
+            static auto step                = sim_state_host.init_chkpt_idx;
+            static auto tbefore             = sim_state_host.tstart;
+            static std::string tchunk       = "000000";
+            static lint tchunk_order_of_mag = 2;
+            const auto time_order_of_mag    = std::floor(std::log10(t));
+            if (time_order_of_mag > tchunk_order_of_mag) {
+                tchunk.insert(0, "0");
+                tchunk_order_of_mag += 1;
+            }
 
-        //     // Transform vector of primitive structs to struct of primitive vectors
-        //     auto transfer_prims = vec2struct<U, V>(sim_state_host.prims);
-        //     writeToProd<U, V>(&transfer_prims, &prods);
-        //     std::string tnow;
-        //     if (sim_state_host->dlogt != 0)
-        //     {
-        //         const auto time_order_of_mag = std::floor(std::log10(step));
-        //         if (time_order_of_mag > tchunk_order_of_mag) {
-        //             tchunk.insert(0, "0");
-        //             tchunk_order_of_mag += 1;
-        //         }
-        //         tnow = create_step_str(step, tchunk);
-        //     } else {
-        //         tnow = create_step_str(t_interval, tchunk);
-        //     }
-        //     if (t_interval == INFINITY) {
-        //         tnow = "interrupted";
-        //     }
-        //     const auto filename = string_format("%d.chkpt." + tnow + ".h5", chkpt_zone_label);
+            // Transform vector of primitive structs to struct of primitive vectors
+            auto transfer_prims = vec2struct<Prim_type, typename Sim_type::primitive_t>(sim_state_host.prims);
+            writeToProd<Prim_type, typename Sim_type::primitive_t>(&transfer_prims, &prods);
+            std::string tnow;
+            if (sim_state_host.dlogt != 0)
+            {
+                const auto time_order_of_mag = std::floor(std::log10(step));
+                if (time_order_of_mag > tchunk_order_of_mag) {
+                    tchunk.insert(0, "0");
+                    tchunk_order_of_mag += 1;
+                }
+                tnow = create_step_str(step, tchunk);
+            } else {
+                tnow = create_step_str(t_interval, tchunk);
+            }
+            if (t_interval == INFINITY) {
+                tnow = "interrupted";
+            }
+            const auto filename = string_format("%d.chkpt." + tnow + ".h5", chkpt_zone_label);
 
-        //     setup.t             = t;
-        //     setup.dt            = t - tbefore;
-        //     setup.chkpt_idx     = step;
-        //     tbefore             = t;
-        //     step++;
-        //     write_hdf5(data_directory, filename, prods, setup, X, sim_state_host.total_zones);
+            setup.t             = t;
+            setup.dt            = t - tbefore;
+            setup.chkpt_idx     = step;
+            tbefore             = t;
+            step++;
+            write_hdf5(data_directory, filename, prods, setup, Ndim, sim_state_host.total_zones);
         }
         
     } // namespace helpers

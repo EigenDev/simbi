@@ -13,44 +13,21 @@
 #include "common/clattice3D.hpp"
 #include "common/helpers.hpp"
 #include "util/ndarray.hpp"
+#include "base.hpp"
 
 namespace simbi
 {
-    struct SRHD3D
+    struct SRHD3D : public HydroBase
     {
         using primitive_t     = sr3d::Primitive;
         using conserved_t     = sr3d::Conserved;
-        using primitive_soa_t = sr3d::PrimitiveData;
-
-        // Constructor vars (order important) 
-        std::vector<std::vector<real>> state3D;
-        luint nx; 
-        luint ny;
-        luint nz; 
-        real gamma;
-        std::vector<real> x1;
-        std::vector<real> x2; 
-        std::vector<real> x3;
-        real cfl;
-        std::string coord_system;
+        using primitive_soa_t = sr3d::PrimitiveSOA;
+        const static int dimensions = 3;
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons;
         ndarray<real> sourceD, sourceS1, sourceS2, sourceS3, sourceTau, pressure_guess, dt_min;
-        std::vector<std::vector<real>> sources;
-        real plm_theta, hubble_param, tstart, tend, t;
-        bool first_order, periodic, hllc, linspace, inFailureState, mesh_motion, reflecting_theta;
-        real dt, decay_const;
-        luint nzones, n, block_size, xphysical_grid, yphysical_grid, zphysical_grid, init_chkpt_idx;
-        luint active_zones, idx_active, total_zones, radius, pseudo_radius;
-        CLattice3D coord_lattice;
-        simbi::Geometry geometry;
-        simbi::BoundaryCondition bc;
-        simbi::Cellspacing x1cell_spacing, x2cell_spacing, x3cell_spacing;
-
-
-        real x3max, x3min, x2max, x2min, x1min, x1max, dx3, dx2, dx1, dlogx1, dlogt;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, s3_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
 
         /* Methods */

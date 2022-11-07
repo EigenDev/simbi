@@ -16,6 +16,7 @@
 using namespace simbi;
 using namespace simbi::util;
 using namespace std::chrono;
+constexpr auto write2file = helpers::write_to_file<hydro2d::PrimitiveSOA, 2, Newtonian2D>;
 
 
 // Typedefs because I'm lazy
@@ -28,7 +29,7 @@ Newtonian2D::Newtonian2D () {}
 
 // Overloaded Constructor
 Newtonian2D::Newtonian2D(
-    std::vector<std::vector<real> > init_state, 
+    std::vector<std::vector<real> > state, 
     luint nx,
     luint ny,
     real gamma, 
@@ -37,17 +38,18 @@ Newtonian2D::Newtonian2D(
     real cfl, 
     std::string coord_system = "cartesian")
 :
-    init_state(init_state),
-    nx(nx),
-    ny(ny),
-    gamma(gamma),
-    x1(x1),
-    x2(x2),
-    cfl(cfl),
-    coord_system(coord_system),
-    inFailureState(false),
-    nzones(init_state[0].size())
-{}
+    HydroBase(
+        state, 
+        nx,
+        ny,
+        gamma, 
+        x1, 
+        x2, 
+        cfl, 
+        coord_system)
+{
+
+}
 
 // Destructor 
 Newtonian2D::~Newtonian2D() {}
@@ -705,12 +707,14 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     anyDisplayProps();
     real round_place = 1 / chkpt_interval;
     this->t = tstart;
-    real t_interval =
+    this->t_interval =
         t == 0 ? 0
                : dlogt !=0 ? tstart
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
     // Define the simulation members
+    this->chkpt_interval  = chkpt_interval;
+    this->data_directory  = data_directory;
     this->tstart          = tstart;
     this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny;
@@ -731,9 +735,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->quirk_smoothing = quirk_smoothing;
     this->bc              = helpers::boundary_cond_map.at(boundary_condition);
     this->geometry        = helpers::geometry_map.at(coord_system);
-    this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
-    this->x2cell_spacing  = simbi::Cellspacing::LINSPACE;
-
+    this->checkpoint_zones= yphysical_grid;
     this->dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
     this->dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
     this->dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
@@ -754,7 +756,6 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         this->reflecting_theta = true;
     }
     // Write some info about the setup for writeup later
-    DataWriteMembers setup;
     setup.x1max          = x1[xphysical_grid - 1];
     setup.x1min          = x1[0];
     setup.x2max          = x2[yphysical_grid - 1];
@@ -776,22 +777,21 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     prims.resize(nzones);
     dt_min.resize(active_zones);
     // Copy the state array into real & profile variables
-    for (size_t i = 0; i < init_state[0].size(); i++)
+    for (size_t i = 0; i < state[0].size(); i++)
     {
-        auto rho      = init_state[0][i];
-        auto m1       = init_state[1][i];
-        auto m2       = init_state[2][i];
-        auto e        = init_state[3][i];
-        auto rho_chi  = init_state[4][i];
+        auto rho      = state[0][i];
+        auto m1       = state[1][i];
+        auto m2       = state[2][i];
+        auto e        = state[3][i];
+        auto rho_chi  = state[4][i];
         cons[i]    = Conserved(rho, m1, m2, e, rho_chi);
     }
 
     // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_const = 1 / (1 + std::exp(static_cast<real>(10.0) * (tstart - engine_duration)));
+    decay_constant = 1 / (1 + std::exp(static_cast<real>(10.0) * (tstart - engine_duration)));
 
     // Declare I/O variables for Read/Write capability
     PrimData prods;
-    sr2d::PrimitiveData transfer_prims;
     
     // Copy the current SRHD instance over to the device
     // if compiling for CPU, these functions do nothing
@@ -852,6 +852,12 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         adapt_dt();
     }
 
+    // Save initial condition
+    if (t == 0) {
+        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
+        t_interval += chkpt_interval;
+    }
+    
     // Simulate :)
     while (t < tend & !inFailureState)
     {
@@ -872,16 +878,15 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     // if (ncheck > 0) {
     //      writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", n, zu_avg/ncheck);
     // }
-    // transfer_prims = helpers::vec2struct<sr2d::PrimitiveData, Primitive>(prims);
-    std::vector<std::vector<real>> solution(5, std::vector<real>(nzones));
+    std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
+    for (luint ii = 0; ii < nx; ii++) {
+        final_prims[0][ii] = prims[ii].rho;
+        final_prims[1][ii] = prims[ii].v1;
+        final_prims[2][ii] = prims[ii].v2;
+        final_prims[3][ii] = prims[ii].p;
+        final_prims[4][ii] = prims[ii].chi;
+    }
 
-    solution[0] = transfer_prims.rho;
-    solution[1] = transfer_prims.v1;
-    solution[2] = transfer_prims.v2;
-    solution[3] = transfer_prims.p;
-    solution[4] = transfer_prims.chi;
- 
-
-    return solution;
+    return final_prims;
 
  };

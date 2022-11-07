@@ -79,9 +79,9 @@ namespace hydro1d {
         }
     };
 
-    struct PrimitiveData {
-        PrimitiveData() {}
-        ~PrimitiveData() {}
+    struct PrimitiveSOA {
+        PrimitiveSOA() {}
+        ~PrimitiveSOA() {}
         std::vector<real> rho, v, p;
     };
 
@@ -145,9 +145,9 @@ namespace sr1d {
         }
     };
 
-    struct PrimitiveArray {
-        PrimitiveArray() {}
-        ~PrimitiveArray() {}
+    struct PrimitiveSOA {
+        PrimitiveSOA() {}
+        ~PrimitiveSOA() {}
         std::vector<real> rho, v, p;
     };
 
@@ -245,9 +245,9 @@ namespace sr2d {
 
     };
 
-    struct PrimitiveData {
-        PrimitiveData() {}
-        ~PrimitiveData() {}
+    struct PrimitiveSOA {
+        PrimitiveSOA() {}
+        ~PrimitiveSOA() {}
         std::vector<real> rho, v1, v2, p, chi;
     };
     
@@ -333,9 +333,9 @@ namespace hydro2d {
 
     };
 
-    struct PrimitiveData {
-        PrimitiveData() {}
-        ~PrimitiveData() {}
+    struct PrimitiveSOA {
+        PrimitiveSOA() {}
+        ~PrimitiveSOA() {}
         std::vector<real> rho, v1, v2, p, chi;
     };
     
@@ -432,9 +432,9 @@ namespace sr3d {
         }
     };
 
-    struct PrimitiveData {
-        PrimitiveData() {}
-        ~PrimitiveData() {}
+    struct PrimitiveSOA {
+        PrimitiveSOA() {}
+        ~PrimitiveSOA() {}
         std::vector<real> rho, v1, v2, v3, p, chi;
     };
     
@@ -516,9 +516,9 @@ namespace hydro3d {
         }
     };
 
-    struct PrimitiveData {
-        PrimitiveData() {}
-        ~PrimitiveData() {}
+    struct PrimitiveSOA {
+        PrimitiveSOA() {}
+        ~PrimitiveSOA() {}
         std::vector<real> rho, v1, v2, v3, p, chi;
     };
     

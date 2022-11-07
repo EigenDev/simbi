@@ -17,7 +17,7 @@
 using namespace simbi;
 using namespace simbi::util;
 using namespace std::chrono;
-
+constexpr auto write2file = helpers::write_to_file<sr3d::PrimitiveSOA, 3, SRHD3D>;
 
 /* Define typedefs because I am lazy */
 using Primitive           = sr3d::Primitive;
@@ -28,7 +28,7 @@ SRHD3D::SRHD3D() {}
 
 // Overloaded Constructor
 SRHD3D::SRHD3D(
-    std::vector<std::vector<real>> state3D, 
+    std::vector<std::vector<real>> state, 
     luint nx, luint ny, luint nz, real gamma,
     std::vector<real> x1, 
     std::vector<real> x2,
@@ -36,18 +36,18 @@ SRHD3D::SRHD3D(
     real cfl,
     std::string coord_system = "cartesian")
 :
-    state3D(state3D),
-    nx(nx),
-    ny(ny),
-    nz(nz),
-    gamma(gamma),
-    x1(x1),
-    x2(x2),
-    x3(x3),
-    cfl(cfl),
-    coord_system(coord_system),
-    inFailureState(false),
-    nzones(state3D[0].size())
+    HydroBase(
+        state,
+        nx,
+        ny,
+        nz,
+        gamma,
+        x1,
+        x2,
+        x3,
+        cfl,
+        coord_system
+    )
 {
 
 }
@@ -627,7 +627,7 @@ void SRHD3D::advance(
 
     #if GPU_CODE
     const real dt                   = this->dt;
-    const real decay_const          = this->decay_const;
+    const real decay_constant       = this->decay_constant;
     const real plm_theta            = this->plm_theta;
     const real gamma                = this->gamma;
     const real dx1                  = this->dx1;
@@ -915,7 +915,7 @@ void SRHD3D::advance(
         const real s2_source = mom2_source[real_loc];
         const real s3_source = mom3_source[real_loc];
         const real e_source  = erg_source[real_loc];
-        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, s3_source, e_source} * decay_const;
+        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, s3_source, e_source} * decay_constant;
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -986,7 +986,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     anyDisplayProps();
     real round_place = 1 / chkpt_interval;
     this->t = tstart;
-    real t_interval =
+    this->t_interval =
         t == 0 ? 0
                : dlogt !=0 ? tstart
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
@@ -999,6 +999,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->sourceTau      = sources[4];
 
     // Define simulation params
+    this->chkpt_interval  = chkpt_interval;
+    this->data_directory  = data_directory;
     this->tstart          = tstart;
     this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny * nz;
@@ -1028,7 +1030,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->x2max           = x2[yphysical_grid - 1];
     this->x3min           = x3[0];
     this->x3max           = x3[zphysical_grid - 1];
-
+    this->checkpoint_zones= zphysical_grid;
     this->d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
     this->s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
     this->s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
@@ -1044,7 +1046,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     }
 
     // Write some info about the setup for writeup later
-    DataWriteMembers setup;
     setup.x1max          = x1[xphysical_grid - 1];
     setup.x1min          = x1[0];
     setup.x2max          = x2[yphysical_grid - 1];
@@ -1073,13 +1074,13 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     dt_min.resize(active_zones);
     pressure_guess.resize(nzones);
     // Copy the state array into real & profile variables
-    for (size_t i = 0; i < state3D[0].size(); i++)
+    for (size_t i = 0; i < state[0].size(); i++)
     {
-        auto D            = state3D[0][i];
-        auto S1           = state3D[1][i];
-        auto S2           = state3D[2][i];
-        auto S3           = state3D[3][i];
-        auto E            = state3D[4][i];
+        auto D            = state[0][i];
+        auto S1           = state[1][i];
+        auto S2           = state[2][i];
+        auto S3           = state[3][i];
+        auto E            = state[4][i];
         auto S            = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
         cons[i]           = Conserved{D, S1, S2, S3, E};
         pressure_guess[i] = std::abs(S - D - E);
@@ -1087,12 +1088,12 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     n = 0;
 
     // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (tstart - engine_duration)));
+    decay_constant = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (tstart - engine_duration)));
 
 
     // Declare I/O variables for Read/Write capability
     PrimData prods;
-    sr3d::PrimitiveData transfer_prims;
+    sr3d::PrimitiveSOA transfer_prims;
 
     SRHD3D *device_self;
     simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(SRHD3D));
@@ -1135,11 +1136,11 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         adapt_dt();
     }
 
-    // if (t == 0)
-    // {
-    //     write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, zphysical_grid);
-    //     t_interval += chkpt_interval;
-    // }
+    // Save initial condition
+    if (t == 0) {
+        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
+        t_interval += chkpt_interval;
+    }
 
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
@@ -1159,24 +1160,20 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
             adapt_dt();
         }
         t += dt;
-        if constexpr(BuildPlatform == Platform::GPU){
-            this->inFailureState = device_self->inFailureState;
-        }
     }
     
     // if (ncheck > 0) {
     //     writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
     // }
+    
+    std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
+    for (luint ii = 0; ii < nx; ii++) {
+        final_prims[0][ii] = prims[ii].rho;
+        final_prims[1][ii] = prims[ii].v1;
+        final_prims[2][ii] = prims[ii].v2;
+        final_prims[3][ii] = prims[ii].p;
+        final_prims[4][ii] = prims[ii].v3;
+    }
 
-    // transfer_prims = helpers::vec2struct<sr3d::PrimitiveData, Primitive>(prims);
-
-    std::vector<std::vector<real>> solution(5, std::vector<real>(nzones));
-
-    solution[0] = transfer_prims.rho;
-    solution[1] = transfer_prims.v1;
-    solution[2] = transfer_prims.v2;
-    solution[3] = transfer_prims.v3;
-    solution[4] = transfer_prims.p;
-
-    return solution;
+    return final_prims;
 };

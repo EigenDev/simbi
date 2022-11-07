@@ -61,7 +61,7 @@ namespace simbi
         void with_timer(sim_state_t &sim_state, F &&f) {
             using conserved_t = typename sim_state_t::conserved_t;
             using primitive_t = typename sim_state_t::primitive_t;
-            // constexpr auto write2file = helpers::write_to_file<sim_state_t, sim_state_t.primitive_soa_t, primitive_t, 1>;
+            constexpr auto write2file = helpers::write_to_file<typename sim_state_t::primitive_soa_t, sim_state_t::dimensions, sim_state_t>;
             // Some benchmarking tools 
             static luint n       = 0;
             static luint nfold   = 0;
@@ -95,24 +95,22 @@ namespace simbi
                 }
 
                 // Write to a file at every checkpoint interval
-                // if (sim_state.t >= sim_state.t_interval && sim_state.t != INFINITY)
-                // {
-                //     write2file(this, sim_state.device_self, sim_state.dualMem, sim_state.setup, 
-                //     sim_state.data_directory, sim_state.t, sim_state.t_interval, sim_state.chkpt_interval, sim_state.active_zones);
-                //     if (sim_state.dlogt != 0) {
-                //         sim_state.t_interval *= std::pow(10, sim_state.dlogt);
-                //     } else {
-                //         sim_state.t_interval += sim_state.chkpt_interval;
-                //     }
-                // }
+                if (sim_state.t >= sim_state.t_interval && sim_state.t != INFINITY)
+                {
+                    write2file(sim_state, sim_state.setup, sim_state.data_directory, sim_state.t, sim_state.t_interval, sim_state.chkpt_interval, sim_state.checkpoint_zones);
+                    if (sim_state.dlogt != 0) {
+                        sim_state.t_interval *= std::pow(10, sim_state.dlogt);
+                    } else {
+                        sim_state.t_interval += sim_state.chkpt_interval;
+                    }
+                }
                 n++;
                 // Listen to kill signals
                 helpers::catch_signals();
             } catch (helpers::InterruptException &e) {
                 util::writeln("{}", e.what());
                 sim_state.inFailureState = true;
-                // write2file(sim_state, sim_state.device_self, sim_state.dualMem, sim_state.setup, 
-                // sim_state.data_directory, sim_state.t, INFINITY, sim_state.chkpt_interval, sim_state.active_zones);
+                write2file(sim_state, sim_state.setup, sim_state.data_directory, sim_state.t, INFINITY, sim_state.chkpt_interval, sim_state.checkpoint_zones);
             }
         }
     } // namespace detail

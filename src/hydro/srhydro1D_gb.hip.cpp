@@ -27,7 +27,7 @@ using Conserved  =  sr1d::Conserved;
 using Primitive  =  sr1d::Primitive;
 using Eigenvals  =  sr1d::Eigenvals;
 using dualType   =  dual::DualSpace1D<Primitive, Conserved, SRHD>;
-constexpr auto write2file = helpers::write_to_file<simbi::SRHD, sr1d::PrimitiveArray, sr1d::Primitive, dualType, 1>;
+constexpr auto write2file = helpers::write_to_file<simbi::SRHD, sr1d::PrimitiveSOA, sr1d::Primitive, dualType, 1>;
 
 // Default Constructor
 SRHD::SRHD(){}

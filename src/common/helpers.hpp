@@ -122,21 +122,30 @@ namespace simbi
         template <typename T, size_t N>
         constexpr size_t array_size(T (&)[N]);
 
-        template<typename T, typename N>
-        typename std::enable_if<is_2D_primitive<N>::value>::type
+        template<typename T, typename U>
+        typename std::enable_if<is_3D_primitive<U>::value>::type
         writeToProd(T *from, PrimData *to);
 
-        template<typename T, typename N>
-        typename std::enable_if<is_1D_primitive<N>::value>::type
+        //Handle 2D primitive arrays whether SR or Newtonian
+        template<typename T, typename U>
+        typename std::enable_if<is_2D_primitive<U>::value>::type
         writeToProd(T *from, PrimData *to);
 
-        template<typename T , typename N>
-        typename std::enable_if<is_2D_primitive<N>::value, T>::type
-        vec2struct(const std::vector<N> &p);
+        template<typename T, typename U>
+        typename std::enable_if<is_1D_primitive<U>::value>::type
+        writeToProd(T *from, PrimData *to);
 
-        template<typename T , typename N>
-        typename std::enable_if<is_1D_primitive<N>::value, T>::type
-        vec2struct(const std::vector<N> &p);
+        template<typename T , typename U, typename arr_type>
+        typename std::enable_if<is_3D_primitive<U>::value, T>::type
+        vec2struct(const arr_type &p);
+
+        template<typename T , typename U, typename arr_type>
+        typename std::enable_if<is_2D_primitive<U>::value, T>::type
+        vec2struct(const arr_type &p);
+
+        template<typename T , typename U, typename arr_type>
+        typename std::enable_if<is_1D_primitive<U>::value, T>::type
+        vec2struct(const arr_type &p);
 
         template <typename... Args>
         std::string string_format(const std::string &format, Args... args);
