@@ -56,36 +56,36 @@ namespace simbi
         template<typename T, typename C>
         void DualSpace1D<T, C, Newtonian1D>::copyHostToDev(const Newtonian1D &host, Newtonian1D *device)
         {
-            n     = host.nx;
-            nreal = host.active_zones; 
+            // n     = host.nx;
+            // nreal = host.active_zones; 
 
-            // Precompute byes
-            cbytes  = n * sizeof(C);
-            pbytes  = n * sizeof(T);
-            rbytes  = n * sizeof(real);
-            rrbytes = nreal * sizeof(real);
+            // // Precompute byes
+            // cbytes  = n * sizeof(C);
+            // pbytes  = n * sizeof(T);
+            // rbytes  = n * sizeof(real);
+            // rrbytes = nreal * sizeof(real);
 
-            //--------Allocate the memory for pointer objects-------------------------
-            simbi::gpu::api::gpuMalloc(&host_u0,               cbytes);
-            simbi::gpu::api::gpuMalloc(&host_prims,            pbytes);
-            simbi::gpu::api::gpuMalloc(&host_dtmin,            rbytes);
+            // //--------Allocate the memory for pointer objects-------------------------
+            // simbi::gpu::api::gpuMalloc(&host_u0,               cbytes);
+            // simbi::gpu::api::gpuMalloc(&host_prims,            pbytes);
+            // simbi::gpu::api::gpuMalloc(&host_dtmin,            rbytes);
 
-            //--------Copy the host resources to pointer variables on host
-            simbi::gpu::api::copyHostToDevice(host_u0,    host.cons.data(), cbytes);
-            simbi::gpu::api::copyHostToDevice(host_prims, host.prims.data()    , pbytes);
+            // //--------Copy the host resources to pointer variables on host
+            // simbi::gpu::api::copyHostToDevice(host_u0,    host.cons.data(), cbytes);
+            // simbi::gpu::api::copyHostToDevice(host_prims, host.prims.data()    , pbytes);
 
-            // copy pointer to allocated device storage to device class
-            simbi::gpu::api::copyHostToDevice(&(device->gpu_cons), &host_u0,                sizeof(C*));
-            simbi::gpu::api::copyHostToDevice(&(device->gpu_prims), &host_prims,             sizeof(T*));
+            // // copy pointer to allocated device storage to device class
+            // simbi::gpu::api::copyHostToDevice(&(device->gpu_cons), &host_u0,                sizeof(C*));
+            // simbi::gpu::api::copyHostToDevice(&(device->gpu_prims), &host_prims,             sizeof(T*));
 
-            simbi::gpu::api::copyHostToDevice(&(device->dt_min), &host_dtmin,            sizeof(real*));
-            simbi::gpu::api::copyHostToDevice(&(device->dt),        &host.dt      ,            sizeof(real));
-            simbi::gpu::api::copyHostToDevice(&(device->gamma),     &host.gamma   ,            sizeof(real));
-            simbi::gpu::api::copyHostToDevice(&(device->cfl)  ,     &host.cfl     ,            sizeof(real));
-            simbi::gpu::api::copyHostToDevice(&(device->nx),        &host.nx      ,            sizeof(int) );
-            simbi::gpu::api::copyHostToDevice(&(device->idx_active),        &host.idx_active,  sizeof(int) );
-            simbi::gpu::api::copyHostToDevice(&(device->active_zones),&host.active_zones,      sizeof(int) );
-            simbi::gpu::api::copyHostToDevice(&(device->decay_constant), &host.decay_constant, sizeof(real));
+            // simbi::gpu::api::copyHostToDevice(&(device->dt_min), &host_dtmin,            sizeof(real*));
+            // simbi::gpu::api::copyHostToDevice(&(device->dt),        &host.dt      ,            sizeof(real));
+            // simbi::gpu::api::copyHostToDevice(&(device->gamma),     &host.gamma   ,            sizeof(real));
+            // simbi::gpu::api::copyHostToDevice(&(device->cfl)  ,     &host.cfl     ,            sizeof(real));
+            // simbi::gpu::api::copyHostToDevice(&(device->nx),        &host.nx      ,            sizeof(int) );
+            // simbi::gpu::api::copyHostToDevice(&(device->idx_active),        &host.idx_active,  sizeof(int) );
+            // simbi::gpu::api::copyHostToDevice(&(device->active_zones),&host.active_zones,      sizeof(int) );
+            // simbi::gpu::api::copyHostToDevice(&(device->decay_constant), &host.decay_constant, sizeof(real));
         };
         
         template<typename T, typename C, typename U>
@@ -113,14 +113,9 @@ namespace simbi
         template<typename T, typename C>
         void DualSpace1D<T, C, Newtonian1D>::copyDevToHost(const Newtonian1D *device, Newtonian1D &host)
         {
-
             simbi::gpu::api::copyDevToHost(host.cons.data(),  host_u0,    cbytes);
             simbi::gpu::api::copyDevToHost(host.prims.data(), host_prims, pbytes);
         };
-
-
-
-
 
         //======================================================
         //                      2D

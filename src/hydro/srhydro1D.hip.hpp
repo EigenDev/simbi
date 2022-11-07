@@ -17,10 +17,14 @@
 #include "build_options.hpp"
 #include "util/exec_policy.hpp"
 #include "build_options.hpp"
+#include "util/ndarray.hpp"
+
 namespace simbi
 {
      struct SRHD
      {
+          using conserved_t = sr1d::Conserved;
+          using primitive_t = sr1d::Primitive;
           // Init Params (order matters)
           std::vector<std::vector<real>> state;
           real gamma;
@@ -35,18 +39,19 @@ namespace simbi
           simbi::Geometry geometry;
           simbi::Cellspacing xcell_spacing;
           real dlogx1, dx1, x1min, x1max;  
-          luint radius, total_zones;
+          luint radius, total_zones, pseudo_radius;
 
           // SRHD* device_self;
 
           // Create vector instances that will live on host
-          std::vector<sr1d::Conserved> cons;
-          std::vector<sr1d::Primitive> prims;
+          ndarray<conserved_t> cons; 
+          ndarray<primitive_t> prims;
+          ndarray<real> sourceD, sourceS, source0, pressure_guess, dt_min;
 
           luint nx, active_zones, idx_active, i_start, i_bound, init_chkpt_idx;
           real plm_theta, engine_duration, t, decay_constant, dlogt, tend, tstart;
           bool first_order, periodic, linspace, hllc, inFailureState, mesh_motion;
-          std::vector<real> sourceD, sourceS, source0, pressure_guess;
+          // std::vector<real> sourceD, sourceS, source0, pressure_guess;
           
           SRHD();
           SRHD(
@@ -189,7 +194,7 @@ namespace simbi
           luint blockSize;
           sr1d::Conserved *gpu_cons;
           sr1d::Primitive *gpu_prims;
-          real            *gpu_pressure_guess, *gpu_sourceD, *gpu_sourceS, *gpu_source0, *dt_min;
+          real            *gpu_pressure_guess, *gpu_sourceD, *gpu_sourceS, *gpu_source0, *gdt_min;
           
      };
      

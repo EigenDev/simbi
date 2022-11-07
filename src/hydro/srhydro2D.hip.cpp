@@ -8,12 +8,11 @@
 #include <chrono>
 #include <cmath>
 #include "util/device_api.hpp"
-#include "util/dual.hpp"
 #include "common/helpers.hip.hpp"
 #include "srhydro2D.hip.hpp"
 #include "util/printb.hpp"
 #include "util/parallel_for.hpp"
-
+#include "util/timer.hpp"
 
 using namespace simbi;
 using namespace simbi::util;
@@ -23,9 +22,6 @@ using namespace std::chrono;
 using Primitive           = sr2d::Primitive;
 using Conserved           = sr2d::Conserved;
 using Eigenvals           = sr2d::Eigenvals;
-using dualType            = simbi::dual::DualSpace2D<Primitive, Conserved, SRHD2D>;
-constexpr auto write2file = helpers::write_to_file<simbi::SRHD2D, sr2d::PrimitiveData, Primitive, dualType, 2>;
-
 // Default Constructor
 SRHD2D::SRHD2D() {}
 
@@ -246,21 +242,34 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
-                compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>>(
+                compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>(
                     dev, 
+                    prims.data(),
+                    dt_min.data(),
                     geometry, 
                     psize, 
                     dx1, 
                     dx2
                 );
-                deviceReduceKernel<SRHD2D, 2><<<p.gridSize,p.blockSize>>>(dev, active_zones);
-                deviceReduceKernel<SRHD2D, 2><<<1,1024>>>(dev, p.gridSize.x * p.gridSize.y);
+                deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(dev, dt_min.data(), active_zones);
+                deviceReduceKernel<2><<<1,1024>>>(dev, dt_min.data(), p.gridSize.x * p.gridSize.y);
                 break;
             
             case simbi::Geometry::SPHERICAL:
-                compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>> (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
-                deviceReduceKernel<SRHD2D, 2><<<p.gridSize,p.blockSize>>>(dev, active_zones);
-                deviceReduceKernel<SRHD2D, 2><<<1,1024>>>(dev, p.gridSize.x * p.gridSize.y);
+                compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>> (
+                    dev, 
+                    prims.data(), 
+                    dt_min.data(),
+                    geometry, 
+                    psize, 
+                    dlogx1, 
+                    dx2, 
+                    x1min, 
+                    x1max, 
+                    x2min, 
+                    x2max);
+                deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(dev, dt_min.data(), active_zones);
+                deviceReduceKernel<2><<<1,1024>>>(dev, dt_min.data(), p.gridSize.x * p.gridSize.y);
                 // dtWarpReduce<SRHD2D, Primitive, 64><<<p.gridSize,p.blockSize,dt_buff_width>>>(dev);
                 break;
             case simbi::Geometry::CYLINDRICAL:
@@ -643,13 +652,10 @@ void SRHD2D::cons2prim(
     auto *self = (user == simbi::MemSide::Host) ? this : dev;
     const luint radius = (first_order) ? 1 : 2;
     const auto n = this->n;
+    auto* const cons_data  = cons.data();
+    auto* const prim_data  = prims.data();
+    auto* const press_data = pressure_guess.data();
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
-         #if GPU_CODE
-        auto* const conserved_buff = self->gpu_cons;
-        #else
-        auto* const conserved_buff = &cons[0];
-        #endif 
-
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;        
@@ -671,18 +677,14 @@ void SRHD2D::cons2prim(
                 invdV = 1.0 / dV;
             }
 
-            const real D    = conserved_buff[gid].d   * invdV;
-            const real S1   = conserved_buff[gid].s1  * invdV;
-            const real S2   = conserved_buff[gid].s2  * invdV;
-            const real tau  = conserved_buff[gid].tau * invdV;
-            const real Dchi = conserved_buff[gid].chi * invdV; 
+            const real D    = cons_data[gid].d   * invdV;
+            const real S1   = cons_data[gid].s1  * invdV;
+            const real S2   = cons_data[gid].s2  * invdV;
+            const real tau  = cons_data[gid].tau * invdV;
+            const real Dchi = cons_data[gid].chi * invdV; 
             const real S    = std::sqrt(S1 * S1 + S2 * S2);
-            #if GPU_CODE
-            real peq = self->gpu_pressure_guess[gid];
-            #else 
-            real peq = pressure_guess[gid];
-            #endif
-
+            
+            real peq = press_data[gid];
             luint iter  = 0;
             const real tol = D * tol_scale;
             do
@@ -727,13 +729,9 @@ void SRHD2D::cons2prim(
             const real inv_et = static_cast<real>(1.0) / (tau + D + peq);
             const real v1     = S1 * inv_et;
             const real v2     = S2 * inv_et;
-            #if GPU_CODE
-                self->gpu_pressure_guess[gid] = peq;
-                self->gpu_prims[gid]          = Primitive{rho, v1, v2, peq, Dchi / D};
-            #else
-                self->pressure_guess[gid] = peq;
-                self->prims[gid]          = Primitive{rho, v1, v2, peq, Dchi / D};
-            #endif
+
+            press_data[gid] = peq;
+            prim_data[gid]  = Primitive{rho, v1, v2, peq, Dchi / D};
             workLeftToDo = false;
         }
     });
@@ -778,20 +776,31 @@ void SRHD2D::advance(
     #endif
 
     const luint nbs = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
-
+    const luint extent                = (BuildPlatform == Platform::GPU) ? 
+                                            p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
     // Choice of column major striding by user
     const luint sx = (col_maj) ? 1  : bx;
     const luint sy = (col_maj) ? by :  1;
-    simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (const luint idx) {
+
+    auto* const prim_data   = prims.data();
+    auto* const cons_data   = cons.data();
+    auto* const dens_source = sourceD.data();
+    auto* const mom1_source = sourceS1.data();
+    auto* const mom2_source = sourceS2.data();
+    auto* const erg_source  = sourceTau.data();
+    simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx) {
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
-        // auto* const prim_buff = self->gpu_prims;
+        // auto *const prim_buff = prim_data;
         #else 
-        auto *const prim_buff = &prims[0];
+        auto *const prim_buff = prim_data;
         #endif 
 
         const auto ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
         const auto jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
+        #if GPU_CODE 
+        if ((ii >= xpg) || (jj >= ypg)) return;
+        #endif
 
         const auto ia  = ii + radius;
         const auto ja  = jj + radius;
@@ -804,27 +813,28 @@ void SRHD2D::advance(
         Conserved fL, fR, gL, gR, frf, flf, grf, glf;
         Primitive xprimsL, xprimsR, yprimsL, yprimsR;
 
-        const auto aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
+        const lint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
+        // Load Shared memory luinto buffer for active zones plus ghosts
         #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
             // Load Shared memory into buffer for active zones plus ghosts
-            prim_buff[tya * sx + txa * sy] = self->gpu_prims[aid];
+            prim_buff[tya * sx + txa * sy] = prim_data[aid];
             if (ty < radius)
             {
                 if (blockIdx.y == p.gridSize.y - 1 && (ja + yextent > ny - radius + ty)) {
                     tyl = ny - radius - ja + ty;
                 }
-                prim_buff[(tya - radius) * sx + txa] = self->gpu_prims[(ja - radius) * nx + ia];
-                prim_buff[(tya + tyl   ) * sx + txa] = self->gpu_prims[(ja + tyl   ) * nx + ia]; 
+                prim_buff[(tya - radius) * sx + txa] = prim_data[ja - radius, ny * nx + ia];
+                prim_buff[(tya + tyl) * sx + txa]    = prim_data[(ja + tyl) % ny * nx + ia]; 
             }
             if (tx < radius)
             {   
                 if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + tx)) {
                     txl = nx - radius - ia + tx;
                 }
-                prim_buff[tya * sx + txa - radius] =  self->gpu_prims[ja * nx + ia - radius];
-                prim_buff[tya * sx + txa +    txl] =  self->gpu_prims[ja * nx + ia + txl]; 
+                prim_buff[tya * sx + txa - radius] =  prim_data[ja * nx + ia - radius, nx];
+                prim_buff[tya * sx + txa +    txl] =  prim_data[ja * nx +    (ia + txl) % nx]; 
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -994,29 +1004,18 @@ void SRHD2D::advance(
 
         //Advance depending on geometry
         const luint real_loc = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
+        const real d_source  = dens_source[real_loc];
+        const real s1_source = mom1_source[real_loc];
+        const real s2_source = mom2_source[real_loc];
+        const real e_source  = erg_source[real_loc];
+        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
-                {
-                    #if GPU_CODE
-                        const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceD[real_loc];
-                        const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS1[real_loc];
-                        const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS2[real_loc];
-                        const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceTau[real_loc];
-                        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
-                        self->gpu_cons[aid]   -= ( (frf - flf) / dx1 + (grf - glf)/ dx2 - source_terms) * step * self->dt;
-                    #else
-                        const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : sourceD[real_loc];
-                        const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : sourceS1[real_loc];
-                        const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : sourceS2[real_loc];
-                        const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : sourceTau[real_loc];
-                        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
-                        cons[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step * self->dt;
-                    #endif
-                
-
+            {
+                cons_data[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step * self->dt;
                 break;
-                }
+            }
             
             case simbi::Geometry::SPHERICAL:
                 {
@@ -1039,17 +1038,6 @@ void SRHD2D::advance(
                 const real s2L          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tl); // std::sin(tl);
                 const real factor       = (self->mesh_motion) ? dVtot : 1;  
 
-                #if GPU_CODE
-                const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceD[real_loc];
-                const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS1[real_loc];
-                const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : self->gpu_sourceS2[real_loc];
-                const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : self->gpu_sourceTau[real_loc];
-                #else
-                const real d_source  = (d_all_zeros)   ? static_cast<real>(0.0) : sourceD[real_loc];
-                const real s1_source = (s1_all_zeros)  ? static_cast<real>(0.0) : sourceS1[real_loc];
-                const real s2_source = (s2_all_zeros)  ? static_cast<real>(0.0) : sourceS2[real_loc];
-                const real e_source  = (e_all_zeros)   ? static_cast<real>(0.0) : sourceTau[real_loc];
-                #endif
 
                 // Grab central primitives
                 const real rhoc = prim_buff[txa * sy + tya * sx].rho;
@@ -1061,12 +1049,13 @@ void SRHD2D::advance(
                 const real gam2 = static_cast<real>(1.0)/(static_cast<real>(1.0) - (uc * uc + vc * vc));
 
                 const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) / dVtot, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dVtot , static_cast<real>(0.0)};
-                const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_const;
-                #if GPU_CODE 
-                    self->gpu_cons[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * self->dt * step * factor;
-                #else
-                    cons[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * self->dt * step * factor;
-                #endif
+                // if (std::isnan(frf.d)) {
+                //     printf("dr: %.2e, nan at [%lu, %lu]\n", self->dt, ii, jj);
+                // }
+                // // if ((ii == 0) & (jj == 0)) {
+                //     printf("dt: %.2e, d: %.2e\n", self->dt, cons_data[aid].d);
+                // }
+                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * self->dt * step * factor;
                 break;
                 }
             case simbi::Geometry::CYLINDRICAL:
@@ -1114,7 +1103,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 {
     anyDisplayProps();
     real round_place = 1 / chkpt_interval;
-    real t = tstart;
+    this->t = tstart;
     real t_interval =
         t == 0 ? 0
                : dlogt !=0 ? tstart
@@ -1165,9 +1154,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         this->reflecting_theta = true;
     }
 
-    cons.resize(nzones);
-    prims.resize(nzones);
-    pressure_guess.resize(nzones);
+    cons.resize(total_zones);
+    prims.resize(total_zones);
+    dt_min.resize(active_zones);
+    pressure_guess.resize(total_zones);
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < nzones; i++)
@@ -1182,9 +1172,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         pressure_guess[i] = std::abs(S - D - E);
     }
 
-    // deallocate initial state vector
-    std::vector<int> state2D;
-
     // Using a sigmoid decay function to represent when the source terms turn off.
     decay_const = 1 / (1 + std::exp(static_cast<real>(10.0) * (tstart - engine_duration)));
 
@@ -1196,8 +1183,14 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     SRHD2D *device_self;
     simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(SRHD2D));
     simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(SRHD2D));
-    dualType dualMem;
-    dualMem.copyHostToDev(*this, device_self);
+    cons.copyToGpu();
+    prims.copyToGpu();
+    pressure_guess.copyToGpu();
+    dt_min.copyToGpu();
+    sourceD.copyToGpu();
+    sourceS1.copyToGpu();
+    sourceS2.copyToGpu();
+    sourceTau.copyToGpu();
 
     // Write some info about the setup for writeup later
     DataWriteMembers setup;
@@ -1220,25 +1213,20 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     setup.x2                 = x2;
 
     // // Setup the system
-    const luint xblockdim       = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
-    const luint yblockdim       = yphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : yphysical_grid;
-    const luint radius          = (periodic) ? 0 : (first_order) ? 1 : 2;
-    const luint pseudo_radius   = (first_order) ? 1 : 2;
-    const luint bx              = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
-    const luint by              = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
-    const luint shBlockSpace    = bx * by;
-    const luint shBlockBytes    = shBlockSpace * sizeof(Primitive);
-    const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
-    const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
+    const luint xblockdim    = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
+    const luint yblockdim    = yphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : yphysical_grid;
+    this->radius             = (periodic) ? 0 : (first_order) ? 1 : 2;
+    this->pseudo_radius      = (first_order) ? 1 : 2;
+    const luint bx           = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
+    const luint by           = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
+    const luint shBlockSpace = bx * by;
+    const luint shBlockBytes = shBlockSpace * sizeof(Primitive);
+    const auto fullP         = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
+    const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
     if (t == 0)
     {
-        if constexpr(BuildPlatform == Platform::GPU)
-        {
-            config_ghosts2D(fullP, device_self, nx, ny, first_order, bc);
-        } else {
-            config_ghosts2D(fullP, this, nx, ny, first_order, bc);
-        }
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc);
     }
 
     const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive);
@@ -1271,201 +1259,37 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         }
     }
      
-    if (t == 0) {
-        write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-        t_interval += (tstart == 0) ? chkpt_interval : tstart;
-    }
-    // Some benchmarking tools 
-    this->n        = 0;
-    luint  nfold   = 0;
-    luint  ncheck  = 0;
-    real    zu_avg = 0;
-    #if GPU_CODE
-    anyGpuEvent_t t1, t2;
-    anyGpuEventCreate(&t1);
-    anyGpuEventCreate(&t2);
-    float delta_t;
-    #else 
-    high_resolution_clock::time_point t1, t2;
-    double delta_t;
-    #endif
+    // if (t == 0) {
+    //     write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
+    //     t_interval += (tstart == 0) ? chkpt_interval : tstart;
+    // }
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
     const auto ozones  = (BuildPlatform == Platform::GPU) ? dev_outer_zones : outer_zones;
 
     // Simulate :)
-    if (first_order)
-    {  
-        try {
-            while (t < tend && !inFailureState)
-            {
-                helpers::recordEvent(t1);
-                advance(self, activeP, bx, by, radius, geometry, memside);
-                cons2prim(fullP, self, memside);
-                config_ghosts2D(fullP, self, nx, ny, true, bc, ozones, reflecting_theta);
-                helpers::recordEvent(t2);
-                t += dt; 
-                
-                if (n >= nfold){
-                    anyGpuEventSynchronize(t2);
-                    helpers::recordDuration(delta_t, t1, t2);
-                    if (BuildPlatform == Platform::GPU) {
-                        delta_t *= 1e-3;
-                    }
-                    ncheck += 1;
-                    zu_avg += total_zones / delta_t;
-                    if constexpr(BuildPlatform == Platform::GPU) {
-                        const real gpu_emperical_bw = getFlops<Conserved, Primitive>(pseudo_radius, total_zones, active_zones, delta_t);
-                        writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
-                    } else {
-                        writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
-                    }
-                    nfold += 100;
-                }
-
-                /* Write to a File every tenth of a second */
-                if (t >= t_interval && t != INFINITY) {
-                    write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-                    if (dlogt != 0) {
-                        t_interval *= std::pow(10, dlogt);
-                    } else {
-                        t_interval += chkpt_interval;
-                    }
-                }
-                n++;
-                // // Adapt the timestep
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    adapt_dt(device_self, geometry, activeP, dtShBytes);
-                } else {
-                    adapt_dt();
-                }
-                hubble_param = adot(t) / a(t);
-                // Update decay constant
-                decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
-
-                if (d_outer) {
-                    // #pragma omp parallel for 
-                    for (luint jj = 0; jj < ny; jj++) {
-                        const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
-                        const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
-                        outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
-                    }
-
-                    if constexpr(BuildPlatform == Platform::GPU) {
-                        simbi::gpu::api::copyHostToDevice(ozones, outer_zones, ny * sizeof(Conserved));
-                    }
-                }
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    this->inFailureState = device_self->inFailureState;
-                }
-                if (inFailureState) {
-                    simbi::gpu::api::deviceSynch();
-                }
-
-                helpers::catch_signals();
-            }
-        } catch (helpers::InterruptException &e) {
-            writeln("{}", e.what());
-            t_interval = INFINITY;
-            write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-        }
-    } else {
-        try {
-             while (t < tend && !inFailureState)
-            {
-                // const auto t0 = high_resolution_clock::now();
-                helpers::recordEvent(t1);
-                // First Half Step
-                advance(self, activeP, bx, by, radius, geometry, memside);
-                cons2prim(fullP, self, memside);
-                config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, reflecting_theta);
-
-                // Final Half Step
-                advance(self, activeP, bx, by, radius, geometry, memside);
-                cons2prim(fullP, self, memside);
-                config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, reflecting_theta);
-                helpers::recordEvent(t2);
-                t += dt; 
-
-                if (n >= nfold){
-                    anyGpuEventSynchronize(t2);
-                    helpers::recordDuration(delta_t, t1, t2);
-                    if (BuildPlatform == Platform::GPU) {
-                        delta_t *= 1e-3;
-                    }
-                    ncheck += 1;
-                    zu_avg += total_zones / delta_t;
-                    if constexpr(BuildPlatform == Platform::GPU) {
-                        const real gpu_emperical_bw = getFlops<Conserved, Primitive>(pseudo_radius, total_zones, active_zones, delta_t);
-                        writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", n, dt, t, total_zones/delta_t, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
-                    } else {
-                        writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, dt, t, total_zones/delta_t);
-                    }
-                    nfold += 100;
-                }
-                
-                //========================== Write to a File every nth of a second ============================
-                if (t >= t_interval && t != INFINITY) {
-                    write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-                    if (dlogt != 0) {
-                        t_interval *= std::pow(10, dlogt);
-                    } else {
-                        t_interval += chkpt_interval;
-                    }
-                }
-                n++;
-
-                //============================ Update decay constant =====================================
-                decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (t - engine_duration)));
-
-                //==================== Adapt the timestep ==================================================
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    adapt_dt(device_self, geometry, activeP, dtShBytes);
-                } else {
-                    adapt_dt();
-                }
-
-                // =========================== Update hubble param ======================================
-                hubble_param = adot(t) / a(t);
-
-                //====================== Update the outer boundaries with the user input ==================
-                if (d_outer) {
-                    // #pragma omp parallel for 
-                    for (luint jj = 0; jj < ny; jj++) {
-                        const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
-                        const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
-                        outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
-                    }
-                    if constexpr(BuildPlatform == Platform::GPU) {
-                        simbi::gpu::api::copyHostToDevice(ozones, outer_zones, ny * sizeof(Conserved));
-                    }
-                }
-
-                //================= Transfer state of simulation to host ==================
-                if constexpr(BuildPlatform == Platform::GPU) {
-                    this->inFailureState = device_self->inFailureState;
-                }
-                if (inFailureState) {
-                    simbi::gpu::api::deviceSynch();
-                }
-
-                helpers::catch_signals();
-            }
-        } catch (helpers::InterruptException &e) {
-            writeln("{}", e.what());
-            t_interval = INFINITY;
-            write2file(this, device_self, dualMem, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-        }
-    }
-    if (ncheck > 0) {
-        writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
-    }
-
-    if constexpr(BuildPlatform == Platform::GPU)
+    while (t < tend & !inFailureState)
     {
-        dualMem.copyDevToHost(device_self, *this);
-        simbi::gpu::api::gpuFree(device_self);
+        simbi::detail::with_timer(*this, [&](){
+            advance(self, activeP, bx, by, radius, geometry, memside);
+            cons2prim(fullP, self, memside);
+            config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, ozones, reflecting_theta);
+        });
+
+        if constexpr(BuildPlatform == Platform::GPU) {
+            adapt_dt(device_self, geometry, activeP, dtShBytes);
+        } else {
+            adapt_dt();
+        }
+        t += dt;
+        if constexpr(BuildPlatform == Platform::GPU){
+            this->inFailureState = device_self->inFailureState;
+        }
     }
+
+    // if (ncheck > 0) {
+    //     writeln("Average zone_updates/sec for {} iterations was: {} zones/sec", n, zu_avg / ncheck);
+    // }
 
     if (outer_zones) {
         if constexpr(BuildPlatform == Platform::GPU) {
@@ -1477,7 +1301,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         }
     }
 
-    transfer_prims = helpers::vec2struct<sr2d::PrimitiveData, Primitive>(prims);
+    // transfer_prims = helpers::vec2struct<sr2d::PrimitiveData, Primitive>(prims);
     std::vector<std::vector<real>> solution(5, std::vector<real>(nzones));
 
     solution[0] = transfer_prims.rho;
