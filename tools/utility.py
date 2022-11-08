@@ -336,7 +336,7 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
             xactive = nx 
             yactive = ny
         else:
-            if args.forder:
+            if ds.attrs['first_order']:
                 rho = rho[1:-1, 1: -1]
                 v1  = v1 [1:-1, 1: -1]
                 v2  = v2 [1:-1, 1: -1]
@@ -366,6 +366,12 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
                 setup['x1'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
                 setup['x2'] = np.linspace(x2min, x2max, yactive)
         
+        if x1max > setup['x1'][-1]:
+            if is_linspace:
+                setup['x1'] = np.linspace(x1min, x1max, xactive)
+            else:
+                setup['x1'] = np.geomspace(x1min, x1max, xactive)
+                
         if coord_sysem == 'cartesian':
             is_cartesian = True
         
@@ -432,30 +438,31 @@ def read_1d_file(filename: str) -> dict:
         p           = hf.get('p')[:]
         nx          = ds.attrs['nx']
         t           = ds.attrs['current_time']
-        try:
-            x1max = ds.attrs['x1max']
-            x1min = ds.attrs['x1min']
-        except:
-            x1max = ds.attrs['xmax']
-            x1min = ds.attrs['xmin']
-
-        try:
-            is_linspace = ds.attrs['linspace']
-        except:
-            is_linspace = False
-            
-        try:
-            gamma = ds.attrs['adiabatic_gamma']
-        except:
-            gamma = 4./3.
-            
-        rho = rho[2:-2]
-        v   = v  [2:-2]
-        p   = p  [2:-2]
-        xactive = nx - 4
+        x1max       = ds.attrs['x1max']
+        x1min       = ds.attrs['x1min']
+        is_linspace = ds.attrs['linspace']
+        gamma       = ds.attrs['adiabatic_gamma']
+        
+        xactive = nx
+        if ds.attrs['boundary_condition'].decode('utf-8') != 'periodic':
+            if ds.attrs['first_order']:
+                rho = rho[1:-1]
+                v   = v[1:-1]
+                p   = p[1:-1]
+                xactive = nx - 4
+            else:
+                rho = rho[2:-2]
+                v   = v  [2:-2]
+                p   = p  [2:-2]
+                xactive = nx - 4
         
         mesh['x1'] = hf.get('x1')[:]
-        
+        if x1max > mesh['x1'][-1]:
+            if is_linspace:
+                mesh['x1'] = np.linspace(x1min, x1max, xactive)
+            else:
+                mesh['x1'] = np.geomspace(x1min, x1max, xactive)
+
         if ds.attrs['regime'].decode("utf-8") == 'relativistic':
             try:
                 using_gamma_beta = ds.attrs['using_gamma_beta']
