@@ -37,6 +37,10 @@ class BaseConfig:
         raise NotImplementedError("Your subclass needs to implement the geometry property")
     
     @property
+    def gamma(self) -> float:
+        raise NotImplementedError("Your subclass needs to implement the gamma property")
+    
+    @property
     def linspace(self) -> bool:
         return False
     
