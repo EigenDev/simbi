@@ -825,8 +825,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     // Setup the system
     const luint xblockdim       = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
     const luint yblockdim       = yphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : yphysical_grid;
-    const luint radius          = (periodic) ? 0 : (first_order) ? 1 : 2;
-    const luint pseudo_radius   = (first_order) ? 1 : 2;
+    this->radius                = (periodic) ? 0 : (first_order) ? 1 : 2;
+    this->pseudo_radius         = (first_order) ? 1 : 2;
     const luint bx              = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * pseudo_radius: nx;
     const luint by              = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * pseudo_radius: ny;
     const luint shBlockSpace    = bx * by;
