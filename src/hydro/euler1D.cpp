@@ -598,7 +598,6 @@ void Newtonian1D::advance(
         } else {
             adapt_dt();
         }
-        t += dt;
     }
 
     if (detail::logger::ncheck > 0) {

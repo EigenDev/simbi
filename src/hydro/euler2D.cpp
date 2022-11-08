@@ -872,7 +872,6 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         } else {
             adapt_dt();
         }
-        t += dt;
     }
     
     if (detail::logger::ncheck > 0) {

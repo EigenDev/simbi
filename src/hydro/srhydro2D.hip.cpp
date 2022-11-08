@@ -1279,7 +1279,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         } else {
             adapt_dt();
         }
-        t += dt;
+        
         if constexpr(BuildPlatform == Platform::GPU) {
             if (device_self->inFailureState) {
                 this->inFailureState = device_self->inFailureState;

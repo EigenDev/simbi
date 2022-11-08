@@ -774,7 +774,6 @@ SRHD::simulate1D(
         } else {
             adapt_dt();
         }
-        t += dt;
 
         if constexpr(BuildPlatform == Platform::GPU) {
             if (device_self->inFailureState) {

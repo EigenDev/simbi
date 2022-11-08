@@ -85,7 +85,7 @@ namespace simbi
                     f();
                     delta_t = timer.get_duration();
                 }
-
+                sim_state.t += sim_state.dt;
                 if (n >= nfold){
                     ncheck += 1;
                     zu_avg += sim_state.total_zones / delta_t;
