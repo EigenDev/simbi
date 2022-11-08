@@ -1085,15 +1085,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         cons[i]           = Conserved{D, S1, S2, S3, E};
         pressure_guess[i] = std::abs(S - D - E);
     }
-    n = 0;
-
-    // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_constant = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (tstart - engine_duration)));
-
-
-    // Declare I/O variables for Read/Write capability
-    PrimData prods;
-    sr3d::PrimitiveSOA transfer_prims;
 
     SRHD3D *device_self;
     simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(SRHD3D));
@@ -1108,7 +1099,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     sourceS3.copyToGpu();
     sourceTau.copyToGpu();
 
-    // // Setup the system
+    // Setup the system
     const luint xblockdim    = xphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : xphysical_grid;
     const luint yblockdim    = yphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : yphysical_grid;
     const luint zblockdim    = zphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : zphysical_grid;
@@ -1148,6 +1139,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     // Simulate :)
     while (t < tend & !inFailureState)
     {
+        // Using a sigmoid decay function to represent when the source terms turn off.
+        decay_constant = helpers::sigmoid(t, engine_duration);
         simbi::detail::with_logger(*this, [&](){
             advance(self, activeP, bx, by, bz, radius, geometry, memside);
             cons2prim(fullP, self, memside);
@@ -1159,7 +1152,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         } else {
             adapt_dt();
         }
-        
         if constexpr(BuildPlatform == Platform::GPU) {
             if (device_self->inFailureState) {
                 this->inFailureState = device_self->inFailureState;

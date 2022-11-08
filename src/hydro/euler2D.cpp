@@ -787,12 +787,6 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         cons[i]    = Conserved(rho, m1, m2, e, rho_chi);
     }
 
-    // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_constant = 1 / (1 + std::exp(static_cast<real>(10.0) * (tstart - engine_duration)));
-
-    // Declare I/O variables for Read/Write capability
-    PrimData prods;
-    
     // Copy the current SRHD instance over to the device
     // if compiling for CPU, these functions do nothing
     Newtonian2D *device_self;
@@ -806,21 +800,20 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     sourceM2.copyToGpu();
     sourceE.copyToGpu();
 
-    if constexpr(BuildPlatform == Platform::GPU)
-    {   
-        dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
-        dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
-        dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
-        x1min   = x1[0];
-        x1max   = x1[xphysical_grid - 1];
-        x2min   = x2[0];
-        x2max   = x2[yphysical_grid - 1];
+   
+    dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
+    dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
+    dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
+    x1min   = x1[0];
+    x1max   = x1[xphysical_grid - 1];
+    x2min   = x2[0];
+    x2max   = x2[yphysical_grid - 1];
 
-        rho_all_zeros  = std::all_of(sourceRho.begin(), sourceRho.end(),   [](real i) {return i == 0;});
-        m1_all_zeros   = std::all_of(sourceM1.begin(),  sourceM1.end(),  [](real i) {return i == 0;});
-        m2_all_zeros   = std::all_of(sourceM2.begin(),  sourceM2.end(),  [](real i) {return i == 0;});
-        e_all_zeros    = std::all_of(sourceE.begin(),  sourceE.end(), [](real i) {return i == 0;});
-    }
+    rho_all_zeros  = std::all_of(sourceRho.begin(), sourceRho.end(),   [](real i) {return i == 0;});
+    m1_all_zeros   = std::all_of(sourceM1.begin(),  sourceM1.end(),  [](real i) {return i == 0;});
+    m2_all_zeros   = std::all_of(sourceM2.begin(),  sourceM2.end(),  [](real i) {return i == 0;});
+    e_all_zeros    = std::all_of(sourceE.begin(),  sourceE.end(), [](real i) {return i == 0;});
+
 
     // Setup the system
     const luint xblockdim       = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;
@@ -861,6 +854,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     // Simulate :)
     while (t < tend & !inFailureState)
     {
+        // Using a sigmoid decay function to represent when the source terms turn off.
+        decay_constant = helpers::sigmoid(t, engine_duration);
         simbi::detail::with_logger(*this, [&](){
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);

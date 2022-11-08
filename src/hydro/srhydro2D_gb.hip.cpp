@@ -1205,12 +1205,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         cons[i]           = Conserved(D, S1, S2, E, Dchi);
         pressure_guess[i] = std::abs(S - D - E);
     }
-
-    // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_const = 1 / (1 + std::exp(static_cast<real>(10.0) * (tstart - engine_duration)));
-
-    // Declare I/O variables for Read/Write capability
-    sr2d::PrimitiveSOA transfer_prims;
     
     // Copy the current SRHD instance over to the device
     // if compiling for CPU, these functions do nothing

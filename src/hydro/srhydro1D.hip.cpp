@@ -761,6 +761,9 @@ SRHD::simulate1D(
     // Simulate :)
     while (t < tend & !inFailureState)
     {
+        // Using a sigmoid decay function to represent when the source terms turn off.
+        decay_constant = helpers::sigmoid(t, engine_duration);
+        
         simbi::detail::with_logger(*this, [&](){
             advance(self, shBlockSize, radius, geometry, memside);
             cons2prim(fullP, device_self, memside);

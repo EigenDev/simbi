@@ -587,6 +587,8 @@ void Newtonian1D::advance(
 
     while (t < tend & !inFailureState)
     {
+        // Using a sigmoid decay function to represent when the source terms turn off.
+        decay_constant = helpers::sigmoid(t, engine_duration);
         simbi::detail::with_logger(*this, [&](){
             advance(radius, geometry, activeP, self, shBlockSize, memside);
             cons2prim(fullP, self, memside);

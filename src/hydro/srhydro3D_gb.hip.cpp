@@ -1058,14 +1058,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     }
     n = 0;
 
-    // Using a sigmoid decay function to represent when the source terms turn off.
-    decay_const = static_cast<real>(1.0) / (static_cast<real>(1.0) + exp(static_cast<real>(10.0) * (tstart - engine_duration)));
-
-
-    // Declare I/O variables for Read/Write capability
-    PrimData prods;
-    sr3d::PrimitiveSOA transfer_prims;
-
     SRHD3D *device_self;
     simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(SRHD3D));
     simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(SRHD3D));
