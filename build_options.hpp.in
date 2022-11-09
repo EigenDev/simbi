@@ -6,6 +6,7 @@
 #mesondefine TWOD_BLOCK_SIZE
 #mesondefine THREED_BLOCK_SIZE
 #mesondefine FOUR_VELOCITY
+#mesondefine CYTHON_COL_MAJOR
 #include "stdint.h"
 #include <functional>
 #include <chrono>
@@ -42,13 +43,11 @@ constexpr real tol_scale = 1e-12;
 
 // NVIDIA seems to like to stencil better in 
 // column major order for some reason...hmmmm
-// #if defined(__HIP_PLATFORM_NVIDIA__)
-// #define CYTHON_COL_MAJOR 1 
-// constexpr bool col_maj = true;
-// #else 
-#define CYTHON_COL_MAJOR 0
+#if CYTHON_COL_MAJOR 
+constexpr bool col_maj = true;
+#else 
 constexpr bool col_maj = false;
-// #endif 
+#endif 
 
 #if defined(__NVCC__) || defined(__HCC__) || (defined(__clang__) && defined(__HIP__))
 #define GPU_CODE 1
