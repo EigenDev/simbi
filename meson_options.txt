@@ -11,6 +11,11 @@ option(
 )
 
 option(
+    'column_major',
+    type: 'boolean', 
+    value: false
+)
+option(
     'profile',
     type: 'combo', 
     choices: ['default', 'develop'],
