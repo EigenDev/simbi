@@ -11,7 +11,7 @@ authors = [
 description = "Python module to solve hydrodynamic equations using a hip/cuda/c++ backend"
 requires-python = ">=3"
 keywords = ["physics", "relativity"]
-license = {file = 'LICENSE.md'}
+license = {file = 'LICENSE.rst'}
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: C++",
@@ -42,7 +42,7 @@ packages = ["pysimbi"]
 
 [tool.setuptools.dynamic]
 version = {file = "pysimbi/VERSION"}
-readme = {file = ["README.md"]}
+readme = {file = ["README.rst"]}
 
 [project.urls]
 repository    = "https://github.com/EigenDev/simbi"
