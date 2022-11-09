@@ -11,6 +11,7 @@ conf_data.set('ONED_BLOCK_SIZE',   get_option('1d_block_size'))
 conf_data.set('TWOD_BLOCK_SIZE',   get_option('2d_block_size'))
 conf_data.set('THREED_BLOCK_SIZE', get_option('3d_block_size'))
 conf_data.set10('FOUR_VELOCITY',   get_option('four_velocity'))
+conf_data.set10('CYTHON_COL_MAJOR',get_option('column_major'))
 configure_file(
     input:  'build_options.hpp.in',
     output: 'build_options.hpp',
