@@ -97,7 +97,7 @@ def main():
             'chkpt_interval': args.chint,
     }
     # HLLC Simulation
-    SodHLLC = Hydro(gamma = args.gamma, initial_state=(rho, p, vx, vy), 
+    SodHLLC = Hydro(gamma = args.gamma, initial_state=(rho, vx, vy, p), 
                 resolution=(xnpts, ynpts), geometry=((xmin, xmax),(ymin, ymax)))
 
     t1 = (time.time()*u.s).to(u.min)

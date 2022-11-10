@@ -111,7 +111,7 @@ def main():
     vx = np.zeros((ntheta ,nr))
     vy = np.zeros((ntheta ,nr))
 
-    bm = Hydro(gamma = args.gamma, initial_state=(rho, p, vx, vy), 
+    bm = Hydro(gamma = args.gamma, initial_state=(rho, vx, vy, p), 
                 resolution=(nr, ntheta), 
                 geometry=((rmin, rmax),(theta_min, theta_max)), 
                 regime="relativistic", coord_system="spherical")

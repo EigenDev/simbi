@@ -120,13 +120,13 @@ class Hydro:
         if discontinuity:
             # Primitive Variables on LHS
             rho_l = self.left_state[0]
-            p_l   = self.left_state[1]
-            v_l   = self.left_state[2]
+            v_l   = self.left_state[1]
+            p_l   = self.left_state[2]
             
             # Primitive Variables on RHS
             rho_r = self.right_state[0]
-            p_r   = self.right_state[1]
-            v_r   = self.right_state[2]
+            v_r   = self.right_state[1]
+            p_r   = self.right_state[2]
         
             if self.regime == "classical":
                 # Calculate Energy Density on LHS
@@ -172,15 +172,14 @@ class Hydro:
             self.dimensionality  = 1
             
             self.init_rho      = initial_state[0]
-            self.init_pressure = initial_state[1]
+            self.init_v        = initial_state[1]
+            self.init_pressure = initial_state[2]
             
             if regime == "classical":
-                self.init_v = initial_state[2]
                 self.init_energy =  ( self.init_pressure/(self.gamma - 1.) + 
                                     0.5*self.init_rho*self.init_v**2 )
                 
             else:
-                self.init_v   = initial_state[2]
                 self.W        = np.asarray(1/np.sqrt(1 - self.init_v**2))
                 self.init_h   = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
                 self.initD    = self.init_rho*self.W
@@ -195,22 +194,14 @@ class Hydro:
             print('Initializing 2D Setup...', flush=True)
             print('',flush=True)
             self.xresolution, self.yresolution = resolution 
-            
+            self.init_rho      = initial_state[0]
+            self.init_v1       = initial_state[1]
+            self.init_v2       = initial_state[2]
+            self.init_pressure = initial_state[3]
+            vsq                = self.init_v1**2 + self.init_v2**2
             if self.regime == "classical":
-                self.init_rho      = initial_state[0]
-                self.init_pressure = initial_state[1]
-                self.init_vx       = initial_state[2]
-                self.init_vy       = initial_state[3]
-                
-                v2 = self.init_vx**2 + self.init_vy**2
-                
-                self.init_energy =  ( self.init_pressure/(self.gamma - 1.) +  0.5*self.init_rho*v2 )
+                self.init_energy =  ( self.init_pressure/(self.gamma - 1.) +  0.5*self.init_rho*vsq)
             else:
-                self.init_rho      = initial_state[0]
-                self.init_pressure = initial_state[1]
-                self.init_v1       = initial_state[2]
-                self.init_v2       = initial_state[3]
-                vsq                = self.init_v1**2 + self.init_v2**2
                 self.W = 1/np.sqrt(1 - vsq)
                 self.init_h = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
                 self.initD  = self.init_rho*self.W
@@ -231,34 +222,21 @@ class Hydro:
             left_z, right_z = geometry[2]
             
             self.xresolution, self.yresolution, self.zresolution = resolution  
-            
+            self.init_rho      = initial_state[0]
+            self.init_v1       = initial_state[1]
+            self.init_v2       = initial_state[2]
+            self.init_v3       = initial_state[3]
+            self.init_pressure = initial_state[4]
+            vsq = self.init_v1**2 + self.init_v2**2 + self.init_xz**2
             if self.regime == "classical":
-                self.init_rho      = initial_state[0]
-                self.init_pressure = initial_state[1]
-                self.init_vx       = initial_state[2]
-                self.init_vy       = initial_state[3]
-                self.init_vz       = initial_state[4]
-                
-                vsq = self.init_vx**2 + self.init_vy**2 + self.init_xz**2
-                
                 self.init_energy =  ( self.init_pressure/(self.gamma - 1.) + 0.5*self.init_rho*vsq )
             else:
-                self.init_rho      = initial_state[0]
-                self.init_pressure = initial_state[1]
-                self.init_v1       = initial_state[2]
-                self.init_v2       = initial_state[3]
-                self.init_v3       = initial_state[4]
-                vsq                = self.init_v1**2 + self.init_v2**2 + self.init_v3**2
-                
-                self.W = 1/np.sqrt(1 - vsq)
-                
+                self.W      = 1/np.sqrt(1 - vsq)
                 self.init_h = 1 + self.gamma*self.init_pressure/((self.gamma - 1)*self.init_rho)
-                
                 self.initD  = self.init_rho*self.W
                 self.initS1 = self.init_h*self.init_rho*self.W**2*self.init_v1
                 self.initS2 = self.init_h*self.init_rho*self.W**2*self.init_v2 
                 self.initS3 = self.init_h*self.init_rho*self.W**2*self.init_v3 
-                
                 self.init_tau = (self.init_rho*self.init_h*(self.W)**2 - self.init_pressure - self.init_rho*(self.W))
                 
             self.u = None 

@@ -83,7 +83,7 @@ def main():
             'chkpt_interval': args.chint,
     }
     
-    SodHLLE = Hydro(gamma = args.gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
+    SodHLLE = Hydro(gamma = args.gamma, initial_state=(rho, vr, vt, p), regime="classical", coord_system="spherical",
                 resolution=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)))
 
     t1 = (time.time()*u.s).to(u.min)
@@ -91,7 +91,7 @@ def main():
 
 
     # HLLC Simulation
-    SodHLLC = Hydro(gamma = args.gamma, initial_state=(rho, p, vr, vt), regime="classical", coord_system="spherical",
+    SodHLLC = Hydro(gamma = args.gamma, initial_state=(rho, vr, vt, p), regime="classical", coord_system="spherical",
                 resolution=(xnpts, ynpts), geometry=((rmin, rmax),(theta_min,theta_max)))
 
     sim_params['hllc'] = True 
@@ -99,7 +99,6 @@ def main():
     hllc_result = SodHLLC.simulate(**sim_params)
 
     print("The 2D SOD Simulation for ({}, {}) grid took {:.3f}".format(xnpts, ynpts, (time.time()*u.s).to(u.min) - t1))
-
     rhoE = hlle_result[0]
     rhoC = hllc_result[0]
 

@@ -8,7 +8,7 @@ class MartiMuller(BaseConfig):
     ad_gamma  = DynamicArg("ad_gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
     @property
     def initial_state(self):
-        return ((10.0, 13.33, 0.0), (0.1, 1e-10, 0.0))
+        return ((10.0, 0.0, 13.33), (0.1, 0.0, 1e-10))
     
     @property
     def geometry(self):

@@ -48,7 +48,7 @@ class IsentropicRelWave(BaseConfig):
     
     @property
     def initial_state(self):
-        return (self.density, self.pre, self.beta)
+        return (self.density, self.beta, self.pre)
     
     @property
     def geometry(self):

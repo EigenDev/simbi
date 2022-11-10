@@ -44,7 +44,7 @@ class SedovTaylor(BaseConfig):
            
     @property
     def initial_state(self):
-        return (self.rho, self.p, self.vx, self.vy)
+        return (self.rho, self.vx, self.vy, self.p)
     
     @property
     def geometry(self):

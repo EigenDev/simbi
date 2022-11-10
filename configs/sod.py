@@ -9,7 +9,7 @@ class SodProblem(BaseConfig):
     
     @property
     def initial_state(self):
-        return ((1.0, 1.0, 0.0), (0.125, 0.1, 0.0))
+        return ((1.0, 0.0, 1.0), (0.125, 0.0, 0.1))
     
     @property
     def geometry(self):

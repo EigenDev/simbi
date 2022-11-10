@@ -39,10 +39,10 @@ def main():
     vR   = 0.0
     
 
-    hydro2 = Hydro(gamma=args.gamma, initial_state = ((rhoL,pL,vL),(rhoR,pR,vR)),
+    hydro2 = Hydro(gamma=args.gamma, initial_state = ((rhoL,vL,pL),(rhoR,vR,pR)),
             resolution=args.nzones, geometry=(xmin,xmax,xmid), regime="relativistic")
 
-    hydro = Hydro(gamma=args.gamma, initial_state = ((rhoL,pL,vL),(rhoR,pR,vR)),
+    hydro = Hydro(gamma=args.gamma, initial_state = ((rhoL,vL,pL),(rhoR,vR,pR)),
             resolution=args.nzones, geometry=(xmin,xmax, xmid), regime="relativistic")
 
     sim_params = {

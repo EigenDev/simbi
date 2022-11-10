@@ -45,7 +45,7 @@ def main():
         pl   = 1  
         pr   = 10 
 
-    init = ((rhol, pl, vl), (rhor, pr, vr))
+    init = ((rhol, vl, pl), (rhor, vr, pr))
 
     fig, axs = plt.subplots(3, 1, figsize=(9,9), sharex=True)
 

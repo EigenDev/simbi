@@ -26,7 +26,7 @@ def main():
     if args.tex:
         plt.rc('text', usetex=True)
         
-    stationary = ((1.4, 1.0, 0.0), (1.0, 1.0, 0.0))
+    stationary = ((1.4, 0.0, 1.0), (1.0, 0.0, 1.0))
     fig, ax = plt.subplots(1, 1, figsize=(3.5,2.78))
 
     hydro = Hydro(gamma=args.gamma, initial_state = stationary,

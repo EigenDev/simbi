@@ -23,7 +23,7 @@ def main():
     
     print_problem_params(args, parser)
     zzz = input("Press Enter key to continue...")
-    sod   = ((1.0,1.0,0.0),(0.1,0.125,0.0))
+    sod   = ((1.0,0.0,1.0),(0.1, 0.0, 0.125))
     fig, ax = plt.subplots(1, 1, figsize=(10,10))
 
     hydro = Hydro(gamma=args.gamma, initial_state = sod,

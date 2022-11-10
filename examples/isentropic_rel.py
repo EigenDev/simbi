@@ -71,15 +71,15 @@ def main():
     rk1 = {}
     for npts in ns:
         x = np.linspace(0, 1, npts, dtype=float)
-        r = rho(alpha, x)
-        p = pressure(gamma, r)
-        v = velocity(gamma, r, p)
+        dens = rho(alpha, x)
+        p = pressure(gamma, dens)
+        v = velocity(gamma, dens, p)
         #v *= -1.
         tend = 0.1
         
         cfl = 10.0/npts
-        first_o  = Hydro(gamma, initial_state=(r,p,v), resolution=npts, geometry=(0, 1.0), regime="relativistic")
-        second_o = Hydro(gamma, initial_state=(r,p,v), resolution=npts, geometry=(0, 1.0), regime="relativistic")
+        first_o  = Hydro(gamma, initial_state=(dens, v, p), resolution=npts, geometry=(0, 1.0), regime="relativistic")
+        second_o = Hydro(gamma, initial_state=(dens, v, p), resolution=npts, geometry=(0, 1.0), regime="relativistic")
         
         rk1[npts] = first_o.simulate(tend=tend , chkpt_interval=args.chint, plm_theta=args.plm_theta, hllc=args.hllc, first_order=True, boundary_condition='periodic', cfl=cfl,  compute_mode=mode, data_directory=args.data_dir)
         rk2[npts] = second_o.simulate(tend=tend, chkpt_interval=args.chint, plm_theta=args.plm_theta, hllc=args.hllc, first_order=False, boundary_condition='periodic', cfl=cfl, compute_mode=mode, data_directory=args.data_dir)

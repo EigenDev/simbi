@@ -215,8 +215,8 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
         if not model.u.any():
             model.u = np.empty(shape = (5, model.yresolution, model.xresolution), dtype=float)
             if model.regime == "classical":
-                model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,
-                                        model.init_rho*model.init_vy, model.init_energy, model.init_rho * scalars])
+                model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_v1,
+                                        model.init_rho*model.init_v2, model.init_energy, model.init_rho * scalars])
             else:
                 model.u[:, :, :] = np.array([model.initD, model.initS1,
                                                     model.initS2, model.init_tau, model.initD * scalars])
@@ -265,8 +265,8 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
             if boundary_condition == "periodic":
                 model.u = np.empty(shape = (5, model.zresolution, model.yresolution, model.xresolution), dtype = float)
                 
-                model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_vx,
-                                            model.init_rho*model.init_vy, model.init_rho*model.init_vz,
+                model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_v1,
+                                            model.init_rho*model.init_v2, model.init_rho*model.init_v3,
                                             model.init_energy])
                 
                 model.u *= volume_factor
@@ -274,9 +274,9 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                 if model.regime == "classical":
                     model.u = np.empty(shape = (5, model.zresolution, model.yresolution, model.xresolution), dtype=float)
                     model.u[:, :, :, :] = np.array([model.init_rho, 
-                                                    model.init_rho*model.init_vx,
-                                                    model.init_rho*model.init_vy,
-                                                    model.init_rho*model.init_vz,
+                                                    model.init_rho*model.init_v1,
+                                                    model.init_rho*model.init_v2,
+                                                    model.init_rho*model.init_v3,
                                                     model.init_energy])
                     model.u *= volume_factor
                 else:

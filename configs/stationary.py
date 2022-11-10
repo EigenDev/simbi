@@ -9,7 +9,7 @@ class StationaryWaveHLL(BaseConfig):
     
     @property
     def initial_state(self):
-        return ((1.4, 1.0, 0.0), (1.0, 1.0, 0.0))
+        return ((1.4, 0.0, 1.0), (1.0, 0.0, 1.0))
     
     @property
     def geometry(self):
