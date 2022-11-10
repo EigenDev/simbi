@@ -67,9 +67,6 @@ void Newtonian2D::cons2prim(
     simbi::MemSide user
 )
 {
-    #if GPU_CODE
-    const auto gamma = this->gamma;
-    #endif 
     auto* self = (user == simbi::MemSide::Dev) ? dev : this;
     auto* const cons_data = cons.data();
     auto* const prim_data = prims.data();
@@ -78,8 +75,7 @@ void Newtonian2D::cons2prim(
         const real v1      = cons_data[gid].m1 / rho;
         const real v2      = cons_data[gid].m2 / rho;
         const real rho_chi = cons_data[gid].chi;
-        const real pre     = (gamma - static_cast<real>(1.0))*(cons_data[gid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2));
-
+        const real pre     = (self->gamma - static_cast<real>(1.0))*(cons_data[gid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2));
         prim_data[gid] = Primitive{rho, v1, v2, pre, rho_chi / rho};
     });
 };
@@ -873,7 +869,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", detail::logger::n, detail::logger::zu_avg/ detail::logger::ncheck);
     }
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
-    for (luint ii = 0; ii < nx; ii++) {
+    for (luint ii = 0; ii < nzones; ii++) {
         final_prims[0][ii] = prims[ii].rho;
         final_prims[1][ii] = prims[ii].v1;
         final_prims[2][ii] = prims[ii].v2;

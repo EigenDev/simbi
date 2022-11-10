@@ -1164,12 +1164,12 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     }
     
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
-    for (luint ii = 0; ii < nx; ii++) {
+    for (luint ii = 0; ii < nzones; ii++) {
         final_prims[0][ii] = prims[ii].rho;
         final_prims[1][ii] = prims[ii].v1;
         final_prims[2][ii] = prims[ii].v2;
-        final_prims[3][ii] = prims[ii].p;
-        final_prims[4][ii] = prims[ii].v3;
+        final_prims[3][ii] = prims[ii].v3;
+        final_prims[4][ii] = prims[ii].p;
     }
 
     return final_prims;
