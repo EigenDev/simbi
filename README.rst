@@ -23,7 +23,7 @@ Requirements
    – pre-built packages depending on your system.
 5) HDF5 libraries 
 For GPU capability
-^^^^^^^^^^^^^^^^^^
+##################
 6) HIP/ROCm if wanting to run on NVIDIA or AMD GPUs, or just CUDA if
    running purely NVIDIA
 
