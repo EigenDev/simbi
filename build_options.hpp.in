@@ -41,8 +41,6 @@ using real = double;
 constexpr real tol_scale = 1e-12;
 #endif 
 
-// NVIDIA seems to like to stencil better in 
-// column major order for some reason...hmmmm
 #if CYTHON_COL_MAJOR 
 constexpr bool col_maj = true;
 #else 
