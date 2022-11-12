@@ -85,6 +85,15 @@ class CustomParser(argparse.ArgumentParser):
         sys.stderr.write(f'error: {message}\n')
         self.print_help()
         sys.exit(2)
+
+class print_the_version(argparse.Action):
+    def __init__(self, option_strings, dest, **kwargs):
+        return super().__init__(option_strings, dest, nargs=0, default=argparse.SUPPRESS, **kwargs)
+    
+    def __call__(self, parser, namespace, values, option_string, **kwargs):
+        from pysimbi import __version__ as version
+        print(f"PySIMBI version {version}")
+        parser.exit()
         
 def main():
     parser = CustomParser(prog='pysimbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
@@ -103,6 +112,7 @@ def main():
     parser.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=0.0, type=float)
     parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
     parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
+    parser.add_argument('--version', help='print current version of pysimbi module', action=print_the_version)
     
     # print help message if no args supplied
     args, argv = parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
