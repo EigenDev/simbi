@@ -592,12 +592,12 @@ def get_file_list(inputs: str) -> list:
                 file_dict[idx]     = sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
             dircount += 1
         else:
-            files += sorted([file for file in inputs])
+            files += [file for file in inputs]
             break
     
     if not multidir:
         # sort by length of strings now
-        files.sort(key=len, reverse=False)
+        # files.sort(key=len, reverse=False)
         return files, len(files)
     else:
         [file_dict[key].sort(key=len, reverse=False) for key in file_dict.keys()]
