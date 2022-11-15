@@ -26,7 +26,7 @@ namespace simbi {
         using primitive_soa_t = hydro1d::PrimitiveSOA;
         const static int dimensions = 1;
 
-        ndarray<conserved_t> cons; 
+        ndarray<conserved_t> cons, outer_zones; 
         ndarray<primitive_t> prims;
         ndarray<real> sourceRho, sourceMom, sourceE, dt_min;
         

@@ -26,7 +26,7 @@ namespace simbi
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
-        ndarray<conserved_t> cons;
+        ndarray<conserved_t> cons, outer_zones;
         ndarray<real> sourceD, sourceS1, sourceS2, sourceS3, sourceTau, pressure_guess, dt_min;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, s3_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
 

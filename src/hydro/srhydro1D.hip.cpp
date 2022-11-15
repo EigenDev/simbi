@@ -163,7 +163,7 @@ void SRHD::advance(
 
             // Set up the left and right state interfaces for i-1/2
             primsL = prim_buff[helpers::mod(txa - 1, bx)];
-            primsR  = prim_buff[(txa - 0) % bx];
+            primsR = prim_buff[(txa - 0) % bx];
 
             uL = self->prims2cons(primsL);
             uR = self->prims2cons(primsR);
@@ -222,8 +222,10 @@ void SRHD::advance(
         switch(geometry)
         {
             case simbi::Geometry::CARTESIAN:
+            {
                 cons_data[ia] -= ((frf - flf) * inv_dx) * self->dt * step;
                 break;
+            }
             case simbi::Geometry::SPHERICAL:
             {
                 const real rlf    = x1l + vfaceL * step * self->dt; 
@@ -234,9 +236,10 @@ void SRHD::advance(
                 const real dV     = rmean * rmean * (rrf - rlf);    
                 const real factor = (self->mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
+                const real invdV  = 1 / dV;
 
-                const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                cons_data[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt * factor;
+                const auto geom_sources = Conserved{0.0, pc * (sR - sL) * invdV, 0.0};
+                cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources) * step * self->dt * factor;
                 break;
             }
                 
@@ -304,7 +307,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 const real xmean = static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl);
                 invdV            = static_cast<real>(1.0) / (xmean * xmean * (xr - xl));
             }
-            peq = press_data[ii];
+            peq            = press_data[ii];
             const real D   = cons_data[ii].d   * invdV;
             const real S   = cons_data[ii].s   * invdV;
             const real tau = cons_data[ii].tau * invdV;
@@ -317,17 +320,14 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 v2  = S * S / (et * et);
                 W   = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - v2);
                 rho = D / W;
-
                 eps = (tau + (static_cast<real>(1.0) - W) * D + (static_cast<real>(1.0) - W * W) * pre) / (D * W);
-
-                h  = static_cast<real>(1.0) + eps + pre / rho;
-                c2 = self->gamma *pre / (h * rho); 
-
-                g = c2 * v2 - static_cast<real>(1.0);
-                f = (self->gamma - static_cast<real>(1.0)) * rho * eps - pre;
+                h   = static_cast<real>(1.0) + eps + pre / rho;
+                c2  = self->gamma *pre / (h * rho); 
+                g   = c2 * v2 - static_cast<real>(1.0);
+                f   = (self->gamma - static_cast<real>(1.0)) * rho * eps - pre;
 
                 peq = pre - f / g;
-                if (iter >= MAX_ITER || std::isnan(peq))
+                if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
                 {
                     const luint idx       = helpers::get_real_idx(ii, radius, self->active_zones);
                     const real xl         = self->get_xface(idx, self->geometry, 0);
@@ -407,20 +407,20 @@ Eigenvals SRHD::calc_eigenvals(
             // Define temporaries to save computational cycles
             const real qfL   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
             const real qfR   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
-            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0) - vR  * vR  + sR));
+            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0) - vR * vR + sR));
             const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0) - vL * vL + sL));
 
             const real lamLm = (vL - sqrtL) * qfL;
-            const real lamRm = (vR  - sqrtR) * qfR;
+            const real lamRm = (vR - sqrtR) * qfR;
             const real lamLp = (vL + sqrtL) * qfL;
-            const real lamRp = (vR  + sqrtR) * qfR;
+            const real lamRp = (vR + sqrtR) * qfR;
 
             real aL = lamLm < lamRm ? lamLm : lamRm;
             real aR = lamLp > lamRp ? lamLp : lamRp;
 
             // Smoothen for rarefaction fan
-            aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
-            aR = helpers::my_max(aR, (vR  + csR) / (1 + vR  * csR));
+            aL = helpers::my_min(aL, (vL - csL)  / (1 - vL * csL));
+            aR = helpers::my_max(aR, (vR  + csR) / (1 + vR * csR));
 
             return Eigenvals(aL, aR);
         }
@@ -730,16 +730,6 @@ SRHD::simulate1D(
     
     Conserved *outer_zones     = nullptr;
     Conserved *dev_outer_zones = nullptr;
-    if (d_outer)
-    {
-        outer_zones = new Conserved[2];
-        const real dV  = get_cell_volume(active_zones - 1, geometry);
-        outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
-        if constexpr(BuildPlatform == Platform::GPU) {
-            simbi::gpu::api::gpuMalloc(&dev_outer_zones, 2 * sizeof(Conserved));
-            simbi::gpu::api::copyHostToDevice(dev_outer_zones, outer_zones, 2 * sizeof(Conserved));
-        }
-    }
     // Save initial condition
     if (t == 0) {
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
@@ -761,6 +751,16 @@ SRHD::simulate1D(
     // Simulate :)
     while (t < tend & !inFailureState)
     {
+        if ((d_outer) && (mesh_motion))
+        {
+            outer_zones = new Conserved[2];
+            const real dV  = get_cell_volume(active_zones - 1, geometry);
+            outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
+            if constexpr(BuildPlatform == Platform::GPU) {
+                simbi::gpu::api::gpuMalloc(&dev_outer_zones, 2 * sizeof(Conserved));
+                simbi::gpu::api::copyHostToDevice(dev_outer_zones, outer_zones, 2 * sizeof(Conserved));
+            }
+        }
         // Using a sigmoid decay function to represent when the source terms turn off.
         decay_constant = helpers::sigmoid(t, engine_duration);
         

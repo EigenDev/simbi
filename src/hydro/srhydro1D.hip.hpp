@@ -28,9 +28,11 @@ namespace simbi
           using primitive_t = sr1d::Primitive;
           using primitive_soa_t = sr1d::PrimitiveSOA;
           const static int dimensions = 1;
+          SRHD* device_self;
+          SRHD* self;
 
           // Create vector instances that will live on host
-          ndarray<conserved_t> cons; 
+          ndarray<conserved_t> cons, outer_zones; 
           ndarray<primitive_t> prims;
           ndarray<real> sourceD, sourceS, source0, pressure_guess, dt_min;
           

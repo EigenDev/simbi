@@ -115,7 +115,7 @@ void SRHD3D::cons2prim(
 
                 peq = pre - f / g;
                 iter++;
-                if (iter >= MAX_ITER || std::isnan(peq))
+                if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
                 {
                     const luint kk    = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z: simbi::detail::get_height(gid, xpg, ypg);
                     const luint jj    = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: simbi::detail::get_row(gid, xpg, ypg, kk);

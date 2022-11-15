@@ -705,7 +705,7 @@ void SRHD2D::cons2prim(
 
                 peq = pre - f / g;
                 iter++;
-                if (iter >= MAX_ITER || std::isnan(peq))
+                if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
                 {
                     const auto ii     = gid % self->nx;
                     const auto jj     = gid / self->nx;
@@ -1230,25 +1230,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
     Conserved *outer_zones = nullptr;
     Conserved *dev_outer_zones = nullptr;
-    // Fill outer zones if user-defined conservative functions provided
-    if (d_outer)
-    {
-        if constexpr(BuildPlatform == Platform::GPU) {
-            simbi::gpu::api::gpuMalloc(&dev_outer_zones, ny * sizeof(Conserved));
-        }
-
-        outer_zones = new Conserved[ny];
-        // #pragma omp parallel for 
-        for (luint jj = 0; jj < ny; jj++) {
-            const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
-            const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
-            outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
-        }
-        if constexpr(BuildPlatform == Platform::GPU) {
-            simbi::gpu::api::copyHostToDevice(dev_outer_zones, outer_zones, ny * sizeof(Conserved));
-        }
-    }
-     
     // Save initial condition
     if (t == 0) {
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
@@ -1262,6 +1243,24 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // Simulate :)
     while (t < tend & !inFailureState)
     {
+        // Fill outer zones if user-defined conservative functions provided
+        if ((d_outer) && (mesh_motion))
+        {
+            if constexpr(BuildPlatform == Platform::GPU) {
+                simbi::gpu::api::gpuMalloc(&dev_outer_zones, ny * sizeof(Conserved));
+            }
+
+            outer_zones = new Conserved[ny];
+            // #pragma omp parallel for 
+            for (luint jj = 0; jj < ny; jj++) {
+                const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
+                const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
+                outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
+            }
+            if constexpr(BuildPlatform == Platform::GPU) {
+                simbi::gpu::api::copyHostToDevice(dev_outer_zones, outer_zones, ny * sizeof(Conserved));
+            }
+        }
         // Using a sigmoid decay function to represent when the source terms turn off.
         decay_constant = helpers::sigmoid(t, engine_duration);
         simbi::detail::with_logger(*this, [&](){

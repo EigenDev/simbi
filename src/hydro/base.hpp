@@ -28,7 +28,7 @@ namespace simbi
         simbi::Geometry geometry;
         simbi::Cellspacing x1cell_spacing, x2cell_spacing, x3cell_spacing;
         luint blockSize, checkpoint_zones;
-        std::vector<std::vector<real> > sources;
+        std::vector<std::vector<real>> sources;
         volatile bool inFailureState; 
 
         protected:
