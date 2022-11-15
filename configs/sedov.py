@@ -11,7 +11,7 @@ def find_nearest(arr: np.ndarray, val: float):
 
 class SedovTaylor(BaseConfig):
     """
-    The Sedov Taylor Problem on a 2D Spherical Logarithmic mesh with variable 
+    The Sedov Taylor Problem on a 2D Spherical Logarithmic mesh with variable zones per decade in radius
     """
         
     # Dynamic Args to be fed to argparse 
