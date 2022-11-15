@@ -550,7 +550,7 @@ def plot_1d_curve(
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
-    r, theta = mesh['r'], mesh['th']
+    r, theta = mesh['x1'], mesh['th']
     theta    = theta * 180 / np.pi 
     
     x1max        = dset['x1max']
@@ -838,7 +838,7 @@ def plot_hist(
 
     lw = 1.0
     def calc_1d_hist(fields: dict, mesh: dict):
-        dV_1d    = util.calc_cell_volume1D(mesh['r'])
+        dV_1d    = util.calc_cell_volume1D(mesh['x1'])
         
         if args.kinetic:
             W        = util.calc_lorentz_gamma(fields)
@@ -1048,7 +1048,7 @@ def plot_dx_domega(
         
     def calc_1d_dx_domega(ofield: dict) -> None:
         edens_1d = util.prims2var(ofield, 'energy')
-        dV_1d    = util.calc_cell_volume1D(ofield['r'])
+        dV_1d    = util.calc_cell_volume1D(ofield['x1'])
         mass     = dV_1d * ofield['rho'] * ofield['W']
         e_k      = (ofield['W'] - 1.0) * mass * util.e_scale.value
         etotal_1d = edens_1d * dV_1d * util.e_scale.value

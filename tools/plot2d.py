@@ -26,7 +26,7 @@ except:
     print('No Cmasher module, so defaulting to matplotlib colors')
     
     
-derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'chi_dens',
+derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'T_eV', 'mass', 'chi_dens',
                  'gamma_beta_1', 'gamma_beta_2', 'mach', 'u1', 'u2']
 field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'chi'] + derived
 lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2', 'u1', 'u2']
@@ -50,6 +50,247 @@ def place_annotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, 
     anchor_text, prop=dict(size=size), frameon=False, loc=args.anot_loc)
     at.patch.set_boxstyle("round,pad=0.1,rounding_size=0.2")
     ax.add_artist(at)
+
+def equipotential_surfaces(file: str = None):
+    from scipy import optimize as scopt
+    def eggleton_radius(q: float) -> float:
+        """Approximate effective dimensionless Roche lobe radius according to Eggelton 1983 (ApJ 268, 368)."""
+        q23 = q**(2./3)
+        return 0.49 * q23 / (0.6 * q23 + np.log(1 + q**(1./3)))
+
+    def calc_phi_n(
+        x1_prime: float, 
+        x2_prime: float, 
+        x3_prime: float, 
+        q: float) -> float:
+        """
+        Dimensionless Roche potential
+        
+        Parameter
+        --------------------
+        x1_prime: 
+            generalized coordinate 1
+        x2_prime:
+            idem 2 
+        x3_prime:
+            idem 3 
+        q:
+            mass ratio M_2/M_1
+            
+        Return
+        ---------------------
+        phi_n: float
+            dimensionless roch lobe potential as a function of the coordinate system
+        """
+        coefficient = 2.0 / (1.0 + q)
+        xi    = - np.sin(x2_prime) * np.cos(x3_prime)
+        mu    =   np.sin(x2_prime)
+        term1 = 1.0 / x1_prime 
+        term2 = q * (1 / (1.0 - 2 * x1_prime * xi + x1_prime**2)**0.5 - x1_prime * xi )
+        term3 = (q + 1.0) / 2.0 * x1_prime ** 2 * mu**2 + q**2 / (2.0 * (1 + q))
+        return coefficient * (term1 + term2 + term3)
+
+    def calc_radius(
+        x2_prime:   float,
+        x3_prime:   float,
+        phi_const:  float, 
+        r_endpoint: float,
+        q:          float,
+        r_array:    np.ndarray = None
+    ) -> float:
+        """
+        Calculate the radius of a point in space knowing the equipotential, theta, and phi
+        
+        Parameters
+        ---------------------------
+        x2_prime: 
+            generalized coordinate 2
+        x3_prime:
+            idem 3 
+        phi_const:
+            potential at a given level surface 
+        r_endpoint:
+            radius of endpoint 
+        q:
+            mass ratio
+            
+        Return
+        ---------------------------
+        radius: float
+            the radius at the given coordinates
+        """
+        # numerically find the geometric radius for a given potential, theta, phi and q
+        potential = lambda x1_prime: calc_phi_n(x1_prime,x2_prime,x3_prime, q) - phi_const
+        radius    = scopt.brentq(potential, a=0.9*args.xlims[0], b=r_endpoint)  
+        return radius
+
+    def calc_volume(
+        q: float, 
+        equi_pot: float, 
+        r_endpoint: float, 
+        r_arr: np.ndarray,
+        phi_arr: np.ndarray,
+        dV: np.ndarray,
+        theta_arr: np.ndarray = None) -> float:
+        """ get the volume of the star
+        Parameters
+        ----------
+        q:
+            the mass ratio of the binary 
+        equi_pot:
+            the potential level at the surface of a star
+        r_endpoint:
+            the radius of the endpoint
+        tolerance:
+            the tolerance for scipy's root finder
+        Returns
+        -------
+        vol : float
+            the volume of the star
+        """
+        if args.ndim == 2:
+            rmask   = r_arr[0] < r_endpoint
+            phi_mod = calc_phi_n(r_arr[:,rmask],np.pi/2, phi_arr[:,rmask], q) - equi_pot
+            min_idx = find_nearest(phi_mod, 0.0)
+            volume_ray  = np.array([dV[phi_idx,:cutoff].sum() for phi_idx,cutoff in enumerate(min_idx)])
+            return volume_ray.sum()
+        else:
+            rmask   = r_arr[0,0] < r_endpoint
+            phi_mod = calc_phi_n(r_arr[:,:,rmask],theta_arr[:,:,rmask], phi_arr[:,:,rmask], q) - equi_pot
+            min_ids = np.argmin(np.abs(phi_mod), axis=args.ndim-1)
+            volume_ray  = np.array([dV[coords[0],coords[1],:cutoff].sum() for coords,cutoff in np.ndenumerate(min_ids)])
+            return volume_ray.sum()
+
+    def dphi_dx1(
+        x1_prime: float, 
+        x2_prime: float, 
+        x3_prime: float, 
+        q: float) -> float:
+        """
+        Derivate of dimensionless roche potential
+        
+        Parameters
+        ----------------------
+        x1_prime:
+            generalized coordinate 1 
+        x2_prime:
+            idem 2 
+        x3_prime:
+            idem 3 
+        q:
+            mass ratio M_2/M_1
+        
+        Returns
+        -----------------------
+        del_phi dot n_hat: float
+            the dimensionless derivative of the Roche potential along some nhat
+        """
+        coefficient = 2.0 / (1.0 + q)
+        xi    = - np.sin(x2_prime) * np.cos(x3_prime)
+        mu    =   np.sin(x2_prime)
+        term1 = -1.0 /  x1_prime ** 2 
+        term2 = q * (-0.5*(1 - 2.0 * x1_prime * xi + x1_prime**2)**(-1.5)*(-2.0 * xi + 2.0 * x1_prime) - 2.0 * xi)
+        term3 = (q + 1.0) * x1_prime * mu**2 
+        return coefficient * (term1 + term2 + term3)
+        
+    def find_lagrange_points_and_phi(a: float, b: float, *args):
+        """
+        Calculate the Lagrange points and roche potential at those Lagrange points
+        """
+        rsolution = scopt.brentq(dphi_dx1, a, b, args=(args[0], args[1], args[2]))
+        phi = calc_phi_n(rsolution, args[0], args[1], args[2])
+        return np.array([rsolution, phi])
+
+    def find_nearest(arr: np.ndarray, val: float) -> int:
+        if arr.ndim > 1:
+            ids = np.argmin(np.abs(arr - val), axis=args.ndim-1)
+            return ids
+        else:
+            idx = np.argmin(np.abs(arr - val))
+            return idx, arr[idx]
+        
+    data = {}
+    with open('../ccn/ccsn_c12/b_cc_45.profile', 'r') as f:
+        data['index']        = f.readline()
+        data['info']         = f.readline()
+        data['val_for_info'] = f.readline()
+        empty                = f.readline()
+        data['param_idx']    = f.readline()
+        param_names               = f.readline().split()
+        
+        nice_info = data['info'].split()
+        nice_vals = data['val_for_info'].split()
+        for index, key_name in enumerate(nice_info):
+            data[key_name] = nice_vals[index]
+            
+        for name in param_names:
+            data[name] = []
+        
+        contents = f.readlines()
+        for x in contents:
+            a = x.split()
+            for index, value in enumerate(param_names):
+                data[value] += [a[index]]
+
+    r              = 10**np.asanyarray(data['logR'],   dtype=float)[::-1]
+    rho_data       = 10**np.asanyarray(data['logRho'], dtype=float)[::-1]
+    min_density    = min(enumerate(rho_data), key=lambda x: x[1] if x[1] > 0 else float('inf'))[1]
+    cutoff, _      = find_nearest(rho_data, min_density)
+    stellar_radius = r[cutoff]
+    nr_data        = int(data['num_zones'])
+    ndec           = np.log10(r[-1] / r[0])
+    zpd_data       = int(nr_data // ndec)
+    rinit          = 1e-3 
+    rmax           = 10
+    zpd            = 1024
+    new_ndec       = np.log10(rmax / rinit)
+    nr_new         = round(zpd * new_ndec)
+    rnew           = np.geomspace(rinit, rmax, nr_new)
+    
+    qinit       = 0.8 
+    m1_init     = float(data['initial_mass'])
+    m2_init     = qinit * m1_init
+    mtotal      = m2_init + m1_init
+    m1_final    = float(data['mass'][0])
+    m2_final    = mtotal - m1_final
+    q           = m2_final / m1_final
+    a           = 1.5 * stellar_radius / eggleton_radius(q)
+    theta_min   = 0.0
+    theta_max   = np.pi
+    npolar      = round(1 + zpd * theta_max / np.log(10.0))
+    theta       = np.linspace(theta_min, theta_max, npolar)
+    rr, thetta  = np.meshgrid(rnew, theta)
+    potential   = calc_phi_n(rr / a, np.pi * 0.5, thetta, q)    
+    lagrange_pts = []
+    rl      = eggleton_radius(q) * a
+    eps     = 1e-6
+    x2_pos  = np.pi * 0.5
+    x3_pos  = 0.0 
+    i       = 0.0
+    guesses = [(eps, 1-eps),(eps, 1-eps), (1+eps, 10*rl)]
+    
+    for aa, bb in guesses:
+        if  i >= 1:
+            x3_pos = np.pi 
+        roots = find_lagrange_points_and_phi(aa, bb, x2_pos, x3_pos, q)
+        roots[0] = roots[0] * a
+        lagrange_pts.append(roots)
+        i += 1
+    
+    lagrange_pts = np.asanyarray(lagrange_pts)
+    lagrange_cor = lagrange_pts[:, 0]
+    r_L1         = lagrange_cor.min()
+    
+    radial_cutoff, _ = find_nearest(rnew, r_L1)
+    phi_0            = potential[-1][radial_cutoff]
+    stellar_radius   = np.zeros_like(theta)
+    for tidx, _ in enumerate(theta):
+        pot_ray      = potential[tidx][: radial_cutoff]
+        phi_mod      = abs(pot_ray - phi_0)
+        equi_idx, _  = find_nearest(phi_mod, 0.0)
+        stellar_radius[tidx] = rr[tidx, equi_idx] 
+        
+    return stellar_radius    
     
 def plot_polar_plot(
     fields:     dict,                            # Field dict
@@ -228,15 +469,16 @@ def plot_polar_plot(
     #========================================================
     #               ORANGE DASHED CURVE
     #========================================================
-    # angs    = np.linspace(x2min, x2max, 1000)
-    # eps     = 0.2
-    # a       = 0.50 * (1 - eps)**(-1/3)
-    # b       = 0.50 * (1 - eps)**(2/3)
-    # radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
-    # r_theta = radius(angs)
-
-    # ax.plot(np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='orange')
-    # ax.plot(-np.radians(np.linspace(0, 180, 1000)), r_theta, linewidth=1, linestyle='--', color='orange')
+    angs    = np.linspace(x2min, x2max, 1000)
+    eps     = 0.2
+    a       = 0.50 * (1 - eps)**(-1/3)
+    b       = 0.50 * (1 - eps)**(2/3)
+    radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+    r_theta = radius(angs)
+    r_theta = equipotential_surfaces()
+    
+    ax.plot(np.radians(np.linspace(0, 180, tt.shape[0])),  1.4 * r_theta, linewidth=1, linestyle='--', color='white')
+    ax.plot(-np.radians(np.linspace(0, 180, tt.shape[0])), 1.4 * r_theta, linewidth=1, linestyle='--', color='white')
     
     if not args.pictorial:
         if x2max < np.pi:
@@ -443,7 +685,7 @@ def plot_polar_plot(
                         for i in range(num_fields):
                             if args.fields[i] in lin_fields:
                                 # labelpad = -35 if you want the labels to be on other side
-                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize, labelpad = -40 )
+                                cbar[i].set_label(r'{}'.format(field_str[i]), fontsize=fsize, labelpad = -35 )
                                 # xticks = [0.10, 0.20, 0.35, 0.50]
                                 # cbar[i].set_ticks(xticks)
                                 # cbar[i].set_ticklabels(['%.2f' % x for x in xticks])
@@ -473,12 +715,11 @@ def plot_polar_plot(
                         cbar.set_label(f'{field_str}', fontsize=fsize)
                 else:
                     cbar.set_label(r'{}'.format(field_str), fontsize=fsize)
-        
         fsize = 25 if not args.print else DEFAULT_SIZE
         if args.setup != "":
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=fsize, y=1.03)
         else:
-            fig.suptitle('t = {:d} s'.format(int(tend.value if args.units else tend)), fontsize=fsize, y=0.95)
+            fig.suptitle('(c) t = {:d} s'.format(int(tend.value if args.units else tend)), fontsize=fsize, y=0.95)
 
 def plot_cartesian_plot(
     fields: dict, 
@@ -543,7 +784,7 @@ def plot_1d_curve(
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
-    r, theta = mesh['r'], mesh['th']
+    r, theta = mesh['x1'], mesh['th']
     theta    = theta
     tidx,_   = util.find_nearest(theta, np.deg2rad(args.viewing))
     x1max        = dset['x1max']
@@ -844,7 +1085,7 @@ def plot_hist(
 
     lw = 1.0 if case < 2 else 2.5
     def calc_1d_hist(fields: dict, mesh: dict):
-        dV_1d    = util.calc_cell_volume1D(mesh['r'])
+        dV_1d    = util.calc_cell_volume1D(mesh['x1'])
         
         if args.kinetic:
             W        = util.calc_lorentz_gamma(fields)
@@ -855,7 +1096,7 @@ def plot_hist(
             mass     = dV_1d * fields['rho'] * W
             var      = mass * util.m.value            # Mass in [g]
         elif args.enthalpy:
-            h   = calc_enthalpy(fields)
+            h   = util.calc_enthalpy(fields)
             var = (h - 1.0) * util.e_scale.value      # Specific Enthalpy in [erg]
         elif args.dm_du:
             u   = fields['gamma_beta']
@@ -960,6 +1201,12 @@ def plot_hist(
     else:
         label = None
     
+    if case < 2:
+        lw = 1.0
+    elif case < 4:
+        lw = 2.0
+    else:
+        lw = 3.5
     c = colors[case + 1]
     if case % 2 == 0:
         c = colors[1]
@@ -1014,7 +1261,7 @@ def plot_hist(
     if args.setup != "":
         ax.set_title(r'{}, t ={:.2f} s'.format(args.setup, tend), fontsize=20)
     
-    if overplot or args.sub_split is None:
+    if overplot and args.sub_split is None:
         if args.labels is not None:
             fsize = 15 if not args.print else DEFAULT_SIZE
             ax.legend(fontsize=fsize, loc=args.legend_loc, fancybox=True, framealpha=0.1)
@@ -1056,7 +1303,7 @@ def plot_dx_domega(
         
     def calc_1d_dx_domega(ofield: dict) -> None:
         edens_1d = util.prims2var(ofield, 'energy')
-        dV_1d    = util.calc_cell_volume1D(ofield['r'])
+        dV_1d    = util.calc_cell_volume1D(ofield['x1'])
         mass     = dV_1d * ofield['rho'] * ofield['W']
         e_k      = (ofield['W'] - 1.0) * mass * util.e_scale.value
         etotal_1d = edens_1d * dV_1d * util.e_scale.value
@@ -1657,10 +1904,10 @@ def main():
     if args.sub_split is not None:
         fsize = 15 if not args.print else DEFAULT_SIZE
         if args.labels is not None:
-                if not args.legend_loc:
-                    axs[0].legend(fontsize=fsize, loc='upper right', fancybox=True, framealpha=0.1)
-                else:
-                    axs[0].legend(fontsize=fsize, loc=args.legend_loc, fancybox=True, framealpha=0.1)
+            if not args.legend_loc:
+                axs[0].legend(fontsize=fsize, loc='upper right', fancybox=True, framealpha=0.1)
+            else:
+                axs[0].legend(fontsize=fsize, loc=args.legend_loc, fancybox=True, framealpha=0.1)
         plt.subplots_adjust(hspace=0.0)
 
     
@@ -1678,12 +1925,11 @@ def main():
                 
                 # for item in (ax.get_xticklabels() + ax.get_yticklabels()):
                 #     item.set_fontsize(SMALL_SIZE)
-                if i == 0:
-                    try:
-                        for item in ax.get_legend().get_texts():
-                            item.set_fontsize(5)
-                    except AttributeError:
-                        pass
+                try:
+                    for item in ax.get_legend().get_texts():
+                        item.set_fontsize(5)
+                except AttributeError:
+                    pass
             
             fig.set_size_inches(*args.fig_dims)
             

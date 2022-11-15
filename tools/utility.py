@@ -112,7 +112,7 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
             field_str_list.append( r'$\chi$')
         elif field == 'chi_dens':
             field_str_list.append( r'$D \cdot \chi$')
-        elif field == 'T_ev':
+        elif field == 'T_eV':
             field_str_list.append("T [eV]" if args.units else "T")
         elif field == 'temperature':
             field_str_list.append("T [K]" if args.units else "T")
@@ -258,7 +258,7 @@ def read_3d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         mesh['theta'] = tt 
         mesh['rr']    = rr
         mesh['phii']  = phii
-        mesh['r']     = setup['x1']
+        mesh['x1']     = setup['x1']
         mesh['th']    = setup['x2']
         mesh['phi']   = setup['x3']
         
@@ -380,7 +380,7 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
                 using_gamma_beta = ds.attrs['using_gamma_beta']
             except:
                 using_gamma_beta = False
-                
+            
             if using_gamma_beta:
                 W = np.sqrt(1 + v1 ** 2 + v2 ** 2)
                 gamma_beta = np.sqrt(v1**2 + v2**2)
@@ -389,17 +389,10 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
             else:
                 W = 1/np.sqrt(1 - (v1**2 + v2**2))
                 gamma_beta = W * np.sqrt(v1**2 + v2**2)
-        
-            a    = (4 * const.sigma_sb.cgs / c)
-            k    = const.k_B.cgs
-            T    = (3 * p * edens_scale  / a)**(1./4.)
-            T_eV = (k * T).to(units.eV)
-            h = 1.0 + gamma * p / (rho * (gamma - 1))
-        
+                
             fields['W']           = W
             fields['enthalpy']    = h
             fields['gamma_beta']  = gamma_beta
-            fields['temperature'] = T_eV
         
         fields['rho']          = rho
         fields['v1']           = v1 
@@ -420,14 +413,14 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         rr, tt = np.meshgrid(setup['x1'], setup['x2'])
         mesh['theta'] = tt 
         mesh['rr']    = rr
-        mesh['r']     = setup['x1']
+        mesh['x1']     = setup['x1']
         mesh['th']    = setup['x2']
         
     return fields, setup, mesh 
 
 def read_1d_file(filename: str) -> dict:
     is_linspace = False
-    ofield = {}
+    fields = {}
     setups = {}
     mesh   = {}
     with h5py.File(filename, 'r') as hf:
@@ -475,28 +468,22 @@ def read_1d_file(filename: str) -> dict:
             else:
                 W = 1/np.sqrt(1 - v**2)
                 gamma_beta = W * v
-        
-            a    = (4 * const.sigma_sb.cgs / c)
-            k    = const.k_B.cgs
-            T    = (3 * p * edens_scale  / a)**(1./4.)
-            T_eV = (k * T).to(units.eV)
             h = 1.0 + gamma * p / (rho * (gamma - 1))
         
-            ofield['W']        = W
-            ofield['enthalpy'] = h
-            ofield['gamma_beta']  = gamma_beta
-            ofield['temperature'] = T_eV
+            fields['W']        = W
+            fields['enthalpy'] = h
+            fields['gamma_beta']  = gamma_beta
             
         setups['ad_gamma']    = ds.attrs['adiabatic_gamma']
         setups['time']        = t
         setups['linspace']    = is_linspace
-        ofield['ad_gamma']    = ds.attrs['adiabatic_gamma']
-        ofield['rho']         = rho
-        ofield['v']           = v
-        ofield['p']           = p
+        fields['ad_gamma']    = ds.attrs['adiabatic_gamma']
+        fields['rho']         = rho
+        fields['v']           = v
+        fields['p']           = p
         mesh['xlims']         = x1min, x1max
         
-    return ofield, setups, mesh
+    return fields, setups, mesh
 
 def prims2var(fields: dict, var: str) -> np.ndarray:
     h = calc_enthalpy(fields)
@@ -517,11 +504,11 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
         a    = (4.0 * const.sigma_sb.cgs / c)
         T    = (3.0 * fields['p'] * edens_scale  / a)**0.25
         return T
-    elif var == 'T_ev':
+    elif var == 'T_eV':
         a    = (4.0 * const.sigma_sb.cgs / c)
         T    = (3.0 * fields['p'] * edens_scale  / a)**0.25
         T_eV = (const.k_B.cgs * T).to(units.eV)
-        return T_eV.value
+        return T_eV
     elif var == 'gamma_beta':
         return W * fields['v']
     elif var == 'chi_dens':

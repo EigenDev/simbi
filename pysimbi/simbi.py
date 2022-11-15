@@ -447,7 +447,7 @@ class Hydro:
             else:   
                 state = PyStateSR(self.u, self.gamma, cfl, x1 = x1, coord_system = cython_coordinates)
                 kwargs = {'a': scale_factor, 'adot': scale_factor_derivative}
-                if dens_outer and mom_outer and edens_outer:
+                if mesh_motion and dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] =  dens_outer
                     kwargs['s_outer'] =  mom_outer
                     kwargs['e_outer'] =  edens_outer
@@ -479,7 +479,7 @@ class Hydro:
                 state = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
             else:
                 kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'quirk_smoothing': quirk_smoothing}
-                if dens_outer and mom_outer and edens_outer:
+                if mesh_motion and dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer']  =  dens_outer
                     kwargs['s1_outer'] =  mom_outer[0]
                     kwargs['s2_outer'] =  mom_outer[1]

@@ -21,15 +21,15 @@ from cycler import cycler
 from utility import DEFAULT_SIZE, SMALL_SIZE, BIGGER_SIZE
 from matplotlib.animation import FuncAnimation
 
-derived = ['gamma_beta', 'temperature', 'D', 's', 'energy']
+derived = ['gamma_beta', 'temperature', 'D', 's', 'energy', 'T_eV']
 field_choices = ['rho', 'v', 'p'] + derived
 
 def plot_profile(fig, ax, filename, args):
     fields, setup, mesh = util.read_1d_file(filename)
-    r, t                = mesh['r'], setup['time']
+    r, t                = mesh['x1'], setup['time']
     x1min, x1max        = mesh['xlims']
     if args.units:
-        tend *= util.time_scale 
+        t *= util.time_scale 
     
     field_labels = util.get_field_str(args)
     label = None
@@ -39,19 +39,14 @@ def plot_profile(fig, ax, filename, args):
             if field == 'rho' or field == 'D':
                 unit_scale = util.rho_scale
             elif field == 'p' or field == 'energy':
-                unit_scale = util.pre_scale
-            
+                unit_scale = util.edens_scale
         if field in derived:
             var = util.prims2var(fields, field)
         else:
             var = fields[field]
-        
+
         if args.scale_down:
             var /= args.scale_down[idx]
-            
-            
-        if args.labels:
-            label = r'$\rm {}$'.format(args.labels[case])
             
         if len(args.fields) > 1:
             label = field_labels[idx]
@@ -70,6 +65,9 @@ def plot_profile(fig, ax, filename, args):
         ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
     else:
         ax.set_xlim(*args.xlims)
+    
+    if args.ylims:
+        ax.set_ylim(*args.ylims)
     # Change the format of the field
     field_str = util.get_field_str(args)
     
@@ -89,7 +87,7 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
 
     tend = fields['t']
     edens_total = util.prims2var(fields, 'energy')
-    r           = fields['r']
+    r           = fields['x1']
     
     if fields['is_linspace']:
         rvertices = 0.5 * (r[1:] + r[:-1])
