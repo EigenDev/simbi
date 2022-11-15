@@ -13,10 +13,6 @@ call_obj.h
 *.h5
 *.pdf
 *.png
-*.eps
-*.so
-*.deb
-*.out
 *.pyc
 *.mp4
 *.xml 
