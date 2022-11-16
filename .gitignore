@@ -5,6 +5,7 @@ builddir/
 *.egg-info/
 data/
 science/
+science
 movies/
 plots/
 .vscode/
