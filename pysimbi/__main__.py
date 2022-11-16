@@ -11,11 +11,14 @@ def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
         param = None
-        for path in Path('configs').rglob('*.py'):
-            if base == Path(path).stem:
-                param = path
+        hard_configs = [file for file in Path('configs').rglob('*.py')]
+        soft_paths   = [soft_path for soft_path in (Path('configs')).glob("*") if soft_path.is_symlink()]   
+        soft_configs = [file for path in soft_paths for file in path.rglob('*.py')]
+        for file in hard_configs + soft_configs:
+            if base == Path(file).stem:
+                param = file
         if not param:
-            raise argparse.ArgumentTypeError('File must have a .py extension or exist in the configs directory')
+            raise argparse.ArgumentTypeError('<script_file> must have a .py extension or exist in the configs directory')
     return param
 
 def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
