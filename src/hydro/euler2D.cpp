@@ -350,12 +350,10 @@ Conserved Newtonian2D::calc_hllc_flux(
     estar                 = cofactor * (edens  * (aR - vR) + pStar * aStar - pressure * vR);
     const auto starStateR = Conserved{rhostar, m1star, m2star, estar};
 
-    const real voL      = left_prims.vcomponent(!ehat);
-    const real voR      = right_prims.vcomponent(!ehat);
     const real ma_local = helpers::my_max(std::abs(vL / cL), std::abs(vR / cR));
     const real phi      = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
-    const real aL_lm    = (phi != 0) ? phi * aL : aL;
-    const real aR_lm    = (phi != 0) ? phi * aR : aR;
+    const real aL_lm    = phi * aL;
+    const real aR_lm    = phi * aR;
 
     // const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
     Conserved net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL_lm
