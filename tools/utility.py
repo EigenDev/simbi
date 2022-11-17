@@ -389,11 +389,11 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
             else:
                 W = 1/np.sqrt(1 - (v1**2 + v2**2))
                 gamma_beta = W * np.sqrt(v1**2 + v2**2)
-                
+            
+            h = 1.0 + gamma * p / (rho * (gamma - 1))
             fields['W']           = W
             fields['enthalpy']    = h
             fields['gamma_beta']  = gamma_beta
-        
         fields['rho']          = rho
         fields['v1']           = v1 
         fields['v2']           = v2 
