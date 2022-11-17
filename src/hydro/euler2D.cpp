@@ -123,7 +123,7 @@ Eigenvals Newtonian2D::calc_eigenvals(
             ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR) )/ 
                 (rhoL*(aL - vL) - rhoR*(aR - vR) ) );
 
-        return Eigenvals(aL, aR, aStar, pStar);
+        return Eigenvals(aL, aR, csL, csR, aStar, pStar);
 
     } else {
         const real vL   = left_prims.vcomponent(ehat);
@@ -303,6 +303,8 @@ Conserved Newtonian2D::calc_hllc_flux(
 
     const real aL    = lambda.aL;
     const real aR    = lambda.aR;
+    const real cL    = lambda.cL;
+    const real cR    = lambda.cR;
     const real aStar = lambda.aStar;
     const real pStar = lambda.pStar;
 
@@ -313,78 +315,132 @@ Conserved Newtonian2D::calc_hllc_flux(
         return right_flux;
     }
 
-    if (-aL <= (aStar - aL) ){
-        const auto pre      = left_prims.p;
-        const auto v1       = left_prims.v1;
-        const auto v2       = left_prims.v2;
-        const auto rho      = left_prims.rho;
-        const auto m1       = left_state.m1;
-        const auto m2       = left_state.m2;
-        const auto energy   = left_state.e_dens;
-        const auto cofac    = 1./(aL - aStar);
+    // Apply the low-Mach HLLC fix found in Fleichman et al 2020: 
+    // https://www.sciencedirect.com/science/article/pii/S0021999120305362
+    constexpr real ma_lim   = static_cast<real>(0.10);
 
-        switch (ehat)
-        {
-        case 1:
-            {
-                const auto rhoStar = cofac * (aL - v1) * rho;
-                const auto m1star  = cofac * (m1*(aL - v1) - pre + pStar);
-                const auto m2star  = cofac * (aL - v1) * m2;
-                const auto eStar   = cofac * (energy*(aL - v1) + pStar*aStar - pre*v1);
+    // --------------Compute the L Star State----------
+    real pressure = left_prims.p;
+    real rho      = left_state.rho;
+    real m1       = left_state.m1;
+    real m2       = left_state.m2;
+    real edens    = left_state.e_dens;
+    real cofactor = static_cast<real>(1.0) / (aL - aStar);
 
-                const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
+    const real vL           = left_prims.vcomponent(ehat);
+    const real vR           = right_prims.vcomponent(ehat);
+    const auto kdelta       = kronecker(ehat, 1);
+    // Left Star State in x-direction of coordinate lattice
+    real rhostar            = cofactor * (aL - vL) * rho;
+    real m1star             = cofactor * (m1 * (aL - vL) +  kdelta * (-pressure + pStar) );
+    real m2star             = cofactor * (m2 * (aL - vL) + !kdelta * (-pressure + pStar) );
+    real estar              = cofactor * (edens  * (aL - vL) + pStar * aStar - pressure * vL);
+    const auto starStateL   = Conserved{rhostar, m1star, m2star, estar};
 
-                return left_flux + (starstate - left_state)*aL;
-            }
+    pressure = right_prims.p;
+    rho      = right_state.rho;
+    m1       = right_state.m1;
+    m2       = right_state.m2;
+    edens    = right_state.e_dens;
+    cofactor = static_cast<real>(1.0) / (aR - aStar);
+
+    rhostar               = cofactor * (aR - vR) * rho;
+    m1star                = cofactor * (m1 * (aR - vR) +  kdelta * (-pressure + pStar) );
+    m2star                = cofactor * (m2 * (aR - vR) + !kdelta * (-pressure + pStar) );
+    estar                 = cofactor * (edens  * (aR - vR) + pStar * aStar - pressure * vR);
+    const auto starStateR = Conserved{rhostar, m1star, m2star, estar};
+
+    const real voL      = left_prims.vcomponent(!ehat);
+    const real voR      = right_prims.vcomponent(!ehat);
+    const real ma_local = helpers::my_max(std::abs(vL / cL), std::abs(vR / cR));
+    const real phi      = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
+    const real aL_lm    = (phi != 0) ? phi * aL : aL;
+    const real aR_lm    = (phi != 0) ? phi * aR : aR;
+
+    // const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
+    Conserved net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL_lm
+                        + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm) * static_cast<real>(0.5);
+
+    // upwind the concentration flux 
+    if (net_flux.rho < static_cast<real>(0.0))
+        net_flux.chi = right_prims.chi * net_flux.rho;
+    else
+        net_flux.chi = left_prims.chi  * net_flux.rho;
+
+    return net_flux;
+
+    // if (-aL <= (aStar - aL) ){
+    //     const auto pre      = left_prims.p;
+    //     const auto v1       = left_prims.v1;
+    //     const auto v2       = left_prims.v2;
+    //     const auto rho      = left_prims.rho;
+    //     const auto m1       = left_state.m1;
+    //     const auto m2       = left_state.m2;
+    //     const auto energy   = left_state.e_dens;
+    //     const auto cofac    = 1./(aL - aStar);
+
+    //     switch (ehat)
+    //     {
+    //     case 1:
+    //         {
+    //             const auto rhoStar = cofac * (aL - v1) * rho;
+    //             const auto m1star  = cofac * (m1*(aL - v1) - pre + pStar);
+    //             const auto m2star  = cofac * (aL - v1) * m2;
+    //             const auto eStar   = cofac * (energy*(aL - v1) + pStar*aStar - pre*v1);
+
+    //             const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
+
+    //             return left_flux + (starstate - left_state)*aL;
+    //         }
         
-        case 2:
-                const auto rhoStar = cofac * (aL - v2) * rho;
-                const auto m1star  = cofac * (aL - v2) * m1; 
-                const auto m2star  = cofac * (m2 * (aL - v2) - pre + pStar);
-                const auto eStar   = cofac * (energy*(aL - v2) + pStar*aStar - pre*v2);
+    //     case 2:
+    //             const auto rhoStar = cofac * (aL - v2) * rho;
+    //             const auto m1star  = cofac * (aL - v2) * m1; 
+    //             const auto m2star  = cofac * (m2 * (aL - v2) - pre + pStar);
+    //             const auto eStar   = cofac * (energy*(aL - v2) + pStar*aStar - pre*v2);
 
-                const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
+    //             const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
 
-                return left_flux + (starstate - left_state)*aL;
-        }
+    //             return left_flux + (starstate - left_state)*aL;
+    //     }
 
-    } else {
-        const auto pre      = right_prims.p;
-        const auto v1       = right_prims.v1;
-        const auto v2       = right_prims.v2;
-        const auto rho      = right_prims.rho;
-        const auto m1       = right_state.m1;
-        const auto m2       = right_state.m2;
-        const auto energy   = right_state.e_dens;
-        const auto cofac    = 1./(aR - aStar);
+    // } else {
+    //     const auto pre      = right_prims.p;
+    //     const auto v1       = right_prims.v1;
+    //     const auto v2       = right_prims.v2;
+    //     const auto rho      = right_prims.rho;
+    //     const auto m1       = right_state.m1;
+    //     const auto m2       = right_state.m2;
+    //     const auto energy   = right_state.e_dens;
+    //     const auto cofac    = 1./(aR - aStar);
 
-        switch (ehat)
-        {
-        case 1:
-            {
-                const auto rhoStar = cofac * (aR - v1) * rho;
-                const auto m1star  = cofac * (m1*(aR - v1) - pre + pStar);
-                const auto m2star  = cofac * (aR - v1) * m2;
-                const auto eStar   = cofac * (energy*(aR - v1) + pStar*aStar - pre*v1);
+    //     switch (ehat)
+    //     {
+    //     case 1:
+    //         {
+    //             const auto rhoStar = cofac * (aR - v1) * rho;
+    //             const auto m1star  = cofac * (m1*(aR - v1) - pre + pStar);
+    //             const auto m2star  = cofac * (aR - v1) * m2;
+    //             const auto eStar   = cofac * (energy*(aR - v1) + pStar*aStar - pre*v1);
 
-                const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
+    //             const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
 
-                return right_flux + (starstate - right_state)*aR;
-            }
+    //             return right_flux + (starstate - right_state)*aR;
+    //         }
         
-        case 2:
-                const auto rhoStar = cofac * (aR - v2) * rho;
-                const auto m1star  = cofac * (aR - v2) * m1; 
-                const auto m2star  = cofac * (m2 * (aR - v2) - pre + pStar);
-                const auto eStar   = cofac * (energy*(aR - v2) + pStar*aStar - pre*v2);
+    //     case 2:
+    //             const auto rhoStar = cofac * (aR - v2) * rho;
+    //             const auto m1star  = cofac * (aR - v2) * m1; 
+    //             const auto m2star  = cofac * (m2 * (aR - v2) - pre + pStar);
+    //             const auto eStar   = cofac * (energy*(aR - v2) + pStar*aStar - pre*v2);
 
-                const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
+    //             const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
 
-                return right_flux + (starstate - right_state)*aR;
-        }
+    //             return right_flux + (starstate - right_state)*aR;
+    //     }
 
 
-    }
+    // }
     
 };
 
