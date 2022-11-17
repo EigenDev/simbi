@@ -33,9 +33,12 @@ def print_problem_params(args, parser) -> None:
         val = str(val)
         print(f"{arg:.<30} {val:<15} {description}", flush = True)
         
-def compute_num_polar_zones(rmin: float, rmax: float, nr: float, theta_bounds: tuple = (0.0, np.pi)):
-    dlogr = np.log(rmax / rmin) / nr
-    return int(1 + (theta_bounds[1] - theta_bounds[0]) / dlogr)
+def compute_num_polar_zones(rmin: float=None, rmax: float=None, nr: float = None, zpd: int = None, theta_bounds: tuple = (0.0, np.pi)):
+    if zpd:
+        return int((theta_bounds[1] - theta_bounds[0]) * zpd / np.log(10))
+    else:
+        dlogr = np.log(rmax / rmin) / nr
+        return int(1 + (theta_bounds[1] - theta_bounds[0]) / dlogr)
 
 def calc_dlogt(tmin: float, tmax: float, ncheckpoints: int):
     if tmin == 0:
