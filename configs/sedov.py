@@ -10,8 +10,8 @@ def find_nearest(arr: np.ndarray, val: float):
     return idx, arr[idx]
 
 class SedovTaylor(BaseConfig):
-    """
-    The Sedov Taylor Problem on a 2D Spherical Logarithmic mesh with variable zones per decade in radius
+    """The Sedov Taylor Problem 
+    Sedov-Taylor Explosion on a 2D Spherical Logarithmic mesh with variable zones per decade in radius
     """
         
     # Dynamic Args to be fed to argparse 
@@ -21,7 +21,7 @@ class SedovTaylor(BaseConfig):
     rend          = DynamicArg("rend", 1.0,           help='radial extent', var_type=float)
     k             = DynamicArg("k", 0.0,              help='density power law k', var_type=float) 
     full_sphere   = DynamicArg("full_sphere", False,  help='flag for full_sphere computation',  var_type=bool, action='store_true') 
-    zpd           = DynamicArg("zpd", 1024,            help='number of radial zones per decade', var_type=int)
+    zpd           = DynamicArg("zpd", 1024,           help='number of radial zones per decade', var_type=int)
     ad_gamma      = DynamicArg("ad_gamma", 5.0 / 3.0, help="Adiabtic gas index", var_type=float)
     
     def __init__(self):
@@ -77,3 +77,7 @@ class SedovTaylor(BaseConfig):
     @property
     def end_time(self):
         return 1.0
+    
+    @property
+    def use_hllc_solver(self) -> bool:
+        return True
