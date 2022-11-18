@@ -100,7 +100,7 @@ void SRHD::advance(
     auto p                      = simbi::ExecutionPolicy(nx);
     p.blockSize                 = BLOCK_SIZE;
     p.sharedMemBytes            = shBlockBytes;
-    // const real xpg            = this->active_zones;
+    const real decay_constant   = this->decay_constant;
     const lint bx               = (BuildPlatform == Platform::GPU) ? sh_block_size : self->nx;
     const lint  pseudo_radius   = (first_order) ? 1 : 2;
     const real step             = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
@@ -218,7 +218,7 @@ void SRHD::advance(
             }
         }
 
-        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * self->decay_constant;
+        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * decay_constant;
         switch(geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -255,11 +255,11 @@ void SRHD::advance(
                 
                 // #if GPU_CODE
                 //     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                //     const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * self->decay_constant;
+                //     const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
                 //     self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt;
                 // #else 
                 //     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                //     const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * self->decay_constant;
+                //     const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
                 //     cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt;
                 // #endif 
                 break;
@@ -703,6 +703,7 @@ SRHD::simulate1D(
     prims.resize(nx);
     pressure_guess.resize(nx);
     dt_min.resize(active_zones);
+    outer_zones.resize(2);
     // Copy the state array into real & profile variables
     for (luint ii = 0; ii < nx; ii++) {
         cons[ii] = Conserved{state[0][ii], state[1][ii], state[2][ii]};
@@ -728,8 +729,6 @@ SRHD::simulate1D(
     this->pseudo_radius       = (first_order) ? 1 : 2;
     const luint shBlockSize   = BLOCK_SIZE + 2 * pseudo_radius;
     
-    Conserved *outer_zones     = nullptr;
-    Conserved *dev_outer_zones = nullptr;
     // Save initial condition
     if (t == 0) {
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
@@ -738,8 +737,6 @@ SRHD::simulate1D(
     // Determine the memory side and state position
     const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
     const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
-    const auto ozones  = (BuildPlatform == Platform::GPU) ? dev_outer_zones : outer_zones;
-
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP, device_self, simbi::MemSide::Dev);
         adapt_dt(device_self, activeP.gridSize.x);
@@ -751,15 +748,10 @@ SRHD::simulate1D(
     // Simulate :)
     while (t < tend & !inFailureState)
     {
-        if ((d_outer) && (mesh_motion))
-        {
-            outer_zones = new Conserved[2];
+        if ((d_outer) && (mesh_motion)) {
             const real dV  = get_cell_volume(active_zones - 1, geometry);
             outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
-            if constexpr(BuildPlatform == Platform::GPU) {
-                simbi::gpu::api::gpuMalloc(&dev_outer_zones, 2 * sizeof(Conserved));
-                simbi::gpu::api::copyHostToDevice(dev_outer_zones, outer_zones, 2 * sizeof(Conserved));
-            }
+            outer_zones.copyToGpu();
         }
         // Using a sigmoid decay function to represent when the source terms turn off.
         decay_constant = helpers::sigmoid(t, engine_duration);
@@ -768,7 +760,7 @@ SRHD::simulate1D(
             advance(self, shBlockSize, radius, geometry, memside);
             cons2prim(fullP, device_self, memside);
             if (!periodic) {
-                config_ghosts1D(fullP, cons.data(), nx, first_order, bc, ozones);
+                config_ghosts1D(fullP, cons.data(), nx, first_order, bc, outer_zones.data());
             }
         });
 
@@ -786,15 +778,6 @@ SRHD::simulate1D(
     }
     if (detail::logger::ncheck > 0) {
         writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", detail::logger::n, detail::logger::zu_avg/ detail::logger::ncheck);
-    }
-
-    if (outer_zones) {
-        if constexpr(BuildPlatform == Platform::GPU) {
-            simbi::gpu::api::gpuFree(dev_outer_zones);
-            delete[] outer_zones;
-        } else {
-            delete[] outer_zones;
-        }
     }
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
