@@ -13,7 +13,10 @@ namespace simbi
         real gamma;
         real cfl;
         std::vector<real> x1, x2, x3;
-        std::string coord_system, data_directory;
+        std::string coord_system;
+        volatile bool inFailureState; 
+        luint nzones;
+        real hllc_z;
 
         // Common members
         DataWriteMembers setup;
@@ -21,7 +24,7 @@ namespace simbi
         real x1min, x1max, x2min, x2max, x3min, x3max;
         real dlogx1, dx1, dx2, dx3, dlogt, tstart, engine_duration;
         bool first_order, periodic, linspace, hllc, mesh_motion, reflecting_theta, quirk_smoothing;
-        luint nzones, active_zones, idx_active, total_zones, n, nx, ny, nz, init_chkpt_idx, radius, pseudo_radius;
+        luint active_zones, idx_active, total_zones, n, nx, ny, nz, init_chkpt_idx, radius, pseudo_radius;
         luint xphysical_grid, yphysical_grid, zphysical_grid;
         simbi::Solver sim_solver;
         simbi::BoundaryCondition bc;
@@ -29,7 +32,7 @@ namespace simbi
         simbi::Cellspacing x1cell_spacing, x2cell_spacing, x3cell_spacing;
         luint blockSize, checkpoint_zones;
         std::vector<std::vector<real>> sources;
-        volatile bool inFailureState; 
+        std::string data_directory;
 
         protected:
         HydroBase(){}
@@ -48,7 +51,8 @@ namespace simbi
             x1(x1),
             coord_system(coord_system),
             inFailureState(false),
-            nx(state[0].size())
+            nx(state[0].size()),
+            hllc_z((gamma - 1)/ (2 * gamma))
         {
 
         }
@@ -72,7 +76,8 @@ namespace simbi
             cfl(cfl),
             coord_system(coord_system),
             inFailureState(false),
-            nzones(state[0].size())
+            nzones(state[0].size()),
+            hllc_z((gamma - 1)/ (2 * gamma))
         {
         }
 
@@ -99,7 +104,8 @@ namespace simbi
             cfl(cfl),
             coord_system(coord_system),
             inFailureState(false),
-            nzones(state[0].size())
+            nzones(state[0].size()),
+            hllc_z((gamma - 1)/ (2 * gamma))
         {
         }
     };
