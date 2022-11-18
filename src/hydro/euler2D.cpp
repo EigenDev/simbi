@@ -568,7 +568,7 @@ void Newtonian2D::advance(
             gL = self->prims2flux(yprimsL, 2);
             gR = self->prims2flux(yprimsR, 2);
 
-            // Calc HLL Flux at i+1/2 luinterface
+            // Calc HLL Flux at i+1/2 interface
             if (self->hllc) {
                 frf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 grf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
@@ -595,7 +595,7 @@ void Newtonian2D::advance(
             gL = self->prims2flux(yprimsL, 2);
             gR = self->prims2flux(yprimsR, 2);
 
-            // Calc HLL Flux at i-1/2 luinterface
+            // Calc HLL Flux at i-1/2 interface
             if (self->hllc)
             {
                 flf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
@@ -623,7 +623,7 @@ void Newtonian2D::advance(
             yright_mid  = prim_buff[(txa * sy +             (tya + 1) % by * sx)];
             yright_most = prim_buff[(txa * sy +             (tya + 2) % by * sx)];
 
-            // Reconstructed left X Primitive vector at the i+1/2 luinterface
+            // Reconstructed left X Primitive vector at the i+1/2 interface
             xprimsL = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
             xprimsR = xright_mid - helpers::minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
             yprimsL = center     + helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
@@ -653,7 +653,7 @@ void Newtonian2D::advance(
                 grf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
             }
 
-            // Do the same thing, but for the left side luinterface [i - 1/2]
+            // Do the same thing, but for the left side interface [i - 1/2]
             xprimsL = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
             xprimsR = center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
             yprimsL = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);

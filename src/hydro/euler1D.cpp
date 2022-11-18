@@ -358,14 +358,14 @@ void Newtonian1D::advance(
             fL = self->prims2flux(primsL);
             fR = self->prims2flux(primsR);
 
-            // Calc HLL Flux at i+1/2 luinterface
+            // Calc HLL Flux at i+1/2 interface
             if (self->hllc) {
                 frf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
             } else {
                 frf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
 
-            // Set up the left and right state luinterfaces for i-1/2
+            // Set up the left and right state interfaces for i-1/2
             primsL = prim_buff[helpers::mod(txa - 1, bx)];
             primsR = prim_buff[(txa + 0) % bx];
             
@@ -374,7 +374,7 @@ void Newtonian1D::advance(
             fL = self->prims2flux(primsL);
             fR = self->prims2flux(primsR);
 
-            // Calc HLL Flux at i-1/2 luinterface
+            // Calc HLL Flux at i-1/2 interface
             if (self->hllc)
             {
                 flf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
@@ -394,7 +394,7 @@ void Newtonian1D::advance(
             right_mid   = prim_buff[(txa + 1)  % bx];
             right_most  = prim_buff[(txa + 2)  % bx];
 
-            // Compute the reconstructed primitives at the i+1/2 luinterface
+            // Compute the reconstructed primitives at the i+1/2 interface
 
             // Reconstructed left primitives vector
             primsL = center    + helpers::minmod((center - left_mid) * plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center) * plm_theta) * static_cast<real>(0.5);
@@ -416,7 +416,7 @@ void Newtonian1D::advance(
                 frf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
 
-            // Do the same thing, but for the right side luinterface [i - 1/2]
+            // Do the same thing, but for the right side interface [i - 1/2]
             primsL = left_mid + helpers::minmod((left_mid - left_most) * plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
             primsR = center   - helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
 
