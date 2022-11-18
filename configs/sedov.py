@@ -77,3 +77,7 @@ class SedovTaylor(BaseConfig):
     @property
     def end_time(self):
         return 1.0
+    
+    @property
+    def use_hllc_solver(self):
+        return True
