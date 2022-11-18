@@ -469,16 +469,16 @@ def plot_polar_plot(
     #========================================================
     #               ORANGE DASHED CURVE
     #========================================================
-    angs    = np.linspace(x2min, x2max, 1000)
-    eps     = 0.2
-    a       = 0.50 * (1 - eps)**(-1/3)
-    b       = 0.50 * (1 - eps)**(2/3)
-    radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
-    r_theta = radius(angs)
-    r_theta = equipotential_surfaces()
+    # angs    = np.linspace(x2min, x2max, 1000)
+    # eps     = 0.2
+    # a       = 0.50 * (1 - eps)**(-1/3)
+    # b       = 0.50 * (1 - eps)**(2/3)
+    # radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+    # r_theta = radius(angs)
+    # r_theta = equipotential_surfaces()
     
-    ax.plot(np.radians(np.linspace(0, 180, tt.shape[0])),  1.4 * r_theta, linewidth=1, linestyle='--', color='white')
-    ax.plot(-np.radians(np.linspace(0, 180, tt.shape[0])), 1.4 * r_theta, linewidth=1, linestyle='--', color='white')
+    # ax.plot(np.radians(np.linspace(0, 180, tt.shape[0])),  1.4 * r_theta, linewidth=1, linestyle='--', color='white')
+    # ax.plot(-np.radians(np.linspace(0, 180, tt.shape[0])), 1.4 * r_theta, linewidth=1, linestyle='--', color='white')
     
     if not args.pictorial:
         if x2max < np.pi:
