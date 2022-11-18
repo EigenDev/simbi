@@ -342,7 +342,7 @@ namespace hydro2d {
     struct Eigenvals{
         GPU_CALLABLE_MEMBER Eigenvals() {}
         GPU_CALLABLE_MEMBER ~Eigenvals() {}
-        real aL, aR, aStar, pStar, cL, cR;
+        real aL, aR, cL, cR, aStar, pStar;
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR, real cL, real cR, real aStar, real pStar) : aL(aL), aR(aR), cL(cL), cR(cR), aStar(aStar), pStar(pStar) {}
     };
