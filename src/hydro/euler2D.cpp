@@ -104,11 +104,10 @@ Eigenvals Newtonian2D::calc_eigenvals(
         // Calculate the mean velocities of sound and fluid
         // const real cbar   = 0.5*(csL + csR);
         // const real rhoBar = 0.5*(rhoL + rhoR);
-        const real z      = (gamma - 1.)/(2.0*gamma);
-        const real num    = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
-        const real denom  = csL * std::pow(pL, - z) + csR * std::pow(pR, - z);
-        const real p_term = num/denom;
-        const real pStar  = std::pow(p_term, (1./z));
+        const real num       = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
+        const real denom     = csL * std::pow(pL, - hllc_z) + csR * std::pow(pR, - hllc_z);
+        const real p_term    = num/denom;
+        const real pStar     = std::pow(p_term, (1./hllc_z));
 
         const real qL = 
             (pStar <= pL) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pL - 1.));
@@ -116,8 +115,8 @@ Eigenvals Newtonian2D::calc_eigenvals(
         const real qR = 
             (pStar <= pR) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pR- 1.));
 
-        const real aL = vR- qL*csL;
-        const real aR = vR+ qR*csR;
+        const real aL = vR - qL*csL;
+        const real aR = vR + qR*csR;
 
         const real aStar = 
             ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR) )/ 
@@ -127,12 +126,12 @@ Eigenvals Newtonian2D::calc_eigenvals(
 
     } else {
         const real vL   = left_prims.vcomponent(ehat);
-        const real vR  = right_prims.vcomponent(ehat);
-        const real pR  = right_prims.p;
+        const real vR   = right_prims.vcomponent(ehat);
+        const real pR   = right_prims.p;
         const real pL   = left_prims.p;
         const real rhoL = left_prims.rho;
         const real rhoR = right_prims.rho;
-        const real csR = std::sqrt(gamma * pR/rhoR);
+        const real csR  = std::sqrt(gamma * pR/rhoR);
         const real csL  = std::sqrt(gamma * pL/rhoL);
 
         const real aL = helpers::my_min(vL - csL, vR - csR);
@@ -257,7 +256,7 @@ Conserved Newtonian2D::prims2flux(const Primitive &prims, const luint ehat)
     const auto v1  = prims.v1;
     const auto v2  = prims.v2;
     const auto pre = prims.p;
-    const auto et  = pre/(gamma - 1.0) + 0.5 * rho * (v1*v1 + v2*v2);
+    const auto et  = pre / (gamma - 1.0) + 0.5 * rho * (v1*v1 + v2*v2);
     
     const auto dens  = rho*vn;
     const auto momx  = rho*v1*vn + pre * kronecker(1, ehat);
@@ -488,6 +487,8 @@ void Newtonian2D::advance(
     // Compile-time choice of coloumn major indexing
     const lint sx            = (col_maj) ? 1  : bx;
     const lint sy            = (col_maj) ? by :  1;
+    const real invdx1        = 1 / dx1;
+    const real invdx2        = 1 / dx2;
     const auto pseudo_radius = (first_order) ? 1 : 2;
     const auto step          = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
 
@@ -695,26 +696,24 @@ void Newtonian2D::advance(
             case simbi::Geometry::CARTESIAN:
                 {
                     const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                    cons_data[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step * dt;
+                    cons_data[aid] -= ( (frf - flf) * invdx1 + (grf - glf) * invdx2 - source_terms) * step * dt;
                 break;
                 }
             
             case simbi::Geometry::SPHERICAL:
                 {
-                const real rl           = (ii > 0 ) ? x1min * std::pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
-                const real rr           = (ii < xpg - 1) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
-                const real tl           = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
-                const real tr           = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
+                const real rl           = self->get_xface(ii, self->geometry, 0); 
+                const real rr           = self->get_xface(ii, self->geometry, 1);
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
-                const real s1R          = rr * rr; 
-                const real s1L          = rl * rl; 
-                const real s2R          = std::sin(tr);
-                const real s2L          = std::sin(tl);
-                const real thmean       = static_cast<real>(0.5) * (tl + tr);
-                const real sint         = std::sin(thmean);
-                const real dV1          = rmean * rmean * (rr - rl);             
-                const real dV2          = rmean * sint * (tr - tl); 
-                // const real cot          = std::cos(thmean) / sint;
+                const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real dcos         = std::cos(tl) - std::cos(tr);
+                const real dVtot        = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
+                const real invdV        = 1.0 / dVtot;
+                const real s1R          = 2.0 * M_PI * rr * rr * dcos; 
+                const real s1L          = 2.0 * M_PI * rl * rl * dcos; 
+                const real s2R          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tr); 
+                const real s2L          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tl); 
 
                 // Grab central primitives
                 const real rhoc = prim_buff[tya * bx + txa].rho;
@@ -722,9 +721,9 @@ void Newtonian2D::advance(
                 const real vc   = prim_buff[tya * bx + txa].v2;
                 const real pc   = prim_buff[tya * bx + txa].p;
                 
-                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * vc * vc) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , static_cast<real>(0.0)};
+                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * uc * vc) / rmean + pc * (s2R - s2L) * invdV , static_cast<real>(0.0)};
                 const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                cons_data[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 - geom_source - source_terms) * dt * step;
+                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * self->dt * step;
                 break;
                 }
             case simbi::Geometry::CYLINDRICAL:
