@@ -529,7 +529,7 @@ void Newtonian1D::advance(
     dt_min.resize(active_zones);
     cons.resize(nx);
     prims.resize(nx);
-    // Copy the state array luinto real & profile variables
+    // Copy the state array into real & profile variables
     for (size_t ii = 0; ii < nx; ii++)
     {
         cons[ii] = Conserved{state[0][ii], state[1][ii], state[2][ii]};

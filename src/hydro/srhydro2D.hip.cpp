@@ -695,7 +695,7 @@ void SRHD2D::advance(
         Primitive xprimsL, xprimsR, yprimsL, yprimsR;
 
         const lint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
-        // Load Shared memory luinto buffer for active zones plus ghosts
+        // Load Shared memory into buffer for active zones plus ghosts
         #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
