@@ -110,12 +110,12 @@ def main():
     parser.add_argument('--hllc', help='flag for HLLC computation as opposed to HLLE', default=False, action='store_true')
     parser.add_argument('--chkpt', help='checkpoint file to restart computation from', default=None, type=str)
     parser.add_argument('--chkpt_interval', help='checkpoint interval spacing in simulation time units', default=0.1, type=float)
-    parser.add_argument('--data_directory', help='directory to save checpoint files', default='data/', type=str)
+    parser.add_argument('--data_directory', help='directory to save checkpoint files', default='data/', type=str)
     parser.add_argument('--boundary_condition', help='boundary condition for inner boundary', default='outflow', choices=['reflecting', 'outflow', 'inflow', 'periodic'])
     parser.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=0.0, type=float)
     parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
     parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
-    parser.add_argument('--version', help='print current version of pysimbi module', action=print_the_version)
+    parser.add_argument('--version','-V', help='print current version of pysimbi module', action=print_the_version)
     
     # print help message if no args supplied
     args, argv = parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
