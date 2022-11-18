@@ -95,35 +95,26 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
         return Eigenvals{aL, aR};
         }
     case Solver::HLLC:
-        real cbar   = static_cast<real>(0.5)*(csL + csR);
-        real rhoBar = static_cast<real>(0.5)*(rhoL + rhoR);
-        real pStar  = static_cast<real>(0.5)*(pL + pR) + static_cast<real>(0.5)*(vL - vR)*cbar*rhoBar;
+        // real cbar   = static_cast<real>(0.5)*(csL + csR);
+        // real rhoBar = static_cast<real>(0.5)*(rhoL + rhoR);
+        // real pStar  = static_cast<real>(0.5)*(pL + pR) + static_cast<real>(0.5)*(vL - vR)*cbar*rhoBar;
 
         // Steps to Compute HLLC as described in Toro et al. 2019
-        real z      = (gamma - 1.)/(2.*gamma);
-        real num    = csL + csR- ( gamma-1.)/2 *(vR- vL);
-        real denom  = csL * std::pow(pL, -z) + csR * std::pow(pR, -z);
-        real p_term = num/denom;
-        real qL, qR;
+        const real num    = csL + csR- ( gamma-1.)/2 *(vR- vL);
+        const real denom  = csL * std::pow(pL, -hllc_z) + csR * std::pow(pR, -hllc_z);
+        const real p_term = num/denom;
+        const real pStar  = std::pow(p_term, (1./hllc_z));
 
-        pStar = std::pow(p_term, (1./z));
+        const real qL = 
+            (pStar <= pL) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pL - 1.));
 
-        if (pStar <= pL){
-            qL = 1.;
-        } else {
-            qL = std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pL - 1.));
-        }
+        const real qR = 
+            (pStar <= pR) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pR- 1.));
 
-        if (pStar <= pR){
-            qR = 1.;
-        } else {
-            qR = std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pR- 1.));
-        }
+        const real aL = vL - qL*csL;
+        const real aR = vR + qR*csR;
 
-        real aL = vL - qL*csL;
-        real aR = vR + qR*csR;
-
-        real aStar = ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR))/
+        const real aStar = ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR))/
                         (rhoL*(aL - vL) - rhoR*(aR - vR) ) );
 
         return Eigenvals{aL, aR, aStar, pStar};
@@ -168,9 +159,6 @@ void Newtonian1D::adapt_dt(Newtonian1D *dev, luint blockSize, luint tblock)
         deviceReduceKernel<1><<<1,1024>>>(dev, dt_min.data(), blockSize);
         simbi::gpu::api::deviceSynch();
         this->dt = dev->dt;
-        // dtWarpReduce<Newtonian1D, Primitive, 16><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev);
-        // simbi::gpu::api::deviceSynch();
-        // simbi::gpu::api::copyDevToHost(&dt, &(dev->dt),  sizeof(real));
     }
     #endif
 };
@@ -214,10 +202,9 @@ Conserved Newtonian1D::calc_hll_flux(
     const Conserved &left_flux,
     const Conserved &right_flux)
 {
-    Eigenvals lambda;
-    lambda  = calc_eigenvals(left_prims, right_prims);
-    real am = lambda.aL;
-    real ap = lambda.aR;
+    const Eigenvals lambda  = calc_eigenvals(left_prims, right_prims);
+    const real am = lambda.aL;
+    const real ap = lambda.aR;
 
     // Compute the HLL Flux component-wise
     return (left_flux * ap - right_flux * am + (right_state - left_state) * am * ap)  / (ap - am) ;
@@ -233,11 +220,11 @@ Conserved Newtonian1D::calc_hllc_flux(
     const Conserved &left_flux,
     const Conserved &right_flux)
 {
-    Eigenvals lambda = calc_eigenvals(left_prims, right_prims);
-    real aL = lambda.aL; 
-    real aR = lambda.aR; 
-    real ap = helpers::my_max(static_cast<real>(0.0), aR);
-    real am = helpers::my_min(static_cast<real>(0.0), aL);
+    const Eigenvals lambda = calc_eigenvals(left_prims, right_prims);
+    const real aL = lambda.aL; 
+    const real aR = lambda.aR; 
+    const real ap = helpers::my_max(static_cast<real>(0.0), aR);
+    const real am = helpers::my_min(static_cast<real>(0.0), aL);
     if (0.0 <= aL){
         return left_flux;
     } 
@@ -437,7 +424,7 @@ void Newtonian1D::advance(
             }
         }
         const auto step = (self->first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
-        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * self->decay_constant;
+        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * decay_constant;
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
