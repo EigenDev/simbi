@@ -265,7 +265,6 @@ void SRHD2D::adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const Executi
                 compute_dt<SRHD2D, Primitive><<<p.gridSize,p.blockSize, bytes>>> (dev, geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
                 deviceReduceKernel<SRHD2D, 2><<<p.gridSize,p.blockSize>>>(dev, active_zones);
                 deviceReduceKernel<SRHD2D, 2><<<1,1024>>>(dev, p.gridSize.x * p.gridSize.y);
-                // dtWarpReduce<SRHD2D, Primitive, 64><<<p.gridSize,p.blockSize,dt_buff_width>>>(dev);
                 break;
             case simbi::Geometry::CYLINDRICAL:
                 // TODO: Implement Cylindrical coordinates at some point

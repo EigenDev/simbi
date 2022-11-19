@@ -104,11 +104,10 @@ Eigenvals Newtonian2D::calc_eigenvals(
         // Calculate the mean velocities of sound and fluid
         // const real cbar   = 0.5*(csL + csR);
         // const real rhoBar = 0.5*(rhoL + rhoR);
-        const real z      = (gamma - 1.)/(2.0*gamma);
-        const real num    = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
-        const real denom  = csL * std::pow(pL, - z) + csR * std::pow(pR, - z);
-        const real p_term = num/denom;
-        const real pStar  = std::pow(p_term, (1./z));
+        const real num       = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
+        const real denom     = csL * std::pow(pL, - hllc_z) + csR * std::pow(pR, - hllc_z);
+        const real p_term    = num/denom;
+        const real pStar     = std::pow(p_term, (1./hllc_z));
 
         const real qL = 
             (pStar <= pL) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pL - 1.));
@@ -116,23 +115,23 @@ Eigenvals Newtonian2D::calc_eigenvals(
         const real qR = 
             (pStar <= pR) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pR- 1.));
 
-        const real aL = vR- qL*csL;
-        const real aR = vR+ qR*csR;
+        const real aL = vR - qL*csL;
+        const real aR = vR + qR*csR;
 
         const real aStar = 
             ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR) )/ 
                 (rhoL*(aL - vL) - rhoR*(aR - vR) ) );
 
-        return Eigenvals(aL, aR, aStar, pStar);
+        return Eigenvals(aL, aR, csL, csR, aStar, pStar);
 
     } else {
         const real vL   = left_prims.vcomponent(ehat);
-        const real vR  = right_prims.vcomponent(ehat);
-        const real pR  = right_prims.p;
+        const real vR   = right_prims.vcomponent(ehat);
+        const real pR   = right_prims.p;
         const real pL   = left_prims.p;
         const real rhoL = left_prims.rho;
         const real rhoR = right_prims.rho;
-        const real csR = std::sqrt(gamma * pR/rhoR);
+        const real csR  = std::sqrt(gamma * pR/rhoR);
         const real csL  = std::sqrt(gamma * pL/rhoL);
 
         const real aL = helpers::my_min(vL - csL, vR - csR);
@@ -257,7 +256,7 @@ Conserved Newtonian2D::prims2flux(const Primitive &prims, const luint ehat)
     const auto v1  = prims.v1;
     const auto v2  = prims.v2;
     const auto pre = prims.p;
-    const auto et  = pre/(gamma - 1.0) + 0.5 * rho * (v1*v1 + v2*v2);
+    const auto et  = pre / (gamma - 1.0) + 0.5 * rho * (v1*v1 + v2*v2);
     
     const auto dens  = rho*vn;
     const auto momx  = rho*v1*vn + pre * kronecker(1, ehat);
@@ -303,6 +302,8 @@ Conserved Newtonian2D::calc_hllc_flux(
 
     const real aL    = lambda.aL;
     const real aR    = lambda.aR;
+    const real cL    = lambda.cL;
+    const real cR    = lambda.cR;
     const real aStar = lambda.aStar;
     const real pStar = lambda.pStar;
 
@@ -313,78 +314,130 @@ Conserved Newtonian2D::calc_hllc_flux(
         return right_flux;
     }
 
-    if (-aL <= (aStar - aL) ){
-        const auto pre      = left_prims.p;
-        const auto v1       = left_prims.v1;
-        const auto v2       = left_prims.v2;
-        const auto rho      = left_prims.rho;
-        const auto m1       = left_state.m1;
-        const auto m2       = left_state.m2;
-        const auto energy   = left_state.e_dens;
-        const auto cofac    = 1./(aL - aStar);
+    // Apply the low-Mach HLLC fix found in Fleichman et al 2020: 
+    // https://www.sciencedirect.com/science/article/pii/S0021999120305362
+    constexpr real ma_lim   = static_cast<real>(0.10);
 
-        switch (ehat)
-        {
-        case 1:
-            {
-                const auto rhoStar = cofac * (aL - v1) * rho;
-                const auto m1star  = cofac * (m1*(aL - v1) - pre + pStar);
-                const auto m2star  = cofac * (aL - v1) * m2;
-                const auto eStar   = cofac * (energy*(aL - v1) + pStar*aStar - pre*v1);
+    // --------------Compute the L Star State----------
+    real pressure = left_prims.p;
+    real rho      = left_state.rho;
+    real m1       = left_state.m1;
+    real m2       = left_state.m2;
+    real edens    = left_state.e_dens;
+    real cofactor = static_cast<real>(1.0) / (aL - aStar);
 
-                const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
+    const real vL           = left_prims.vcomponent(ehat);
+    const real vR           = right_prims.vcomponent(ehat);
+    const auto kdelta       = kronecker(ehat, 1);
+    // Left Star State in x-direction of coordinate lattice
+    real rhostar            = cofactor * (aL - vL) * rho;
+    real m1star             = cofactor * (m1 * (aL - vL) +  kdelta * (-pressure + pStar) );
+    real m2star             = cofactor * (m2 * (aL - vL) + !kdelta * (-pressure + pStar) );
+    real estar              = cofactor * (edens  * (aL - vL) + pStar * aStar - pressure * vL);
+    const auto starStateL   = Conserved{rhostar, m1star, m2star, estar};
 
-                return left_flux + (starstate - left_state)*aL;
-            }
+    pressure = right_prims.p;
+    rho      = right_state.rho;
+    m1       = right_state.m1;
+    m2       = right_state.m2;
+    edens    = right_state.e_dens;
+    cofactor = static_cast<real>(1.0) / (aR - aStar);
+
+    rhostar               = cofactor * (aR - vR) * rho;
+    m1star                = cofactor * (m1 * (aR - vR) +  kdelta * (-pressure + pStar) );
+    m2star                = cofactor * (m2 * (aR - vR) + !kdelta * (-pressure + pStar) );
+    estar                 = cofactor * (edens  * (aR - vR) + pStar * aStar - pressure * vR);
+    const auto starStateR = Conserved{rhostar, m1star, m2star, estar};
+
+    const real ma_local = helpers::my_max(std::abs(vL / cL), std::abs(vR / cR));
+    const real phi      = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
+    const real aL_lm    = phi * aL;
+    const real aR_lm    = phi * aR;
+
+    // const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
+    Conserved net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL_lm
+                        + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm) * static_cast<real>(0.5);
+
+    // upwind the concentration flux 
+    if (net_flux.rho < static_cast<real>(0.0))
+        net_flux.chi = right_prims.chi * net_flux.rho;
+    else
+        net_flux.chi = left_prims.chi  * net_flux.rho;
+
+    return net_flux;
+
+    // if (-aL <= (aStar - aL) ){
+    //     const auto pre      = left_prims.p;
+    //     const auto v1       = left_prims.v1;
+    //     const auto v2       = left_prims.v2;
+    //     const auto rho      = left_prims.rho;
+    //     const auto m1       = left_state.m1;
+    //     const auto m2       = left_state.m2;
+    //     const auto energy   = left_state.e_dens;
+    //     const auto cofac    = 1./(aL - aStar);
+
+    //     switch (ehat)
+    //     {
+    //     case 1:
+    //         {
+    //             const auto rhoStar = cofac * (aL - v1) * rho;
+    //             const auto m1star  = cofac * (m1*(aL - v1) - pre + pStar);
+    //             const auto m2star  = cofac * (aL - v1) * m2;
+    //             const auto eStar   = cofac * (energy*(aL - v1) + pStar*aStar - pre*v1);
+
+    //             const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
+
+    //             return left_flux + (starstate - left_state)*aL;
+    //         }
         
-        case 2:
-                const auto rhoStar = cofac * (aL - v2) * rho;
-                const auto m1star  = cofac * (aL - v2) * m1; 
-                const auto m2star  = cofac * (m2 * (aL - v2) - pre + pStar);
-                const auto eStar   = cofac * (energy*(aL - v2) + pStar*aStar - pre*v2);
+    //     case 2:
+    //             const auto rhoStar = cofac * (aL - v2) * rho;
+    //             const auto m1star  = cofac * (aL - v2) * m1; 
+    //             const auto m2star  = cofac * (m2 * (aL - v2) - pre + pStar);
+    //             const auto eStar   = cofac * (energy*(aL - v2) + pStar*aStar - pre*v2);
 
-                const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
+    //             const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
 
-                return left_flux + (starstate - left_state)*aL;
-        }
+    //             return left_flux + (starstate - left_state)*aL;
+    //     }
 
-    } else {
-        const auto pre      = right_prims.p;
-        const auto v1       = right_prims.v1;
-        const auto v2       = right_prims.v2;
-        const auto rho      = right_prims.rho;
-        const auto m1       = right_state.m1;
-        const auto m2       = right_state.m2;
-        const auto energy   = right_state.e_dens;
-        const auto cofac    = 1./(aR - aStar);
+    // } else {
+    //     const auto pre      = right_prims.p;
+    //     const auto v1       = right_prims.v1;
+    //     const auto v2       = right_prims.v2;
+    //     const auto rho      = right_prims.rho;
+    //     const auto m1       = right_state.m1;
+    //     const auto m2       = right_state.m2;
+    //     const auto energy   = right_state.e_dens;
+    //     const auto cofac    = 1./(aR - aStar);
 
-        switch (ehat)
-        {
-        case 1:
-            {
-                const auto rhoStar = cofac * (aR - v1) * rho;
-                const auto m1star  = cofac * (m1*(aR - v1) - pre + pStar);
-                const auto m2star  = cofac * (aR - v1) * m2;
-                const auto eStar   = cofac * (energy*(aR - v1) + pStar*aStar - pre*v1);
+    //     switch (ehat)
+    //     {
+    //     case 1:
+    //         {
+    //             const auto rhoStar = cofac * (aR - v1) * rho;
+    //             const auto m1star  = cofac * (m1*(aR - v1) - pre + pStar);
+    //             const auto m2star  = cofac * (aR - v1) * m2;
+    //             const auto eStar   = cofac * (energy*(aR - v1) + pStar*aStar - pre*v1);
 
-                const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
+    //             const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
 
-                return right_flux + (starstate - right_state)*aR;
-            }
+    //             return right_flux + (starstate - right_state)*aR;
+    //         }
         
-        case 2:
-                const auto rhoStar = cofac * (aR - v2) * rho;
-                const auto m1star  = cofac * (aR - v2) * m1; 
-                const auto m2star  = cofac * (m2 * (aR - v2) - pre + pStar);
-                const auto eStar   = cofac * (energy*(aR - v2) + pStar*aStar - pre*v2);
+    //     case 2:
+    //             const auto rhoStar = cofac * (aR - v2) * rho;
+    //             const auto m1star  = cofac * (aR - v2) * m1; 
+    //             const auto m2star  = cofac * (m2 * (aR - v2) - pre + pStar);
+    //             const auto eStar   = cofac * (energy*(aR - v2) + pStar*aStar - pre*v2);
 
-                const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
+    //             const auto starstate = Conserved{rhoStar, m1star, m2star, eStar};
 
-                return right_flux + (starstate - right_state)*aR;
-        }
+    //             return right_flux + (starstate - right_state)*aR;
+    //     }
 
 
-    }
+    // }
     
 };
 
@@ -434,6 +487,8 @@ void Newtonian2D::advance(
     // Compile-time choice of coloumn major indexing
     const lint sx            = (col_maj) ? 1  : bx;
     const lint sy            = (col_maj) ? by :  1;
+    const real invdx1        = 1 / dx1;
+    const real invdx2        = 1 / dx2;
     const auto pseudo_radius = (first_order) ? 1 : 2;
     const auto step          = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
 
@@ -468,7 +523,7 @@ void Newtonian2D::advance(
         Primitive xprimsL, xprimsR, yprimsL, yprimsR;
 
         const lint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
-        // Load Shared memory luinto buffer for active zones plus ghosts
+        // Load Shared memory into buffer for active zones plus ghosts
         #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
@@ -514,7 +569,7 @@ void Newtonian2D::advance(
             gL = self->prims2flux(yprimsL, 2);
             gR = self->prims2flux(yprimsR, 2);
 
-            // Calc HLL Flux at i+1/2 luinterface
+            // Calc HLL Flux at i+1/2 interface
             if (self->hllc) {
                 frf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 grf = self->calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
@@ -541,7 +596,7 @@ void Newtonian2D::advance(
             gL = self->prims2flux(yprimsL, 2);
             gR = self->prims2flux(yprimsR, 2);
 
-            // Calc HLL Flux at i-1/2 luinterface
+            // Calc HLL Flux at i-1/2 interface
             if (self->hllc)
             {
                 flf = self->calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
@@ -569,7 +624,7 @@ void Newtonian2D::advance(
             yright_mid  = prim_buff[(txa * sy +             (tya + 1) % by * sx)];
             yright_most = prim_buff[(txa * sy +             (tya + 2) % by * sx)];
 
-            // Reconstructed left X Primitive vector at the i+1/2 luinterface
+            // Reconstructed left X Primitive vector at the i+1/2 interface
             xprimsL = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
             xprimsR = xright_mid - helpers::minmod((xright_mid - center) * plm_theta, (xright_most - center) * static_cast<real>(0.5), (xright_most - xright_mid)*plm_theta) * static_cast<real>(0.5);
             yprimsL = center     + helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center) * plm_theta) * static_cast<real>(0.5);  
@@ -599,7 +654,7 @@ void Newtonian2D::advance(
                 grf = self->calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
             }
 
-            // Do the same thing, but for the left side luinterface [i - 1/2]
+            // Do the same thing, but for the left side interface [i - 1/2]
             xprimsL = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
             xprimsR = center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
             yprimsL = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
@@ -641,26 +696,24 @@ void Newtonian2D::advance(
             case simbi::Geometry::CARTESIAN:
                 {
                     const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                    cons_data[aid] -= ( (frf - flf) / dx1 + (grf - glf)/dx2 - source_terms) * step * dt;
+                    cons_data[aid] -= ( (frf - flf) * invdx1 + (grf - glf) * invdx2 - source_terms) * step * dt;
                 break;
                 }
             
             case simbi::Geometry::SPHERICAL:
                 {
-                const real rl           = (ii > 0 ) ? x1min * std::pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
-                const real rr           = (ii < xpg - 1) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
-                const real tl           = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
-                const real tr           = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
+                const real rl           = self->get_xface(ii, self->geometry, 0); 
+                const real rr           = self->get_xface(ii, self->geometry, 1);
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
-                const real s1R          = rr * rr; 
-                const real s1L          = rl * rl; 
-                const real s2R          = std::sin(tr);
-                const real s2L          = std::sin(tl);
-                const real thmean       = static_cast<real>(0.5) * (tl + tr);
-                const real sint         = std::sin(thmean);
-                const real dV1          = rmean * rmean * (rr - rl);             
-                const real dV2          = rmean * sint * (tr - tl); 
-                // const real cot          = std::cos(thmean) / sint;
+                const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real dcos         = std::cos(tl) - std::cos(tr);
+                const real dVtot        = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
+                const real invdV        = 1.0 / dVtot;
+                const real s1R          = 2.0 * M_PI * rr * rr * dcos; 
+                const real s1L          = 2.0 * M_PI * rl * rl * dcos; 
+                const real s2R          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tr); 
+                const real s2L          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tl); 
 
                 // Grab central primitives
                 const real rhoc = prim_buff[tya * bx + txa].rho;
@@ -668,9 +721,9 @@ void Newtonian2D::advance(
                 const real vc   = prim_buff[tya * bx + txa].v2;
                 const real pc   = prim_buff[tya * bx + txa].p;
                 
-                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * vc * vc) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , static_cast<real>(0.0)};
+                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * uc * vc) / rmean + pc * (s2R - s2L) * invdV , static_cast<real>(0.0)};
                 const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
-                cons_data[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 - geom_source - source_terms) * dt * step;
+                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * self->dt * step;
                 break;
                 }
             case simbi::Geometry::CYLINDRICAL:

@@ -9,20 +9,20 @@ def find_nearest(arr: np.ndarray, val: float):
     idx = np.argmin(np.abs(arr - val))
     return idx, arr[idx]
 
-class SedovTaylor(BaseConfig):
-    """The Sedov Taylor Problem 
-    Sedov-Taylor Explosion on a 2D Spherical Logarithmic mesh with variable zones per decade in radius
+class RelativisticExplosions(BaseConfig):
+    """
+    The Sedov Taylor Problem on a 2D Spherical Logarithmic mesh with variable zones per decade in radius
     """
         
     # Dynamic Args to be fed to argparse 
-    e0            = DynamicArg("e0", 1.0,             help='energy scale',  var_type=float)                        
+    e0            = DynamicArg("e0", 2.0,             help='energy scale',  var_type=float)                        
     rho0          = DynamicArg("rho0", 1.0,           help='density scale', var_type=float)                      
     rinit         = DynamicArg("rinit", 0.1,          help='intial grid radius', var_type=float)
     rend          = DynamicArg("rend", 1.0,           help='radial extent', var_type=float)
     k             = DynamicArg("k", 0.0,              help='density power law k', var_type=float) 
     full_sphere   = DynamicArg("full_sphere", False,  help='flag for full_sphere computation',  var_type=bool, action='store_true') 
-    zpd           = DynamicArg("zpd", 1024,           help='number of radial zones per decade', var_type=int)
-    ad_gamma      = DynamicArg("ad_gamma", 5.0 / 3.0, help="Adiabtic gas index", var_type=float)
+    zpd           = DynamicArg("zpd", 1024,            help='number of radial zones per decade', var_type=int)
+    ad_gamma      = DynamicArg("ad_gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float)
     
     def __init__(self):
         ndec        = np.log10(self.rend / self.rinit)
@@ -30,14 +30,14 @@ class SedovTaylor(BaseConfig):
         r           = np.geomspace(self.rinit.value, self.rend.value, self.nr)
         self.theta_min   = 0
         self.theta_max   = np.pi if self.full_sphere else 0.5 * np.pi
-        self.npolar = compute_num_polar_zones(self.rinit, self.rend, self.nr, theta_bounds=(self.theta_min, self.theta_max))
+        self.npolar = compute_num_polar_zones(zpd=self.zpd, theta_bounds=(self.theta_min, self.theta_max))
         dr          = self.rinit * 1.5 
         
         p_zones = find_nearest(r, dr)[0]
         p_c     = (self.ad_gamma - 1.)*(3*self.e0/((NU + 1)*np.pi*dr ** NU))
         
         self.rho            = np.ones((self.npolar , self.nr), float) * r ** (- self.k)
-        self.p              = P_AMB * self.rho 
+        self.p              = self.rho * P_AMB 
         self.p[:, :p_zones] = p_c
         self.vx             = np.zeros_like(self.p)
         self.vy             = self.vx.copy()
@@ -68,7 +68,7 @@ class SedovTaylor(BaseConfig):
     
     @property
     def regime(self):
-        return "classical"
+        return "relativistic"
     
     @property
     def start_time(self):

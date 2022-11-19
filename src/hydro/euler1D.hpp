@@ -1,5 +1,5 @@
 /* 
-* luinterface between python construction of the 1D state 
+* interface between python construction of the 1D state 
 * and cpp. This is where the heavy lifting will occur when 
 * computing the HLL derivative of the state vector
 * given the state itself.

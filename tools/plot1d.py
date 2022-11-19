@@ -16,7 +16,7 @@ import os
 import utility as util
 from datetime import datetime
 from itertools import cycle
-
+from utility import DEFAULT_SIZE, SMALL_SIZE
 try:
     import cmasher as cmr 
 except:
@@ -165,6 +165,8 @@ def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = Fals
     sorted_energy = np.sort(energy)
     ax.set_xscale('log')
     ax.set_yscale('log')
+    if args.xlims:
+        ax.set_xlim(*args.xlims)
     # ax.set_ylim(sorted_energy[1], 1.5*ets.max())
     ax.set_xlabel(r'$\Gamma\beta $')
     if args.eks:
@@ -215,10 +217,22 @@ def main():
     args = parser.parse_args()
     
     if args.tex:
-        plt.rcParams.update({
-        "text.usetex": True,
-        "font.family": "sans-serif",
-        "font.sans-serif": ["Time New Roman"]})
+            plt.rc('font',   size=DEFAULT_SIZE)          # controls default text sizes
+            plt.rc('axes',   titlesize=DEFAULT_SIZE)     # fontsize of the axes title
+            plt.rc('axes',   labelsize=DEFAULT_SIZE)    # fontsize of the x and y labels
+            plt.rc('xtick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
+            plt.rc('ytick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
+            plt.rc('legend', fontsize=DEFAULT_SIZE)      # legend fontsize
+            plt.rc('figure', titlesize=DEFAULT_SIZE)    # fontsize of the figure title
+            
+            plt.rcParams.update(
+                {
+                    "text.usetex": True,
+                    "font.family": "serif",
+                    "font.serif": "Times New Roman",
+                    "font.size": DEFAULT_SIZE
+                }
+            )
     
     fig_size = args.fig_size
     flist, _ = util.get_file_list(args.files)
