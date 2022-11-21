@@ -19,3 +19,4 @@ call_obj.h
 *.xml 
 *.csv
 *.job
+*.txt
