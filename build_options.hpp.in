@@ -47,7 +47,7 @@ constexpr bool col_maj = true;
 constexpr bool col_maj = false;
 #endif 
 
-#if defined(__NVCC__) || defined(__HCC__) || (defined(__clang__) && defined(__HIP__))
+#if defined(__NVCC__) || defined(__HIPCC__) || (defined(__clang__) && defined(__HIP__))
 #define GPU_CODE 1
 constexpr Platform BuildPlatform = Platform::GPU;
 // typedef float real;
