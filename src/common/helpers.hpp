@@ -286,6 +286,8 @@ namespace simbi
         inline double sigmoid(double t, double tduration) {
             return 1 / (1 + std::exp(static_cast<real>(10.0) * (t - tduration)));
         }
+
+        
     } // namespace helpers
     
     

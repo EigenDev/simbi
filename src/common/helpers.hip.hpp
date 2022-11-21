@@ -62,6 +62,14 @@ namespace simbi
     GPU_CALLABLE_INLINE
     constexpr unsigned int kronecker(luint i, luint j) { return (i == j ? 1 : 0); }
 
+    GPU_CALLABLE_INLINE
+    auto get_2d_idx(const luint ii, const luint jj, const luint nx, const luint ny){
+        if constexpr(col_maj) {
+            return  ii * ny + jj;
+        }
+        return jj * nx + ii;
+    }
+    
     void config_ghosts1D(
         const ExecutionPolicy<> p,
         SRHD::conserved_t *cons, 
@@ -180,6 +188,8 @@ namespace simbi
         const float ghost_conf_contr = (total_zones - real_zones)  * radius * sizeof(T);
         return (advance_contr + cons2prim_contr + ghost_conf_contr) / (delta_t * 1e9);
     }
+
+
 } // end simbi
 
 #include "helpers.hip.tpp"

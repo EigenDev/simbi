@@ -77,24 +77,7 @@ namespace simbi {
                 std::cout << "Bad construction of execution policy" << std::endl;
                 std::cout << e.what() << std::endl;
             }
-            if (glist.size() == 1)
-            {
-                this->gridSize  = dim3((glist[0] + blist[0] - 1) / blist[0]);
-                this->blockSize = dim3(blist[0]); 
-            } else if (glist.size() == 2)
-            {
-                luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
-                luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
-                this->gridSize  = dim3(nxBlocks, nyBlocks);
-                this->blockSize = dim3(blist[0], blist[1]); 
-            } else if (glist.size() == 3)
-            {
-                luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
-                luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
-                luint nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];
-                this->gridSize  = dim3(nxBlocks, nyBlocks, nzBlocks);
-                this->blockSize = dim3(blist[0], blist[1], blist[2]); 
-            }
+            build_grid();
         }
 
         ExecutionPolicy(const std::vector<T> glist, const std::vector<U> blist, const size_t sharedMemBytes)
@@ -112,25 +95,7 @@ namespace simbi {
                 std::cout << "Bad construction of execution policy" << std::endl;
                 std::cout << e.what() << std::endl;
             }
-            
-            if (glist.size() == 1)
-            {
-                this->gridSize  = dim3((glist[0] + blist[0] - 1) / blist[0]);
-                this->blockSize = dim3(blist[0]); 
-            } else if (glist.size() == 2)
-            {
-                luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
-                luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
-                this->gridSize  = dim3(nxBlocks, nyBlocks);
-                this->blockSize = dim3(blist[0], blist[1]); 
-            } else if (glist.size() == 3)
-            {
-                luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
-                luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
-                luint nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];
-                this->gridSize  = dim3(nxBlocks, nyBlocks, nzBlocks);
-                this->blockSize = dim3(blist[0], blist[1], blist[2]); 
-            }
+            build_grid();
         }
 
         ExecutionPolicy(const std::vector<T> glist, const std::vector<U> blist, const size_t sharedMemBytes, const simbiStream_t stream)
@@ -148,32 +113,51 @@ namespace simbi {
                 std::cout << "Bad construction of execution policy" << std::endl;
                 std::cout << e.what() << std::endl;
             }
-            if (glist.size() == 1)
-            {
+            build_grid(glist, blist);
+        }
+
+            
+        ~ExecutionPolicy() {}
+        T compute_blocks(const T nzones, const luint nThreads) const
+        {
+            return (nzones + nThreads - 1) / nThreads;
+        }
+
+        T get_xextent() {
+            if constexpr(col_maj) {
+                return gridSize.y;
+            }
+            return gridSize.x;
+        }
+
+        T get_yextent() {
+            if constexpr(col_maj) {
+                return gridSize.x;
+            }
+            return gridSize.y;
+        }
+
+        void build_grid(const std::vector<T> glist, const std::vector<U> blist) {
+            if (glist.size() == 1) {
                 this->gridSize  = dim3((glist[0] + blist[0] - 1) / blist[0]);
                 this->blockSize = dim3(blist[0]); 
-            } else if (glist.size() == 2)
-            {
+            } else if (glist.size() == 2) {
                 luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
                 luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
-                this->gridSize  = dim3(nxBlocks, nyBlocks);
-                this->blockSize = dim3(blist[0], blist[1]); 
-            } else if (glist.size() == 3)
-            {
+                if constexpr(col_maj) {
+                    this->gridSize  = dim3(nyBlocks, nxBlocks);
+                    this->blockSize = dim3(blist[1], blist[0]);
+                } else {
+                    this->gridSize  = dim3(nxBlocks, nyBlocks);
+                    this->blockSize = dim3(blist[0], blist[1]); 
+                }
+            } else if (glist.size() == 3) {
                 luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
                 luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
                 luint nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];
                 this->gridSize  = dim3(nxBlocks, nyBlocks, nzBlocks);
                 this->blockSize = dim3(blist[0], blist[1], blist[2]); 
             }
-        }
-
-            
-        ~ExecutionPolicy() {}
-
-        T compute_blocks(const T nzones, const luint nThreads) const
-        {
-            return (nzones + nThreads - 1) / nThreads;
         }
     };
 

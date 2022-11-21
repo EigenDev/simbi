@@ -157,144 +157,46 @@ namespace simbi
     
     }
 
-
     GPU_CALLABLE_INLINE
-    unsigned int globalThreadXCount() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return blockDim.x * blockDim.y * blockDim.z * gridDim.x * gridDim.y * gridDim.z;
-    else
-    	return 1;
-    
+    unsigned int get_ii_in2D(){
+        if constexpr(col_maj) {
+            return blockDim.y * blockIdx.y + threadIdx.y;
+        }
+        return blockDim.x * blockIdx.x + threadIdx.x;
     }
 
     GPU_CALLABLE_INLINE
-    unsigned int globalThreadYCount() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return blockDim.y * gridDim.y;
-    else
-    	return 1;
-    
+    unsigned int get_jj_in2D(){
+        if constexpr(col_maj) {
+            return blockDim.x * blockIdx.x + threadIdx.x;
+        }
+        return blockDim.y * blockIdx.y + threadIdx.y;
     }
 
-    GPU_CALLABLE_INLINE
-    unsigned int globalThreadZCount() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return blockDim.z * gridDim.z;
-    else
-    	return 1;
-    
+    template<Platform P = BuildPlatform>
+    GPU_CALLABLE_INLINE 
+    unsigned int get_tx() {
+        if constexpr(P == Platform::GPU) {
+            if constexpr(col_maj) {
+                return threadIdx.y;
+            }
+            return threadIdx.x;
+        } else {
+            return 0;
+        }
     }
 
-
-    GPU_CALLABLE_INLINE
-    unsigned int globalBlockXCount() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return gridDim.x;
-    else
-    	return 1;
-    
-    }
-
-    GPU_CALLABLE_INLINE
-    unsigned int globalBlockYCount() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return gridDim.y;
-    else
-    	return 1;
-    
-    }
-
-    GPU_CALLABLE_INLINE
-    unsigned int globalBlockZCount() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return gridDim.z;
-    else
-    	return 1;
-    
-    }
-
-
-    GPU_CALLABLE_INLINE
-    unsigned int localThreadIdx_x() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return threadIdx.x;
-    else
-    	return 0;
-    
-    }
-
-    GPU_CALLABLE_INLINE
-    unsigned int localThreadIdx_y() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return threadIdx.y;
-    else
-    	return 0;
-    
-    }
-
-    GPU_CALLABLE_INLINE
-    unsigned int localThreadIdx_z() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return threadIdx.z;
-    else
-    	return 0;
-    
-    }
-
-
-    GPU_CALLABLE_INLINE
-    unsigned int localThreadCount_x() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return blockDim.x;
-    else
-    	return 1;
-    
-    }
-
-    GPU_CALLABLE_INLINE
-    unsigned int localThreadCount_y() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return blockDim.y;
-    else
-    	return 1;
-    
-    }
-
-    GPU_CALLABLE_INLINE
-    unsigned int localThreadCount_z() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return blockDim.z;
-    else
-    	return 1;
-    
-    }
-
-
-    GPU_CALLABLE_INLINE
-    unsigned int globalBlockIdx_x() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return blockIdx.x;
-    else
-    	return 0;
-    
-    }
-
-    GPU_CALLABLE_INLINE
-    unsigned int globalBlockIdx_y() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return blockIdx.y;
-    else
-    	return 0;
-    
-    }
-
-    GPU_CALLABLE_INLINE
-    unsigned int globalBlockIdx_z() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return blockIdx.z;
-    else
-    	return 0;
-    
+    template<Platform P = BuildPlatform>
+    GPU_CALLABLE_INLINE 
+    unsigned int get_ty() {
+        if constexpr(P == Platform::GPU) {
+            if constexpr(col_maj) {
+                return threadIdx.x;
+            }
+            return threadIdx.y;
+        } else {
+            return 0;
+        }
     }
 
 
