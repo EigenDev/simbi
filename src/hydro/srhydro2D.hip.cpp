@@ -402,7 +402,7 @@ Conserved SRHD2D::calc_hllc_flux(
     const real aStar = c * (static_cast<real>(1.0) / quad);
     const real pStar = -aStar * fe + fs;
     
-    if (true) {
+    if (false) {
         // Apply the low-Mach HLLC fix found in Fleichman et al 2020: 
         // https://www.sciencedirect.com/science/article/pii/S0021999120305362
         constexpr real ma_lim = static_cast<real>(0.1);
