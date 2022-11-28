@@ -114,7 +114,7 @@ constexpr int WARP_SIZE    = 64;
 #define anyGpuGetDeviceCount        hipGetDeviceCount
 #endif
 #else
-constexpr int WARP_SIZE    = 32;
+constexpr int WARP_SIZE = 32;
 #define GPU_CODE 0
 #define CUDA_CODE 0
 #define HIP_CODE 0
