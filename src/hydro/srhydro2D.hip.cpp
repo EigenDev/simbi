@@ -541,7 +541,7 @@ void SRHD2D::cons2prim(
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;        
-        const auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * threadIdx.y + threadIdx.x : gid;
+        const auto tid = get_threadId();
         if (tid == 0)
             found_failure = self->inFailureState;
         simbi::gpu::api::synchronize();
@@ -639,7 +639,7 @@ void SRHD2D::advance(
     const auto xpg      = this->xphysical_grid;
     const auto ypg      = this->yphysical_grid;
     const real step     = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
-
+    const auto pseudo_radius = (first_order) ? 1 : 2;
     #if GPU_CODE
     const auto xextent             = p.get_xextent();
     const auto yextent             = p.get_yextent();
@@ -687,46 +687,45 @@ void SRHD2D::advance(
         auto *const prim_buff = prim_data;
         #endif 
 
-        const auto ii  = (BuildPlatform == Platform::GPU) ? get_ii_in2D() : idx % xpg;
-        const auto jj  = (BuildPlatform == Platform::GPU) ? get_jj_in2D() : idx / xpg;
+        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
+        const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
         #if GPU_CODE 
-        if ((ii >= max_ii) || (jj >= max_jj)) return;
+        if ((ii >= xpg) || (jj >= ypg)) return;
         #endif
 
-        const auto ia  = ii + radius;
-        const auto ja  = jj + radius;
-        const auto tx  = get_tx();
-        const auto ty  = get_ty();
-        const auto txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
-        const auto tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
+        const lint ia  = ii + radius;
+        const lint ja  = jj + radius;
+        const lint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
+        const lint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
+        const lint txa = (BuildPlatform == Platform::GPU) ? tx + pseudo_radius : ia;
+        const lint tya = (BuildPlatform == Platform::GPU) ? ty + pseudo_radius : ja;
 
         Conserved uxL, uxR, uyL, uyR;
         Conserved fL, fR, gL, gR, frf, flf, grf, glf;
         Primitive xprimsL, xprimsR, yprimsL, yprimsR;
 
-        const lint aid = get_2d_idx(ia, ja, nx, ny);
+        const lint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
         // Load Shared memory into buffer for active zones plus ghosts
         #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
             // Load Shared memory into buffer for active zones plus ghosts
             prim_buff[tya * sx + txa * sy] = prim_data[aid];
-            if (ty < radius)
+            if (ty < pseudo_radius)
             {
-                if (blockIdx.y == yextent - 1 && (ja + yextent > ny - radius + ty)) {
+                if (blockIdx.y == p.gridSize.y - 1 && (ja + yextent > ny - radius + ty)) {
                     tyl = ny - radius - ja + ty;
                 }
-                prim_buff[(tya - radius) * sx + txa] = prim_data[(ja - radius) * nx + ia];
-                prim_buff[(tya + tyl   ) * sx + txa] = prim_data[(ja + tyl   ) * nx + ia]; 
+                prim_buff[(tya - pseudo_radius) * sx + txa] = prim_data[helpers::mod(ja - pseudo_radius, ny) * nx + ia];
+                prim_buff[(tya + tyl) * sx + txa]           = prim_data[(ja + tyl) % ny * nx + ia]; 
             }
-            
-            if (tx < radius)
+            if (tx < pseudo_radius)
             {   
-                if (blockIdx.x == xextent - 1 && (ia + xextent > nx - radius + tx)) {
+                if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + tx)) {
                     txl = nx - radius - ia + tx;
                 }
-                prim_buff[tya * sx + (txa - radius) * sy] =  prim_data[ja * nx + (ia - radius)];
-                prim_buff[tya * sx + (txa +    txl) * sy] =  prim_data[ja * nx + (ia + txl   )]; 
+                prim_buff[tya * sx + txa - pseudo_radius] =  prim_data[ja * nx + helpers::mod(ia - pseudo_radius, nx)];
+                prim_buff[tya * sx + txa +    txl]        =  prim_data[ja * nx +    (ia + txl) % nx]; 
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -737,11 +736,11 @@ void SRHD2D::advance(
         const real vfaceL = x1l * hubble_param;
         if (self->first_order)
         {
-            xprimsL = prim_buff[(txa + 0) * sy + (tya + 0) * sx];
-            xprimsR = prim_buff[(txa + 1) * sy + (tya + 0) * sx];
+            xprimsL = prim_buff[(txa + 0)      * sy + (tya + 0) * sx];
+            xprimsR = prim_buff[(txa + 1) % bx * sy + (tya + 0) * sx];
             //j+1/2
-            yprimsL = prim_buff[(txa + 0) * sy + (tya + 0) * sx];
-            yprimsR = prim_buff[(txa + 0) * sy + (tya + 1) * sx];
+            yprimsL = prim_buff[(txa + 0) * sy + (tya + 0)      * sx];
+            yprimsR = prim_buff[(txa + 0) * sy + (tya + 1) % by * sx];
             
             // i+1/2
             uxL = self->prims2cons(xprimsL); 
@@ -795,17 +794,17 @@ void SRHD2D::advance(
             }   
         } else { 
             // Coordinate X
-            const Primitive xleft_most  = prim_buff[(txa - 2) * sy + tya * sx];
-            const Primitive xleft_mid   = prim_buff[(txa - 1) * sy + tya * sx];
-            const Primitive center      = prim_buff[(txa + 0) * sy + tya * sx];
-            const Primitive xright_mid  = prim_buff[(txa + 1) * sy + tya * sx];
-            const Primitive xright_most = prim_buff[(txa + 2) * sy + tya * sx];
+            const Primitive xleft_most  = prim_buff[(helpers::mod(txa - 2, bx)    * sy + tya * sx)];
+            const Primitive xleft_mid   = prim_buff[(helpers::mod(txa - 1, bx)    * sy + tya * sx)];
+            const Primitive center      = prim_buff[(            (txa + 0)        * sy + tya * sx)];
+            const Primitive xright_mid  = prim_buff[(            (txa + 1) % bx   * sy + tya * sx)];
+            const Primitive xright_most = prim_buff[(            (txa + 2) % bx   * sy + tya * sx)];
 
             // Coordinate Y
-            const Primitive yleft_most  = prim_buff[txa * sy + (tya - 2) * sx];
-            const Primitive yleft_mid   = prim_buff[txa * sy + (tya - 1) * sx];
-            const Primitive yright_mid  = prim_buff[txa * sy + (tya + 1) * sx];
-            const Primitive yright_most = prim_buff[txa * sy + (tya + 2) * sx];
+            const Primitive yleft_most  = prim_buff[(txa * sy + helpers::mod(tya - 2, by)  * sx)];
+            const Primitive yleft_mid   = prim_buff[(txa * sy + helpers::mod(tya - 1, by)  * sx)];
+            const Primitive yright_mid  = prim_buff[(txa * sy +             (tya + 1) % by * sx)];
+            const Primitive yright_most = prim_buff[(txa * sy +             (tya + 2) % by * sx)];
 
             // Reconstructed left X Primitive vector at the i+1/2 interface
             xprimsL  = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
