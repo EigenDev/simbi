@@ -499,7 +499,7 @@ void Newtonian2D::advance(
     auto* const mom2_source  = sourceM2.data();
     auto* const erg_source   = sourceE.data();
     simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
-       #if GPU_CODE 
+        #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
         #else 
         auto *const prim_buff = prim_data;
@@ -609,20 +609,18 @@ void Newtonian2D::advance(
         }
         else 
         {
-            Primitive xleft_most, xright_most, xleft_mid, xright_mid, center;
-            Primitive yleft_most, yright_most, yleft_mid, yright_mid;
             // Coordinate X
-            xleft_most  = prim_buff[(helpers::mod(txa - 2, bx)    * sy + tya * sx)];
-            xleft_mid   = prim_buff[(helpers::mod(txa - 1, bx)    * sy + tya * sx)];
-            center      = prim_buff[(            (txa + 0)        * sy + tya * sx)];
-            xright_mid  = prim_buff[(            (txa + 1) % bx   * sy + tya * sx)];
-            xright_most = prim_buff[(            (txa + 2) % bx   * sy + tya * sx)];
+            const Primitive xleft_most  = prim_buff[(helpers::mod(txa - 2, bx)    * sy + tya * sx)];
+            const Primitive xleft_mid   = prim_buff[(helpers::mod(txa - 1, bx)    * sy + tya * sx)];
+            const Primitive center      = prim_buff[(            (txa + 0)        * sy + tya * sx)];
+            const Primitive xright_mid  = prim_buff[(            (txa + 1) % bx   * sy + tya * sx)];
+            const Primitive xright_most = prim_buff[(            (txa + 2) % bx   * sy + tya * sx)];
 
             // Coordinate Y
-            yleft_most  = prim_buff[(txa * sy + helpers::mod(tya - 2, by)  * sx)];
-            yleft_mid   = prim_buff[(txa * sy + helpers::mod(tya - 1, by)  * sx)];
-            yright_mid  = prim_buff[(txa * sy +             (tya + 1) % by * sx)];
-            yright_most = prim_buff[(txa * sy +             (tya + 2) % by * sx)];
+            const Primitive yleft_most  = prim_buff[(txa * sy + helpers::mod(tya - 2, by)  * sx)];
+            const Primitive yleft_mid   = prim_buff[(txa * sy + helpers::mod(tya - 1, by)  * sx)];
+            const Primitive yright_mid  = prim_buff[(txa * sy +             (tya + 1) % by * sx)];
+            const Primitive yright_most = prim_buff[(txa * sy +             (tya + 2) % by * sx)];
 
             // Reconstructed left X Primitive vector at the i+1/2 interface
             xprimsL = center     + helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center) * plm_theta) * static_cast<real>(0.5); 
