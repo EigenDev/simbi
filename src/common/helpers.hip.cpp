@@ -223,8 +223,7 @@ namespace simbi{
                         cons[(x2grid_size - 1) * sx + ii * sy] = cons[(x2grid_size - 4) * sx + ii * sy];
                         cons[(x2grid_size - 2) * sx + ii * sy] = cons[(x2grid_size - 3) * sx + ii * sy];
 
-                        if (reflecting_theta)
-                        {
+                        if (reflecting_theta) {
                             cons[(x2grid_size - 1) * sx + ii * sy].s2 = - cons[(x2grid_size - 4) * sx + ii * sy].s2;
                             cons[(x2grid_size - 2) * sx + ii * sy].s2 = - cons[(x2grid_size - 3) * sx + ii * sy].s2;
                         }
