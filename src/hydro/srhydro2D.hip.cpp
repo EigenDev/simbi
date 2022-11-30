@@ -695,13 +695,13 @@ void SRHD2D::advance(
         const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
         const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
         #if GPU_CODE 
-        if ((ii >= xpg) || (jj >= ypg)) return;
+        if ((ii >= max_ii) || (jj >= max_jj)) return;
         #endif
 
         const lint ia  = ii + radius;
         const lint ja  = jj + radius;
-        const lint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
-        const lint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
+        const lint tx  = (BuildPlatform == Platform::GPU) ? get_tx(): 0;
+        const lint ty  = (BuildPlatform == Platform::GPU) ? get_ty(): 0;
         const lint txa = (BuildPlatform == Platform::GPU) ? tx + pseudo_radius : ia;
         const lint tya = (BuildPlatform == Platform::GPU) ? ty + pseudo_radius : ja;
 
@@ -709,7 +709,7 @@ void SRHD2D::advance(
         Conserved fL, fR, gL, gR, frf, flf, grf, glf;
         Primitive xprimsL, xprimsR, yprimsL, yprimsR;
 
-        const lint aid = (col_maj) ? ia * ny + ja : ja * nx + ia;
+        const lint aid = get_2d_idx(ia, ja, nx, ny); //(col_maj) ? ia * ny + ja : ja * nx + ia;
         // Load Shared memory into buffer for active zones plus ghosts
         #if GPU_CODE
             luint txl = xextent;
@@ -945,7 +945,7 @@ void SRHD2D::advance(
                 break;
         } // end switch
     });
-    // update x1 enpoints
+    // update x1 endpoints
     const real x1l    = self->get_x1face(0, geometry, 0);
     const real x1r    = self->get_x1face(xphysical_grid, geometry, 1);
     const real vfaceR = x1r * hubble_param;
