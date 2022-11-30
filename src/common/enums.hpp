@@ -33,6 +33,13 @@ namespace simbi{
         HLLE,
     };
 
+    enum class HLLCTYPE {
+        CLASSICAL,
+        // Apply the low-Mach HLLC fix found in Fleischmann et al 2020: 
+        // https://www.sciencedirect.com/science/article/pii/S0021999120305362
+        FLEISCHMANN,
+    };
+
     enum class BoundaryCondition {
         REFLECTING,
         OUTFLOW,
@@ -46,5 +53,6 @@ namespace simbi{
         NAIVE,
     };
     constexpr auto comp_wave_speed = WaveSpeeds::MIGNONE_AND_BODO_05;
+    constexpr auto comp_hllc_type  = HLLCTYPE::FLEISCHMANN;
 }
 #endif
