@@ -397,6 +397,10 @@ DT* simbi::ndarray<DT>::dev_data(){
 
 template<typename DT>
 DT* simbi::ndarray<DT>::data(){
+    if (sz == 0) {
+        return nullptr;
+    }
+    
     if constexpr(BuildPlatform == Platform::GPU) {
         return dev_arr.get();
     } else {

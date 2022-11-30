@@ -77,7 +77,7 @@ namespace simbi {
                 std::cout << "Bad construction of execution policy" << std::endl;
                 std::cout << e.what() << std::endl;
             }
-            build_grid();
+            build_grid(glist, blist);
         }
 
         ExecutionPolicy(const std::vector<T> glist, const std::vector<U> blist, const size_t sharedMemBytes)
@@ -95,7 +95,7 @@ namespace simbi {
                 std::cout << "Bad construction of execution policy" << std::endl;
                 std::cout << e.what() << std::endl;
             }
-            build_grid();
+            build_grid(glist, blist);
         }
 
         ExecutionPolicy(const std::vector<T> glist, const std::vector<U> blist, const size_t sharedMemBytes, const simbiStream_t stream)
@@ -123,18 +123,18 @@ namespace simbi {
             return (nzones + nThreads - 1) / nThreads;
         }
 
-        T get_xextent() {
+        auto get_xextent() const {
             if constexpr(col_maj) {
-                return gridSize.y;
+                return blockSize.y;
             }
-            return gridSize.x;
+            return blockSize.x;
         }
 
-        T get_yextent() {
+        auto get_yextent() const {
             if constexpr(col_maj) {
-                return gridSize.x;
+                return blockSize.x;
             }
-            return gridSize.y;
+            return blockSize.y;
         }
 
         void build_grid(const std::vector<T> glist, const std::vector<U> blist) {

@@ -74,7 +74,7 @@ template<typename T, typename U = int>
 GPU_CALLABLE_INLINE
 range_t<T> range(T begin, T end, U step = 1)
 {
-    begin += simbi::globalThreadIdx_x();
+    begin += simbi::globalThreadIdx();
     return range_t<T>{begin, end, static_cast<T>(step)};
 }
 #endif

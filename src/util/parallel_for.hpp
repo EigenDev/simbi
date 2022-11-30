@@ -17,7 +17,7 @@ namespace simbi
 	void parallel_for(const ExecutionPolicy<> &p, index_type first, index_type last, F function) {
 		simbi::launch(p, [=] GPU_LAMBDA () {
 			#if GPU_CODE
-				for (auto idx : range(first, last, globalThreadXCount()))  function(idx);
+				for (auto idx : range(first, last, globalThreadCount()))  function(idx);
 			#else
 				#pragma omp parallel for schedule(static) 
 				for(auto idx = first; idx < last; idx++) function(idx);

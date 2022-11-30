@@ -566,6 +566,7 @@ void SRHD2D::cons2prim(
             const real Dchi = cons_data[gid].chi * invdV; 
             const real S    = std::sqrt(S1 * S1 + S2 * S2);
             
+            
             real peq = press_data[gid];
             luint iter  = 0;
             const real tol = D * tol_scale;
@@ -612,6 +613,12 @@ void SRHD2D::cons2prim(
             const real v1     = S1 * inv_et;
             const real v2     = S2 * inv_et;
 
+            #if !GPU_CODE
+            if (rho == 0) {
+                std::cout << "wtf at: " << gid << "\n";
+                std::cin.get();
+            }
+            #endif
             press_data[gid] = peq;
             prim_data[gid]  = Primitive{rho, v1, v2, peq, Dchi / D};
             workLeftToDo = false;
@@ -706,19 +713,20 @@ void SRHD2D::advance(
             prim_buff[tya * sx + txa * sy] = prim_data[aid];
             if (ty < radius)
             {
-                if (blockIdx.y == p.gridSize.y - 1 && (ja + yextent > jstride - radius + ty)) {
-                    tyl = jstride - radius - ja + ty;
+                if (blockIdx.y == yextent - 1 && (ja + yextent > ny - radius + ty)) {
+                    tyl = ny - radius - ja + ty;
                 }
-                prim_buff[(tya - radius) * sx + txa * sy] = prim_data[(ja - radius) * gnx + ia * gny];
-                prim_buff[(tya + tyl   ) * sx + txa * sy] = prim_data[(ja + tyl   ) * gnx + ia * gny]; 
+                prim_buff[(tya - radius) * sx + txa] = prim_data[(ja - radius) * nx + ia];
+                prim_buff[(tya + tyl   ) * sx + txa] = prim_data[(ja + tyl   ) * nx + ia]; 
             }
+            
             if (tx < radius)
             {   
-                if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > istride - radius + tx)) {
-                    txl = istride - radius - ia + tx;
+                if (blockIdx.x == xextent - 1 && (ia + xextent > nx - radius + tx)) {
+                    txl = nx - radius - ia + tx;
                 }
-                prim_buff[tya * sx + (txa - radius) * sy] =  prim_data[ja * gnx + (ia - radius) * gny];
-                prim_buff[tya * sx + (txa +    txl) * sy] =  prim_data[ja * gnx + (ia + txl   ) * gny]; 
+                prim_buff[tya * sx + (txa - radius) * sy] =  prim_data[ja * nx + (ia - radius)];
+                prim_buff[tya * sx + (txa +    txl) * sy] =  prim_data[ja * nx + (ia + txl   )]; 
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -1033,7 +1041,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     prims.resize(nzones);
     dt_min.resize(active_zones);
     pressure_guess.resize(nzones);
-    outer_zones.resize(ny);
+    if (d_outer && s1_outer && s2_outer && e_outer) {
+        outer_zones.resize(ny);
+    }
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < nzones; i++)
@@ -1093,8 +1103,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const auto fullP         = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
-    if (t == 0)
-    {
+    if (t == 0) {
         config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc);
     }
 
@@ -1106,7 +1115,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         cons2prim(fullP);
         adapt_dt();
     }
-
+  
     // Save initial condition
     if (t == 0) {
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
@@ -1136,7 +1145,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
             cons2prim(fullP, self, memside);
             config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), reflecting_theta);
         });
-
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(device_self, geometry, activeP, dtShBytes);
         } else {

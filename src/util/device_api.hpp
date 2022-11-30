@@ -127,7 +127,7 @@ namespace simbi
     } // namespace gpu
     
     GPU_CALLABLE_INLINE
-    unsigned int globalThreadIdx_x() {
+    unsigned int globalThreadIdx() {
     if constexpr(BuildPlatform == Platform::GPU)
     	return ( 
                   (blockIdx.z * blockDim.z + threadIdx.z) * blockDim.x * gridDim.x * blockDim.y * gridDim.y
@@ -138,23 +138,9 @@ namespace simbi
     	return 0;
     
     }
-
     GPU_CALLABLE_INLINE
-    unsigned int globalThreadIdx_y() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return threadIdx.y + blockIdx.y * blockDim.y;
-    else
-    	return 0;
-    
-    }
-
-    GPU_CALLABLE_INLINE
-    unsigned int globalThreadIdx_z() {
-    if constexpr(BuildPlatform == Platform::GPU)
-    	return threadIdx.z + blockIdx.z * blockDim.z;
-    else
-    	return 0;
-    
+    unsigned int globalThreadCount() {
+        return blockDim.x * gridDim.x * blockDim.y * gridDim.y * blockDim.z * gridDim.z;
     }
 
     GPU_CALLABLE_INLINE
