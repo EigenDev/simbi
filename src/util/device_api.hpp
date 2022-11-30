@@ -8,6 +8,7 @@
 #include "build_options.hpp"
 #include <string>
 #include <stdexcept>
+#include <omp.h>
 #define NAME_OF(variable) ((decltype(&variable))nullptr, #variable)
 
 namespace simbi
@@ -182,6 +183,16 @@ namespace simbi
             return threadIdx.y;
         } else {
             return 0;
+        }
+    }
+
+    template<Platform P = BuildPlatform>
+    GPU_CALLABLE_INLINE
+    unsigned int get_threadId() {
+        if constexpr(P == Platform::GPU) {
+            return blockDim.x * blockDim.y * threadIdx.z + blockDim.x * threadIdx.y + threadIdx.x;
+        } else {
+            return omp_get_thread_num();
         }
     }
 
