@@ -876,7 +876,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     
     if (t == 0)
     {
-        if (!periodic) config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc);
+        if (!periodic) config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), reflecting_theta);
     }
     const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive) + xblockdim * yblockdim * sizeof(real);
     
@@ -906,7 +906,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         simbi::detail::with_logger(*this, [&](){
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc);
+            if (!periodic) config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), reflecting_theta);
         });
 
         if constexpr(BuildPlatform == Platform::GPU) {
