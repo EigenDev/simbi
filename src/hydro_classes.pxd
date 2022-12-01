@@ -12,7 +12,7 @@ cdef extern from "util/pyobj_wrapper.hpp":
                              # note - doesn't match c++ signature - that's fine!
         
 cdef extern from "build_options.hpp":
-    cdef bool col_maj "CYTHON_COL_MAJOR"
+    cdef bool col_maj "COLUMN_MAJOR"
 
 cdef extern from "common/enums.hpp":
     cdef int FLOAT_PRECISION "FLOAT_PRECISION"
