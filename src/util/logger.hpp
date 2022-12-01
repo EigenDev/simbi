@@ -26,7 +26,10 @@ namespace simbi
                 create_event(tstart);
                 create_event(tstop);
             }
-            ~Timer(){}
+            ~Timer(){
+                destroy_event(tstart);
+                destroy_event(tstop);
+            }
 
             void startTimer() {
                 recordEvent(tstart);
@@ -38,6 +41,14 @@ namespace simbi
                     anyGpuEventCreate(&stamp);
                 }
             }
+
+            template<Platform P = BuildPlatform, typename T>
+            void destroy_event(T &stamp) {
+                if constexpr(P == Platform::GPU) {
+                    anyGpuEventDestroy(stamp);
+                }
+            }
+
             template<typename T>
             void recordEvent(T &stamp) {
                 if constexpr(std::is_same_v<T,std::chrono::high_resolution_clock::time_point>) {
