@@ -6,7 +6,6 @@
 #define DEVICE_API_HPP
 
 #include "build_options.hpp"
-#include <string>
 #include <stdexcept>
 #include <omp.h>
 #define NAME_OF(variable) ((decltype(&variable))nullptr, #variable)

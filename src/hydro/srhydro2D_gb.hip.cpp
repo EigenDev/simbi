@@ -1185,7 +1185,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->mesh_motion  = (hubble_param != 0);
 
     if (x2max == 0.5 * M_PI){
-        this->reflecting_theta = true;
+        this->half_sphere = true;
     }
 
     cons.resize(nzones);
@@ -1314,7 +1314,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 helpers::recordEvent(t1);
                 advance(self, activeP, bx, by, radius, geometry, memside);
                 cons2prim(fullP, self, memside);
-                config_ghosts2D(fullP, self, nx, ny, true, bc, ozones, reflecting_theta);
+                config_ghosts2D(fullP, self, nx, ny, true, bc, ozones, half_sphere);
                 helpers::recordEvent(t2);
                 t += dt; 
                 
@@ -1391,12 +1391,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                 // First Half Step
                 advance(self, activeP, bx, by, radius, geometry, memside);
                 cons2prim(fullP, self, memside);
-                config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, reflecting_theta);
+                config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, half_sphere);
 
                 // Final Half Step
                 advance(self, activeP, bx, by, radius, geometry, memside);
                 cons2prim(fullP, self, memside);
-                config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, reflecting_theta);
+                config_ghosts2D(fullP, self, nx, ny, false, bc, ozones, half_sphere);
                 helpers::recordEvent(t2);
                 t += dt; 
 

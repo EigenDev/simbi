@@ -6,13 +6,14 @@
 #mesondefine TWOD_BLOCK_SIZE
 #mesondefine THREED_BLOCK_SIZE
 #mesondefine FOUR_VELOCITY
-#mesondefine CYTHON_COL_MAJOR
-#include "stdint.h"
-#include <functional>
-#include <chrono>
-#include <csignal>
-#include <cstdlib>
-#include <exception>
+#mesondefine COLUMN_MAJOR
+#include <functional>    // std::function
+#include <chrono>        // high_resolution_clock
+#include <csignal>       // SIGACTION
+#include <exception>     // std::exception
+#include <cmath>         // std::sqrt, std::log10, etc/
+#include <string>        // std::string 
+#include <stdint.h>      // int_type, uint64_t, int64_t
 
 using luint = uint64_t;
 using lint  = int64_t;
@@ -41,7 +42,7 @@ using real = double;
 constexpr real tol_scale = 1e-12;
 #endif 
 
-#if CYTHON_COL_MAJOR 
+#if COLUMN_MAJOR 
 constexpr bool col_maj = true;
 #else 
 constexpr bool col_maj = false;
@@ -60,69 +61,63 @@ constexpr Platform BuildPlatform = Platform::GPU;
 #define GPU_CALLABLE_INLINE            __host__ __device__ inline
 #define GPU_CALLABLE_MEMBER            __host__ __device__
 #define GPU_CALLABLE_INLINE_MEMBER     __host__ __device__ inline
-#define EXTERN_SHARED                  extern __shared__
-#define STATIC_SHARED                  static __shared__
-#define GPU_CAPTURE                    [=, *this]
 
 #if defined(__NVCC__) && !defined(__HIP__)
 #include <cuda_runtime.h>
 #define CUDA_CODE 1
 using simbiStream_t = cudaStream_t;
 constexpr int WARP_SIZE    = 32;
-#define anyGpuMalloc                cudaMalloc
-#define anyGpuMallocManaged         cudaMallocManaged
-#define anyGpuMemcpy                cudaMemcpy
-#define anyGpuFree                  cudaFree
-#define anyGpuMemset                cudaMemset
-#define anyGpuDeviceSynchronize     cudaDeviceSynchronize
-#define anyGpuMemcpyHostToDevice    cudaMemcpyHostToDevice
-#define anyGpuMemcpyDeviceToDevice  cudaMemcpyDeviceToDevice
-#define anyGpuMemcpyDeviceToHost    cudaMemcpyDeviceToHost
-#define anyGpuGetErrorString        cudaGetErrorString
-#define anyGpuError_t               cudaError_t
-#define anyGpuEvent_t               cudaEvent_t 
-#define anyGpuEventCreate           cudaEventCreate
-#define anyGpuEventRecord           cudaEventRecord 
-#define anyGpuEventSynchronize      cudaEventSynchronize 
-#define anyGpuEventElapsedTime      cudaEventElapsedTime
-#define anyGpuProp_t                cudaDeviceProp
-#define anyGpuGetDeviceProperties   cudaGetDeviceProperties
-#define anyGpuGetDeviceCount        cudaGetDeviceCount
+#define anyGpuMalloc                 cudaMalloc
+#define anyGpuMallocManaged          cudaMallocManaged
+#define anyGpuMemcpy                 cudaMemcpy
+#define anyGpuFree                   cudaFree
+#define anyGpuMemset                 cudaMemset
+#define anyGpuDeviceSynchronize      cudaDeviceSynchronize
+#define anyGpuMemcpyHostToDevice     cudaMemcpyHostToDevice
+#define anyGpuMemcpyDeviceToDevice   cudaMemcpyDeviceToDevice
+#define anyGpuMemcpyDeviceToHost     cudaMemcpyDeviceToHost
+#define anyGpuGetErrorString         cudaGetErrorString
+#define anyGpuError_t                cudaError_t
+#define anyGpuEvent_t                cudaEvent_t
+#define anyGpuEventCreate            cudaEventCreate
+#define anyGpuEventDestroy           cudaEventDestroy
+#define anyGpuEventRecord            cudaEventRecord 
+#define anyGpuEventSynchronize       cudaEventSynchronize 
+#define anyGpuEventElapsedTime       cudaEventElapsedTime
+#define anyGpuProp_t                 cudaDeviceProp
+#define anyGpuGetDeviceProperties    cudaGetDeviceProperties
+#define anyGpuGetDeviceCount         cudaGetDeviceCount
 #else 
 #include "hip/hip_runtime.h"
 #define HIP_CODE 1
 using simbiStream_t = hipStream_t;
 constexpr int WARP_SIZE    = 64;
-#define anyGpuMalloc                hipMalloc
-#define anyGpuMallocManaged         hipMallocManaged
-#define anyGpuMemcpy                hipMemcpy
-#define anyGpuFree                  hipFree
-#define anyGpuMemset                hipMemset
-#define anyGpuMemcpyHostToDevice    hipMemcpyHostToDevice
-#define anyGpuMemcpyDeviceToDevice  hipMemcpyDeviceToDevice
-#define anyGpuMemcpyDeviceToHost    hipMemcpyDeviceToHost
-#define anyGpuDeviceSynchronize     hipDeviceSynchronize
-#define anyGpuGetErrorString        hipGetErrorString
-#define anyGpuError_t               hipError_t
-#define anyGpuEvent_t               hipEvent_t 
-#define anyGpuEventCreate           hipEventCreate
-#define anyGpuEventRecord           hipEventRecord 
-#define anyGpuEventSynchronize      hipEventSynchronize 
-#define anyGpuEventElapsedTime      hipEventElapsedTime
-#define anyGpuProp_t                hipDeviceProp_t
-#define anyGpuGetDeviceProperties   hipGetDeviceProperties
-#define anyGpuGetDeviceCount        hipGetDeviceCount
+#define anyGpuMalloc                 hipMalloc
+#define anyGpuMallocManaged          hipMallocManaged
+#define anyGpuMemcpy                 hipMemcpy
+#define anyGpuFree                   hipFree
+#define anyGpuMemset                 hipMemset
+#define anyGpuDeviceSynchronize      hipDeviceSynchronize
+#define anyGpuMemcpyHostToDevice     hipMemcpyHostToDevice
+#define anyGpuMemcpyDeviceToDevice   hipMemcpyDeviceToDevice
+#define anyGpuMemcpyDeviceToHost     hipMemcpyDeviceToHost
+#define anyGpuGetErrorString         hipGetErrorString
+#define anyGpuError_t                hipError_t
+#define anyGpuEvent_t                hipEvent_t
+#define anyGpuEventCreate            hipEventCreate
+#define anyGpuEventDestroy           hipEventDestroy
+#define anyGpuEventRecord            hipEventRecord 
+#define anyGpuEventSynchronize       hipEventSynchronize 
+#define anyGpuEventElapsedTime       hipEventElapsedTime
+#define anyGpuProp_t                 hipDeviceProp
+#define anyGpuGetDeviceProperties    hipGetDeviceProperties
+#define anyGpuGetDeviceCount         hipGetDeviceCount
 #endif
 #else
 constexpr int WARP_SIZE = 32;
 #define GPU_CODE 0
 #define CUDA_CODE 0
 #define HIP_CODE 0
-#include <cmath>
-#include <cstring>
-#include <string>
-#include <stdint.h>
-#include <stdexcept>
 constexpr Platform BuildPlatform = Platform::CPU;
 
 #define GPU_DEV                         
@@ -134,9 +129,7 @@ constexpr Platform BuildPlatform = Platform::CPU;
 #define GPU_CALLABLE_INLINE_MEMBER   inline
 #define GPU_DEV_INLINE               inline 
 #define __shared__                   static
-#define GPU_SHARED_DYN               extern __shared__
-#define GPU_CAPTURE                  [this]
-#define STATIC_SHARED                static
+
 // Define a bunch of ghost functions to make the compiler
 // happy and avoid a bunch if #ifdefs throughout code
 // Don't get too mad at me... I'm a physicist, not a programmer :-)
@@ -199,6 +192,10 @@ namespace simbi {
         return 0;
     }
 
+    inline int anyGpuEventDestroy(anyGpuEvent_t *a) {
+        return 0;
+    }
+
     inline int anyGpuEventRecord(anyGpuEvent_t a) {
         return 0;
     }
@@ -216,13 +213,7 @@ namespace simbi {
     template <typename T>
     inline std::string anyGpuGetErrorString(T) { return std::string("nothing odd here.");}
 } // end simbi
-
 using namespace simbi;
-
 #endif
-// #if FLOAT_PRECISION
-// const auto sqrt = sqrtf;
-// #else 
-// const auto sqrt = static_cast<double(*)(const double)>(std::sqrt);
-// #endif
+
 #endif

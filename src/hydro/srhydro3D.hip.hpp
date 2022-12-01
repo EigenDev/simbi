@@ -8,7 +8,6 @@
 #define SRHYDRO3D_HIP_HPP
 
 #include <vector>
-#include <string>
 #include "common/hydro_structs.hpp"
 #include "common/clattice3D.hpp"
 #include "common/helpers.hpp"

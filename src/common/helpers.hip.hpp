@@ -94,7 +94,7 @@ namespace simbi
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
         const sr2d::Conserved *outer_zones = nullptr,
-        const bool reflecting_theta = true);
+        const bool half_sphere = true);
 
     void config_ghosts2D(
         const ExecutionPolicy<> p,
@@ -104,7 +104,7 @@ namespace simbi
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
         const hydro2d::Conserved *outer_zones = nullptr,
-        const bool reflecting_theta = true);
+        const bool half_sphere = true);
 
     void config_ghosts3D(
         const ExecutionPolicy<> p,
@@ -114,7 +114,7 @@ namespace simbi
         const int x3grid_size,  
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
-        const bool reflecting_theta = true);
+        const bool half_sphere = true);
 
     inline GPU_DEV real warpReduceMin(real val) {
         #if CUDA_CODE
@@ -137,7 +137,7 @@ namespace simbi
 
     inline GPU_DEV real blockReduceMin(real val) {
         #if GPU_CODE
-        STATIC_SHARED real shared[WARP_SIZE]; // Shared mem for 32 (Nvidia) / 64 (AMD) partial mins
+        __shared__ real shared[WARP_SIZE]; // Shared mem for 32 (Nvidia) / 64 (AMD) partial mins
         const int tid = threadIdx.z * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
         const int bsz = blockDim.x * blockDim.y * blockDim.z;
         int lane      = tid % WARP_SIZE;

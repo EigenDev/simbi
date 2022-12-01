@@ -1042,7 +1042,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->mesh_motion  = (hubble_param != 0);
 
     if (x2max == 0.5 * M_PI){
-        this->reflecting_theta = true;
+        this->half_sphere = true;
     }
 
     // Write some info about the setup for writeup later

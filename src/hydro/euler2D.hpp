@@ -8,7 +8,6 @@
 #define EULER2D_HPP
 
 #include <vector>
-#include <string>
 #include "util/exec_policy.hpp"
 #include "common/hydro_structs.hpp"
 #include "common/clattice2D.hpp"

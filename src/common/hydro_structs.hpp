@@ -8,7 +8,6 @@
 #define HYDRO_STRUCTS_HPP 
 
 #include <vector>
-#include <string>
 #include "enums.hpp"
 #include "build_options.hpp"
 //---------------------------------------------------------------------------------------------------------

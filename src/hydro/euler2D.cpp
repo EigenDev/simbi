@@ -800,7 +800,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->mesh_motion  = (hubble_param != 0);
 
     if (x2max == 0.5 * M_PI){
-        this->reflecting_theta = true;
+        this->half_sphere = true;
     }
     // Write some info about the setup for writeup later
     setup.x1max          = x1[xphysical_grid - 1];
@@ -876,7 +876,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     
     if (t == 0)
     {
-        if (!periodic) config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), reflecting_theta);
+        if (!periodic) config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
     }
     const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive) + xblockdim * yblockdim * sizeof(real);
     
@@ -906,7 +906,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         simbi::detail::with_logger(*this, [&](){
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), reflecting_theta);
+            if (!periodic) config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
         });
 
         if constexpr(BuildPlatform == Platform::GPU) {

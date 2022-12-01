@@ -8,7 +8,6 @@
 #ifndef SRHYDRO1D_HIP_HPP
 #define SRHYDRO1D_HIP_HPP
 
-#include <string>
 #include <vector>
 #include "common/helpers.hpp"
 #include "common/clattice1D.hpp"
