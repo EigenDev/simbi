@@ -334,7 +334,7 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                     const real xr         = self->get_xface(idx, self->geometry, 1);
                     const real xmean      = helpers::calc_any_mean(xl, xr, self->x1cell_spacing);
                     printf("\nCons2Prim cannot converge\n");
-                    printf("Density: %.3e, Pressure: %.3e, vsq: %.3e, coord: %.2e\n", rho, peq, v2, xmean);
+                    printf("density: %.3e, pressure: %.3e, vsq: %.3e, coord: %.2e, iter: %d\n", rho, peq, v2, xmean, iter);
                     self->dt             = INFINITY;
                     self->inFailureState = true;
                     found_failure        = true;
@@ -703,7 +703,9 @@ SRHD::simulate1D(
     prims.resize(nx);
     pressure_guess.resize(nx);
     dt_min.resize(active_zones);
-    outer_zones.resize(2);
+    if (mesh_motion) {
+        outer_zones.resize(2);
+    }
     // Copy the state array into real & profile variables
     for (luint ii = 0; ii < nx; ii++) {
         cons[ii] = Conserved{state[0][ii], state[1][ii], state[2][ii]};
