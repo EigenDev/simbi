@@ -139,7 +139,7 @@ namespace simbi{
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
         const sr2d::Conserved *outer_zones,
-        const bool reflecting_theta)
+        const bool half_sphere)
     {
         const int extent = (BuildPlatform == Platform::GPU) ? p.gridSize.x * p.blockSize.x * p.gridSize.y * p.blockSize.y : x1grid_size * x2grid_size; 
         const int sx     = (col_maj) ? 1 : x1grid_size;
@@ -147,87 +147,72 @@ namespace simbi{
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
             const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % x1grid_size;
             const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / x1grid_size;
+
+            const int sx = (col_maj) ? 1 : x1grid_size;
+            const int sy = (col_maj) ? x2grid_size : 1;
             if (first_order){
-                if(jj < x2grid_size)
-                {
+                if(jj < x2grid_size - 2) {
                     // Fix the ghost zones at the radial boundaries
-                    if (outer_zones) {
-                        cons[jj * sx +  (x1grid_size - 1) * sy] = outer_zones[jj];
-                    } else {
-                        cons[jj * sx +  (x1grid_size - 1) * sy] = cons[jj * sx +  (x1grid_size - 2) * sy];
-                    }
-                    
-                    cons[jj * sx +  0 * sy]   = cons[jj * sx +  1 * sy];
+                    cons[(jj + 1) * sx +  (x1grid_size - 1) * sy] = cons[(jj + 1) * sx +  (x1grid_size - 2) * sy];
+                    cons[(jj + 1) * sx +  0 * sy]   = cons[(jj + 1) * sx +  1 * sy];
                     switch (boundary_condition)
                     {
                     case simbi::BoundaryCondition::REFLECTING:
-                        cons[jj * sx + 0 * sy].s1 = - cons[jj * sx + 1 * sy].s1;
+                        cons[(jj + 1) * sx + 0 * sy].s1 = - cons[(jj + 1) * sx + 1 * sy].s1;
                         break;
                     case simbi::BoundaryCondition::INFLOW:
-                        cons[jj * sx + 0 * sy].s1 = - cons[jj * sx + 1 * sy].s1;
+                        cons[(jj + 1) * sx + 0 * sy].s1 = - cons[(jj + 1) * sx + 1 * sy].s1;
                         break;
                     default:
-                        cons[jj * sx +  0 * sy]   = cons[jj * sx +  1 * sy];
                         break;
-                    }
-
-                    // Fix the ghost zones at the angular boundaries
-                    if (ii < x1grid_size){
-                        cons[0 * sx + ii * sy]  = cons[1 * sx + ii * sy];
-                        cons[(x2grid_size - 1) * sx + ii * sy] = cons[(x2grid_size - 2) * sx + ii * sy];
-
-                        if (reflecting_theta)
-                        {
-                            cons[(x2grid_size - 1) * sx + ii * sy].s2 = - cons[(x2grid_size - 2) * sx + ii * sy].s2;
-                        }
                     }
                 }
+                // Fix the ghost zones at the angular boundaries
+                if (ii < x1grid_size - 2) {
+                    cons[0 * sx + (ii + 1) * sy]  = cons[1 * sx + (ii + 1) * sy];
+                    cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
+                }
+
             } else {
-                if(jj < x2grid_size)
-                {
+                if(jj < x2grid_size - 4) {
                     // Fix the ghost zones at the radial boundaries
-                    if (outer_zones) {
-                        cons[jj * sx +  (x1grid_size - 1) * sy] = outer_zones[jj];
-                        cons[jj * sx +  (x1grid_size - 2) * sy] = outer_zones[jj];
-                    } else {
-                        cons[jj * sx +  (x1grid_size - 1) * sy] = cons[jj * sx +  (x1grid_size - 3) * sy];
-                        cons[jj * sx +  (x1grid_size - 2) * sy] = cons[jj * sx +  (x1grid_size - 3) * sy];
-                    }
+                    cons[(jj + 2) * sx +  (x1grid_size - 1) * sy] = cons[(jj + 2) * sx +  (x1grid_size - 3) * sy];
+                    cons[(jj + 2) * sx +  (x1grid_size - 2) * sy] = cons[(jj + 2) * sx +  (x1grid_size - 3) * sy];
                     switch (boundary_condition)
                     {
                     case simbi::BoundaryCondition::REFLECTING:
-                        cons[jj * sx +  0 * sy]   = cons[jj * sx +  3 * sy];
-                        cons[jj * sx +  1 * sy]   = cons[jj * sx +  2 * sy];
+                        cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  3 * sy];
+                        cons[(jj + 2) * sx +  1 * sy]   = cons[(jj + 2) * sx +  2 * sy];
 
-                        cons[jj * sx + 0 * sy].s1 = - cons[jj * sx + 3 * sy].s1;
-                        cons[jj * sx + 1 * sy].s1 = - cons[jj * sx + 2 * sy].s1;
+                        cons[(jj + 2) * sx + 0 * sy].s1 = - cons[(jj + 2) * sx + 3 * sy].s1;
+                        cons[(jj + 2) * sx + 1 * sy].s1 = - cons[(jj + 2) * sx + 2 * sy].s1;
                         break;
                     case simbi::BoundaryCondition::INFLOW:
-                        cons[jj * sx +  0 * sy]   = cons[jj * sx +  2 * sy];
-                        cons[jj * sx +  1 * sy]   = cons[jj * sx +  2 * sy];
+                        cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  2 * sy];
+                        cons[(jj + 2) * sx +  1 * sy]   = cons[(jj + 2) * sx +  2 * sy];
 
-                        cons[jj * sx + 0 * sy].s1 = - cons[jj * sx + 2 * sy].s1;
-                        cons[jj * sx + 1 * sy].s1 = - cons[jj * sx + 2 * sy].s1;
+                        cons[(jj + 2) * sx + 0 * sy].s1 = - cons[(jj + 2) * sx + 2 * sy].s1;
+                        cons[(jj + 2) * sx + 1 * sy].s1 = - cons[(jj + 2) * sx + 2 * sy].s1;
                         break;
                     default:
-                        cons[jj * sx +  0 * sy]   = cons[jj * sx +  2 * sy];
-                        cons[jj * sx +  1 * sy]   = cons[jj * sx +  2 * sy];
+                        cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  2 * sy];
+                        cons[(jj + 2) * sx +  1 * sy]   = cons[(jj + 2) * sx +  2 * sy];
                         break;
                     }
+                }
 
-                    // Fix the ghost zones at the angular boundaries
-                    if (ii < x1grid_size){
-                        cons[0 * sx + (ii + 0) * sy]  = cons[3 * sx + (ii + 0) * sy];
-                        cons[1 * sx + (ii + 0) * sy]  = cons[2 * sx + (ii + 0) * sy];
+                // Fix the ghost zones at the angular boundaries
+                if (ii < x1grid_size - 4) {
+                        cons[0 * sx + (ii + 2) * sy]  = cons[3 * sx + (ii + 2) * sy];
+                        cons[1 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
 
-                        cons[(x2grid_size - 1) * sx + ii * sy] = cons[(x2grid_size - 4) * sx + ii * sy];
-                        cons[(x2grid_size - 2) * sx + ii * sy] = cons[(x2grid_size - 3) * sx + ii * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 2) * sy] = cons[(x2grid_size - 4) * sx + (ii + 2) * sy];
+                        cons[(x2grid_size - 2) * sx + (ii + 2) * sy] = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
 
-                        if (reflecting_theta) {
-                            cons[(x2grid_size - 1) * sx + ii * sy].s2 = - cons[(x2grid_size - 4) * sx + ii * sy].s2;
-                            cons[(x2grid_size - 2) * sx + ii * sy].s2 = - cons[(x2grid_size - 3) * sx + ii * sy].s2;
+                        if (half_sphere) {
+                            cons[(x2grid_size - 1) * sx + (ii + 2) * sy].s2 = - cons[(x2grid_size - 4) * sx + (ii + 2) * sy].s2;
+                            cons[(x2grid_size - 2) * sx + (ii + 2) * sy].s2 = - cons[(x2grid_size - 3) * sx + (ii + 2) * sy].s2;
                         }
-                    }
                 }
             }
         });
@@ -241,7 +226,7 @@ namespace simbi{
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
         const hydro2d::Conserved *outer_zones,
-        const bool reflecting_theta)
+        const bool half_sphere)
     {
         const int extent = (BuildPlatform == Platform::GPU) ? p.gridSize.x * p.blockSize.x * p.gridSize.y * p.blockSize.y : x1grid_size * x2grid_size; 
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
@@ -251,83 +236,71 @@ namespace simbi{
             const int sx = (col_maj) ? 1 : x1grid_size;
             const int sy = (col_maj) ? x2grid_size : 1;
             if (first_order){
-                if(jj < x2grid_size)
-                {
+                if(jj < x2grid_size - 2) {
                     // Fix the ghost zones at the radial boundaries
-                    cons[jj * sx +  (x1grid_size - 1) * sy] = cons[jj * sx +  (x1grid_size - 2) * sy];
-                    cons[jj * sx +  0 * sy]   = cons[jj * sx +  1 * sy];
+                    cons[(jj + 1) * sx +  (x1grid_size - 1) * sy] = cons[(jj + 1) * sx +  (x1grid_size - 2) * sy];
+                    cons[(jj + 1) * sx +  0 * sy]   = cons[(jj + 1) * sx +  1 * sy];
                     switch (boundary_condition)
                     {
                     case simbi::BoundaryCondition::REFLECTING:
-                        cons[jj * sx + 0 * sy].m1 = - cons[jj * sx + 1 * sy].m1;
+                        cons[(jj + 1) * sx + 0 * sy].m1 = - cons[(jj + 1) * sx + 1 * sy].m1;
                         break;
                     case simbi::BoundaryCondition::INFLOW:
-                        cons[jj * sx + 0 * sy].m1 = - cons[jj * sx + 1 * sy].m1;
+                        cons[(jj + 1) * sx + 0 * sy].m1 = - cons[(jj + 1) * sx + 1 * sy].m1;
                         break;
                     default:
                         break;
                     }
-
-                    // Fix the ghost zones at the angular boundaries
-                    if (ii < x1grid_size){
-                        cons[0 * sx + ii * sy]  = cons[1 * sx + ii * sy];
-                        cons[(x2grid_size - 1) * sx + ii * sy] = cons[(x2grid_size - 2) * sx + ii * sy];
-                    }
+                }
+                // Fix the ghost zones at the angular boundaries
+                if (ii < x1grid_size - 2) {
+                    cons[0 * sx + (ii + 1) * sy]  = cons[1 * sx + (ii + 1) * sy];
+                    cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
                 }
 
             } else {
-                if(jj < x2grid_size)
-                {
+                if(jj < x2grid_size - 4) {
                     // Fix the ghost zones at the radial boundaries
-                    cons[jj * sx +  (x1grid_size - 1) * sy] = cons[jj * sx +  (x1grid_size - 3) * sy];
-                    cons[jj * sx +  (x1grid_size - 2) * sy] = cons[jj * sx +  (x1grid_size - 3) * sy];
-                    switch (boundary_condition)
-                    {
+                    cons[(jj + 2) * sx +  (x1grid_size - 1) * sy] = cons[(jj + 2) * sx +  (x1grid_size - 3) * sy];
+                    cons[(jj + 2) * sx +  (x1grid_size - 2) * sy] = cons[(jj + 2) * sx +  (x1grid_size - 3) * sy];
+                    switch (boundary_condition) {
                     case simbi::BoundaryCondition::REFLECTING:
-                        cons[jj * sx +  0 * sy]   = cons[jj * sx +  3 * sy];
-                        cons[jj * sx +  1 * sy]   = cons[jj * sx +  2 * sy];
+                        cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  3 * sy];
+                        cons[(jj + 2) * sx +  1 * sy]   = cons[(jj + 2) * sx +  2 * sy];
 
-                        cons[jj * sx + 0 * sy].m1 = - cons[jj * sx + 3 * sy].m1;
-                        cons[jj * sx + 1 * sy].m1 = - cons[jj * sx + 2 * sy].m1;
+                        cons[(jj + 2) * sx + 0 * sy].m1 = - cons[(jj + 2) * sx + 3 * sy].m1;
+                        cons[(jj + 2) * sx + 1 * sy].m1 = - cons[(jj + 2) * sx + 2 * sy].m1;
                         break;
                     case simbi::BoundaryCondition::INFLOW:
-                        cons[jj * sx +  0 * sy]   = cons[jj * sx +  2 * sy];
-                        cons[jj * sx +  1 * sy]   = cons[jj * sx +  2 * sy];
+                        cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  2 * sy];
+                        cons[(jj + 2) * sx +  1 * sy]   = cons[(jj + 2) * sx +  2 * sy];
 
-                        cons[jj * sx + 0 * sy].m1 = - cons[jj * sx + 2 * sy].m1;
-                        cons[jj * sx + 1 * sy].m1 = - cons[jj * sx + 2 * sy].m1;
+                        cons[(jj + 2) * sx + 0 * sy].m1 = - cons[(jj + 2) * sx + 2 * sy].m1;
+                        cons[(jj + 2) * sx + 1 * sy].m1 = - cons[(jj + 2) * sx + 2 * sy].m1;
                         break;
                     default:
-                        cons[jj * sx +  0 * sy]   = cons[jj * sx +  2 * sy];
-                        cons[jj * sx +  1 * sy]   = cons[jj * sx +  2 * sy];
+                        cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  2 * sy];
+                        cons[(jj + 2) * sx +  1 * sy]   = cons[(jj + 2) * sx +  2 * sy];
                         break;
                     }
+                }
 
-                    // Fix the ghost zones at the angular boundaries
-                    if (ii < x1grid_size) {
-                        cons[0 * sx + ii * sy]  = cons[3 * sx + ii * sy];
-                        cons[1 * sx + ii * sy]  = cons[2 * sx + ii * sy];
+                // Fix the ghost zones at the angular boundaries
+                if (ii < x1grid_size - 4) {
+                        cons[0 * sx + (ii + 2) * sy]  = cons[3 * sx + (ii + 2) * sy];
+                        cons[1 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
 
-                        cons[(x2grid_size - 1) * sx + ii * sy] = cons[(x2grid_size - 4) * sx + ii * sy];
-                        cons[(x2grid_size - 2) * sx + ii * sy] = cons[(x2grid_size - 3) * sx + ii * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 2) * sy] = cons[(x2grid_size - 4) * sx + (ii + 2) * sy];
+                        cons[(x2grid_size - 2) * sx + (ii + 2) * sy] = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
 
-                        if (reflecting_theta)
-                        {
-                            cons[(x2grid_size - 1) * sx + ii * sy].m2 = - cons[(x2grid_size - 4) * sx + ii * sy].m2;
-                            cons[(x2grid_size - 2) * sx + ii * sy].m2 = - cons[(x2grid_size - 3) * sx + ii * sy].m2;
+                        if (half_sphere) {
+                            cons[(x2grid_size - 1) * sx + (ii + 2) * sy].m2 = - cons[(x2grid_size - 4) * sx + (ii + 2) * sy].m2;
+                            cons[(x2grid_size - 2) * sx + (ii + 2) * sy].m2 = - cons[(x2grid_size - 3) * sx + (ii + 2) * sy].m2;
                         }
-                    }
                 }
             }
         });
     };
-
-
-
-
-
-
-
 
     //============================================
     //                  3D
@@ -341,7 +314,7 @@ namespace simbi{
         const int x3grid_size, 
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
-        const bool reflecting_theta)
+        const bool half_sphere)
     {
         const int extent = (BuildPlatform == Platform::GPU) ? 
                             p.gridSize.z * p.gridSize.y * p.gridSize.x * p.blockSize.z * p.blockSize.y * p.blockSize.x 
