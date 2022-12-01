@@ -692,8 +692,8 @@ void SRHD2D::advance(
         auto *const prim_buff = prim_data;
         #endif 
 
-        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : idx % xpg;
-        const luint jj  = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : idx / xpg;
+        const luint ii  = (BuildPlatform == Platform::GPU) ? get_ii_in2D() : idx % xpg;
+        const luint jj  = (BuildPlatform == Platform::GPU) ? get_jj_in2D() : idx / xpg;
         #if GPU_CODE 
         if ((ii >= max_ii) || (jj >= max_jj)) return;
         #endif
@@ -709,7 +709,7 @@ void SRHD2D::advance(
         Conserved fL, fR, gL, gR, frf, flf, grf, glf;
         Primitive xprimsL, xprimsR, yprimsL, yprimsR;
 
-        const lint aid = get_2d_idx(ia, ja, nx, ny); //(col_maj) ? ia * ny + ja : ja * nx + ia;
+        const lint aid = get_2d_idx(ia, ja, nx, ny); 
         // Load Shared memory into buffer for active zones plus ghosts
         #if GPU_CODE
             luint txl = xextent;
@@ -1035,7 +1035,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->mesh_motion  = (hubble_param != 0);
 
     if (x2max == 0.5 * M_PI){
-        this->reflecting_theta = true;
+        this->half_sphere = true;
     }
 
     cons.resize(nzones);
@@ -1105,9 +1105,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
     if (t == 0) {
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc);
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
     }
-
+    
     const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive);
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP, device_self, simbi::MemSide::Dev);
@@ -1144,7 +1144,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         simbi::detail::with_logger(*this, [&](){
             advance(self, activeP, bx, by, radius, geometry, memside);
             cons2prim(fullP, self, memside);
-            config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), reflecting_theta);
+            config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
         });
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(device_self, geometry, activeP, dtShBytes);
