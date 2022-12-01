@@ -81,3 +81,7 @@ class SedovTaylor(BaseConfig):
     @property
     def use_hllc_solver(self) -> bool:
         return True
+    
+    @property
+    def boundary_condition(self) -> str:
+        return "reflecting"
