@@ -13,6 +13,12 @@ namespace simbi
             static luint ncheck  = 0;
             static real  zu_avg  = 0.0;
             static real delta_t  = 0.0;
+
+            inline void print_avg_speed() {
+                if (ncheck > 0) {
+                    util::writeln("Average zone update/sec for {:>5} iterations was {:>5.2e} zones/sec", n, zu_avg / ncheck);
+                }
+            }
         };
 
         class Timer
@@ -102,10 +108,10 @@ namespace simbi
                     zu_avg += sim_state.total_zones / delta_t;
                     if constexpr(BuildPlatform == Platform::GPU) {
                         const real gpu_emperical_bw = getFlops<conserved_t, primitive_t>(sim_state.pseudo_radius, sim_state.total_zones, sim_state.active_zones, delta_t);
-                        util::writefl("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", 
+                        util::writefl<Color::CYAN>("\riteration:{:>06} dt:{:>08.2e} time:{:>08.2e} zones/sec:{:>08.2e} ebw(%):{:>04.2f}", 
                         n, sim_state.dt, sim_state.t, sim_state.total_zones/delta_t, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
                     } else {
-                        util::writefl("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, sim_state.dt, sim_state.t, sim_state.total_zones/delta_t);
+                        util::writefl<Color::CYAN>("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, sim_state.dt, sim_state.t, sim_state.total_zones/delta_t);
                     }
                     nfold += 100;
                 }

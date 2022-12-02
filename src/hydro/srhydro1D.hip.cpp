@@ -778,9 +778,7 @@ SRHD::simulate1D(
             }
         }
     }
-    if (detail::logger::ncheck > 0) {
-        writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", detail::logger::n, detail::logger::zu_avg/ detail::logger::ncheck);
-    }
+    detail::logger::print_avg_speed();
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
     for (luint ii = 0; ii < nx; ii++) {

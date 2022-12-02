@@ -3,7 +3,7 @@ namespace simbi
 {
     namespace util
     {
-        template <typename ...ARGS>
+        template <Color C, typename ...ARGS>
         void write (std::string const & fmt, ARGS... args) {
                 const std::string argss[] = {[](const auto &x){
                         std::stringstream ss;
@@ -125,20 +125,20 @@ namespace simbi
                         }
                     } else {
                         width_str = "";
-                        std::cout << ch;
+                        std::cout << color_map.at(C) << ch << color_map.at(Color::RESET);
                     }
                     cidx++;
                 }
         }
 
-        template <typename ...ARGS> void writeln(std::string const & fmt, ARGS... args) {
+        template <Color C, typename ...ARGS> void writeln(std::string const & fmt, ARGS... args) {
                 std::cout << "\n";
-                write(fmt, args...);
+                write<C>(fmt, args...);
                 std::cout << '\n';
         }
 
-        template <typename ...ARGS> void writefl(std::string const & fmt, ARGS... args) {
-                write(fmt, args...);
+        template <Color C, typename ...ARGS> void writefl(std::string const & fmt, ARGS... args) {
+                write<C>(fmt, args...);
                 std::cout << std::flush;
         }
     } // namespace util

@@ -915,10 +915,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
             adapt_dt();
         }
     }
+    detail::logger::print_avg_speed();
     
-    if (detail::logger::ncheck > 0) {
-        writeln("Average zone update/sec for:{:>5} iterations was {:>5.2e} zones/sec", detail::logger::n, detail::logger::zu_avg/ detail::logger::ncheck);
-    }
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
     for (luint ii = 0; ii < nzones; ii++) {
         final_prims[0][ii] = prims[ii].rho;
