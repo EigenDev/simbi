@@ -268,7 +268,6 @@ void SRHD3D::adapt_dt()
                 const auto x2r     = get_x2face(jj, 1);
                 const auto dx2     = x2r - x2l; 
                 const auto shift_j = jj + idx_active;
-                const auto sint    = std::sin(x2[jj]);
                 #pragma omp for nowait schedule(static) reduction(min:min_dt)
                 for (luint ii = 0; ii < xphysical_grid; ii++)
                 {
@@ -305,17 +304,14 @@ void SRHD3D::adapt_dt()
                     case simbi::Geometry::SPHERICAL:
                         {
                             const auto rmean = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l *x1l);
+                            const real th    = static_cast<real>(0.5) * (x2r + x2l);
+                            const auto sint  = std::sin(th);
                             const auto rproj = rmean * sint;
                             // At either pole, we are just in the r,theta plane
-                            if (rproj == 0) 
-                                cfl_dt = std::min(
-                                            {       dx1 / (std::max(std::abs(plus_v1), std::abs(minus_v1))),
-                                            rmean * dx2 / (std::max(std::abs(plus_v2), std::abs(minus_v2)))});
-                            else
-                                cfl_dt = std::min(
-                                            {       dx1 / (std::max(std::abs(plus_v1), std::abs(minus_v1))),
-                                            rmean * dx2 / (std::max(std::abs(plus_v2), std::abs(minus_v2))),
-                                            rproj * dx3 / (std::max(std::abs(plus_v3), std::abs(minus_v3)))});
+                            cfl_dt = std::min(
+                                        {       dx1 / (std::max(std::abs(plus_v1), std::abs(minus_v1))),
+                                        rmean * dx2 / (std::max(std::abs(plus_v2), std::abs(minus_v2))),
+                                        rproj * dx3 / (std::max(std::abs(plus_v3), std::abs(minus_v3)))});
                             break;
                         }
                     case simbi::Geometry::CYLINDRICAL:

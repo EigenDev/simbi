@@ -281,11 +281,11 @@ namespace simbi{
                 case simbi::Geometry::SPHERICAL:
                 {    
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl           = helpers::my_max(rmin * std::pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
+                    const real rl           = helpers::my_max(rmin * std::pow(10, (ii - static_cast<real>(0.5)) * dx1), rmin);
                     const real rr           = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
                     const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                     const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                    const real ql           = helpers::my_max(x3min + (kk - static_cast<real>(0.5)) * dx3, x3min);
+                    const real ql           = helpers::my_max(x3min + dx3 * (kk - static_cast<real>(0.5)), x3min);
                     const real qr           = helpers::my_min(ql + dx3 * (kk == 0 ? 0.5 : 1.0), x3max); 
                     const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
                     const real th           = static_cast<real>(0.5) * (tl + tr);
