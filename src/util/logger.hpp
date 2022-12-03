@@ -7,20 +7,6 @@ namespace simbi
 {
     namespace detail
     {
-        namespace logger {
-            static luint n       = 0;
-            static luint nfold   = 0;
-            static luint ncheck  = 0;
-            static real  zu_avg  = 0.0;
-            static real delta_t  = 0.0;
-
-            inline void print_avg_speed() {
-                if (ncheck > 0) {
-                    util::writeln("Average zone update/sec for {:>5} iterations was {:>5.2e} zones/sec", n, zu_avg / ncheck);
-                }
-            }
-        };
-
         class Timer
         {
             using time_type     = std::conditional_t<BuildPlatform == Platform::GPU, anyGpuEvent_t, std::chrono::high_resolution_clock::time_point>;
@@ -82,59 +68,93 @@ namespace simbi
             }
         };
 
-        template <typename sim_state_t, typename F>
-        void with_logger(sim_state_t &sim_state, F &&f) {
-            using conserved_t = typename sim_state_t::conserved_t;
-            using primitive_t = typename sim_state_t::primitive_t;
-            constexpr auto write2file = helpers::write_to_file<typename sim_state_t::primitive_soa_t, sim_state_t::dimensions, sim_state_t>;
+        namespace logger {
+            struct Logger {
+                static int n;
+                static real  speed;
+                static int nfold;
+                static int ncheck;
+                static real  zu_avg;
+                static real delta_t;
+            };
+
+            inline int   Logger::n       = 0;
+            inline real  Logger::speed   = 0;
+            inline int   Logger::nfold   = 100;
+            inline int   Logger::ncheck  = 0;
+            inline real  Logger::zu_avg  = 0;
+            inline real  Logger::delta_t = 0;
+
             
-             // Some benchmarking tools 
-            using namespace logger;
-            static auto timer    = Timer();
-            try {
-                if (sim_state.first_order) {
-                    timer.startTimer();
-                    f();
-                    delta_t = timer.get_duration();
-                } else {
-                    timer.startTimer();
-                    f();
-                    f();
-                    delta_t = timer.get_duration();
-                }
-                sim_state.t += sim_state.dt;
-                if (n >= nfold){
+            template <typename sim_state_t, typename F>
+            void with_logger(sim_state_t &sim_state, F &&f) {
+                using conserved_t = typename sim_state_t::conserved_t;
+                using primitive_t = typename sim_state_t::primitive_t;
+                auto&n       = Logger::n;
+                auto&speed   = Logger::speed;
+                auto&nfold   = Logger::nfold;
+                auto&ncheck  = Logger::ncheck;
+                auto&zu_avg  = Logger::zu_avg;
+                auto&delta_t = Logger::delta_t;
+                constexpr auto write2file = helpers::write_to_file<typename sim_state_t::primitive_soa_t, sim_state_t::dimensions, sim_state_t>;
+                int fold_count = 0;
+                static auto timer = Timer();
+                try {
+                    if (sim_state.first_order) {
+                        timer.startTimer();
+                        do
+                        {
+                            f();
+                            fold_count++;
+                        } while (fold_count < nfold && sim_state.t < sim_state.t_interval);
+                        delta_t = timer.get_duration();
+                    } else {
+                        timer.startTimer();
+                        do
+                        {
+                            f();
+                            f();
+                            fold_count++;
+                        } while (fold_count < nfold && sim_state.t < sim_state.t_interval);
+                        delta_t = timer.get_duration();
+                    }
+                    n      += fold_count;
                     ncheck += 1;
-                    zu_avg += sim_state.total_zones / delta_t;
+                    speed = fold_count * sim_state.total_zones / delta_t;
+                    zu_avg += speed;
                     if constexpr(BuildPlatform == Platform::GPU) {
                         const real gpu_emperical_bw = getFlops<conserved_t, primitive_t>(sim_state.pseudo_radius, sim_state.total_zones, sim_state.active_zones, delta_t);
                         util::writefl<Color::CYAN>("\riteration:{:>06}  dt: {:>08.2e}  time: {:>08.2e}  zones/sec: {:>08.2e}  ebw(%): {:>04.2f}", 
-                        n, sim_state.dt, sim_state.t, sim_state.total_zones/delta_t, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
+                        n, sim_state.dt, sim_state.t, speed, static_cast<real>(100.0) * fold_count * gpu_emperical_bw / gpu_theoretical_bw);
                     } else {
-                        util::writefl<Color::CYAN>("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, sim_state.dt, sim_state.t, sim_state.total_zones/delta_t);
+                        util::writefl<Color::CYAN>("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, sim_state.dt, sim_state.t, speed);
                     }
-                    nfold += 100;
-                }
+                    
+                    // Write to a file at every checkpoint interval
+                    if (sim_state.t >= sim_state.t_interval && sim_state.t != INFINITY)
+                    {
+                        write2file(sim_state, sim_state.setup, sim_state.data_directory, sim_state.t, sim_state.t_interval, sim_state.chkpt_interval, sim_state.checkpoint_zones);
+                        if (sim_state.dlogt != 0) {
+                            sim_state.t_interval *= std::pow(10, sim_state.dlogt);
+                        } else {
+                            sim_state.t_interval += sim_state.chkpt_interval;
+                        }
+                    }
+                    // Listen to kill signals
+                    helpers::catch_signals();
+                } catch (helpers::InterruptException &e) {
+                    util::writeln("{}", e.what());
+                    sim_state.inFailureState = true;
+                    write2file(sim_state, sim_state.setup, sim_state.data_directory, sim_state.t, INFINITY, sim_state.chkpt_interval, sim_state.checkpoint_zones);
+                }                
+            };
 
-                // Write to a file at every checkpoint interval
-                if (sim_state.t >= sim_state.t_interval && sim_state.t != INFINITY)
-                {
-                    write2file(sim_state, sim_state.setup, sim_state.data_directory, sim_state.t, sim_state.t_interval, sim_state.chkpt_interval, sim_state.checkpoint_zones);
-                    if (sim_state.dlogt != 0) {
-                        sim_state.t_interval *= std::pow(10, sim_state.dlogt);
-                    } else {
-                        sim_state.t_interval += sim_state.chkpt_interval;
-                    }
+            inline void print_avg_speed() {
+                if (Logger::ncheck > 0) {
+                    util::writeln("Average zone update/sec for {:>5} iterations was {:>5.2e} zones/sec", Logger::n, Logger::zu_avg / Logger::ncheck);
                 }
-                n++;
-                // Listen to kill signals
-                helpers::catch_signals();
-            } catch (helpers::InterruptException &e) {
-                util::writeln("{}", e.what());
-                sim_state.inFailureState = true;
-                write2file(sim_state, sim_state.setup, sim_state.data_directory, sim_state.t, INFINITY, sim_state.chkpt_interval, sim_state.checkpoint_zones);
             }
-        }
+        } // namespace logger 
     } // namespace detail
     
 } // namespace simbi
