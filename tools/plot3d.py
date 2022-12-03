@@ -1480,7 +1480,7 @@ def main():
     parser.add_argument('--inset', dest='inset', action= 'store_true', default=False)
     parser.add_argument('--png', dest='png', action= 'store_true', default=False)
     parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
-    parser.add_argument('--fig_dims', dest='fig_dims', default = [3.35, 9], type=float, nargs=2)
+    parser.add_argument('--fig_dims', dest='fig_dims', default = [3.35, 4], type=float, nargs=2)
     
     parser.add_argument('--save', dest='save', type=str,
                         default=None,
@@ -1512,7 +1512,7 @@ def main():
     if args.cmap == 'grayscale':
         plt.style.use('grayscale')
     else:
-        plt.style.use('seaborn-colorblind')
+        plt.style.use('seaborn-v0_8-colorblind')
     
     if args.dbg:
         plt.style.use('dark_background')
