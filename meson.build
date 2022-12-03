@@ -140,19 +140,21 @@ sources = [
     #######################
     ### Common IMPLEMENTATIONS
     #######################
-    'src/common/clattice1D.cpp',
-    'src/common/clattice2D.cpp',
-    'src/common/clattice3D.cpp',
+    # 'src/common/clattice1D.cpp',
+    # 'src/common/clattice2D.cpp',
+    # 'src/common/clattice3D.cpp',
     'src/common/helpers.cpp',
     'src/common/helpers.hip.cpp',
-    # 'src/common/viscous_diff.cpp'
-    # 'src/common/viscous_diff.hpp'
 
     #######################
     #### GPU / CPU IMPLEMENTATIONS
     #######################
     'src/hydro/euler1D.cpp',
     'src/hydro/euler2D.cpp',
+    'src/hydro/srhydro1D.hip.cpp',
+    'src/hydro/srhydro2D.hip.cpp',
+    'src/hydro/srhydro3D.hip.cpp',
+    
 
     #######################
     #### UTIL IMPLEMENTATIONS
@@ -160,25 +162,36 @@ sources = [
     'src/util/device_api.cpp',
 ]
 
-if get_option('four_velocity')
-sources += [
-    'src/hydro/srhydro1D.hip.cpp',
-    'src/hydro/srhydro2D.hip.cpp',
-    'src/hydro/srhydro3D.hip.cpp',
+headers = [
+    'src/common/helpers.hpp',
+    'src/common/helpers.hip.hpp',
+    'src/common/enums.hpp',
+    'src/common/hydro_structs.hpp',
+    'src/common/traits.hpp',
+    
+    'src/hydro/euler1D.hpp',
+    'src/hydro/euler2D.hpp',
+    'src/hydro/srhydro1D.hip.hpp',
+    'src/hydro/srhydro2D.hip.hpp',
+    'src/hydro/srhydro3D.hip.hpp',
+
+    'src/util/device_api.hpp',
+    'src/util/exec_policy.hpp',
+    'src/util/kernel.hpp',
+    'src/util/launch.hpp',
+    'src/util/logger.hpp',
+    'src/util/managed.hpp',
+    'src/util/ndarray.hpp',
+    'src/util/parallel_for.hpp',
+    'src/util/printb.hpp',
+    'src/util/range.hpp',
 ]
-else 
-sources += [
-    'src/hydro/srhydro1D.hip.cpp',
-    'src/hydro/srhydro2D.hip.cpp',
-    'src/hydro/srhydro3D.hip.cpp',
-]
-endif
 
 
 run_command('python', '-m', 'cython', '--cplus', 'src/call_obj.pyx', check: true)
 cpu_ext = py3.extension_module(
     'cpu_ext',
-    ['src/cpu_ext.pyx', 'src/call_obj.pyx'] + sources,
+    ['src/cpu_ext.pyx', 'src/call_obj.pyx'] + sources + headers,
     include_directories: all_inc,
     cpp_args: cpp_comp_args + ['-DGPU_CODE=0'],
     dependencies: depends,
@@ -210,6 +223,8 @@ if get_option('gpu_compilation').enabled()
                 input : source,
                 output : '@BASENAME@.o',
                 build_by_default: true,
+                depend_files: headers,
+                depends: gpu_depends,
             )
             gpu_objs += [gpu_trg]
         endforeach

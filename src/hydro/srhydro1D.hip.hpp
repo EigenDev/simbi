@@ -10,7 +10,6 @@
 
 #include <vector>
 #include "common/helpers.hpp"
-#include "common/clattice1D.hpp"
 #include "common/enums.hpp"
 #include "common/hydro_structs.hpp"
 #include "build_options.hpp"

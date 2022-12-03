@@ -10,7 +10,6 @@
 #include <vector>
 #include "common/helpers.hpp"
 #include "common/hydro_structs.hpp"
-#include "common/clattice2D.hpp"
 #include "util/exec_policy.hpp"
 #include "util/ndarray.hpp"
 #include "base.hpp"

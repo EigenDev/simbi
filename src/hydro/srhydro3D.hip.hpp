@@ -9,7 +9,6 @@
 
 #include <vector>
 #include "common/hydro_structs.hpp"
-#include "common/clattice3D.hpp"
 #include "common/helpers.hpp"
 #include "util/ndarray.hpp"
 #include "base.hpp"
