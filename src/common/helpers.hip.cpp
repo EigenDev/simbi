@@ -314,169 +314,104 @@ namespace simbi{
         const int x3grid_size, 
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
-        const bool half_sphere)
+        const bool half_sphere,
+        const simbi::Geometry geometry)
     {
         const int extent = (BuildPlatform == Platform::GPU) ? 
                             p.gridSize.z * p.gridSize.y * p.gridSize.x * p.blockSize.z * p.blockSize.y * p.blockSize.x 
                             : x1grid_size * x2grid_size * x3grid_size;
+
+        const int sx = x1grid_size;
+        const int sy = x2grid_size;
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
             const int kk = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(gid, x1grid_size, x2grid_size);
             const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(gid, x1grid_size, x2grid_size, kk);
             const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(gid, x1grid_size, x2grid_size, kk);
+
+            
             if (first_order){
-                if ((jj < x2grid_size) && (ii < x1grid_size) && (kk < x3grid_size))
-                {
-                    if (jj < 1){
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].d   =   cons[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].d;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s1  =   cons[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].s1;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s2  =   cons[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].s2;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s3  =   cons[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].s3;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau =   cons[ii + x1grid_size * 1 + x1grid_size * x2grid_size * kk].tau;
-                        
-                    } else if (jj > x2grid_size - 2) {
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].d    =   cons[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].d;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s1   =   cons[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].s1;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s2   =   cons[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].s2;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s3   =   cons[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].s3;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau  =   cons[x1grid_size * x2grid_size * kk + (x2grid_size - 2) * x1grid_size + ii].tau;
-
-                    } 
-                    if (kk < 1){
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].d   =   cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].d;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s1  =   cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].s1;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s2  =   cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].s2;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s3  =   cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].s3;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau =   cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * 1].tau;
-                        
-                    } else if (kk > x3grid_size - 2) {
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].d    =   cons[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].d;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s1   =   cons[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].s1;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s2   =   cons[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].s2;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].s3   =   cons[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].s3;
-                        cons[ii + x1grid_size * jj + x1grid_size * x2grid_size * kk].tau  =   cons[x1grid_size * x2grid_size * (x3grid_size - 3) + jj * x1grid_size + ii].tau;
-
-                    } else {
-                        cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].d               = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].d;
-                        cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].d = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].d;
-
-                        cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s1               = - cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s1;
-                        cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s1 =   cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s1;
-
-                        cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s2                = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s2;
-                        cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s2  = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s2;
-
-                        cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s3                = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s3;
-                        cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s3  = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s3;
-
-                        cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].tau               = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].tau;
-                        cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].tau = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].tau;
+                if(jj < x2grid_size - 2 && kk < x3grid_size - 2) {
+                    // Fix the ghost zones at the radial boundaries
+                    cons[(kk + 1) * sx * sy + (jj + 1) * sx + (x1grid_size - 1)] = cons[(kk + 1) * sx * sy + (jj + 1) * sx +  (x1grid_size - 2)];
+                    cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0]                 = cons[(kk + 1) * sx * sy + (jj + 1) * sx +                  1];
+                    switch (boundary_condition)
+                    {
+                    case simbi::BoundaryCondition::REFLECTING:
+                        cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0].s1 = -cons[(kk + 1) * sx * sy + (jj + 1) * sx + 1].s1;
+                        break;
+                    case simbi::BoundaryCondition::INFLOW:
+                        cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0].s1 = -cons[(kk + 1) * sx * sy + (jj + 1) * sx + 1].s1;
+                        break;
+                    default:
+                        break;
                     }
+                }
+                // Fix the ghost zones at the polar boundaries
+                if (ii < x1grid_size - 2 && kk < x3grid_size - 2) {
+                    cons[(kk + 1) * sx * sy + 0 * sx + (ii + 1)]                 = cons[(kk + 1) * sx * sy + 1 * sx + (ii + 1)];
+                    cons[(kk + 1) * sx * sy + (x2grid_size - 1) * sx + (ii + 1)] = cons[(kk + 1) * sx * sy + (x2grid_size - 2) * sx + (ii + 1)];
+                }
+
+                // Fix the ghost zones at the azimuthal boundaries
+                if (jj < x2grid_size - 2 && ii < x1grid_size - 2) {
+                    cons[0 * sx * sy + (jj + 1) * sx + (ii + 1)]                 = cons[1 * sx * sy + (jj + 1) * sx + (ii + 1)];
+                    cons[(x3grid_size - 1) * sx * sy + (jj + 1) * sx + (ii + 1)] = cons[(x3grid_size - 2) * sx * sy + (jj + 1) * sx + (ii + 1)];
                 }
 
             } else {
-                if((jj < x2grid_size) && (kk < x3grid_size))
-                {
-
+                if(jj < x2grid_size - 4 && kk < x3grid_size - 4) {
                     // Fix the ghost zones at the radial boundaries
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size +  0].d               = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size +  3].d;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size +  1].d               = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size +  2].d;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 1].d = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 3].d;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 2].d = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size +  x1grid_size - 3].d;
-
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s1               = - cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].s1;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s1               = - cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].s1;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s1 =   cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s1;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s1 =   cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s1;
-
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s2               = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].s2;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s2               = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].s2;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s2 = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s2;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s2 = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s2;
-
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].s3               = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].s3;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].s3               = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].s3;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].s3 = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s3;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].s3 = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].s3;
-
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 0].tau                = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 3].tau;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 1].tau                = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + 2].tau;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 1].tau  = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].tau;
-                    cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 2].tau  = cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + x1grid_size - 3].tau;
-
-                    // Fix the ghost zones at the angular boundaries
-                    
-                    if (jj < 2){
-                        if (ii < x1grid_size){
-                            if (jj == 0){
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   cons[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].d;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   cons[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].s1;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   cons[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].s2;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   cons[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].s3;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   cons[kk * x1grid_size * x2grid_size + 3 * x1grid_size + ii].tau;
-                            } else {
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d    =   cons[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].d;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1   =   cons[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].s1;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2   =   cons[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].s2;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3   =   cons[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].s3;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau  =   cons[kk * x1grid_size * x2grid_size + 2 * x1grid_size + ii].tau;
-                            }
-                        }
-                    } else if (jj > x2grid_size - 3) {
-                        if (ii < x1grid_size){
-                            if (jj == x2grid_size - 1){
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   cons[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].d;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   cons[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].s1;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   cons[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].s2;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   cons[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].s3;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   cons[kk * x1grid_size * x2grid_size + (x2grid_size - 4) * x1grid_size + ii].tau;
-                            } else {
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   cons[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].d;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   cons[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].s1;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   cons[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].s2;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   cons[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].s3;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   cons[kk * x1grid_size * x2grid_size + (x2grid_size - 3) * x1grid_size + ii].tau;
-                            }
-                        }
+                    cons[(kk + 2) * sx * sy + (jj + 2) * sx + (x1grid_size - 1)] = cons[(kk + 2) * sx * sy + (jj + 2) * sx +  (x1grid_size - 3)];
+                    cons[(kk + 2) * sx * sy + (jj + 2) * sx + (x1grid_size - 2)] = cons[(kk + 2) * sx * sy + (jj + 2) * sx +  (x1grid_size - 3)];
+                    switch (boundary_condition)
+                    {
+                    case simbi::BoundaryCondition::REFLECTING:
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + 3];
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2];
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0].s1 = -cons[(kk + 2) * sx * sy + (jj + 2) * sx + 3].s1;
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1].s1 = -cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2].s1;
+                        break;
+                    case simbi::BoundaryCondition::INFLOW:
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2];
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2];
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0].s1 = -cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2].s1;
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1].s1 = -cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2].s1;
+                        break;
+                    default:
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2];
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2];
+                        break;
                     }
+                }
+                // Fix the ghost zones at the polar boundaries
+                if (ii < x1grid_size - 4 && kk < x3grid_size - 4) {
+                    cons[(kk + 2) * sx * sy + 0 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + 3 * sx + (ii + 2)];
+                    cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + 2 * sx + (ii + 2)];
+                    cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)];
+                    cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
+                }
 
-                    if (kk < 2){
-                        if (ii < x1grid_size){
-                            if (jj == 0){
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   cons[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].d;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   cons[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   cons[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   cons[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   cons[3 * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
-                            } else {
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d    =   cons[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].d;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1   =   cons[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2   =   cons[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3   =   cons[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau  =   cons[2 * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
-                            }
-                        }
-                    } else if (kk > x3grid_size - 3) {
-                        if (ii < x1grid_size){
-                            if (kk == x3grid_size - 1){
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   cons[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].d;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   cons[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   cons[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   cons[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   cons[(x3grid_size - 4) * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
-                            } else {
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].d   =   cons[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].d;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1  =   cons[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s1;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2  =   cons[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s2;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3  =   cons[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].s3;
-                                cons[kk * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau =   cons[(x3grid_size - 3) * x1grid_size * x2grid_size + jj * x1grid_size + ii].tau;
-                            }
-                        }
+                // Fix the ghost zones at the azimuthal boundaries
+                if (jj < x2grid_size - 4 && ii < x1grid_size - 4) {
+                    switch (geometry)
+                    {
+                    case simbi::Geometry::CYLINDRICAL:
+                    case simbi::Geometry::SPHERICAL:
+                        cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)]                 = cons[(x3grid_size - 4) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                        cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)]                 = cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                        cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)];
+                        cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)];
+                        break;
+                    case simbi::Geometry::CARTESIAN:
+                        cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)]                 = cons[3 * sx * sy + (jj + 2) * sx + (ii + 2)];
+                        cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)]                 = cons[2 * sx * sy + (jj + 2) * sx + (ii + 2)];
+                        cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                        cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                        break;
                     }
                     
                 }
-
             }
-
         });
         
     };

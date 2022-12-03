@@ -114,7 +114,8 @@ namespace simbi
         const int x3grid_size,  
         const bool first_order,
         const simbi::BoundaryCondition boundary_condition,
-        const bool half_sphere = true);
+        const bool half_sphere,
+        const simbi::Geometry geometry);
 
     inline GPU_DEV real warpReduceMin(real val) {
         #if CUDA_CODE
