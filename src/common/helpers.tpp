@@ -67,6 +67,7 @@ namespace simbi
                 sprims.rho.push_back(p[i].rho);
                 sprims.v1.push_back(p[i].v1);
                 sprims.v2.push_back(p[i].v2);
+                sprims.v3.push_back(p[i].v3);
                 sprims.p.push_back(p[i].p);
                 sprims.chi.push_back(p[i].chi);
             }
