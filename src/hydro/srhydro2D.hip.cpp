@@ -66,18 +66,17 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
 {
     // Separate the left and right Primitive
     const real rhoL = primsL.rho;
+    const real vL   = primsL.vcomponent(nhat);
     const real pL   = primsL.p;
     const real hL   = static_cast<real>(1.0) + gamma * pL / (rhoL * (gamma - static_cast<real>(1.0)));
 
     const real rhoR  = primsR.rho;
+    const real vR    = primsR.vcomponent(nhat);
     const real pR    = primsR.p;
-    const real hR    = static_cast<real>(1.0) + gamma * pR  / (rhoR  * (gamma - static_cast<real>(1.0)));
+    const real hR    = static_cast<real>(1.0) + gamma * pR / (rhoR * (gamma - static_cast<real>(1.0)));
 
-    const real csR  = std::sqrt(gamma * pR  / (hR  * rhoR));
+    const real csR = std::sqrt(gamma * pR / (hR * rhoR));
     const real csL = std::sqrt(gamma * pL / (hL * rhoL));
-
-    const real vL = primsL.vcomponent(nhat);
-    const real vR  = primsR.vcomponent(nhat);
 
     //-----------Calculate wave speeds based on Shneider et al. 1992
     switch (comp_wave_speed)
@@ -289,12 +288,13 @@ void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
 GPU_CALLABLE_MEMBER
 Conserved SRHD2D::prims2flux(const Primitive &prims, luint nhat = 1) const
 {
-    const real vn              = prims.vcomponent(nhat);
-    const auto kron            = kronecker(nhat, 1);
     const real rho             = prims.rho;
     const real v1              = prims.v1;
     const real v2              = prims.v2;
     const real pressure        = prims.p;
+    const real chi             = prims.chi;
+    const real vn              = (nhat == 1) ? v1 : v2;
+    const auto kron            = kronecker(nhat, 1);
     const real lorentz_gamma   = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2));
 
     const real h   = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
@@ -303,7 +303,7 @@ Conserved SRHD2D::prims2flux(const Primitive &prims, luint nhat = 1) const
     const real S2  = rho * lorentz_gamma * lorentz_gamma * h * v2;
     const real Sj  = (nhat == 1) ? S1 : S2;
 
-    return Conserved{D * vn, S1 * vn + kron * pressure, S2 * vn + !kron * pressure, Sj - D * vn, D * vn * prims.chi};
+    return Conserved{D * vn, S1 * vn + kron * pressure, S2 * vn + !kron * pressure, Sj - D * vn, D * vn * chi};
 };
 
 GPU_CALLABLE_MEMBER
@@ -386,11 +386,19 @@ Conserved SRHD2D::calc_hllc_flux(
     const auto hll_flux = 
         (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aRp * aLm) / (aRp - aLm);
 
-    //------ Mignone & Bodo subtract off the rest mass density
-    const real e  = hll_state.tau + hll_state.d;
-    const real s  = hll_state.momentum(nhat);
-    const real fe = hll_flux.tau + hll_flux.d;
-    const real fs = hll_flux.momentum(nhat);
+    
+    const real uhlld   = hll_state.d;
+    const real uhlls1  = hll_state.s1;
+    const real uhlls2  = hll_state.s2;
+    const real uhlltau = hll_state.tau;
+    const real fhlld   = hll_flux.d;
+    const real fhlls1  = hll_flux.s1;
+    const real fhlls2  = hll_flux.s2;
+    const real fhlltau = hll_flux.tau;
+    const real e  = uhlltau + uhlld;
+    const real s  = (nhat == 1) ? uhlls1 : uhlls2;
+    const real fe = fhlltau + fhlld;
+    const real fs = (nhat == 1) ? fhlls1 : fhlls2;
 
     //------Calculate the contact wave velocity and pressure
     const real a     = fe;
@@ -627,8 +635,6 @@ void SRHD2D::advance(
     #if GPU_CODE
     const auto xextent             = p.get_xextent();
     const auto yextent             = p.get_yextent();
-    const luint gnx                = (col_maj) ? 1 : nx;
-    const luint gny                = (col_maj) ? ny : 1;
     const luint max_ii             = (col_maj) ? ypg : xpg;
     const luint max_jj             = (col_maj) ? xpg : ypg;
     #endif
@@ -910,8 +916,8 @@ void SRHD2D::advance(
     const real x1r    = get_x1face(xphysical_grid, geometry, 1);
     const real vfaceR = x1r * hubble_param;
     const real vfaceL = x1l * hubble_param;
-    x1min      += step * dt * vfaceL;
-    x1max      += step * dt * vfaceR;
+    x1min += step * dt * vfaceL;
+    x1max += step * dt * vfaceR;
 }
 
 //===================================================================================================================

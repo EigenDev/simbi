@@ -88,7 +88,7 @@ namespace simbi
             const luint nhat);
 
         GPU_CALLABLE_MEMBER
-        sr3d::Conserved calc_Flux(const sr3d::Primitive &prims, const luint nhat);
+        sr3d::Conserved prims2flux(const sr3d::Primitive &prims, const luint nhat);
 
         GPU_CALLABLE_MEMBER
         sr3d::Conserved calc_hll_flux(

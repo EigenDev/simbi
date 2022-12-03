@@ -5,7 +5,6 @@
 #mesondefine ONED_BLOCK_SIZE
 #mesondefine TWOD_BLOCK_SIZE
 #mesondefine THREED_BLOCK_SIZE
-#mesondefine FOUR_VELOCITY
 #mesondefine COLUMN_MAJOR
 #include <functional>    // std::function
 #include <chrono>        // high_resolution_clock

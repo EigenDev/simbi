@@ -166,8 +166,11 @@ void Newtonian1D::adapt_dt(luint blockSize, luint tblock)
 GPU_CALLABLE_MEMBER
 Conserved Newtonian1D::prims2cons(const Primitive &prim)
 {
-    real energy = prim.p/(gamma - static_cast<real>(1.0)) + static_cast<real>(0.5) * prim.rho * prim.v * prim.v;
-    return Conserved{prim.rho, prim.rho * prim.v, energy};
+    const real rho = prim.rho;
+    const real v   = prim.v;
+    const real pre = prim.p;
+    real energy    = pre / (gamma - static_cast<real>(1.0)) + static_cast<real>(0.5) * rho * v * v;
+    return Conserved{rho, rho * v, energy};
 };
 
 //-----------------------------------------------------------------------------------------------------------
@@ -178,13 +181,15 @@ Conserved Newtonian1D::prims2cons(const Primitive &prim)
 GPU_CALLABLE_MEMBER
 Conserved Newtonian1D::prims2flux(const Primitive &prim)
 {
-    real energy = prim.p/(gamma - static_cast<real>(1.0)) + static_cast<real>(0.5) * prim.rho * prim.v * prim.v;
+    const real rho = prim.rho;
+    const real v   = prim.v;
+    const real pre = prim.p;
+    real energy    = pre / (gamma - static_cast<real>(1.0)) + static_cast<real>(0.5) * rho * v * v;
 
     return Conserved{
-        prim.rho * prim.v,
-        prim.rho * prim.v * prim.v + prim.p,
-        (energy + prim.p)*prim.v
-
+        rho * v,
+        rho * v * v + pre,
+        (energy + pre) * v
     };
 };
 
@@ -216,20 +221,19 @@ Conserved Newtonian1D::calc_hllc_flux(
     const Conserved &right_flux)
 {
     const Eigenvals lambda = calc_eigenvals(left_prims, right_prims);
-    const real aL = lambda.aL; 
-    const real aR = lambda.aR; 
-    const real ap = helpers::my_max(static_cast<real>(0.0), aR);
-    const real am = helpers::my_min(static_cast<real>(0.0), aL);
+    const real aL    = lambda.aL; 
+    const real aR    = lambda.aR; 
+    const real aStar = lambda.aStar;
+    const real pStar = lambda.pStar;
     if (0.0 <= aL){
         return left_flux;
     } 
     else if (0.0 >= aR){
         return right_flux;
     }
-
-    real aStar = lambda.aStar;
-    real pStar = lambda.pStar;
-
+    
+    const real ap = helpers::my_max(static_cast<real>(0.0), aR);
+    const real am = helpers::my_min(static_cast<real>(0.0), aL);
     auto hll_flux = (left_flux * ap + right_flux * am - (right_state - left_state) * am * ap)  / (am + ap) ;
 
     auto hll_state = (right_state * aR - left_state * aL - right_flux + left_flux)/(aR - aL);

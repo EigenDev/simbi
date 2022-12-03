@@ -338,14 +338,14 @@ Eigenvals SRHD::calc_eigenvals(
 {
     // Compute L/R Sound Speeds
     const real rhoL = primsL.rho;
-    const real pL   = primsL.p;
     const real vL   = primsL.v;
+    const real pL   = primsL.p;
     const real hL   = static_cast<real>(1.0) + gamma * pL / (rhoL * (gamma - 1));
     const real csL  = std::sqrt(gamma * pL / (rhoL * hL));
 
     const real rhoR  = primsR.rho;
-    const real pR    = primsR.p;
     const real vR    = primsR.v;
+    const real pR    = primsR.p;
     const real hR    = static_cast<real>(1.0) + gamma * pR  / (rhoR  * (gamma - 1));
     const real csR   = std::sqrt(gamma * pR  / (rhoR  * hR));
 
@@ -465,8 +465,8 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD::prims2flux(const Primitive &prim) const
 {
     const real rho = prim.rho;
-    const real pre = prim.p;
     const real v   = prim.v;
+    const real pre = prim.p;
     const real W   = static_cast<real>(1.0) / std::sqrt(1 - v * v);
     const real h   = static_cast<real>(1.0) + gamma * pre / (rho * (gamma - 1));
     const real D   = rho * W;
@@ -486,8 +486,8 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hll_flux(
     const Eigenvals lambda = calc_eigenvals(left_prims, right_prims);
 
     // Grab the necessary wave speeds
-    const real aR  = lambda.aR;
     const real aL  = lambda.aL;
+    const real aR  = lambda.aR;
     const real aLm = aL < 0 ? aL : 0;
     const real aRp = aR > 0 ? aR : 0;
 
@@ -526,10 +526,16 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const Conserved hll_flux  = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
     const Conserved hll_state = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
 
-    const real e  = hll_state.tau + hll_state.d;
-    const real s  = hll_state.s;
-    const real fs = hll_flux.s;
-    const real fe = hll_flux.tau + hll_flux.d;
+    const real uhlld   = hll_state.d;
+    const real uhlls   = hll_state.s;
+    const real uhlltau = hll_state.tau;
+    const real fhlld   = hll_flux.d;
+    const real fhlls   = hll_flux.s;
+    const real fhlltau = hll_flux.tau;
+    const real e    = uhlltau + uhlld;
+    const real s    = uhlls;
+    const real fs   = fhlls;
+    const real fe   = fhlltau + fhlld;
     
     const real a     = fe;
     const real b     = - (e + fs);
@@ -541,6 +547,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
 
     
     if (vface <= aStar) {
+        const real v        = left_prims.v;
         const real pressure = left_prims.p;
         const real D        = left_state.d;
         const real S        = left_state.s;
@@ -549,7 +556,6 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         const real cofactor = static_cast<real>(1.0) / (aLm - aStar);
 
         //--------------Compute the L Star State----------
-        const real v = left_prims.v;
         // Left Star State in x-direction of coordinate lattice
         const real Dstar    = cofactor * (aLm - v) * D;
         const real Sstar    = cofactor * (S * (aLm - v) - pressure + pStar);
@@ -563,6 +569,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         Conserved hllc_flux = left_flux + (star_stateL - left_state) * aLm;
         return    hllc_flux - star_stateL * vface;
     } else {
+        const real v         = right_prims.v;
         const real pressure  = right_prims.p;
         const real D         = right_state.d;
         const real S         = right_state.s;
@@ -571,7 +578,6 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         const real cofactor  = static_cast<real>(1.0) / (aRp - aStar);
 
         //--------------Compute the R Star State----------
-        const real v = right_prims.v;
         // Left Star State in x-direction of coordinate lattice
         const real Dstar    = cofactor * (aRp - v) * D;
         const real Sstar    = cofactor * (S * (aRp - v) - pressure + pStar);

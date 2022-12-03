@@ -162,9 +162,9 @@ sources = [
 
 if get_option('four_velocity')
 sources += [
-    'src/hydro/srhydro1D_gb.hip.cpp',
-    'src/hydro/srhydro2D_gb.hip.cpp',
-    'src/hydro/srhydro3D_gb.hip.cpp',
+    'src/hydro/srhydro1D.hip.cpp',
+    'src/hydro/srhydro2D.hip.cpp',
+    'src/hydro/srhydro3D.hip.cpp',
 ]
 else 
 sources += [

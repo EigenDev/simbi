@@ -158,18 +158,17 @@ Eigenvals SRHD3D::calc_Eigenvals(
 {
     // Separate the left and right Primitive
     const real rhoL = primsL.rho;
+    const real vL   = primsL.vcomponent(nhat);
     const real pL   = primsL.p;
     const real hL   = static_cast<real>(1.0) + gamma * pL / (rhoL * (gamma - static_cast<real>(1.0)));
 
     const real rhoR  = primsR.rho;
+    const real vR    = primsR.vcomponent(nhat);
     const real pR    = primsR.p;
-    const real hR    = static_cast<real>(1.0) + gamma * pR  / (rhoR  * (gamma - static_cast<real>(1.0)));
+    const real hR    = static_cast<real>(1.0) + gamma * pR  / (rhoR * (gamma - static_cast<real>(1.0)));
 
-    const real csR  = std::sqrt(gamma * pR  / (hR  * rhoR));
+    const real csR = std::sqrt(gamma * pR / (hR * rhoR));
     const real csL = std::sqrt(gamma * pL / (hL * rhoL));
-
-    const real vL = primsL.vcomponent(nhat);
-    const real vR  = primsR.vcomponent(nhat);
 
     //-----------Calculate wave speeds based on Shneider et al. 1992
     switch (comp_wave_speed)
@@ -365,12 +364,14 @@ void SRHD3D::adapt_dt(const ExecutionPolicy<> &p, const luint bytes)
 // Get the 2D Flux array (4,1). Either return F or G depending on directional
 // flag
 GPU_CALLABLE_MEMBER
-Conserved SRHD3D::calc_Flux(const Primitive &prims, const luint nhat = 1)
+Conserved SRHD3D::prims2flux(const Primitive &prims, const luint nhat = 1)
 {
     const real rho      = prims.rho;
     const real v1       = prims.v1;
     const real v2       = prims.v2;
     const real v3       = prims.v3;
+    const real chi      = prims.chi;
+    const real vn       = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
     const real pressure = prims.p;
     const real lorentz_gamma = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2 + v3*v3));
 
@@ -379,12 +380,17 @@ Conserved SRHD3D::calc_Flux(const Primitive &prims, const luint nhat = 1)
     const real S1 = rho * lorentz_gamma * lorentz_gamma * h * v1;
     const real S2 = rho * lorentz_gamma * lorentz_gamma * h * v2;
     const real S3 = rho * lorentz_gamma * lorentz_gamma * h * v3;
-    const real tau =
-                    rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma;
+    const real Sj = (nhat == 1) ? S1 : (nhat == 2) ? S2 : S3;
+    const real tau = rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma;
 
-    return (nhat == 1) ? Conserved{D * v1, S1 * v1 + pressure, S2 * v1, S3 * v1,  (tau + pressure) * v1}
-          :(nhat == 2) ? Conserved{D * v2, S1 * v2, S2 * v2 + pressure, S3 * v2,  (tau + pressure) * v2}
-          :              Conserved{D * v3, S1 * v3, S2 * v3, S3 * v3 + pressure,  (tau + pressure) * v3};
+    return Conserved{
+        D  * vn, 
+        S1 * vn + kronecker(nhat, 1) * pressure, 
+        S2 * vn + kronecker(nhat, 2) * pressure, 
+        S3 * vn + kronecker(nhat, 3) * pressure,  
+        Sj - D * vn, 
+        D * vn * chi
+    };
 };
 
 GPU_CALLABLE_MEMBER
@@ -397,8 +403,7 @@ Conserved SRHD3D::calc_hll_flux(
     const Primitive &right_prims,
     const   luint nhat)
 {
-    Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
-
+    const Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
     const real aL = lambda.aL;
     const real aR = lambda.aR;
 
@@ -423,18 +428,15 @@ Conserved SRHD3D::calc_hllc_flux(
     const   luint nhat = 1)
 {
 
-    Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
-
+    const Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
     const real aL = lambda.aL;
     const real aR = lambda.aR;
 
     //---- Check Wave Speeds before wasting computations
-    if (static_cast<real>(0.0) <= aL)
-    {
+    if (static_cast<real>(0.0) <= aL) {
         return left_flux;
     }
-    else if (static_cast<real>(0.0) >= aR)
-    {
+    else if (static_cast<real>(0.0) >= aR) {
         return right_flux;
     }
 
@@ -450,30 +452,38 @@ Conserved SRHD3D::calc_hllc_flux(
         = (left_flux * aRplus - right_flux * aLminus + (right_state - left_state) * aRplus * aLminus) 
             / (aRplus - aLminus);
 
-    //------ Mignone & Bodo subtract off the rest mass density
-    const real e  = hll_state.tau + hll_state.d;
-    const real s  = hll_state.momentum(nhat);
-    const real fe = hll_flux.tau + hll_flux.d;
-    const real fs = hll_flux.momentum(nhat);
+    const real uhlld   = hll_state.d;
+    const real uhlls1  = hll_state.s1;
+    const real uhlls2  = hll_state.s2;
+    const real uhlls3  = hll_state.s3;
+    const real uhlltau = hll_state.tau;
+    const real fhlld   = hll_flux.d;
+    const real fhlls1  = hll_flux.s1;
+    const real fhlls2  = hll_flux.s2;
+    const real fhlls3  = hll_flux.s3;
+    const real fhlltau = hll_flux.tau;
+    const real e  = uhlltau + uhlld;
+    const real s  = (nhat == 1) ? uhlls1 : (nhat == 2) ? uhlls2 : uhlls3;
+    const real fe = fhlltau + fhlld;
+    const real fs = (nhat == 1) ? fhlls1 : (nhat == 2) ? fhlls2 : fhlls3;
 
     //------Calculate the contact wave velocity and pressure
     const real a = fe;
     const real b = -(e + fs);
     const real c = s;
-    const real quad = -static_cast<real>(0.5) * (b + helpers::sgn(b) * std::sqrt(b * b - 4.0 * a * c));
+    const real quad  = -static_cast<real>(0.5) * (b + helpers::sgn(b) * std::sqrt(b * b - 4.0 * a * c));
     const real aStar = c * (static_cast<real>(1.0) / quad);
     const real pStar = -aStar * fe + fs;
 
-    // return Conserved(0.0, 0.0, 0.0, 0.0);
     if (-aL <= (aStar - aL))
     {
         const real pressure = left_prims.p;
-        const real D = left_state.d;
-        const real S1 = left_state.s1;
-        const real S2 = left_state.s2;
-        const real S3 = left_state.s3;
+        const real D   = left_state.d;
+        const real S1  = left_state.s1;
+        const real S2  = left_state.s2;
+        const real S3  = left_state.s3;
         const real tau = left_state.tau;
-        const real E = tau + D;
+        const real E   = tau + D;
         const real cofactor = static_cast<real>(1.0) / (aL - aStar);
         //--------------Compute the L Star State----------
         switch (nhat)
@@ -534,12 +544,12 @@ Conserved SRHD3D::calc_hllc_flux(
     else
     {
         const real pressure = right_prims.p;
-        const real D  = right_state.d;
-        const real S1 = right_state.s1;
-        const real S2 = right_state.s2;
-        const real S3 = right_state.s3;
+        const real D   = right_state.d;
+        const real S1  = right_state.s1;
+        const real S2  = right_state.s2;
+        const real S3  = right_state.s3;
         const real tau = right_state.tau;
-        const real E = tau + D;
+        const real E   = tau + D;
         const real cofactor = static_cast<real>(1.0) / (aR - aStar);
 
         /* Compute the L/R Star State */
@@ -617,10 +627,6 @@ void SRHD3D::advance(
     const luint yextent             = p.blockSize.y;
     const luint zextent             = p.blockSize.z;
     #endif 
-    // Choice of column major striding by user
-    // const luint sx = (col_maj) ? 1  : bx;
-    // const luint sy = (col_maj) ? by :  1;
-    // const luint sz = (col_maj) ? bz :  1;
 
     const luint extent = (BuildPlatform == Platform::GPU) ? 
                      p.blockSize.z * p.gridSize.z * p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
@@ -714,14 +720,14 @@ void SRHD3D::advance(
             uzL = prims2cons(zprimsL);
             uzR  = prims2cons(zprimsR);
 
-            fL = calc_Flux(xprimsL, 1);
-            fR  = calc_Flux(xprimsR, 1);
+            fL = prims2flux(xprimsL, 1);
+            fR  = prims2flux(xprimsR, 1);
 
-            gL = calc_Flux(yprimsL, 2);
-            gR  = calc_Flux(yprimsR, 2);
+            gL = prims2flux(yprimsL, 2);
+            gR  = prims2flux(yprimsR, 2);
 
-            hL = calc_Flux(zprimsL, 3);
-            hR  = calc_Flux(zprimsR, 3);
+            hL = prims2flux(zprimsL, 3);
+            hR  = prims2flux(zprimsR, 3);
 
             // Calc HLL Flux at i+1/2 interface
             if (hllc)
@@ -755,14 +761,14 @@ void SRHD3D::advance(
             uzL = prims2cons(zprimsL);
             uzR  = prims2cons(zprimsR);
 
-            fL = calc_Flux(xprimsL, 1);
-            fR  = calc_Flux(xprimsR, 1);
+            fL = prims2flux(xprimsL, 1);
+            fR  = prims2flux(xprimsR, 1);
 
-            gL = calc_Flux(yprimsL, 2);
-            gR  = calc_Flux(yprimsR, 2);
+            gL = prims2flux(yprimsL, 2);
+            gR  = prims2flux(yprimsR, 2);
 
-            hL = calc_Flux(zprimsL, 3);
-            hR  = calc_Flux(zprimsR, 3);
+            hL = prims2flux(zprimsL, 3);
+            hR  = prims2flux(zprimsR, 3);
 
             // Calc HLL Flux at i-1/2 interface
             if ( hllc)
@@ -820,14 +826,14 @@ void SRHD3D::advance(
             uzL = prims2cons(zprimsL);
             uzR = prims2cons(zprimsR);
 
-            fL = calc_Flux(xprimsL, 1);
-            fR = calc_Flux(xprimsR, 1);
+            fL = prims2flux(xprimsL, 1);
+            fR = prims2flux(xprimsR, 1);
 
-            gL = calc_Flux(yprimsL, 2);
-            gR = calc_Flux(yprimsR, 2);
+            gL = prims2flux(yprimsL, 2);
+            gR = prims2flux(yprimsR, 2);
 
-            hL = calc_Flux(zprimsL, 3);
-            hR = calc_Flux(zprimsR, 3);
+            hL = prims2flux(zprimsL, 3);
+            hR = prims2flux(zprimsR, 3);
 
             if (hllc) {
                 frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
@@ -857,12 +863,12 @@ void SRHD3D::advance(
             uzL = prims2cons(zprimsL);
             uzR = prims2cons(zprimsR);
 
-            fL = calc_Flux(xprimsL, 1);
-            fR = calc_Flux(xprimsR, 1);
-            gL = calc_Flux(yprimsL, 2);
-            gR = calc_Flux(yprimsR, 2);
-            hL = calc_Flux(zprimsL, 3);
-            hR = calc_Flux(zprimsR, 3);
+            fL = prims2flux(xprimsL, 1);
+            fR = prims2flux(xprimsR, 1);
+            gL = prims2flux(yprimsL, 2);
+            gR = prims2flux(yprimsR, 2);
+            hL = prims2flux(zprimsL, 3);
+            hR = prims2flux(zprimsR, 3);
 
             if (hllc) {
                 flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);

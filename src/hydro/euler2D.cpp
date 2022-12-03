@@ -84,15 +84,15 @@ Eigenvals Newtonian2D::calc_eigenvals(
     const Primitive &right_prims,
     const luint ehat)
 {   
+    const real rhoL = left_prims.rho;
+    const real vL   = left_prims.vcomponent(ehat);
+    const real pL   = left_prims.p;
+    
+    const real rhoR = right_prims.rho;
+    const real vR   = right_prims.vcomponent(ehat);
+    const real pR   = right_prims.p;
     if (hllc)
     {
-        const real vL   = left_prims.vcomponent(ehat);
-        const real vR   = right_prims.vcomponent(ehat);
-        const real pR   = right_prims.p;
-        const real pL   = left_prims.p;
-        const real rhoL = left_prims.rho;
-        const real rhoR = right_prims.rho;
-
         const real csR = std::sqrt(gamma * pR/rhoR);
         const real csL = std::sqrt(gamma * pL/rhoL);
 
@@ -120,12 +120,6 @@ Eigenvals Newtonian2D::calc_eigenvals(
         return Eigenvals(aL, aR, csL, csR, aStar, pStar);
 
     } else {
-        const real vL   = left_prims.vcomponent(ehat);
-        const real vR   = right_prims.vcomponent(ehat);
-        const real pR   = right_prims.p;
-        const real pL   = left_prims.p;
-        const real rhoL = left_prims.rho;
-        const real rhoR = right_prims.rho;
         const real csR  = std::sqrt(gamma * pR/rhoR);
         const real csL  = std::sqrt(gamma * pL/rhoL);
 
@@ -291,7 +285,7 @@ Conserved Newtonian2D::calc_hllc_flux(
     const Primitive &right_prims,
     const luint ehat)
 {
-    Eigenvals lambda = calc_eigenvals(left_prims, right_prims, ehat);
+    const Eigenvals lambda = calc_eigenvals(left_prims, right_prims, ehat);
 
     const real aL    = lambda.aL;
     const real aR    = lambda.aR;
