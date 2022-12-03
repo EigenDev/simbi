@@ -227,7 +227,7 @@ class Hydro:
             self.init_v2       = initial_state[2]
             self.init_v3       = initial_state[3]
             self.init_pressure = initial_state[4]
-            vsq = self.init_v1**2 + self.init_v2**2 + self.init_xz**2
+            vsq = self.init_v1**2 + self.init_v2**2 + self.init_v3**2
             if self.regime == "classical":
                 self.init_energy =  ( self.init_pressure/(self.gamma - 1.) + 0.5*self.init_rho*vsq )
             else:
