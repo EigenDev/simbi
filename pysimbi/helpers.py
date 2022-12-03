@@ -20,7 +20,28 @@ def calc_cell_volume2D(r: np.ndarray, theta: np.ndarray) -> np.ndarray:
     rvertices = np.sqrt(rr[:, 1:] * rr[:, :-1])
     rvertices = np.insert(rvertices,  0, rr[:, 0], axis=1)
     rvertices = np.insert(rvertices, rvertices.shape[1], rr[:, -1], axis=1)
-    return (2.0 * np.pi *  (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos)
+    return (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos * dphi
+
+def calc_cell_volume3D(r: np.ndarray, theta: np.ndarray, phi: np.ndarray) -> np.ndarray:
+    if r.ndim == 1 and theta.ndim == 1 and phi.ndim == 1:
+        thetta, phii, rr = np.meshgrid(theta, phi, r)
+    else:
+        rr, thetta, phii = r, theta, phi
+    
+    pvertices = 0.5 * (phii[1:] + phii[:-1])
+    pvertices = np.insert(pvertices, 0, phii[0], axis=0)
+    pvertices = np.insert(pvertices, pvertices.shape[0], phii[-1], axis=0)
+    dphi      = pvertices[1:] - pvertices[:-1]
+    
+    tvertices = 0.5 * (thetta[:, 1:] + thetta[:, :-1])
+    tvertices = np.insert(tvertices, 0, thetta[0], axis=1)
+    tvertices = np.insert(tvertices, tvertices.shape[1], thetta[:, -1], axis=1)
+    dcos      = np.cos(tvertices[:, :-1]) - np.cos(tvertices[:, 1:])
+    
+    rvertices = np.sqrt(rr[:, :,  1:] * rr[:, :, :-1])
+    rvertices = np.insert(rvertices,  0, rr[:, :, 0], axis=2)
+    rvertices = np.insert(rvertices, rvertices.shape[2], rr[:, :, -1], axis=2)
+    return (2.0 * np.pi *  (1./3.) * (rvertices[:, :, 1:]**3 - rvertices[:, :, :-1]**3) *  dcos)
 
 def print_problem_params(args, parser) -> None:
     print("\nProblem paramters:")
