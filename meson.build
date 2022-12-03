@@ -224,7 +224,7 @@ if get_option('gpu_compilation').enabled()
                 output : '@BASENAME@.o',
                 build_by_default: true,
                 depend_files: headers,
-                depends: gpu_depends,
+                # depends: gpu_depends,
             )
             gpu_objs += [gpu_trg]
         endforeach
