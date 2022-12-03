@@ -124,10 +124,10 @@ namespace simbi
                     zu_avg += speed;
                     if constexpr(BuildPlatform == Platform::GPU) {
                         const real gpu_emperical_bw = getFlops<conserved_t, primitive_t>(sim_state.pseudo_radius, sim_state.total_zones, sim_state.active_zones, delta_t);
-                        util::writefl<Color::CYAN>("\riteration:{:>06}  dt: {:>08.2e}  time: {:>08.2e}  zones/sec: {:>08.2e}  ebw(%): {:>04.2f}", 
+                        util::writefl<Color::LIGHT_MAGENTA>("\riteration:{:>06}  dt: {:>08.2e}  time: {:>08.2e}  zones/sec: {:>08.2e}  ebw(%): {:>04.2f}", 
                         n, sim_state.dt, sim_state.t, speed, static_cast<real>(100.0) * fold_count * gpu_emperical_bw / gpu_theoretical_bw);
                     } else {
-                        util::writefl<Color::CYAN>("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, sim_state.dt, sim_state.t, speed);
+                        util::writefl<Color::LIGHT_MAGENTA>("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, sim_state.dt, sim_state.t, speed);
                     }
                     
                     // Write to a file at every checkpoint interval
