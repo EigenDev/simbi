@@ -599,7 +599,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
                     printf("\nCons2Prim cannot converge:\n");
                     printf("Density: %.2e, Pressure: %.2e, Vsq: %.2f, et: %.2e, xcoord: %.2e, ycoord: %.2e, iter: %lu\n", rho, peq, v2, et,  x1mean, x2mean, iter);
                     dt             = INFINITY;
-                    found_failure        = true;
+                    found_failure  = true;
                     inFailureState = true;
                     simbi::gpu::api::synchronize();
                     break;
@@ -633,7 +633,6 @@ void SRHD2D::advance(
     const luint max_jj             = (col_maj) ? xpg : ypg;
     #endif
 
-    const luint nbs   = (BuildPlatform == Platform::GPU) ? bx * by : nzones;
     const luint extent= (BuildPlatform == Platform::GPU) ? 
                                             p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
     // Choice of column major striding by user

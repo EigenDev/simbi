@@ -209,7 +209,6 @@ void Newtonian2D::adapt_dt()
         } // end jj
     }// end parallel region
     dt = cfl * min_dt;
-    t += dt;
 };
 
 void Newtonian2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
@@ -234,8 +233,6 @@ void Newtonian2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
             // TODO: Implement Cylindrical coordinates at some point
             break;
         }
-
-        t += dt;
     }
     #endif
 }

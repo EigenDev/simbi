@@ -86,7 +86,7 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
         
         real peq = press_data[gid];
         real tol = D * tol_scale;
-        auto tid = (BuildPlatform == Platform::GPU) ? blockDim.x * blockDim.y * threadIdx.z + blockDim.x * threadIdx.y + threadIdx.x : gid;
+        auto tid = get_threadId();
         if (tid == 0) found_failure = inFailureState;
         simbi::gpu::api::synchronize();
         while (!found_failure && workLeftToDo)

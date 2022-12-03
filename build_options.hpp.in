@@ -111,7 +111,7 @@ constexpr int WARP_SIZE    = 64;
 #define anyGpuEventRecord            hipEventRecord 
 #define anyGpuEventSynchronize       hipEventSynchronize 
 #define anyGpuEventElapsedTime       hipEventElapsedTime
-#define anyGpuProp_t                 hipDeviceProp
+#define anyGpuProp_t                 hipDeviceProp_t
 #define anyGpuGetDeviceProperties    hipGetDeviceProperties
 #define anyGpuGetDeviceCount         hipGetDeviceCount
 #endif

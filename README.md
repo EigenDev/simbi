@@ -81,3 +81,8 @@ config script, and `--nzones` and `--gamma` are problem-specific options
 that are dynamically parsed based on whatever `DynamicArg` variables
 exist in the config script you create. Check out how to create one of
 these configuration scripts in the `configs/` folder!
+
+You can plot the above output by doing 
+``` bash
+$ ./tools/plot1d.py data/1000.chkpt.000_100.h5 "Marti & Muller Problem 1" --field rho v p --tex
+```
