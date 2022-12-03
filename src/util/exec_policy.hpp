@@ -155,8 +155,8 @@ namespace simbi {
                 luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
                 luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
                 luint nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];
-                this->gridSize  = dim3(nxBlocks, nyBlocks, nzBlocks);
-                this->blockSize = dim3(blist[0], blist[1], blist[2]); 
+                this->gridSize    = dim3(nxBlocks, nyBlocks, nzBlocks);
+                this->blockSize   = dim3(blist[0], blist[1], blist[2]); 
             }
         }
     };

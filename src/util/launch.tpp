@@ -15,14 +15,14 @@ namespace simbi {
     template <typename Function, typename... Arguments>
     void launch(const ExecutionPolicy<> &policy, Function f, Arguments... args)
     {
+
         #if GPU_CODE
         if constexpr(BuildPlatform == Platform::GPU)
         {
-            ExecutionPolicy<> p = policy;
-            Kernel<<<p.gridSize, 
-                    p.blockSize, 
-                    p.sharedMemBytes, 
-                    p.stream>>>(f, args...);
+            Kernel<<<policy.gridSize, 
+                     policy.blockSize, 
+                     policy.sharedMemBytes, 
+                     policy.stream>>>(f, args...);
         }
         #else 
         {
