@@ -29,6 +29,12 @@ constexpr Velocity VelocityType = Velocity::FourVelocity;
 constexpr Velocity VelocityType = Velocity::Beta;
 #endif
 
+#if GPU_CODE
+constexpr Platform BuildPlatform = Platform::GPU;
+#else 
+constexpr Platform BuildPlatform = Platform::CPU;
+#endif 
+
 constexpr int BLOCK_SIZE   = ONED_BLOCK_SIZE;
 constexpr int BLOCK_SIZE2D = TWOD_BLOCK_SIZE;
 constexpr int BLOCK_SIZE3D = THREED_BLOCK_SIZE;
@@ -49,10 +55,6 @@ constexpr bool col_maj = false;
 #endif 
 
 #if defined(__NVCC__) || defined(__HIPCC__) || (defined(__clang__) && defined(__HIP__))
-#define GPU_CODE 1
-constexpr Platform BuildPlatform = Platform::GPU;
-// typedef float real;
-
 #define GPU_DEV                        __device__
 #define GPU_DEV_INLINE                 __device__ inline
 #define GPU_LAUNCHABLE                 __global__
@@ -115,10 +117,8 @@ constexpr int WARP_SIZE    = 64;
 #endif
 #else
 constexpr int WARP_SIZE = 32;
-#define GPU_CODE 0
 #define CUDA_CODE 0
 #define HIP_CODE 0
-constexpr Platform BuildPlatform = Platform::CPU;
 
 #define GPU_DEV                         
 #define GPU_LAUNCHABLE                 
