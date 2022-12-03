@@ -11,6 +11,7 @@ plots/
 .vscode/
 call_obj.cpp
 call_obj.h
+dual.*
 *.h5
 *.pdf
 *.png
