@@ -1,6 +1,4 @@
----
-title: "SIMBI: 3D Relativistic Hydro Code"
----
+# SIMBI: 3D Relativistic Hydro Code
 
 # 2D Relativistic Jet Simulation
 
