@@ -255,7 +255,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
     simbi::parallel_for(p, (luint)0, nx, [=] GPU_LAMBDA (luint ii){
         real eps, pre, v2, et, c2, h, g, f, W, rho, peq;
         volatile __shared__ bool found_failure;
-        luint tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
+        luint tx = get_threadId();
 
         if (tx == 0) 
             found_failure = inFailureState;
