@@ -378,11 +378,10 @@ namespace simbi
                     std::copy(setup.x1.begin(),  setup.x1.begin() + setup.x1.size(), x1.get());
                     std::copy(setup.x2.begin(),  setup.x2.begin() + setup.x2.size(), x2.get());
                     std::copy(setup.x3.begin(),  setup.x3.begin() + setup.x3.size(), x3.get());
+
                     H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
-                    
                     H5::DataType real_type;
-                    if (typeid(real) == typeid(double))
-                    {
+                    if (typeid(real) == typeid(double)) {
                         real_type = H5::PredType::NATIVE_DOUBLE;
                     } else {
                         real_type = H5::PredType::NATIVE_FLOAT;
