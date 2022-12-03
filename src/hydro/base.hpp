@@ -2,10 +2,12 @@
 #define BASE_HPP
 
 #include "common/hydro_structs.hpp"
+#include "util/managed.hpp"
 #include "build_options.hpp"
+
 namespace simbi
 {
-    struct HydroBase
+    struct HydroBase : public Managed<BuildPlatform>
     {
         // Initializer members
         std::vector<std::vector<real>> state;
@@ -20,8 +22,8 @@ namespace simbi
         // Common members
         DataWriteMembers setup;
         real dt, t, tend, t_interval, chkpt_interval, plm_theta, decay_constant, hubble_param; 
-        real x1min, x1max, x2min, x2max, x3min, x3max;
-        real dlogx1, dx1, dx2, dx3, dlogt, tstart, engine_duration;
+        real x1min, x1max, x2min, x2max, x3min, x3max, step;
+        real dlogx1, dx1, dx2, dx3, dlogt, tstart, engine_duration, invdx1, invdx2, invdx3;
         bool first_order, periodic, linspace, hllc, mesh_motion, half_sphere, quirk_smoothing;
         luint active_zones, idx_active, total_zones, n, nx, ny, nz, init_chkpt_idx, radius, pseudo_radius;
         luint xphysical_grid, yphysical_grid, zphysical_grid;

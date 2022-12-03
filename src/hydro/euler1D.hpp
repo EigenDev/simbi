@@ -42,9 +42,9 @@ namespace simbi {
         GPU_CALLABLE_MEMBER
         hydro1d::Eigenvals calc_eigenvals(const hydro1d::Primitive &left_state, const hydro1d::Primitive &right_state);
 
-        void cons2prim(ExecutionPolicy<> p, Newtonian1D *dev = nullptr, simbi::MemSide user = simbi::MemSide::Host);
+        void cons2prim(const ExecutionPolicy<> &p);
         void adapt_dt();
-        void adapt_dt(Newtonian1D *dev, luint blockSize, luint tblock);
+        void adapt_dt(luint blockSize, luint tblock);
         
         GPU_CALLABLE_MEMBER
         hydro1d::Conserved prims2cons(const hydro1d::Primitive &prims);
@@ -102,12 +102,8 @@ namespace simbi {
             const hydro1d::Conserved &right_flux);
 
         void advance(
-            const luint radius,
-            const simbi::Geometry geometry,
-            const ExecutionPolicy<> p,
-            Newtonian1D *dev = nullptr,  
-            const luint sh_block_size = 0,
-            const simbi::MemSide user = simbi::MemSide::Host);
+            const ExecutionPolicy<> &p, 
+            const luint xstride);
 
         std::vector<std::vector<real> > simulate1D(
             std::vector<std::vector<real>> &sources,

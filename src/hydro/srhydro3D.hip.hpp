@@ -44,21 +44,13 @@ namespace simbi
             std::string coord_system);
         ~SRHD3D();
 
-        void cons2prim();
-        void cons2prim(
-            const ExecutionPolicy<> p, 
-            SRHD3D *dev = nullptr, 
-            simbi::MemSide user = simbi::MemSide::Host);
+        void cons2prim(const ExecutionPolicy<> &p);
 
         void advance(
-            SRHD3D *dev, 
-            const ExecutionPolicy<> p,
+            const ExecutionPolicy<> &p,
             const luint bx,
             const luint by,
-            const luint bz,
-            const luint radius, 
-            const simbi::Geometry geometry, 
-            const simbi::MemSide user);
+            const luint bz);
 
         GPU_CALLABLE_MEMBER
         sr3d::Eigenvals calc_Eigenvals(
@@ -108,12 +100,8 @@ namespace simbi
             const sr3d::Primitive &right_prims,
             const luint nhat);
 
-        sr3d::Conserved u_dot(luint ii, luint jj);
-
-        std::vector<sr3d::Conserved> u_dot2D(const std::vector<sr3d::Conserved> &cons_state);
-
         void adapt_dt();
-        void adapt_dt(SRHD3D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, const luint bytes);
+        void adapt_dt(const ExecutionPolicy<> &p, const luint bytes);
 
         std::vector<std::vector<real>> simulate3D(
             const std::vector<std::vector<real>> sources,

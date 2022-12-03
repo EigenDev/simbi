@@ -27,46 +27,33 @@ namespace simbi
           using primitive_t = sr1d::Primitive;
           using primitive_soa_t = sr1d::PrimitiveSOA;
           const static int dimensions = 1;
-          SRHD* device_self;
-          SRHD* self;
 
           // Create vector instances that will live on host
           ndarray<conserved_t> cons, outer_zones; 
           ndarray<primitive_t> prims;
           ndarray<real> sourceD, sourceS, source0, pressure_guess, dt_min;
           
-          SRHD();
+          SRHD(){};
           SRHD(
                std::vector<std::vector<real>> state, 
                real gamma, 
                real cfl,
                std::vector<real> x1, 
                std::string coord_system);
-          ~SRHD();
-
-          //===============================
-          // Host Ptrs to underlying data
-          //===============================
-          sr1d::Conserved * cons_ptr;
-          real            * pguess_ptr;
-          sr1d::Primitive * prims_ptr;
+          ~SRHD(){};
 
           void advance(
-               SRHD *s, 
-               const luint sh_block_size, 
-               const luint radius, 
-               const simbi::Geometry geometry, 
-               const simbi::MemSide user = simbi::MemSide::Host);
+               const ExecutionPolicy<> &p,
+               const luint xstride);
 
-          void set_mirror_ptrs();
-          void cons2prim(ExecutionPolicy<> p, SRHD *dev = nullptr, simbi::MemSide user = simbi::MemSide::Host);
+          void cons2prim(const ExecutionPolicy<> &p);
 
           GPU_CALLABLE_MEMBER
           sr1d::Eigenvals calc_eigenvals(const sr1d::Primitive &primsL,
                                          const sr1d::Primitive &primsR) const;
 
           void adapt_dt();
-          void adapt_dt(SRHD *dev, luint blockSize);
+          void adapt_dt(luint blockSize);
 
           GPU_CALLABLE_MEMBER
           sr1d::Conserved prims2cons(const sr1d::Primitive &prim) const;
@@ -168,15 +155,6 @@ namespace simbi
                }
                
           }
-          //==============================================================
-          // Create dynamic array instances that will live on device
-          //==============================================================
-          //             GPU RESOURCES
-          //==============================================================
-          luint blockSize;
-          sr1d::Conserved *gpu_cons;
-          sr1d::Primitive *gpu_prims;
-          real            *gpu_pressure_guess, *gpu_sourceD, *gpu_sourceS, *gpu_source0, *gdt_min;
           
      };
      

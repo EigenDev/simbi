@@ -56,14 +56,13 @@ Newtonian1D::Newtonian1D(
  * variables density (rho), pressure, and
  * velocity (v)
  */
-void Newtonian1D::cons2prim(ExecutionPolicy<> p, Newtonian1D *dev, simbi::MemSide user){
-    auto *self = (user == simbi::MemSide::Host) ? this : dev;
+void Newtonian1D::cons2prim(const ExecutionPolicy<> &p){
     auto* const conserved_buff = cons.data();
     auto* const primitive_buff = prims.data();
      simbi::parallel_for(p, (luint)0, nx, [=] GPU_LAMBDA (luint ii){ 
         real rho = conserved_buff[ii].rho;
         real v   = conserved_buff[ii].m / rho;
-        real pre = (self->gamma - static_cast<real>(1.0))*(conserved_buff[ii].e_dens - static_cast<real>(0.5) * rho * v * v);
+        real pre = (gamma - static_cast<real>(1.0))*(conserved_buff[ii].e_dens - static_cast<real>(0.5) * rho * v * v);
         primitive_buff[ii]  = Primitive{rho, v, pre};
     });
 };
@@ -150,16 +149,12 @@ void Newtonian1D::adapt_dt(){
     dt = cfl * min_dt;
 };
 
-void Newtonian1D::adapt_dt(Newtonian1D *dev, luint blockSize, luint tblock)
+void Newtonian1D::adapt_dt(luint blockSize, luint tblock)
 {   
     #if GPU_CODE
-    {
-        compute_dt<Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev, prims.data(), dt_min.data());
-        deviceReduceKernel<1><<<blockSize, BLOCK_SIZE>>>(dev, dt_min.data(), active_zones);
-        deviceReduceKernel<1><<<1,1024>>>(dev, dt_min.data(), blockSize);
-        simbi::gpu::api::deviceSynch();
-        this->dt = dev->dt;
-    }
+        compute_dt<Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(this, prims.data(), dt_min.data());
+        deviceReduceKernel<1><<<blockSize, BLOCK_SIZE>>>(this, dt_min.data(), active_zones);
+        deviceReduceKernel<1><<<1,1024>>>(this, dt_min.data(), blockSize);
     #endif
 };
 //----------------------------------------------------------------------------------------------------
@@ -280,24 +275,9 @@ Conserved Newtonian1D::calc_hllc_flux(
 //----------------------------------------------------------------------------------------------------------
 
 void Newtonian1D::advance(
-    const luint radius, 
-    const simbi::Geometry geometry,
-    const ExecutionPolicy<> p,
-    Newtonian1D *dev,  
-    const luint sh_block_size,
-    const simbi::MemSide user
-)
+    const ExecutionPolicy<> &p,
+    const luint xstride)
 {
-    auto *self = (user == simbi::MemSide::Host) ? this : dev;
-    #if GPU_CODE
-    const real dt                   = this->dt;
-    const real plm_theta            = this->plm_theta;
-    const auto nx                   = this->nx;
-    const real decay_constant       = this->decay_constant;
-    const auto pseudo_radius        = this->pseudo_radius;
-    #endif 
-
-    const lint bx = (BuildPlatform == Platform::GPU) ? sh_block_size : this->nx;
     auto* const prim_data   = prims.data();
     auto* const cons_data   = cons.data();
     auto* const dens_source = sourceRho.data();
@@ -331,55 +311,55 @@ void Newtonian1D::advance(
             simbi::gpu::api::synchronize();
         #endif
 
-        const real x1l    = self->get_xface(ii, geometry, 0);
-        const real x1r    = self->get_xface(ii, geometry, 1);
+        const real x1l    = get_xface(ii, geometry, 0);
+        const real x1r    = get_xface(ii, geometry, 1);
         const real vfaceL = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
         const real vfaceR = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
-        if (self->first_order)
+        if (first_order)
         {
-            primsL = prim_buff[(txa + 0) % bx];
-            primsR = prim_buff[(txa + 1) % bx];
+            primsL = prim_buff[(txa + 0) % xstride];
+            primsR = prim_buff[(txa + 1) % xstride];
             
-            uL = self->prims2cons(primsL);
-            uR = self->prims2cons(primsR);
-            fL = self->prims2flux(primsL);
-            fR = self->prims2flux(primsR);
+            uL = prims2cons(primsL);
+            uR = prims2cons(primsR);
+            fL = prims2flux(primsL);
+            fR = prims2flux(primsR);
 
             // Calc HLL Flux at i+1/2 interface
-            if (self->hllc) {
-                frf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
+            if (hllc) {
+                frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
             } else {
-                frf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
 
             // Set up the left and right state interfaces for i-1/2
-            primsL = prim_buff[helpers::mod(txa - 1, bx)];
-            primsR = prim_buff[(txa + 0) % bx];
+            primsL = prim_buff[helpers::mod(txa - 1, xstride)];
+            primsR = prim_buff[(txa + 0) % xstride];
             
-            uL = self->prims2cons(primsL);
-            uR = self->prims2cons(primsR);
-            fL = self->prims2flux(primsL);
-            fR = self->prims2flux(primsR);
+            uL = prims2cons(primsL);
+            uR = prims2cons(primsR);
+            fL = prims2flux(primsL);
+            fR = prims2flux(primsR);
 
             // Calc HLL Flux at i-1/2 interface
-            if (self->hllc)
+            if (hllc)
             {
-                flf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
+                flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
             }
             else
             {
-                flf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
         }
         else
         {
             Primitive left_most, right_most, left_mid, right_mid, center;
 
-            left_most   = prim_buff[helpers::mod(txa - 2, bx)];
-            left_mid    = prim_buff[helpers::mod(txa - 1, bx)];
-            center      = prim_buff[(txa + 0)  % bx];
-            right_mid   = prim_buff[(txa + 1)  % bx];
-            right_most  = prim_buff[(txa + 2)  % bx];
+            left_most   = prim_buff[helpers::mod(txa - 2, xstride)];
+            left_mid    = prim_buff[helpers::mod(txa - 1, xstride)];
+            center      = prim_buff[(txa + 0)  % xstride];
+            right_mid   = prim_buff[(txa + 1)  % xstride];
+            right_most  = prim_buff[(txa + 2)  % xstride];
 
             // Compute the reconstructed primitives at the i+1/2 interface
 
@@ -389,18 +369,18 @@ void Newtonian1D::advance(
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
-            uL = self->prims2cons(primsL);
-            uR = self->prims2cons(primsR);
-            fL = self->prims2flux(primsL);
-            fR = self->prims2flux(primsR);
+            uL = prims2cons(primsL);
+            uR = prims2cons(primsR);
+            fL = prims2flux(primsL);
+            fR = prims2flux(primsR);
 
-            if (self->hllc)
+            if (hllc)
             {
-                frf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
+                frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
             }
             else
             {
-                frf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
 
             // Do the same thing, but for the right side interface [i - 1/2]
@@ -409,27 +389,26 @@ void Newtonian1D::advance(
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
-            uL = self->prims2cons(primsL);
-            uR = self->prims2cons(primsR);
-            fL = self->prims2flux(primsL);
-            fR = self->prims2flux(primsR);
+            uL = prims2cons(primsL);
+            uR = prims2cons(primsR);
+            fL = prims2flux(primsL);
+            fR = prims2flux(primsR);
 
-            if (self->hllc)
+            if (hllc)
             {
-                flf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
+                flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
             }
             else
             {
-                flf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
         }
-        const auto step = (self->first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
         const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * decay_constant;
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
             { 
-                cons_data[ia] -= ( (frf - flf)/ self->dx1) * dt * step;
+                cons_data[ia] -= ( (frf - flf) * invdx1) * dt * step;
                 break;
             }
         case simbi::Geometry::SPHERICAL:
@@ -440,7 +419,7 @@ void Newtonian1D::advance(
                 const real sR     = rrf * rrf; 
                 const real sL     = rlf * rlf; 
                 const real dV     = rmean * rmean * (rrf - rlf);    
-                const real factor = (self->mesh_motion) ? dV : 1;         
+                const real factor = (mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
                 const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                 cons_data[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt * factor;
@@ -493,6 +472,7 @@ void Newtonian1D::advance(
     this->active_zones    = (periodic) ? nx: (first_order) ? nx - 2 : nx - 4;
     this->dlogx1          = std::log10(x1[active_zones - 1]/ x1[0]) / (active_zones - 1);
     this->dx1             = (x1[active_zones - 1] - x1[0]) / (active_zones - 1);
+    this->invdx1           = 1 / dx1;
     this->x1min           = x1[0];
     this->x1max           = x1[active_zones - 1];
     this->total_zones     = nx;
@@ -530,15 +510,10 @@ void Newtonian1D::advance(
     cons.resize(nx);
     prims.resize(nx);
     // Copy the state array into real & profile variables
-    for (size_t ii = 0; ii < nx; ii++)
-    {
+    for (size_t ii = 0; ii < nx; ii++) {
         cons[ii] = Conserved{state[0][ii], state[1][ii], state[2][ii]};
     }
     
-    // Copy the current Newtonian1D instance over to the device
-    Newtonian1D *device_self;
-    simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(Newtonian1D));
-    simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(Newtonian1D));
     cons.copyToGpu();
     prims.copyToGpu();
     dt_min.copyToGpu();
@@ -549,15 +524,15 @@ void Newtonian1D::advance(
     const auto xblockdim     = nx > BLOCK_SIZE ? BLOCK_SIZE : nx;
     this->radius             = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->pseudo_radius      = (first_order) ? 1 : 2;
+    this->step               = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
     const luint shBlockSize  = BLOCK_SIZE + 2 * pseudo_radius;
     const luint shBlockBytes = shBlockSize * sizeof(Primitive);
     const auto fullP         = simbi::ExecutionPolicy({nx}, {xblockdim}, shBlockBytes);
     const auto activeP       = simbi::ExecutionPolicy({active_zones}, {xblockdim}, shBlockBytes);
     
-    if constexpr(BuildPlatform == Platform::GPU)
-    {
-        cons2prim(fullP, device_self, simbi::MemSide::Dev);
-        adapt_dt(device_self, activeP.gridSize.x, xblockdim);
+    if constexpr(BuildPlatform == Platform::GPU) {
+        cons2prim(fullP);
+        adapt_dt(activeP.gridSize.x, xblockdim);
     } else {
         cons2prim(fullP);
         adapt_dt();
@@ -568,25 +543,25 @@ void Newtonian1D::advance(
         write2file(*this, setup, data_directory, t, t_interval, this->chkpt_interval, active_zones);
         t_interval += this->chkpt_interval;
     }
-
-    const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
-    const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
-
+    const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
     while (t < tend & !inFailureState)
     {
         // Using a sigmoid decay function to represent when the source terms turn off.
         decay_constant = helpers::sigmoid(t, engine_duration);
-        simbi::detail::with_logger(*this, [&](){
-            advance(radius, geometry, activeP, self, shBlockSize, memside);
-            cons2prim(fullP, self, memside);
-            if (!periodic) config_ghosts1D_t(fullP, cons, nx, first_order, bc, (conserved_t*)nullptr);
+        simbi::detail::logger::with_logger(*this, [&](){
+            advance(activeP, xstride);
+            cons2prim(fullP);
+            if (!periodic) {
+                config_ghosts1D_t(fullP, cons, nx, first_order, bc, outer_zones.data());
+            }   
+            
+            if constexpr(BuildPlatform == Platform::GPU) {
+                adapt_dt(activeP.gridSize.x,xblockdim);
+            } else {
+                adapt_dt();
+            }
+            t += dt;
         });
-
-        if constexpr(BuildPlatform == Platform::GPU) {
-            adapt_dt(device_self, activeP.gridSize.x,xblockdim);
-        } else {
-            adapt_dt();
-        }
     }
     detail::logger::print_avg_speed();
 

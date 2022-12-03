@@ -79,23 +79,14 @@ namespace simbi
             const real vface) const;
 
         void adapt_dt();
-        void adapt_dt(SRHD2D *dev, const simbi::Geometry geometry, const ExecutionPolicy<> p, luint bytes);
+        void adapt_dt(const ExecutionPolicy<> &p, luint bytes);
         
         void advance(
-               SRHD2D *s, 
-               const ExecutionPolicy<> p, 
+               const ExecutionPolicy<> &p, 
                const luint bx,
-               const luint by,
-               const luint radius, 
-               const simbi::Geometry geometry, 
-               const simbi::MemSide user = simbi::MemSide::Host);
+               const luint by);
 
-        void cons2prim(
-            ExecutionPolicy<> p, 
-            SRHD2D *dev = nullptr, 
-            simbi::MemSide user = simbi::MemSide::Host);
-
-        void cons2prim(SRHD2D *s);
+        void cons2prim(const ExecutionPolicy<> &p);
 
         GPU_CALLABLE_INLINE
         constexpr real get_x1face(const lint ii, const simbi::Geometry geometry, const int side)

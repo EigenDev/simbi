@@ -26,9 +26,6 @@ using Conserved  =  sr1d::Conserved;
 using Primitive  =  sr1d::Primitive;
 using Eigenvals  =  sr1d::Eigenvals;
 
-// Default Constructor
-SRHD::SRHD(){}
-
 // Overloaded Constructor
 SRHD::SRHD(
     std::vector<std::vector<real>> state, 
@@ -47,16 +44,7 @@ SRHD::SRHD(
 {
 
 }
-// Destructor
-SRHD::~SRHD()
-{}
 
-void SRHD::set_mirror_ptrs()
-{
-    cons_ptr   = &cons[0];
-    prims_ptr  = &prims[0];
-    pguess_ptr = &pressure_guess[0];
-}
 
 GPU_CALLABLE_MEMBER
 real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side) const
@@ -87,30 +75,15 @@ real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geome
 //                          KERNEL CALLS
 //=====================================================================
 void SRHD::advance(
-    SRHD *dev,  
-    const luint sh_block_size,
-    const luint radius, 
-    const simbi::Geometry geometry,
-    const simbi::MemSide user)
+    const ExecutionPolicy<> &p,
+    const luint xstride)
 {
-    auto *self = (user == simbi::MemSide::Host) ? this : dev;
-
-    // const bool mesh_motion      = (hubble_param != 0);
-    const unsigned shBlockBytes = sh_block_size * sizeof(Primitive);
-    auto p                      = simbi::ExecutionPolicy(nx);
-    p.blockSize                 = BLOCK_SIZE;
-    p.sharedMemBytes            = shBlockBytes;
-    const real decay_constant   = this->decay_constant;
-    const lint bx               = (BuildPlatform == Platform::GPU) ? sh_block_size : self->nx;
-    const lint  pseudo_radius   = (first_order) ? 1 : 2;
-    const real step             = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
-    const real inv_dx           = 1.0 / this->dx1;
     auto* const cons_data       = cons.data();
     auto* const prim_data       = prims.data();
     auto* const dens_source     = sourceD.data();
     auto* const mom_source      = sourceS.data();
     auto* const erg_source      = source0.data();
-    simbi::parallel_for(p, (luint)0, self->active_zones, [=] GPU_LAMBDA (luint ii) {
+    simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
         #else 
@@ -131,90 +104,90 @@ void SRHD::advance(
             prim_buff[txa] = prim_data[ia];
             if (threadIdx.x < pseudo_radius)
             {
-                if (blockIdx.x == p.gridSize.x - 1 && (ia + BLOCK_SIZE > self->nx - radius + threadIdx.x)) {
-                    txl = self->nx - radius - ia + threadIdx.x;
+                if (blockIdx.x == p.gridSize.x - 1 && (ia + BLOCK_SIZE > nx - radius + threadIdx.x)) {
+                    txl = nx - radius - ia + threadIdx.x;
                 }
-                prim_buff[txa - pseudo_radius] = prim_data[helpers::mod(ia - pseudo_radius, self->nx)];
-                prim_buff[txa + txl   ]        = prim_data[(ia + txl ) % self->nx];
+                prim_buff[txa - pseudo_radius] = prim_data[helpers::mod(ia - pseudo_radius, nx)];
+                prim_buff[txa + txl   ]        = prim_data[(ia + txl ) % nx];
             }
             simbi::gpu::api::synchronize();
         #endif
 
-        const real x1l    = self->get_xface(ii, geometry, 0);
-        const real x1r    = self->get_xface(ii, geometry, 1);
-        const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1l * self->hubble_param;
-        const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1r * self->hubble_param;
-        if (self->first_order)
+        const real x1l    = get_xface(ii, geometry, 0);
+        const real x1r    = get_xface(ii, geometry, 1);
+        const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
+        const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
+        if (first_order)
         {
             // Set up the left and right state interfaces for i+1/2
-            primsL = prim_buff[(txa + 0) % bx];
-            primsR = prim_buff[(txa + 1) % bx];
-            uL     = self->prims2cons(primsL);
-            uR     = self->prims2cons(primsR);
-            fL     = self->prims2flux(primsL);
-            fR     = self->prims2flux(primsR);
+            primsL = prim_buff[(txa + 0) % xstride];
+            primsR = prim_buff[(txa + 1) % xstride];
+            uL     = prims2cons(primsL);
+            uR     = prims2cons(primsR);
+            fL     = prims2flux(primsL);
+            fR     = prims2flux(primsR);
 
             // Calc HLL Flux at i+1/2 interface
-            if (self->hllc){
-                frf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
+            if (hllc){
+                frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
             } else {
-                frf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
+                frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
             }
 
             // Set up the left and right state interfaces for i-1/2
-            primsL = prim_buff[helpers::mod(txa - 1, bx)];
-            primsR = prim_buff[(txa - 0) % bx];
+            primsL = prim_buff[helpers::mod(txa - 1, xstride)];
+            primsR = prim_buff[(txa - 0) % xstride];
 
-            uL = self->prims2cons(primsL);
-            uR = self->prims2cons(primsR);
-            fL = self->prims2flux(primsL);
-            fR = self->prims2flux(primsR);
+            uL = prims2cons(primsL);
+            uR = prims2cons(primsR);
+            fL = prims2flux(primsL);
+            fR = prims2flux(primsR);
 
             // Calc HLL Flux at i-1/2 interface
-            if (self->hllc) {
-                flf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
+            if (hllc) {
+                flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
             } else {
-                flf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
+                flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
             }   
         } else {
-            const Primitive left_most  = prim_buff[helpers::mod(txa - 2, bx)];
-            const Primitive left_mid   = prim_buff[helpers::mod(txa - 1, bx)];
-            const Primitive center     = prim_buff[(txa + 0) % bx];
-            const Primitive right_mid  = prim_buff[(txa + 1) % bx];
-            const Primitive right_most = prim_buff[(txa + 2) % bx];
+            const Primitive left_most  = prim_buff[helpers::mod(txa - 2, xstride)];
+            const Primitive left_mid   = prim_buff[helpers::mod(txa - 1, xstride)];
+            const Primitive center     = prim_buff[(txa + 0) % xstride];
+            const Primitive right_mid  = prim_buff[(txa + 1) % xstride];
+            const Primitive right_most = prim_buff[(txa + 2) % xstride];
 
             // Compute the reconstructed primitives at the i+1/2 interface
             // Reconstructed left primitives vector
-            primsL = center    + helpers::minmod((center - left_mid)*self->plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*self->plm_theta)*static_cast<real>(0.5); 
-            primsR = right_mid - helpers::minmod((right_mid - center)*self->plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most - right_mid)*self->plm_theta)*static_cast<real>(0.5);
+            primsL = center    + helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5); 
+            primsR = right_mid - helpers::minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most - right_mid)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM primitives
-            uL = self->prims2cons(primsL);
-            uR = self->prims2cons(primsR);
-            fL = self->prims2flux(primsL);
-            fR = self->prims2flux(primsR);
+            uL = prims2cons(primsL);
+            uR = prims2cons(primsR);
+            fL = prims2flux(primsL);
+            fR = prims2flux(primsR);
 
-            if (self->hllc) {
-                frf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
+            if (hllc) {
+                frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
             } else {
-                frf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
+                frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
             }
             
             // Do the same thing, but for the right side interface [i - 1/2]
-            primsL = left_mid + helpers::minmod((left_mid - left_most)*self->plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*self->plm_theta)*static_cast<real>(0.5);
-            primsR = center   - helpers::minmod((center - left_mid)*self->plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*self->plm_theta)*static_cast<real>(0.5);
+            primsL = left_mid + helpers::minmod((left_mid - left_most)*plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
+            primsR = center   - helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
-            uL = self->prims2cons(primsL);
-            uR = self->prims2cons(primsR);
-            fL = self->prims2flux(primsL);
-            fR = self->prims2flux(primsR);
+            uL = prims2cons(primsL);
+            uR = prims2cons(primsR);
+            fL = prims2flux(primsL);
+            fR = prims2flux(primsR);
 
-            if (self->hllc) {
-                flf = self->calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
+            if (hllc) {
+                flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
             } else {
-                flf = self->calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
+                flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
             }
         }
 
@@ -223,30 +196,31 @@ void SRHD::advance(
         {
             case simbi::Geometry::CARTESIAN:
             {
-                cons_data[ia] -= ((frf - flf) * inv_dx) * self->dt * step;
+                cons_data[ia] -= ((frf - flf) * invdx1) * dt * step;
+                // printf("frf: %.2e, flf: %.2e", frf.d, flf.d);
                 break;
             }
             case simbi::Geometry::SPHERICAL:
             {
-                const real rlf    = x1l + vfaceL * step * self->dt; 
-                const real rrf    = x1r + vfaceR * step * self->dt;
+                const real rlf    = x1l + vfaceL * step * dt; 
+                const real rrf    = x1r + vfaceR * step * dt;
                 const real rmean  = static_cast<real>(0.75) * (rrf * rrf * rrf * rrf - rlf * rlf * rlf * rlf) / (rrf * rrf * rrf - rlf * rlf * rlf);
                 const real sR     = rrf * rrf; 
                 const real sL     = rlf * rlf; 
                 const real dV     = rmean * rmean * (rrf - rlf);    
-                const real factor = (self->mesh_motion) ? dV : 1;         
+                const real factor = (mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
                 const real invdV  = 1 / dV;
 
                 const auto geom_sources = Conserved{0.0, pc * (sR - sL) * invdV, 0.0};
-                cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources) * step * self->dt * factor;
+                cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources) * step * dt * factor;
                 break;
             }
                 
             case simbi::Geometry::CYLINDRICAL:
             {
-                // const real rlf    = x1l + vfaceL * step * self->dt; 
-                // const real rrf    = x1r + vfaceR * step * self->dt;
+                // const real rlf    = x1l + vfaceL * step * dt; 
+                // const real rrf    = x1r + vfaceR * step * dt;
                 // const real rmean  = static_cast<real>(0.75) * (rrf * rrf * rrf * rrf - rlf * rlf * rlf * rlf) / (rrf * rrf * rrf - rlf * rlf * rlf);
                 // const real sR     = rrf; 
                 // const real sL     = rlf; 
@@ -255,34 +229,26 @@ void SRHD::advance(
                 
                 // #if GPU_CODE
                 //     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                //     const auto sources = Conserved{self->gpu_sourceD[ii], self->gpu_sourceS[ii],self->gpu_source0[ii]} * decay_constant;
-                //     self->gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt;
+                //     const auto sources = Conserved{gpu_sourceD[ii], gpu_sourceS[ii],gpu_source0[ii]} * decay_constant;
+                //     gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt;
                 // #else 
                 //     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
                 //     const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
-                //     cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * self->dt;
+                //     cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt;
                 // #endif 
                 break;
             }
         } // end switch
-        if (ii == self->active_zones - 1) {
-            self->x1max += step * self->dt * vfaceR;
+        if (ii == active_zones - 1) {
+            x1max += step * dt * vfaceR;
         } else if (ii == 0) {
-            self->x1min += step * self->dt * vfaceL;
+            x1min += step * dt * vfaceL;
         }
     });	
-    if constexpr(BuildPlatform == Platform::GPU) {
-        this->x1min = dev->x1min;
-        this->x1max = dev->x1max;
-    }
 }
 
-void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
+void SRHD::cons2prim(const ExecutionPolicy<> &p)
 {
-    auto *self = (user == simbi::MemSide::Host) ? this : dev;
-    #if GPU_CODE
-    const real radius = (first_order) ? 1 : 2;
-    #endif
     auto* const cons_data  = cons.data();
     auto* const prims_data = prims.data();
     auto* const press_data = pressure_guess.data();
@@ -292,18 +258,18 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
         luint tx = (BuildPlatform == Platform::GPU) ? threadIdx.x : ii;
 
         if (tx == 0) 
-            found_failure = self->inFailureState;
+            found_failure = inFailureState;
         simbi::gpu::api::synchronize();
         
         real invdV = 1.0;
         bool workLeftToDo = true;
         while (!found_failure && workLeftToDo)
         {   
-            if (self->mesh_motion && (self->geometry == simbi::Geometry::SPHERICAL))
+            if (mesh_motion && (geometry == simbi::Geometry::SPHERICAL))
             {
-                const luint idx  = helpers::get_real_idx(ii, radius, self->active_zones);
-                const real xl    = self->get_xface(idx, self->geometry, 0);
-                const real xr    = self->get_xface(idx, self->geometry, 1);
+                const luint idx  = helpers::get_real_idx(ii, radius, active_zones);
+                const real xl    = get_xface(idx, geometry, 0);
+                const real xr    = get_xface(idx, geometry, 1);
                 const real xmean = static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl);
                 invdV            = static_cast<real>(1.0) / (xmean * xmean * (xr - xl));
             }
@@ -322,21 +288,21 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
                 rho = D / W;
                 eps = (tau + (static_cast<real>(1.0) - W) * D + (static_cast<real>(1.0) - W * W) * pre) / (D * W);
                 h   = static_cast<real>(1.0) + eps + pre / rho;
-                c2  = self->gamma *pre / (h * rho); 
+                c2  = gamma *pre / (h * rho); 
                 g   = c2 * v2 - static_cast<real>(1.0);
-                f   = (self->gamma - static_cast<real>(1.0)) * rho * eps - pre;
+                f   = (gamma - static_cast<real>(1.0)) * rho * eps - pre;
 
                 peq = pre - f / g;
                 if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
                 {
-                    const luint idx       = helpers::get_real_idx(ii, radius, self->active_zones);
-                    const real xl         = self->get_xface(idx, self->geometry, 0);
-                    const real xr         = self->get_xface(idx, self->geometry, 1);
-                    const real xmean      = helpers::calc_any_mean(xl, xr, self->x1cell_spacing);
+                    const luint idx       = helpers::get_real_idx(ii, radius, active_zones);
+                    const real xl         = get_xface(idx, geometry, 0);
+                    const real xr         = get_xface(idx, geometry, 1);
+                    const real xmean      = helpers::calc_any_mean(xl, xr, x1cell_spacing);
                     printf("\nCons2Prim cannot converge\n");
                     printf("density: %.3e, pressure: %.3e, vsq: %.3e, coord: %.2e, iter: %d\n", rho, peq, v2, xmean, iter);
-                    self->dt             = INFINITY;
-                    self->inFailureState = true;
+                    dt             = INFINITY;
+                    inFailureState = true;
                     found_failure        = true;
                     simbi::gpu::api::synchronize();
                     break;
@@ -352,8 +318,8 @@ void SRHD::cons2prim(ExecutionPolicy<> p, SRHD *dev, simbi::MemSide user)
             // real emin         = u * u / (1.0 + u * u) / std::pow(mach_ceiling, 2.0);
 
             // if (e < emin) {
-            //     // printf("peq: %f, npew: %f\n", rho * emin * (self->gamma - 1.0));
-            //     peq = rho * emin * (self->gamma - 1.0);
+            //     // printf("peq: %f, npew: %f\n", rho * emin * (gamma - 1.0));
+            //     peq = rho * emin * (gamma - 1.0);
             // }
             press_data[ii] = peq;
             prims_data[ii] = Primitive{rho, v, peq};
@@ -464,14 +430,12 @@ void SRHD::adapt_dt()
     dt = cfl * min_dt;
 };
 
-void SRHD::adapt_dt(SRHD *dev, luint blockSize)
+void SRHD::adapt_dt(luint blockSize)
 {   
     #if GPU_CODE
-        compute_dt<Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(dev, prims.data(), dt_min.data());
-        deviceReduceKernel<1><<<blockSize, BLOCK_SIZE>>>(dev, dt_min.data(), active_zones);
-        deviceReduceKernel<1><<<1,1024>>>(dev, dt_min.data(), blockSize);
-        simbi::gpu::api::deviceSynch();
-        this->dt = dev->dt;
+        compute_dt<Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(this, prims.data(), dt_min.data());
+        deviceReduceKernel<1><<<blockSize, BLOCK_SIZE>>>(this, dt_min.data(), active_zones);
+        deviceReduceKernel<1><<<1,1024>>>(this, dt_min.data(), blockSize);
     #endif
 };
 
@@ -668,6 +632,7 @@ SRHD::simulate1D(
     this->active_zones    = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
     this->dlogx1          = std::log10(x1[active_zones - 1]/ x1[0]) / (active_zones - 1);
     this->dx1             = (x1[active_zones - 1] - x1[0]) / (active_zones - 1);
+    this->invdx1          = 1.0 / this->dx1;
     this->x1min           = x1[0];
     this->x1max           = x1[active_zones - 1];
     this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
@@ -713,10 +678,6 @@ SRHD::simulate1D(
         pressure_guess[ii] = std::abs((state[1][ii]) - state[0][ii] - state[2][ii]);
     }
 
-    // Copy the current SRHD instance over to the device
-    SRHD *device_self;
-    simbi::gpu::api::gpuMallocManaged(&device_self, sizeof(SRHD));
-    simbi::gpu::api::copyHostToDevice(device_self, this, sizeof(SRHD));
     cons.copyToGpu();
     prims.copyToGpu();
     pressure_guess.copyToGpu();
@@ -725,29 +686,31 @@ SRHD::simulate1D(
     sourceS.copyToGpu();
     source0.copyToGpu();
 
-    const auto fullP          = simbi::ExecutionPolicy(nx);
-    const auto activeP        = simbi::ExecutionPolicy(active_zones);
+    const auto xblockdim      = nx > BLOCK_SIZE ? BLOCK_SIZE : nx;
     this->radius              = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->pseudo_radius       = (first_order) ? 1 : 2;
+    this->step                = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
     const luint shBlockSize   = BLOCK_SIZE + 2 * pseudo_radius;
+    const luint shBlockBytes  = shBlockSize * sizeof(Primitive);
+    const auto fullP          = simbi::ExecutionPolicy({nx}, {xblockdim}, shBlockBytes);
+    const auto activeP        = simbi::ExecutionPolicy({active_zones}, {xblockdim}, shBlockBytes);
     
-    // Save initial condition
-    if (t == 0) {
-        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-        t_interval += chkpt_interval;
-    }
-    // Determine the memory side and state position
-    const auto memside = (BuildPlatform == Platform::GPU) ? simbi::MemSide::Dev : simbi::MemSide::Host;
-    const auto self    = (BuildPlatform == Platform::GPU) ? device_self : this;
     if constexpr(BuildPlatform == Platform::GPU) {
-        cons2prim(fullP, device_self, simbi::MemSide::Dev);
-        adapt_dt(device_self, activeP.gridSize.x);
+        cons2prim(fullP);
+        adapt_dt(activeP.gridSize.x);
     } else {
         cons2prim(fullP);
         adapt_dt();
     }
 
+    // Save initial condition
+    if (t == 0) {
+        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
+        t_interval += chkpt_interval;
+    }
+
     // Simulate :)
+    const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
     while (t < tend & !inFailureState)
     {
         if ((d_outer) && (mesh_motion)) {
@@ -758,25 +721,20 @@ SRHD::simulate1D(
         // Using a sigmoid decay function to represent when the source terms turn off.
         decay_constant = helpers::sigmoid(t, engine_duration);
         
-        simbi::detail::with_logger(*this, [&](){
-            advance(self, shBlockSize, radius, geometry, memside);
-            cons2prim(fullP, device_self, memside);
+        simbi::detail::logger::with_logger(*this, [&](){
+            advance(activeP, xstride);
+            cons2prim(fullP);
             if (!periodic) {
                 config_ghosts1D(fullP, cons.data(), nx, first_order, bc, outer_zones.data());
             }
-        });
 
-        if constexpr(BuildPlatform == Platform::GPU) {
-            adapt_dt(device_self, activeP.gridSize.x);
-        } else {
-            adapt_dt();
-        }
-
-        if constexpr(BuildPlatform == Platform::GPU) {
-            if (device_self->inFailureState) {
-                this->inFailureState = device_self->inFailureState;
+            if constexpr(BuildPlatform == Platform::GPU) {
+                adapt_dt(activeP.gridSize.x);
+            } else {
+                adapt_dt();
             }
-        }
+            t += dt;
+        });
     }
     detail::logger::print_avg_speed();
 

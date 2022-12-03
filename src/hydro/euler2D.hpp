@@ -43,22 +43,19 @@ namespace simbi {
 
         ~Newtonian2D();
 
-        void cons2prim(
-            ExecutionPolicy<> p, 
-            Newtonian2D *dev = nullptr, 
-            simbi::MemSide user = simbi::MemSide::Host);
+        void cons2prim(const ExecutionPolicy<> &p);
 
         GPU_CALLABLE_MEMBER
         hydro2d::Eigenvals calc_eigenvals(
             const hydro2d::Primitive &left_state, 
             const hydro2d::Primitive &right_state,
-            const luint ehat = 1);
+            const luint ehat);
 
         GPU_CALLABLE_MEMBER
         hydro2d::Conserved prims2cons(const hydro2d::Primitive &prims);
 
         GPU_CALLABLE_MEMBER
-        hydro2d::Conserved prims2flux(const hydro2d::Primitive &prims, const luint ehat = 1);
+        hydro2d::Conserved prims2flux(const hydro2d::Primitive &prims, const luint ehat);
 
         GPU_CALLABLE_MEMBER
         hydro2d::Conserved calc_hll_flux(
@@ -108,19 +105,13 @@ namespace simbi {
 
         void adapt_dt();
         void adapt_dt(
-            Newtonian2D *dev, 
-            const simbi::Geometry geometry, 
-            const ExecutionPolicy<> p, 
+            const ExecutionPolicy<> &p, 
             luint bytes);
 
         void advance(
-               Newtonian2D *s, 
-               const ExecutionPolicy<> p, 
+               const ExecutionPolicy<> &p, 
                const luint bx,
-               const luint by,
-               const luint radius, 
-               const simbi::Geometry geometry, 
-               const simbi::MemSide user = simbi::MemSide::Host);
+               const luint by);
 
         std::vector<std::vector<real> > simulate2D(
             const std::vector<std::vector<real>> sources,
