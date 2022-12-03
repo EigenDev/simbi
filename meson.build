@@ -11,7 +11,7 @@ conf_data.set('ONED_BLOCK_SIZE',   get_option('1d_block_size'))
 conf_data.set('TWOD_BLOCK_SIZE',   get_option('2d_block_size'))
 conf_data.set('THREED_BLOCK_SIZE', get_option('3d_block_size'))
 conf_data.set10('FOUR_VELOCITY',   get_option('four_velocity'))
-conf_data.set10('COLUMN_MAJOR',get_option('column_major'))
+conf_data.set10('COLUMN_MAJOR',    get_option('column_major'))
 configure_file(
     input:  'build_options.hpp.in',
     output: 'build_options.hpp',
@@ -180,7 +180,7 @@ cpu_ext = py3.extension_module(
     'cpu_ext',
     ['src/cpu_ext.pyx', 'src/call_obj.pyx'] + sources,
     include_directories: all_inc,
-    cpp_args: cpp_comp_args,
+    cpp_args: cpp_comp_args + ['-DGPU_CODE=0'],
     dependencies: depends,
     override_options: ['cython_language=cpp'],
     install: true,
@@ -205,6 +205,7 @@ if get_option('gpu_compilation').enabled()
                     '@INPUT@',
                     '-o',
                     '@OUTPUT@',
+                    '-DGPU_CODE=1',
                 ],
                 input : source,
                 output : '@BASENAME@.o',
@@ -232,6 +233,7 @@ if get_option('gpu_compilation').enabled()
             link_with: [gpu_lib],
             include_directories: all_inc,
             dependencies: depends + gpu_depends,
+            cpp_args: ['-DGPU_CODE=1'],
             override_options: ['cython_language=cpp'],
             install: true,
             install_dir: py3_install_dir,
