@@ -127,10 +127,6 @@ namespace simbi{
         #if GPU_CODE
         real cfl_dt, v1p, v1m, v2p, v2m;
         const real gamma = self->gamma;
-
-        // const luint tx  = threadIdx.x;
-        // const luint ty  = threadIdx.y;
-        // const luint tid = blockDim.x * ty + tx;
         const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
         const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
         const luint ia  = ii + self->idx_active;
