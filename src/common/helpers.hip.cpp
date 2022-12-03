@@ -389,6 +389,12 @@ namespace simbi{
                     cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + 2 * sx + (ii + 2)];
                     cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)];
                     cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
+                    
+                    if (half_sphere) {
+                        cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)].s2 = - cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)].s2;
+                        cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)].s2 = - cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)].s2;
+                    }
+
                 }
 
                 // Fix the ghost zones at the azimuthal boundaries
