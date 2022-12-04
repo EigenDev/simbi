@@ -169,8 +169,6 @@ namespace simbi
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-METHODS
         //---------------------------------------------------------------------------------------------------------
-
-        void config_gpu_space();
         void pause_program();
         //----------------Define Methods-------------------------
         std::string create_step_str(real t_interval, std::string &tnow);
@@ -263,24 +261,6 @@ namespace simbi
                 real_idx = active_zones - 1;
             }
             return real_idx;
-        }   
-
-        template<typename T>
-        inline void recordEvent(T &stamp) {
-            if constexpr(std::is_same_v<T,std::chrono::high_resolution_clock::time_point>) {
-                stamp = std::chrono::high_resolution_clock::now();
-            } else {
-                anyGpuEventRecord(stamp);
-            }
-        }
-
-        template<typename T, typename U>
-        inline void recordDuration(T &dt, U t1, U t2) {
-            if constexpr(std::is_same_v<U,std::chrono::high_resolution_clock::time_point>) {
-                dt = static_cast<std::chrono::duration<real>>(t2 - t1).count();
-            } else {
-                anyGpuEventElapsedTime(&dt, t1, t2);
-            }
         }
 
         inline double sigmoid(double t, double tduration) {
