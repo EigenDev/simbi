@@ -108,18 +108,18 @@ constexpr int WARP_SIZE                     = 64;
 constexpr auto ComputeRuntime               = Runtime::ROCM;
 template<typename T>
 constexpr auto anyGpuMalloc(T **devPtr, size_t size) {
-    return cudaMalloc(devPtr, size);
+    return hipMalloc(devPtr, size);
 }
 template<typename T>
 constexpr auto anyGpuMallocManaged(T **devPtr, size_t size) {
-    return cudaMallocManaged(devPtr, size);
+    return hipMallocManaged(devPtr, size);
 }
 
-inline auto anyGpuEventCreate(cudaEvent_t *stamp) {
-    return cudaEventCreate(stamp);
+inline auto anyGpuEventCreate(hipEvent_t *stamp) {
+    return hipEventCreate(stamp);
 };
-inline auto anyGpuEventRecord(cudaEvent_t stamp) { 
-    return cudaEventRecord(stamp);
+inline auto anyGpuEventRecord(hipEvent_t stamp) { 
+    return hipEventRecord(stamp);
 };
 constexpr auto anyGpuMemcpy                 = hipMemcpy;
 constexpr auto anyGpuFree                   = hipFree;
