@@ -54,7 +54,7 @@ constexpr bool col_maj = true;
 constexpr bool col_maj = false;
 #endif 
 
-#if defined(__NVCC__) || defined(__HIPCC__) || (defined(__clang__) && defined(__HIP__))
+#if defined(GPU_PLATFORM_NVIDIA) || defined(GPU_PLATFORM_AMD)
 #define GPU_DEV                        __device__
 #define GPU_DEV_INLINE                 __device__ inline
 #define GPU_LAUNCHABLE                 __global__
@@ -64,7 +64,7 @@ constexpr bool col_maj = false;
 #define GPU_CALLABLE_MEMBER            __host__ __device__
 #define GPU_CALLABLE_INLINE_MEMBER     __host__ __device__ inline
 
-#if defined(__NVCC__) && !defined(__HIP__)
+#if GPU_PLATFORM_NVIDIA
 #include <cuda_runtime.h>
 #define CUDA_CODE 1
 constexpr int WARP_SIZE                     = 32;

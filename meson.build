@@ -81,7 +81,7 @@ if get_option('gpu_compilation').enabled()
             gpu_depends += [cuda]
             gpu_linkers += ['-lcudart']
             gpu_comp_args = [
-                '-D__HIP_PLATFORM_NVIDIA__=1',
+                '-D__GPU_PLATFORM_NVIDIA__=1',
                 '-std=c++17',
                 f'-arch=sm_@gpu_arch@', 
                 f'-ccbin=@host_compiler@',
@@ -95,7 +95,7 @@ if get_option('gpu_compilation').enabled()
             hip_compiler = 'hipcc'
             gpu_linkers += ['-lamdhip64']
             gpu_comp_args = [
-                '-D__HIP_PLATFORM_AMD__=1',
+                '-D__GPU_PLATFORM_AMD__=1',
                 '-std=c++17',
                 '-fPIC', 
                 '-O3', 
