@@ -426,14 +426,14 @@ namespace simbi{
             const int kb = 1024;
             const int mb = kb * kb;
             int devCount;
-            anyGpuGetDeviceCount(&devCount);
+            gpu::api::getDeviceCount(&devCount);
             std::cout << std::string(80, '=')  << "\n";
             std::cout << "GPU Device(s): " << std::endl << std::endl;
 
             for(int i = 0; i < devCount; ++i)
             {
                 anyGpuProp_t props;
-                anyGpuGetDeviceProperties(&props, i);
+                gpu::api::getDeviceProperties(&props, i);
                 std::cout << "  Device number:   " << i << std::endl;
                 std::cout << "  Device name:     " << props.name << ": " << props.major << "." << props.minor << std::endl;
                 std::cout << "  Global memory:   " << props.totalGlobalMem / mb << "mb" << std::endl;
@@ -457,4 +457,4 @@ namespace simbi{
         std::cout << "CPU Compute Core(s): " << processor_count << std::endl;
         #endif
     }
-}
+} // namespace simbi
