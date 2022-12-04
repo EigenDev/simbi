@@ -151,7 +151,7 @@ namespace simbi
 
             inline void print_avg_speed() {
                 if (Logger::ncheck > 0) {
-                    util::writeln("Average zone update/sec for {:>5} iterations was {:>5.2e} zones/sec", Logger::n, Logger::zu_avg / Logger::ncheck);
+                    util::writeln("Average zone update/sec for{:>5} iterations was {:>5.2e} zones/sec", Logger::n, Logger::zu_avg / Logger::ncheck);
                 }
             }
         } // namespace logger 
