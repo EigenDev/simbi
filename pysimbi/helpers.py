@@ -41,7 +41,7 @@ def calc_cell_volume3D(r: np.ndarray, theta: np.ndarray, phi: np.ndarray) -> np.
     rvertices = np.sqrt(rr[:, :,  1:] * rr[:, :, :-1])
     rvertices = np.insert(rvertices,  0, rr[:, :, 0], axis=2)
     rvertices = np.insert(rvertices, rvertices.shape[2], rr[:, :, -1], axis=2)
-    return ((1./3.) * (rvertices[:, :, 1:]**3 - rvertices[:, :, :-1]**3) * dcos * dphi)
+    return (1./3.) * (rvertices[:, :, 1:]**3 - rvertices[:, :, :-1]**3) * dcos * dphi
 
 def print_problem_params(args, parser) -> None:
     print("\nProblem paramters:")
