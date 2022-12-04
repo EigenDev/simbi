@@ -58,7 +58,14 @@ namespace simbi
                 auto status = simbi::gpu::error::status_t(anyGpuEventCreate(a));
                 simbi::gpu::error::check_err(status, "Failed to create event");
             };
-            void gpuEventRecoird(anyGpuEvent_t a)
+
+            void gpuEventDestroy(anyGpuEvent_t a)
+            {
+                auto status = simbi::gpu::error::status_t(anyGpuEventDestroy(a));
+                simbi::gpu::error::check_err(status, "Failed to create event");
+            };
+
+            void gpuEventRecord(anyGpuEvent_t a)
             {
                 auto status = simbi::gpu::error::status_t(anyGpuEventRecord(a));
                 simbi::gpu::error::check_err(status, "Failed to record event");
@@ -67,6 +74,16 @@ namespace simbi
             {
                 auto status = simbi::gpu::error::status_t(anyGpuEventElapsedTime(time, a, b));
                 simbi::gpu::error::check_err(status, "Failed to get event elapsed time");
+            };
+
+            void getDeviceCount(int *devCount){
+                auto status = simbi::gpu::error::status_t(anyGpuGetDeviceCount(devCount));
+                simbi::gpu::error::check_err(status, "Failed to get device count");
+            };
+
+            void getDeviceProperties(anyGpuProp_t *props, int i){
+                auto status = simbi::gpu::error::status_t(anyGpuGetDeviceProperties(props, i));
+                simbi::gpu::error::check_err(status, "Failed to get device properties");
             };
         } // namespace api
     

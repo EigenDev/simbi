@@ -98,8 +98,11 @@ namespace simbi
             void gpuFree(void *obj);
             void gpuEventSynchronize(anyGpuEvent_t a);
             void gpuEventCreate(anyGpuEvent_t *a);
-            void gpuEventRecoird(anyGpuEvent_t a);
+            void gpuEventDestroy(anyGpuEvent_t  a);
+            void gpuEventRecord(anyGpuEvent_t a);
             void gpuEventElapsedTime(float *time, anyGpuEvent_t a, anyGpuEvent_t b);
+            void getDeviceCount(int *devCount);
+            void getDeviceProperties(anyGpuProp_t *props, int i);
 
             void gpuMemset(void *obj, int val, size_t bytes);
 

@@ -30,14 +30,14 @@ namespace simbi
             template<Platform P = BuildPlatform, typename T>
             void create_event(T &stamp) {
                 if constexpr(P == Platform::GPU) {
-                    anyGpuEventCreate(&stamp);
+                    gpu::api::gpuEventCreate(&stamp);
                 }
             }
 
             template<Platform P = BuildPlatform, typename T>
             void destroy_event(T &stamp) {
                 if constexpr(P == Platform::GPU) {
-                    anyGpuEventDestroy(stamp);
+                    gpu::api::gpuEventDestroy(stamp);
                 }
             }
 
@@ -46,7 +46,7 @@ namespace simbi
                 if constexpr(std::is_same_v<T,std::chrono::high_resolution_clock::time_point>) {
                     stamp = std::chrono::high_resolution_clock::now();
                 } else {
-                    anyGpuEventRecord(stamp);
+                    gpu::api::gpuEventRecord(stamp);
                 }
             }
 
@@ -55,8 +55,9 @@ namespace simbi
                 if constexpr(std::is_same_v<U,std::chrono::high_resolution_clock::time_point>) {
                     dt = static_cast<std::chrono::duration<real>>(t2 - t1).count();
                 } else {
-                    anyGpuEventSynchronize(t2);
-                    anyGpuEventElapsedTime(&dt, t1, t2);
+                    gpu::api::gpuEventSynchronize(t2);
+                    gpu::api::gpuEventElapsedTime(&dt, t1, t2);
+                    // time output from GPU automatically in ms so convert to seconds
                     dt *= 1e-3;
                 }
             }
@@ -133,7 +134,8 @@ namespace simbi
                     // Write to a file at every checkpoint interval
                     if (sim_state.t >= sim_state.t_interval && sim_state.t != INFINITY)
                     {
-                        write2file(sim_state, sim_state.setup, sim_state.data_directory, sim_state.t, sim_state.t_interval, sim_state.chkpt_interval, sim_state.checkpoint_zones);
+                        write2file(sim_state, sim_state.setup, sim_state.data_directory, 
+                        sim_state.t, sim_state.t_interval, sim_state.chkpt_interval, sim_state.checkpoint_zones);
                         if (sim_state.dlogt != 0) {
                             sim_state.t_interval *= std::pow(10, sim_state.dlogt);
                         } else {
@@ -145,13 +147,15 @@ namespace simbi
                 } catch (helpers::InterruptException &e) {
                     util::writeln("{}", e.what());
                     sim_state.inFailureState = true;
-                    write2file(sim_state, sim_state.setup, sim_state.data_directory, sim_state.t, INFINITY, sim_state.chkpt_interval, sim_state.checkpoint_zones);
+                    write2file(sim_state, sim_state.setup, sim_state.data_directory, 
+                    sim_state.t, INFINITY, sim_state.chkpt_interval, sim_state.checkpoint_zones);
                 }                
             };
 
             inline void print_avg_speed() {
                 if (Logger::ncheck > 0) {
-                    util::writeln("Average zone update/sec for{:>5} iterations was {:>5.2e} zones/sec", Logger::n, Logger::zu_avg / Logger::ncheck);
+                    util::writeln("Average zone update/sec for{:>5} iterations was {:>5.2e} zones/sec", 
+                    Logger::n, Logger::zu_avg / Logger::ncheck);
                 }
             }
         } // namespace logger 
