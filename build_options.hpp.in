@@ -21,6 +21,7 @@ using lint  = int64_t;
 extern volatile sig_atomic_t killFlag;
 
 enum class Platform: int {CPU = 0, GPU = 1};
+enum class Runtime:  int {CUDA = 0, ROCM = 1, CPU = 2};
 enum class Velocity: int {Beta = 0, FourVelocity = 1};
 #if FOUR_VELOCITY
 constexpr Velocity VelocityType = Velocity::FourVelocity;
@@ -66,55 +67,80 @@ constexpr bool col_maj = false;
 #if defined(__NVCC__) && !defined(__HIP__)
 #include <cuda_runtime.h>
 #define CUDA_CODE 1
-using simbiStream_t = cudaStream_t;
-constexpr int WARP_SIZE    = 32;
-#define anyGpuMalloc                 cudaMalloc
-#define anyGpuMallocManaged          cudaMallocManaged
-#define anyGpuMemcpy                 cudaMemcpy
-#define anyGpuFree                   cudaFree
-#define anyGpuMemset                 cudaMemset
-#define anyGpuDeviceSynchronize      cudaDeviceSynchronize
-#define anyGpuMemcpyHostToDevice     cudaMemcpyHostToDevice
-#define anyGpuMemcpyDeviceToDevice   cudaMemcpyDeviceToDevice
-#define anyGpuMemcpyDeviceToHost     cudaMemcpyDeviceToHost
-#define anyGpuGetErrorString         cudaGetErrorString
-#define anyGpuError_t                cudaError_t
-#define anyGpuEvent_t                cudaEvent_t
-#define anyGpuEventCreate            cudaEventCreate
-#define anyGpuEventDestroy           cudaEventDestroy
-#define anyGpuEventRecord            cudaEventRecord 
-#define anyGpuEventSynchronize       cudaEventSynchronize 
-#define anyGpuEventElapsedTime       cudaEventElapsedTime
-#define anyGpuProp_t                 cudaDeviceProp
-#define anyGpuGetDeviceProperties    cudaGetDeviceProperties
-#define anyGpuGetDeviceCount         cudaGetDeviceCount
+constexpr int WARP_SIZE                     = 32;
+constexpr auto ComputeRuntime               = Runtime::CUDA;
+template<typename T>
+constexpr auto anyGpuMalloc(T **devPtr, size_t size) {
+    return cudaMalloc(devPtr, size);
+}
+template<typename T>
+constexpr auto anyGpuMallocManaged(T **devPtr, size_t size) {
+    return cudaMallocManaged(devPtr, size);
+}
+
+inline auto anyGpuEventCreate(cudaEvent_t *stamp) {
+    return cudaEventCreate(stamp);
+};
+inline auto anyGpuEventRecord(cudaEvent_t stamp) { 
+    return cudaEventRecord(stamp);
+};
+constexpr auto anyGpuMemcpy                 = cudaMemcpy;
+constexpr auto anyGpuFree                   = cudaFree;
+constexpr auto anyGpuMemset                 = cudaMemset;
+constexpr auto anyGpuDeviceSynchronize      = cudaDeviceSynchronize;
+constexpr auto anyGpuMemcpyHostToDevice     = cudaMemcpyHostToDevice;
+constexpr auto anyGpuMemcpyDeviceToDevice   = cudaMemcpyDeviceToDevice;
+constexpr auto anyGpuMemcpyDeviceToHost     = cudaMemcpyDeviceToHost;
+constexpr auto anyGpuGetErrorString         = cudaGetErrorString;
+constexpr auto anyGpuEventDestroy           = cudaEventDestroy;
+constexpr auto anyGpuEventSynchronize       = cudaEventSynchronize;
+constexpr auto anyGpuEventElapsedTime       = cudaEventElapsedTime;
+constexpr auto anyGpuGetDeviceProperties    = cudaGetDeviceProperties;
+constexpr auto anyGpuGetDeviceCount         = cudaGetDeviceCount;
+using anyGpuProp_t                          = cudaDeviceProp;
+using anyGpuError_t                         = cudaError_t;
+using anyGpuEvent_t                         = cudaEvent_t;
+using simbiStream_t                         = cudaStream_t;
 #else 
 #include "hip/hip_runtime.h"
 #define HIP_CODE 1
-using simbiStream_t = hipStream_t;
-constexpr int WARP_SIZE    = 64;
-#define anyGpuMalloc                 hipMalloc
-#define anyGpuMallocManaged          hipMallocManaged
-#define anyGpuMemcpy                 hipMemcpy
-#define anyGpuFree                   hipFree
-#define anyGpuMemset                 hipMemset
-#define anyGpuDeviceSynchronize      hipDeviceSynchronize
-#define anyGpuMemcpyHostToDevice     hipMemcpyHostToDevice
-#define anyGpuMemcpyDeviceToDevice   hipMemcpyDeviceToDevice
-#define anyGpuMemcpyDeviceToHost     hipMemcpyDeviceToHost
-#define anyGpuGetErrorString         hipGetErrorString
-#define anyGpuError_t                hipError_t
-#define anyGpuEvent_t                hipEvent_t
-#define anyGpuEventCreate            hipEventCreate
-#define anyGpuEventDestroy           hipEventDestroy
-#define anyGpuEventRecord            hipEventRecord 
-#define anyGpuEventSynchronize       hipEventSynchronize 
-#define anyGpuEventElapsedTime       hipEventElapsedTime
-#define anyGpuProp_t                 hipDeviceProp_t
-#define anyGpuGetDeviceProperties    hipGetDeviceProperties
-#define anyGpuGetDeviceCount         hipGetDeviceCount
+constexpr int WARP_SIZE                     = 64;
+constexpr auto ComputeRuntime               = Runtime::ROCM;
+template<typename T>
+constexpr auto anyGpuMalloc(T **devPtr, size_t size) {
+    return cudaMalloc(devPtr, size);
+}
+template<typename T>
+constexpr auto anyGpuMallocManaged(T **devPtr, size_t size) {
+    return cudaMallocManaged(devPtr, size);
+}
+
+inline auto anyGpuEventCreate(cudaEvent_t *stamp) {
+    return cudaEventCreate(stamp);
+};
+inline auto anyGpuEventRecord(cudaEvent_t stamp) { 
+    return cudaEventRecord(stamp);
+};
+constexpr auto anyGpuMemcpy                 = hipMemcpy;
+constexpr auto anyGpuFree                   = hipFree;
+constexpr auto anyGpuMemset                 = hipMemset;
+constexpr auto anyGpuDeviceSynchronize      = hipDeviceSynchronize;
+constexpr auto anyGpuMemcpyHostToDevice     = hipMemcpyHostToDevice;
+constexpr auto anyGpuMemcpyDeviceToDevice   = hipMemcpyDeviceToDevice;
+constexpr auto anyGpuMemcpyDeviceToHost     = hipMemcpyDeviceToHost;
+constexpr auto anyGpuGetErrorString         = hipGetErrorString;
+constexpr auto anyGpuEventDestroy           = hipEventDestroy;
+constexpr auto anyGpuEventSynchronize       = hipEventSynchronize;
+constexpr auto anyGpuEventElapsedTime       = hipEventElapsedTime;
+constexpr auto anyGpuGetDeviceProperties    = hipGetDeviceProperties;
+constexpr auto anyGpuGetDeviceCount         = hipGetDeviceCount;
+using anyGpuProp_t                          = hipDeviceProp_t;
+using anyGpuError_t                         = hipError_t;
+using anyGpuEvent_t                         = hipEvent_t;
+using simbiStream_t                         = hipStream_t;
 #endif
 #else
+constexpr auto ComputeRuntime = Runtime::CPU;
 constexpr int WARP_SIZE = 32;
 #define CUDA_CODE 0
 #define HIP_CODE 0
@@ -153,6 +179,7 @@ namespace simbi {
 
     using simbiStream_t = int;
     using anyGpuError_t = int;
+    using anyGpuProp_t  = int;
     using dim3 = u3;
 
     using anyGpuEvent_t = std::chrono::high_resolution_clock::time_point;
@@ -191,7 +218,7 @@ namespace simbi {
         return 0;
     }
 
-    inline int anyGpuEventDestroy(anyGpuEvent_t *a) {
+    inline int anyGpuEventDestroy(anyGpuEvent_t a) {
         return 0;
     }
 
@@ -206,11 +233,21 @@ namespace simbi {
     inline int anyGpuEventElapsedTime(float *time, anyGpuEvent_t a, anyGpuEvent_t b) {
         return 0;
     }
+
+    inline int anyGpuGetDeviceCount(int *count) {
+        return 0;
+    }
+
+    inline int anyGpuGetDeviceProperties(anyGpuProp_t *props, int i) {
+        return 0;
+    };
     inline void __syncthreads() { return;}
     inline anyGpuError_t anyGpuDeviceSynchronize() { return 0;}
 
     template <typename T>
-    inline std::string anyGpuGetErrorString(T) { return std::string("nothing odd here.");}
+    inline std::string anyGpuGetErrorString(T) { 
+        return std::string("Something went wrong with anyGpu instance");
+    }
 } // end simbi
 using namespace simbi;
 #endif
