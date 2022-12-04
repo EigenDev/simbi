@@ -123,25 +123,35 @@ namespace simbi {
             return (nzones + nThreads - 1) / nThreads;
         }
 
-        auto get_xextent() const {
+        constexpr auto get_xextent() const {
             if constexpr(col_maj) {
                 return blockSize.y;
             }
             return blockSize.x;
         }
 
-        auto get_yextent() const {
+        constexpr auto get_yextent() const {
             if constexpr(col_maj) {
                 return blockSize.x;
             }
             return blockSize.y;
         }
 
+        constexpr auto get_full_extent() const {
+            if constexpr(BuildPlatform == Platform::GPU) {
+                return blockSize.z * gridSize.z * blockSize.x * blockSize.y * gridSize.x * gridSize.y;
+            } else {
+                return nzones;
+            }
+        }
+
         void build_grid(const std::vector<T> glist, const std::vector<U> blist) {
             if (glist.size() == 1) {
                 this->gridSize  = dim3((glist[0] + blist[0] - 1) / blist[0]);
                 this->blockSize = dim3(blist[0]); 
+                this->nzones = glist[0];
             } else if (glist.size() == 2) {
+                this->nzones = glist[0] * glist[1];
                 luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
                 luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
                 if constexpr(col_maj) {
@@ -152,6 +162,7 @@ namespace simbi {
                     this->blockSize = dim3(blist[0], blist[1]); 
                 }
             } else if (glist.size() == 3) {
+                this->nzones = glist[0] * glist[1] * glist[2];
                 luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
                 luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
                 luint nzBlocks    = (glist[2] + blist[2] - 1) / blist[2];

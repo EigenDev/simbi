@@ -305,9 +305,7 @@ void SRHD3D::adapt_dt()
                         {
                             const auto rmean = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l *x1l);
                             const real th    = static_cast<real>(0.5) * (x2r + x2l);
-                            const auto sint  = std::sin(th);
-                            const auto rproj = rmean * sint;
-                            // At either pole, we are just in the r,theta plane
+                            const auto rproj = rmean * std::sin(th);
                             cfl_dt = std::min(
                                         {       dx1 / (std::max(std::abs(plus_v1), std::abs(minus_v1))),
                                         rmean * dx2 / (std::max(std::abs(plus_v2), std::abs(minus_v2))),
@@ -353,7 +351,6 @@ void SRHD3D::adapt_dt(const ExecutionPolicy<> &p, const luint ystridetes)
                 // TODO: Implement Cylindrical coordinates at some point
                 break;
         }
-        // gpu::api::deviceSynch();
     }
     #endif
 }
@@ -427,7 +424,6 @@ Conserved SRHD3D::calc_hllc_flux(
     const Primitive &right_prims,
     const   luint nhat = 1)
 {
-
     const Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
     const real aL = lambda.aL;
     const real aR = lambda.aR;
@@ -626,8 +622,7 @@ void SRHD3D::advance(
     const luint zextent             = p.blockSize.z;
     #endif 
 
-    const luint extent = (BuildPlatform == Platform::GPU) ? 
-                     p.blockSize.z * p.gridSize.z * p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
+    const luint extent = p.get_full_extent();
 
     auto* const prim_data   = prims.data();
     auto* const cons_data   = cons.data();

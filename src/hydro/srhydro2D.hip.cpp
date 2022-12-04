@@ -639,8 +639,7 @@ void SRHD2D::advance(
     const luint max_jj             = (col_maj) ? xpg : ypg;
     #endif
 
-    const luint extent= (BuildPlatform == Platform::GPU) ? 
-                                            p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
+    const luint extent= p.get_full_extent();
     // Choice of column major striding by user
     const luint sx = (col_maj) ? 1  : bx;
     const luint sy = (col_maj) ? by :  1;

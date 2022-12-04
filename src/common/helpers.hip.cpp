@@ -141,7 +141,7 @@ namespace simbi{
         const sr2d::Conserved *outer_zones,
         const bool half_sphere)
     {
-        const int extent = (BuildPlatform == Platform::GPU) ? p.gridSize.x * p.blockSize.x * p.gridSize.y * p.blockSize.y : x1grid_size * x2grid_size; 
+        const int extent = p.get_full_extent();
         const int sx     = (col_maj) ? 1 : x1grid_size;
         const int sy     = (col_maj) ? x2grid_size : 1;
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
@@ -228,7 +228,7 @@ namespace simbi{
         const hydro2d::Conserved *outer_zones,
         const bool half_sphere)
     {
-        const int extent = (BuildPlatform == Platform::GPU) ? p.gridSize.x * p.blockSize.x * p.gridSize.y * p.blockSize.y : x1grid_size * x2grid_size; 
+        const int extent = p.get_full_extent();
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
             const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % x1grid_size;
             const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / x1grid_size;
@@ -317,10 +317,7 @@ namespace simbi{
         const bool half_sphere,
         const simbi::Geometry geometry)
     {
-        const int extent = (BuildPlatform == Platform::GPU) ? 
-                            p.gridSize.z * p.gridSize.y * p.gridSize.x * p.blockSize.z * p.blockSize.y * p.blockSize.x 
-                            : x1grid_size * x2grid_size * x3grid_size;
-
+        const int extent = p.get_full_extent();
         const int sx = x1grid_size;
         const int sy = x2grid_size;
         simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {

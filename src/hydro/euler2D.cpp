@@ -439,9 +439,7 @@ void Newtonian2D::advance(
 {
     const luint xpg                   = this->xphysical_grid;
     const luint ypg                   = this->yphysical_grid;
-    const luint extent                = (BuildPlatform == Platform::GPU) ? 
-                                            p.blockSize.x * p.blockSize.y * p.gridSize.x * p.gridSize.y : active_zones;
-
+    const luint extent                = p.get_full_extent();
     #if GPU_CODE
     const luint xextent            = p.blockSize.x;
     const luint yextent            = p.blockSize.y;
