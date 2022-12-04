@@ -6,12 +6,13 @@ import importlib
 from pysimbi import Hydro
 from pathlib import Path
 
+repo_path = Path(__file__, '../..').resolve()
 overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta', 'dlogt', 'data_directory', 'quirk_smoothing']
 def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
         param = None
-        hard_configs = [file for file in Path('configs').rglob('*.py')]
+        hard_configs = [file for file in repo_path.joinpath('configs').rglob('*.py')]
         soft_paths   = [soft_path for soft_path in (Path('configs')).glob("*") if soft_path.is_symlink()]   
         soft_configs = [file for path in soft_paths for file in path.rglob('*.py')]
         for file in hard_configs + soft_configs:
