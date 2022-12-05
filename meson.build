@@ -122,7 +122,7 @@ if get_option('gpu_compilation').enabled()
         gpu_arch = get_option('gpu_arch')
         gpu_comp_args = [
                 '-std=c++17',
-                '-D__HIP_PLATFORM_NVIDIA__=1',
+                '-DGPU_PLATFORM_NVIDIA=1',
                 f'-arch=sm_@gpu_arch@', 
                 f'-ccbin=@host_compiler@',
                 '--ptxas-options=-v', 
