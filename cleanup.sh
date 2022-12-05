@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 SIMBI_DIR="$( cd "$( dirname "$0" )" && pwd )"
 
 BUILD_DIR="${SIMBI_DIR}/build"

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 function usage {
     echo "usage: CXX=<cpp_compiler> $0 [options]"
     echo ""
@@ -25,7 +25,7 @@ fi
 eval set -- "$params"
 unset params
 
-SIMBI_DIR="$( cd "$( dirname "$0" )" && pwd )"
+SIMBI_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 if command -v nvcc &> /dev/null; then 
 GPU_RUNTIME_DIR="$(echo $PATH | sed "s/:/\n/g" | grep "cuda/bin" | sed "s/\/bin//g" |  head -n 1)"
 elif command -v hipcc &> /dev/null; then
