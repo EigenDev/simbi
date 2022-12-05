@@ -362,7 +362,6 @@ class Hydro:
             u (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
-        helpers.print_progress()
         if scale_factor == None:
             scale_factor = lambda t: 1.0 
         if scale_factor_derivative == None:
@@ -431,7 +430,8 @@ class Hydro:
             # Create a new directory because it does not exist 
             os.makedirs(data_directory)
             print(f"The data directory provided does not exist. Creating the {data_directory} directory now!", flush=True)
-        
+
+        helpers.print_progress()
         if first_order:
             print("Computing First Order Solution...", flush=True)
         else:
