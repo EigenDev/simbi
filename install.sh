@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+YELLOW='\033[0;33m'
+RST='\033[0m' # No Color
+EXECUTED=false
+ERROR_CODE=0
+if [ "${BASH_SOURCE[0]}" -ef "$0" ]
+then
+    printf "${YELLOW}WRN${RST}: Running script as executable. Be aware that none of your build configurations will be cached!\n"
+    printf "If you want to cached the build configurations, please use the 'source' command.\n"
+    read -p "press [Enter] to continue..."
+    EXECUTED=true
+    
+fi
+
 function usage {
     echo "usage: CXX=<cpp_compiler> $0 [options]"
     echo ""
@@ -6,16 +19,16 @@ function usage {
     echo "  --oned                         block size for 1D simulations (only set for gpu compilation)"
     echo "  --twod                         block size for 2D simulations (only set for gpu compilation)"
     echo "  --threed                       block size for 3D simulations (only set for gpu compilation)"
-    echo "  --gpu-arch                     SM architecture specification for gpu compilation"
+    echo "  --dev-arch                     SM architecture specification for gpu compilation"
     echo "  --verbose                      flag for verbose compilation output"
     echo "  --[float | double]-precision   floating point precision"
     echo "  --[column | row]-major         memory layout for multi-dimensional arrays"
     echo "  --[gpu | cpu]-compilation      compilation mode"
     echo "  --[default | develop]          install mode (normal or editable)"
-    exit 1
+    ERROR_CODE=1
 }
 
-params="$(getopt -o hv -l oned:,twod:,threed:,gpu-arch,help,verbose,\
+params="$(getopt -o hv -l oned:,twod:,threed:,dev-arch:,help,verbose,\
 float-precision,double-precision,column-major,row-major,gpu-compilation,\
 cpu-compilation,develop,default,configure --name "$(basename "$0")" -- "$@")"
 if [ $? -ne 0 ]
@@ -114,7 +127,7 @@ do
           export SIMBI_PROFILE="default"
           shift
           ;;
-        --gpu-arch)
+        --dev-arch)
             export SIMBI_GPU_ARCH=("$2")
             shift 2
             ;;
@@ -151,14 +164,15 @@ do
     esac
 done
 
+
+if test -z "${CXX}"; then 
+    CXX="$(echo $(command -v c++) )" 
+    printf "${YELLOW}WRN${RST}: C++ compiler not set.\n"
+    printf "Using symbolic link ${CXX} as default.\n"
+fi 
+
 function configure()
 {
-  RED='\033[0;31m'
-  RST='\033[0m' # No Color
-  if test -z "${CXX}"; then 
-    printf "${RED}ERROR${RST}: please provie a c++ compiler\n"
-    usage
-  fi 
   if [ ${not_configured} = true ] || [ -z "${reconfigure}" ] || [ ${configure_only} = true ] ; then
   CXX=${CXX} meson setup ${SIMBI_BUILDDIR} -Dgpu_compilation=${SIMBI_GPU_COMPILATION} -Dhdf5_include_dir=${HDF5_INCLUDE} -Dgpu_include_dir=${GPU_INCLUDE} \
   -D1d_block_size=${SIMBI_ONE_BLOCK_SIZE} -D2d_block_size=${SIMBI_TWOD_BLOCK_SIZE} -D3d_block_size=${SIMBI_THREED_BLOCK_SIZE} \
@@ -177,8 +191,10 @@ function cleanup()
   (cd ${SIMBI_DIR} && ./cleanup.sh)
 }
 
-configure
-if [ ${configure_only} = false ]; then
-install_simbi
-cleanup
+if [ ${ERROR_CODE} = 0 ]; then
+    configure
+    if [ ${configure_only} = false ]; then
+    install_simbi
+    cleanup
+    fi
 fi
