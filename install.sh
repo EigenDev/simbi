@@ -17,7 +17,7 @@ function usage {
 
 params="$(getopt -o hv -l oned:,twod:,threed:,gpu-arch,help,verbose,\
 float-precision,double-precision,column-major,row-major,gpu-compilation,\
-cpu-compilation,develop,default --name "$(basename "$0")" -- "$@")"
+cpu-compilation,develop,default,configure --name "$(basename "$0")" -- "$@")"
 if [ $? -ne 0 ]
 then
     usage
@@ -70,6 +70,7 @@ if test -z "${SIMBI_BUILDDIR}"; then
 export SIMBI_BUILDDIR=builddir
 fi
 
+configure_only=false
 not_configured=true
 reconfigure=""
 if [ -d "${SIMBI_DIR}/${SIMBI_BUILDDIR}/meson-logs" ]; then 
@@ -143,6 +144,10 @@ do
             verbose='--verbose'
             shift
             ;;
+        --configure)
+            configure_only=true
+            shift 
+            ;;
         --)
             shift
             break
@@ -161,7 +166,7 @@ function configure()
     printf "${RED}ERROR${RST}: please provie a c++ compiler\n"
     usage
   fi 
-  if [ ${not_configured}=true ] || [ -z "${reconfigure}" ] ; then
+  if [ ${not_configured} = true ] || [ -z "${reconfigure}" ] ; then
   CXX=${CXX} meson setup ${SIMBI_BUILDDIR} -Dgpu_compilation=${SIMBI_GPU_COMPILATION} -Dhdf5_include_dir=${HDF5_INCLUDE} -Dgpu_include_dir=${GPU_INCLUDE} \
   -D1d_block_size=${SIMBI_ONE_BLOCK_SIZE} -D2d_block_size=${SIMBI_TWOD_BLOCK_SIZE} -D3d_block_size=${SIMBI_THREED_BLOCK_SIZE} \
   -Dcolumn_major=${SIMBI_COLUMN_MAJOR} -Dfloat_precision=${SIMBI_FLOAT_PRECISION} \
@@ -180,5 +185,7 @@ function cleanup()
 }
 
 configure
+if [ ${configure_only} = false ]; then
 install_simbi
 cleanup
+fi
