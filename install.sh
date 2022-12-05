@@ -166,7 +166,7 @@ function configure()
     printf "${RED}ERROR${RST}: please provie a c++ compiler\n"
     usage
   fi 
-  if [ ${not_configured} = true ] || [ -z "${reconfigure}" ] ; then
+  if [ ${not_configured} = true ] || [ -z "${reconfigure}" ] || [ ${configure_only} = true ] ; then
   CXX=${CXX} meson setup ${SIMBI_BUILDDIR} -Dgpu_compilation=${SIMBI_GPU_COMPILATION} -Dhdf5_include_dir=${HDF5_INCLUDE} -Dgpu_include_dir=${GPU_INCLUDE} \
   -D1d_block_size=${SIMBI_ONE_BLOCK_SIZE} -D2d_block_size=${SIMBI_TWOD_BLOCK_SIZE} -D3d_block_size=${SIMBI_THREED_BLOCK_SIZE} \
   -Dcolumn_major=${SIMBI_COLUMN_MAJOR} -Dfloat_precision=${SIMBI_FLOAT_PRECISION} \
