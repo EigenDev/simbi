@@ -28,6 +28,13 @@
 
 ## Quick setup guide
 
+<strong>Easy Install</strong>
+1) Run 
+```bash
+$ CXX=<your_cpp_compiler> source ./install.sh [options]
+```
+
+<strong>Manual Install</strong>
 1)  Run
 
 ``` bash
