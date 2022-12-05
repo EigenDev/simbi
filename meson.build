@@ -95,7 +95,7 @@ if get_option('gpu_compilation').enabled()
             hip_compiler = 'hipcc'
             gpu_linkers += ['-lamdhip64']
             gpu_comp_args = [
-                '-DGPU_PLATFORM_NVIDIA=1',
+                '-DGPU_PLATFORM_AMD=1',
                 '-std=c++17',
                 '-fPIC', 
                 '-O3', 
