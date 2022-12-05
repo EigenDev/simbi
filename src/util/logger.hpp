@@ -71,20 +71,13 @@ namespace simbi
 
         namespace logger {
             struct Logger {
-                static int n;
-                static real  speed;
-                static int nfold;
-                static int ncheck;
-                static real  zu_avg;
-                static real delta_t;
+                inline static int n         = 0;
+                inline static real  speed   = 0;
+                inline static int nfold     = 100;
+                inline static int ncheck    = 0;
+                inline static real  zu_avg  = 0;
+                inline static real delta_t  = 0;
             };
-
-            inline int   Logger::n       = 0;
-            inline real  Logger::speed   = 0;
-            inline int   Logger::nfold   = 100;
-            inline int   Logger::ncheck  = 0;
-            inline real  Logger::zu_avg  = 0;
-            inline real  Logger::delta_t = 0;
 
             
             template <typename sim_state_t, typename F>
