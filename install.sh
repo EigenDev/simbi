@@ -32,15 +32,8 @@ elif command -v hipcc &> /dev/null; then
 GPU_RUNTIME_DIR=("$(hipconfig --rocmpath)")
 fi 
 GPU_INCLUDE="${GPU_RUNTIME_DIR}/include"
-HDF5_HEADER="$(echo '#include <H5Cpp.h>' | cpp -H -o /dev/null 2>&1 | head -n1 | sed "s/^.//;s/^.//")"
-if [ $? -ne 0 ]
-then
-HDF5_RUNTIME_DIR="$(echo $PATH | sed "s/:/\n/g" | grep "hdf5" | sed "s/\/bin//g" |  head -n 1)"
-HDF5_INCLUDE="${HDF5_RUNTIME_DIR}/include"
-else
-HDF5_INCLUDE="$(dirname "${HDF5_HEADER}")"
-fi
-
+HDF5_PATH="$(echo $(which h5cc) | sed "s/:/\n/g" | grep "bin/h5cc" | sed "s/\/bin//g;s/\/h5cc//g" |  head -n 1)"
+HDF5_INCLUDE="${HDF5_PATH}/include"
 
 if test -z "${SIMBI_GPU_COMPILATION}"; then 
 export SIMBI_GPU_COMPILATION="disabled"
