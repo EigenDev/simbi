@@ -22,6 +22,20 @@ def valid_pyscript(param):
             raise argparse.ArgumentTypeError('<script_file> must have a .py extension or exist in the configs directory')
     return param
 
+def max_thread_count(param) -> int:
+    import multiprocessing
+    num_threads_available = multiprocessing.cpu_count()
+    
+    try:
+        val = int(param)
+    except ValueError:    
+        raise argparse.ArgumentTypeError("\nMust be a integer\n")
+    
+    if val > num_threads_available:
+        raise argparse.ArgumentTypeError(f'\nTrying to set thread count greater than available compute core(s) equal to {num_threads_available}\n')
+    
+    return val
+
 def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     """
     Configure the Hydro state based on the Config class that exists in the passed
@@ -117,14 +131,18 @@ def main():
     parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
     parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
     parser.add_argument('--version','-V', help='print current version of pysimbi module', action=print_the_version)
+    parser.add_argument('--nthreads', '-p', help="number of omp threads to run at", type=max_thread_count, default=None)
     
     # print help message if no args supplied
     args, argv = parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
     sim_states, kwargs, state_docs  = configure_state(args.setup_script, parser, argv)
+    if args.nthreads:
+        os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
+        
     for idx, sim_state in enumerate(sim_states):
         for arg in vars(args):
-            if arg == 'setup_script':
+            if arg == 'setup_script' or arg == 'nthreads':
                 continue
             if arg in overideable_args and kwargs[idx][arg]:
                 continue 
