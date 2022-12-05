@@ -148,8 +148,10 @@ done
 
 function configure()
 {
+  RED='\033[0;31m'
+  RST='\033[0m' # No Color
   if test -z "${CXX}"; then 
-    echo "ERROR: please provie a c++ compiler"
+    printf "${RED}ERROR${RST}: please provie a c++ compiler\n"
     usage
   fi 
   if [ ${not_configured}=true ] || [ -z "${reconfigure}" ] ; then
