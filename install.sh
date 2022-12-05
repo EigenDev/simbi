@@ -26,9 +26,9 @@ eval set -- "$params"
 unset params
 
 SIMBI_DIR="$( cd "$( dirname "$0" )" && pwd )"
-if which nvcc -v &> /dev/null; then 
+if command -v nvcc &> /dev/null; then 
 GPU_RUNTIME_DIR="$(echo $PATH | sed "s/:/\n/g" | grep "cuda/bin" | sed "s/\/bin//g" |  head -n 1)"
-elif which hipcc -v &> /dev/null; then
+elif command -v hipcc &> /dev/null; then
 GPU_RUNTIME_DIR=("$(hipconfig --rocmpath)")
 fi 
 GPU_INCLUDE="${GPU_RUNTIME_DIR}/include"
