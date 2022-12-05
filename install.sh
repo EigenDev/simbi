@@ -9,7 +9,6 @@ then
     printf "If you want to cached the build configurations, please use the 'source' command.\n"
     read -p "press [Enter] to continue..."
     EXECUTED=true
-    
 fi
 
 function usage {
