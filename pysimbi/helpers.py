@@ -1,4 +1,6 @@
 import numpy as np 
+import sys
+from time import sleep 
 def calc_cell_volume1D(r: np.ndarray) -> np.ndarray:
     rvertices = np.sqrt(r[1:] * r[:-1])
     rvertices = np.insert(rvertices,  0, r[0])
@@ -65,3 +67,19 @@ def calc_dlogt(tmin: float, tmax: float, ncheckpoints: int):
     if tmin == 0:
         return np.log10(tmax / 1e-10) / (ncheckpoints - 1)
     return np.log10(tmax / tmin) / (ncheckpoints - 1)
+
+
+def progressbar(it, prefix="", size=100, out=sys.stdout): 
+    count = len(it)
+    def show(j):
+        x = int(size*j/count)
+        print(f"{prefix}[{u'█'*x}{('.'*(size-x))}] {j}/{count}", end='\r', file=out, flush=True)
+    show(0)
+    for i, item in enumerate(it):
+        yield item
+        show(i+1)
+    print("\n", flush=True, file=out)
+
+def print_progress() -> None:
+    for i in progressbar(range(100), "Loading: ", 60):
+        sleep(0.03) 

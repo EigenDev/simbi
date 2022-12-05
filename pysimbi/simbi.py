@@ -10,7 +10,6 @@ import inspect
 import pysimbi.initial_condition as simbi_ic 
 import warnings
 from typing import Callable
-from time import sleep 
 regimes             = ['classical', 'relativistic']
 coord_systems       = ['spherical', 'cartesian'] # TODO: Implement Cylindrical
 boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
@@ -363,7 +362,7 @@ class Hydro:
             u (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
-        sleep(1.5)
+        helpers.print_progress()
         if scale_factor == None:
             scale_factor = lambda t: 1.0 
         if scale_factor_derivative == None:
