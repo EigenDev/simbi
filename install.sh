@@ -15,7 +15,9 @@ function usage {
     exit 1
 }
 
-params="$(getopt -o hv -l oned:,twod:,threed:,gpu-arch,help,verbose,float-precision,double-precision,column-major,row-major,gpu-compilation,cpu-compilation,develop,default --name "$(basename "$0")" -- "$@")"
+params="$(getopt -o hv -l oned:,twod:,threed:,gpu-arch,help,verbose,\
+float-precision,double-precision,column-major,row-major,gpu-compilation,\
+cpu-compilation,develop,default --name "$(basename "$0")" -- "$@")"
 if [ $? -ne 0 ]
 then
     usage
