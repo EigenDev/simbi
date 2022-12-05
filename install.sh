@@ -1,20 +1,21 @@
 #!/bin/bash
-params="$(getopt -o e:hv -l oned:,twod:,threed:,gpu_arch,help,verbose,float-precision,double-precision,column-major,row-major,gpu-compilation,cpu-compilation,develop,default --name "$(basename "$0")" -- "$@")"
-SIMBI_DIR="$( cd "$( dirname "$0" )" && pwd )"
+function usage {
+    echo "usage: CXX=<cpp_compiler> $0 [options]"
+    echo ""
+    echo "   -h --help                     print help message"
+    echo "  --oned                         block size for 1D simulations (only set for gpu compilation)"
+    echo "  --twod                         block size for 2D simulations (only set for gpu compilation)"
+    echo "  --threed                       block size for 3D simulations (only set for gpu compilation)"
+    echo "  --gpu-arch                     SM architecture specification for gpu compilation"
+    echo "  --verbose                      flag for verbose compilation output"
+    echo "  --[float | double]-precision   floating point precision"
+    echo "  --[column | row]-major         memory layout for multi-dimensional arrays"
+    echo "  --[gpu | cpu]-compilation      compilation mode"
+    echo "  --[default | develop]          install mode (normal or editable)"
+    exit 1
+}
 
-usage()  
-{  
-echo "Usage: $0 [options]"  
-exit 1  
-} 
-
-
-
-if which nvcc -v &> /dev/null; then 
-gpu_runtime_dir="$(echo $PATH | sed "s/:/\n/g" | grep "cuda/bin" | sed "s/\/bin//g" |  head -n 1)"
-elif which hipcc -v &> /dev/null; then
-gpu_runtime_dir=("$(hipconfig --rocmpath)")
-fi 
+params="$(getopt -o hv -l oned:,twod:,threed:,gpu-arch,help,verbose,float-precision,double-precision,column-major,row-major,gpu-compilation,cpu-compilation,develop,default --name "$(basename "$0")" -- "$@")"
 if [ $? -ne 0 ]
 then
     usage
@@ -22,14 +23,15 @@ fi
 eval set -- "$params"
 unset params
 
-gpu_include="${gpu_runtime_dir}/include"
-hdf5_header="$(echo '#include <H5Cpp.h>' | cpp -H -o /dev/null 2>&1 | head -n1 | sed "s/^.//;s/^.//")"
-hdf5_include="$(dirname "${hdf5_header}")"
-if test -z "${CXX}"; then 
-echo "please provie a c++ compiler"
-exit 1
+SIMBI_DIR="$( cd "$( dirname "$0" )" && pwd )"
+if which nvcc -v &> /dev/null; then 
+GPU_RUNTIME_DIR="$(echo $PATH | sed "s/:/\n/g" | grep "cuda/bin" | sed "s/\/bin//g" |  head -n 1)"
+elif which hipcc -v &> /dev/null; then
+GPU_RUNTIME_DIR=("$(hipconfig --rocmpath)")
 fi 
-
+GPU_INCLUDE="${GPU_RUNTIME_DIR}/include"
+HDF5_HEADER="$(echo '#include <H5Cpp.h>' | cpp -H -o /dev/null 2>&1 | head -n1 | sed "s/^.//;s/^.//")"
+HDF5_INCLUDE="$(dirname "${HDF5_HEADER}")"
 
 if test -z "${SIMBI_GPU_COMPILATION}"; then 
 export SIMBI_GPU_COMPILATION="disabled"
@@ -65,7 +67,6 @@ if [ -d "${SIMBI_DIR}/${SIMBI_BUILDDIR}/meson-logs" ]; then
 not_configured=false
 reconfigure="--reconfigure"
 fi 
-
 verbose=""
 while true
 do
@@ -105,13 +106,12 @@ do
             export SIMBI_PROFILE="develop"
             shift
             ;;
-
         --default)
           [ "${--develop}" = 2 ]
           export SIMBI_PROFILE="default"
           shift
           ;;
-        --gpu_arch)
+        --gpu-arch)
             export SIMBI_GPU_ARCH=("$2")
             shift 2
             ;;
@@ -119,17 +119,14 @@ do
             export SIMBI_ONE_BLOCK_SIZE=("$2")
             shift 2
             ;;
-
         --twod)
             export SIMBI_TWOD_BLOCK_SIZE=("$2")
             shift 2
             ;;
-
         --threed)
             export SIMBI_THREED_BLOCK_SIZE=("$2")
             shift 2
             ;;
-
         -h|--help)
             usage
             ;;
@@ -147,22 +144,26 @@ do
     esac
 done
 
-configure()
+function configure()
 {
+  if test -z "${CXX}"; then 
+    echo "ERROR: please provie a c++ compiler"
+    usage
+  fi 
   if [ ${not_configured}=true ] || [ -z "${reconfigure}" ] ; then
-  CXX=${CXX} meson setup ${SIMBI_BUILDDIR} -Dgpu_compilation=${SIMBI_GPU_COMPILATION} -Dhdf5_include_dir=${hdf5_include} -Dgpu_include_dir=${gpu_include} \
+  CXX=${CXX} meson setup ${SIMBI_BUILDDIR} -Dgpu_compilation=${SIMBI_GPU_COMPILATION} -Dhdf5_include_dir=${HDF5_INCLUDE} -Dgpu_include_dir=${GPU_INCLUDE} \
   -D1d_block_size=${SIMBI_ONE_BLOCK_SIZE} -D2d_block_size=${SIMBI_TWOD_BLOCK_SIZE} -D3d_block_size=${SIMBI_THREED_BLOCK_SIZE} \
   -Dcolumn_major=${SIMBI_COLUMN_MAJOR} -Dfloat_precision=${SIMBI_FLOAT_PRECISION} \
   -Dprofile=${SIMBI_PROFILE} -Dgpu_arch=${SIMBI_GPU_ARCH} ${reconfigure}
   fi
 }
 
-install_simbi()
+function install_simbi()
 {
   ( cd ${SIMBI_DIR}/${SIMBI_BUILDDIR} && meson compile ${verbose} && meson install )
 }
 
-cleanup()
+function cleanup()
 {
   (cd ${SIMBI_DIR} && ./cleanup.sh)
 }
