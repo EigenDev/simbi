@@ -717,31 +717,20 @@ SRHD::simulate1D(
 
     // Simulate :)
     const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
-    while (t < tend & !inFailureState)
-    {
-        if ((d_outer) && (mesh_motion)) {
-            const real dV  = get_cell_volume(active_zones - 1, geometry);
-            outer_zones[0] = Conserved{d_outer(x1max), s_outer(x1max), e_outer(x1max)} * dV;
-            outer_zones.copyToGpu();
+    simbi::detail::logger::with_logger(*this, tend, [&](){
+        advance(activeP, xstride);
+        cons2prim(fullP);
+        if (!periodic) {
+            config_ghosts1D(fullP, cons.data(), nx, first_order, bc, outer_zones.data());
         }
-        // Using a sigmoid decay function to represent when the source terms turn off.
-        decay_constant = helpers::sigmoid(t, engine_duration);
-        
-        simbi::detail::logger::with_logger(*this, [&](){
-            advance(activeP, xstride);
-            cons2prim(fullP);
-            if (!periodic) {
-                config_ghosts1D(fullP, cons.data(), nx, first_order, bc, outer_zones.data());
-            }
 
-            if constexpr(BuildPlatform == Platform::GPU) {
-                adapt_dt(activeP.gridSize.x);
-            } else {
-                adapt_dt();
-            }
-            t += dt;
-        });
-    }
+        if constexpr(BuildPlatform == Platform::GPU) {
+            adapt_dt(activeP.gridSize.x);
+        } else {
+            adapt_dt();
+        }
+        t += dt;
+    });
     detail::logger::print_avg_speed();
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));

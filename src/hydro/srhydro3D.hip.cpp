@@ -1132,22 +1132,17 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     }
 
     // Simulate :)
-    while (t < tend & !inFailureState)
-    {
-        // Using a sigmoid decay function to represent when the source terms turn off.
-        decay_constant = helpers::sigmoid(t, engine_duration);
-        simbi::detail::logger::with_logger(*this, [&](){
-            advance(activeP, xstride, ystride, zstride);
-            cons2prim(fullP);
-            config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bc, half_sphere, geometry);
-            if constexpr(BuildPlatform == Platform::GPU) {
-                adapt_dt(activeP, dtShBytes);
-            } else {
-                adapt_dt();
-            }
-            t += dt;
-        });
-    }
+    simbi::detail::logger::with_logger(*this, tend, [&](){
+        advance(activeP, xstride, ystride, zstride);
+        cons2prim(fullP);
+        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bc, half_sphere, geometry);
+        if constexpr(BuildPlatform == Platform::GPU) {
+            adapt_dt(activeP, dtShBytes);
+        } else {
+            adapt_dt();
+        }
+        t += dt;
+    });
     detail::logger::print_avg_speed();
     
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));

@@ -1082,35 +1082,19 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         t_interval += chkpt_interval;
     }
     // Simulate :)
-    while (t < tend & !inFailureState)
-    {
-        // Fill outer zones if user-defined conservative functions provided
-        if ((d_outer) && (mesh_motion))
-        {
-            // #pragma omp parallel for 
-            for (luint jj = 0; jj < ny; jj++) {
-                const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
-                const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
-                outer_zones[jj]  = Conserved{d_outer(x1max, x2[jreal]), s1_outer(x1max, x2[jreal]), s2_outer(x1max, x2[jreal]), e_outer(x1max, x2[jreal])} * dV;
-            }
-            outer_zones.copyToGpu();
+    simbi::detail::logger::with_logger(*this, tend, [&](){
+        advance(activeP, bx, by);
+        cons2prim(fullP);
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
+        
+        if constexpr(BuildPlatform == Platform::GPU) {
+            adapt_dt(activeP, dtShBytes);
+        } else {
+            adapt_dt();
         }
-        // Using a sigmoid decay function to represent when the source terms turn off.
-        decay_constant = helpers::sigmoid(t, engine_duration);
-        simbi::detail::logger::with_logger(*this, [&](){
-            advance(activeP, bx, by);
-            cons2prim(fullP);
-            config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
-            
-            if constexpr(BuildPlatform == Platform::GPU) {
-                adapt_dt(activeP, dtShBytes);
-            } else {
-                adapt_dt();
-            }
 
-            t += dt;
-        });
-    }
+        t += dt;
+    });
     detail::logger::print_avg_speed();
 
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));

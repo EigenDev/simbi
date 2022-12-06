@@ -548,25 +548,21 @@ void Newtonian1D::advance(
         t_interval += this->chkpt_interval;
     }
     const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
-    while (t < tend & !inFailureState)
-    {
-        // Using a sigmoid decay function to represent when the source terms turn off.
-        decay_constant = helpers::sigmoid(t, engine_duration);
-        simbi::detail::logger::with_logger(*this, [&](){
-            advance(activeP, xstride);
-            cons2prim(fullP);
-            if (!periodic) {
-                config_ghosts1D_t(fullP, cons, nx, first_order, bc, outer_zones.data());
-            }   
-            
-            if constexpr(BuildPlatform == Platform::GPU) {
-                adapt_dt(activeP.gridSize.x,xblockdim);
-            } else {
-                adapt_dt();
-            }
-            t += dt;
-        });
-    }
+
+    simbi::detail::logger::with_logger(*this, tend, [&](){
+        advance(activeP, xstride);
+        cons2prim(fullP);
+        if (!periodic) {
+            config_ghosts1D_t(fullP, cons, nx, first_order, bc, outer_zones.data());
+        }   
+        
+        if constexpr(BuildPlatform == Platform::GPU) {
+            adapt_dt(activeP.gridSize.x,xblockdim);
+        } else {
+            adapt_dt();
+        }
+        t += dt;
+    });
     detail::logger::print_avg_speed();
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));

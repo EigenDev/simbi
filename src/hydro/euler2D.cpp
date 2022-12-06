@@ -849,25 +849,20 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     }
     
     // Simulate :)
-    while (t < tend & !inFailureState)
-    {
-        // Using a sigmoid decay function to represent when the source terms turn off.
-        decay_constant = helpers::sigmoid(t, engine_duration);
-        simbi::detail::logger::with_logger(*this, [&](){
-            advance(activeP, bx, by);
-            cons2prim(fullP);
-            if (!periodic) {
-                config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
-            }
-            
-            if constexpr(BuildPlatform == Platform::GPU) {
-                adapt_dt(activeP, dtShBytes);
-            } else {
-                adapt_dt();
-            }
-            t += dt;
-        });
-    }
+    simbi::detail::logger::with_logger(*this, tend, [&](){
+        advance(activeP, bx, by);
+        cons2prim(fullP);
+        if (!periodic) {
+            config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
+        }
+        
+        if constexpr(BuildPlatform == Platform::GPU) {
+            adapt_dt(activeP, dtShBytes);
+        } else {
+            adapt_dt();
+        }
+        t += dt;
+    });
     detail::logger::print_avg_speed();
     
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
