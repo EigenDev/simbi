@@ -43,6 +43,7 @@ packages = ["pysimbi"]
 [tool.setuptools_scm]
 write_to = "pysimbi/version.py"
 version_scheme = "post-release"
+local_scheme = "no-local-version"
 
 [tool.setuptools.dynamic]
 readme = {file = ["README.md"]}

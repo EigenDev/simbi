@@ -6,4 +6,4 @@ from .helpers import print_problem_params, compute_num_polar_zones, calc_dlogt
 from pathlib import Path
 
 
-__version__ = '.'.join(map(str,__version_tuple__[:3]))
+__version__ = '.'.join(map(str,__version_tuple__))
