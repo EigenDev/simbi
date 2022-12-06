@@ -76,13 +76,12 @@ export SIMBI_BUILDDIR=builddir
 fi
 
 configure_only=false
-not_configured=true
-reconfigure=""
-if [ -d "${SIMBI_DIR}/${SIMBI_BUILDDIR}/meson-logs" ]; then 
-not_configured=false
+reconfigure=
+if command meson introspect ${SIMBI_BUILDDIR} -i --targets &> /dev/null; then 
 reconfigure="--reconfigure"
 fi 
-verbose=""
+
+verbose=
 while true
 do
     case $1 in
@@ -172,12 +171,10 @@ fi
 
 function configure()
 {
-  if [ ${not_configured} = true ] || [ -z "${reconfigure}" ] || [ ${configure_only} = true ] ; then
   CXX=${CXX} meson setup ${SIMBI_BUILDDIR} -Dgpu_compilation=${SIMBI_GPU_COMPILATION} -Dhdf5_include_dir=${HDF5_INCLUDE} -Dgpu_include_dir=${GPU_INCLUDE} \
   -D1d_block_size=${SIMBI_ONE_BLOCK_SIZE} -D2d_block_size=${SIMBI_TWOD_BLOCK_SIZE} -D3d_block_size=${SIMBI_THREED_BLOCK_SIZE} \
   -Dcolumn_major=${SIMBI_COLUMN_MAJOR} -Dfloat_precision=${SIMBI_FLOAT_PRECISION} \
   -Dprofile=${SIMBI_PROFILE} -Dgpu_arch=${SIMBI_GPU_ARCH} ${reconfigure}
-  fi
 }
 
 function install_simbi()
