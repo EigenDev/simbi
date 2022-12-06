@@ -1,5 +1,5 @@
 project('pysimbi', 'c', 'cpp', 'cython',
-    version : files('pysimbi/VERSION'), 
+    version : run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(), 
     license : 'MIT',
     default_options : [ 'cpp_std=c++17' ],
 )
@@ -224,7 +224,6 @@ if get_option('gpu_compilation').enabled()
                 output : '@BASENAME@.o',
                 build_by_default: true,
                 depend_files: headers,
-                # depends: gpu_depends,
             )
             gpu_objs += [gpu_trg]
         endforeach

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel", "cython", "meson", "ninja"]
+requires = ["setuptools", "wheel", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -40,11 +40,11 @@ zip_safe = false
 [tool.setuptools]
 packages = ["pysimbi"]
 
-[tool.setuptools.package-data]
-"*" = ["VERSION"]
+[tool.setuptools_scm]
+write_to = "pysimbi/version.py"
+version_scheme = "post-release"
 
 [tool.setuptools.dynamic]
-version = {file = "pysimbi/VERSION"}
 readme = {file = ["README.md"]}
 
 [project.urls]
