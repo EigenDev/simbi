@@ -126,7 +126,8 @@ namespace simbi
                             do
                             {
                                 f();
-                            } while (fold_count++ < nfold && sim_state.t < sim_state.t_interval);
+                                fold_count++;
+                            } while (fold_count < nfold && sim_state.t < sim_state.t_interval);
                             delta_t = timer.get_duration();
                         } else {
                             timer.startTimer();
@@ -134,7 +135,8 @@ namespace simbi
                             {
                                 f();
                                 f();
-                            } while (fold_count++ < nfold && sim_state.t < sim_state.t_interval);
+                                fold_count++;
+                            } while (fold_count < nfold && sim_state.t < sim_state.t_interval);
                             delta_t = timer.get_duration();
                         }
                         n      += fold_count;
