@@ -188,6 +188,10 @@ function cleanup()
   (cd ${SIMBI_DIR} && ./cleanup.sh)
 }
 
+if ! command -v meson; then
+    pip3 install meson
+fi 
+
 if [ ${ERROR_CODE} = 0 ]; then
     configure
     if [ ${configure_only} = false ]; then
