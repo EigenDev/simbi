@@ -1,10 +1,17 @@
-# This is where we wrap the C++ code with Cython to take advantage of
-# the readability of pythonic coding.
-# distutils: language = c++
-# Cython interface file for wrapping the object
+# Cython file to expose key hydro classes to Python while hiding
+# many of the internal functions expressed in the C++ implementation.
+# This is a key file which has a soft symlink connected it to it since 
+# in Cython the extension name and file name need to match, but the gpu
+# implementation is identical for the cpu / gpu extensions, so instead of 
+# continually maintaining two pieces of identical code, we create a symlink 
+# instead. 
+#
+# Marcus DuPont 
+# New York University 
+# Update on: 2022 / 12 / 06
+#
 
 cimport numpy as np 
-
 import numpy as np 
 import sys
 from hydro_classes cimport *
