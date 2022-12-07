@@ -78,7 +78,7 @@ fi
 
 configure_only=false
 reconfigure=
-if command meson introspect ${SIMBI_BUILDDIR} -i --targets &> /dev/null; then 
+if command meson introspect ${SIMBI_DIR}/${SIMBI_BUILDDIR} -i --targets &> /dev/null; then 
 reconfigure="--reconfigure"
 fi 
 
@@ -188,7 +188,7 @@ function cleanup()
   (cd ${SIMBI_DIR} && ./cleanup.sh)
 }
 
-if ! command -v meson; then
+if ! command -v meson &> /dev/null; then
     pip3 install meson
 fi 
 
