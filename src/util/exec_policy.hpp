@@ -35,7 +35,7 @@ namespace simbi {
         ExecutionPolicy(const T nzones, const U blockSize)
         : 
         blockSize(dim3(blockSize)),
-        sharedMemBytes(sharedMemBytes),  
+        sharedMemBytes(0),  
         stream(0)
         {
             const T nBlocks = compute_blocks(nzones, blockSize);
