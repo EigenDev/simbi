@@ -1143,7 +1143,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         }
         t += dt;
     });
-    detail::logger::print_avg_speed();
     
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
     for (luint ii = 0; ii < nzones; ii++) {

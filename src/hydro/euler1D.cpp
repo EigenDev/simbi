@@ -563,7 +563,6 @@ void Newtonian1D::advance(
         }
         t += dt;
     });
-    detail::logger::print_avg_speed();
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
     for (luint ii = 0; ii < nx; ii++) {

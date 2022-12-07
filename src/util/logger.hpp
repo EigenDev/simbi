@@ -79,7 +79,13 @@ namespace simbi
                 inline static real delta_t  = 0;
             };
 
-            
+            inline void print_avg_speed() {
+                if (Logger::ncheck > 0) {
+                    util::writeln("Average zone update/sec for {:>5} iterations was {:>5.2e} zones/sec", 
+                    Logger::n, Logger::zu_avg / Logger::ncheck);
+                }
+            }
+
             template <typename sim_state_t, typename F>
             void with_logger(sim_state_t &sim_state, real end_time, F &&f) {
                 using conserved_t = typename sim_state_t::conserved_t;
@@ -126,8 +132,7 @@ namespace simbi
                             do
                             {
                                 f();
-                                fold_count++;
-                            } while (fold_count < nfold && sim_state.t < sim_state.t_interval);
+                            } while (++fold_count < nfold && sim_state.t < sim_state.t_interval);
                             delta_t = timer.get_duration();
                         } else {
                             timer.startTimer();
@@ -135,13 +140,12 @@ namespace simbi
                             {
                                 f();
                                 f();
-                                fold_count++;
-                            } while (fold_count < nfold && sim_state.t < sim_state.t_interval);
+                            } while (++fold_count < nfold && sim_state.t < sim_state.t_interval);
                             delta_t = timer.get_duration();
                         }
                         n      += fold_count;
                         ncheck += 1;
-                        speed = fold_count * sim_state.total_zones / delta_t;
+                        speed   = fold_count * sim_state.total_zones / delta_t;
                         zu_avg += speed;
                         if constexpr(BuildPlatform == Platform::GPU) {
                             const real gpu_emperical_bw = getFlops<conserved_t, primitive_t>(sim_state.pseudo_radius, sim_state.total_zones, sim_state.active_zones, delta_t);
@@ -170,15 +174,9 @@ namespace simbi
                         write2file(sim_state, sim_state.setup, sim_state.data_directory, 
                         sim_state.t, INFINITY, sim_state.chkpt_interval, sim_state.checkpoint_zones);
                     }  
-                }              
-            };
-
-            inline void print_avg_speed() {
-                if (Logger::ncheck > 0) {
-                    util::writeln("Average zone update/sec for {:>5} iterations was {:>5.2e} zones/sec", 
-                    Logger::n, Logger::zu_avg / Logger::ncheck);
                 }
-            }
+                print_avg_speed();              
+            };
         } // namespace logger 
     } // namespace detail
     
