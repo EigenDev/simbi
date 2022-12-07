@@ -74,34 +74,34 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
             print(f"Printing dynamic arguments present in -- {setup_class}")
             static_config.print_problem_params()
             peek_only = True
+            continue
             
-        if not peek_only:
-            # Call initializer once static vars modified
-            config = static_config()
-            
-            if config.__doc__:
-                state_docs += [f"{config.__doc__}"]
-            else:
-                state_docs += [f"No docstring for problem class: {setup_class}"]
-            state: Hydro = Hydro.gen_from_setup(config)
-            kwargs[idx] = {}
-            kwargs[idx]['tstart']                   = config.start_time
-            kwargs[idx]['tend']                     = config.end_time
-            kwargs[idx]['hllc']                     = config.use_hllc_solver 
-            kwargs[idx]['boundary_condition']       = config.boundary_condition
-            kwargs[idx]['plm_theta']                = config.plm_theta
-            kwargs[idx]['dlogt']                    = config.dlogt
-            kwargs[idx]['data_directory']           = config.data_directory
-            kwargs[idx]['linspace']                 = config.linspace 
-            kwargs[idx]['sources']                  = config.sources 
-            kwargs[idx]['passive_scalars']          = config.passive_scalars 
-            kwargs[idx]['scale_factor']             = config.scale_factor 
-            kwargs[idx]['scale_factor_derivative']  = config.scale_factor_derivative
-            kwargs[idx]['edens_outer']              = config.edens_outer
-            kwargs[idx]['mom_outer']                = config.mom_outer 
-            kwargs[idx]['dens_outer']               = config.dens_outer 
-            kwargs[idx]['quirk_smoothing']          = config.use_quirk_smoothing
-            states.append(state)
+        # Call initializer once static vars modified
+        config = static_config()
+        
+        if config.__doc__:
+            state_docs += [f"{config.__doc__}"]
+        else:
+            state_docs += [f"No docstring for problem class: {setup_class}"]
+        state: Hydro = Hydro.gen_from_setup(config)
+        kwargs[idx] = {}
+        kwargs[idx]['tstart']                   = config.start_time
+        kwargs[idx]['tend']                     = config.end_time
+        kwargs[idx]['hllc']                     = config.use_hllc_solver 
+        kwargs[idx]['boundary_condition']       = config.boundary_condition
+        kwargs[idx]['plm_theta']                = config.plm_theta
+        kwargs[idx]['dlogt']                    = config.dlogt
+        kwargs[idx]['data_directory']           = config.data_directory
+        kwargs[idx]['linspace']                 = config.linspace 
+        kwargs[idx]['sources']                  = config.sources 
+        kwargs[idx]['passive_scalars']          = config.passive_scalars 
+        kwargs[idx]['scale_factor']             = config.scale_factor 
+        kwargs[idx]['scale_factor_derivative']  = config.scale_factor_derivative
+        kwargs[idx]['edens_outer']              = config.edens_outer
+        kwargs[idx]['mom_outer']                = config.mom_outer 
+        kwargs[idx]['dens_outer']               = config.dens_outer 
+        kwargs[idx]['quirk_smoothing']          = config.use_quirk_smoothing
+        states.append(state)
     
     if peek_only:
         exit(0)
