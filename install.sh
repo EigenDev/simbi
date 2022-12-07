@@ -58,7 +58,7 @@ if test -z "${SIMBI_TWOD_BLOCK_SIZE}"; then
 export SIMBI_TWOD_BLOCK_SIZE=16
 fi 
 if test -z "${SIMBI_THREED_BLOCK_SIZE}"; then 
-export SIMBI_THREED_BLOCK_SIZE=8
+export SIMBI_THREED_BLOCK_SIZE=4
 fi 
 if test -z "${SIMBI_COLUMN_MAJOR}"; then 
 export SIMBI_COLUMN_MAJOR=false 
