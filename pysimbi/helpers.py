@@ -82,4 +82,4 @@ def progressbar(it, prefix="", size=100, out=sys.stdout):
 
 def print_progress() -> None:
     for i in progressbar(range(100), "Loading: ", 60):
-        sleep(0.03) 
+        sleep(0.01) 
