@@ -126,6 +126,7 @@ namespace simbi
                     // Using a sigmoid decay function to represent when the source terms turn off.
                     sim_state.decay_constant = helpers::sigmoid(sim_state.t, sim_state.engine_duration);
                     try {
+                        //============== Compute benchmarks
                         int fold_count = 0;
                         if (sim_state.first_order) {
                             timer.startTimer();
@@ -143,6 +144,8 @@ namespace simbi
                             } while (++fold_count < nfold && sim_state.t < sim_state.t_interval);
                             delta_t = timer.get_duration();
                         }
+
+                        //=================== Record Benchmarks
                         n      += fold_count;
                         ncheck += 1;
                         speed   = fold_count * sim_state.total_zones / delta_t;
