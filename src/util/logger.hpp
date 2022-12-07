@@ -71,33 +71,33 @@ namespace simbi
 
         namespace logger {
             struct Logger {
-                inline static int n         = 0;
-                inline static real  speed   = 0;
-                inline static int nfold     = 100;
-                inline static int ncheck    = 0;
-                inline static real  zu_avg  = 0;
-                inline static real delta_t  = 0;
+                int n, nfold, ncheck;
+                real speed, zu_avg, delta_t;
+                Logger() : n(0), nfold(100), ncheck(0), speed(0), zu_avg(0), delta_t(0) {};
+                ~Logger(){};
             };
 
-            inline void print_avg_speed() {
-                if (Logger::ncheck > 0) {
+            inline void print_avg_speed(Logger &logger) {
+                if (logger.ncheck > 0) {
                     util::writeln("Average zone update/sec for {:>5} iterations was {:>5.2e} zones/sec", 
-                    Logger::n, Logger::zu_avg / Logger::ncheck);
+                    logger.n, logger.zu_avg / logger.ncheck);
                 }
             }
 
             template <typename sim_state_t, typename F>
             void with_logger(sim_state_t &sim_state, real end_time, F &&f) {
+                auto timer  = Timer();
+                auto logger = Logger();
                 using conserved_t = typename sim_state_t::conserved_t;
                 using primitive_t = typename sim_state_t::primitive_t;
-                auto&n       = Logger::n;
-                auto&speed   = Logger::speed;
-                auto&nfold   = Logger::nfold;
-                auto&ncheck  = Logger::ncheck;
-                auto&zu_avg  = Logger::zu_avg;
-                auto&delta_t = Logger::delta_t;
+                auto&n       = logger.n;
+                auto&nfold   = logger.nfold;
+                auto&ncheck  = logger.ncheck;
+                auto&speed   = logger.speed;
+                auto&zu_avg  = logger.zu_avg;
+                auto&delta_t = logger.delta_t;
                 constexpr auto write2file = helpers::write_to_file<typename sim_state_t::primitive_soa_t, sim_state_t::dimensions, sim_state_t>;
-                auto timer = Timer();
+                
                 while (sim_state.t < end_time & !sim_state.inFailureState)
                 {
                     if constexpr(is_relativistic<sim_state_t>::value) {
@@ -175,7 +175,7 @@ namespace simbi
                         sim_state.t, INFINITY, sim_state.chkpt_interval, sim_state.checkpoint_zones);
                     }  
                 }
-                print_avg_speed();              
+                print_avg_speed(logger);              
             };
         } // namespace logger 
     } // namespace detail
