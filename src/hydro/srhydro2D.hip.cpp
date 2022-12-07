@@ -251,8 +251,9 @@ void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
                     dx1, 
                     dx2
                 );
-                deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
-                deviceReduceKernel<2><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y);
+                deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
+                // deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
+                // deviceReduceKernel<2><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y);
                 break;
             
             case simbi::Geometry::SPHERICAL:
@@ -268,8 +269,9 @@ void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
                     x1max, 
                     x2min, 
                     x2max);
-                deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
-                deviceReduceKernel<2><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y);
+                deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
+                // deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
+                // deviceReduceKernel<2><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y);
                 break;
             case simbi::Geometry::CYLINDRICAL:
                 // TODO: Implement Cylindrical coordinates at some point
@@ -1060,7 +1062,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const luint by           = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
     const luint shBlockSpace = bx * by;
     const luint shBlockBytes = shBlockSpace * sizeof(Primitive);
-    const auto fullP         = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim}, shBlockBytes);
+    const auto fullP         = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim});
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
     if (t == 0) {

@@ -334,5 +334,35 @@ namespace simbi{
         }
         #endif 
     };
+
+    template<int dim, typename T>
+    GPU_LAUNCHABLE void deviceReduceWarpAtomicKernel(T *self, real *dt_min, lint nmax) {
+        #if GPU_CODE
+        real min = INFINITY;
+        luint ii   = blockIdx.x * blockDim.x + threadIdx.x;
+        luint jj   = blockIdx.y * blockDim.y + threadIdx.y;
+        luint kk   = blockIdx.z * blockDim.z + threadIdx.z;
+        luint tid  = threadIdx.z * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+        luint bid  = blockIdx.z * gridDim.x * gridDim.y + blockIdx.y * gridDim.x + blockIdx.x;
+        luint nt   = blockDim.x * blockDim.y * blockDim.z * gridDim.x * gridDim.y * gridDim.z;
+        luint gid;
+        if constexpr(dim == 1) {
+            gid = ii;
+        } else if constexpr(dim == 2) {
+            gid  = self->xphysical_grid * jj + ii;
+        } else if constexpr(dim == 3) {
+            gid  = self->yphysical_grid * self->xphysical_grid * kk + self->xphysical_grid * jj + ii;
+        }
+        // reduce multiple elements per thread
+        for(auto i = gid; i < nmax; i += nt) {
+            min = helpers::my_min(dt_min[i], min);
+        }
+        min = blockReduceMin(min);
+        if (tid==0) {
+            atomicMinReal(dt_min, min);
+            self->dt = dt_min[0];
+        }
+        #endif 
+    };
 }
 

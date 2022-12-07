@@ -164,6 +164,9 @@ namespace simbi
     template<typename T>
     GPU_LAUNCHABLE void deviceReduceKernel(T *self, lint nmax);
 
+    template<typename T>
+    GPU_LAUNCHABLE void deviceReduceWarpAtomicKernel(T *self, lint nmax);
+
     void anyDisplayProps();
 
     /**
@@ -189,6 +192,16 @@ namespace simbi
         const float ghost_conf_contr = (total_zones - real_zones)  * radius * sizeof(T);
         return (advance_contr + cons2prim_contr + ghost_conf_contr) / (delta_t * 1e9);
     }
+
+    #if GPU_CODE
+    __device__ __forceinline__ real atomicMinReal (real * addr, real value) {
+        real old;
+        old = (value >= 0) ? __int_as_float(atomicMin((int *)addr, __float_as_int(value))) :
+             __uint_as_float(atomicMax((unsigned int *)addr, __float_as_uint(value)));
+
+        return old;
+    }
+    #endif 
 
 
 } // end simbi

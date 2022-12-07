@@ -66,8 +66,6 @@ SRHD3D::~SRHD3D() {}
  */
 void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
 {
-    const luint xpg    = xphysical_grid;
-    const luint ypg    = yphysical_grid;
     auto* const prim_data  = prims.data();
     auto* const cons_data  = cons.data();
     auto* const press_data = pressure_guess.data(); 
@@ -112,6 +110,8 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
                 iter++;
                 if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
                 {
+                    const luint xpg    = xphysical_grid;
+                    const luint ypg    = yphysical_grid;
                     const luint kk    = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z: simbi::detail::get_height(gid, xpg, ypg);
                     const luint jj    = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: simbi::detail::get_row(gid, xpg, ypg, kk);
                     const luint ii    = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: simbi::detail::get_column(gid, xpg, ypg, kk);
@@ -142,13 +142,11 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
             real v1 = S1 * inv_et;
             real v2 = S2 * inv_et;
             real v3 = S3 * inv_et;
-            // printf("[%lu, %lu], rho:%.2e v1: %.2e v2: %.2e, v3: %.2e  peq: %.2e\n", rho, v1, v2, v3, peq);
             press_data[gid] = peq;
             prim_data[gid]  = Primitive{rho, v1, v2, v3, peq};
             workLeftToDo = false;
         }
     });
-    // gpu::api::deviceSynch();
 }
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
@@ -327,7 +325,7 @@ void SRHD3D::adapt_dt()
     dt = cfl * min_dt;
     };
 
-void SRHD3D::adapt_dt(const ExecutionPolicy<> &p, const luint ystridetes)
+void SRHD3D::adapt_dt(const ExecutionPolicy<> &p, const luint bytes)
 {
     #if GPU_CODE
     {
@@ -335,17 +333,19 @@ void SRHD3D::adapt_dt(const ExecutionPolicy<> &p, const luint ystridetes)
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
-                compute_dt<Primitive><<<p.gridSize,p.blockSize, ystridetes>>>
+                compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>
                 (this, prims.data(), dt_min.data(), geometry, psize, dx1, dx2, dx3);
-                deviceReduceKernel<3><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
-                deviceReduceKernel<3><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y * p.gridSize.z);
+                deviceReduceWarpAtomicKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
+                // deviceReduceKernel<3><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
+                // deviceReduceKernel<3><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y * p.gridSize.z);
                 break;
             
             case simbi::Geometry::SPHERICAL:
-                compute_dt<Primitive><<<p.gridSize,p.blockSize, ystridetes>>>
+                compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>
                 (this, prims.data(), dt_min.data(), geometry, psize, dlogx1, dx2, dx3, x1min, x1max, x2min, x2max, x3min, x3max);
-                deviceReduceKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
-                deviceReduceKernel<3><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y * p.gridSize.z);
+                deviceReduceWarpAtomicKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
+                // deviceReduceKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
+                // deviceReduceKernel<3><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y * p.gridSize.z);
                 break;
             case simbi::Geometry::CYLINDRICAL:
                 // TODO: Implement Cylindrical coordinates at some point
@@ -1110,7 +1110,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     const luint zstride      = (BuildPlatform == Platform::GPU) ? zblockdim + 2 * radius: nz;
     const luint shBlockSpace = (xblockdim + 2 * radius) * (yblockdim + 2 * radius) * (zblockdim + 2 * radius);
     const luint shBlockBytes = shBlockSpace * sizeof(Primitive);
-    const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
+    const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
     if (t == 0) {

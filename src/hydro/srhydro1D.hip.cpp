@@ -434,8 +434,9 @@ void SRHD::adapt_dt(luint blockSize)
 {   
     #if GPU_CODE
         compute_dt<Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(this, prims.data(), dt_min.data());
-        deviceReduceKernel<1><<<blockSize, BLOCK_SIZE>>>(this, dt_min.data(), active_zones);
-        deviceReduceKernel<1><<<1,1024>>>(this, dt_min.data(), blockSize);
+        deviceReduceWarpAtomicKernel<1><<<blockSize, BLOCK_SIZE>>>(this, dt_min.data(), active_zones);
+        // deviceReduceKernel<1><<<blockSize, BLOCK_SIZE>>>(this, dt_min.data(), active_zones);
+        // deviceReduceKernel<1><<<1,1024>>>(this, dt_min.data(), blockSize);
     #endif
 };
 
@@ -698,8 +699,8 @@ SRHD::simulate1D(
     this->step                = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
     const luint shBlockSize   = BLOCK_SIZE + 2 * pseudo_radius;
     const luint shBlockBytes  = shBlockSize * sizeof(Primitive);
-    const auto fullP          = simbi::ExecutionPolicy({nx}, {xblockdim}, shBlockBytes);
-    const auto activeP        = simbi::ExecutionPolicy({active_zones}, {xblockdim}, shBlockBytes);
+    const auto fullP          = simbi::ExecutionPolicy(nx, xblockdim);
+    const auto activeP        = simbi::ExecutionPolicy(active_zones, xblockdim, shBlockBytes);
     
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
