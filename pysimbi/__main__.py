@@ -63,39 +63,49 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     states = []
     state_docs = []
     kwargs = {}
+    peek_only = False
     for idx, setup_class in enumerate(setup_classes):
         problem_class = getattr(importlib.import_module(f'{base_script}'), f'{setup_class}')
         static_config = problem_class
         if argv:
             static_config.parse_args(parser)
         
-        # Call initializer once static vars modified
-        config = static_config()
-        
-        if config.__doc__:
-            state_docs += [f"{config.__doc__}"]
-        else:
-            state_docs += [f"No docstring for problem class: {setup_class}"]
-        state: Hydro = Hydro.gen_from_setup(config)
-        kwargs[idx] = {}
-        kwargs[idx]['tstart']                   = config.start_time
-        kwargs[idx]['tend']                     = config.end_time
-        kwargs[idx]['hllc']                     = config.use_hllc_solver 
-        kwargs[idx]['boundary_condition']       = config.boundary_condition
-        kwargs[idx]['plm_theta']                = config.plm_theta
-        kwargs[idx]['dlogt']                    = config.dlogt
-        kwargs[idx]['data_directory']           = config.data_directory
-        kwargs[idx]['linspace']                 = config.linspace 
-        kwargs[idx]['sources']                  = config.sources 
-        kwargs[idx]['passive_scalars']          = config.passive_scalars 
-        kwargs[idx]['scale_factor']             = config.scale_factor 
-        kwargs[idx]['scale_factor_derivative']  = config.scale_factor_derivative
-        kwargs[idx]['edens_outer']              = config.edens_outer
-        kwargs[idx]['mom_outer']                = config.mom_outer 
-        kwargs[idx]['dens_outer']               = config.dens_outer 
-        kwargs[idx]['quirk_smoothing']          = config.use_quirk_smoothing
-        states.append(state)
-        
+        if getattr(parser.parse_args(), 'peek'):
+            print(f"Printing dynamic arguments present in -- {setup_class}")
+            static_config.print_problem_params()
+            peek_only = True
+            
+        if not peek_only:
+            # Call initializer once static vars modified
+            config = static_config()
+            
+            if config.__doc__:
+                state_docs += [f"{config.__doc__}"]
+            else:
+                state_docs += [f"No docstring for problem class: {setup_class}"]
+            state: Hydro = Hydro.gen_from_setup(config)
+            kwargs[idx] = {}
+            kwargs[idx]['tstart']                   = config.start_time
+            kwargs[idx]['tend']                     = config.end_time
+            kwargs[idx]['hllc']                     = config.use_hllc_solver 
+            kwargs[idx]['boundary_condition']       = config.boundary_condition
+            kwargs[idx]['plm_theta']                = config.plm_theta
+            kwargs[idx]['dlogt']                    = config.dlogt
+            kwargs[idx]['data_directory']           = config.data_directory
+            kwargs[idx]['linspace']                 = config.linspace 
+            kwargs[idx]['sources']                  = config.sources 
+            kwargs[idx]['passive_scalars']          = config.passive_scalars 
+            kwargs[idx]['scale_factor']             = config.scale_factor 
+            kwargs[idx]['scale_factor_derivative']  = config.scale_factor_derivative
+            kwargs[idx]['edens_outer']              = config.edens_outer
+            kwargs[idx]['mom_outer']                = config.mom_outer 
+            kwargs[idx]['dens_outer']               = config.dens_outer 
+            kwargs[idx]['quirk_smoothing']          = config.use_quirk_smoothing
+            states.append(state)
+    
+    if peek_only:
+        exit(0)
+    
     return states, kwargs, state_docs 
 
 class CustomParser(argparse.ArgumentParser):
@@ -132,6 +142,7 @@ def main():
     parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
     parser.add_argument('--version','-V', help='print current version of pysimbi module', action=print_the_version)
     parser.add_argument('--nthreads', '-p', help="number of omp threads to run at", type=max_thread_count, default=None)
+    parser.add_argument('--peek', help='print setup-script usage', default=False, action='store_true')
     
     # print help message if no args supplied
     args, argv = parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
@@ -139,10 +150,10 @@ def main():
     sim_states, kwargs, state_docs  = configure_state(args.setup_script, parser, argv)
     if args.nthreads:
         os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
-        
+    
     for idx, sim_state in enumerate(sim_states):
         for arg in vars(args):
-            if arg == 'setup_script' or arg == 'nthreads':
+            if arg == 'setup_script' or arg == 'nthreads' or arg == 'peek':
                 continue
             if arg in overideable_args and kwargs[idx][arg]:
                 continue 
