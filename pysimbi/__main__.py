@@ -85,8 +85,8 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
             state_docs += [f"No docstring for problem class: {setup_class}"]
         state: Hydro = Hydro.gen_from_setup(config)
         kwargs[idx] = {}
-        kwargs[idx]['tstart']                   = config.start_time
-        kwargs[idx]['tend']                     = config.end_time
+        kwargs[idx]['tstart']                   = config.default_start_time
+        kwargs[idx]['tend']                     = config.default_end_time
         kwargs[idx]['hllc']                     = config.use_hllc_solver 
         kwargs[idx]['boundary_condition']       = config.boundary_condition
         kwargs[idx]['plm_theta']                = config.plm_theta
@@ -126,8 +126,8 @@ class print_the_version(argparse.Action):
 def main():
     parser = CustomParser(prog='pysimbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
     parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
-    parser.add_argument('--tstart',    help='start time for simulation', default=0.0, type=float)
-    parser.add_argument('--tend',    help='end time for simulation', default=1.0, type=float)
+    parser.add_argument('--tstart',    help='start time for simulation', default=None, type=float)
+    parser.add_argument('--tend',    help='end time for simulation', default=None, type=float)
     parser.add_argument('--dlogt',     help='logarithmic time bin spacing for checkpoints', default=0.0, type=float)
     parser.add_argument('--plm_theta', help='piecewise linear consturction parameter', default=1.5, type=float)
     parser.add_argument('--first_order', help='Set flag if wanting first order accuracy in solution', default=False, action='store_true')
@@ -154,6 +154,14 @@ def main():
     for idx, sim_state in enumerate(sim_states):
         for arg in vars(args):
             if arg == 'setup_script' or arg == 'nthreads' or arg == 'peek':
+                continue
+            if arg == 'tend' or arg == 'tstart':
+                command_line_time = getattr(args, arg)
+                # override the default time args if thet've been set
+                if kwargs[idx][arg] or command_line_time:
+                    kwargs[idx][arg] = command_line_time
+                else:
+                    kwargs[idx][arg] = 1.0 if arg == 'tend' else 0.0
                 continue
             if arg in overideable_args and kwargs[idx][arg]:
                 continue 

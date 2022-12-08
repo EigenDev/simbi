@@ -71,11 +71,11 @@ class thermalBomb(BaseConfig):
         return "relativistic"
     
     @property
-    def start_time(self):
+    def default_start_time(self):
         return 0.0
     
     @property
-    def end_time(self):
+    def default_end_time(self):
         return 1.0
     
     @property

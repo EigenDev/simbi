@@ -73,11 +73,11 @@ class BaseConfig:
        return None
    
     @property
-    def start_time(self) -> float:
+    def default_start_time(self) -> float:
        return None
    
     @property
-    def end_time(self) -> float:
+    def default_end_time(self) -> float:
        return None
    
     @property
