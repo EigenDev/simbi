@@ -26,14 +26,10 @@ namespace simbi
         }
 
         void catch_signals() {
-            // Adapted from answer to "How can I catch a ctrl-c event? (C++)"
-            struct sigaction sigBreakHandler;
-            sigBreakHandler.sa_handler = [](int sig) {killsig_received = true;};
-            sigemptyset(&sigBreakHandler.sa_mask);
-            sigBreakHandler.sa_flags = 0;
-            sigaction(SIGINT,  &sigBreakHandler, NULL);
-            sigaction(SIGTERM, &sigBreakHandler, NULL);
-            sigaction(SIGKILL, &sigBreakHandler, NULL);
+            const static auto signal_handler = [](int sig) {killsig_received = true;};
+            std::signal(SIGTERM, signal_handler);
+            std::signal(SIGINT,  signal_handler);
+            std::signal(SIGKILL, signal_handler);
             if (killsig_received) {
                 killsig_received = false;
                 throw helpers::InterruptException(1);
