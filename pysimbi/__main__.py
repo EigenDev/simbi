@@ -151,18 +151,18 @@ def main():
     if args.nthreads:
         os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
     
+    global_nonsim_args = ['setup_script', 'nthreads', 'peek']
     for idx, sim_state in enumerate(sim_states):
         for arg in vars(args):
-            if arg == 'setup_script' or arg == 'nthreads' or arg == 'peek':
+            if arg in global_nonsim_args:
                 continue
             if arg == 'tend' or arg == 'tstart':
                 command_line_time = getattr(args, arg)
                 # override the default time args if they've been set
-                if kwargs[idx][arg]:
-                    if command_line_time:
-                        kwargs[idx][arg] = command_line_time
-                else:
-                    kwargs[idx][arg] = 1.0 if arg == 'tend' else 0.0
+                if command_line_time:
+                    kwargs[idx][arg] = command_line_time
+                elif not kwargs[idx][arg]:
+                   kwargs[idx][arg] = 1.0 if arg == 'tend' else 0.0
                 continue
             if arg in overideable_args and kwargs[idx][arg]:
                 continue 
