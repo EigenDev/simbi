@@ -157,8 +157,8 @@ def main():
                 continue
             if arg == 'tend' or arg == 'tstart':
                 command_line_time = getattr(args, arg)
-                # override the default time args if thet've been set
-                if kwargs[idx][arg] or command_line_time:
+                # override the default time args if they've been set
+                if kwargs[idx][arg] and command_line_time:
                     kwargs[idx][arg] = command_line_time
                 else:
                     kwargs[idx][arg] = 1.0 if arg == 'tend' else 0.0
