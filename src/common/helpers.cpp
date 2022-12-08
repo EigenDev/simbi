@@ -6,13 +6,15 @@
 
 #include "helpers.hpp" 
 #include "hydro_structs.hpp"
-
-volatile sig_atomic_t killFlag = 0;
+#include <atomic>
 using namespace H5;
 namespace simbi
 {
     namespace helpers
     {
+        // Flag that detects whether prgram was terminated by external forces
+        std::atomic<bool> killsig_received = false;
+
         InterruptException::InterruptException(int s)
         : status(s)
         {
@@ -26,24 +28,18 @@ namespace simbi
         void catch_signals() {
             // Adapted from answer to "How can I catch a ctrl-c event? (C++)"
             struct sigaction sigBreakHandler;
-            sigBreakHandler.sa_handler = [](int sig) {killFlag = 1;};
+            sigBreakHandler.sa_handler = [](int sig) {killsig_received = true;};
             sigemptyset(&sigBreakHandler.sa_mask);
             sigBreakHandler.sa_flags = 0;
             sigaction(SIGINT,  &sigBreakHandler, NULL);
             sigaction(SIGTERM, &sigBreakHandler, NULL);
             sigaction(SIGKILL, &sigBreakHandler, NULL);
-            if (killFlag) {
-                killFlag = 0;
+            if (killsig_received) {
+                killsig_received = false;
                 throw helpers::InterruptException(1);
             }
         }
 
-        // void catch_signals() {
-        //     auto handler = [](int stat) { throw InterruptException(stat) ;};
-        //     signal(SIGINT, handler);
-        //     signal(SIGTERM, handler);
-        //     signal(SIGKILL, handler);
-        // }
         // =========================================================================================================
         //        HELPER FUNCTIONS FOR COMPUTATION
         // =========================================================================================================
