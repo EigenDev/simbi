@@ -6,7 +6,7 @@ ERROR_CODE=0
 if [ "${BASH_SOURCE[0]}" -ef "$0" ]
 then
     printf "${YELLOW}WRN${RST}: Running script as executable. Be aware that none of your build configurations will be cached!\n"
-    printf "If you want to cached the build configurations, please use the 'source' command.\n"
+    printf "If you want to cached the build configurations, please use the 'source' or '.' commands.\n"
     read -p "press [Enter] to continue..."
     EXECUTED=true
 fi
