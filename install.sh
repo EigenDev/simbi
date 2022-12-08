@@ -144,6 +144,7 @@ do
             ;;
         -h|--help)
             usage
+            break
             ;;
         -v|--verbose)
             verbose='--verbose'
@@ -159,40 +160,41 @@ do
             ;;
         *)
             usage
+            break
             ;;
     esac
 done
 
 
-if test -z "${CXX}"; then 
-    CXX="$(echo $(command -v c++) )" 
-    printf "${YELLOW}WRN${RST}: C++ compiler not set.\n"
-    printf "Using symbolic link ${CXX} as default.\n"
-fi 
-
-function configure()
-{
-  CXX=${CXX} meson setup ${SIMBI_BUILDDIR} -Dgpu_compilation=${SIMBI_GPU_COMPILATION} -Dhdf5_include_dir=${HDF5_INCLUDE} -Dgpu_include_dir=${GPU_INCLUDE} \
-  -D1d_block_size=${SIMBI_ONE_BLOCK_SIZE} -D2d_block_size=${SIMBI_TWOD_BLOCK_SIZE} -D3d_block_size=${SIMBI_THREED_BLOCK_SIZE} \
-  -Dcolumn_major=${SIMBI_COLUMN_MAJOR} -Dfloat_precision=${SIMBI_FLOAT_PRECISION} \
-  -Dprofile=${SIMBI_PROFILE} -Dgpu_arch=${SIMBI_GPU_ARCH} ${reconfigure}
-}
-
-function install_simbi()
-{
-  ( cd ${SIMBI_DIR}/${SIMBI_BUILDDIR} && meson compile ${verbose} && meson install )
-}
-
-function cleanup()
-{
-  (cd ${SIMBI_DIR} && ./cleanup.sh)
-}
-
-if ! command -v meson &> /dev/null; then
-    pip3 install meson
-fi 
 
 if [ ${ERROR_CODE} = 0 ]; then
+    if test -z "${CXX}"; then 
+        CXX="$(echo $(command -v c++) )" 
+        printf "${YELLOW}WRN${RST}: C++ compiler not set.\n"
+        printf "Using symbolic link ${CXX} as default.\n"
+    fi 
+
+    function configure()
+    {
+    CXX=${CXX} meson setup ${SIMBI_BUILDDIR} -Dgpu_compilation=${SIMBI_GPU_COMPILATION} -Dhdf5_include_dir=${HDF5_INCLUDE} -Dgpu_include_dir=${GPU_INCLUDE} \
+    -D1d_block_size=${SIMBI_ONE_BLOCK_SIZE} -D2d_block_size=${SIMBI_TWOD_BLOCK_SIZE} -D3d_block_size=${SIMBI_THREED_BLOCK_SIZE} \
+    -Dcolumn_major=${SIMBI_COLUMN_MAJOR} -Dfloat_precision=${SIMBI_FLOAT_PRECISION} \
+    -Dprofile=${SIMBI_PROFILE} -Dgpu_arch=${SIMBI_GPU_ARCH} ${reconfigure}
+    }
+
+    function install_simbi()
+    {
+    ( cd ${SIMBI_DIR}/${SIMBI_BUILDDIR} && meson compile ${verbose} && meson install )
+    }
+
+    function cleanup()
+    {
+    (cd ${SIMBI_DIR} && ./cleanup.sh)
+    }
+
+    if ! command -v meson &> /dev/null; then
+        pip3 install meson
+    fi 
     configure
     if [ ${configure_only} = false ]; then
     install_simbi
