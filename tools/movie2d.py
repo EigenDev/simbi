@@ -450,7 +450,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
             fsize = 25 if not args.print else DEFAULT_SIZE
             fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.95)
     
-def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
+def plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, ds):
     xx, yy = mesh['xx'], mesh['yy']
     
     vmin,vmax = args.cbar
@@ -467,9 +467,11 @@ def plot_cartesian_plot(fig, ax, cbaxes, field_dict, args, mesh, ds):
         
     tend = ds["time"]
     ax.grid(False)
-    # ax.yaxis.grid(True, alpha=0.1)
-    # ax.xaxis.grid(True, alpha=0.1)
-    c = ax.pcolormesh(xx, yy, field_dict[args.fields[0]], cmap=color_map, shading='auto', **kwargs)
+    if args.fields[0] in derived:
+        var = util.prims2var(fields, args.fields[0])
+    else:
+        var = fields[args.fields[0]]
+    c = ax.pcolormesh(xx, yy, var, cmap=color_map, shading='auto', **kwargs)
 
     if args.log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
@@ -579,8 +581,9 @@ def main():
     # read the first file and infer the system configuration from it
     init_setup = util.read_2d_file(args, flist[0])[1]
     if init_setup["is_cartesian"]:
-        fig, ax = plt.subplots(1, 1, figsize=(11,10), constrained_layout=False)
+        fig, ax = plt.subplots(1, 1, figsize=(11,10))
         ax.grid(False)
+        ax.set_aspect('equal')
         divider = make_axes_locatable(ax)
         if not args.pictorial:
             cbaxes = divider.append_axes('right', size='5%', pad=0.05)
@@ -681,7 +684,7 @@ def main():
         plt.show()
     else:
         dpi = 600
-        animation.save("{}.mp4".format(args.save.replace(" ", "_")), codec="libx264")
+        animation.save("{}.mp4".format(args.save.replace(" ", "_")))
     
     
     

@@ -716,7 +716,7 @@ def plot_polar_plot(
                 else:
                     cbar.set_label(r'{}'.format(field_str), fontsize=fsize)
         fsize = 25 if not args.print else DEFAULT_SIZE
-        if args.setup != "":
+        if args.setup:
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=fsize, y=1.03)
         else:
             fig.suptitle('(c) t = {:d} s'.format(int(tend.value if args.units else tend)), fontsize=fsize, y=0.95)
@@ -726,7 +726,7 @@ def plot_cartesian_plot(
     args: argparse.ArgumentParser, 
     mesh: dict, 
     dset: dict) -> None:
-    fig, ax = plt.subplots(1, 1, figsize=(10,10), constrained_layout=False)
+    fig, ax = plt.subplots(1, 1, figsize=(5,5))
     xx, yy = mesh['xx'], mesh['yy']
     x1max        = dset['x1max']
     x1min        = dset['x1min']
@@ -744,13 +744,16 @@ def plot_cartesian_plot(
         color_map = (plt.cm.get_cmap(args.cmap)).reversed()
     else:
         color_map = plt.cm.get_cmap(args.cmap)
-        
-    tend = dset['time']
-    c = ax.pcolormesh(xx, yy, fields[args.fields[0]], cmap=color_map, shading='auto', **kwargs)
     
+    if args.fields[0] in derived:
+        var = util.prims2var(fields, args.fields[0])
+    else:
+        var = fields[args.fields[0]]
+    tend = dset['time']
+    c = ax.pcolormesh(xx, yy, var, cmap=color_map, shading='auto', **kwargs)
     divider = make_axes_locatable(ax)
     cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
-    
+
     if not args.no_cbar:
         if args.log:
             logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
@@ -759,7 +762,6 @@ def plot_cartesian_plot(
             cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes)
 
     ax.tick_params(axis='both', labelsize=10)
-    
     # Change the format of the field
     field_str = util.get_field_str(args)
     if args.log:
@@ -767,8 +769,9 @@ def plot_cartesian_plot(
     else:
         cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
     
-    if args.setup != "":
-        fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20, y=0.95)
+    ax.set_aspect('equal')
+    if args.setup:
+        ax.set_title('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20)
     
 def plot_1d_curve(
     fields: dict, 
@@ -851,7 +854,7 @@ def plot_1d_curve(
         ax.set_ylabel(r'{}'.format(field_labels), fontsize=20)
         
     
-    if args.setup != "":
+    if args.setup:
         ax.set_title(r'$\theta = {:.2f}^{{\circ}}$ time: {:.3f}'.format(mesh['th'][tidx] * 180 / np.pi, tend))
     if not overplot:
         return fig
@@ -1258,7 +1261,7 @@ def plot_hist(
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     
-    if args.setup != "":
+    if args.setup:
         ax.set_title(r'{}, t ={:.2f} s'.format(args.setup, tend), fontsize=20)
     
     if overplot and args.sub_split is None:
@@ -1567,7 +1570,7 @@ def plot_dx_domega(
         axins.spines['right'].set_visible(False)
         axins.spines['top'].set_visible(False)
 
-    if args.setup != "":
+    if args.setup:
         ax.set_title(r'{}, t ={:.2f}'.format(args.setup, tend), fontsize=20)
     if args.log:
         if energy_and_mass:
@@ -1758,7 +1761,7 @@ def main():
             lines_per_plot = len(args.files)
         else:
             fig,axs = plt.subplots(num_subplots, 1, figsize=(8,4 * num_subplots), sharex=True, tight_layout=False)
-            if args.setup != "":
+            if args.setup:
                 fig.suptitle(f'{args.setup}')
             if args.de_domega or args.dm_domega:
                 axs[-1].set_xlabel(r'$\theta \ \rm[deg]$', fontsize=20)
