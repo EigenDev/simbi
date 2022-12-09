@@ -1002,6 +1002,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
+    this->engine_duration = engine_duration;
     this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny * nz;
     this->first_order     = first_order;

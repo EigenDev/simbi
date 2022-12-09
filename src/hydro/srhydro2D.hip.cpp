@@ -964,6 +964,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->sourceTau       = sources[3];
 
     // Define sim state params
+    this->engine_duration = engine_duration;
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
@@ -1083,7 +1084,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
         t_interval += chkpt_interval;
     }
-
+    
     // Simulate :)
     const luint xstride = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
     const luint ystride = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
