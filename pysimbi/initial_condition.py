@@ -94,9 +94,7 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                     else:
                         model.x1 = np.geomspace(x1min, x1max, nx_active)
                         model.x2 = np.linspace(x2min,  x2max, ny_active)
-                
                 volume_factor = helpers.calc_cell_volume2D(model.x1, model.x2)
-                
             rho     = rho.reshape(ny, nx)
             v1      = v1.reshape(ny, nx)
             v2      = v2.reshape(ny, nx)
@@ -111,12 +109,12 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                     v2 /= W
                 else:
                     W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
-                model.D    = rho * W              
-                model.S1   = W*W*rho*h*v1         
-                model.S2   = W*W*rho*h*v2         
-                model.tau  = W*W*rho*h - p - rho*W
-                model.Dchi = model.D * scalars    
-                model.u    = np.array([model.D, model.S1, model.S2, model.tau, model.Dchi])
+                D    = rho * W              
+                S1   = W*W*rho*h*v1         
+                S2   = W*W*rho*h*v2         
+                tau  = W*W*rho*h - p - rho*W
+                Dchi = D * scalars    
+                model.u    = np.array([D, S1, S2, tau, Dchi])
             else:
                 model.u    = np.array([rho, rho * v1, rho * v2, p / (ad_gamma - 1) + 0.5 * rho * (v1 ** 2 + v2 ** 2), rho * scalars])
             

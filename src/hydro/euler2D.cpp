@@ -733,6 +733,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->first_order     = first_order;
     this->periodic        = boundary_condition == "periodic";
     this->hllc            = hllc;
+    this->engine_duration = engine_duration;
     this->dlogt           = dlogt;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
