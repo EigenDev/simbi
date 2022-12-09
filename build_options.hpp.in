@@ -39,13 +39,21 @@ constexpr int BLOCK_SIZE3D = THREED_BLOCK_SIZE;
 constexpr int MAX_ITER     = 1000;
 // Precision preprocessing
 #if FLOAT_PRECISION
-using int_cast = int;
+#if defined(GPU_PLATFORM_AMD)
+using atomic_cast = unsigned int;
+#else
+using atomic_cast = int;
+#endif
 #define __int_as_real __int_as_float
 #define __real_as_int __float_as_int
 using real = float;
 constexpr real tol_scale = 1e-6;
 #else
-using int_cast = long long;
+#if defined(GPU_PLATFORM_AMD)
+using atomic_cast = unsigned long long;
+#else
+using atomic_cast = long long;
+#endif
 #define __int_as_real __longlong_as_double
 #define __real_as_int __double_as_longlong
 using real = double;

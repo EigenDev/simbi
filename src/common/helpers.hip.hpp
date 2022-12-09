@@ -196,7 +196,7 @@ namespace simbi
     #if GPU_CODE
     __device__ __forceinline__ real atomicMinReal (real * addr, real value) {
         real old;
-        old = __int_as_real(atomicMin((int_cast *)addr, __real_as_int(value)));
+        old = __int_as_real(atomicMin((atomic_cast *)addr, __real_as_int(value)));
         return old;
     }
     #endif 
