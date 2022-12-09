@@ -239,6 +239,7 @@ void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
     #if GPU_CODE
     {
         const luint psize = p.blockSize.x*p.blockSize.y;
+        const auto bsize = std::min(p.gridSize.x*p.gridSize.y, (unsigned int)1024);
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -279,6 +280,7 @@ void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
         }
     }
     #endif
+    gpu::api::deviceSynch();
 }
 
 //===================================================================================================================
@@ -655,6 +657,7 @@ void SRHD2D::advance(
     simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx) {
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
+        // auto *const prim_buff = prim_data;
         #else 
         auto *const prim_buff = prim_data;
         #endif 
@@ -998,7 +1001,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
-
     if (x2max == 0.5 * M_PI){
         this->half_sphere = true;
     }
@@ -1058,9 +1060,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->radius             = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->pseudo_radius      = (first_order) ? 1 : 2;
     this->step               = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
-    const luint bx           = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
-    const luint by           = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
-    const luint shBlockSpace = bx * by;
+    const luint shBlockSpace = (xblockdim + 2 * radius) * (yblockdim + 2 * radius);
     const luint shBlockBytes = shBlockSpace * sizeof(Primitive);
     const auto fullP         = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim});
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
@@ -1083,9 +1083,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
         t_interval += chkpt_interval;
     }
+
     // Simulate :)
+    const luint xstride = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
+    const luint ystride = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
     simbi::detail::logger::with_logger(*this, tend, [&](){
-        advance(activeP, bx, by);
+        advance(activeP, xstride, ystride);
         cons2prim(fullP);
         config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
         
@@ -1094,7 +1097,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         } else {
             adapt_dt();
         }
-
         t += dt;
     });
 

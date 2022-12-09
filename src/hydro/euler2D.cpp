@@ -231,6 +231,7 @@ void Newtonian2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
             break;
         }
     }
+    gpu::api::deviceSynch();
     #endif
 }
 //-----------------------------------------------------------------------------------------------------------

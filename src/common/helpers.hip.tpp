@@ -197,7 +197,6 @@ namespace simbi{
                 }
                 // TODO: Implement
             } // end switch
-            
             dt_min[jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
         }
         #endif
@@ -357,10 +356,10 @@ namespace simbi{
         for(auto i = gid; i < nmax; i += nt) {
             min = helpers::my_min(dt_min[i], min);
         }
+
         min = blockReduceMin(min);
-        if (tid==0) {
-            atomicMinReal(dt_min, min);
-            self->dt = dt_min[0];
+        if (tid == 0) {
+            self->dt = atomicMinReal(dt_min, min);
         }
         #endif 
     };

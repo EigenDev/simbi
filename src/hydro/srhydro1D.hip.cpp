@@ -435,6 +435,7 @@ void SRHD::adapt_dt(luint blockSize)
     #if GPU_CODE
         compute_dt<Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(this, prims.data(), dt_min.data());
         deviceReduceWarpAtomicKernel<1><<<blockSize, BLOCK_SIZE>>>(this, dt_min.data(), active_zones);
+        gpu::api::deviceSynch();
         // deviceReduceKernel<1><<<blockSize, BLOCK_SIZE>>>(this, dt_min.data(), active_zones);
         // deviceReduceKernel<1><<<1,1024>>>(this, dt_min.data(), blockSize);
     #endif

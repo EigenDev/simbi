@@ -351,6 +351,7 @@ void SRHD3D::adapt_dt(const ExecutionPolicy<> &p, const luint bytes)
                 // TODO: Implement Cylindrical coordinates at some point
                 break;
         }
+        gpu::api::deviceSynch();
     }
     #endif
 }
