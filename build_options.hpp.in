@@ -27,10 +27,13 @@ constexpr Velocity VelocityType = Velocity::FourVelocity;
 constexpr Velocity VelocityType = Velocity::Beta;
 #endif
 
+
+//=========================== GPU Threads Per Dimension
 constexpr int BLOCK_SIZE   = ONED_BLOCK_SIZE;
 constexpr int BLOCK_SIZE2D = TWOD_BLOCK_SIZE;
 constexpr int BLOCK_SIZE3D = THREED_BLOCK_SIZE;
 constexpr int MAX_ITER     = 1000;
+
 //========================= FLOAT PRECISION CHECK
 #if FLOAT_PRECISION
 #if defined(GPU_PLATFORM_AMD)
