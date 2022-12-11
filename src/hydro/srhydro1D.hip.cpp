@@ -293,7 +293,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 f   = (gamma - static_cast<real>(1.0)) * rho * eps - pre;
 
                 peq = pre - f / g;
-                if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
+                if (iter >= MAX_ITER)
                 {
                     const luint idx       = helpers::get_real_idx(ii, radius, active_zones);
                     const real xl         = get_xface(idx, geometry, 0);
