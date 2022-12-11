@@ -120,7 +120,7 @@ class print_the_version(argparse.Action):
     
     def __call__(self, parser, namespace, values, option_string, **kwargs):
         from simbi import __version__ as version
-        print(f"PySIMBI version {version}")
+        print(f"SIMBI version {version}")
         parser.exit()
         
 def main():
