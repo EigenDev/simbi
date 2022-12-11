@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 import sys
-from pysimbi import Hydro, print_problem_params
+from simbi import Hydro, print_problem_params
 
 if sys.version_info <= (3,9):
     action = 'store_false'

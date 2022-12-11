@@ -2,7 +2,7 @@
 SIMBI_DIR="$( cd "$( dirname "$0" )" && pwd )"
 
 BUILD_DIR="${SIMBI_DIR}/build"
-EGG_DIR="${SIMBI_DIR}/pysimbi.egg-info"
+EGG_DIR="${SIMBI_DIR}/simbi.egg-info"
 if [ -d "${EGG_DIR}" ]; then
   rm -rf ${EGG_DIR}
 fi

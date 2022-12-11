@@ -3,7 +3,7 @@ import os
 import ast
 import sys
 import importlib
-from pysimbi import Hydro
+from simbi import Hydro
 from pathlib import Path
 
 configs_path = Path('configs').resolve()
@@ -119,12 +119,12 @@ class print_the_version(argparse.Action):
         return super().__init__(option_strings, dest, nargs=0, default=argparse.SUPPRESS, **kwargs)
     
     def __call__(self, parser, namespace, values, option_string, **kwargs):
-        from pysimbi import __version__ as version
+        from simbi import __version__ as version
         print(f"PySIMBI version {version}")
         parser.exit()
         
 def main():
-    parser = CustomParser(prog='pysimbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
+    parser = CustomParser(prog='simbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
     parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
     parser.add_argument('--tstart',    help='start time for simulation', default=None, type=float)
     parser.add_argument('--tend',    help='end time for simulation', default=None, type=float)
@@ -140,7 +140,7 @@ def main():
     parser.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=0.0, type=float)
     parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
     parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
-    parser.add_argument('--version','-V', help='print current version of pysimbi module', action=print_the_version)
+    parser.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
     parser.add_argument('--nthreads', '-p', help="number of omp threads to run at", type=max_thread_count, default=None)
     parser.add_argument('--peek', help='print setup-script usage', default=False, action='store_true')
     

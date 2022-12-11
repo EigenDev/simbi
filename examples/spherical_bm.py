@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import argparse
-from pysimbi import Hydro, print_problem_params 
+from simbi import Hydro, print_problem_params 
 import sys
 from astropy import units as u
 

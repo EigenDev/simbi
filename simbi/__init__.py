@@ -1,4 +1,4 @@
-from .simbi import Hydro
+from .simulator import Hydro
 from .config import * 
 from .dynarg import DynamicArg
 from .version import __version_tuple__ 

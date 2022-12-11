@@ -3,7 +3,7 @@ requires = ["setuptools", "wheel", "setuptools-scm", "Cython"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pysimbi"
+name = "simbi"
 authors = [
     {name = "Marcus DuPont"},
     {email = "md4469@nyu.edu"}
@@ -32,16 +32,16 @@ dependencies = [
 ]
 
 [project.scripts]
-pysimbi = "pysimbi.__main__:main"
+simbi = "simbi.__main__:main"
 
 [options]
 zip_safe = false
 
 [tool.setuptools]
-packages = ["pysimbi"]
+packages = ["simbi"]
 
 [tool.setuptools_scm]
-write_to = "pysimbi/version.py"
+write_to = "simbi/version.py"
 version_scheme = "post-release"
 local_scheme = "no-local-version"
 

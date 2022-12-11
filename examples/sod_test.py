@@ -5,7 +5,7 @@ import time
 import matplotlib.pyplot as plt 
 import argparse 
 import sys 
-from pysimbi import Hydro, print_problem_params
+from simbi import Hydro, print_problem_params
     
 def main():
     parser = argparse.ArgumentParser(description='Sod Shock Tube Params')

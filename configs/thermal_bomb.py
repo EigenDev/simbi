@@ -1,5 +1,5 @@
 import numpy as np
-from pysimbi import BaseConfig, compute_num_polar_zones, DynamicArg
+from simbi import BaseConfig, compute_num_polar_zones, DynamicArg
 
 RHO_AMB = 1.0
 P_AMB   = RHO_AMB * 1e-10

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import time
 import argparse
 import sys
-from pysimbi import Hydro, print_problem_params 
+from simbi import Hydro, print_problem_params 
 from astropy import units as u
 
 if sys.version_info <= (3,9):

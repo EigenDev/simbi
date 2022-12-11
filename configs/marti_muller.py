@@ -1,4 +1,4 @@
-from pysimbi import BaseConfig, DynamicArg
+from simbi import BaseConfig, DynamicArg
 
 class MartiMuller(BaseConfig):
     """

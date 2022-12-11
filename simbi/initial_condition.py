@@ -4,7 +4,7 @@
 from statistics import mode
 import numpy as np 
 import h5py 
-import pysimbi.helpers as helpers 
+import simbi.helpers as helpers 
  
 def load_checkpoint(model, filename, dim, mesh_motion):
     print(f"Loading from checkpoint: {filename}...", flush=True)

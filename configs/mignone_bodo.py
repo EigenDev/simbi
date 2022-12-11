@@ -1,4 +1,4 @@
-from pysimbi import BaseConfig, DynamicArg
+from simbi import BaseConfig, DynamicArg
 class MignoneBodo(BaseConfig):
     """
     Mignone & Bodo (2005), Relativistic Test Problems in 1D Fluid

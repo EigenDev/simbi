@@ -2,12 +2,12 @@
 # Marcus DuPont
 # New York University
 # 06/10/2020
-import pysimbi.helpers as helpers
+import simbi.helpers as helpers
 import numpy as np 
 import os
 import sys 
 import inspect
-import pysimbi.initial_condition as simbi_ic 
+import simbi.initial_condition as simbi_ic 
 import warnings
 from typing import Callable
 regimes             = ['classical', 'relativistic']
@@ -15,7 +15,6 @@ coord_systems       = ['spherical', 'cartesian'] # TODO: Implement Cylindrical
 boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
 
 class Hydro:
-    
     def __init__(self, 
                  gamma: float,
                  initial_state: tuple,

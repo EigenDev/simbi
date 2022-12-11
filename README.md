@@ -77,9 +77,9 @@ Another way to run the code is to create some configuration script and
 invoke it using the entry point. You would then run it like so:
 
 ``` bash
-$ pysimbi configs/marti_muller.py --mode gpu --nzones 100 --ad_gamma 1.4 
+$ simbi configs/marti_muller.py --mode gpu --nzones 100 --ad_gamma 1.4 
 # or one could do 
-$ pysimbi marti_muller --mode gpu --nzones 100 --ad_gamma 1.4
+$ simbi marti_muller --mode gpu --nzones 100 --ad_gamma 1.4
 # since the entry point is built to recursively search the configs/ folder for valid .py scripts now
 ```
 

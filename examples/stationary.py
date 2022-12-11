@@ -4,7 +4,7 @@ import numpy as np
 import time
 import argparse
 import matplotlib.pyplot as plt 
-from pysimbi import Hydro, print_problem_params
+from simbi import Hydro, print_problem_params
     
 def main():
     parser = argparse.ArgumentParser(description='Stationary Wave Problem')

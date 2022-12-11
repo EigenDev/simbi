@@ -1,5 +1,5 @@
 import numpy as np
-from pysimbi import BaseConfig, DynamicArg
+from simbi import BaseConfig, DynamicArg
 SEED = 12345
 class KelvinHelmholtz(BaseConfig):
     """
