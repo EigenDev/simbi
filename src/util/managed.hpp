@@ -1,13 +1,14 @@
-#include "build_options.hpp"
-#include "device_api.hpp"
+#ifndef MANAGED_HPP
+#define MANAGED_HPP
 
+#include "device_api.hpp"
 namespace simbi
 {
-    template<Platform P = BuildPlatform>
+    template<bool gpu_managed = managed_memory>
     class Managed{
         public: 
         static constexpr void* operator new(std::size_t len) {
-            if constexpr(P == Platform::GPU) {
+            if constexpr(gpu_managed) {
                 void *ptr;
                 gpu::api::gpuMallocManaged(&ptr, len);
                 gpu::api::deviceSynch();
@@ -17,7 +18,7 @@ namespace simbi
             }
         }
         static constexpr void operator delete(void *ptr) {
-            if constexpr(P == Platform::GPU) {
+            if constexpr(gpu_managed) {
                 gpu::api::deviceSynch();
                 gpu::api::gpuFree(ptr);
             } else {
@@ -26,4 +27,5 @@ namespace simbi
         }
     };
 } // namespace simbi
+#endif
 

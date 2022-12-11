@@ -247,7 +247,7 @@ if get_option('gpu_compilation').enabled()
             link_with: [gpu_lib],
             include_directories: all_inc,
             dependencies: depends + gpu_depends,
-            cpp_args: ['-DGPU_CODE=1'],
+            cpp_args: ['-DMANAGED'],
             override_options: ['cython_language=cpp'],
             install: true,
             install_dir: py3_install_dir,

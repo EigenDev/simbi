@@ -6,6 +6,15 @@ namespace simbi
     {
         namespace api
         {
+            // void deviceSynch() {
+            //     if constexpr(BuildPlatform == Platform::GPU)
+            //     {
+            //         auto status = error::status_t(anyGpuDeviceSynchronize());
+            //         error::check_err(status, "Failed to synch device(s)");
+            //     } else {
+            //         return;
+            //     }
+            // }
             void copyHostToDevice(void *to, const void *from, size_t bytes)
             {
                 auto status = simbi::gpu::error::status_t(anyGpuMemcpy(to, from, bytes, anyGpuMemcpyHostToDevice));

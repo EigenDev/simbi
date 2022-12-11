@@ -596,7 +596,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
 
                 peq = pre - f / g;
                 iter++;
-                if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
+                if (iter >= MAX_ITER)
                 {
                     const auto ii     = gid % nx;
                     const auto jj     = gid / nx;
@@ -999,7 +999,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
     this->s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
     this->e_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
-    // Stuff for moving mesh
+    // Params moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
     if (x2max == 0.5 * M_PI){
@@ -1078,7 +1078,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         cons2prim(fullP);
         adapt_dt();
     }
-  
+    
     // Save initial condition
     if (t == 0) {
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);

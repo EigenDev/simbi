@@ -103,24 +103,24 @@ namespace simbi
             void gpuEventElapsedTime(float *time, anyGpuEvent_t a, anyGpuEvent_t b);
             void getDeviceCount(int *devCount);
             void getDeviceProperties(anyGpuProp_t *props, int i);
-
             void gpuMemset(void *obj, int val, size_t bytes);
+            // void deviceSynch();
 
-            inline GPU_DEV void synchronize() {
-                if constexpr(BuildPlatform == Platform::GPU)
+            template<Platform P = BuildPlatform>
+            inline void deviceSynch() {
+                if constexpr(P == Platform::GPU)
                 {
-                    __syncthreads();
+                    auto status = error::status_t(anyGpuDeviceSynchronize());
+                    error::check_err(status, "Failed to synch device(s)");
                 } else {
                     return;
                 }
             }
-
-
-            inline void deviceSynch() {
-                if constexpr(BuildPlatform == Platform::GPU)
+            template<Platform P = BuildPlatform>
+            GPU_DEV_INLINE void synchronize() {
+                if constexpr(P == Platform::GPU)
                 {
-                    auto status = error::status_t(anyGpuDeviceSynchronize());
-                    error::check_err(status, "Failed to synch device(s)");
+                    __syncthreads();
                 } else {
                     return;
                 }

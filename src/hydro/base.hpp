@@ -7,7 +7,7 @@
 
 namespace simbi
 {
-    struct HydroBase : public Managed<BuildPlatform>
+    struct HydroBase : public Managed<managed_memory>
     {
         // Initializer members
         std::vector<std::vector<real>> state;
