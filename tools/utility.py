@@ -407,14 +407,12 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
     mesh = {}
     if setup['is_cartesian']:
         xx, yy = np.meshgrid(setup['x1'], setup['x2'])
-        mesh['xx'] = xx
-        mesh['yy'] = yy
+        mesh['x1'] = xx
+        mesh['x2'] = yy
     else:      
         rr, tt = np.meshgrid(setup['x1'], setup['x2'])
-        mesh['theta'] = tt 
-        mesh['rr']    = rr
-        mesh['x1']     = setup['x1']
-        mesh['th']    = setup['x2']
+        mesh['x2'] = tt 
+        mesh['x1'] = rr
         
     return fields, setup, mesh 
 

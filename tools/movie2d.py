@@ -37,7 +37,7 @@ def get_frames(dir, max_file_num):
 def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
     num_fields = len(args.fields)
     is_wedge   = args.nwedge > 0
-    rr, tt = mesh['rr'], mesh['theta']
+    rr, tt = mesh['x1'], mesh['x2']
     t2     = - tt[::-1]
     x1max  = dset['x1max']
     x1min  = dset['x1min']
@@ -175,7 +175,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
         else:
             kwargs = {'vmin': vmin, 'vmax': vmax}
             
-        cs = np.zeros(len(args.fields), dtype=object)
+        cs = np.empty(2 if not args.bipolar else 4, dtype=object)
         
         if args.fields[0] in derived:
             var = units * util.prims2var(fields, args.fields[0])
@@ -184,12 +184,12 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
         
         cs[0] = ax.pcolormesh(tt, rr, var, cmap=color_map, shading='auto',
                               linewidth=0, rasterized=True, **kwargs)
-        cs[0] = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, 
+        cs[1] = ax.pcolormesh(t2[::-1], rr, var,  cmap=color_map, 
                               linewidth=0,rasterized=True, shading='auto', **kwargs)
         
         if args.bipolar:
-            cs[0] = ax.pcolormesh(tt[:: 1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
-            cs[0] = ax.pcolormesh(t2[::-1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
+            cs[2] = ax.pcolormesh(tt[:: 1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
+            cs[3] = ax.pcolormesh(t2[::-1] + np.pi, rr,  var, cmap=color_map, shading='auto', **kwargs)
     
     if args.pictorial: 
         ax.set_position([0.1, -0.15, 0.8, 1.30])
@@ -450,8 +450,10 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
             fsize = 25 if not args.print else DEFAULT_SIZE
             fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.95)
     
+    return cs
+    
 def plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, ds):
-    xx, yy = mesh['xx'], mesh['yy']
+    xx, yy = mesh['x1'], mesh['x2']
     
     vmin,vmax = args.cbar
     if args.log:
@@ -490,15 +492,25 @@ def plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, ds):
         
     fig.suptitle('{} at t = {:.2f} s'.format(args.setup, tend), fontsize=20, y=0.95)
     
+    return c
+    
 def create_mesh(fig, ax, filename, cbaxes, args):
     fields, setups, mesh = util.read_2d_file(args, filename)
     if setups["is_cartesian"]:
-        plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, setups)
+        c = plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, setups)
     else:      
-        ax.grid(False)
-        plot_polar_plot(fig, ax, cbaxes, fields, args, mesh, setups)        
-    return ax
+        c = plot_polar_plot(fig, ax, cbaxes, fields, args, mesh, setups)        
+    return c
 
+def get_data(filename, args):
+    fields, setups, mesh = util.read_2d_file(args, filename)
+    if args.fields[0] in derived:
+        var = util.prims2var(fields, args.fields[0])
+    else:
+        var = fields[args.fields[0]]
+        
+    return setups, mesh, var
+    
 def main():
     parser = argparse.ArgumentParser(
         description='Plot a 2D Figure From a File (H5).',
@@ -570,13 +582,10 @@ def main():
     flist, frame_count = util.get_file_list(args.files)
     flist              = flist[args.frame_range[0]: args.frame_range[1]]
     frame_count        = len(flist)
-    
-    num_fields = len(args.fields)
+    cbar               = args.cbar 
+    num_fields         = len(args.fields)
     if num_fields > 1:
-        if len(args.cbar) == 2*num_fields:
-            pass
-        else:
-            args.cbar += (num_fields - 1) * [None, None]
+        cbar += (num_fields - 1) * [None, None]
     
     # read the first file and infer the system configuration from it
     init_setup = util.read_2d_file(args, flist[0])[1]
@@ -589,6 +598,7 @@ def main():
             cbaxes = divider.append_axes('right', size='5%', pad=0.05)
         cbar_orientation = "vertical"
     else:
+        is_polar = True
         if args.nwedge > 0:
             fig, ax = plt.subplots(1, 2, subplot_kw={'projection': 'polar'},
                          figsize=(15, 10), constrained_layout=True)
@@ -626,44 +636,26 @@ def main():
                     cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
             cbar_orientation = "vertical"
     
+    
     def init_mesh(filename):
         if not args.pictorial:
             p = create_mesh(fig, ax, filename, cbaxes, args)
         else:
             p = create_mesh(fig, ax, filename, None, args)
         
-        return p
-        
+        return p,
+    
+    drawings = init_mesh(flist[0])
     def update(frame, args):
         """
         Animation function. Takes the current frame number (to select the potion of
         data to plot) and a line object to update.
         """
-        if not args.pictorial:
-            try:
-                for cbax in cbaxes:
-                    cbax.cla()
-            except:
-                cbaxes.cla()
-            
-        if isinstance(ax, (list, np.ndarray)):
-            for axs in ax:
-                axs.cla()
-                ax.grid(False)
-        else:
-            ax.cla()
-            ax.grid(False)
-        # Not strictly neccessary, just so we know we are stealing these from
-        # the global scope
-        if not args.pictorial:
-            pcolor_mesh = create_mesh(fig, ax, flist[frame], cbaxes, args)
-        else:
-            pcolor_mesh = create_mesh(fig, ax, flist[frame], None, args)
-
-        return pcolor_mesh
-
-    # Initialize plot
-    inital_im = init_mesh(flist[0])
+        setups, mesh, data = get_data(flist[frame], args)
+        fig.suptitle('{} at t = {:.2f} s'.format(args.setup, setups['time']), fontsize=20, y=1.0)
+        for drawing in drawings:
+            drawing.set_array(data.ravel())
+        return drawing,
 
     animation = FuncAnimation(
         # Your Matplotlib Figure object
@@ -672,7 +664,8 @@ def main():
         update,
         # Frame information (here just frame number)
         np.arange(frame_count),
-        #blit = True,
+        # blit = True,
+        # init_func=init_mesh,
         # Extra arguments to the animate function
         fargs=[args],
         # repeat=False,
