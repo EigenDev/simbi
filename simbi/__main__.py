@@ -1,10 +1,50 @@
 import argparse
+from typing import List
 import os 
 import ast
 import sys
 import importlib
 from simbi import Hydro
 from pathlib import Path
+
+class CustomParser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.stderr.write(f'error: {message}\n')
+        self.print_help()
+        sys.exit(2)
+
+class print_the_version(argparse.Action):
+    def __init__(self, option_strings, dest, **kwargs):
+        return super().__init__(option_strings, dest, nargs=0, default=argparse.SUPPRESS, **kwargs)
+    
+    def __call__(self, parser, namespace, values, option_string, **kwargs):
+        from simbi import __version__ as version
+        print(f"SIMBI version {version}")
+        parser.exit()
+        
+def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
+    parser = CustomParser(prog='simbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
+    parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
+    parser.add_argument('--tstart',    help='start time for simulation', default=None, type=float)
+    parser.add_argument('--tend',    help='end time for simulation', default=None, type=float)
+    parser.add_argument('--dlogt',     help='logarithmic time bin spacing for checkpoints', default=0.0, type=float)
+    parser.add_argument('--plm_theta', help='piecewise linear consturction parameter', default=1.5, type=float)
+    parser.add_argument('--first_order', help='Set flag if wanting first order accuracy in solution', default=False, action='store_true')
+    parser.add_argument('--cfl', help='Courant-Friedrichs-Lewy stability number', default=0.1, type=float)
+    parser.add_argument('--hllc', help='flag for HLLC computation as opposed to HLLE', default=False, action='store_true')
+    parser.add_argument('--chkpt', help='checkpoint file to restart computation from', default=None, type=str)
+    parser.add_argument('--chkpt_interval', help='checkpoint interval spacing in simulation time units', default=0.1, type=float)
+    parser.add_argument('--data_directory', help='directory to save checkpoint files', default='data/', type=str)
+    parser.add_argument('--boundary_condition', help='boundary condition for inner boundary', default='outflow', choices=['reflecting', 'outflow', 'inflow', 'periodic'])
+    parser.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=0.0, type=float)
+    parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
+    parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
+    parser.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
+    parser.add_argument('--nthreads', '-p', help="number of omp threads to run at", type=max_thread_count, default=None)
+    parser.add_argument('--peek', help='print setup-script usage', default=False, action='store_true')
+    
+    # print help message if no args supplied
+    return parser, parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
 configs_path = Path('configs').resolve()
 overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta', 'dlogt', 'data_directory', 'quirk_smoothing']
@@ -107,46 +147,8 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
         exit(0)
     
     return states, kwargs, state_docs 
-
-class CustomParser(argparse.ArgumentParser):
-    def error(self, message):
-        sys.stderr.write(f'error: {message}\n')
-        self.print_help()
-        sys.exit(2)
-
-class print_the_version(argparse.Action):
-    def __init__(self, option_strings, dest, **kwargs):
-        return super().__init__(option_strings, dest, nargs=0, default=argparse.SUPPRESS, **kwargs)
-    
-    def __call__(self, parser, namespace, values, option_string, **kwargs):
-        from simbi import __version__ as version
-        print(f"SIMBI version {version}")
-        parser.exit()
         
-def main():
-    parser = CustomParser(prog='simbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
-    parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
-    parser.add_argument('--tstart',    help='start time for simulation', default=None, type=float)
-    parser.add_argument('--tend',    help='end time for simulation', default=None, type=float)
-    parser.add_argument('--dlogt',     help='logarithmic time bin spacing for checkpoints', default=0.0, type=float)
-    parser.add_argument('--plm_theta', help='piecewise linear consturction parameter', default=1.5, type=float)
-    parser.add_argument('--first_order', help='Set flag if wanting first order accuracy in solution', default=False, action='store_true')
-    parser.add_argument('--cfl', help='Courant-Friedrichs-Lewy stability number', default=0.1, type=float)
-    parser.add_argument('--hllc', help='flag for HLLC computation as opposed to HLLE', default=False, action='store_true')
-    parser.add_argument('--chkpt', help='checkpoint file to restart computation from', default=None, type=str)
-    parser.add_argument('--chkpt_interval', help='checkpoint interval spacing in simulation time units', default=0.1, type=float)
-    parser.add_argument('--data_directory', help='directory to save checkpoint files', default='data/', type=str)
-    parser.add_argument('--boundary_condition', help='boundary condition for inner boundary', default='outflow', choices=['reflecting', 'outflow', 'inflow', 'periodic'])
-    parser.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=0.0, type=float)
-    parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
-    parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
-    parser.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
-    parser.add_argument('--nthreads', '-p', help="number of omp threads to run at", type=max_thread_count, default=None)
-    parser.add_argument('--peek', help='print setup-script usage', default=False, action='store_true')
-    
-    # print help message if no args supplied
-    args, argv = parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
-
+def main(parser: argparse.ArgumentParser = parse_arguments()[0], args: argparse.Namespace = parse_arguments()[1][0], argv: List = parse_arguments()[1][1]):
     sim_states, kwargs, state_docs  = configure_state(args.setup_script, parser, argv)
     if args.nthreads:
         os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
@@ -175,5 +177,5 @@ def main():
     
     
 if __name__ == '__main__':
-    main()
+    sys.exit(main(*parse_arguments()))
     
