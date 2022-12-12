@@ -247,7 +247,7 @@ def main():
     )
 
     if args.save is not None:
-        animation.save('{}.mp4'.format(args.save).replace(' ', '_'), progress_callback = lambda i, n: print(f'Saving frame {i} of {n}', end='\r'))
+        animation.save('{}.mp4'.format(args.save).replace(' ', '_'), progress_callback = lambda i, n: print(f'Saving frame {i} of {n}', end='\r', flush=True))
         # animation.save('science/{}_{}.mp4'.format(args.setup[0], args.fields))
     else:
         plt.show()

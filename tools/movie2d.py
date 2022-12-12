@@ -684,7 +684,7 @@ def main():
         plt.show()
     else:
         dpi = 600
-        animation.save("{}.mp4".format(args.save.replace(" ", "_")), progress_callback = lambda i, n: print(f'Saving frame {i} of {n}', end='\r'))
+        animation.save("{}.mp4".format(args.save.replace(" ", "_")), progress_callback = lambda i, n: print(f'Saving frame {i} of {n}', end='\r', flush=True))
     
     
     
