@@ -77,8 +77,8 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
         color_map = (plt.get_cmap(args.cmap)).reversed()
     else:
         color_map = plt.get_cmap(args.cmap)
-        
-    tend = dset['time'] * util.time_scale
+    
+    tend = dset['time'] * (util.time_scale if args.units else 1.0)
     # If plotting multiple fields on single polar projection, split the 
     # field projections into their own quadrants
     if num_fields > 1:
@@ -448,7 +448,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), fontsize=25, y=1)
         else:
             fsize = 25 if not args.print else DEFAULT_SIZE
-            fig.suptitle('t = {:d} s'.format(int(tend.value)), fontsize=fsize, y=0.95)
+            fig.suptitle('t = {:d}'.format(int(tend.value)), fontsize=fsize, y=0.95)
     
     return cs
     
@@ -467,7 +467,7 @@ def plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, ds):
     else:
         color_map = plt.cm.get_cmap(args.cmap)
         
-    tend = ds["time"]
+    tend = ds["time"] * (util.time_scale if args.units else 1.0)
     ax.grid(False)
     if args.fields[0] in derived:
         var = util.prims2var(fields, args.fields[0])
@@ -490,7 +490,7 @@ def plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, ds):
     else:
         cbar.ax.set_ylabel(r'{}'.format(field_str), fontsize=20)
         
-    fig.suptitle('{} at t = {:.2f} s'.format(args.setup, tend), fontsize=20, y=0.95)
+    ax.set_title('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20)
     
     return c
     
@@ -503,13 +503,13 @@ def create_mesh(fig, ax, filename, cbaxes, args):
     return c
 
 def get_data(filename, args):
-    fields, setups, mesh = util.read_2d_file(args, filename)
+    fields, setups, _ = util.read_2d_file(args, filename)
     if args.fields[0] in derived:
         var = util.prims2var(fields, args.fields[0])
     else:
         var = fields[args.fields[0]]
         
-    return setups, mesh, var
+    return setups, var
     
 def main():
     parser = argparse.ArgumentParser(
@@ -556,6 +556,7 @@ def main():
     parser.add_argument('--inset', dest='inset', action= 'store_true', default=False)
     parser.add_argument('--png', dest='png', action= 'store_true', default=False)
     parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
+    parser.add_argument('--transparent', help='transparent bg flag', default=False, action='store_true')
     args = parser.parse_args()
     
     if args.tex:
@@ -589,6 +590,7 @@ def main():
     
     # read the first file and infer the system configuration from it
     init_setup = util.read_2d_file(args, flist[0])[1]
+    cartesian = False
     if init_setup["is_cartesian"]:
         fig, ax = plt.subplots(1, 1, figsize=(11,10))
         ax.grid(False)
@@ -597,6 +599,7 @@ def main():
         if not args.pictorial:
             cbaxes = divider.append_axes('right', size='5%', pad=0.05)
         cbar_orientation = "vertical"
+        cartesian = True
     else:
         is_polar = True
         if args.nwedge > 0:
@@ -651,11 +654,20 @@ def main():
         Animation function. Takes the current frame number (to select the potion of
         data to plot) and a line object to update.
         """
-        setups, mesh, data = get_data(flist[frame], args)
-        fig.suptitle('{} at t = {:.2f} s'.format(args.setup, setups['time']), fontsize=20, y=1.0)
+        setups, data = get_data(flist[frame], args)
+        time = setups['time'] * (util.time_scale if args.units else 1.0)
+        if cartesian:
+            ax.set_title('{} at t = {:.2f} s'.format(args.setup, time), fontsize=20)
+        else:
+            fig.suptitle('{} at t = {:.2f}'.format(args.setup, setups['time']), fontsize=20, y=1.0)
+            
         for drawing in drawings:
             drawing.set_array(data.ravel())
-        return drawing,
+            if cartesian:
+                drawing.set_offsets([setups['x1'], setups['x2']])
+            else:
+                drawing.set_offsets([setups['x2'], setups['x1']])
+        return drawings,
 
     animation = FuncAnimation(
         # Your Matplotlib Figure object
@@ -677,7 +689,9 @@ def main():
         plt.show()
     else:
         dpi = 600
-        animation.save("{}.mp4".format(args.save.replace(" ", "_")), progress_callback = lambda i, n: print(f'Saving frame {i} of {n}', end='\r', flush=True))
+        animation.save("{}.mp4".format(args.save.replace(" ", "_")), 
+                       progress_callback = lambda i, n: print(f'Saving frame {i} of {n}', end='\r', flush=True))
+                    #    savefig_kwargs={"transparent": args.transparent, "facecolor": "none"},)
     
     
     
