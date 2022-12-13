@@ -1,5 +1,5 @@
 from .simulator import Hydro
-from .config import * 
+from .base_config import * 
 from .dynarg import DynamicArg
 from .version import __version_tuple__ 
 from .helpers import print_problem_params, compute_num_polar_zones, calc_dlogt
