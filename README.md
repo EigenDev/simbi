@@ -87,7 +87,7 @@ where `--mode` is a global command line option available for every
 config script, and `--nzones` and `--gamma` are problem-specific options
 that are dynamically parsed based on whatever `DynamicArg` variables
 exist in the config script you create. Check out how to create one of
-these configuration scripts in the `configs/` folder!
+these configuration scripts in the `simbi/configs/` folder!
 
 You can plot the above output by doing 
 ``` bash
