@@ -45,6 +45,9 @@ write_to = "simbi/version.py"
 version_scheme = "post-release"
 local_scheme = "no-local-version"
 
+[tool.setuptools.package-data]
+simbi = ["configs/*.py"]
+
 [tool.setuptools.dynamic]
 readme = {file = ["README.md"]}
 

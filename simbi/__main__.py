@@ -46,16 +46,17 @@ def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     # print help message if no args supplied
     return parser, parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
-configs_path = Path('configs').resolve()
+configs_src = Path(__file__).resolve().parent / 'configs'
 overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta', 'dlogt', 'data_directory', 'quirk_smoothing']
 def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
         param = None
-        hard_configs = [file for file in configs_path.rglob('*.py')]
+        pkg_configs  = [file for file in configs_src.rglob('*.py')]
         soft_paths   = [soft_path for soft_path in (Path('configs')).glob("*") if soft_path.is_symlink()]   
         soft_configs = [file for path in soft_paths for file in path.rglob('*.py')]
-        for file in hard_configs + soft_configs:
+        soft_configs+= [file for file in Path('configs').resolve().rglob('*.py')]
+        for file in pkg_configs + soft_configs:
             if base == Path(file).stem:
                 param = file
         if not param:
