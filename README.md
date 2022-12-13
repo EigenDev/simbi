@@ -88,7 +88,7 @@ config script, and `--nzones` and `--gamma` are problem-specific options
 that are dynamically parsed based on whatever `DynamicArg` variables
 exist in the config script you create. Check out how to create one of
 these configuration scripts in the `simbi/configs/` folder! When creating
-your own configuration file, you must place it in a directory entitled 'configs/' and
+your own configuration file, you must place it in a directory entitled `configs/` and
 run `simbi` from your `configs/` parent directory and `simbi` should auto detect your configuration and run the simulation.
 
 You can plot the above output by doing 
