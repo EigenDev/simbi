@@ -274,51 +274,19 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         v1  = hf.get('v1')[:]
         v2  = hf.get('v2')[:]
         p   = hf.get('p')[:]
+        chi = hf.get('chi')[:]
         t   = ds.attrs['current_time']
         
-        try:
-            x1max = ds.attrs['x1max']
-            x1min = ds.attrs['x1min']
-            x2max = ds.attrs['x2max']
-            x2min = ds.attrs['x2min']
-        except:
-            x1max = ds.attrs['xmax']
-            x1min = ds.attrs['xmin']
-            x2max = ds.attrs['ymax']
-            x2min = ds.attrs['ymin']  
+        x1max = ds.attrs['x1max']
+        x1min = ds.attrs['x1min']
+        x2max = ds.attrs['x2max']
+        x2min = ds.attrs['x2min']
+        nx    = ds.attrs['nx']
+        ny    = ds.attrs['ny']
+        gamma = ds.attrs['adiabatic_gamma']
         
-        # New checkpoint files, so check if new attributes were
-        # implemented or not
-        try:
-            nx          = ds.attrs['nx']
-            ny          = ds.attrs['ny']
-        except:
-            nx          = ds.attrs['NX']
-            ny          = ds.attrs['NY']
-        
-        try:
-            chi = hf.get('chi')[:]
-        except:
-            chi = np.zeros((ny, nx))
-            
-        try:
-            gamma = ds.attrs['adiabatic_gamma']
-        except:
-            gamma = 4./3.
-        
-        # Check for garbage value
-        if gamma < 1:
-            gamma = 4./3. 
-            
-        try:
-            coord_sysem = ds.attrs['geometry'].decode('utf-8')
-        except Exception as e:
-            coord_sysem = 'spherical'
-            
-        try:
-            is_linspace = ds.attrs['linspace']
-        except:
-            is_linspace = False
+        coord_sysem = ds.attrs['geometry'].decode('utf-8')
+        is_linspace = ds.attrs['linspace']
         
         setup['x1max'] = x1max 
         setup['x1min'] = x1min 
@@ -372,7 +340,7 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
             else:
                 setup['x1'] = np.geomspace(x1min, x1max, xactive)
                 
-        if coord_sysem == 'cartesian':
+        if coord_sysem in ['cartesian', 'planar_cylindrical', 'axis_cylindrical']:
             is_cartesian = True
         
         if ds.attrs['regime'].decode("utf-8") == 'relativistic':

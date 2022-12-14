@@ -727,12 +727,7 @@ def plot_cartesian_plot(
     mesh: dict, 
     dset: dict) -> None:
     fig, ax = plt.subplots(1, 1, figsize=(5,5))
-    xx, yy = mesh['xx'], mesh['yy']
-    x1max        = dset['x1max']
-    x1min        = dset['x1min']
-    x2max        = dset['x2max']
-    x2min        = dset['x2min']
-    
+    xx, yy = mesh['x1'], mesh['x2']
     vmin,vmax = args.cbar
 
     if args.log:

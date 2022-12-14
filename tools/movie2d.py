@@ -657,7 +657,7 @@ def main():
         setups, data = get_data(flist[frame], args)
         time = setups['time'] * (util.time_scale if args.units else 1.0)
         if cartesian:
-            ax.set_title('{} at t = {:.2f} s'.format(args.setup, time), fontsize=20)
+            ax.set_title('{} at t = {:.2f}'.format(args.setup, time), fontsize=20)
         else:
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, setups['time']), fontsize=20, y=1.0)
             
@@ -689,7 +689,7 @@ def main():
         plt.show()
     else:
         dpi = 600
-        animation.save("{}.mp4".format(args.save.replace(" ", "_")), 
+        animation.save("{}.mp4".format(args.save.replace(" ", "_")),
                        progress_callback = lambda i, n: print(f'Saving frame {i} of {n}', end='\r', flush=True))
                     #    savefig_kwargs={"transparent": args.transparent, "facecolor": "none"},)
     
