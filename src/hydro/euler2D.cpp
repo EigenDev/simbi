@@ -747,41 +747,39 @@ void Newtonian2D::advance(
                 }
             case simbi::Geometry::PLANAR_CYLINDRICAL:
                 {
-                const real rl           = get_xface(ii, geometry, 0); 
-                const real rr           = get_xface(ii, geometry, 1);
+                const real rl           = get_x1face(ii, geometry, 0); 
+                const real rr           = get_x1face(ii, geometry, 1);
                 const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                 const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
                 const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                const real dVtot        = (1.0 / 2.0) * (rr * rr - rl * rl) * dx2;
+                const real dVtot        = rmean * (rr - rl) * dx2;
                 const real invdV        = 1.0 / dVtot;
                 const real s1R          = rr * dx2; 
                 const real s1L          = rl * dx2; 
-                const real s2R          = (rr - rl) * tr; 
-                const real s2L          = (rr - rl) * tl; 
+                const real s2R          = (rr - rl); 
+                const real s2L          = (rr - rl); 
 
                 // Grab central primitives
                 const real rhoc = prim_buff[tya * bx + txa].rho;
                 const real uc   = prim_buff[tya * bx + txa].v1;
                 const real vc   = prim_buff[tya * bx + txa].v2;
                 const real pc   = prim_buff[tya * bx + txa].p;
-                
+
                 const Conserved geom_source  = {0, (rhoc * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * uc * vc) / rmean, 0};
                 cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step;
                 break;
                 }
             case simbi::Geometry::AXIS_CYLINDRICAL:
                 {
-                const real rl           = get_xface(ii, geometry, 0); 
-                const real rr           = get_xface(ii, geometry, 1);
+                const real rl           = get_x1face(ii, geometry, 0); 
+                const real rr           = get_x1face(ii, geometry, 1);
                 const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
-                const real zl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
-                const real zr           = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                const real dVtot        = (1.0 / 2.0) * (rr * rr - rl * rl) * dx2;
+                const real dVtot        = rmean * (rr - rl) * dx2;
                 const real invdV        = 1.0 / dVtot;
                 const real s1R          = rr * dx2; 
                 const real s1L          = rl * dx2; 
-                const real s2R          = 0.5 * (rr + rl) * dx2; 
-                const real s2L          = 0.5 * (rr + rl) * dx2; 
+                const real s2R          = rmean * (rr - rl); 
+                const real s2L          = rmean * (rr - rl); 
 
                 // Grab central primitives
                 const real rhoc = prim_buff[tya * bx + txa].rho;

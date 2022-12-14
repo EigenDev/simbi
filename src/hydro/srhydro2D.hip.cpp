@@ -250,7 +250,6 @@ void SRHD2D::adapt_dt()
                             const real x1l    = get_x1face(ii, geometry, 0);
                             const real x1r    = get_x1face(ii, geometry, 1);
                             const real dr     = x1r - x1l;
-                            const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
                             if (mesh_motion)
                             {
                                 const real vfaceL   = x1l * hubble_param;
@@ -954,12 +953,12 @@ void SRHD2D::advance(
                 const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                 const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
                 const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                const real dVtot        = 0.5 * (rr * rr - rl * rl) * dx2;
+                const real dVtot        = rmean * (rr - rl) * dx2;
                 const real invdV        = 1.0 / dVtot;
                 const real s1R          = rr * dx2; 
                 const real s1L          = rl * dx2; 
-                const real s2R          = (rr - rl) * tr; 
-                const real s2L          = (rr - rl) * tl; 
+                const real s2R          = (rr - rl); 
+                const real s2L          = (rr - rl); 
 
                 // Grab central primitives
                 const real rhoc = prim_buff[tya * bx + txa].rho;
@@ -978,12 +977,13 @@ void SRHD2D::advance(
                 {
                 const real rl           = get_x1face(ii, geometry, 0); 
                 const real rr           = get_x1face(ii, geometry, 1);
-                const real dVtot        = 0.5 * (rr * rr - rl * rl) * dx2;
+                const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
+                const real dVtot        = rmean * (rr - rl) * dx2;
                 const real invdV        = 1.0 / dVtot;
                 const real s1R          = rr * dx2; 
                 const real s1L          = rl * dx2; 
-                const real s2R          = 0.5 * (rr + rl) * dx2; 
-                const real s2L          = 0.5 * (rr + rl) * dx2; 
+                const real s2R          = rmean * (rr - rl); 
+                const real s2L          = rmean * (rr - rl); 
 
                 // Grab central primitives
                 const real rhoc = prim_buff[tya * bx + txa].rho;

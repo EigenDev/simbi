@@ -213,8 +213,8 @@ namespace simbi{
                 case simbi::Geometry::AXIS_CYLINDRICAL:
                 {
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl  = helpers::my_max(rmin * std::pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
-                    const real rr  = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
+                    const real rl = self->get_x1face(ii, geometry, 0);
+                    const real rr = self->get_x1face(ii, geometry, 1);
                     const real zl  = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                     const real zr  = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                     if (self->mesh_motion)

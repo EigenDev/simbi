@@ -976,12 +976,12 @@ void SRHD3D::advance(
                     const real rmean        = static_cast<real>(2.0 / 3,0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                     const real s1R          = rr * (zr - zl) * (tr - tl); 
                     const real s1L          = rl * (zr - zl) * (tr - tl); 
-                    const real s2R          = (rr - rl) * (zr - rl) * tr;
-                    const real s2L          = (rr - rl) * (zr - rl) * tl;
+                    const real s2R          = (rr - rl) * (zr - rl);
+                    const real s2L          = (rr - rl) * (zr - rl);
                     const real s3L          = rmean * (rr - rl) * (tr - tl);
                     const real s3R          = s3L;
                     const real thmean       = static_cast<real>(0.5) * (tl + tr);
-                    const real dV           = static_cast<real>(0.5) * (rr * rr - rl * rl) * (zr - zl) * (tr - tl);
+                    const real dV           = rmean  * (rr - rl) * (zr - zl) * (tr - tl);
                     const real invdV        = 1/ dV;
 
                     // Grab central primitives
