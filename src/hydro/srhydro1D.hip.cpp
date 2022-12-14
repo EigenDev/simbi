@@ -51,6 +51,7 @@ real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geome
 {
     switch(geometry)
     {
+    case simbi::Geometry::CYLINDRICAL:
     case simbi::Geometry::SPHERICAL:
         {
             const real xl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min); 
@@ -66,9 +67,6 @@ real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geome
             // Rigid motion
             return  hubble_const;
         }
-    case simbi::Geometry::CYLINDRICAL:
-        // TODO: Implement Cylindrical coordinates at some point
-        break;
     }
 }
 //=====================================================================
@@ -200,6 +198,7 @@ void SRHD::advance(
                 // printf("frf: %.2e, flf: %.2e", frf.d, flf.d);
                 break;
             }
+            case simbi::Geometry::CYLINDRICAL:
             case simbi::Geometry::SPHERICAL:
             {
                 const real rlf    = x1l + vfaceL * step * dt; 
@@ -214,28 +213,6 @@ void SRHD::advance(
 
                 const auto geom_sources = Conserved{0.0, pc * (sR - sL) * invdV, 0.0};
                 cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources) * step * dt * factor;
-                break;
-            }
-                
-            case simbi::Geometry::CYLINDRICAL:
-            {
-                // const real rlf    = x1l + vfaceL * step * dt; 
-                // const real rrf    = x1r + vfaceR * step * dt;
-                // const real rmean  = static_cast<real>(0.75) * (rrf * rrf * rrf * rrf - rlf * rlf * rlf * rlf) / (rrf * rrf * rrf - rlf * rlf * rlf);
-                // const real sR     = rrf; 
-                // const real sL     = rlf; 
-                // const real dV     = rmean * (rrf - rlf);           
-                // const real pc     = prim_buff[txa].p;
-                
-                // #if GPU_CODE
-                //     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                //     const auto sources = Conserved{gpu_sourceD[ii], gpu_sourceS[ii],gpu_source0[ii]} * decay_constant;
-                //     gpu_cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt;
-                // #else 
-                //     const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
-                //     const auto sources = Conserved{sourceD[ii], sourceS[ii],source0[ii]} * decay_constant;
-                //     cons[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt;
-                // #endif 
                 break;
             }
         } // end switch
@@ -271,7 +248,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 const real xl    = get_xface(idx, geometry, 0);
                 const real xr    = get_xface(idx, geometry, 1);
                 const real xmean = static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl);
-                invdV            = static_cast<real>(1.0) / (xmean * xmean * (xr - xl));
+                invdV            = 1 / (xmean * xmean * (xr - xl));
             }
             peq            = press_data[ii];
             const real D   = cons_data[ii].d   * invdV;
@@ -284,13 +261,13 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 pre = peq;
                 et  = tau + D + pre;
                 v2  = S * S / (et * et);
-                W   = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - v2);
+                W   = 1 / std::sqrt(1 - v2);
                 rho = D / W;
-                eps = (tau + (static_cast<real>(1.0) - W) * D + (static_cast<real>(1.0) - W * W) * pre) / (D * W);
-                h   = static_cast<real>(1.0) + eps + pre / rho;
+                eps = (tau + (1 - W) * D + (1 - W * W) * pre) / (D * W);
+                h   = 1 + eps + pre / rho;
                 c2  = gamma *pre / (h * rho); 
-                g   = c2 * v2 - static_cast<real>(1.0);
-                f   = (gamma - static_cast<real>(1.0)) * rho * eps - pre;
+                g   = c2 * v2 - 1;
+                f   = (gamma - 1) * rho * eps - pre;
 
                 peq = pre - f / g;
                 if (iter >= MAX_ITER)
@@ -340,13 +317,13 @@ Eigenvals SRHD::calc_eigenvals(
     const real rhoL = primsL.rho;
     const real vL   = primsL.v;
     const real pL   = primsL.p;
-    const real hL   = static_cast<real>(1.0) + gamma * pL / (rhoL * (gamma - 1));
+    const real hL   = 1 + gamma * pL / (rhoL * (gamma - 1));
     const real csL  = std::sqrt(gamma * pL / (rhoL * hL));
 
     const real rhoR  = primsR.rho;
     const real vR    = primsR.v;
     const real pR    = primsR.p;
-    const real hR    = static_cast<real>(1.0) + gamma * pR  / (rhoR  * (gamma - 1));
+    const real hR    = 1 + gamma * pR  / (rhoR  * (gamma - 1));
     const real csR   = std::sqrt(gamma * pR  / (rhoR  * hR));
 
     switch (comp_wave_speed)
@@ -368,13 +345,13 @@ Eigenvals SRHD::calc_eigenvals(
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
             // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-            const real sL = csL*csL/(gamma*gamma*(static_cast<real>(1.0) - csL*csL));
-            const real sR = csR*csR/(gamma*gamma*(static_cast<real>(1.0) - csR*csR));
+            const real sL = csL*csL/(gamma*gamma*(1 - csL*csL));
+            const real sR = csR*csR/(gamma*gamma*(1 - csR*csR));
             // Define temporaries to save computational cycles
-            const real qfL   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
-            const real qfR   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
-            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0) - vR * vR + sR));
-            const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0) - vL * vL + sL));
+            const real qfL   = 1 / (1 + sL);
+            const real qfR   = 1 / (1 + sR);
+            const real sqrtR = std::sqrt(sR * (1 - vR * vR + sR));
+            const real sqrtL = std::sqrt(sL * (1 - vL * vL + sL));
 
             const real lamLm = (vL - sqrtL) * qfL;
             const real lamRm = (vR - sqrtR) * qfR;
@@ -413,7 +390,7 @@ void SRHD::adapt_dt()
             const real rho    = prims[ii + idx_active].rho;
             const real p      = prims[ii + idx_active].p;
             const real v      = prims[ii + idx_active].v;
-            const real h      = static_cast<real>(1.0) + gamma * p / (rho * (gamma - 1));
+            const real h      = 1 + gamma * p / (rho * (gamma - 1));
             const real cs     = std::sqrt(gamma * p / (rho * h));
             const real vPLus  = (v + cs) / (1 + v * cs);
             const real vMinus = (v - cs) / (1 - v * cs);
@@ -453,8 +430,8 @@ Conserved SRHD::prims2cons(const Primitive &prim) const
     const real rho = prim.rho;
     const real v   = prim.v;
     const real pre = prim.p;  
-    const real h   = static_cast<real>(1.0) + gamma * pre / (rho * (gamma - 1));
-    const real W   = static_cast<real>(1.0) / std::sqrt(1 - v * v);
+    const real h   = 1 + gamma * pre / (rho * (gamma - 1));
+    const real W   = 1 / std::sqrt(1 - v * v);
 
     return Conserved{rho * W, rho * h * W * W * v, rho * h * W * W - pre - rho * W};
 };
@@ -469,8 +446,8 @@ Conserved SRHD::prims2flux(const Primitive &prim) const
     const real rho = prim.rho;
     const real v   = prim.v;
     const real pre = prim.p;
-    const real W   = static_cast<real>(1.0) / std::sqrt(1 - v * v);
-    const real h   = static_cast<real>(1.0) + gamma * pre / (rho * (gamma - 1));
+    const real W   = 1 / std::sqrt(1 - v * v);
+    const real h   = 1 + gamma * pre / (rho * (gamma - 1));
     const real D   = rho * W;
     const real S   = rho * h * W * W * v;
     return Conserved{D*v, S*v + pre, S - D*v};
@@ -555,7 +532,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         const real S        = left_state.s;
         const real tau      = left_state.tau;
         const real E        = tau + D;
-        const real cofactor = static_cast<real>(1.0) / (aLm - aStar);
+        const real cofactor = 1 / (aLm - aStar);
 
         //--------------Compute the L Star State----------
         // Left Star State in x-direction of coordinate lattice
@@ -577,7 +554,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         const real S         = right_state.s;
         const real tau       = right_state.tau;
         const real E         = tau + D;
-        const real cofactor  = static_cast<real>(1.0) / (aRp - aStar);
+        const real cofactor  = 1 / (aRp - aStar);
 
         //--------------Compute the R Star State----------
         // Left Star State in x-direction of coordinate lattice
@@ -697,7 +674,7 @@ SRHD::simulate1D(
     const auto xblockdim      = nx > BLOCK_SIZE ? BLOCK_SIZE : nx;
     this->radius              = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->pseudo_radius       = (first_order) ? 1 : 2;
-    this->step                = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+    this->step                = (first_order) ? 1 : static_cast<real>(0.5);
     const luint shBlockSize   = BLOCK_SIZE + 2 * pseudo_radius;
     const luint shBlockBytes  = shBlockSize * sizeof(Primitive);
     const auto fullP          = simbi::ExecutionPolicy(nx, xblockdim);

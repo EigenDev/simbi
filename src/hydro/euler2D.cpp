@@ -70,7 +70,7 @@ void Newtonian2D::cons2prim(const ExecutionPolicy<> &p)
         const real v1      = cons_data[gid].m1 / rho;
         const real v2      = cons_data[gid].m2 / rho;
         const real rho_chi = cons_data[gid].chi;
-        const real pre     = (gamma - static_cast<real>(1.0))*(cons_data[gid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2));
+        const real pre     = (gamma - 1)*(cons_data[gid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2));
         prim_data[gid] = Primitive{rho, v1, v2, pre, rho_chi / rho};
     });
 };
@@ -176,28 +176,87 @@ void Newtonian2D::adapt_dt()
                 const auto pressure = prims[aid].p;
                 const auto cs       = std::sqrt(gamma * pressure / rho );
 
+                //================ Plus / Minus Wave speed components -================
+                const auto plus_v1  = (v1 + cs);
+                const auto plus_v2  = (v2 + cs);
+                const auto minus_v1 = (v1 - cs);
+                const auto minus_v2 = (v2 - cs);
+
+                auto v1p = std::abs(plus_v1);
+                auto v1m = std::abs(minus_v1);
+                auto v2p = std::abs(plus_v2);
+                auto v2m = std::abs(minus_v2);
+                real cfl_dt;
                 switch (geometry)
                 {
-                case simbi::Geometry::CARTESIAN:
-                    cfl_dt = helpers::my_min( dx1/(helpers::my_max(std::abs(v1 + cs), std::abs(v1 - cs))), dx2/(helpers::my_max(std::abs(v2 + cs), std::abs(v2 - cs))) );
-                    break;
-                case simbi::Geometry::SPHERICAL:
-                    {
-                        const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                        const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                        const real dtheta = tr - tl;
-                        const real x1l    = get_x1face(ii, geometry, 0);
-                        const real x1r    = get_x1face(ii, geometry, 1);
-                        const real dr     = x1r - x1l;
-                        const real rmean  = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
-                        cfl_dt = helpers::my_min( dr/(helpers::my_max(std::abs(v1 + cs), std::abs(v1 - cs))), rmean*dtheta/(helpers::my_max(std::abs(v2 + cs), std::abs(v2 - cs))) );
+                    case simbi::Geometry::CARTESIAN:
+                        {
+                            if (mesh_motion) {
+                                v1p = std::abs(plus_v1  - hubble_param);
+                                v1m = std::abs(minus_v1 - hubble_param);
+                            }
+                            cfl_dt = helpers::my_min(dx1 / (helpers::my_max(v1p, v1m)), dx2 / (helpers::my_max(v2p, v2m)));
+                            break;
+                        }
+                    case simbi::Geometry::SPHERICAL:
+                        {
+                            const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                            const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                            const real dtheta = tr - tl;
+                            const real x1l    = get_x1face(ii, geometry, 0);
+                            const real x1r    = get_x1face(ii, geometry, 1);
+                            const real dr     = x1r - x1l;
+                            const real rmean  = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
+                            if (mesh_motion)
+                            {
+                                const real vfaceL   = x1l * hubble_param;
+                                const real vfaceR   = x1r * hubble_param;
+                                v1p = std::abs(plus_v1  - vfaceR);
+                                v1m = std::abs(minus_v1 - vfaceL);
+                            }
+                            cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
+                            break;
+                        }
 
-                    break;
-                    }
-                case simbi::Geometry::CYLINDRICAL:
-                    // TODO: Implement Cylindrical coordinates at some point
-                    break;
-                }
+                    case simbi::Geometry::PLANAR_CYLINDRICAL:
+                        {
+                            const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                            const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                            const real dtheta = tr - tl;
+                            const real x1l    = get_x1face(ii, geometry, 0);
+                            const real x1r    = get_x1face(ii, geometry, 1);
+                            const real dr     = x1r - x1l;
+                            const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                            if (mesh_motion)
+                            {
+                                const real vfaceL   = x1l * hubble_param;
+                                const real vfaceR   = x1r * hubble_param;
+                                v1p = std::abs(plus_v1  - vfaceR);
+                                v1m = std::abs(minus_v1 - vfaceL);
+                            }
+                            cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
+                            break;
+                        }
+                    case simbi::Geometry::AXIS_CYLINDRICAL:
+                        {
+                            const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                            const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                            const real dz     = zr - zl;
+                            const real x1l    = get_x1face(ii, geometry, 0);
+                            const real x1r    = get_x1face(ii, geometry, 1);
+                            const real dr     = x1r - x1l;
+                            const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                            if (mesh_motion)
+                            {
+                                const real vfaceL   = x1l * hubble_param;
+                                const real vfaceR   = x1r * hubble_param;
+                                v1p = std::abs(plus_v1  - vfaceR);
+                                v1m = std::abs(minus_v1 - vfaceL);
+                            }
+                            cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
+                            break;
+                        }
+                } // end switch
                 min_dt = std::min(min_dt, cfl_dt);
             } // end ii
         } // end jj
@@ -219,7 +278,9 @@ void Newtonian2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
             // deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
             // deviceReduceKernel<2><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y);
             break;
-        
+            
+        case simbi::Geometry::PLANAR_CYLINDRICAL:
+        case simbi::Geometry::AXIS_CYLINDRICAL:
         case simbi::Geometry::SPHERICAL:
             compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>> (this, prims.data(), dt_min.data(), geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
             deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
@@ -315,7 +376,7 @@ Conserved Newtonian2D::calc_hllc_flux(
     real m1       = left_state.m1;
     real m2       = left_state.m2;
     real edens    = left_state.e_dens;
-    real cofactor = static_cast<real>(1.0) / (aL - aStar);
+    real cofactor = 1 / (aL - aStar);
 
     const real vL           = left_prims.vcomponent(ehat);
     const real vR           = right_prims.vcomponent(ehat);
@@ -332,7 +393,7 @@ Conserved Newtonian2D::calc_hllc_flux(
     m1       = right_state.m1;
     m2       = right_state.m2;
     edens    = right_state.e_dens;
-    cofactor = static_cast<real>(1.0) / (aR - aStar);
+    cofactor = 1 / (aR - aStar);
 
     rhostar               = cofactor * (aR - vR) * rho;
     m1star                = cofactor * (m1 * (aR - vR) +  kdelta * (-pressure + pStar) );
@@ -350,7 +411,7 @@ Conserved Newtonian2D::calc_hllc_flux(
                         + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm) * static_cast<real>(0.5);
 
     // upwind the concentration flux 
-    if (net_flux.rho < static_cast<real>(0.0))
+    if (net_flux.rho < 0)
         net_flux.chi = right_prims.chi * net_flux.rho;
     else
         net_flux.chi = left_prims.chi  * net_flux.rho;
@@ -650,13 +711,13 @@ void Newtonian2D::advance(
         const real m1_source  = mom1_source[real_loc];
         const real m2_source  = mom2_source[real_loc];
         const real e_source   = erg_source[real_loc];
+        const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
                 {
-                    const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
                     cons_data[aid] -= ( (frf - flf) * invdx1 + (grf - glf) * invdx2 - source_terms) * step * dt;
-                break;
+                    break;
                 }
             
             case simbi::Geometry::SPHERICAL:
@@ -680,14 +741,58 @@ void Newtonian2D::advance(
                 const real vc   = prim_buff[tya * bx + txa].v2;
                 const real pc   = prim_buff[tya * bx + txa].p;
                 
-                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * uc * vc) / rmean + pc * (s2R - s2L) * invdV , static_cast<real>(0.0)};
-                const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
+                const Conserved geom_source  = {0, (rhoc * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * uc * vc) / rmean + pc * (s2R - s2L) * invdV , 0};
                 cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step;
                 break;
                 }
-            case simbi::Geometry::CYLINDRICAL:
-                // TODO: Implement Cylindrical coordinates at some point
+            case simbi::Geometry::PLANAR_CYLINDRICAL:
+                {
+                const real rl           = get_xface(ii, geometry, 0); 
+                const real rr           = get_xface(ii, geometry, 1);
+                const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
+                const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real dVtot        = (1.0 / 2.0) * (rr * rr - rl * rl) * dx2;
+                const real invdV        = 1.0 / dVtot;
+                const real s1R          = rr * dx2; 
+                const real s1L          = rl * dx2; 
+                const real s2R          = (rr - rl) * tr; 
+                const real s2L          = (rr - rl) * tl; 
+
+                // Grab central primitives
+                const real rhoc = prim_buff[tya * bx + txa].rho;
+                const real uc   = prim_buff[tya * bx + txa].v1;
+                const real vc   = prim_buff[tya * bx + txa].v2;
+                const real pc   = prim_buff[tya * bx + txa].p;
+                
+                const Conserved geom_source  = {0, (rhoc * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * uc * vc) / rmean, 0};
+                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step;
                 break;
+                }
+            case simbi::Geometry::AXIS_CYLINDRICAL:
+                {
+                const real rl           = get_xface(ii, geometry, 0); 
+                const real rr           = get_xface(ii, geometry, 1);
+                const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
+                const real zl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                const real zr           = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real dVtot        = (1.0 / 2.0) * (rr * rr - rl * rl) * dx2;
+                const real invdV        = 1.0 / dVtot;
+                const real s1R          = rr * dx2; 
+                const real s1L          = rl * dx2; 
+                const real s2R          = 0.5 * (rr + rl) * dx2; 
+                const real s2L          = 0.5 * (rr + rl) * dx2; 
+
+                // Grab central primitives
+                const real rhoc = prim_buff[tya * bx + txa].rho;
+                const real uc   = prim_buff[tya * bx + txa].v1;
+                const real vc   = prim_buff[tya * bx + txa].v2;
+                const real pc   = prim_buff[tya * bx + txa].p;
+                
+                const Conserved geom_source  = {0, pc * (s1R - s1L) * invdV, 0, 0};
+                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step;
+                break;
+                }
         } // end switch
     });
 }
@@ -826,7 +931,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     const luint yblockdim       = yphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : yphysical_grid;
     this->radius                = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->pseudo_radius         = (first_order) ? 1 : 2;
-    this->step                  = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+    this->step                  = (first_order) ? 1 : static_cast<real>(0.5);
     const luint bx              = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * pseudo_radius: nx;
     const luint by              = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * pseudo_radius: ny;
     const luint shBlockSpace    = bx * by;

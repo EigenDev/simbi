@@ -20,6 +20,8 @@ namespace simbi{
         CARTESIAN,
         SPHERICAL,
         CYLINDRICAL,
+        AXIS_CYLINDRICAL,
+        PLANAR_CYLINDRICAL,
     };
 
     enum class Accuracy

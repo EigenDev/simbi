@@ -106,6 +106,8 @@ namespace simbi
         const std::map<std::string, simbi::Geometry> geometry_map = {
         { "spherical", simbi::Geometry::SPHERICAL },
         { "cartesian", simbi::Geometry::CARTESIAN},
+        { "planar_cylindrical", simbi::Geometry::PLANAR_CYLINDRICAL},
+        { "axis_cylindrical", simbi::Geometry::AXIS_CYLINDRICAL},
         { "cylindtical", simbi::Geometry::CYLINDRICAL}
         };
 

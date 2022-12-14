@@ -65,6 +65,7 @@ namespace simbi {
                             return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                         }
                 }
+            case simbi::Geometry::PLANAR_CYLINDRICAL:
             case simbi::Geometry::SPHERICAL:
                 {
                         const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
@@ -74,11 +75,6 @@ namespace simbi {
                             return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                         }
                 }
-            case simbi::Geometry::CYLINDRICAL:
-            {
-                //  TODO: Implement
-                break;
-            }
             }
         }
 

@@ -149,10 +149,10 @@ namespace simbi{
                     v1           /= lorentz;
                     v2           /= lorentz;
                 }
-                plus_v1  = (v1 + cs) / (static_cast<real>(1.0) + v1 * cs);
-                plus_v2  = (v2 + cs) / (static_cast<real>(1.0) + v2 * cs);
-                minus_v1 = (v1 - cs) / (static_cast<real>(1.0) - v1 * cs);
-                minus_v2 = (v2 - cs) / (static_cast<real>(1.0) - v2 * cs);
+                plus_v1  = (v1 + cs) / (1 + v1 * cs);
+                plus_v2  = (v2 + cs) / (1 + v2 * cs);
+                minus_v1 = (v1 - cs) / (1 - v1 * cs);
+                minus_v2 = (v2 - cs) / (1 - v2 * cs);
             } else {
                 real cs  = std::sqrt(gamma * p / rho);
                 plus_v1  = (v1 + cs);
@@ -191,8 +191,41 @@ namespace simbi{
                                      rmean * (tr - tl) / (helpers::my_max(v2p, v2m)));
                     break;
                 }
-                case simbi::Geometry::CYLINDRICAL:
+                case simbi::Geometry::PLANAR_CYLINDRICAL:
                 {
+                    // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
+                    const real rl  = helpers::my_max(rmin * std::pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
+                    const real rr  = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
+                    const real tl  = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                    const real tr  = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    if (self->mesh_motion)
+                    {
+                        const real vfaceL   = rl * self->hubble_param;
+                        const real vfaceR   = rr * self->hubble_param;
+                        v1p = std::abs(plus_v1  - vfaceR);
+                        v1m = std::abs(minus_v1 - vfaceL);
+                    }
+                    const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
+                    cfl_dt = helpers::my_min((rr - rl) / (helpers::my_max(v1p, v1m)),
+                                     rmean * (tr - tl) / (helpers::my_max(v2p, v2m)));
+                    break;
+                }
+                case simbi::Geometry::AXIS_CYLINDRICAL:
+                {
+                    // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
+                    const real rl  = helpers::my_max(rmin * std::pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
+                    const real rr  = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
+                    const real zl  = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                    const real zr  = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    if (self->mesh_motion)
+                    {
+                        const real vfaceL   = rl * self->hubble_param;
+                        const real vfaceR   = rr * self->hubble_param;
+                        v1p = std::abs(plus_v1  - vfaceR);
+                        v1m = std::abs(minus_v1 - vfaceL);
+                    }
+                    cfl_dt = helpers::my_min((rr - rl) / (helpers::my_max(v1p, v1m)),
+                                             (zr - zl) / (helpers::my_max(v2p, v2m)));
                     break;
                 }
                 // TODO: Implement
@@ -253,12 +286,12 @@ namespace simbi{
                     v2           /= lorentz;
                     v3           /= lorentz;
                 }
-                plus_v1  = (v1 + cs) / (static_cast<real>(1.0) + v1 * cs);
-                plus_v2  = (v2 + cs) / (static_cast<real>(1.0) + v2 * cs);
-                plus_v3  = (v3 + cs) / (static_cast<real>(1.0) + v3 * cs);
-                minus_v1 = (v1 - cs) / (static_cast<real>(1.0) - v1 * cs);
-                minus_v2 = (v2 - cs) / (static_cast<real>(1.0) - v2 * cs);
-                minus_v3 = (v3 - cs) / (static_cast<real>(1.0) - v3 * cs);
+                plus_v1  = (v1 + cs) / (1 + v1 * cs);
+                plus_v2  = (v2 + cs) / (1 + v2 * cs);
+                plus_v3  = (v3 + cs) / (1 + v3 * cs);
+                minus_v1 = (v1 - cs) / (1 - v1 * cs);
+                minus_v2 = (v2 - cs) / (1 - v2 * cs);
+                minus_v3 = (v3 - cs) / (1 - v3 * cs);
             } else {
                 real cs  = std::sqrt(gamma * p / rho);
                 plus_v1  = (v1 + cs);
@@ -294,9 +327,21 @@ namespace simbi{
                     break;
                  }
                 case simbi::Geometry::CYLINDRICAL:
-                {
+                {    
+                    // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
+                    const real rl           = helpers::my_max(rmin * std::pow(10, (ii - static_cast<real>(0.5)) * dx1), rmin);
+                    const real rr           = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
+                    const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                    const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    const real zl           = helpers::my_max(x3min + dx3 * (kk - static_cast<real>(0.5)), x3min);
+                    const real zr           = helpers::my_min(zl + dx3 * (kk == 0 ? 0.5 : 1.0), x3max); 
+                    const real rmean        = static_cast<real>(2.0 / 3,0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
+                    const real th           = static_cast<real>(0.5) * (tl + tr);
+                    cfl_dt = helpers::my_min3((rr - rl) / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                      rmean * (tr - tl) / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                                              (zr - zl) / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
                     break;
-                }
+                 }
             } // end switch
             
             dt_min[kk * self->xphysical_grid * self->yphysical_grid + jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;

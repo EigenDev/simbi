@@ -62,7 +62,7 @@ void Newtonian1D::cons2prim(const ExecutionPolicy<> &p){
      simbi::parallel_for(p, (luint)0, nx, [=] GPU_LAMBDA (luint ii){ 
         real rho = conserved_buff[ii].rho;
         real v   = conserved_buff[ii].m / rho;
-        real pre = (gamma - static_cast<real>(1.0))*(conserved_buff[ii].e_dens - static_cast<real>(0.5) * rho * v * v);
+        real pre = (gamma - 1)*(conserved_buff[ii].e_dens - static_cast<real>(0.5) * rho * v * v);
         primitive_buff[ii]  = Primitive{rho, v, pre};
     });
 };
@@ -171,7 +171,7 @@ Conserved Newtonian1D::prims2cons(const Primitive &prim)
     const real rho = prim.rho;
     const real v   = prim.v;
     const real pre = prim.p;
-    real energy    = pre / (gamma - static_cast<real>(1.0)) + static_cast<real>(0.5) * rho * v * v;
+    real energy    = pre / (gamma - 1) + static_cast<real>(0.5) * rho * v * v;
     return Conserved{rho, rho * v, energy};
 };
 
@@ -186,7 +186,7 @@ Conserved Newtonian1D::prims2flux(const Primitive &prim)
     const real rho = prim.rho;
     const real v   = prim.v;
     const real pre = prim.p;
-    real energy    = pre / (gamma - static_cast<real>(1.0)) + static_cast<real>(0.5) * rho * v * v;
+    real energy    = pre / (gamma - 1) + static_cast<real>(0.5) * rho * v * v;
 
     return Conserved{
         rho * v,
@@ -432,8 +432,19 @@ void Newtonian1D::advance(
                 break;
             }
         case simbi::Geometry::CYLINDRICAL:
-            // TODO: Implement Cylindrical coordinates at some point
-            break;
+            {
+                const real rlf    = x1l + vfaceL * step * dt; 
+                const real rrf    = x1r + vfaceR * step * dt;
+                const real rmean  = (2.0 / 3.0) * (rrf * rrf * rrf - rlf * rlf * rlf) / (rrf * rrf - rlf * rlf);
+                const real sR     = rrf * rrf; 
+                const real sL     = rlf * rlf; 
+                const real dV     = rmean * rmean * (rrf - rlf);    
+                const real factor = (mesh_motion) ? dV : 1;         
+                const real pc     = prim_buff[txa].p;
+                const auto geom_sources = Conserved{0.0, pc * (sR - sL) / dV, 0.0};
+                cons_data[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt * factor;
+                break;
+            }
         } // end switch
     }); // end parallel region
     
@@ -530,7 +541,7 @@ void Newtonian1D::advance(
     const auto xblockdim     = nx > BLOCK_SIZE ? BLOCK_SIZE : nx;
     this->radius             = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->pseudo_radius      = (first_order) ? 1 : 2;
-    this->step               = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+    this->step               = (first_order) ? 1 : static_cast<real>(0.5);
     const luint shBlockSize  = BLOCK_SIZE + 2 * pseudo_radius;
     const luint shBlockBytes = shBlockSize * sizeof(Primitive);
     const auto fullP         = simbi::ExecutionPolicy(nx, xblockdim);

@@ -236,9 +236,9 @@ namespace sr2d {
 
         GPU_CALLABLE_MEMBER inline real calc_lorentz_gamma() const {
             if constexpr(VelocityType == Velocity::Beta) {
-                return 1 / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2));
+                return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
             } else {
-                return std::sqrt(static_cast<real>(1.0) + (v1 * v1 + v2 * v2));
+                return std::sqrt(1 + (v1 * v1 + v2 * v2));
             }
         }
 
@@ -424,9 +424,9 @@ namespace sr3d {
 
         GPU_CALLABLE_MEMBER inline real calc_lorentz_gamma() const {
             if constexpr(VelocityType == Velocity::Beta) {
-                return 1 / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2 + v3 * v3));
+                return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
             } else {
-                return std::sqrt(static_cast<real>(1.0) + (v1 * v1 + v2 * v2 + v3 * v3));
+                return std::sqrt(1 + (v1 * v1 + v2 * v2 + v3 * v3));
             }
         }
     };

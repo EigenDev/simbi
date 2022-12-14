@@ -11,7 +11,7 @@ import simbi.initial_condition as simbi_ic
 import warnings
 from typing import Callable
 regimes             = ['classical', 'relativistic']
-coord_systems       = ['spherical', 'cartesian'] # TODO: Implement Cylindrical
+coord_systems       = ['spherical', 'cartesian', 'planar_cylindrical', 'axis_cylindrical', 'cylindrical']
 boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
 
 class Hydro:
@@ -412,6 +412,9 @@ class Hydro:
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensionality , mesh_motion)
         
+        if self.dimensionality == 1 and self.coord_system in ['planar_cylindrical', 'axis_cylindrical']:
+            self.coord_system = 'cylindrical'
+            
         periodic    = boundary_condition == 'periodic'
         start_time  = tstart if self.t == 0 else self.t
         #Convert strings to byte arrays

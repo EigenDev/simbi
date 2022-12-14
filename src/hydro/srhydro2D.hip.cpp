@@ -68,12 +68,12 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
     const real rhoL = primsL.rho;
     const real vL   = primsL.vcomponent(nhat);
     const real pL   = primsL.p;
-    const real hL   = static_cast<real>(1.0) + gamma * pL / (rhoL * (gamma - static_cast<real>(1.0)));
+    const real hL   = 1 + gamma * pL / (rhoL * (gamma - 1));
 
     const real rhoR  = primsR.rho;
     const real vR    = primsR.vcomponent(nhat);
     const real pR    = primsR.p;
-    const real hR    = static_cast<real>(1.0) + gamma * pR / (rhoR * (gamma - static_cast<real>(1.0)));
+    const real hR    = 1 + gamma * pR / (rhoR * (gamma - 1));
 
     const real csR = std::sqrt(gamma * pR / (hR * rhoR));
     const real csL = std::sqrt(gamma * pL / (hL * rhoL));
@@ -85,10 +85,10 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
         {
             const real vbar  = static_cast<real>(0.5) * (vL + vR);
             const real cbar  = static_cast<real>(0.5) * (csL + csR);
-            const real bl    = (vbar - cbar)/(static_cast<real>(1.0) - cbar*vbar);
-            const real br    = (vbar + cbar)/(static_cast<real>(1.0) + cbar*vbar);
-            const real aL    = helpers::my_min(bl, (vL - csL)/(static_cast<real>(1.0) - vL*csL));
-            const real aR    = helpers::my_max(br, (vR  + csR)/(static_cast<real>(1.0) + vR*csR));
+            const real bl    = (vbar - cbar)/(1 - cbar*vbar);
+            const real br    = (vbar + cbar)/(1 + cbar*vbar);
+            const real aL    = helpers::my_min(bl, (vL - csL)/(1 - vL*csL));
+            const real aR    = helpers::my_max(br, (vR  + csR)/(1 + vR*csR));
 
             return Eigenvals(aL, aR, csL, csR);
         }
@@ -96,13 +96,13 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
             // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-            const real sL = csL*csL/(gamma*gamma*(static_cast<real>(1.0) - csL*csL));
-            const real sR = csR*csR/(gamma*gamma*(static_cast<real>(1.0) - csR*csR));
+            const real sL = csL*csL/(gamma*gamma*(1 - csL*csL));
+            const real sR = csR*csR/(gamma*gamma*(1 - csR*csR));
             // Define temporaries to save computational cycles
-            const real qfL   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sL);
-            const real qfR   = static_cast<real>(1.0) / (static_cast<real>(1.0) + sR);
-            const real sqrtR = std::sqrt(sR * (static_cast<real>(1.0) - vR  * vR  + sR));
-            const real sqrtL = std::sqrt(sL * (static_cast<real>(1.0) - vL * vL + sL));
+            const real qfL   = 1 / (1 + sL);
+            const real qfR   = 1 / (1 + sR);
+            const real sqrtR = std::sqrt(sR * (1 - vR  * vR  + sR));
+            const real sqrtL = std::sqrt(sL * (1 - vL * vL + sL));
 
             const real lamLm = (vL - sqrtL) * qfL;
             const real lamRm = (vR  - sqrtR) * qfR;
@@ -142,8 +142,8 @@ Conserved SRHD2D::prims2cons(const Primitive &prims) const
     const real v1            = prims.v1;
     const real v2            = prims.v2;
     const real pressure      = prims.p;
-    const real lorentz_gamma = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2));
-    const real h             = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
+    const real lorentz_gamma = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
+    const real h             = 1 + gamma * pressure / (rho * (gamma - 1));
 
     return Conserved{
         rho * lorentz_gamma, 
@@ -201,9 +201,8 @@ void SRHD2D::adapt_dt()
                                 v1m = std::abs(minus_v1 - hubble_param);
                             }
                             cfl_dt = helpers::my_min(dx1 / (helpers::my_max(v1p, v1m)), dx2 / (helpers::my_max(v2p, v2m)));
+                            break;
                         }
-                        break;
-                    
                     case simbi::Geometry::SPHERICAL:
                         {
                             const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
@@ -221,11 +220,47 @@ void SRHD2D::adapt_dt()
                                 v1m = std::abs(minus_v1 - vfaceL);
                             }
                             cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
+                            break;
                         }
-                        break;
 
-                    case simbi::Geometry::CYLINDRICAL:
-                    break;
+                    case simbi::Geometry::PLANAR_CYLINDRICAL:
+                        {
+                            const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                            const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                            const real dtheta = tr - tl;
+                            const real x1l    = get_x1face(ii, geometry, 0);
+                            const real x1r    = get_x1face(ii, geometry, 1);
+                            const real dr     = x1r - x1l;
+                            const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                            if (mesh_motion)
+                            {
+                                const real vfaceL   = x1l * hubble_param;
+                                const real vfaceR   = x1r * hubble_param;
+                                v1p = std::abs(plus_v1  - vfaceR);
+                                v1m = std::abs(minus_v1 - vfaceL);
+                            }
+                            cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
+                            break;
+                        }
+                    case simbi::Geometry::AXIS_CYLINDRICAL:
+                        {
+                            const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                            const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                            const real dz     = zr - zl;
+                            const real x1l    = get_x1face(ii, geometry, 0);
+                            const real x1r    = get_x1face(ii, geometry, 1);
+                            const real dr     = x1r - x1l;
+                            const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                            if (mesh_motion)
+                            {
+                                const real vfaceL   = x1l * hubble_param;
+                                const real vfaceR   = x1r * hubble_param;
+                                v1p = std::abs(plus_v1  - vfaceR);
+                                v1m = std::abs(minus_v1 - vfaceL);
+                            }
+                            cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
+                            break;
+                        }
                 } // end switch
                 min_dt = helpers::my_min(min_dt, cfl_dt);
             } // end ii 
@@ -236,6 +271,7 @@ void SRHD2D::adapt_dt()
 
 void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
 {
+    
     #if GPU_CODE
     {
         const luint psize = p.blockSize.x*p.blockSize.y;
@@ -256,7 +292,8 @@ void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
                 // deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
                 // deviceReduceKernel<2><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y);
                 break;
-            
+            case simbi::Geometry::PLANAR_CYLINDRICAL:
+            case simbi::Geometry::AXIS_CYLINDRICAL:
             case simbi::Geometry::SPHERICAL:
                 compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>> (
                     this, 
@@ -299,9 +336,9 @@ Conserved SRHD2D::prims2flux(const Primitive &prims, luint nhat = 1) const
     const real chi             = prims.chi;
     const real vn              = (nhat == 1) ? v1 : v2;
     const auto kron            = kronecker(nhat, 1);
-    const real lorentz_gamma   = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - (v1 * v1 + v2 * v2));
+    const real lorentz_gamma   = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
 
-    const real h   = static_cast<real>(1.0) + gamma * pressure / (rho * (gamma - static_cast<real>(1.0)));
+    const real h   = 1 + gamma * pressure / (rho * (gamma - 1));
     const real D   = rho * lorentz_gamma;
     const real S1  = rho * lorentz_gamma * lorentz_gamma * h * v1;
     const real S2  = rho * lorentz_gamma * lorentz_gamma * h * v2;
@@ -326,8 +363,8 @@ Conserved SRHD2D::calc_hll_flux(
     const real aR = lambda.aR;
 
     // Calculate plus/minus alphas
-    const real aLm = aL < static_cast<real>(0.0) ? aL : static_cast<real>(0.0);
-    const real aRp = aR > static_cast<real>(0.0) ? aR : static_cast<real>(0.0);
+    const real aLm = aL < 0 ? aL : 0;
+    const real aRp = aR > 0 ? aR : 0;
 
     Conserved net_flux;
     // Compute the HLL Flux component-wise
@@ -343,7 +380,7 @@ Conserved SRHD2D::calc_hll_flux(
         net_flux = f_hll - u_hll * vface;
     }
     // Upwind the scalar concentration flux
-    if (net_flux.d < static_cast<real>(0.0))
+    if (net_flux.d < 0)
         net_flux.chi = right_prims.chi * net_flux.d;
     else
         net_flux.chi = left_prims.chi  * net_flux.d;
@@ -372,8 +409,8 @@ Conserved SRHD2D::calc_hllc_flux(
     const real cL = lambda.csL;
     const real cR = lambda.csR;
 
-    const real aLm = aL < static_cast<real>(0.0) ? aL : static_cast<real>(0.0);
-    const real aRp = aR > static_cast<real>(0.0) ? aR : static_cast<real>(0.0);
+    const real aLm = aL < 0 ? aL : 0;
+    const real aRp = aR > 0 ? aR : 0;
 
     //---- Check Wave Speeds before wasting computations
     if (vface <= aLm) {
@@ -409,7 +446,7 @@ Conserved SRHD2D::calc_hllc_flux(
     const real b     = -(e + fs);
     const real c     = s;
     const real quad  = -static_cast<real>(0.5) * (b + helpers::sgn(b) * std::sqrt(b * b - static_cast<real>(4.0) * a * c));
-    const real aStar = c * (static_cast<real>(1.0) / quad);
+    const real aStar = c * (1 / quad);
     const real pStar = -aStar * fe + fs;
 
     switch (comp_hllc_type)
@@ -425,7 +462,7 @@ Conserved SRHD2D::calc_hllc_flux(
             real S2       = left_state.s2;
             real tau      = left_state.tau;
             real E        = tau + D;
-            real cofactor = static_cast<real>(1.0) / (aL - aStar);
+            real cofactor = 1 / (aL - aStar);
 
             const real vL           = left_prims.vcomponent(nhat);
             const real vR           = right_prims.vcomponent(nhat);
@@ -444,7 +481,7 @@ Conserved SRHD2D::calc_hllc_flux(
             S2       = right_state.s2;
             tau      = right_state.tau;
             E        = tau + D;
-            cofactor = static_cast<real>(1.0) / (aR - aStar);
+            cofactor = 1 / (aR - aStar);
 
             Dstar                 = cofactor * (aR - vR) * D;
             S1star                = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
@@ -464,7 +501,7 @@ Conserved SRHD2D::calc_hllc_flux(
                                 + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm) * static_cast<real>(0.5) - face_starState * vface;
 
             // upwind the concentration flux 
-            if (net_flux.d < static_cast<real>(0.0))
+            if (net_flux.d < 0)
                 net_flux.chi = right_prims.chi * net_flux.d;
             else
                 net_flux.chi = left_prims.chi  * net_flux.d;
@@ -482,7 +519,7 @@ Conserved SRHD2D::calc_hllc_flux(
                 const real tau      = left_state.tau;
                 const real chi      = left_state.chi;
                 const real E        = tau + D;
-                const real cofactor = static_cast<real>(1.0) / (aL - aStar);
+                const real cofactor = 1 / (aL - aStar);
 
                 const real vL     =  left_prims.vcomponent(nhat);
                 const auto kdelta = kronecker(nhat, 1);
@@ -498,7 +535,7 @@ Conserved SRHD2D::calc_hllc_flux(
                 auto hllc_flux = left_flux + (starStateL - left_state) * aL - starStateL * vface;
 
                 // upwind the concentration flux 
-                if (hllc_flux.d < static_cast<real>(0.0))
+                if (hllc_flux.d < 0)
                     hllc_flux.chi = right_prims.chi * hllc_flux.d;
                 else
                     hllc_flux.chi = left_prims.chi  * hllc_flux.d;
@@ -512,7 +549,7 @@ Conserved SRHD2D::calc_hllc_flux(
                 const real tau      = right_state.tau;
                 const real chi      = right_state.chi;
                 const real E        = tau + D;
-                const real cofactor = static_cast<real>(1.0) / (aR - aStar);
+                const real cofactor = 1 / (aR - aStar);
 
                 const real vR         = right_prims.vcomponent(nhat);
                 const auto kdelta     = kronecker(nhat, 1);
@@ -527,7 +564,7 @@ Conserved SRHD2D::calc_hllc_flux(
                 auto hllc_flux = right_flux + (starStateR - right_state) * aR - starStateR * vface;
 
                 // upwind the concentration flux 
-                if (hllc_flux.d < static_cast<real>(0.0))
+                if (hllc_flux.d < 0)
                     hllc_flux.chi = right_prims.chi * hllc_flux.d;
                 else
                     hllc_flux.chi = left_prims.chi  * hllc_flux.d;
@@ -558,7 +595,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
         real invdV = 1.0;
         while (!found_failure && workLeftToDo)
         {
-            if (mesh_motion && (geometry == simbi::Geometry::SPHERICAL))
+            if (mesh_motion && ( (geometry == simbi::Geometry::SPHERICAL) || (geometry == simbi::Geometry::PLANAR_CYLINDRICAL) ))
             {
                 const luint ii   = gid % nx;
                 const luint jj   = gid / nx;
@@ -584,15 +621,15 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
                 pre = peq;
                 et  = tau + D + pre;
                 v2  = S * S / (et * et);
-                W   = static_cast<real>(1.0) / std::sqrt(static_cast<real>(1.0) - v2);
+                W   = 1 / std::sqrt(1 - v2);
                 rho = D / W;
-                eps = (tau + (static_cast<real>(1.0) - W) * D + (static_cast<real>(1.0) - W * W) * pre) / (D * W);
+                eps = (tau + (1 - W) * D + (1 - W * W) * pre) / (D * W);
 
-                h  = static_cast<real>(1.0) + eps + pre / rho;
+                h  = 1 + eps + pre / rho;
                 c2 = gamma * pre / (h * rho);
 
-                g = c2 * v2 - static_cast<real>(1.0);
-                f = (gamma - static_cast<real>(1.0)) * rho * eps - pre;
+                g = c2 * v2 - 1;
+                f = (gamma - 1) * rho * eps - pre;
 
                 peq = pre - f / g;
                 iter++;
@@ -618,7 +655,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
                 }
             } while (std::abs(peq - pre) >= tol);
 
-            const real inv_et = static_cast<real>(1.0) / (tau + D + peq);
+            const real inv_et = 1 / (tau + D + peq);
             const real v1     = S1 * inv_et;
             const real v2     = S2 * inv_et;
             press_data[gid] = peq;
@@ -903,16 +940,61 @@ void SRHD2D::advance(
                 const real vc   = prim_buff[txa * sy + tya * sx].v2;
                 const real pc   = prim_buff[txa * sy + tya * sx].p;
 
-                const real hc   = static_cast<real>(1.0) + gamma * pc/(rhoc * (gamma - static_cast<real>(1.0)));
-                const real gam2 = static_cast<real>(1.0)/(static_cast<real>(1.0) - (uc * uc + vc * vc));
+                const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+                const real gam2 = 1/(1 - (uc * uc + vc * vc));
 
-                const Conserved geom_source  = {static_cast<real>(0.0), (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L) * invdV , static_cast<real>(0.0)};
+                const Conserved geom_source  = {0, (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L) * invdV , 0};
                 cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step * factor;
                 break;
                 }
-            case simbi::Geometry::CYLINDRICAL:
-                // TODO: Implement Cylindrical coordinates at some point
+             case simbi::Geometry::PLANAR_CYLINDRICAL:
+                {
+                const real rl           = get_x1face(ii, geometry, 0); 
+                const real rr           = get_x1face(ii, geometry, 1);
+                const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
+                const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real dVtot        = 0.5 * (rr * rr - rl * rl) * dx2;
+                const real invdV        = 1.0 / dVtot;
+                const real s1R          = rr * dx2; 
+                const real s1L          = rl * dx2; 
+                const real s2R          = (rr - rl) * tr; 
+                const real s2L          = (rr - rl) * tl; 
+
+                // Grab central primitives
+                const real rhoc = prim_buff[tya * bx + txa].rho;
+                const real uc   = prim_buff[tya * bx + txa].v1;
+                const real vc   = prim_buff[tya * bx + txa].v2;
+                const real pc   = prim_buff[tya * bx + txa].p;
+                
+                const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+                const real gam2 = 1/(1 - (uc * uc + vc * vc));
+
+                const Conserved geom_source  = {0, (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean, 0};
+                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step;
                 break;
+                }
+            case simbi::Geometry::AXIS_CYLINDRICAL:
+                {
+                const real rl           = get_x1face(ii, geometry, 0); 
+                const real rr           = get_x1face(ii, geometry, 1);
+                const real dVtot        = 0.5 * (rr * rr - rl * rl) * dx2;
+                const real invdV        = 1.0 / dVtot;
+                const real s1R          = rr * dx2; 
+                const real s1L          = rl * dx2; 
+                const real s2R          = 0.5 * (rr + rl) * dx2; 
+                const real s2L          = 0.5 * (rr + rl) * dx2; 
+
+                // Grab central primitives
+                const real rhoc = prim_buff[tya * bx + txa].rho;
+                const real uc   = prim_buff[tya * bx + txa].v1;
+                const real vc   = prim_buff[tya * bx + txa].v2;
+                const real pc   = prim_buff[tya * bx + txa].p;
+                
+                const Conserved geom_source  = {0, pc * (s1R - s1L) * invdV, 0, 0};
+                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step;
+                break;
+                }
         } // end switch
     });
     // update x1 endpoints
@@ -1060,7 +1142,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const luint yblockdim    = yphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : yphysical_grid;
     this->radius             = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->pseudo_radius      = (first_order) ? 1 : 2;
-    this->step               = (first_order) ? static_cast<real>(1.0) : static_cast<real>(0.5);
+    this->step               = (first_order) ? 1 : static_cast<real>(0.5);
     const luint shBlockSpace = (xblockdim + 2 * radius) * (yblockdim + 2 * radius);
     const luint shBlockBytes = shBlockSpace * sizeof(Primitive);
     const auto fullP         = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim});
