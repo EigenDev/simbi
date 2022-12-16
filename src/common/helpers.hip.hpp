@@ -92,6 +92,7 @@ namespace simbi
         const int x1grid_size, 
         const int x2grid_size, 
         const bool first_order,
+        const simbi::Geometry geometry,
         const simbi::BoundaryCondition boundary_condition,
         const sr2d::Conserved *outer_zones = nullptr,
         const bool half_sphere = true);
@@ -102,6 +103,7 @@ namespace simbi
         const int x1grid_size, 
         const int x2grid_size, 
         const bool first_order,
+        const simbi::Geometry geometry,
         const simbi::BoundaryCondition boundary_condition,
         const hydro2d::Conserved *outer_zones = nullptr,
         const bool half_sphere = true);

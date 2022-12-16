@@ -1150,7 +1150,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
     if (t == 0) {
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bc, outer_zones.data(), half_sphere);
     }
     
     const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive);
@@ -1176,7 +1176,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     simbi::detail::logger::with_logger(*this, tend, [&](){
         advance(activeP, xstride, ystride);
         cons2prim(fullP);
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, bc, outer_zones.data(), half_sphere);
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bc, outer_zones.data(), half_sphere);
         
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP, dtShBytes);

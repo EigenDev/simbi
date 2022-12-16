@@ -137,6 +137,7 @@ namespace simbi{
         const int x1grid_size, 
         const int x2grid_size, 
         const bool first_order,
+        const simbi::Geometry geometry,
         const simbi::BoundaryCondition boundary_condition,
         const sr2d::Conserved *outer_zones,
         const bool half_sphere)
@@ -169,8 +170,25 @@ namespace simbi{
                 }
                 // Fix the ghost zones at the angular boundaries
                 if (ii < x1grid_size - 2) {
-                    cons[0 * sx + (ii + 1) * sy]  = cons[1 * sx + (ii + 1) * sy];
-                    cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
+                    switch (geometry)
+                    {
+                    case simbi::Geometry::SPHERICAL:
+                        cons[0 * sx + (ii + 1) * sy]  = cons[1 * sx + (ii + 1) * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
+                        if (half_sphere) {
+                            cons[(x2grid_size - 1) * sx + (ii + 2) * sy].s2 = - cons[(x2grid_size - 2) * sx + (ii + 2) * sy].s2;
+                        }
+                        break;
+
+                    case simbi::Geometry::PLANAR_CYLINDRICAL:
+                        cons[0 * sx + (ii + 1) * sy]  = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[1 * sx + (ii + 1) * sy];
+                        break;
+                    default:
+                        cons[0 * sx + (ii + 1) * sy]  = cons[1 * sx + (ii + 1) * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
+                        break;
+                    } // end switch
                 }
 
             } else {
@@ -203,16 +221,32 @@ namespace simbi{
 
                 // Fix the ghost zones at the angular boundaries
                 if (ii < x1grid_size - 4) {
+                    switch (geometry)
+                    {
+                    case simbi::Geometry::SPHERICAL:
                         cons[0 * sx + (ii + 2) * sy]  = cons[3 * sx + (ii + 2) * sy];
                         cons[1 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
-
                         cons[(x2grid_size - 1) * sx + (ii + 2) * sy] = cons[(x2grid_size - 4) * sx + (ii + 2) * sy];
                         cons[(x2grid_size - 2) * sx + (ii + 2) * sy] = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
-
                         if (half_sphere) {
                             cons[(x2grid_size - 1) * sx + (ii + 2) * sy].s2 = - cons[(x2grid_size - 4) * sx + (ii + 2) * sy].s2;
                             cons[(x2grid_size - 2) * sx + (ii + 2) * sy].s2 = - cons[(x2grid_size - 3) * sx + (ii + 2) * sy].s2;
                         }
+                        break;
+
+                    case simbi::Geometry::PLANAR_CYLINDRICAL:
+                        cons[0 * sx + (ii + 2) * sy]  = cons[(x2grid_size - 4) * sx + (ii + 2) * sy];
+                        cons[1 * sx + (ii + 2) * sy]  = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 2) * sy] = cons[2 * sx + (ii + 2) * sy];
+                        cons[(x2grid_size - 2) * sx + (ii + 2) * sy] = cons[3 * sx + (ii + 2) * sy];
+                        break;
+                    default:
+                        cons[0 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
+                        cons[1 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 2) * sy] = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
+                        cons[(x2grid_size - 2) * sx + (ii + 2) * sy] = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
+                        break;
+                    } // end switch
                 }
             }
         });
@@ -224,6 +258,7 @@ namespace simbi{
         const int x1grid_size, 
         const int x2grid_size, 
         const bool first_order,
+        const simbi::Geometry geometry,
         const simbi::BoundaryCondition boundary_condition,
         const hydro2d::Conserved *outer_zones,
         const bool half_sphere)
@@ -254,10 +289,25 @@ namespace simbi{
                 }
                 // Fix the ghost zones at the angular boundaries
                 if (ii < x1grid_size - 2) {
-                    cons[0 * sx + (ii + 1) * sy]  = cons[1 * sx + (ii + 1) * sy];
-                    cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
+                    switch (geometry)
+                    {
+                    case simbi::Geometry::SPHERICAL:
+                        cons[0 * sx + (ii + 1) * sy]  = cons[1 * sx + (ii + 1) * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
+                        if (half_sphere) {
+                            cons[(x2grid_size - 1) * sx + (ii + 2) * sy].m2 = - cons[(x2grid_size - 2) * sx + (ii + 2) * sy].m2;
+                        }
+                        break;
+                    case simbi::Geometry::PLANAR_CYLINDRICAL:
+                        cons[0 * sx + (ii + 1) * sy]  = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[1 * sx + (ii + 1) * sy];
+                        break;
+                    default:
+                        cons[0 * sx + (ii + 1) * sy]  = cons[1 * sx + (ii + 1) * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
+                        break;
+                    } // end switch
                 }
-
             } else {
                 if(jj < x2grid_size - 4) {
                     // Fix the ghost zones at the radial boundaries
@@ -287,16 +337,31 @@ namespace simbi{
 
                 // Fix the ghost zones at the angular boundaries
                 if (ii < x1grid_size - 4) {
+                    switch (geometry) 
+                    {
+                    case simbi::Geometry::SPHERICAL:
                         cons[0 * sx + (ii + 2) * sy]  = cons[3 * sx + (ii + 2) * sy];
                         cons[1 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
-
                         cons[(x2grid_size - 1) * sx + (ii + 2) * sy] = cons[(x2grid_size - 4) * sx + (ii + 2) * sy];
                         cons[(x2grid_size - 2) * sx + (ii + 2) * sy] = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
-
                         if (half_sphere) {
                             cons[(x2grid_size - 1) * sx + (ii + 2) * sy].m2 = - cons[(x2grid_size - 4) * sx + (ii + 2) * sy].m2;
                             cons[(x2grid_size - 2) * sx + (ii + 2) * sy].m2 = - cons[(x2grid_size - 3) * sx + (ii + 2) * sy].m2;
                         }
+                        break;
+                    case simbi::Geometry::PLANAR_CYLINDRICAL:
+                        cons[0 * sx + (ii + 2) * sy]  = cons[(x2grid_size - 4) * sx + (ii + 2) * sy];
+                        cons[1 * sx + (ii + 2) * sy]  = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 2) * sy] = cons[2 * sx + (ii + 2) * sy];
+                        cons[(x2grid_size - 2) * sx + (ii + 2) * sy] = cons[3 * sx + (ii + 2) * sy];
+                        break;
+                    default:
+                        cons[0 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
+                        cons[1 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
+                        cons[(x2grid_size - 1) * sx + (ii + 2) * sy] = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
+                        cons[(x2grid_size - 2) * sx + (ii + 2) * sy] = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
+                        break;
+                    } // end switch
                 }
             }
         });
@@ -382,31 +447,47 @@ namespace simbi{
                 }
                 // Fix the ghost zones at the polar boundaries
                 if (ii < x1grid_size - 4 && kk < x3grid_size - 4) {
-                    cons[(kk + 2) * sx * sy + 0 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + 3 * sx + (ii + 2)];
-                    cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + 2 * sx + (ii + 2)];
-                    cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)];
-                    cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
-                    
-                    if (half_sphere) {
-                        cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)].s2 = - cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)].s2;
-                        cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)].s2 = - cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)].s2;
+                    switch (geometry)
+                    {
+                    case simbi::Geometry::SPHERICAL:
+                        cons[(kk + 2) * sx * sy + 0 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + 3 * sx + (ii + 2)];
+                        cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + 2 * sx + (ii + 2)];
+                        cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)];
+                        cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
+                        
+                        if (half_sphere) {
+                            cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)].s2 = - cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)].s2;
+                            cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)].s2 = - cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)].s2;
+                        }
+                        break;
+                    case simbi::Geometry::CYLINDRICAL:
+                        cons[(kk + 2) * sx * sy + 0 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)];
+                        cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
+                        cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + 3 * sx + (ii + 2)];
+                        cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + 2 * sx + (ii + 2)];
+                        break;
+                    default:
+                        cons[(kk + 2) * sx * sy + 0 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + 2 * sx + (ii + 2)];
+                        cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)]                = cons[(kk + 2) * sx * sy + 2 * sx + (ii + 2)];
+                        cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
+                        cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
+                        break;
                     }
-
                 }
 
                 // Fix the ghost zones at the azimuthal boundaries
                 if (jj < x2grid_size - 4 && ii < x1grid_size - 4) {
                     switch (geometry)
                     {
-                    case simbi::Geometry::CYLINDRICAL:
                     case simbi::Geometry::SPHERICAL:
                         cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)]                 = cons[(x3grid_size - 4) * sx * sy + (jj + 2) * sx + (ii + 2)];
                         cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)]                 = cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
                         cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)];
                         cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)];
                         break;
+                    case simbi::Geometry::CYLINDRICAL:
                     case simbi::Geometry::CARTESIAN:
-                        cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)]                 = cons[3 * sx * sy + (jj + 2) * sx + (ii + 2)];
+                        cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)]                 = cons[2 * sx * sy + (jj + 2) * sx + (ii + 2)];
                         cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)]                 = cons[2 * sx * sy + (jj + 2) * sx + (ii + 2)];
                         cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
                         cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
