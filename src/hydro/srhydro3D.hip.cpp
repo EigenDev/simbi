@@ -1166,7 +1166,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         adapt_dt();
     }
     // Using a sigmoid decay function to represent when the source terms turn off.
-    time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
+    time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
 
     // Save initial condition
     if (t == 0) {
@@ -1184,7 +1184,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         } else {
             adapt_dt();
         }
-        time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
+        time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
     });
     
