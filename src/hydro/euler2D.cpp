@@ -813,7 +813,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     std::string boundary_condition,
     bool first_order,
     bool linspace, 
-    bool hllc)
+    bool hllc,
+    bool constant_sources)
 {    
     anyDisplayProps();
     real round_place = 1 / chkpt_interval;
@@ -950,6 +951,9 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         adapt_dt();
     }
 
+    // Using a sigmoid decay function to represent when the source terms turn off.
+    time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
+
     // Save initial condition
     if (t == 0) {
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
@@ -969,7 +973,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         } else {
             adapt_dt();
         }
-        t += dt;
+        time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
+        t += step * dt;
     });
     
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));

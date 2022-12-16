@@ -325,6 +325,7 @@ class Hydro:
         engine_duration: float = 10.0,
         compute_mode: str = 'cpu',
         quirk_smoothing: bool = True,
+        constant_sources: bool = False,
         scale_factor: Callable = None,
         scale_factor_derivative: Callable = None,
         dens_outer: Callable = None,
@@ -468,6 +469,7 @@ class Hydro:
                 first_order        = first_order,
                 linspace           = linspace,
                 hllc               = hllc,
+                constant_sources   = constant_sources,
                 **kwargs)  
                 
         elif self.dimensionality  == 2:            
@@ -489,19 +491,20 @@ class Hydro:
                 state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
                 
             self.solution = state.simulate(
-                sources         = sources,
-                tstart          = start_time,
-                tend            = tend,
-                dlogt           = dlogt,
-                plm_theta       = plm_theta,
-                engine_duration = engine_duration,
-                chkpt_interval  = chkpt_interval,
-                chkpt_idx       = self.chkpt_idx,
-                data_directory  = cython_data_directory,
+                sources            = sources,
+                tstart             = start_time,
+                tend               = tend,
+                dlogt              = dlogt,
+                plm_theta          = plm_theta,
+                engine_duration    = engine_duration,
+                chkpt_interval     = chkpt_interval,
+                chkpt_idx          = self.chkpt_idx,
+                data_directory     = cython_data_directory,
                 boundary_condition = cython_boundary_condition,
-                first_order     = first_order,
-                linspace        = linspace,
-                hllc            = hllc,
+                first_order        = first_order,
+                linspace           = linspace,
+                hllc               = hllc,
+                constant_sources   = constant_sources,
                 **kwargs)  
 
         else:
@@ -516,19 +519,20 @@ class Hydro:
                 state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=cython_coordinates)
             
             self.solution = state.simulate(
-                sources         = sources,
-                tstart          = tstart,
-                tend            = tend,
-                dlogt           = dlogt,
-                plm_theta       = plm_theta,
-                engine_duration = engine_duration,
-                chkpt_interval  = chkpt_interval,
-                chkpt_idx       = self.chkpt_idx,
-                data_directory  = cython_data_directory,
+                sources            = sources,
+                tstart             = tstart,
+                tend               = tend,
+                dlogt              = dlogt,
+                plm_theta          = plm_theta,
+                engine_duration    = engine_duration,
+                chkpt_interval     = chkpt_interval,
+                chkpt_idx          = self.chkpt_idx,
+                data_directory     = cython_data_directory,
                 boundary_condition = cython_boundary_condition,
-                first_order     = first_order,
-                linspace        = linspace,
-                hllc            = hllc)  
+                first_order        = first_order,
+                linspace           = linspace,
+                hllc               = hllc,
+                constant_sources   = constant_sources)  
         
         if not periodic:
             self._cleanup(first_order)

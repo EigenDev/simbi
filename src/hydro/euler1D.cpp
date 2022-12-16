@@ -409,7 +409,7 @@ void Newtonian1D::advance(
                 flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
         }
-        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * decay_constant;
+        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * time_constant;
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
@@ -464,7 +464,8 @@ void Newtonian1D::advance(
     std::string boundary_condition,
     bool first_order,
     bool linspace,
-    bool hllc)
+    bool hllc,
+    bool constant_sources)
 {
     anyDisplayProps();
     this->chkpt_interval  = chkpt_interval;
@@ -554,6 +555,8 @@ void Newtonian1D::advance(
         cons2prim(fullP);
         adapt_dt();
     }
+    // Using a sigmoid decay function to represent when the source terms turn off.
+    time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
 
     // Save initial condition
     if (t == 0) {
@@ -574,7 +577,8 @@ void Newtonian1D::advance(
         } else {
             adapt_dt();
         }
-        t += dt;
+        time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
+        t += step * dt;
     });
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));

@@ -95,6 +95,7 @@ namespace simbi
                bool first_order, 
                bool linspace, 
                bool hllc,
+               bool constant_sources,
                std::function<double(double)> a = nullptr,
                std::function<double(double)> adot = nullptr,
                std::function<double(double)> d_outer = nullptr,

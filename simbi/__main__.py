@@ -39,6 +39,7 @@ def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     parser.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=0.0, type=float)
     parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
     parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
+    parser.add_argument('--constant_sources', help='flag to indicate source terms provided are constant', default=False, action='store_true')
     parser.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
     parser.add_argument('--nthreads', '-p', help="number of omp threads to run at", type=max_thread_count, default=None)
     parser.add_argument('--peek', help='print setup-script usage', default=False, action='store_true')
@@ -47,7 +48,7 @@ def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     return parser, parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
 configs_src = Path(__file__).resolve().parent / 'configs'
-overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta', 'dlogt', 'data_directory', 'quirk_smoothing']
+overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta', 'dlogt', 'data_directory', 'quirk_smoothing', 'constant_sources']
 def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
@@ -142,6 +143,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
         kwargs[idx]['mom_outer']                = config.mom_outer 
         kwargs[idx]['dens_outer']               = config.dens_outer 
         kwargs[idx]['quirk_smoothing']          = config.use_quirk_smoothing
+        kwargs[idx]['constant_sources']         = config.constant_sources
         states.append(state)
     
     if peek_only:

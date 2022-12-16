@@ -21,7 +21,7 @@ namespace simbi
 
         // Common members
         DataWriteMembers setup;
-        real dt, t, tend, t_interval, chkpt_interval, plm_theta, decay_constant, hubble_param; 
+        real dt, t, tend, t_interval, chkpt_interval, plm_theta, time_constant, hubble_param; 
         real x1min, x1max, x2min, x2max, x3min, x3max, step;
         real dlogx1, dx1, dx2, dx3, dlogt, tstart, engine_duration, invdx1, invdx2, invdx3;
         bool first_order, periodic, linspace, hllc, mesh_motion, half_sphere, quirk_smoothing;

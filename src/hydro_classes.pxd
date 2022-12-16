@@ -35,7 +35,8 @@ cdef extern from "hydro/euler1D.hpp" namespace "simbi":
             string boundary_condition,
             bool first_order,
             bool linspace,
-            bool hllc)
+            bool hllc,
+            bool constant_sources)
 
 cdef extern from "hydro/euler2D.hpp" namespace "simbi":
     cdef cppclass Newtonian2D:
@@ -59,7 +60,8 @@ cdef extern from "hydro/euler2D.hpp" namespace "simbi":
             string boundary_condition,
             bool first_order,
             bool linspace, 
-            bool hllc) except +
+            bool hllc,
+            bool constant_sources) except +
 
 
 cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
@@ -85,6 +87,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             bool first_order, 
             bool linspace, 
             bool hllc,
+            bool constant_sources,
             PyObjWrapper a,
             PyObjWrapper adot) except + 
             
@@ -102,6 +105,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             bool first_order, 
             bool linspace, 
             bool hllc,
+            bool constant_sources,
             PyObjWrapper a,
             PyObjWrapper adot,
             PyObjWrapper d_outer,
@@ -133,6 +137,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
             bool linspace,
             bool hllc,
             bool quirk_smoothing,
+            bool constant_sources,
             PyObjWrapper a,
             PyObjWrapper adot)
 
@@ -151,6 +156,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
             bool linspace,
             bool hllc,
             bool quirk_smoothing,
+            bool constant_sources,
             PyObjWrapper a,
             PyObjWrapper adot,
             PyObjWrapper d_outer,
@@ -190,4 +196,5 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
             string boundary_condition,
             bool first_order,
             bool linspace,
-            bool hllc)
+            bool hllc,
+            bool constant_sources)

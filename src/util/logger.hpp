@@ -123,8 +123,6 @@ namespace simbi
                             }
                         }
                     }
-                    // Using a sigmoid decay function to represent when the source terms turn off.
-                    sim_state.decay_constant = helpers::sigmoid(sim_state.t, sim_state.engine_duration);
                     try {
                         //============== Compute benchmarks
                         if (sim_state.first_order) {

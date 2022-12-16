@@ -922,7 +922,7 @@ void SRHD3D::advance(
         const real s2_source = mom2_source[real_loc];
         const real s3_source = mom3_source[real_loc];
         const real e_source  = erg_source[real_loc];
-        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, s3_source, e_source} * decay_constant;
+        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, s3_source, e_source} * time_constant;
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -1019,7 +1019,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     std::string boundary_condition,
     bool first_order,
     bool linspace, 
-    bool hllc)
+    bool hllc,
+    bool constant_sources)
 {   
     anyDisplayProps();
     real round_place = 1 / chkpt_interval;
@@ -1164,6 +1165,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         cons2prim(fullP);
         adapt_dt();
     }
+    // Using a sigmoid decay function to represent when the source terms turn off.
+    time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
 
     // Save initial condition
     if (t == 0) {
@@ -1181,7 +1184,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         } else {
             adapt_dt();
         }
-        t += dt;
+        time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
+        t += step * dt;
     });
     
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));

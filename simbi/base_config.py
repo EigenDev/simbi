@@ -105,6 +105,10 @@ class BaseConfig:
         return False
     
     @property
+    def constant_sources(self):
+        return False 
+    
+    @property
     def x1(self):
         return None 
     

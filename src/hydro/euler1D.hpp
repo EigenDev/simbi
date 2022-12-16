@@ -113,7 +113,8 @@ namespace simbi {
             std::string boundary_condition,
             bool first_order,
             bool linspace,
-            bool hllc);
+            bool hllc,
+            bool constant_sources);
     };
 }
 

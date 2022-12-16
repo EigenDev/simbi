@@ -265,7 +265,10 @@ namespace simbi
             return real_idx;
         }
 
-        inline double sigmoid(double t, double tduration) {
+        inline double sigmoid(const double t, const double tduration, const double time_step, const bool constant_sources) {
+            if (constant_sources) {
+                return 1 / time_step;
+            }
             return 1 / (1 + std::exp(static_cast<real>(10.0) * (t - tduration)));
         }
 

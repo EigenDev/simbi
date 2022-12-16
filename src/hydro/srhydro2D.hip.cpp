@@ -907,7 +907,7 @@ void SRHD2D::advance(
         const real s1_source = mom1_source[real_loc];
         const real s2_source = mom2_source[real_loc];
         const real e_source  = erg_source[real_loc];
-        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * decay_constant;
+        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * time_constant;
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -1024,6 +1024,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     bool linspace,
     bool hllc,
     bool quirk_smoothing,
+    bool constant_sources,
     std::function<double(double)> a,
     std::function<double(double)> adot,
     std::function<double(double, double)> d_outer,
@@ -1160,6 +1161,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         cons2prim(fullP);
         adapt_dt();
     }
+    // Using a sigmoid decay function to represent when the source terms turn off.
+    time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
     
     // Save initial condition
     if (t == 0) {
@@ -1180,7 +1183,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         } else {
             adapt_dt();
         }
-        t += dt;
+        time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
+        t += step * dt;
     });
 
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));

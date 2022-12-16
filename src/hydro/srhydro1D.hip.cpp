@@ -189,7 +189,7 @@ void SRHD::advance(
             }
         }
 
-        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * decay_constant;
+        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * time_constant;
         switch(geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -588,6 +588,7 @@ SRHD::simulate1D(
     bool first_order,
     bool linspace,
     bool hllc,
+    bool constant_sources,
     std::function<double(double)> a,
     std::function<double(double)> adot,
     std::function<double(double)> d_outer,
@@ -687,6 +688,8 @@ SRHD::simulate1D(
         cons2prim(fullP);
         adapt_dt();
     }
+    // Using a sigmoid decay function to represent when the source terms turn off.
+    time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
 
     // Save initial condition
     if (t == 0) {
@@ -708,7 +711,8 @@ SRHD::simulate1D(
         } else {
             adapt_dt();
         }
-        t += dt;
+        time_constant = helpers::sigmoid(t, engine_duration, dt, constant_sources);
+        t += step * dt;
     });
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));

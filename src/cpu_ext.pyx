@@ -43,7 +43,8 @@ cdef class PyState:
         string boundary_condition,
         bool first_order,
         bool linspace,
-        bool hllc):
+        bool hllc,
+        bool constant_sources):
 
         result = self.c_state.simulate1D(
             sources,
@@ -58,7 +59,8 @@ cdef class PyState:
             boundary_condition,
             first_order,
             linspace,
-            hllc)
+            hllc,
+            constant_sources)
 
         return np.asarray(result)
 
@@ -91,6 +93,7 @@ cdef class PyStateSR:
         bool first_order, 
         bool linspace, 
         bool hllc,
+        bool constant_sources,
         a,
         adot,
         d_outer = None,
@@ -118,6 +121,7 @@ cdef class PyStateSR:
                 first_order, 
                 linspace, 
                 hllc,
+                constant_sources,
                 a_cpp,
                 adot_cpp,
                 d_cpp,
@@ -138,6 +142,7 @@ cdef class PyStateSR:
                 first_order, 
                 linspace, 
                 hllc,
+                constant_sources,
                 a_cpp,
                 adot_cpp)
             
@@ -173,7 +178,8 @@ cdef class PyState2D:
         string boundary_condition,
         bool first_order,
         bool linspace, 
-        bool hllc):
+        bool hllc,
+        bool constant_sources):
 
         result = self.c_state.simulate2D(
             sources,
@@ -188,7 +194,8 @@ cdef class PyState2D:
             boundary_condition, 
             first_order,
             linspace, 
-            hllc)
+            hllc,
+            constant_sources)
             
         result = np.asarray(result)
         result = result.reshape(5, self.c_state.ny, self.c_state.nx)
@@ -232,6 +239,7 @@ cdef class PyStateSR2D:
         bool linspace,
         bool hllc,
         bool quirk_smoothing,
+        bool constant_sources,
         a,
         adot,
         d_outer  = None,
@@ -262,6 +270,7 @@ cdef class PyStateSR2D:
                 linspace,
                 hllc,
                 quirk_smoothing,
+                constant_sources,
                 a_cpp,
                 adot_cpp,
                 d_cpp,
@@ -284,6 +293,7 @@ cdef class PyStateSR2D:
                 linspace,
                 hllc,
                 quirk_smoothing,
+                constant_sources,
                 a_cpp,
                 adot_cpp)
 
@@ -330,7 +340,8 @@ cdef class PyStateSR3D:
         string boundary_condition,
         bool first_order,
         bool linspace,
-        bool hllc):
+        bool hllc,
+        bool constant_sources):
         
         result = self.c_state.simulate3D(
             sources,
@@ -345,7 +356,8 @@ cdef class PyStateSR3D:
             boundary_condition,
             first_order,
             linspace,
-            hllc)
+            hllc,
+            constant_sources)
         result = np.asarray(result)
         result = result.reshape(5, self.c_state.nz, self.c_state.ny, self.c_state.nx)
         return result
