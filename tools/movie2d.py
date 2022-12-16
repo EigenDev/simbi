@@ -453,7 +453,8 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
     return cs
     
 def plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, ds):
-    xx, yy = mesh['x1'], mesh['x2']
+    plots = []
+    x1, x2 = mesh['x1'], mesh['x2']
     
     vmin,vmax = args.cbar
     if args.log:
@@ -473,13 +474,16 @@ def plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, ds):
         var = util.prims2var(fields, args.fields[0])
     else:
         var = fields[args.fields[0]]
-    c = ax.pcolormesh(xx, yy, var, cmap=color_map, shading='auto', **kwargs)
+        
+    plots += [ax.pcolormesh(x1, x2, var, cmap=color_map, shading='auto', **kwargs)]
+    # if ds['coord_system'] == 'axis_cylindrical':
+        # plots += [ax.pcolormesh(-x1, x2, var, cmap=color_map, shading='auto', **kwargs)]
 
     if args.log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-        cbar = fig.colorbar(c, orientation="vertical", cax=cbaxes, format=logfmt)
+        cbar = fig.colorbar(plots[0], orientation="vertical", cax=cbaxes, format=logfmt)
     else:
-        cbar = fig.colorbar(c, orientation="vertical", cax=cbaxes)
+        cbar = fig.colorbar(plots[0], orientation="vertical", cax=cbaxes)
 
     ax.tick_params(axis='both', labelsize=10)
     
@@ -492,7 +496,7 @@ def plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, ds):
         
     ax.set_title('{} at t = {:.2f}'.format(args.setup, tend), fontsize=20)
     
-    return c
+    return plots
     
 def create_mesh(fig, ax, filename, cbaxes, args):
     fields, setups, mesh = util.read_2d_file(args, filename)
@@ -598,10 +602,8 @@ def main():
         divider = make_axes_locatable(ax)
         if not args.pictorial:
             cbaxes = divider.append_axes('right', size='5%', pad=0.05)
-        cbar_orientation = "vertical"
         cartesian = True
     else:
-        is_polar = True
         if args.nwedge > 0:
             fig, ax = plt.subplots(1, 2, subplot_kw={'projection': 'polar'},
                          figsize=(15, 10), constrained_layout=True)
@@ -614,7 +616,6 @@ def main():
             ax.set_position( [0.1, -0.18, 0.8, 1.43])
             if not args.pictorial:
                 cbaxes  = fig.add_axes([0.2, 0.1, 0.6, 0.04]) 
-            cbar_orientation = "horizontal"
         else:
             if num_fields > 1:
                 if num_fields == 2:
@@ -637,7 +638,6 @@ def main():
             else:
                 if not args.pictorial:
                     cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
-            cbar_orientation = "vertical"
     
     
     def init_mesh(filename):
@@ -646,8 +646,9 @@ def main():
         else:
             p = create_mesh(fig, ax, filename, None, args)
         
-        return p,
+        return p
     
+    import matplotlib as mpl  
     drawings = init_mesh(flist[0])
     def update(frame, args):
         """
@@ -660,13 +661,16 @@ def main():
             ax.set_title('{} at t = {:.2f}'.format(args.setup, time), fontsize=20)
         else:
             fig.suptitle('{} at t = {:.2f}'.format(args.setup, setups['time']), fontsize=20, y=1.0)
-            
+        
+        
         for drawing in drawings:
             drawing.set_array(data.ravel())
             if cartesian:
-                drawing.set_offsets([setups['x1'], setups['x2']])
+                offsets = np.array([setups['x1'], setups['x2']], dtype=object)
+                drawing.set_offsets(offsets)
             else:
-                drawing.set_offsets([setups['x2'], setups['x1']])
+                offsets = np.array([setups['x2'], setups['x1']], dtype=object)
+                drawing.set_offsets(offsets)
         return drawings,
 
     animation = FuncAnimation(

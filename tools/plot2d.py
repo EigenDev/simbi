@@ -725,15 +725,18 @@ def plot_cartesian_plot(
     fields: dict, 
     args: argparse.ArgumentParser, 
     mesh: dict, 
-    dset: dict) -> None:
+    dset: dict,
+    mirror: bool = False) -> None:
+    
     fig, ax = plt.subplots(1, 1, figsize=(5,5))
-    xx, yy = mesh['x1'], mesh['x2']
+    x1, x2 = mesh['x1'], mesh['x2']
     vmin,vmax = args.cbar
 
     if args.log:
         kwargs = {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)}
     else:
-        kwargs = {'vmin': vmin, 'vmax': vmax}
+        kwargs = {'norm': mcolors.PowerNorm(gamma=10.0, vmin=vmin, vmax=vmax)}
+        # kwargs = {'vmin': vmin, 'vmax': vmax}
         
     if args.rcmap:
         color_map = (plt.cm.get_cmap(args.cmap)).reversed()
@@ -745,7 +748,9 @@ def plot_cartesian_plot(
     else:
         var = fields[args.fields[0]]
     tend = dset['time']
-    c = ax.pcolormesh(xx, yy, var, cmap=color_map, shading='auto', **kwargs)
+    c = ax.pcolormesh(x1, x2, var, cmap=color_map, shading='auto', **kwargs)
+    if mirror:
+        ax.pcolormesh(-x1, x2, var,  cmap=color_map, shading='auto', **kwargs)
     divider = make_axes_locatable(ax)
     cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
 
@@ -1895,7 +1900,7 @@ def main():
             plot_dec_rad(fields, args, mesh, setup, overplot=False)
         else:
             if setup['is_cartesian']:
-                plot_cartesian_plot(fields, args, mesh, setup)
+                plot_cartesian_plot(fields, args, mesh, setup, mirror=setup['coord_system'] == 'axis_cylindrical')
             else:
                 plot_polar_plot(fields, args, mesh, setup)
     

@@ -293,6 +293,8 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         setup['x2max'] = x2max 
         setup['x2min'] = x2min 
         setup['time']  = t
+        setup['regime'] = ds.attrs['regime'].decode("utf-8")
+        setup['coord_system'] = coord_sysem
         
         rho = rho.reshape(ny, nx)
         v1  = v1.reshape(ny, nx)
@@ -343,7 +345,7 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         if coord_sysem in ['cartesian', 'planar_cylindrical', 'axis_cylindrical']:
             is_cartesian = True
         
-        if ds.attrs['regime'].decode("utf-8") == 'relativistic':
+        if setup['regime'] == 'relativistic':
             try:
                 using_gamma_beta = ds.attrs['using_gamma_beta']
             except:
@@ -369,9 +371,8 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         fields['chi']          = chi
         fields['ad_gamma']     = gamma
         setup['is_cartesian']  = is_cartesian
+    
         
-        
-    ynpts, xnpts = rho.shape 
     mesh = {}
     if setup['is_cartesian']:
         xx, yy = np.meshgrid(setup['x1'], setup['x2'])
@@ -382,6 +383,12 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         mesh['x2'] = tt 
         mesh['x1'] = rr
         
+    # import matplotlib.pyplot as plt 
+    # # plt.semilogy(setup['x2'], fields['gamma_beta'][:, 511])
+    # plt.semilogy(setup['x2'], fields['p'][:, 511])
+    # # plt.semilogy(setup['x2'], fields['rho'][:, 511])
+    # plt.show()
+    # exit(0)
     return fields, setup, mesh 
 
 def read_1d_file(filename: str) -> dict:

@@ -110,9 +110,9 @@ def plot_profile(args, fields, mesh, setup, ncols: int, ax = None, overplot = Fa
     
     
     if not subplot:   
-        ax.set_title('{}'.format(args.setup[0]))
+        ax.set_title('{}'.format(args.setup))
     if not overplot:
-        ax.set_title('{} at t = {:.3f}'.format(args.setup[0], tend))
+        ax.set_title('{} at t = {:.3f}'.format(args.setup, tend))
         return fig
     
 def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = False, case=0):
@@ -183,10 +183,10 @@ def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = Fals
     if args.fill_scale is not None:
         fill_below_intersec(gbs, energy, args.fill_scale*energy.max(), colors[case])
     if not subplot:
-        ax.set_title(r'setup: {}'.format(args.setup[0]))
+        ax.set_title(r'setup: {}'.format(args.setup))
         
     if not overplot:
-        ax.set_title(r'setup: {}, t ={:.2f}'.format(args.setup[0], tend))
+        ax.set_title(r'setup: {}, t ={:.2f}'.format(args.setup, tend))
         return fig
 
 def main():
@@ -195,27 +195,26 @@ def main():
         epilog='This Only Supports H5 Files Right Now')
     
     parser.add_argument('files', metavar='Filename', nargs='+', help='A Data Source to Be Plotted')
-    parser.add_argument('setup', metavar='Setup', nargs='?', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable(s)', nargs='+', help='The name of the field variable(s) you\'d like to plot', choices=field_choices, default=['rho'])
-    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max', default = 0.0, help='The domain range')
-    parser.add_argument('--xlims', dest = 'xlims', metavar='Domain',default = None, help='The domain range', nargs='+', type=float)
-    parser.add_argument('--fill_scale', dest = 'fill_scale', metavar='Filler maximum', type=float, default = None, help='Set the y-scale to start plt.fill_between')
-    parser.add_argument('--log', dest='log', action='store_true', default=False, help='Logarithmic Radial Grid Option')
-    parser.add_argument('--ehist', dest='ehist', action='store_true',default=False, help='Plot the energy_vs_gb histogram')
-    parser.add_argument('--eks', dest='eks', action='store_true', default=False,help='Plot the kinetic energy on the histogram')
-    parser.add_argument('--hhist', dest='hhist', action='store_true',default=False,help='Plot the enthalpy on the histogram')
-    parser.add_argument('--labels', dest='labels', nargs='+',help='map labels to filenames')
-    parser.add_argument('--save', dest='save', default=None, help='If you want save the fig')
+    parser.add_argument('--setup', '-s',  type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)', default="")
+    parser.add_argument('--fields', metavar='Field Variable(s)', nargs='+', help='The name of the field variable(s) you\'d like to plot', choices=field_choices, default=['rho'])
+    parser.add_argument('--rmax', metavar='Radial Domain Max', default = 0.0, help='The domain range')
+    parser.add_argument('--xlims', metavar='Domain',default = None, help='The domain range', nargs='+', type=float)
+    parser.add_argument('--fill_scale', metavar='Filler maximum', type=float, default = None, help='Set the y-scale to start plt.fill_between')
+    parser.add_argument('--log', action='store_true', default=False, help='Logarithmic Radial Grid Option')
+    parser.add_argument('--ehist', action='store_true',default=False, help='Plot the energy_vs_gb histogram')
+    parser.add_argument('--eks', action='store_true', default=False,help='Plot the kinetic energy on the histogram')
+    parser.add_argument('--hhist',  action='store_true',default=False,help='Plot the enthalpy on the histogram')
+    parser.add_argument('--labels', nargs='+',help='map labels to filenames')
+    parser.add_argument('--save', default=None, help='If you want save the fig')
     parser.add_argument('--first_order', dest='forder', action='store_true', default=False, help='True if this is a grid using RK1')
-    parser.add_argument('--plots', dest='plots', type = int, default=1,help=r'Number of subplots you\'d like')
-    parser.add_argument('--units', dest='units', action='store_true', default=False,help='True if you would like units scale (default is solar units)')
-    parser.add_argument('--tex', dest='tex', default=False, action='store_true', help='set if want Latex typesetting')
-    parser.add_argument('--fig_size', dest='fig_size', default=(4,3.5), type=float, help='size of figure', nargs=2)
-    parser.add_argument('--cmap', dest='cmap', default='viridis', type=str, help='matplotlib color map')
-    parser.add_argument('--clims', dest='clims', default=[0, 1], type=float, nargs='+', help='color limits')
-    parser.add_argument('--legend', dest='legend', default=True, action=argparse.BooleanOptionalAction)
+    parser.add_argument('--plots', type = int, default=1,help=r'Number of subplots you\'d like')
+    parser.add_argument('--units', action='store_true', default=False,help='True if you would like units scale (default is solar units)')
+    parser.add_argument('--tex', default=False, action='store_true', help='set if want Latex typesetting')
+    parser.add_argument('--fig_size', default=(4,3.5), type=float, help='size of figure', nargs=2)
+    parser.add_argument('--cmap', default='viridis', type=str, help='matplotlib color map')
+    parser.add_argument('--clims', default=[0, 1], type=float, nargs='+', help='color limits')
+    parser.add_argument('--legend', default=True, action=argparse.BooleanOptionalAction)
     args = parser.parse_args()
-    
     if args.tex:
             plt.rc('font',   size=DEFAULT_SIZE)          # controls default text sizes
             plt.rc('axes',   titlesize=DEFAULT_SIZE)     # fontsize of the axes title
@@ -256,7 +255,7 @@ def main():
                 plot_hist(args, fields,mesh, setup,  ax = ax1, overplot= True, subplot = True, case = idx)
                 plot_profile(args, fields, mesh, setup, ncols, ax = ax2, overplot=True, subplot = True, case = idx)
                 
-            fig.suptitle('{}'.format(args.setup[0]))
+            fig.suptitle('{}'.format(args.setup))
             
         if args.labels != None:
             ax.legend()
