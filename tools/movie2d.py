@@ -319,8 +319,8 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
         
     # ax.axes.xaxis.set_ticklabels([])
     # ax.axes.yaxis.set_ticklabels([])
-    ax.set_rmax(x1max) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
-    ax.set_rmin(x1min)
+    # ax.set_rmax(x1max) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
+    # ax.set_rmin(x1min)
     
     field_str = util.get_field_str(args)
     if is_wedge:
@@ -507,13 +507,13 @@ def create_mesh(fig, ax, filename, cbaxes, args):
     return c
 
 def get_data(filename, args):
-    fields, setups, _ = util.read_2d_file(args, filename)
+    fields, setups, mesh = util.read_2d_file(args, filename)
     if args.fields[0] in derived:
         var = util.prims2var(fields, args.fields[0])
     else:
         var = fields[args.fields[0]]
         
-    return setups, var
+    return setups, mesh, var
     
 def main():
     parser = argparse.ArgumentParser(
@@ -650,12 +650,13 @@ def main():
     
     import matplotlib as mpl  
     drawings = init_mesh(flist[0])
+    label_format = '{:,.1f}'
     def update(frame, args):
         """
         Animation function. Takes the current frame number (to select the potion of
         data to plot) and a line object to update.
         """
-        setups, data = get_data(flist[frame], args)
+        setups, mesh, data = get_data(flist[frame], args)
         time = setups['time'] * (util.time_scale if args.units else 1.0)
         if cartesian:
             ax.set_title('{} at t = {:.2f}'.format(args.setup, time), fontsize=20)
@@ -665,13 +666,30 @@ def main():
         
         for drawing in drawings:
             drawing.set_array(data.ravel())
-            if cartesian:
-                offsets = np.array([setups['x1'], setups['x2']], dtype=object)
-                drawing.set_offsets(offsets)
-            else:
-                offsets = np.array([setups['x2'], setups['x1']], dtype=object)
-                drawing.set_offsets(offsets)
+            # if not cartesian:
+            #     # ax.set_ylim(setups['x1'][0], setups['x1'][-1])
+            #     ax.set_rmax(setups['x1'][-1])
+            #     # fixing yticks with matplotlib.ticker "FixedLocator"
+            #     # ticks_loc = ax.get_yticks().tolist()
+            #     # ax.yaxis.set_major_locator(tkr.FixedLocator(ticks_loc))
+            #     # dx = (setups['x1'].max() - setups['x1'].min()) / (len(ticks_loc) - 1)
+            #     # xlabels = [setups['x1'][0]]
+            #     # for i in range(1, len(ticks_loc)):
+            #     #     shift = xlabels[i-1] + dx
+            #     #     xlabels += [util.find_nearest(setups['x1'], shift)[1]]
+            
+            #     # print(np.array(xlabels))
+            #     # print(setups['x1'])
+            #     # xlabels = [label_format.format(x) for x in xlabels]
+            #     # ax.set_yticklabels(xlabels)
         return drawings,
+        # ax.grid(False)
+        # if not args.pictorial:
+        #     p = create_mesh(fig, ax, flist[frame], cbaxes, args)
+        # else:
+        #     p = create_mesh(fig, ax, flist[frame], None, args)
+        
+        # return p
 
     animation = FuncAnimation(
         # Your Matplotlib Figure object
@@ -692,7 +710,6 @@ def main():
     if not args.save:
         plt.show()
     else:
-        dpi = 600
         animation.save("{}.mp4".format(args.save.replace(" ", "_")),
                        progress_callback = lambda i, n: print(f'Saving frame {i} of {n}', end='\r', flush=True))
                     #    savefig_kwargs={"transparent": args.transparent, "facecolor": "none"},)
