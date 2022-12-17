@@ -306,7 +306,7 @@ def plot_polar_plot(
     '''
     num_fields = len(args.fields)
     is_wedge   = args.nwedge > 0
-    rr, tt = mesh['rr'], mesh['theta']
+    rr, tt = mesh['x1'], mesh['x2']
     t2     = - tt[::-1]
     x1max  = dset['x1max']
     x1min  = dset['x1min']
@@ -800,7 +800,7 @@ def plot_1d_curve(
     field_labels = util.get_field_str(args)
     tend = dset['time'] * util.time_scale
     if args.mass:
-        dV          = util.calc_cell_volume2D(mesh['rr'], mesh['theta'])
+        dV          = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
         mass        = dV * fields['W'] * fields['rho']
         # linestyle = '-.'
         if args.labels is None:
@@ -929,7 +929,7 @@ def plot_per_theta(
         tau = np.zeros_like(mesh['th'])
         for tidx, t in enumerate(mesh['th']):
             ridx      = np.argmax(fields['gamma_beta'][tidx])
-            tau[tidx] = kappa * a_star / (mesh['rr'][tidx,ridx] * R_0)
+            tau[tidx] = kappa * a_star / (mesh['x1'][tidx,ridx] * R_0)
             
         mean_tau = running_mean(tau, 50)
         ax.plot(theta, 32*mean_tau, linestyle='--', label=label+"(x32)")
@@ -951,7 +951,7 @@ def plot_per_theta(
     # Aesthetic 
     if case == 0:
         if args.anot_loc is not None:
-            dV = util.calc_cell_volume2D(mesh['rr'], mesh['theta'])
+            dV = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
             etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
             place_annotation(args, fields, ax, etot)
             
@@ -981,7 +981,7 @@ def plot_dec_rad(
 
     colors = plt.cm.viridis(np.linspace(0.1, 0.90, file_num if file_num > 1 else len(mdots)))
     
-    tvert   = util.calc_theta_verticies(mesh['theta'])
+    tvert   = util.calc_theta_verticies(mesh['x2'])
     tcent   = 0.5 * (tvert[1:,0] + tvert[:-1,0])
     dtheta  = tvert[1:,0] - tvert[:-1,0]
     domega  = 2.0 * np.pi * np.sin(tcent) * dtheta 
@@ -990,7 +990,7 @@ def plot_dec_rad(
     factor  = np.array([0.75 * 4.0 * np.pi * vw.value / mdot.value for mdot in mdots])
     gb      = fields['gamma_beta']
     W       = util.calc_lorentz_gamma(fields)
-    dV      = util.calc_cell_volume2D(mesh['rr'], mesh['theta'])
+    dV      = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
     mass    = W * dV * fields['rho'] * util.m.value
 
     theta = theta * 180 / np.pi
@@ -1049,7 +1049,7 @@ def plot_dec_rad(
     axins.xaxis.set_ticks_position('top')
     if case == 0:
         if args.anot_loc is not None:
-            dV = util.calc_cell_volume2D(mesh['rr'], mesh['theta'])
+            dV = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
             etot = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
             place_annotation(args, fields, ax, etot)
             
@@ -1139,8 +1139,8 @@ def plot_hist(
         ax = fig.add_subplot(1, 1, 1)
     
     tend        = dset['time'] * util.time_scale
-    theta       = mesh['theta']
-    r           = mesh['rr']
+    theta       = mesh['x2']
+    r           = mesh['x1']
     dV          = util.calc_cell_volume2D(r, theta)
     
     if args.kinetic:
@@ -1336,9 +1336,9 @@ def plot_dx_domega(
     coloriter = cycle(colors)
     
     tend        = dset['time'] * util.time_scale
-    theta       = mesh['theta']
+    theta       = mesh['x2']
     tv          = util.calc_theta_verticies(theta)
-    r           = mesh['rr']
+    r           = mesh['x1']
     dV          = util.calc_cell_volume2D(r, theta)
     
     if ax_col == 0:
