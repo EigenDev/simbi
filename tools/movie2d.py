@@ -476,8 +476,8 @@ def plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, ds):
         var = fields[args.fields[0]]
         
     plots += [ax.pcolormesh(x1, x2, var, cmap=color_map, shading='auto', **kwargs)]
-    # if ds['coord_system'] == 'axis_cylindrical':
-        # plots += [ax.pcolormesh(-x1, x2, var, cmap=color_map, shading='auto', **kwargs)]
+    if ds['coord_system'] == 'axis_cylindrical':
+        plots += [ax.pcolormesh(-x1, x2, var, cmap=color_map, shading='auto', **kwargs)]
 
     if args.log:
         logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
