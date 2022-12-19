@@ -295,6 +295,10 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         setup['time']  = t
         setup['regime'] = ds.attrs['regime'].decode("utf-8")
         setup['coord_system'] = coord_sysem
+        try:
+            setup['mesh_motion'] = ds.attrs['mesh_motion']
+        except KeyError:
+            setup['mesh_motion']= False
         
         rho = rho.reshape(ny, nx)
         v1  = v1.reshape(ny, nx)
@@ -382,7 +386,7 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         rr, tt = np.meshgrid(setup['x1'], setup['x2'])
         mesh['x2'] = tt 
         mesh['x1'] = rr
-        
+    
     # import matplotlib.pyplot as plt 
     # # plt.semilogy(setup['x2'], fields['gamma_beta'][:, 511])
     # plt.semilogy(setup['x2'], fields['p'][:, 511])
