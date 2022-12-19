@@ -311,11 +311,11 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
     ax.set_theta_direction(-1)
     ax.tick_params(axis='both', labelsize=15)
     rlabels = ax.get_ymajorticklabels()
-    if not args.pictorial:
-        for label in rlabels:
-            label.set_color('white')
-    else:
-        ax.axes.yaxis.set_ticklabels([])
+    # if not args.pictorial:
+    #     for label in rlabels:
+    #         label.set_color('white')
+    # else:
+    #     ax.axes.yaxis.set_ticklabels([])
         
     # ax.axes.xaxis.set_ticklabels([])
     # ax.axes.yaxis.set_ticklabels([])
@@ -507,13 +507,13 @@ def create_mesh(fig, ax, filename, cbaxes, args):
     return c
 
 def get_data(filename, args):
-    fields, setups, mesh = util.read_2d_file(args, filename)
+    fields, setups, _ = util.read_2d_file(args, filename)
     if args.fields[0] in derived:
         var = util.prims2var(fields, args.fields[0])
     else:
         var = fields[args.fields[0]]
         
-    return setups, mesh, var
+    return setups, var
     
 def main():
     parser = argparse.ArgumentParser(
@@ -640,56 +640,56 @@ def main():
                     cbaxes  = fig.add_axes([0.8, 0.1, 0.03, 0.8]) 
     
     
-    def init_mesh(filename):
+    def init_mesh():
         if not args.pictorial:
-            p = create_mesh(fig, ax, filename, cbaxes, args)
+            p = create_mesh(fig, ax, flist[0], cbaxes, args)
         else:
-            p = create_mesh(fig, ax, filename, None, args)
-        
+            p = create_mesh(fig, ax, flist[0], None, args)
         return p
     
-    import matplotlib as mpl  
-    drawings = init_mesh(flist[0])
-    label_format = '{:,.1f}'
+    drawings  = init_mesh()
+    ticks_loc = ax.get_yticks().tolist()
+    dtick     = ticks_loc[1] - ticks_loc[0]
+    init_xpos = init_setup['x1'][0]
+    label_format = '{:.1f}'
     def update(frame, args):
         """
         Animation function. Takes the current frame number (to select the potion of
         data to plot) and a line object to update.
         """
-        setups, mesh, data = get_data(flist[frame], args)
-        time = setups['time'] * (util.time_scale if args.units else 1.0)
-        if cartesian:
-            ax.set_title('{} at t = {:.2f}'.format(args.setup, time), fontsize=20)
-        else:
-            fig.suptitle('{} at t = {:.2f}'.format(args.setup, setups['time']), fontsize=20, y=1.0)
-        
-        
-        for drawing in drawings:
-            drawing.set_array(data.ravel())
-            # if not cartesian:
-            #     # ax.set_ylim(setups['x1'][0], setups['x1'][-1])
-            #     ax.set_rmax(setups['x1'][-1])
-            #     # fixing yticks with matplotlib.ticker "FixedLocator"
-            #     # ticks_loc = ax.get_yticks().tolist()
-            #     # ax.yaxis.set_major_locator(tkr.FixedLocator(ticks_loc))
-            #     # dx = (setups['x1'].max() - setups['x1'].min()) / (len(ticks_loc) - 1)
-            #     # xlabels = [setups['x1'][0]]
-            #     # for i in range(1, len(ticks_loc)):
-            #     #     shift = xlabels[i-1] + dx
-            #     #     xlabels += [util.find_nearest(setups['x1'], shift)[1]]
+        if init_setup['mesh_motion']:
+            if not args.pictorial:
+                try:
+                    for cbax in cbaxes:
+                        cbax.cla()
+                except TypeError:
+                    cbaxes.cla()
+                
+            try:
+                for axs in ax:
+                    axs.cla()
+            except TypeError:
+                ax.cla()
+                
+            ax.grid(False)
+            if not args.pictorial:
+                p = create_mesh(fig, ax, flist[frame], cbaxes, args)
+            else:
+                p = create_mesh(fig, ax, flist[frame], None, args)
             
-            #     # print(np.array(xlabels))
-            #     # print(setups['x1'])
-            #     # xlabels = [label_format.format(x) for x in xlabels]
-            #     # ax.set_yticklabels(xlabels)
-        return drawings,
-        # ax.grid(False)
-        # if not args.pictorial:
-        #     p = create_mesh(fig, ax, flist[frame], cbaxes, args)
-        # else:
-        #     p = create_mesh(fig, ax, flist[frame], None, args)
+            return p
+        else:
+            setups, data = get_data(flist[frame], args)
+            time = setups['time'] * (util.time_scale if args.units else 1.0)
+            if cartesian:
+                ax.set_title('{} at t = {:.2f}'.format(args.setup, time), fontsize=20)
+            else:
+                fig.suptitle('{} at t = {:.2f}'.format(args.setup, setups['time']), fontsize=20, y=1.0)
+            
+            for drawing in drawings:
+                drawing.set_array(data.ravel())
+            return drawings,
         
-        # return p
 
     animation = FuncAnimation(
         # Your Matplotlib Figure object
@@ -704,7 +704,8 @@ def main():
         fargs=[args],
         # repeat=False,
         # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
-        interval= 1000 / 10
+        interval= 1000 / 10,
+        repeat=True,
     )
 
     if not args.save:
