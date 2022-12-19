@@ -164,6 +164,10 @@ namespace simbi
                     att.write(bool_type, &setup.using_fourvelocity);
                     att.close();
 
+                    att = sim_info.createAttribute("mesh_motion", bool_type, att_space);
+                    att.write(bool_type, &setup.mesh_motion);
+                    att.close();
+
                     att = sim_info.createAttribute("first_order", bool_type, att_space);
                     att.write(bool_type, &setup.first_order);
                     att.close();
@@ -291,6 +295,10 @@ namespace simbi
 
                     att = sim_info.createAttribute("using_gamma_beta", bool_type, att_space);
                     att.write(bool_type, &setup.using_fourvelocity);
+                    att.close();
+
+                    att = sim_info.createAttribute("mesh_motion", bool_type, att_space);
+                    att.write(bool_type, &setup.mesh_motion);
                     att.close();
                     
                     att = sim_info.createAttribute("x1max", real_type, att_space);
@@ -443,6 +451,10 @@ namespace simbi
 
                     att = sim_info.createAttribute("using_gamma_beta", bool_type, att_space);
                     att.write(bool_type, &setup.using_fourvelocity);
+                    att.close();
+
+                    att = sim_info.createAttribute("mesh_motion", bool_type, att_space);
+                    att.write(bool_type, &setup.mesh_motion);
                     att.close();
                     
                     att = sim_info.createAttribute("x1max", real_type, att_space);

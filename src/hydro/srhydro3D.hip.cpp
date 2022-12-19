@@ -1089,28 +1089,29 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     }
 
     // Write some info about the setup for writeup later
-    setup.x1max          = x1[xphysical_grid - 1];
-    setup.x1min          = x1[0];
-    setup.x2max          = x2[yphysical_grid - 1];
-    setup.x2min          = x2[0];
-    setup.zmax           = x3[zphysical_grid - 1];
-    setup.zmin           = x3[0];
-    setup.nx             = nx;
-    setup.ny             = ny;
-    setup.nz             = nz;
-    setup.xactive_zones  = xphysical_grid;
-    setup.yactive_zones  = yphysical_grid;
-    setup.zactive_zones  = zphysical_grid;
-    setup.linspace       = linspace;
-    setup.ad_gamma       = gamma;
-    setup.first_order    = first_order;
-    setup.coord_system   = coord_system;
-    setup.boundarycond   = boundary_condition;
+    setup.x1max              = x1[xphysical_grid - 1];
+    setup.x1min              = x1[0];
+    setup.x2max              = x2[yphysical_grid - 1];
+    setup.x2min              = x2[0];
+    setup.zmax               = x3[zphysical_grid - 1];
+    setup.zmin               = x3[0];
+    setup.nx                 = nx;
+    setup.ny                 = ny;
+    setup.nz                 = nz;
+    setup.xactive_zones      = xphysical_grid;
+    setup.yactive_zones      = yphysical_grid;
+    setup.zactive_zones      = zphysical_grid;
+    setup.linspace           = linspace;
+    setup.ad_gamma           = gamma;
+    setup.first_order        = first_order;
+    setup.coord_system       = coord_system;
+    setup.boundarycond       = boundary_condition;
     setup.using_fourvelocity = false;
     setup.regime             = "relativistic";
     setup.x1                 = x1;
     setup.x2                 = x2;
     setup.x3                 = x3;
+    setup.mesh_motion        = mesh_motion;
     
     cons.resize(nzones);
     prims.resize(nzones);

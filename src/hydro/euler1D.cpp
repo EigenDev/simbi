@@ -511,17 +511,18 @@ void Newtonian1D::advance(
         t == 0 ? 0
                : dlogt !=0 ? tstart
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + this->chkpt_interval;
-    this->setup.x1max          = x1[active_zones - 1];
-    this->setup.x1min          = x1[0];
-    this->setup.xactive_zones  = active_zones;
-    this->setup.nx             = nx;
-    this->setup.linspace       = linspace;
-    this->setup.ad_gamma       = gamma;
-    this->setup.first_order    = first_order;
-    this->setup.coord_system   = coord_system;
-    this->setup.boundarycond   = boundary_condition;
-    this->setup.regime         = "classical";
-    this->setup.x1             = x1;
+    setup.x1max          = x1[active_zones - 1];
+    setup.x1min          = x1[0];
+    setup.xactive_zones  = active_zones;
+    setup.nx             = nx;
+    setup.linspace       = linspace;
+    setup.ad_gamma       = gamma;
+    setup.first_order    = first_order;
+    setup.coord_system   = coord_system;
+    setup.boundarycond   = boundary_condition;
+    setup.regime         = "classical";
+    setup.x1             = x1;
+    setup.mesh_motion    = mesh_motion;
 
 
     dt_min.resize(active_zones);

@@ -635,20 +635,21 @@ SRHD::simulate1D(
                : dlogt !=0 ? tstart
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + this->chkpt_interval;
 
-    this->hubble_param = adot(t) / a(t);
-    this->mesh_motion  = (hubble_param != 0);
-    setup.x1max          = x1[active_zones - 1];
-    setup.x1min          = x1[0];
-    setup.xactive_zones  = active_zones;
-    setup.nx             = nx;
-    setup.linspace       = linspace;
-    setup.ad_gamma       = gamma;
-    setup.first_order    = first_order;
-    setup.coord_system   = coord_system;
-    setup.boundarycond   = boundary_condition;
+    this->hubble_param       = adot(t) / a(t);
+    this->mesh_motion        = (hubble_param != 0);
+    setup.x1max              = x1[active_zones - 1];
+    setup.x1min              = x1[0];
+    setup.xactive_zones      = active_zones;
+    setup.nx                 = nx;
+    setup.linspace           = linspace;
+    setup.ad_gamma           = gamma;
+    setup.first_order        = first_order;
+    setup.coord_system       = coord_system;
+    setup.boundarycond       = boundary_condition;
     setup.using_fourvelocity = false;
     setup.x1                 = x1;
-    setup.regime = "relativistic";
+    setup.regime             = "relativistic";
+    setup.mesh_motion        = mesh_motion;
 
     cons.resize(nx);
     prims.resize(nx);
