@@ -59,23 +59,23 @@ namespace simbi
                 ///@cond
                 // Just the error code? Okay, no problem
                 runtime_error(status_t error_code) :
-                    ::std::runtime_error(describe(error_code)),
-                    code_(error_code)
+                    ::std::runtime_error(describe(error_code) + " at  " __FILE__ ":"  + std::to_string(__LINE__)),
+                    internal_code(error_code)
                 { }
                 // Human-readable error logic
                 runtime_error(status_t error_code, const ::std::string& what_arg) :
-                    ::std::runtime_error(what_arg + ": " + describe(error_code)),
-                    code_(error_code)
+                    ::std::runtime_error(what_arg + ": " + describe(error_code) + " at  " __FILE__ ":" + std::to_string(__LINE__)),
+                    internal_code(error_code)
                 { }
                 ///@endcond
 
                 /**
                  * Obtain the GPU status code which resulted in this error being thrown.
                  */
-                status_t code() const { return code_; }
+                status_t code() const { return internal_code; }
 
             private:
-                status_t code_;
+                status_t internal_code;
             };
             
 
