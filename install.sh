@@ -14,7 +14,7 @@ fi
 function usage {
     echo "usage: CXX=<cpp_compiler> $0 [options]"
     echo ""
-    echo "   -h --help                     print help message"
+    echo "   -h | --help                     print help message"
     echo "  --oned                         block size for 1D simulations (only set for gpu compilation)"
     echo "  --twod                         block size for 2D simulations (only set for gpu compilation)"
     echo "  --threed                       block size for 3D simulations (only set for gpu compilation)"
