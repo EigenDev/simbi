@@ -649,9 +649,6 @@ def main():
     
     drawings  = init_mesh()
     ticks_loc = ax.get_yticks().tolist()
-    dtick     = ticks_loc[1] - ticks_loc[0]
-    init_xpos = init_setup['x1'][0]
-    label_format = '{:.1f}'
     def update(frame, args):
         """
         Animation function. Takes the current frame number (to select the potion of
