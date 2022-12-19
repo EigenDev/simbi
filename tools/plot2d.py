@@ -311,7 +311,6 @@ def plot_polar_plot(
     x1max  = dset['x1max']
     x1min  = dset['x1min']
     x2max  = dset['x2max']
-    x2min  = dset['x2min']
     if not subplots:
         if is_wedge:
             nplots = args.nwedge + 1
@@ -320,10 +319,6 @@ def plot_polar_plot(
             ax    = axes[0]
             wedge = axes[1]
         else:
-            if x2max < np.pi:
-                figsize = (8, 5)
-            else:
-                figsize = (10, 8)
             fig, ax = plt.subplots(1, 1, subplot_kw={'projection': 'polar'},
                                 figsize=args.fig_dims, constrained_layout=False)
     else:
