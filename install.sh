@@ -19,7 +19,7 @@ function usage {
     echo "  --twod                         block size for 2D simulations (only set for gpu compilation)"
     echo "  --threed                       block size for 3D simulations (only set for gpu compilation)"
     echo "  --dev-arch                     SM architecture specification for gpu compilation"
-    echo "  --verbose                      flag for verbose compilation output"
+    echo "  -v | --verbose                 flag for verbose compilation output"
     echo "  --configure                    flag to only configure the meson build directory without installing"
     echo "  --[float | double]-precision   floating point precision"
     echo "  --[column | row]-major         memory layout for multi-dimensional arrays"
