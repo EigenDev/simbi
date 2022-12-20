@@ -252,8 +252,8 @@ void SRHD2D::adapt_dt()
                             const real dr     = x1r - x1l;
                             if (mesh_motion)
                             {
-                                const real vfaceL   = x1l * hubble_param;
-                                const real vfaceR   = x1r * hubble_param;
+                                const real vfaceL   = hubble_param;
+                                const real vfaceR   = hubble_param;
                                 v1p = std::abs(plus_v1  - vfaceR);
                                 v1m = std::abs(minus_v1 - vfaceL);
                             }
@@ -594,7 +594,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
         real invdV = 1.0;
         while (!found_failure && workLeftToDo)
         {
-            if (mesh_motion && ( (geometry == simbi::Geometry::SPHERICAL) || (geometry == simbi::Geometry::PLANAR_CYLINDRICAL) ))
+            if (mesh_motion &&  (geometry != simbi::Geometry::CARTESIAN))
             {
                 const luint ii   = gid % nx;
                 const luint jj   = gid / nx;
@@ -610,6 +610,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
             const real tau  = cons_data[gid].tau * invdV;
             const real Dchi = cons_data[gid].chi * invdV; 
             const real S    = std::sqrt(S1 * S1 + S2 * S2);
+            
             
             
             real peq = press_data[gid];
@@ -645,7 +646,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
                     const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
                     const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
                     printf("\nCons2Prim cannot converge:\n");
-                    printf("Density: %.2e, Pressure: %.2e, Vsq: %.2f, et: %.2e, xcoord: %.2e, ycoord: %.2e, iter: %lu\n", rho, peq, v2, et,  x1mean, x2mean, iter);
+                    printf("Density: %.2e, Pressure: %.2e, Vsq: %.2f, et: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", rho, peq, v2, et,  x1mean, x2mean, iter);
                     dt             = INFINITY;
                     found_failure  = true;
                     inFailureState = true;
@@ -743,8 +744,8 @@ void SRHD2D::advance(
 
         const real x1l    = get_x1face(ii, geometry, 0);
         const real x1r    = get_x1face(ii, geometry, 1);
-        const real vfaceR = x1r * hubble_param;
-        const real vfaceL = x1l * hubble_param;
+        const real vfaceR = (geometry == simbi::Geometry::SPHERICAL) ? x1r * hubble_param : hubble_param;
+        const real vfaceL = (geometry == simbi::Geometry::SPHERICAL) ? x1l * hubble_param : hubble_param;
         if (first_order)
         {
             xprimsL = prim_buff[(txa + 0)      * sy + (tya + 0) * sx];
@@ -948,8 +949,8 @@ void SRHD2D::advance(
                 }
              case simbi::Geometry::PLANAR_CYLINDRICAL:
                 {
-                const real rl           = get_x1face(ii, geometry, 0); 
-                const real rr           = get_x1face(ii, geometry, 1);
+                const real rl           = x1l + vfaceL * step * dt; 
+                const real rr           = x1r + vfaceR * step * dt;
                 const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                 const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
                 const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
@@ -975,8 +976,8 @@ void SRHD2D::advance(
                 }
             case simbi::Geometry::AXIS_CYLINDRICAL:
                 {
-                const real rl           = get_x1face(ii, geometry, 0); 
-                const real rr           = get_x1face(ii, geometry, 1);
+                const real rl           = x1l + vfaceL * step * dt; 
+                const real rr           = x1r + vfaceR * step * dt;
                 const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                 const real dVtot        = rmean * (rr - rl) * dx2;
                 const real invdV        = 1.0 / dVtot;
@@ -984,6 +985,7 @@ void SRHD2D::advance(
                 const real s1L          = rl * dx2; 
                 const real s2R          = rmean * (rr - rl); 
                 const real s2L          = rmean * (rr - rl); 
+                const real factor       = (mesh_motion) ? dVtot : 1;  
 
                 // Grab central primitives
                 const real rhoc = prim_buff[tya * bx + txa].rho;
@@ -992,7 +994,7 @@ void SRHD2D::advance(
                 const real pc   = prim_buff[tya * bx + txa].p;
                 
                 const Conserved geom_source  = {0, pc * (s1R - s1L) * invdV, 0, 0};
-                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step;
+                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step * factor;
                 break;
                 }
         } // end switch
@@ -1000,8 +1002,8 @@ void SRHD2D::advance(
     // update x1 endpoints
     const real x1l    = get_x1face(0, geometry, 0);
     const real x1r    = get_x1face(xphysical_grid, geometry, 1);
-    const real vfaceR = x1r * hubble_param;
-    const real vfaceL = x1l * hubble_param;
+    const real vfaceR = (geometry == simbi::Geometry::SPHERICAL) ? x1r * hubble_param : hubble_param;
+    const real vfaceL = (geometry == simbi::Geometry::SPHERICAL) ? x1l * hubble_param : hubble_param;
     x1min += step * dt * vfaceL;
     x1max += step * dt * vfaceR;
 }
@@ -1162,6 +1164,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         cons2prim(fullP);
         adapt_dt();
     }
+
     // Using a sigmoid decay function to represent when the source terms turn off.
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
     

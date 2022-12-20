@@ -152,12 +152,13 @@ namespace simbi
 
             case simbi::Geometry::AXIS_CYLINDRICAL:
             {
-                const real xl     = get_x1face(ii, geometry, 0);
-                const real xr     = get_x1face(ii, geometry, 1);
+                const real rl     = get_x1face(ii, geometry, 0);
+                const real rr     = get_x1face(ii, geometry, 1);
                 const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                 const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dx2    = zr - zl;
-                const real dV     = (1.0 / 2.0) * (xr * xr - xl * xl) * dx2;
+                const real rmean  = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
+                const real dV     = rmean * (rr - rl) * dx2;
                 return dV;
             }
             

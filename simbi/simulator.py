@@ -387,7 +387,7 @@ class Hydro:
             if self.dimensionality == 1:
                 volume_factor = helpers.calc_cell_volume1D(x1)
             elif self.dimensionality == 2:
-                volume_factor = helpers.calc_cell_volume2D(x1, x2)
+                volume_factor = helpers.calc_cell_volume2D(x1, x2, self.coord_system)
         else:
             volume_factor = 1.0
                 
@@ -439,7 +439,7 @@ class Hydro:
             print("Computing First Order Solution...", flush=True)
         else:
             print('Computing Second Order Solution...', flush=True)
-        
+    
         if self.dimensionality  == 1:
             sources = np.zeros(self.u.shape) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
@@ -487,7 +487,7 @@ class Hydro:
                     kwargs['s1_outer'] =  mom_outer[0]
                     kwargs['s2_outer'] =  mom_outer[1]
                     kwargs['e_outer']  =  edens_outer
-                    
+                
                 state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
                 
             self.solution = state.simulate(
