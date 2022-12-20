@@ -52,11 +52,11 @@ overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta',
 def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
-        param = None
+        param        = None
         pkg_configs  = [file for file in configs_src.rglob('*.py')]
-        soft_paths   = [soft_path for soft_path in (Path('configs')).glob("*") if soft_path.is_symlink()]   
+        soft_paths   = [soft_path for soft_path in (Path('simbi_configs')).glob("*") if soft_path.is_symlink()]   
         soft_configs = [file for path in soft_paths for file in path.rglob('*.py')]
-        soft_configs+= [file for file in Path('configs').resolve().rglob('*.py')]
+        soft_configs+= [file for file in Path('simbi_configs').resolve().rglob('*.py')]
         for file in pkg_configs + soft_configs:
             if base == Path(file).stem:
                 param = file
