@@ -61,37 +61,29 @@ $ meson install -C <build_dir>
 3)  If `meson` detected `hip` or `cuda`, the install script will install
     both the cpu and gpu extensions into your system site-packages or
     `--user` site-packages depending on privileges.
-4)  If all is well, we can test. To test, try running the example
-    scripts provided. For example
+4)  If all is well, we can test. To test, try running the configuration
+    scripts provided. For example:
 
-``` bash
-$ ./examples/sod_test.py --nzones 512 --mode cpu --cfl 0.1 --bc outflow --tend 0.2
-```
+    ``` bash
+    $ simbi configs/marti_muller.py --mode gpu --nzones 100 --ad_gamma 1.4 
+    # or one could do 
+    $ simbi marti_muller --mode gpu --nzones 100 --ad_gamma 1.4
+    # since the entry point is built to recursively search the configs/ folder for valid .py scripts now
+    ```
 
+    where `--mode` is a global command line option available for every
+    config script, and `--nzones` and `--gamma` are problem-specific options
+    that are dynamically parsed based on whatever `DynamicArg` variables
+    exist in the config script you create. Check out how to create one of
+    these configuration scripts in the `simbi/configs/` folder! When creating
+    your own configuration file, you must place it in a directory entitled `configs/` and
+    run `simbi` from your `configs/` parent directory and `simbi` should auto detect your configuration and run the simulation.
+
+    You can plot the above output by running 
+    ``` bash
+    $ ./tools/plot1d.py data/1000.chkpt.000_100.h5 "Marti \& Muller Problem 1" --field rho v p --tex
+    ```
 5)  ???
 6)  Profit
 
-## Bonus
 
-Another way to run the code is to create some configuration script and
-invoke it using the entry point. You would then run it like so:
-
-``` bash
-$ simbi configs/marti_muller.py --mode gpu --nzones 100 --ad_gamma 1.4 
-# or one could do 
-$ simbi marti_muller --mode gpu --nzones 100 --ad_gamma 1.4
-# since the entry point is built to recursively search the configs/ folder for valid .py scripts now
-```
-
-where `--mode` is a global command line option available for every
-config script, and `--nzones` and `--gamma` are problem-specific options
-that are dynamically parsed based on whatever `DynamicArg` variables
-exist in the config script you create. Check out how to create one of
-these configuration scripts in the `simbi/configs/` folder! When creating
-your own configuration file, you must place it in a directory entitled `configs/` and
-run `simbi` from your `configs/` parent directory and `simbi` should auto detect your configuration and run the simulation.
-
-You can plot the above output by doing 
-``` bash
-$ ./tools/plot1d.py data/1000.chkpt.000_100.h5 "Marti & Muller Problem 1" --field rho v p --tex
-```
