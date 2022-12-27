@@ -67,7 +67,7 @@
     scripts provided. For example:
 
     ``` bash
-    $ simbi configs/marti_muller.py --mode gpu --nzones 100 --ad_gamma 1.4 
+    $ simbi simbi/configs/marti_muller.py --mode gpu --nzones 100 --ad_gamma 1.4 
     # or one could do 
     $ simbi marti_muller --mode gpu --nzones 100 --ad_gamma 1.4
     # since the entry point is built to recursively search the configs/ folder for valid .py scripts now
