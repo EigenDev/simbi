@@ -30,33 +30,32 @@
 
 <strong>Easy Install</strong>
 1) Run 
-```bash
-$ CXX=<your_cpp_compiler> . ./install.sh [options]
-```
+    ```bash
+    $ CXX=<your_cpp_compiler> . ./install.sh [options]
+    ```
 
 <strong>Manual Install</strong>
 1)  Run
 
-``` bash
-$ CXX=<your_cpp_compiler> meson setup <build_dir> -D<some_option>
-```
+    ``` bash
+    $ CXX=<your_cpp_compiler> meson setup <build_dir> -D<some_option>
+    ```
 
-from project root. It is important that this directory is not named
-`build` because the `install` call with create `build` dir for the `pip`
-installation part. For the `-D<build_option>` part, check the
-`meson_options.txt` file for available build options.
+    from project root. It is important that this directory is not named
+    `build` because the `install` call with create `build` dir for the `pip`
+    installation part. For the `-D<build_option>` part, check the
+    `meson_options.txt` file for available build options.
 
 2)  Run
+    ``` bash
+    $ ninja -v -C <build_dir> install
+    ```
 
-``` bash
-$ ninja -v -C <build_dir> install
-```
+    or
 
-or
-
-``` bash
-$ meson install -C <build_dir>
-```
+    ``` bash
+    $ meson install -C <build_dir>
+    ```
 
 3)  If `meson` detected `hip` or `cuda`, the install script will install
     both the cpu and gpu extensions into your system site-packages or
