@@ -60,6 +60,9 @@
 3)  If `meson` detected `hip` or `cuda`, the install script will install
     both the cpu and gpu extensions into your system site-packages or
     `--user` site-packages depending on privileges.
+
+<strong>Running a Configuration</strong>
+
 4)  If all is well, we can test. To test, try running the configuration
     scripts provided. For example:
 
