@@ -11,7 +11,7 @@ import simbi.initial_condition as simbi_ic
 import warnings
 from typing import Callable
 regimes             = ['classical', 'relativistic']
-coord_systems       = ['spherical', 'cartesian', 'planar_cylindrical', 'axis_cylindrical', 'cylindrical']
+coord_systems       = ['spherical', 'cartesian', 'cylindrical', 'planar_cylindrical', 'axis_cylindrical']
 boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
 
 class Hydro:
@@ -277,6 +277,8 @@ class Hydro:
                 elif isinstance(value, tuple):
                     if isinstance(value[0], Callable):
                         val_str = f"user-defined {key} function(s)"
+                elif isinstance(value, (list, np.ndarray)):
+                    val_str = f"user-defined {key} terms"
                 else:
                     val_str = str(value)
                 
