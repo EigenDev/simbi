@@ -40,6 +40,15 @@ namespace simbi
             const char* what();
             int status;
         };
+
+        class SimulationFailureException : public std::exception
+        {
+            public:
+            SimulationFailureException(const char* reason, const char* details);
+            const std::string what();
+            const std::string reason;
+            const std::string details;
+        };
         
         /*
         Catch keyboard Ctrl+C and other signals and pass

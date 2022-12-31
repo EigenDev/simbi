@@ -34,6 +34,14 @@ namespace simbi
         luint blockSize, checkpoint_zones;
         std::vector<std::vector<real>> sources;
         std::string data_directory;
+        char* err_reason;
+        char err_location[100];
+
+        void check_state(){
+            if (inFailureState) {
+                throw helpers::SimulationFailureException(err_reason, err_location);
+            }
+        }
 
         protected:
         HydroBase(){}

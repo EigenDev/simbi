@@ -14,11 +14,10 @@ namespace simbi
     {
         // Flag that detects whether prgram was terminated by external forces
         std::atomic<bool> killsig_received = false;
-
+        
         InterruptException::InterruptException(int s)
         : status(s)
         {
-
         }
 
         const char* InterruptException::what() {
@@ -34,6 +33,16 @@ namespace simbi
                 killsig_received = false;
                 throw helpers::InterruptException(1);
             }
+        }
+
+        SimulationFailureException::SimulationFailureException(const char* reason, const char* details)
+        : reason(reason), details(details)
+        {
+        }
+
+        const std::string SimulationFailureException::what() {
+            const auto err_ms = "Simulation failed\n reason: " + reason + "\n details: " + details;
+            return err_ms;
         }
 
         // =========================================================================================================

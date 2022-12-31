@@ -108,7 +108,7 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
 
                 peq = pre - f / g;
                 iter++;
-                if (iter >= MAX_ITER)
+                if (iter >= MAX_ITER || std::isnan(peq))
                 {
                     const luint xpg    = xphysical_grid;
                     const luint ypg    = yphysical_grid;

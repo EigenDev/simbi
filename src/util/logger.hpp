@@ -165,12 +165,17 @@ namespace simbi
                         }
                         // Listen to kill signals
                         helpers::catch_signals();
+
+                        // check runtime error signals
+                        sim_state.check_state();
                     } catch (helpers::InterruptException &e) {
-                        util::writeln("{}", e.what());
+                        util::writeln("Interript Exception: {}", e.what());
                         sim_state.inFailureState = true;
                         write2file(sim_state, sim_state.setup, sim_state.data_directory, 
                         sim_state.t, INFINITY, sim_state.chkpt_interval, sim_state.checkpoint_zones);
-                    }  
+                    } catch (helpers::SimulationFailureException &e) {
+                        util::writeln("SimulationFailureException: {}", e.what());
+                    }
                 }
                 print_avg_speed(logger);              
             };
