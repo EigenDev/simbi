@@ -204,7 +204,6 @@ namespace simbi
     #if GPU_CODE
     __syncthreads();
     #endif
-    
     }
 } // namespace simbi
 

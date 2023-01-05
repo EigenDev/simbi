@@ -120,6 +120,10 @@ class BaseConfig:
     def x3(self):
         return None
     
+    @property
+    def object_cells(self):
+        return None
+    
     @final
     @classmethod
     def find_dynamic_args(cls) -> None:

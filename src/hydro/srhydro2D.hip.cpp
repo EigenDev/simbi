@@ -645,10 +645,8 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
                     const real x2r    = get_x2face(jreal, 1);
                     const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
                     const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
-                    err_reason = "Cons2Prim cannot converge";
-                    // sprintf(err_location, "Density: %.2e, Pressure: %.2e, Vsq: %.2f, et: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", rho, peq, v2, et,  x1mean, x2mean, iter);
-                    // printf("\nCons2Prim cannot converge:\n");
-                    // printf("Density: %.2e, Pressure: %.2e, Vsq: %.2f, et: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", rho, peq, v2, et,  x1mean, x2mean, iter);
+                    printf("\nCons2Prim cannot converge:\nDensity: %.2e, Pressure: %.2e, Vsq: %.2f, et: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", 
+                    rho, peq, v2, et,  x1mean, x2mean, iter);
                     dt             = INFINITY;
                     found_failure  = true;
                     inFailureState = true;

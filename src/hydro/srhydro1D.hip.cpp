@@ -276,8 +276,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                     const real xl         = get_xface(idx, geometry, 0);
                     const real xr         = get_xface(idx, geometry, 1);
                     const real xmean      = helpers::calc_any_mean(xl, xr, x1cell_spacing);
-                    printf("\nCons2Prim cannot converge\n");
-                    printf("density: %.3e, pressure: %.3e, vsq: %.3e, coord: %.2e, iter: %d\n", rho, peq, v2, xmean, iter);
+                    printf("\nCons2Prim cannot converge\n density: %.3e, pressure: %.3e, vsq: %.3e, coord: %.2e, iter: %d\n", rho, peq, v2, xmean, iter);
                     dt             = INFINITY;
                     inFailureState = true;
                     found_failure        = true;

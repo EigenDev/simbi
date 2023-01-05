@@ -128,8 +128,8 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
                     const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
                     const real x3mean = helpers::calc_any_mean(x3l, x3r, x3cell_spacing);
 
-                    printf("\nCons2Prim cannot converge\n");
-                    printf("Density: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e\n", rho, peq, v2, x1mean, x2mean, x3mean);
+                    printf("\nCons2Prim cannot converge\n Density: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e\n", rho, peq, v2, x1mean, x2mean, x3mean);
+                   
                     found_failure  = true;
                     inFailureState = true;
                     simbi::gpu::api::synchronize();
