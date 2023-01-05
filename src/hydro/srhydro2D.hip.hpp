@@ -27,6 +27,7 @@ namespace simbi
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons, outer_zones;
         ndarray<real> sourceD, sourceS1, sourceS2, sourceTau, pressure_guess, dt_min;
+        ndarray<int> object_pos;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros;
         
         /* Methods */
@@ -170,6 +171,7 @@ namespace simbi
 
         std::vector<std::vector<real>> simulate2D(
             std::vector<std::vector<real>> &sources,
+            std::vector<int> &object_cells,
             real tstart,
             real tend,
             real dlogt,

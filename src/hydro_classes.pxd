@@ -49,6 +49,7 @@ cdef extern from "hydro/euler2D.hpp" namespace "simbi":
         vector[vector[real]] state
         vector[vector[real]] simulate2D(
             vector[vector[real]] sources,
+            vector[int] object_cells,
             real tstart, 
             real tend, 
             real dlogt, 

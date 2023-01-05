@@ -908,7 +908,16 @@ void SRHD2D::advance(
         const real s1_source = mom1_source[real_loc];
         const real s2_source = mom2_source[real_loc];
         const real e_source  = erg_source[real_loc];
-        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * time_constant;
+        const Conserved source_terms        = Conserved{d_source, s1_source, s2_source, e_source} * time_constant;
+
+        const bool object_to_my_left        = object_pos[jj * xpg +  helpers::my_max(ii - 1, (luint)0)];
+        const bool object_to_my_left_most   = object_pos[jj * xpg +  helpers::my_max(ii - 2, (luint)0)];
+        const bool object_to_my_right       = object_pos[jj * xpg +  helpers::my_min(ii + 1, xpg - 1)];
+        const bool object_to_my_right_most  = object_pos[jj * xpg +  helpers::my_min(ii + 2, xpg - 1];
+        const bool object_to_my_top         = object_pos[helpers::my_min(jj + 1, ypg - 1)  * xpg +  ii];
+        const bool object_to_my_top_most    = object_pos[helpers::my_min(jj + 2, ypg - 1)  * xpg +  ii];
+        const bool object_to_my_bottom      = object_pos[helpers::my_max(jj - 1, (luint)0) * xpg +  ii];
+        const bool object_to_my_bottom_most = object_pos[helpers::my_max(jj - 2, (luint)0) * xpg +  ii];
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -1012,7 +1021,8 @@ void SRHD2D::advance(
 //                                            SIMULATE
 //===================================================================================================================
 std::vector<std::vector<real>> SRHD2D::simulate2D(
-    std::vector<std::vector<real>> & sources,
+    std::vector<std::vector<real>> &sources,
+    std::vector<int> &object_cells,
     real tstart,
     real tend,
     real dlogt,
@@ -1043,6 +1053,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
     // Define the source terms
+    this->object_pos      = object_cells;
     this->sourceD         = sources[0];
     this->sourceS1        = sources[1];
     this->sourceS2        = sources[2];
@@ -1120,6 +1131,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     sourceS1.copyToGpu();
     sourceS2.copyToGpu();
     sourceTau.copyToGpu();
+    object_pos.copyToGpu();
 
     // Write some info about the setup for writeup later
     setup.x1max              = x1[xphysical_grid - 1];
