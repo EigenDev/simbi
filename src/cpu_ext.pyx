@@ -226,7 +226,7 @@ cdef class PyStateSR2D:
 
     def simulate(self, 
         vector[vector[real]] sources,
-        vector[vector[int]] object_cells,
+        np.ndarray[int, ndim=2] object_cells,
         real tstart,
         real tend,
         real dlogt,
@@ -255,7 +255,7 @@ cdef class PyStateSR2D:
         cdef PyObjWrapper s2_cpp   = PyObjWrapper(s2_outer)
         cdef PyObjWrapper e_cpp    = PyObjWrapper(e_outer)
 
-        object_contig = object_cells.reshape(object_cells.shape[0], -1)
+        object_contig = object_cells.flatten()
         if d_outer and s1_outer and s2_outer and e_outer:
             result = self.c_state.simulate2D(
                 sources,
@@ -283,7 +283,7 @@ cdef class PyStateSR2D:
         else:
             result = self.c_state.simulate2D(
                 sources,
-                object_cells,
+                object_contig,
                 tstart,
                 tend,
                 dlogt,

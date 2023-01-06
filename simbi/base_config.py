@@ -121,7 +121,7 @@ class BaseConfig:
         return None
     
     @property
-    def object_cells(self):
+    def object_zones(self):
         return None
     
     @final

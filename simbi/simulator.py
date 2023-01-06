@@ -443,8 +443,7 @@ class Hydro:
         else:
             print('Computing Second Order Solution...', flush=True)
 
-        
-        object_cells = np.zeros_like(object_positions) if not object_positions else np.array(object_positions, dtype=int)
+        object_cells = np.zeros_like(self.u[0]) if object_positions is None else np.asarray(object_positions, dtype=np.intc)
         if self.dimensionality  == 1:
             sources = np.zeros_like(self.u) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
@@ -486,13 +485,12 @@ class Hydro:
             if self.regime == "classical":
                 state = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
             else:
-                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'quirk_smoothing': quirk_smoothing}
+                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'quirk_smoothing': quirk_smoothing, 'object_cells': object_cells}
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer']      = dens_outer
                     kwargs['s1_outer']     = mom_outer[0]
                     kwargs['s2_outer']     = mom_outer[1]
                     kwargs['e_outer']      = edens_outer
-                    kwargs['object_cells'] = object_cells
                 
                 state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
                 

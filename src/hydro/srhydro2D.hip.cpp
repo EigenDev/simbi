@@ -691,6 +691,7 @@ void SRHD2D::advance(
     auto* const mom1_source = sourceS1.data();
     auto* const mom2_source = sourceS2.data();
     auto* const erg_source  = sourceTau.data();
+    auto* const object_data = object_pos.data();
     simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx) {
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
@@ -705,6 +706,19 @@ void SRHD2D::advance(
         if ((ii >= max_ii) || (jj >= max_jj)) return;
         #endif
 
+        const bool within_object            = object_data[jj * xpg + ii];
+        const bool object_to_my_left        = object_data[jj * xpg +  helpers::my_max(ii - 1, (luint)0)];
+        const bool object_to_my_left_most   = object_data[jj * xpg +  helpers::my_max(ii - 2, (luint)0)];
+        const bool object_to_my_right       = object_data[jj * xpg +  helpers::my_min(ii + 1, xpg - 1)];
+        const bool object_to_my_right_most  = object_data[jj * xpg +  helpers::my_min(ii + 2, xpg - 1)];
+        const bool object_to_my_top         = object_data[helpers::my_min(jj + 1, ypg - 1)  * xpg +  ii];
+        const bool object_to_my_top_most    = object_data[helpers::my_min(jj + 2, ypg - 1)  * xpg +  ii];
+        const bool object_to_my_bottom      = object_data[helpers::my_max(jj - 1, (luint)0) * xpg +  ii];
+        const bool object_to_my_bottom_most = object_data[helpers::my_max(jj - 2, (luint)0) * xpg +  ii];
+
+        // if (object_to_my_left & object_to_my_right & object_to_my_bottom & object_to_my_top) {
+        //     return;
+        // }
         const lint ia  = ii + radius;
         const lint ja  = jj + radius;
         const lint tx  = (BuildPlatform == Platform::GPU) ? get_tx(): 0;
@@ -748,6 +762,7 @@ void SRHD2D::advance(
         const real vfaceL = (geometry == simbi::Geometry::SPHERICAL) ? x1l * hubble_param : hubble_param;
         if (first_order)
         {
+            //i+1/2
             xprimsL = prim_buff[(txa + 0)      * sy + (tya + 0) * sx];
             xprimsR = prim_buff[(txa + 1) % bx * sy + (tya + 0) * sx];
             //j+1/2
@@ -767,6 +782,10 @@ void SRHD2D::advance(
             gL = prims2flux(yprimsL, 2);
             gR = prims2flux(yprimsR, 2);
 
+            // if (object_to_my_left) {
+            //     fL
+            // }
+
             // Calc HLL Flux at i+1/2 interface
             if (hllc) {
                 frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
@@ -779,14 +798,14 @@ void SRHD2D::advance(
             // Set up the left and right state interfaces for i-1/2
             xprimsL = prim_buff[(txa - 1) * sy + (tya + 0) * sx];
             xprimsR = prim_buff[(txa - 0) * sy + (tya + 0) * sx];
-            //j+1/2
+            //j-1/2
             yprimsL = prim_buff[(txa - 0) * sy + (tya - 1) * sx]; 
             yprimsR = prim_buff[(txa + 0) * sy + (tya - 0) * sx]; 
 
-            // i+1/2
+            // i-1/2
             uxL = prims2cons(xprimsL); 
             uxR = prims2cons(xprimsR); 
-            // j+1/2
+            // j-1/2
             uyL = prims2cons(yprimsL);  
             uyR = prims2cons(yprimsR); 
 
@@ -826,7 +845,7 @@ void SRHD2D::advance(
 
 
             // Calculate the left and right states using the reconstructed PLM
-            // Primitive
+            // Primitive (i,j + 1/2)
             uxL  = prims2cons(xprimsL);
             uxR  = prims2cons(xprimsR);
             uyL  = prims2cons(yprimsL);
@@ -836,6 +855,14 @@ void SRHD2D::advance(
             fR  = prims2flux(xprimsR, 1);
             gL  = prims2flux(yprimsL, 2);
             gR  = prims2flux(yprimsR, 2);
+
+            if (object_to_my_right){
+                fR.s1 *= -1;
+            }
+
+            if (object_to_my_top){
+                gR.s2 *= -1;
+            }
 
             if (hllc) {
                 if(quirk_smoothing)
@@ -867,7 +894,7 @@ void SRHD2D::advance(
             yprimsR  = center    - helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
-            // Primitive
+            // Primitive (i,j -1/2)
             uxL  = prims2cons(xprimsL);
             uxR  = prims2cons(xprimsR);
             uyL  = prims2cons(yprimsL);
@@ -877,6 +904,14 @@ void SRHD2D::advance(
             fR  = prims2flux(xprimsR, 1);
             gL  = prims2flux(yprimsL, 2);
             gR  = prims2flux(yprimsR, 2);
+
+            if (object_to_my_left){
+                fL.s1 *= -1;
+            }
+
+            if (object_to_my_bottom){
+                gL.s2 *= -1;
+            }
 
             if (hllc) {
                 if (quirk_smoothing)
@@ -908,16 +943,7 @@ void SRHD2D::advance(
         const real s1_source = mom1_source[real_loc];
         const real s2_source = mom2_source[real_loc];
         const real e_source  = erg_source[real_loc];
-        const Conserved source_terms        = Conserved{d_source, s1_source, s2_source, e_source} * time_constant;
-
-        const bool object_to_my_left        = object_pos[jj * xpg +  helpers::my_max(ii - 1, (luint)0)];
-        const bool object_to_my_left_most   = object_pos[jj * xpg +  helpers::my_max(ii - 2, (luint)0)];
-        const bool object_to_my_right       = object_pos[jj * xpg +  helpers::my_min(ii + 1, xpg - 1)];
-        const bool object_to_my_right_most  = object_pos[jj * xpg +  helpers::my_min(ii + 2, xpg - 1];
-        const bool object_to_my_top         = object_pos[helpers::my_min(jj + 1, ypg - 1)  * xpg +  ii];
-        const bool object_to_my_top_most    = object_pos[helpers::my_min(jj + 2, ypg - 1)  * xpg +  ii];
-        const bool object_to_my_bottom      = object_pos[helpers::my_max(jj - 1, (luint)0) * xpg +  ii];
-        const bool object_to_my_bottom_most = object_pos[helpers::my_max(jj - 2, (luint)0) * xpg +  ii];
+        const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * time_constant;
         switch (geometry)
         {
             case simbi::Geometry::CARTESIAN:
