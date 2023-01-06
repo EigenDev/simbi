@@ -782,9 +782,13 @@ void SRHD2D::advance(
             gL = prims2flux(yprimsL, 2);
             gR = prims2flux(yprimsR, 2);
 
-            // if (object_to_my_left) {
-            //     fL
-            // }
+            if (object_to_my_right){
+                fR.s1 *= -1;
+            }
+
+            if (object_to_my_top){
+                gR.s2 *= -1;
+            }
 
             // Calc HLL Flux at i+1/2 interface
             if (hllc) {
@@ -814,6 +818,14 @@ void SRHD2D::advance(
 
             gL = prims2flux(yprimsL, 2);
             gR = prims2flux(yprimsR, 2);
+
+            if (object_to_my_left){
+                fL.s1 *= -1;
+            }
+
+            if (object_to_my_bottom){
+                gL.s2 *= -1;
+            }
 
             // Calc HLL Flux at i-1/2 interface
             if (hllc) {
