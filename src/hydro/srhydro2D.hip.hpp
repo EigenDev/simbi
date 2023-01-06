@@ -65,7 +65,7 @@ namespace simbi
             const real vface) const;
 
         GPU_CALLABLE_MEMBER
-        sr2d::Conserved prims2flux(const sr2d::Primitive &prims,  luint nhat) const;
+        sr2d::Conserved prims2flux(const sr2d::Primitive &prims,  const luint nhat, const bool object_boundary) const;
 
         GPU_CALLABLE_MEMBER
         sr2d::Conserved calc_hll_flux(

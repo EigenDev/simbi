@@ -443,7 +443,7 @@ class Hydro:
         else:
             print('Computing Second Order Solution...', flush=True)
 
-        object_cells = np.zeros_like(self.u[0]) if object_positions is None else np.asarray(object_positions, dtype=np.intc)
+        object_cells = np.zeros_like(self.u[0], dtype=np.intc) if object_positions is None else np.asarray(object_positions, dtype=np.intc)
         if self.dimensionality  == 1:
             sources = np.zeros_like(self.u) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)

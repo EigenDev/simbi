@@ -52,6 +52,13 @@ namespace hydro1d {
             p      -= prims.p;
             return *this;
         }
+
+        GPU_CALLABLE_MEMBER Primitive & operator *=(const real c) {
+            rho    *= c;
+            v      *= c;
+            p      *= c;
+            return *this;
+        }
     };
 
     struct Conserved {
@@ -74,6 +81,13 @@ namespace hydro1d {
             rho    -= cons.rho;
             m      -= cons.m;
             e_dens -= cons.e_dens;
+            return *this;
+        }
+
+        GPU_CALLABLE_MEMBER Conserved & operator *=(const real c) {
+            rho    *= c;
+            m      *= c;
+            e_dens *= c;
             return *this;
         }
     };
@@ -118,6 +132,13 @@ namespace sr1d {
             p      -= prims.p;
             return *this;
         }
+
+        GPU_CALLABLE_MEMBER Primitive & operator *=(const real c) {
+            rho    *= c;
+            v      *= c;
+            p      *= c;
+            return *this;
+        }
     };
 
     struct Conserved {
@@ -140,6 +161,13 @@ namespace sr1d {
             d      -= cons.d;
             s      -= cons.s;
             tau    -= cons.tau;
+            return *this;
+        }
+
+        GPU_CALLABLE_MEMBER Conserved & operator *=(const real c) {
+            d    *= c;
+            s    *= c;
+            tau  *= c;
             return *this;
         }
     };
@@ -197,6 +225,15 @@ namespace sr2d {
             return *this;
         }
 
+        GPU_CALLABLE_MEMBER Conserved & operator *=(const real c) {
+            d    *= c;
+            s1   *= c;
+            s1   *= c;
+            tau  *= c;
+            chi  *= c;
+            return *this;
+        }
+
         GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {return (nhat == 1 ? s1 : s2); }
     };
 
@@ -222,12 +259,12 @@ namespace sr2d {
             return *this;
         }
 
-        GPU_CALLABLE_MEMBER Primitive & operator -=(const Primitive &prims) {
-            rho    -= prims.rho;
-            v1     -= prims.v1;
-            v2     -= prims.v2;
-            p      -= prims.p;
-            chi    -= prims.chi;
+        GPU_CALLABLE_MEMBER Primitive & operator *=(const real c) {
+            rho  *= c;
+            v1   *= c;
+            v1   *= c;
+            p    *= c;
+            chi  *= c;
             return *this;
         }
         
@@ -293,6 +330,14 @@ namespace hydro2d {
             return *this;
         }
 
+        GPU_CALLABLE_MEMBER Conserved & operator *=(const real c) {
+            rho     *= c;
+            m1      *= c;
+            m1      *= c;
+            e_dens  *= c;
+            chi     *= c;
+            return *this;
+        }
         GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {return (nhat == 1 ? m1 : m2); }
     };
 
@@ -324,6 +369,15 @@ namespace hydro2d {
             v2     -= prims.v2;
             p      -= prims.p;
             chi    -= prims.chi;
+            return *this;
+        }
+
+        GPU_CALLABLE_MEMBER Primitive & operator *=(const real c) {
+            rho  *= c;
+            v1   *= c;
+            v1   *= c;
+            p    *= c;
+            chi  *= c;
             return *this;
         }
         
@@ -383,6 +437,16 @@ namespace sr3d {
             return *this;
         }
 
+        GPU_CALLABLE_MEMBER Conserved & operator *=(const real c) {
+            d      -= c;
+            s1     -= c;
+            s2     -= c;
+            s3     -= c;
+            tau    -= c;
+            chi    -= c;
+            return *this;
+        }
+
         GPU_CALLABLE_MEMBER real momentum(const int nhat) const {return (nhat == 1 ? s1 : (nhat == 2) ? s2 : s3); }
     };
 
@@ -416,6 +480,16 @@ namespace sr3d {
             v3     -= prims.v3;
             p      -= prims.p;
             chi    -= prims.chi;
+            return *this;
+        }
+
+        GPU_CALLABLE_MEMBER Primitive & operator *=(const real c) {
+            rho    -= c;
+            v1     -= c;
+            v2     -= c;
+            v3     -= c;
+            p      -= c;
+            chi    -= c;
             return *this;
         }
 
@@ -478,6 +552,15 @@ namespace hydro3d {
             return *this;
         }
 
+        GPU_CALLABLE_MEMBER Conserved & operator *=(const real c) {
+            rho    -= c;
+            m1     -= c;
+            m2     -= c;
+            m3     -= c;
+            e_dens -= c;
+            return *this;
+        }
+
         GPU_CALLABLE_MEMBER real momentum(const int nhat) const {return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3); }
     };
 
@@ -511,6 +594,16 @@ namespace hydro3d {
             v3     -= prims.v3;
             p      -= prims.p;
             chi    -= prims.chi;
+            return *this;
+        }
+
+        GPU_CALLABLE_MEMBER Primitive & operator *=(const real c) {
+            rho    -= c;
+            v1     -= c;
+            v2     -= c;
+            v3     -= c;
+            p      -= c;
+            chi    -= c;
             return *this;
         }
     };
