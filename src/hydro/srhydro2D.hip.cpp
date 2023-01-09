@@ -326,16 +326,14 @@ void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
 // Get the 2D Flux array (4,1). Either return F or G depending on directional
 // flag
 GPU_CALLABLE_MEMBER
-Conserved SRHD2D::prims2flux(const Primitive &prims, const luint nhat, const bool object_boundary) const
+Conserved SRHD2D::prims2flux(const Primitive &prims, const luint nhat) const
 {
-    const auto negate          = (1 - 2 * object_boundary);
     const real rho             = prims.rho;
     const real v1              = prims.v1;
     const real v2              = prims.v2;
     const real pressure        = prims.p;
     const real chi             = prims.chi;
     const real vn              = (nhat == 1) ? v1 : v2;
-    const real vj              = vn * (1 - 2 * object_boundary);
     const auto kron            = kronecker(nhat, 1);
     const real lorentz_gamma   = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
 
@@ -345,7 +343,7 @@ Conserved SRHD2D::prims2flux(const Primitive &prims, const luint nhat, const boo
     const real S2  = rho * lorentz_gamma * lorentz_gamma * h * v2;
     const real Sj  = (nhat == 1) ? S1 : S2;
 
-    return Conserved{D * vj, S1 * vj + kron * pressure, S2 * vj + !kron * pressure, Sj - D * vj, D * vj * chi};
+    return Conserved{D * vn, S1 * vn + kron * pressure, S2 * vn + !kron * pressure, Sj - D * vn, D * vn * chi};
 };
 
 GPU_CALLABLE_MEMBER
@@ -768,6 +766,22 @@ void SRHD2D::advance(
             yprimsL = prim_buff[(txa + 0) * sy + (tya + 0)      * sx];
             yprimsR = prim_buff[(txa + 0) * sy + (tya + 1) % by * sx];
             
+            if (object_to_my_right){
+                xprimsR.rho =  xprimsL.rho;
+                xprimsR.v1  = -xprimsL.v1;
+                xprimsR.v2  = -xprimsL.v2;
+                xprimsR.p   =  xprimsL.p;
+                xprimsR.chi =  xprimsL.chi;
+            }
+
+            if (object_to_my_top){
+                yprimsR.rho =  yprimsL.rho;
+                yprimsR.v1  = -yprimsL.v1;
+                yprimsR.v2  = -yprimsL.v2;
+                yprimsR.p   =  yprimsL.p;
+                yprimsR.chi =  yprimsL.chi;
+            }
+
             // i+1/2
             uxL = prims2cons(xprimsL); 
             uxR = prims2cons(xprimsR); 
@@ -775,10 +789,10 @@ void SRHD2D::advance(
             uyL = prims2cons(yprimsL);  
             uyR = prims2cons(yprimsR); 
 
-            fL = prims2flux(xprimsL, 1, false);
-            fR = prims2flux(xprimsR, 1, object_to_my_right);
-            gL = prims2flux(yprimsL, 2, false);
-            gR = prims2flux(yprimsR, 2, object_to_my_top);
+            fL = prims2flux(xprimsL, 1);
+            fR = prims2flux(xprimsR, 1);
+            gL = prims2flux(yprimsL, 2);
+            gR = prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i+1/2 interface
             if (hllc) {
@@ -796,6 +810,21 @@ void SRHD2D::advance(
             yprimsL = prim_buff[(txa - 0) * sy + (tya - 1) * sx]; 
             yprimsR = prim_buff[(txa + 0) * sy + (tya - 0) * sx]; 
 
+            if (object_to_my_left){
+                xprimsL.rho =  xprimsR.rho;
+                xprimsL.v1  = -xprimsR.v1;
+                xprimsL.v2  = -xprimsR.v2;
+                xprimsL.p   =  xprimsR.p;
+                xprimsL.chi =  xprimsR.chi;
+            }
+
+            if (object_to_my_bottom){
+                yprimsL.rho =  yprimsR.rho;
+                yprimsL.v1  = -yprimsR.v1;
+                yprimsL.v2  = -yprimsR.v2;
+                yprimsL.p   =  yprimsR.p;
+                yprimsL.chi =  yprimsR.chi;
+            }
             // i-1/2
             uxL = prims2cons(xprimsL); 
             uxR = prims2cons(xprimsR); 
@@ -803,10 +832,10 @@ void SRHD2D::advance(
             uyL = prims2cons(yprimsL);  
             uyR = prims2cons(yprimsR); 
 
-            fL = prims2flux(xprimsL, 1, object_to_my_left);
-            fR = prims2flux(xprimsR, 1, false);
-            gL = prims2flux(yprimsL, 2, object_to_my_bottom);
-            gR = prims2flux(yprimsR, 2, false);
+            fL = prims2flux(xprimsL, 1);
+            fR = prims2flux(xprimsR, 1);
+            gL = prims2flux(yprimsL, 2);
+            gR = prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i-1/2 interface
             if (hllc) {
@@ -837,6 +866,22 @@ void SRHD2D::advance(
             yprimsR  = yright_mid - helpers::minmod((yright_mid - center) * plm_theta, (yright_most - center) * static_cast<real>(0.5), (yright_most - yright_mid)*plm_theta) * static_cast<real>(0.5);
 
 
+            if (object_to_my_right){
+                xprimsR.rho =  xprimsL.rho;
+                xprimsR.v1  = -xprimsL.v1;
+                xprimsR.v2  = -xprimsL.v2;
+                xprimsR.p   =  xprimsL.p;
+                xprimsR.chi =  xprimsL.chi;
+            }
+
+            if (object_to_my_top){
+                yprimsR.rho =  yprimsL.rho;
+                yprimsR.v1  = -yprimsL.v1;
+                yprimsR.v2  = -yprimsL.v2;
+                yprimsR.p   =  yprimsL.p;
+                yprimsR.chi =  yprimsL.chi;
+            }
+
             // Calculate the left and right states using the reconstructed PLM
             // Primitive (i,j + 1/2)
             uxL  = prims2cons(xprimsL);
@@ -844,22 +889,10 @@ void SRHD2D::advance(
             uyL  = prims2cons(yprimsL);
             uyR  = prims2cons(yprimsR);
 
-            fL = prims2flux(xprimsL, 1, false);
-            fR = prims2flux(xprimsR, 1, object_to_my_right);
-            gL = prims2flux(yprimsL, 2, false);
-            gR = prims2flux(yprimsR, 2, object_to_my_top);
-
-            // if (object_to_my_right){
-            //     // fR.d   =  0;
-            //     fR.s1 *= -1;
-            //     fR.s2 *= -1;
-            // }
-
-            // if (object_to_my_top){
-            //     // gR.d   =  0;
-            //     gR.s1 *= -1;
-            //     gR.s2 *= -1;
-            // }
+            fL = prims2flux(xprimsL, 1);
+            fR = prims2flux(xprimsR, 1);
+            gL = prims2flux(yprimsL, 2);
+            gR = prims2flux(yprimsR, 2);
 
             if (hllc) {
                 if(quirk_smoothing)
@@ -890,6 +923,22 @@ void SRHD2D::advance(
             yprimsL  = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
             yprimsR  = center    - helpers::minmod((center - yleft_mid)*plm_theta, (yright_mid - yleft_mid)*static_cast<real>(0.5), (yright_mid - center)*plm_theta)*static_cast<real>(0.5);
 
+            if (object_to_my_left){
+                xprimsL.rho =  xprimsR.rho;
+                xprimsL.v1  = -xprimsR.v1;
+                xprimsL.v2  = -xprimsR.v2;
+                xprimsL.p   =  xprimsR.p;
+                xprimsL.chi =  xprimsR.chi;
+            }
+
+            if (object_to_my_bottom){
+                yprimsL.rho =  yprimsR.rho;
+                yprimsL.v1  = -yprimsR.v1;
+                yprimsL.v2  = -yprimsR.v2;
+                yprimsL.p   =  yprimsR.p;
+                yprimsL.chi =  yprimsR.chi;
+            }
+
             // Calculate the left and right states using the reconstructed PLM
             // Primitive (i,j -1/2)
             uxL  = prims2cons(xprimsL);
@@ -897,22 +946,10 @@ void SRHD2D::advance(
             uyL  = prims2cons(yprimsL);
             uyR  = prims2cons(yprimsR);
 
-            fL = prims2flux(xprimsL, 1, object_to_my_left);
-            fR = prims2flux(xprimsR, 1, false);
-            gL = prims2flux(yprimsL, 2, object_to_my_bottom);
-            gR = prims2flux(yprimsR, 2, false);
-
-            // if (object_to_my_left){
-            //     fL.d   =  0;
-            //     fL.s1 *= -1;
-            //     fL.s2 *= -1;
-            // }
-
-            // if (object_to_my_bottom){
-            //     gL.d   =  0;
-            //     gL.s1 *= -1;
-            //     gL.s2 *= -1;
-            // }
+            fL = prims2flux(xprimsL, 1);
+            fR = prims2flux(xprimsR, 1);
+            gL = prims2flux(yprimsL, 2);
+            gR = prims2flux(yprimsR, 2);
 
             if (hllc) {
                 if (quirk_smoothing)
@@ -938,25 +975,6 @@ void SRHD2D::advance(
             }
         }
 
-        // if (object_to_my_left){
-        //     flf.s1 *= -1;
-        //     flf.s2 *= -1;
-        // }
-
-        // if (object_to_my_right){
-        //     frf.s1 *= -1;
-        //     frf.s2 *= -1;
-        // }
-
-        // if (object_to_my_top){
-        //     grf.s1 *= -1;
-        //     grf.s2 *= -1;
-        // }
-
-        // if (object_to_my_bottom){
-        //     glf.s1 *= -1;
-        //     glf.s2 *= -1;
-        // }
         //Advance depending on geometry
         const luint real_loc = get_2d_idx(ii, jj, xpg, ypg);
         const real d_source  = dens_source[real_loc];
