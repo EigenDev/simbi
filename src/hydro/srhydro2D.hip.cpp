@@ -1064,6 +1064,13 @@ void SRHD2D::advance(
                 
                 const Conserved geom_source  = {0, pc * (s1R - s1L) * invdV, 0, 0};
                 cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step * factor;
+
+                #if !GPU_CODE
+                if (jj == ypg - 1) {
+                    writeln("density source: {}, res: {}", source_terms.d * dt * step, cons_data[aid].d);
+                    helpers::pause_program();
+                }
+                #endif 
                 break;
                 }
         } // end switch

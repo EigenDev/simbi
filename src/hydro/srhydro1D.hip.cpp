@@ -195,7 +195,6 @@ void SRHD::advance(
             case simbi::Geometry::CARTESIAN:
             {
                 cons_data[ia] -= ((frf - flf) * invdx1) * dt * step;
-                // printf("frf: %.2e, flf: %.2e", frf.d, flf.d);
                 break;
             }
             case simbi::Geometry::CYLINDRICAL:
