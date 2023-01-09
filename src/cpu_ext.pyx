@@ -226,7 +226,7 @@ cdef class PyStateSR2D:
 
     def simulate(self, 
         vector[vector[real]] sources,
-        np.ndarray[int, ndim=2] object_cells,
+        np.ndarray[bool, ndim=2] object_cells,
         real tstart,
         real tend,
         real dlogt,

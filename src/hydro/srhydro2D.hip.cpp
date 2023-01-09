@@ -706,15 +706,10 @@ void SRHD2D::advance(
         if ((ii >= max_ii) || (jj >= max_jj)) return;
         #endif
 
-        const bool within_object            = object_data[jj * xpg + ii];
-        const bool object_to_my_left        = object_data[jj * xpg +  helpers::my_max(ii - 1, (luint)0)];
-        const bool object_to_my_left_most   = object_data[jj * xpg +  helpers::my_max(ii - 2, (luint)0)];
-        const bool object_to_my_right       = object_data[jj * xpg +  helpers::my_min(ii + 1,  xpg - 1)];
-        const bool object_to_my_right_most  = object_data[jj * xpg +  helpers::my_min(ii + 2,  xpg - 1)];
-        const bool object_to_my_top         = object_data[helpers::my_min(jj + 1, ypg - 1)  * xpg +  ii];
-        const bool object_to_my_top_most    = object_data[helpers::my_min(jj + 2, ypg - 1)  * xpg +  ii];
-        const bool object_to_my_bottom      = object_data[helpers::my_max(jj - 1, (luint)0) * xpg +  ii];
-        const bool object_to_my_bottom_most = object_data[helpers::my_max(jj - 2, (luint)0) * xpg +  ii];
+        const bool object_to_my_left  = object_data[jj * xpg +  helpers::my_max(static_cast<lint>(ii - 1), static_cast<lint>(0))];
+        const bool object_to_my_right = object_data[jj * xpg +  helpers::my_min(ii + 1,  xpg - 1)];
+        const bool object_above_me    = object_data[helpers::my_min(jj + 1, ypg - 1)  * xpg +  ii];
+        const bool object_below_me    = object_data[helpers::my_max(static_cast<lint>(jj - 1), static_cast<lint>(0)) * xpg +  ii];
 
         const lint ia  = ii + radius;
         const lint ja  = jj + radius;
@@ -774,7 +769,7 @@ void SRHD2D::advance(
                 xprimsR.chi =  xprimsL.chi;
             }
 
-            if (object_to_my_top){
+            if (object_above_me){
                 yprimsR.rho =  yprimsL.rho;
                 yprimsR.v1  = -yprimsL.v1;
                 yprimsR.v2  = -yprimsL.v2;
@@ -818,7 +813,7 @@ void SRHD2D::advance(
                 xprimsL.chi =  xprimsR.chi;
             }
 
-            if (object_to_my_bottom){
+            if (object_below_me){
                 yprimsL.rho =  yprimsR.rho;
                 yprimsL.v1  = -yprimsR.v1;
                 yprimsL.v2  = -yprimsR.v2;
@@ -869,14 +864,14 @@ void SRHD2D::advance(
             if (object_to_my_right){
                 xprimsR.rho =  xprimsL.rho;
                 xprimsR.v1  = -xprimsL.v1;
-                xprimsR.v2  = -xprimsL.v2;
+                xprimsR.v2  =  xprimsL.v2;
                 xprimsR.p   =  xprimsL.p;
                 xprimsR.chi =  xprimsL.chi;
             }
 
-            if (object_to_my_top){
+            if (object_above_me){
                 yprimsR.rho =  yprimsL.rho;
-                yprimsR.v1  = -yprimsL.v1;
+                yprimsR.v1  =  yprimsL.v1;
                 yprimsR.v2  = -yprimsL.v2;
                 yprimsR.p   =  yprimsL.p;
                 yprimsR.chi =  yprimsL.chi;
@@ -926,18 +921,19 @@ void SRHD2D::advance(
             if (object_to_my_left){
                 xprimsL.rho =  xprimsR.rho;
                 xprimsL.v1  = -xprimsR.v1;
-                xprimsL.v2  = -xprimsR.v2;
+                xprimsL.v2  =  xprimsR.v2;
                 xprimsL.p   =  xprimsR.p;
                 xprimsL.chi =  xprimsR.chi;
             }
 
-            if (object_to_my_bottom){
+            if (object_below_me){
                 yprimsL.rho =  yprimsR.rho;
-                yprimsL.v1  = -yprimsR.v1;
+                yprimsL.v1  =  yprimsR.v1;
                 yprimsL.v2  = -yprimsR.v2;
                 yprimsL.p   =  yprimsR.p;
                 yprimsL.chi =  yprimsR.chi;
             }
+
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive (i,j -1/2)
@@ -1086,7 +1082,7 @@ void SRHD2D::advance(
 //===================================================================================================================
 std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::vector<std::vector<real>> &sources,
-    std::vector<int> &object_cells,
+    std::vector<bool> &object_cells,
     real tstart,
     real tend,
     real dlogt,
