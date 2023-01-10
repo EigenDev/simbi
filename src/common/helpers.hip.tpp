@@ -81,7 +81,7 @@ namespace simbi{
         {
             const real rho = prim_buffer[aid].rho;
             const real p   = prim_buffer[aid].p;
-            const real v   = prim_buffer[aid].v;
+            real v   = prim_buffer[aid].v;
         
             if constexpr(is_relativistic<T>::value)
             {
