@@ -186,7 +186,6 @@ void Newtonian2D::adapt_dt()
                 auto v1m = std::abs(minus_v1);
                 auto v2p = std::abs(plus_v2);
                 auto v2m = std::abs(minus_v2);
-                real cfl_dt;
                 switch (geometry)
                 {
                     case simbi::Geometry::CARTESIAN:
@@ -269,28 +268,8 @@ void Newtonian2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
     #if GPU_CODE
     {
         luint psize = p.blockSize.x*p.blockSize.y;
-        switch (geometry)
-        {
-        case simbi::Geometry::CARTESIAN:
-            compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>(this, prims.data(),dt_min.data(), geometry, psize, dx1, dx2);
-            deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
-
-            // deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
-            // deviceReduceKernel<2><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y);
-            break;
-            
-        case simbi::Geometry::PLANAR_CYLINDRICAL:
-        case simbi::Geometry::AXIS_CYLINDRICAL:
-        case simbi::Geometry::SPHERICAL:
-            compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>> (this, prims.data(), dt_min.data(), geometry, psize, dlogx1, dx2, x1min, x1max, x2min, x2max);
-            deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
-            // deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(this, dt_min.data(),  active_zones);
-            // deviceReduceKernel<2><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y);
-            break;
-        case simbi::Geometry::CYLINDRICAL:
-            // TODO: Implement Cylindrical coordinates at some point
-            break;
-        }
+        compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>(this, prims.data(),dt_min.data(), geometry, psize);
+        deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
     }
     gpu::api::deviceSynch();
     #endif
@@ -782,9 +761,6 @@ void Newtonian2D::advance(
                 const real s2L          = rmean * (rr - rl); 
 
                 // Grab central primitives
-                const real rhoc = prim_buff[tya * bx + txa].rho;
-                const real uc   = prim_buff[tya * bx + txa].v1;
-                const real vc   = prim_buff[tya * bx + txa].v2;
                 const real pc   = prim_buff[tya * bx + txa].p;
                 
                 const Conserved geom_source  = {0, pc * (s1R - s1L) * invdV, 0, 0};

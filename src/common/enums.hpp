@@ -35,6 +35,11 @@ namespace simbi{
         HLLE,
     };
 
+    enum class TIMESTEP_TYPE {
+        MINIMUM,
+        ADAPTIVE,
+    };
+
     enum class HLLCTYPE {
         CLASSICAL,
         // Apply the low-Mach HLLC fix found in Fleischmann et al 2020: 

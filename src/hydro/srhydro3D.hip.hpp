@@ -98,9 +98,12 @@ namespace simbi
             const sr3d::Conserved &right_flux,
             const sr3d::Primitive &left_prims,
             const sr3d::Primitive &right_prims,
-            const luint nhat);
+            const luint nhat);  
 
+        template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt();
+
+        template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt(const ExecutionPolicy<> &p, const luint bytes);
 
         std::vector<std::vector<real>> simulate3D(
@@ -127,22 +130,28 @@ namespace simbi
             {
             case simbi::Geometry::CARTESIAN:
                 {
-                        const real x1l = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
-                        if (side == 0) {
-                            return x1l;
-                        }
-                        return helpers::my_min(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+                    const real x1l = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+                    if (side == 0) {
+                        return x1l;
+                    }
+                    return helpers::my_min(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                 }
             case simbi::Geometry::SPHERICAL:
                 {
-                        const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
-                        if (side == 0) {
-                            return rl;
-                        }
-                        return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                    const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                    if (side == 0) {
+                        return rl;
+                    }
+                    return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                 }
             case simbi::Geometry::CYLINDRICAL:
-                // TODO: Implement
+                {
+                    const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                    if (side == 0) {
+                        return rl;
+                    }
+                    return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                }
                 break;
             }
         }

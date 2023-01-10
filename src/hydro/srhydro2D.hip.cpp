@@ -159,12 +159,13 @@ Conserved SRHD2D::prims2cons(const Primitive &prims) const
 //---------------------------------------------------------------------
 
 // Adapt the cfl conditonal timestep
+template<TIMESTEP_TYPE dt_type>
 void SRHD2D::adapt_dt()
 {
     real min_dt = INFINITY;
     #pragma omp parallel 
     {
-        real v1p, v1m, v2p, v2m;
+        real v1p, v1m, v2p, v2m, cfl_dt;
         // Compute the minimum timestep given cfl
         for (luint jj = 0; jj < yphysical_grid; jj++)
         {
@@ -182,23 +183,25 @@ void SRHD2D::adapt_dt()
                 const auto cs       = std::sqrt(gamma * pressure / (rho * h));
 
                 //================ Plus / Minus Wave speed components -================
-                const auto plus_v1  = (v1 + cs) / (1.0 + v1 * cs);
-                const auto plus_v2  = (v2 + cs) / (1.0 + v2 * cs);
-                const auto minus_v1 = (v1 - cs) / (1.0 - v1 * cs);
-                const auto minus_v2 = (v2 - cs) / (1.0 - v2 * cs);
 
-                v1p = std::abs(plus_v1);
-                v1m = std::abs(minus_v1);
-                v2p = std::abs(plus_v2);
-                v2m = std::abs(minus_v2);
-                real cfl_dt;
+                if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                    v1p = std::abs(v1 + cs) / (1.0 + v1 * cs);
+                    v2p = std::abs(v2 + cs) / (1.0 + v2 * cs);
+                    v1m = std::abs(v1 - cs) / (1.0 - v1 * cs);
+                    v2m = std::abs(v2 - cs) / (1.0 - v2 * cs);
+                } else {
+                    v1p = 1;
+                    v1m = 1;
+                    v2p = 1;
+                    v2m = 1;
+                }
                 switch (geometry)
                 {
                     case simbi::Geometry::CARTESIAN:
                         {
                             if (mesh_motion) {
-                                v1p = std::abs(plus_v1  - hubble_param);
-                                v1m = std::abs(minus_v1 - hubble_param);
+                                v1p = std::abs(v1p - hubble_param);
+                                v1m = std::abs(v1m - hubble_param);
                             }
                             cfl_dt = helpers::my_min(dx1 / (helpers::my_max(v1p, v1m)), dx2 / (helpers::my_max(v2p, v2m)));
                             break;
@@ -216,8 +219,8 @@ void SRHD2D::adapt_dt()
                             {
                                 const real vfaceL   = x1l * hubble_param;
                                 const real vfaceR   = x1r * hubble_param;
-                                v1p = std::abs(plus_v1  - vfaceR);
-                                v1m = std::abs(minus_v1 - vfaceL);
+                                v1p = std::abs(v1p - vfaceR);
+                                v1m = std::abs(v1m - vfaceL);
                             }
                             cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
                             break;
@@ -236,8 +239,8 @@ void SRHD2D::adapt_dt()
                             {
                                 const real vfaceL   = x1l * hubble_param;
                                 const real vfaceR   = x1r * hubble_param;
-                                v1p = std::abs(plus_v1  - vfaceR);
-                                v1m = std::abs(minus_v1 - vfaceL);
+                                v1p = std::abs(v1p - vfaceR);
+                                v1m = std::abs(v1m - vfaceL);
                             }
                             cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
                             break;
@@ -254,8 +257,8 @@ void SRHD2D::adapt_dt()
                             {
                                 const real vfaceL   = hubble_param;
                                 const real vfaceR   = hubble_param;
-                                v1p = std::abs(plus_v1  - vfaceR);
-                                v1m = std::abs(minus_v1 - vfaceL);
+                                v1p = std::abs(v1p - vfaceR);
+                                v1m = std::abs(v1m - vfaceL);
                             }
                             cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
                             break;
@@ -268,52 +271,21 @@ void SRHD2D::adapt_dt()
     dt = cfl * min_dt;
 };
 
+template<TIMESTEP_TYPE dt_type>
 void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
 {
     
     #if GPU_CODE
     {
         const luint psize = p.blockSize.x*p.blockSize.y;
-        const auto bsize = std::min(p.gridSize.x*p.gridSize.y, (unsigned int)1024);
-        switch (geometry)
-        {
-            case simbi::Geometry::CARTESIAN:
-                compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>(
-                    this, 
-                    prims.data(),
-                    dt_min.data(),
-                    geometry, 
-                    psize, 
-                    dx1, 
-                    dx2
-                );
-                deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
-                // deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
-                // deviceReduceKernel<2><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y);
-                break;
-            case simbi::Geometry::PLANAR_CYLINDRICAL:
-            case simbi::Geometry::AXIS_CYLINDRICAL:
-            case simbi::Geometry::SPHERICAL:
-                compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>> (
-                    this, 
-                    prims.data(), 
-                    dt_min.data(),
-                    geometry, 
-                    psize, 
-                    dlogx1, 
-                    dx2, 
-                    x1min, 
-                    x1max, 
-                    x2min, 
-                    x2max);
-                deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
-                // deviceReduceKernel<2><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
-                // deviceReduceKernel<2><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y);
-                break;
-            case simbi::Geometry::CYLINDRICAL:
-                // TODO: Implement Cylindrical coordinates at some point
-                break;
-        }
+        compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize, bytes>>>(
+            this, 
+            prims.data(),
+            dt_min.data(),
+            geometry, 
+            psize
+        );
+        deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
     }
     #endif
     gpu::api::deviceSynch();

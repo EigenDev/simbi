@@ -69,7 +69,7 @@ namespace simbi{
         });
     };
 
-    template<typename T, typename U, typename V>
+    template<typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
     GPU_LAUNCHABLE  typename std::enable_if<is_1D_primitive<T>::value>::type 
     compute_dt(U *self, const V* prim_buffer, real* dt_min)
     {
@@ -81,20 +81,24 @@ namespace simbi{
         {
             const real rho = prim_buffer[aid].rho;
             const real p   = prim_buffer[aid].p;
+            const real v   = prim_buffer[aid].v;
         
             if constexpr(is_relativistic<T>::value)
             {
-                real v  = prim_buffer[aid].v;
-                if constexpr(VelocityType == Velocity::FourVelocity) {
-                    real lorentz  = std::sqrt(1 + v * v);
-                    v /= lorentz;
+                if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                    real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
+                    real cs  = std::sqrt(self->gamma * p / (rho * h));
+                    if constexpr(VelocityType == Velocity::FourVelocity) {
+                        real lorentz  = std::sqrt(1 + v * v);
+                        v /= lorentz;
+                    }
+                    vPlus  = (v + cs) / (1 + v * cs);
+                    vMinus = (v - cs) / (1 - v * cs);
+                } else {
+                    vPlus  = 1;
+                    vMinus = 1;
                 }
-                const real h  = 1. + self->gamma * p / (rho * (self->gamma - 1.));
-                const real cs = std::sqrt(self->gamma * p / (rho * h));
-                vPlus         = (v + cs) / (1 + v * cs);
-                vMinus        = (v - cs) / (1 - v * cs);
             } else {
-                const real v  = prim_buffer[aid].v;
                 const real cs = std::sqrt(self->gamma * p / rho );
                 vPlus         = (v + cs);
                 vMinus        = (v - cs);
@@ -110,19 +114,13 @@ namespace simbi{
         #endif
     }
 
-    template<typename T, typename U, typename V>
+    template<typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
     GPU_LAUNCHABLE  typename std::enable_if<is_2D_primitive<T>::value>::type 
     compute_dt(U *self, 
     const V* prim_buffer,
     real* dt_min,
     const simbi::Geometry geometry, 
-    luint bytes,
-    real dx1, 
-    real dx2 , 
-    real rmin, 
-    real rmax,
-    real x2min,
-    real x2max)
+    const luint bytes)
     {
         #if GPU_CODE
         real cfl_dt, v1p, v1m, v2p, v2m;
@@ -142,17 +140,24 @@ namespace simbi{
 
             if constexpr(is_relativistic<T>::value)
             {
-                real h   = 1 + gamma * p / (rho * (gamma - 1));
-                real cs  = std::sqrt(gamma * p / (rho * h));
-                if constexpr(VelocityType == Velocity::FourVelocity) {
-                    real lorentz  = std::sqrt(1 + (v1 * v1 + v2 * v2));
-                    v1           /= lorentz;
-                    v2           /= lorentz;
+                if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                    real h   = 1 + gamma * p / (rho * (gamma - 1));
+                    real cs  = std::sqrt(gamma * p / (rho * h));
+                    if constexpr(VelocityType == Velocity::FourVelocity) {
+                        real lorentz  = std::sqrt(1 + (v1 * v1 + v2 * v2));
+                        v1           /= lorentz;
+                        v2           /= lorentz;
+                    }
+                    plus_v1  = (v1 + cs) / (1 + v1 * cs);
+                    plus_v2  = (v2 + cs) / (1 + v2 * cs);
+                    minus_v1 = (v1 - cs) / (1 - v1 * cs);
+                    minus_v2 = (v2 - cs) / (1 - v2 * cs);
+                } else {
+                    plus_v1  = 1;
+                    plus_v2  = 1;
+                    minus_v1 = 1;
+                    minus_v2 = 1;
                 }
-                plus_v1  = (v1 + cs) / (1 + v1 * cs);
-                plus_v2  = (v2 + cs) / (1 + v2 * cs);
-                minus_v1 = (v1 - cs) / (1 - v1 * cs);
-                minus_v2 = (v2 - cs) / (1 - v2 * cs);
             } else {
                 real cs  = std::sqrt(gamma * p / rho);
                 plus_v1  = (v1 + cs);
@@ -168,17 +173,17 @@ namespace simbi{
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
-                    cfl_dt = helpers::my_min(dx1 / (helpers::my_max(v1p, v1m)),
-                                    dx2 / (helpers::my_max(v2m, v2m)));
+                    cfl_dt = helpers::my_min(self->dx1 / (helpers::my_max(v1p, v1m)),
+                                             self->dx2 / (helpers::my_max(v2m, v2m)));
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
                 {
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl  = helpers::my_max(rmin * std::pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
-                    const real rr  = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
-                    const real tl  = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                    const real tr  = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    const real rl           = self->get_x1face(ii, geometry, 0);
+                    const real rr           = self->get_x1face(ii, geometry, 1);
+                    const real tl           = self->get_x2face(jj, 0);  
+                    const real tr           = self->get_x2face(jj, 1); 
                     if (self->mesh_motion)
                     {
                         const real vfaceL   = rl * self->hubble_param;
@@ -194,10 +199,10 @@ namespace simbi{
                 case simbi::Geometry::PLANAR_CYLINDRICAL:
                 {
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl  = helpers::my_max(rmin * std::pow(10, (ii -static_cast<real>(0.5)) * dx1), rmin);
-                    const real rr  = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
-                    const real tl  = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                    const real tr  = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    const real rl           = self->get_x1face(ii, geometry, 0);
+                    const real rr           = self->get_x1face(ii, geometry, 1);
+                    const real tl           = self->get_x2face(jj, 0);  
+                    const real tr           = self->get_x2face(jj, 1); 
                     if (self->mesh_motion)
                     {
                         const real vfaceL   = rl * self->hubble_param;
@@ -212,11 +217,10 @@ namespace simbi{
                 }
                 case simbi::Geometry::AXIS_CYLINDRICAL:
                 {
-                    // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl = self->get_x1face(ii, geometry, 0);
-                    const real rr = self->get_x1face(ii, geometry, 1);
-                    const real zl  = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                    const real zr  = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                    const real rl           = self->get_x1face(ii, geometry, 0);
+                    const real rr           = self->get_x1face(ii, geometry, 1);
+                    const real zl           = self->get_x2face(jj, 0);  
+                    const real zr           = self->get_x2face(jj, 1); 
                     if (self->mesh_motion)
                     {
                         const real vfaceL   = rl * self->hubble_param;
@@ -235,22 +239,13 @@ namespace simbi{
         #endif
     }
 
-    template<typename T, typename U, typename V>
+    template<typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
     GPU_LAUNCHABLE  typename std::enable_if<is_3D_primitive<T>::value>::type 
     compute_dt(U *self, 
     const V* prim_buffer,
     real *dt_min,
     const simbi::Geometry geometry, 
-    luint bytes,
-    real dx1, 
-    real dx2,
-    real dx3, 
-    real rmin, 
-    real rmax,
-    real x2min,
-    real x2max,
-    real x3min,
-    real x3max)
+    const luint bytes)
     {
         #if GPU_CODE
         real cfl_dt;
@@ -278,20 +273,29 @@ namespace simbi{
 
             if constexpr(is_relativistic<T>::value)
             {
-                real h   = 1 + gamma * p / (rho * (gamma - 1));
-                real cs  = std::sqrt(gamma * p / (rho * h));
-                if constexpr(VelocityType == Velocity::FourVelocity) {
-                    real lorentz  = std::sqrt(1 + (v1 * v1 + v2 * v2 + v3 * v3));
-                    v1           /= lorentz;
-                    v2           /= lorentz;
-                    v3           /= lorentz;
+                if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                    real h   = 1 + gamma * p / (rho * (gamma - 1));
+                    real cs  = std::sqrt(gamma * p / (rho * h));
+                    if constexpr(VelocityType == Velocity::FourVelocity) {
+                        real lorentz  = std::sqrt(1 + (v1 * v1 + v2 * v2 + v3 * v3));
+                        v1           /= lorentz;
+                        v2           /= lorentz;
+                        v3           /= lorentz;
+                    }
+                    plus_v1  = (v1 + cs) / (1 + v1 * cs);
+                    plus_v2  = (v2 + cs) / (1 + v2 * cs);
+                    plus_v3  = (v3 + cs) / (1 + v3 * cs);
+                    minus_v1 = (v1 - cs) / (1 - v1 * cs);
+                    minus_v2 = (v2 - cs) / (1 - v2 * cs);
+                    minus_v3 = (v3 - cs) / (1 - v3 * cs);
+                } else {
+                    plus_v1  = 1;
+                    plus_v2  = 1;
+                    plus_v3  = 1;
+                    minus_v1 = 1;
+                    minus_v2 = 1;
+                    minus_v3 = 1;
                 }
-                plus_v1  = (v1 + cs) / (1 + v1 * cs);
-                plus_v2  = (v2 + cs) / (1 + v2 * cs);
-                plus_v3  = (v3 + cs) / (1 + v3 * cs);
-                minus_v1 = (v1 - cs) / (1 - v1 * cs);
-                minus_v2 = (v2 - cs) / (1 - v2 * cs);
-                minus_v3 = (v3 - cs) / (1 - v3 * cs);
             } else {
                 real cs  = std::sqrt(gamma * p / rho);
                 plus_v1  = (v1 + cs);
@@ -305,20 +309,20 @@ namespace simbi{
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
-                    cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
-                                              dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
-                                              dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
+                    cfl_dt = helpers::my_min3(self->dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                              self->dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                                              self->dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
                     break;
                 
                 case simbi::Geometry::SPHERICAL:
                 {    
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl           = helpers::my_max(rmin * std::pow(10, (ii - static_cast<real>(0.5)) * dx1), rmin);
-                    const real rr           = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
-                    const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                    const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                    const real ql           = helpers::my_max(x3min + dx3 * (kk - static_cast<real>(0.5)), x3min);
-                    const real qr           = helpers::my_min(ql + dx3 * (kk == 0 ? 0.5 : 1.0), x3max); 
+                    const real rl           = self->get_x1face(ii, geometry, 0);
+                    const real rr           = self->get_x1face(ii, geometry, 1);
+                    const real tl           = self->get_x2face(jj, 0);  
+                    const real tr           = self->get_x2face(jj, 1); 
+                    const real ql           = self->get_x2face(kk, 0); 
+                    const real qr           = self->get_x2face(kk, 1); 
                     const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
                     const real th           = static_cast<real>(0.5) * (tl + tr);
                     cfl_dt = helpers::my_min3((rr - rl) / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
@@ -329,12 +333,12 @@ namespace simbi{
                 case simbi::Geometry::CYLINDRICAL:
                 {    
                     // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl           = helpers::my_max(rmin * std::pow(10, (ii - static_cast<real>(0.5)) * dx1), rmin);
-                    const real rr           = helpers::my_min(rl * std::pow(10, dx1 * (ii == 0 ? 0.5 : 1.0)), rmax);
-                    const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                    const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                    const real zl           = helpers::my_max(x3min + dx3 * (kk - static_cast<real>(0.5)), x3min);
-                    const real zr           = helpers::my_min(zl + dx3 * (kk == 0 ? 0.5 : 1.0), x3max); 
+                    const real rl           = self->get_x1face(ii, geometry, 0);
+                    const real rr           = self->get_x1face(ii, geometry, 1);
+                    const real tl           = self->get_x2face(jj, 0);  
+                    const real tr           = self->get_x2face(jj, 1); 
+                    const real zl           = self->get_x2face(kk, 0); 
+                    const real zr           = self->get_x2face(kk, 1); 
                     const real rmean        = static_cast<real>(2.0 / 3,0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                     const real th           = static_cast<real>(0.5) * (tl + tr);
                     cfl_dt = helpers::my_min3((rr - rl) / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),

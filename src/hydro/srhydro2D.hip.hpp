@@ -78,7 +78,10 @@ namespace simbi
             const luint nhat,
             const real vface) const;
 
+        template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt();
+
+        template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt(const ExecutionPolicy<> &p, luint bytes);
         
         void advance(

@@ -51,8 +51,11 @@ namespace simbi
           sr1d::Eigenvals calc_eigenvals(const sr1d::Primitive &primsL,
                                          const sr1d::Primitive &primsR) const;
 
+          template<simbi::TIMESTEP_TYPE dt_type = simbi::TIMESTEP_TYPE::ADAPTIVE>
           void adapt_dt();
-          void adapt_dt(luint blockSize);
+
+          template<simbi::TIMESTEP_TYPE dt_type = simbi::TIMESTEP_TYPE::ADAPTIVE>
+          void adapt_dt(const luint blockSize);
 
           GPU_CALLABLE_MEMBER
           sr1d::Conserved prims2cons(const sr1d::Primitive &prim) const;

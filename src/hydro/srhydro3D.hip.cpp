@@ -247,12 +247,13 @@ Conserved SRHD3D::prims2cons(const Primitive &prims)
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
 // Adapt the cfl conditonal timestep
+template<TIMESTEP_TYPE dt_type>
 void SRHD3D::adapt_dt()
 {
     real min_dt = INFINITY;
     #pragma omp parallel 
     {
-        real cfl_dt;
+        real cfl_dt, v1p, v1m, v2p, v2m, v3p, v3m;
         // Compute the minimum timestep given cfl
         for (luint kk = 0; kk < zphysical_grid; kk++)
         {
@@ -280,12 +281,21 @@ void SRHD3D::adapt_dt()
                     const auto cs       = std::sqrt(gamma * pressure / (rho * h));
 
                     // Left/Right wave speeds
-                    const auto plus_v1  = (v1 + cs) / (1 + v1 * cs);
-                    const auto plus_v2  = (v2 + cs) / (1 + v2 * cs);
-                    const auto plus_v3  = (v3 + cs) / (1 + v3 * cs);
-                    const auto minus_v1 = (v1 - cs) / (1 - v1 * cs);
-                    const auto minus_v2 = (v2 - cs) / (1 - v2 * cs);
-                    const auto minus_v3 = (v3 - cs) / (1 - v3 * cs);
+                    if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                        v1p = std::abs(v1 + cs) / (1 + v1 * cs);
+                        v2p = std::abs(v2 + cs) / (1 + v2 * cs);
+                        v3p = std::abs(v3 + cs) / (1 + v3 * cs);
+                        v1m = std::abs(v1 - cs) / (1 - v1 * cs);
+                        v2m = std::abs(v2 - cs) / (1 - v2 * cs);
+                        v3m = std::abs(v3 - cs) / (1 - v3 * cs);
+                    } else {
+                        v1p = 1;
+                        v1m = 1;
+                        v2p = 1;
+                        v2m = 1;
+                        v3p = 1;
+                        v3m = 1;
+                    }
 
                     const auto x1l     = get_x1face(ii, geometry, 0);
                     const auto x1r     = get_x1face(ii, geometry, 1);
@@ -294,9 +304,9 @@ void SRHD3D::adapt_dt()
                     {
                     case simbi::Geometry::CARTESIAN:
                         cfl_dt = std::min(
-                                    {dx1 / (std::max(std::abs(plus_v1), std::abs(minus_v1))),
-                                     dx2 / (std::max(std::abs(plus_v2), std::abs(minus_v2))),
-                                     dx3 / (std::max(std::abs(plus_v3), std::abs(minus_v3)))});
+                                    {dx1 / (std::max(v1p, v1m)),
+                                     dx2 / (std::max(v2p, v2m)),
+                                     dx3 / (std::max(v3p, v3m))});
                         break;
                     
                     case simbi::Geometry::SPHERICAL:
@@ -305,18 +315,18 @@ void SRHD3D::adapt_dt()
                             const real th    = static_cast<real>(0.5) * (x2r + x2l);
                             const auto rproj = rmean * std::sin(th);
                             cfl_dt = std::min(
-                                        {       dx1 / (std::max(std::abs(plus_v1), std::abs(minus_v1))),
-                                        rmean * dx2 / (std::max(std::abs(plus_v2), std::abs(minus_v2))),
-                                        rproj * dx3 / (std::max(std::abs(plus_v3), std::abs(minus_v3)))});
+                                        {       dx1 / (std::max(v1p, v1m)),
+                                        rmean * dx2 / (std::max(v2p, v2m)),
+                                        rproj * dx3 / (std::max(v3p, v3m))});
                             break;
                         }
                     case simbi::Geometry::CYLINDRICAL:
                         {
                             const auto rmean = static_cast<real>(2.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
                             cfl_dt = std::min(
-                                        {       dx1 / (std::max(std::abs(plus_v1), std::abs(minus_v1))),
-                                        rmean * dx2 / (std::max(std::abs(plus_v2), std::abs(minus_v2))),
-                                                dx3 / (std::max(std::abs(plus_v3), std::abs(minus_v3)))});
+                                        {       dx1 / (std::max(v1p, v1m)),
+                                        rmean * dx2 / (std::max(v2p, v2m)),
+                                                dx3 / (std::max(v3p, v3m))});
                             break;
                         }
                     }
@@ -327,37 +337,19 @@ void SRHD3D::adapt_dt()
             } // end jj
         } // end kk
     } // end parallel region
-
     dt = cfl * min_dt;
+
     };
 
+template<TIMESTEP_TYPE dt_type>
 void SRHD3D::adapt_dt(const ExecutionPolicy<> &p, const luint bytes)
 {
     
     #if GPU_CODE
     {
         luint psize = p.blockSize.x*p.blockSize.y;
-        switch (geometry)
-        {
-            case simbi::Geometry::CARTESIAN:
-                compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>
-                (this, prims.data(), dt_min.data(), geometry, psize, dx1, dx2, dx3);
-                deviceReduceWarpAtomicKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
-                // deviceReduceKernel<3><<<p.gridSize,p.blockSize>>>(this, dt_min.data(), active_zones);
-                // deviceReduceKernel<3><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y * p.gridSize.z);
-                break;
-            
-            case simbi::Geometry::CYLINDRICAL:
-            case simbi::Geometry::SPHERICAL:
-                compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>
-                (this, prims.data(), dt_min.data(), geometry, psize, dlogx1, dx2, dx3, x1min, x1max, x2min, x2max, x3min, x3max);
-                deviceReduceWarpAtomicKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
-                // deviceReduceKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
-                // deviceReduceKernel<3><<<1,1024>>>(this, dt_min.data(), p.gridSize.x * p.gridSize.y * p.gridSize.z);
-                break;
-            default:
-                break;
-        }
+        compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize, bytes>>>(this, prims.data(), dt_min.data(), geometry, psize);
+        deviceReduceWarpAtomicKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
     }
     #endif
@@ -1041,7 +1033,6 @@ void SRHD3D::advance(
         {
             case simbi::Geometry::CARTESIAN:
                 {
-                    // printf("indx1: %.2e, invdx2: %.2e, invfx3: %.2e\n", invdx1, invdx2, invdx3);
                     cons_data[aid] -= ( (frf  - flf ) * invdx1 + (grf - glf) * invdx2 + (hrf - hlf) * invdx3 - source_terms) * dt * step;
                     break;
                 }
@@ -1277,10 +1268,10 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     const auto dtShBytes = zblockdim * xblockdim * yblockdim * sizeof(Primitive) + zblockdim * xblockdim * yblockdim * sizeof(real);
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
-        adapt_dt(activeP, dtShBytes);
+        adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP, dtShBytes);
     } else {
         cons2prim(fullP);
-        adapt_dt();
+        adapt_dt<TIMESTEP_TYPE::MINIMUM>();
     }
     // Using a sigmoid decay function to represent when the source terms turn off.
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);

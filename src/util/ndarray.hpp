@@ -20,15 +20,15 @@ namespace simbi
 	template <typename Deleter>
 	using unique_p = std::unique_ptr<DT[], Deleter>;
 	private:
+		// Variable to store the size of the
+		// array
+		size_type sz;
+		
 		// Variable to store the current capacity
 		// of the array
 		size_type nd_capacity;
 
 		size_type dimensions;
-
-		// Variable to store the size of the
-		// array
-		size_type sz;
 
 		std::unique_ptr<DT[]> arr;
 		// Device-side array

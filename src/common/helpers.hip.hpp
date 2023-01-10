@@ -15,40 +15,25 @@ namespace simbi
     //======================================
     //          GPU TEMPLATES
     //======================================
-    template<typename T, typename U, typename V>
+    template<typename T, TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE, typename U, typename V>
     GPU_LAUNCHABLE  typename std::enable_if<is_1D_primitive<T>::value>::type 
     compute_dt(U *s, const V* prim_buffer, real* dt_min);
 
-    template<typename T, typename U, typename V>
+    template<typename T, TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE, typename U, typename V>
     GPU_LAUNCHABLE  typename std::enable_if<is_2D_primitive<T>::value>::type 
     compute_dt(U *s, 
     const V* prim_buffer,
     real *dt_min,
     const simbi::Geometry geometry, 
-    luint bytes,
-    real dx1, 
-    real dx2 , 
-    real rmin = 0, 
-    real rmax = 1,
-    real x2min = 0,
-    real x2max = 1);
+    const luint bytes);
 
-    template<typename T, typename U, typename V>
+    template<typename T, TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE, typename U, typename V>
     GPU_LAUNCHABLE  typename std::enable_if<is_3D_primitive<T>::value>::type 
     compute_dt(U *s, 
     const V* prim_buffer,
     real *dt_min,
     const simbi::Geometry geometry, 
-    luint bytes,
-    real dx1, 
-    real dx2,
-    real dx3, 
-    real rmin  = 0, 
-    real rmax  = 0,
-    real x2min = 0,
-    real x2max = 0,
-    real x3min = 0,
-    real x3max = 0);
+    const luint bytes);
 
     //======================================
     //              HELPER OVERLOADS

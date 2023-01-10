@@ -376,11 +376,13 @@ Eigenvals SRHD::calc_eigenvals(
 };
 
 // Adapt the cfl conditonal timestep
+template<TIMESTEP_TYPE dt_type>
 void SRHD::adapt_dt()
 {   
     real min_dt = INFINITY;
     #pragma omp parallel 
     {   
+        real vPlus, vMinus;
         // Compute the minimum timestep given cfl
         #pragma omp for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++)
@@ -390,22 +392,29 @@ void SRHD::adapt_dt()
             const real v      = prims[ii + idx_active].v;
             const real h      = 1 + gamma * p / (rho * (gamma - 1));
             const real cs     = std::sqrt(gamma * p / (rho * h));
-            const real vPLus  = (v + cs) / (1 + v * cs);
-            const real vMinus = (v - cs) / (1 - v * cs);
+            if constexpr(dt_type == simbi::TIMESTEP_TYPE::ADAPTIVE) {
+                vPlus  = (v + cs) / (1 + v * cs);
+                vMinus = (v - cs) / (1 - v * cs);
+            } else {
+                vPlus  = 1;
+                vMinus = 1;
+            }
+            
 
             const real x1l    = get_xface(ii, geometry, 0);
             const real x1r    = get_xface(ii, geometry, 1);
             const real dx1    = x1r - x1l;
             const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
             const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
-            const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPLus - vfaceR), std::abs(vMinus - vfaceL)));
+            const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPlus - vfaceR), std::abs(vMinus - vfaceL)));
             min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
         }
     }   
     dt = cfl * min_dt;
 };
 
-void SRHD::adapt_dt(luint blockSize)
+template<TIMESTEP_TYPE dt_type>
+void SRHD::adapt_dt(const luint blockSize)
 {   
     #if GPU_CODE
         compute_dt<Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(this, prims.data(), dt_min.data());
@@ -682,10 +691,10 @@ SRHD::simulate1D(
     
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
-        adapt_dt(activeP.gridSize.x);
+        adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP.gridSize.x);
     } else {
         cons2prim(fullP);
-        adapt_dt();
+        adapt_dt<TIMESTEP_TYPE::MINIMUM>();
     }
     // Using a sigmoid decay function to represent when the source terms turn off.
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
