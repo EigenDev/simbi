@@ -764,14 +764,14 @@ void SRHD2D::advance(
             if (object_to_my_right){
                 xprimsR.rho =  xprimsL.rho;
                 xprimsR.v1  = -xprimsL.v1;
-                xprimsR.v2  = -xprimsL.v2;
+                xprimsR.v2  =  xprimsL.v2;
                 xprimsR.p   =  xprimsL.p;
                 xprimsR.chi =  xprimsL.chi;
             }
 
             if (object_above_me){
                 yprimsR.rho =  yprimsL.rho;
-                yprimsR.v1  = -yprimsL.v1;
+                yprimsR.v1  =  yprimsL.v1;
                 yprimsR.v2  = -yprimsL.v2;
                 yprimsR.p   =  yprimsL.p;
                 yprimsR.chi =  yprimsL.chi;

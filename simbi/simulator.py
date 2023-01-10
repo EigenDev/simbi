@@ -521,6 +521,7 @@ class Hydro:
                 # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
             else:
                 state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=cython_coordinates)
+                kwargs = {'object_cells': object_cells}
             
             self.solution = state.simulate(
                 sources            = sources,
@@ -536,7 +537,8 @@ class Hydro:
                 first_order        = first_order,
                 linspace           = linspace,
                 hllc               = hllc,
-                constant_sources   = constant_sources)  
+                constant_sources   = constant_sources,
+                **kwargs)  
         
         if not periodic:
             self._cleanup(first_order)

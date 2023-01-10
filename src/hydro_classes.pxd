@@ -187,6 +187,7 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
 
         vector[vector[real]] simulate3D(
             vector[vector[real]] sources,
+            vector[bool] object_cells,
             real tstart,
             real tend,
             real dlogt,

@@ -333,6 +333,7 @@ cdef class PyStateSR3D:
 
     def simulate(self, 
         vector[vector[real]] sources,
+        np.ndarray[bool, ndim=3] object_cells,
         real tstart,
         real tend,
         real dlogt,
@@ -347,8 +348,10 @@ cdef class PyStateSR3D:
         bool hllc,
         bool constant_sources):
         
+        object_contig = object_cells.flatten()
         result = self.c_state.simulate3D(
             sources,
+            object_contig,
             tstart,
             tend,
             dlogt,

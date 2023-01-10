@@ -639,6 +639,7 @@ void SRHD3D::advance(
     auto* const mom2_source = sourceS2.data();
     auto* const mom3_source = sourceS3.data();
     auto* const erg_source  = sourceTau.data();
+    auto* const object_data = object_pos.data();
     const auto last_kindex  = nz - 1 - radius;
     const auto last_jindex  = ny - 1 - radius;
     const auto last_iindex  = nx - 1 - radius;
@@ -734,6 +735,13 @@ void SRHD3D::advance(
             simbi::gpu::api::synchronize();
         #endif
 
+        const bool object_to_my_left  = object_data[kk * xpg * ypg + jj * xpg +  helpers::my_max(static_cast<lint>(ii - 1), static_cast<lint>(0))];
+        const bool object_to_my_right = object_data[kk * xpg * ypg + jj * xpg +  helpers::my_min(ii + 1,  xpg - 1)];
+        const bool object_in_front    = object_data[kk * xpg * ypg + helpers::my_min(jj + 1, ypg - 1) * xpg +  ii];
+        const bool object_behind      = object_data[kk * xpg * ypg + helpers::my_max(static_cast<lint>(jj - 1), static_cast<lint>(0)) * xpg + ii];
+        const bool object_above_me    = object_data[helpers::my_min(kk + 1, zpg - 1)  * xpg * ypg + jj * xpg +  ii];
+        const bool object_below_me    = object_data[helpers::my_max(static_cast<lint>(kk - 1), static_cast<lint>(0)) * xpg * ypg + jj * xpg +  ii];
+
         if (first_order){
             xprimsL = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 0)];
             xprimsR = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 1)];
@@ -743,6 +751,33 @@ void SRHD3D::advance(
             //j+1/2
             zprimsL = prim_buff[(tza + 0) * xstride * ystride + tya * xstride + txa];
             zprimsR = prim_buff[(tza + 1) * xstride * ystride + tya * xstride + txa];
+
+            if (object_to_my_right){
+                xprimsR.rho =  xprimsL.rho;
+                xprimsR.v1  = -xprimsL.v1;
+                xprimsR.v2  =  xprimsL.v2;
+                xprimsR.v3  =  xprimsL.v3;
+                xprimsR.p   =  xprimsL.p;
+                xprimsR.chi =  xprimsL.chi;
+            }
+
+            if (object_in_front){
+                yprimsR.rho =  yprimsL.rho;
+                yprimsR.v1  =  yprimsL.v1;
+                yprimsR.v2  = -yprimsL.v2;
+                yprimsR.v3  =  yprimsL.v3;
+                yprimsR.p   =  yprimsL.p;
+                yprimsR.chi =  yprimsL.chi;
+            }
+
+            if (object_above_me) {
+                zprimsR.rho =  zprimsL.rho;
+                zprimsR.v1  =  zprimsL.v1;
+                zprimsR.v2  =  zprimsL.v2;
+                zprimsR.v3  = -zprimsL.v3;
+                zprimsR.p   =  zprimsL.p;
+                zprimsR.chi =  zprimsL.chi;
+            }
 
             uxL = prims2cons(xprimsL);
             uxR = prims2cons(xprimsR);
@@ -785,6 +820,33 @@ void SRHD3D::advance(
             zprimsL = prim_buff[(tza - 1) * xstride * ystride + tya * xstride + txa]; 
             zprimsR = prim_buff[(tza - 0) * xstride * ystride + tya * xstride + txa]; 
 
+            if (object_to_my_left){
+                xprimsL.rho =  xprimsR.rho;
+                xprimsL.v1  = -xprimsR.v1;
+                xprimsL.v2  =  xprimsR.v2;
+                xprimsL.v3  =  xprimsR.v3;
+                xprimsL.p   =  xprimsR.p;
+                xprimsL.chi =  xprimsR.chi;
+            }
+
+            if (object_behind){
+                yprimsL.rho =  yprimsR.rho;
+                yprimsL.v1  =  yprimsR.v1;
+                yprimsL.v2  = -yprimsR.v2;
+                yprimsL.v3  =  yprimsR.v3;
+                yprimsL.p   =  yprimsR.p;
+                yprimsL.chi =  yprimsR.chi;
+            }
+
+            if (object_below_me) {
+                zprimsL.rho =  zprimsR.rho;
+                zprimsL.v1  =  zprimsR.v1;
+                zprimsL.v2  =  zprimsR.v2;
+                zprimsL.v3  = -zprimsR.v3;
+                zprimsL.p   =  zprimsR.p;
+                zprimsL.chi =  zprimsR.chi;
+            }
+
             uxL = prims2cons(xprimsL);
             uxR = prims2cons(xprimsR);
 
@@ -804,7 +866,7 @@ void SRHD3D::advance(
             hR = prims2flux(zprimsR, 3);
 
             // Calc HLL Flux at i-1/2 interface
-            if ( hllc)
+            if (hllc)
             {
                 flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
@@ -847,6 +909,32 @@ void SRHD3D::advance(
             zprimsL = center     + helpers::minmod((center - zleft_mid)*plm_theta, (zright_mid - zleft_mid)*static_cast<real>(0.5), (zright_mid - center) * plm_theta) * static_cast<real>(0.5);  
             zprimsR = zright_mid - helpers::minmod((zright_mid - center) * plm_theta, (zright_most - center) * static_cast<real>(0.5), (zright_most - zright_mid)*plm_theta) * static_cast<real>(0.5);
 
+            if (object_to_my_right){
+                xprimsR.rho =  xprimsL.rho;
+                xprimsR.v1  = -xprimsL.v1;
+                xprimsR.v2  =  xprimsL.v2;
+                xprimsR.v3  =  xprimsL.v3;
+                xprimsR.p   =  xprimsL.p;
+                xprimsR.chi =  xprimsL.chi;
+            }
+
+            if (object_in_front){
+                yprimsR.rho =  yprimsL.rho;
+                yprimsR.v1  =  yprimsL.v1;
+                yprimsR.v2  = -yprimsL.v2;
+                yprimsR.v3  =  yprimsL.v3;
+                yprimsR.p   =  yprimsL.p;
+                yprimsR.chi =  yprimsL.chi;
+            }
+
+            if (object_above_me) {
+                zprimsR.rho =  zprimsL.rho;
+                zprimsR.v1  =  zprimsL.v1;
+                zprimsR.v2  =  zprimsL.v2;
+                zprimsR.v3  = -zprimsL.v3;
+                zprimsR.p   =  zprimsL.p;
+                zprimsR.chi =  zprimsL.chi;
+            }
 
             // Calculate the left and right states using the reconstructed PLM
             // Primitive
@@ -887,6 +975,32 @@ void SRHD3D::advance(
             zprimsL = zleft_mid + helpers::minmod((zleft_mid - zleft_most) * plm_theta, (center - zleft_most) * static_cast<real>(0.5), (center - zleft_mid)*plm_theta) * static_cast<real>(0.5);
             zprimsR = center    - helpers::minmod((center - zleft_mid)*plm_theta, (zright_mid - zleft_mid)*static_cast<real>(0.5), (zright_mid - center)*plm_theta)*static_cast<real>(0.5);
 
+            if (object_to_my_left){
+                xprimsL.rho =  xprimsR.rho;
+                xprimsL.v1  = -xprimsR.v1;
+                xprimsL.v2  =  xprimsR.v2;
+                xprimsL.v3  =  xprimsR.v3;
+                xprimsL.p   =  xprimsR.p;
+                xprimsL.chi =  xprimsR.chi;
+            }
+
+            if (object_behind){
+                yprimsL.rho =  yprimsR.rho;
+                yprimsL.v1  =  yprimsR.v1;
+                yprimsL.v2  = -yprimsR.v2;
+                yprimsL.v3  =  yprimsR.v3;
+                yprimsL.p   =  yprimsR.p;
+                yprimsL.chi =  yprimsR.chi;
+            }
+
+            if (object_below_me) {
+                zprimsL.rho =  zprimsR.rho;
+                zprimsL.v1  =  zprimsR.v1;
+                zprimsL.v2  =  zprimsR.v2;
+                zprimsL.v3  = -zprimsR.v3;
+                zprimsL.p   =  zprimsR.p;
+                zprimsL.chi =  zprimsR.chi;
+            }
 
             // Calculate the left and right states using the reconstructed PLM Primitive
             uxL = prims2cons(xprimsL);
@@ -927,6 +1041,7 @@ void SRHD3D::advance(
         {
             case simbi::Geometry::CARTESIAN:
                 {
+                    // printf("indx1: %.2e, invdx2: %.2e, invfx3: %.2e\n", invdx1, invdx2, invdx3);
                     cons_data[aid] -= ( (frf  - flf ) * invdx1 + (grf - glf) * invdx2 + (hrf - hlf) * invdx3 - source_terms) * dt * step;
                     break;
                 }
@@ -962,7 +1077,6 @@ void SRHD3D::advance(
 
                     const Conserved geom_source  = {0, (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , - rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean, 0};
                     cons_data[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 + (hrf - hlf) / dV3 - geom_source - source_terms) * dt * step;
-
                 break;
                 }
             case simbi::Geometry::CYLINDRICAL:
@@ -996,7 +1110,6 @@ void SRHD3D::advance(
 
                     const Conserved geom_source  = {0, (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean , 0, 0};
                     cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV + (hrf - hlf) * invdV - geom_source - source_terms) * dt * step;
-
                 break;
                 }
         } // end switch
@@ -1007,7 +1120,8 @@ void SRHD3D::advance(
 //                                            SIMULATE
 //===================================================================================================================
 std::vector<std::vector<real>> SRHD3D::simulate3D(
-    const std::vector<std::vector<real>> sources,
+    const std::vector<std::vector<real>> &sources,
+    std::vector<bool> &object_cells,
     real tstart, 
     real tend, 
     real dlogt, 
@@ -1038,6 +1152,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->sourceTau      = sources[4];
 
     // Define simulation params
+    this->object_pos      = object_cells;
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
@@ -1112,7 +1227,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     setup.x2                 = x2;
     setup.x3                 = x3;
     setup.mesh_motion        = mesh_motion;
-    
+
     cons.resize(nzones);
     prims.resize(nzones);
     dt_min.resize(active_zones);
@@ -1139,6 +1254,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     sourceS2.copyToGpu();
     sourceS3.copyToGpu();
     sourceTau.copyToGpu();
+    object_pos.copyToGpu();
 
     // Setup the system
     const luint xblockdim    = xphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : xphysical_grid;
@@ -1168,7 +1284,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     }
     // Using a sigmoid decay function to represent when the source terms turn off.
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
-
     // Save initial condition
     if (t == 0) {
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, zphysical_grid);
