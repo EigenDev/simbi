@@ -169,16 +169,7 @@ def read_3d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         nz = ds.attrs['nz']
 
         gamma = ds.attrs['adiabatic_gamma']
-            
-        try:
-            coord_sysem = ds.attrs['geometry'].decode('utf-8')
-        except Exception as e:
-            coord_sysem = 'spherical'
-            
-        try:
-            is_linspace = ds.attrs['linspace']
-        except:
-            is_linspace = False
+        coord_sysem = ds.attrs['geometry'].decode('utf-8')
         
         setup['x1max'] = x1max 
         setup['x1min'] = x1min 
@@ -248,20 +239,10 @@ def read_3d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
     znpts, ynpts, xnpts = rho.shape 
     
     mesh = {}
-    if setup['is_cartesian']:
-        yy, zz, xx = np.meshgrid(setup['x2'], setup['x3'], setup['x1'])
-        mesh['xx'] = xx
-        mesh['yy'] = yy
-        mesh['zz'] = zz
-    else:  
-        tt, phii, rr = np.meshgrid(setup['x2'], setup['x3'], setup['x1'])
-        mesh['theta'] = tt 
-        mesh['rr']    = rr
-        mesh['phii']  = phii
-        mesh['x1']     = setup['x1']
-        mesh['th']    = setup['x2']
-        mesh['phi']   = setup['x3']
-        
+    x3, x2, x1 = np.meshgrid(setup['x3'], setup['x2'], setup['x1'], indexing='ij')
+    mesh['x1'] = x1
+    mesh['x2'] = x2
+    mesh['x3'] = x3
     return fields, setup, mesh 
 
 def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dict,dict]:

@@ -491,12 +491,7 @@ def plot_cartesian_plot(
     dset: dict) -> None:
     fig, ax = plt.subplots(1, 1, figsize=(10,10), constrained_layout=False)
 
-    xx, yy = mesh['xx'], mesh['yy']
-    x1max        = dset['x1max']
-    x1min        = dset['x1min']
-    x2max        = dset['x2max']
-    x2min        = dset['x2min']
-    
+    xx1, xx2, xx3 = mesh['x1'], mesh['x2'], mesh['x3']
     vmin,vmax = args.cbar
 
     if args.log:
@@ -508,9 +503,18 @@ def plot_cartesian_plot(
         color_map = (plt.cm.get_cmap(args.cmap)).reversed()
     else:
         color_map = plt.cm.get_cmap(args.cmap)
+    
+    if args.fields[0] in derived:
+        var = util.prims2var(fields, args.fields[0])
+    else:
+        var = fields[args.fields[0]]
         
     tend = dset['time']
-    c = ax.pcolormesh(xx, yy, fields[args.fields[0]], cmap=color_map, shading='auto', **kwargs)
+    varz = var[:, xx2.shape[1] // 2, :]
+    x1   = xx1[0, 0, :]
+    x2   = xx2[0, :, 0]
+    x3   = xx3[:, 0, 0]
+    c    = ax.pcolormesh(x1, x3, varz, cmap=color_map, shading='auto', **kwargs)
     
     divider = make_axes_locatable(ax)
     cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
