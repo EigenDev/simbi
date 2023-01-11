@@ -13,7 +13,6 @@
 #include "common/enums.hpp"
 #include "common/helpers.hpp"
 #include "build_options.hpp"
-#include "util/ndarray.hpp"
 #include "base.hpp"
 namespace simbi {
     struct Newtonian2D : public HydroBase {
@@ -25,7 +24,7 @@ namespace simbi {
 
         // Simulation Param
         ndarray<primitive_t> prims;
-        ndarray<conserved_t> cons, outer_zones;
+        ndarray<conserved_t> cons, outer_zones, inflow_zones;
         ndarray<real> sourceRho, sourceM1, sourceM2, sourceE, dt_min;
         bool rho_all_zeros, m1_all_zeros, m2_all_zeros, e_all_zeros;
         
@@ -122,11 +121,12 @@ namespace simbi {
             real chkpt_luinterval,
             int  chkpt_idx,
             std::string data_directory, 
-            std::string boundary_condition,
+            std::vector<std::string> boundary_conditions,
             bool first_order,
             bool linspace, 
             bool hllc,
-            bool constant_sources);
+            bool constant_sources,
+            std::vector<std::vector<real>> boundary_sources);
 
 
         GPU_CALLABLE_INLINE

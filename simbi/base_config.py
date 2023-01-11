@@ -3,7 +3,7 @@ from .dynarg import DynamicArg
 
 
 class_props = [
-    'boundary_condition', 'coord_system', 'data_directory', 
+    'boundary_conditions', 'coord_system', 'data_directory', 
     'dens_outer', 'resolution', 'dlogt', 'dynamic_args', 
     'edens_outer', 'end_time', 'find_dynamic_args', 'gamma', 
     'geometry', 'initial_state', 'linspace', 'mom_outer', 
@@ -85,8 +85,8 @@ class BaseConfig:
        return None
    
     @property
-    def boundary_condition(self) -> str:
-       return None 
+    def boundary_conditions(self) -> str:
+       return None
    
     @property
     def plm_theta(self) -> float:

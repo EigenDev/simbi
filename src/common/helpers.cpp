@@ -115,6 +115,22 @@ namespace simbi
             size_t size_str = 100;                    
             H5Tset_size(dtype_str, size_str);
 
+            // HDF5 only understands vector of char* :-(
+            std::vector<const char*> arr_c_str;
+            for (size_t ii = 0; ii < setup.boundary_conditions.size(); ++ii) 
+                arr_c_str.push_back(setup.boundary_conditions[ii].c_str());
+
+            //
+            //  one dimension
+            // 
+            hsize_t     str_dimsf[1] {arr_c_str.size()};
+            H5::DataSpace bc_dataspace(rank, str_dimsf);
+
+            // Variable length string
+            H5::StrType str_datatype(H5::PredType::C_S1, H5T_VARIABLE); 
+            H5::DataSet str_dataset = file.createDataSet("boundary_conditions", str_datatype, bc_dataspace);
+            str_dataset.write(arr_c_str.data(), str_datatype);
+            str_dataset.close();
             switch (dim)
             {
                 case 1:
@@ -145,7 +161,6 @@ namespace simbi
                     dataset = file.createDataSet("x1", datatype, dataspacex1);
                     dataset.write(x1.get(), H5::PredType::NATIVE_DOUBLE);
                     dataset.close();
-
 
                     // Write Datset Attributes
                     H5::DataType real_type(H5::PredType::NATIVE_DOUBLE);
@@ -207,10 +222,6 @@ namespace simbi
 
                     att = sim_info.createAttribute("geometry", dtype_str, att_space);
                     att.write(dtype_str, setup.coord_system.c_str());
-                    att.close();
-
-                    att = sim_info.createAttribute("boundary_condition", dtype_str, att_space);
-                    att.write(dtype_str, setup.boundarycond.c_str());
                     att.close();
 
                     att = sim_info.createAttribute("regime", dtype_str, att_space);
@@ -352,10 +363,6 @@ namespace simbi
 
                     att = sim_info.createAttribute("geometry", dtype_str, att_space);
                     att.write(dtype_str, setup.coord_system.c_str());
-                    att.close();
-
-                    att = sim_info.createAttribute("boundary_condition", dtype_str, att_space);
-                    att.write(dtype_str, setup.boundarycond.c_str());
                     att.close();
 
                     att = sim_info.createAttribute("regime", dtype_str, att_space);
@@ -524,10 +531,6 @@ namespace simbi
 
                     att = sim_info.createAttribute("geometry", dtype_str, att_space);
                     att.write(dtype_str, setup.coord_system.c_str());
-                    att.close();
-
-                    att = sim_info.createAttribute("boundary_condition", dtype_str, att_space);
-                    att.write(dtype_str, setup.boundarycond.c_str());
                     att.close();
 
                     att = sim_info.createAttribute("regime", dtype_str, att_space);

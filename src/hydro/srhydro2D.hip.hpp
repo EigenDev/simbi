@@ -11,7 +11,6 @@
 #include "common/helpers.hpp"
 #include "common/hydro_structs.hpp"
 #include "util/exec_policy.hpp"
-#include "util/ndarray.hpp"
 #include "base.hpp"
 
 namespace simbi
@@ -25,7 +24,7 @@ namespace simbi
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
-        ndarray<conserved_t> cons, outer_zones;
+        ndarray<conserved_t> cons, outer_zones, inflow_zones;
         ndarray<real> sourceD, sourceS1, sourceS2, sourceTau, pressure_guess, dt_min;
         ndarray<bool> object_pos;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros;
@@ -183,12 +182,13 @@ namespace simbi
             real chkpt_interval,
             int  chkpt_idx,
             std::string data_directory,
-            std::string boundary_condition,
+            std::vector<std::string> boundary_conditions,
             bool first_order,
             bool linspace,
             bool hllc,
             bool quirk_smoothing,
             bool constant_sources,
+            std::vector<std::vector<real>> boundary_sources,
             std::function<double(double)> a = nullptr,
             std::function<double(double)> adot = nullptr,
             std::function<double(double, double)> d_outer = nullptr,

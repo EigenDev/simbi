@@ -40,11 +40,12 @@ cdef class PyState:
         real chkpt_interval,
         int  chkpt_idx,
         string data_directory,
-        string boundary_condition,
+        vector[string] boundary_conditions,
         bool first_order,
         bool linspace,
         bool hllc,
-        bool constant_sources):
+        bool constant_sources,
+        vector[vector[real]] boundary_sources):
 
         result = self.c_state.simulate1D(
             sources,
@@ -56,11 +57,12 @@ cdef class PyState:
             chkpt_interval,
             chkpt_idx,
             data_directory,
-            boundary_condition,
+            boundary_conditions,
             first_order,
             linspace,
             hllc,
-            constant_sources)
+            constant_sources,
+            boundary_sources)
 
         return np.asarray(result)
 
@@ -89,11 +91,12 @@ cdef class PyStateSR:
         real chkpt_interval, 
         int  chkpt_idx,
         string data_directory,
-        string boundary_condition,
+        vector[string] boundary_conditions,
         bool first_order, 
         bool linspace, 
         bool hllc,
         bool constant_sources,
+        vector[vector[real]] boundary_sources,
         a,
         adot,
         d_outer = None,
@@ -117,11 +120,12 @@ cdef class PyStateSR:
                 chkpt_interval, 
                 chkpt_idx,
                 data_directory,
-                boundary_condition,
+                boundary_conditions,
                 first_order, 
                 linspace, 
                 hllc,
                 constant_sources,
+                boundary_sources,
                 a_cpp,
                 adot_cpp,
                 d_cpp,
@@ -138,11 +142,12 @@ cdef class PyStateSR:
                 chkpt_interval, 
                 chkpt_idx,
                 data_directory,
-                boundary_condition,
+                boundary_conditions,
                 first_order, 
                 linspace, 
                 hllc,
                 constant_sources,
+                boundary_sources,
                 a_cpp,
                 adot_cpp)
             
@@ -175,11 +180,12 @@ cdef class PyState2D:
         real chkpt_interval,
         int  chkpt_idx,
         string data_directory, 
-        string boundary_condition,
+        vector[string] boundary_conditions,
         bool first_order,
         bool linspace, 
         bool hllc,
-        bool constant_sources):
+        bool constant_sources,
+        vector[vector[real]] boundary_sources):
 
         result = self.c_state.simulate2D(
             sources,
@@ -191,11 +197,12 @@ cdef class PyState2D:
             chkpt_interval,
             chkpt_idx,
             data_directory,
-            boundary_condition, 
+            boundary_conditions, 
             first_order,
             linspace, 
             hllc,
-            constant_sources)
+            constant_sources,
+            boundary_sources)
             
         result = np.asarray(result)
         result = result.reshape(5, self.c_state.ny, self.c_state.nx)
@@ -235,12 +242,13 @@ cdef class PyStateSR2D:
         real chkpt_interval,
         int  chkpt_idx,
         string data_directory,
-        string boundary_condition,
+        vector[string] boundary_conditions,
         bool first_order,
         bool linspace,
         bool hllc,
         bool quirk_smoothing,
         bool constant_sources,
+        vector[vector[real]] boundary_sources,
         a,
         adot,
         d_outer  = None,
@@ -268,12 +276,13 @@ cdef class PyStateSR2D:
                 chkpt_interval,
                 chkpt_idx,
                 data_directory,
-                boundary_condition,
+                boundary_conditions,
                 first_order,
                 linspace,
                 hllc,
                 quirk_smoothing,
                 constant_sources,
+                boundary_sources,
                 a_cpp,
                 adot_cpp,
                 d_cpp,
@@ -292,12 +301,13 @@ cdef class PyStateSR2D:
                 chkpt_interval,
                 chkpt_idx,
                 data_directory,
-                boundary_condition,
+                boundary_conditions,
                 first_order,
                 linspace,
                 hllc,
                 quirk_smoothing,
                 constant_sources,
+                boundary_sources,
                 a_cpp,
                 adot_cpp)
 
@@ -342,11 +352,12 @@ cdef class PyStateSR3D:
         real chkpt_interval,
         int  chkpt_idx,
         string data_directory,
-        string boundary_condition,
+        vector[string] boundary_conditions,
         bool first_order,
         bool linspace,
         bool hllc,
-        bool constant_sources):
+        bool constant_sources,
+        vector[vector[real]] boundary_sources):
         
         object_contig = object_cells.flatten()
         result = self.c_state.simulate3D(
@@ -360,11 +371,12 @@ cdef class PyStateSR3D:
             chkpt_interval,
             chkpt_idx,
             data_directory,
-            boundary_condition,
+            boundary_conditions,
             first_order,
             linspace,
             hllc,
-            constant_sources)
+            constant_sources,
+            boundary_sources)
         result = np.asarray(result)
         result = result.reshape(5, self.c_state.nz, self.c_state.ny, self.c_state.nx)
         return result

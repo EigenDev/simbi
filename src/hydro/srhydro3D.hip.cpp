@@ -1121,11 +1121,12 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     real chkpt_interval,
     int  chkpt_idx,
     std::string data_directory, 
-    std::string boundary_condition,
+    std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace, 
     bool hllc,
-    bool constant_sources)
+    bool constant_sources,
+    std::vector<std::vector<real>> boundary_sources)
 {   
     anyDisplayProps();
     real round_place = 1 / chkpt_interval;
@@ -1151,12 +1152,11 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny * nz;
     this->first_order     = first_order;
-    this->periodic        = boundary_condition == "periodic";
+    this->periodic        = boundary_conditions[0] == "periodic";
     this->hllc            = hllc;
     this->dlogt           = dlogt;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
-    this->bc              = helpers::boundary_cond_map.at(boundary_condition);
     this->geometry        = helpers::geometry_map.at(coord_system);
     this->xphysical_grid  = (first_order) ? nx - 2: nx - 4;
     this->yphysical_grid  = (first_order) ? ny - 2: ny - 4;
@@ -1194,6 +1194,13 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         this->half_sphere = true;
     }
 
+    inflow_zones.resize(6);
+    for (int i = 0; i < 6; i++) {
+        this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
+        this->inflow_zones.push_back(Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]});
+    }
+    
+
     // Write some info about the setup for writeup later
     setup.x1max              = x1[xphysical_grid - 1];
     setup.x1min              = x1[0];
@@ -1211,13 +1218,13 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     setup.ad_gamma           = gamma;
     setup.first_order        = first_order;
     setup.coord_system       = coord_system;
-    setup.boundarycond       = boundary_condition;
     setup.using_fourvelocity = false;
     setup.regime             = "relativistic";
     setup.x1                 = x1;
     setup.x2                 = x2;
     setup.x3                 = x3;
     setup.mesh_motion        = mesh_motion;
+    setup.boundary_conditions  = boundary_conditions;
 
     cons.resize(nzones);
     prims.resize(nzones);
@@ -1246,6 +1253,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     sourceS3.copyToGpu();
     sourceTau.copyToGpu();
     object_pos.copyToGpu();
+    bcs.copyToGpu();
 
     // Setup the system
     const luint xblockdim    = xphysical_grid > BLOCK_SIZE3D ? BLOCK_SIZE3D : xphysical_grid;
@@ -1263,7 +1271,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
     if (t == 0) {
-        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bc, half_sphere, geometry);
+        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(),inflow_zones.data(), half_sphere, geometry);
     }
     const auto dtShBytes = zblockdim * xblockdim * yblockdim * sizeof(Primitive) + zblockdim * xblockdim * yblockdim * sizeof(real);
     if constexpr(BuildPlatform == Platform::GPU) {
@@ -1285,7 +1293,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     simbi::detail::logger::with_logger(*this, tend, [&](){
         advance(activeP, xstride, ystride, zstride);
         cons2prim(fullP);
-        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bc, half_sphere, geometry);
+        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP, dtShBytes);
         } else {

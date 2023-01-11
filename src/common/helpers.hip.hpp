@@ -60,16 +60,18 @@ namespace simbi
         SRHD::conserved_t *cons, 
         const int grid_size,
         const bool first_order, 
-        const simbi::BoundaryCondition boundary_condition,
-        const sr1d::Conserved *outer_zones = nullptr);
+        const simbi::BoundaryCondition* boundary_conditions,
+        const sr1d::Conserved *outer_zones = nullptr,
+        const sr1d::Conserved *inflow_zones = nullptr);
 
     void config_ghosts1D(
         const ExecutionPolicy<> p,
         Newtonian1D::conserved_t *cons, 
         const int grid_size,
         const bool first_order, 
-        const simbi::BoundaryCondition boundary_condition,
-        const hydro1d::Conserved *outer_zones = nullptr);
+        const simbi::BoundaryCondition* boundary_conditions,
+        const hydro1d::Conserved *outer_zones  = nullptr,
+        const hydro1d::Conserved *inflow_zones = nullptr);
         
     void config_ghosts2D(
         const ExecutionPolicy<> p,
@@ -78,8 +80,9 @@ namespace simbi
         const int x2grid_size, 
         const bool first_order,
         const simbi::Geometry geometry,
-        const simbi::BoundaryCondition boundary_condition,
+        const simbi::BoundaryCondition* boundary_conditions,
         const sr2d::Conserved *outer_zones = nullptr,
+        const sr2d::Conserved *boundary_zones = nullptr,
         const bool half_sphere = true);
 
     void config_ghosts2D(
@@ -89,8 +92,9 @@ namespace simbi
         const int x2grid_size, 
         const bool first_order,
         const simbi::Geometry geometry,
-        const simbi::BoundaryCondition boundary_condition,
+        const simbi::BoundaryCondition* boundary_conditions,
         const hydro2d::Conserved *outer_zones = nullptr,
+        const hydro2d::Conserved *boundary_zones = nullptr,
         const bool half_sphere = true);
 
     void config_ghosts3D(
@@ -100,7 +104,8 @@ namespace simbi
         const int x2grid_size,
         const int x3grid_size,  
         const bool first_order,
-        const simbi::BoundaryCondition boundary_condition,
+        const simbi::BoundaryCondition* boundary_conditions,
+        const sr3d::Conserved* inflow_zones,
         const bool half_sphere,
         const simbi::Geometry geometry);
 

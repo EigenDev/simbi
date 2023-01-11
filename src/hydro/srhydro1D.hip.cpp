@@ -591,11 +591,12 @@ SRHD::simulate1D(
     real chkpt_interval,
     int  chkpt_idx,
     std::string data_directory,
-    std::string boundary_condition,
+    std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace,
     bool hllc,
     bool constant_sources,
+    std::vector<std::vector<real>> boundary_sources,
     std::function<double(double)> a,
     std::function<double(double)> adot,
     std::function<double(double)> d_outer,
@@ -607,7 +608,7 @@ SRHD::simulate1D(
     this->data_directory  = data_directory;
     this->tstart          = tstart;
     this->init_chkpt_idx  = chkpt_idx;
-    this->periodic        = boundary_condition == "periodic";
+    this->periodic        = boundary_conditions[0] == "periodic";
     this->first_order     = first_order;
     this->plm_theta       = plm_theta;
     this->linspace        = linspace;
@@ -619,7 +620,6 @@ SRHD::simulate1D(
     this->t               = tstart;
     this->tend            = tend;
     this->dlogt           = dlogt;
-    this->bc              = helpers::boundary_cond_map.at(boundary_condition);
     this->geometry        = helpers::geometry_map.at(coord_system);
     this->idx_active      = (periodic) ? 0  : (first_order) ? 1 : 2;
     this->active_zones    = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
@@ -631,7 +631,12 @@ SRHD::simulate1D(
     this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
     this->total_zones     = nx;
     this->checkpoint_zones= active_zones;
-    luint n = 0;
+    inflow_zones.resize(2);
+    for (size_t i = 0; i < 2; i++)
+    {
+        this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
+        this->inflow_zones.push_back(Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]});
+    }
     
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
@@ -652,11 +657,11 @@ SRHD::simulate1D(
     setup.ad_gamma           = gamma;
     setup.first_order        = first_order;
     setup.coord_system       = coord_system;
-    setup.boundarycond       = boundary_condition;
     setup.using_fourvelocity = false;
     setup.x1                 = x1;
     setup.regime             = "relativistic";
     setup.mesh_motion        = mesh_motion;
+    setup.boundary_conditions = boundary_conditions;
 
     cons.resize(nx);
     prims.resize(nx);
@@ -679,6 +684,8 @@ SRHD::simulate1D(
     sourceD.copyToGpu();
     sourceS.copyToGpu();
     source0.copyToGpu();
+    inflow_zones.copyToGpu();
+    bcs.copyToGpu();
 
     const auto xblockdim      = nx > BLOCK_SIZE ? BLOCK_SIZE : nx;
     this->radius              = (periodic) ? 0 : (first_order) ? 1 : 2;
@@ -711,7 +718,7 @@ SRHD::simulate1D(
         advance(activeP, xstride);
         cons2prim(fullP);
         if (!periodic) {
-            config_ghosts1D(fullP, cons.data(), nx, first_order, bc, outer_zones.data());
+            config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
         }
 
         if constexpr(BuildPlatform == Platform::GPU) {

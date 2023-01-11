@@ -138,11 +138,12 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                     model.u[:, -(i + 1), :] = model.u[:, -(nghosts + 1), :]
         
 
-def initializeModel(model, first_order = False, boundary_condition = "outflow", scalars = 0, volume_factor = 1):
+def initializeModel(model, first_order = False, boundary_conditions = "outflow", scalars = 0, volume_factor = 1):
+    full_periodic = all(bc == 'periodic' for bc in boundary_conditions)
     # Check if u-array is empty. If it is, generate an array.
     if model.dimensionality  == 1:
         if not model.u.any():
-            if boundary_condition == "periodic":
+            if full_periodic:
                 if model.regime == "classical":
                     model.u = np.empty(shape = (3, model.resolution), dtype = float)
                     
@@ -196,7 +197,7 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                     model.u = np.insert(model.u, 0,
                                     (left_ghost, left_ghost) , axis=1)
         else:
-            if not boundary_condition == 'periodic':
+            if not full_periodic:
                 model.u *= volume_factor
                 # Add the extra ghost cells for i-2, i+2
                 right_ghost = model.u[:, -1]
@@ -221,7 +222,7 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
             
             model.u *= volume_factor
                 
-            if boundary_condition != 'periodic':
+            if not full_periodic:
                 if first_order:
                     # Add boundary ghosts
                     bottom_ghost = model.u[:, -1]
@@ -260,7 +261,7 @@ def initializeModel(model, first_order = False, boundary_condition = "outflow", 
                 
     else:
         if not model.u.any():
-            if boundary_condition == "periodic":
+            if not full_periodic:
                 model.u = np.empty(shape = (5, model.zresolution, model.yresolution, model.xresolution), dtype = float)
                 
                 model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_v1,

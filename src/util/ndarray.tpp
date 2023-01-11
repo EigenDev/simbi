@@ -104,9 +104,9 @@ template <typename DT>
 constexpr void simbi::ndarray<DT>::push_back(const DT& data)
 {
     if (sz == nd_capacity) {
-        auto old = arr;
+        auto old = arr.get();
         arr.reset(new DT[nd_capacity = nd_capacity * 2]);
-        std::copy(old.get(), old.get() + sz, arr.get());
+        std::copy(old, old + sz, arr.get());
     } else {
         nd_capacity += sizeof(DT);
     }

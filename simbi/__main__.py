@@ -35,7 +35,7 @@ def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     parser.add_argument('--chkpt', help='checkpoint file to restart computation from', default=None, type=str)
     parser.add_argument('--chkpt_interval', help='checkpoint interval spacing in simulation time units', default=0.1, type=float)
     parser.add_argument('--data_directory', help='directory to save checkpoint files', default='data/', type=str)
-    parser.add_argument('--boundary_condition', help='boundary condition for inner boundary', default='outflow', choices=['reflecting', 'outflow', 'inflow', 'periodic'])
+    parser.add_argument('--boundary_conditions', help='boundary condition for inner boundary', default='outflow', nargs="+", choices=['reflecting', 'outflow', 'inflow', 'periodic'])
     parser.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=0.0, type=float)
     parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
     parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
@@ -48,7 +48,7 @@ def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     return parser, parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
 configs_src = Path(__file__).resolve().parent / 'configs'
-overideable_args = ['tstart', 'tend', 'hllc', 'boundary_condition', 'plm_theta', 'dlogt', 'data_directory', 'quirk_smoothing', 'constant_sources']
+overideable_args = ['tstart', 'tend', 'hllc', 'boundary_conditions', 'plm_theta', 'dlogt', 'data_directory', 'quirk_smoothing', 'constant_sources']
 def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
@@ -130,7 +130,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
         kwargs[idx]['tstart']                   = config.default_start_time
         kwargs[idx]['tend']                     = config.default_end_time
         kwargs[idx]['hllc']                     = config.use_hllc_solver 
-        kwargs[idx]['boundary_condition']       = config.boundary_condition
+        kwargs[idx]['boundary_conditions']      = config.boundary_conditions
         kwargs[idx]['plm_theta']                = config.plm_theta
         kwargs[idx]['dlogt']                    = config.dlogt
         kwargs[idx]['data_directory']           = config.data_directory

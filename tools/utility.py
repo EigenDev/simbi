@@ -153,6 +153,8 @@ def read_3d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         v3  = hf.get('v3')[:]
         p   = hf.get('p')[:]
         chi = hf.get('chi')[:]
+        bcs = hf.get('boundary_conditions')[:]
+        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
         t   = ds.attrs['current_time']
         
         x1max = ds.attrs['x1max']
@@ -256,7 +258,9 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         v2  = hf.get('v2')[:]
         p   = hf.get('p')[:]
         chi = hf.get('chi')[:]
+        bcs = hf.get('boundary_conditions')[:]
         t   = ds.attrs['current_time']
+        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
         
         x1max = ds.attrs['x1max']
         x1min = ds.attrs['x1min']
@@ -287,7 +291,7 @@ def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dic
         p   = p.reshape(ny, nx)
         chi = chi.reshape(ny, nx)
         
-        if ds.attrs['boundary_condition'].decode("utf-8") == 'periodic':
+        if full_periodic:
             xactive = nx 
             yactive = ny
         else:
@@ -387,25 +391,26 @@ def read_1d_file(filename: str) -> dict:
         rho         = hf.get('rho')[:]
         v           = hf.get('v')[:]
         p           = hf.get('p')[:]
+        bcs         = hf.get('boundary_conditions')
         nx          = ds.attrs['nx']
         t           = ds.attrs['current_time']
         x1max       = ds.attrs['x1max']
         x1min       = ds.attrs['x1min']
         is_linspace = ds.attrs['linspace']
         gamma       = ds.attrs['adiabatic_gamma']
-        
+        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
         xactive = nx
-        if ds.attrs['boundary_condition'].decode('utf-8') != 'periodic':
+        if not full_periodic:
             if ds.attrs['first_order']:
                 rho = rho[1:-1]
                 v   = v[1:-1]
                 p   = p[1:-1]
-                xactive = nx - 4
+                xactive -= 2
             else:
                 rho = rho[2:-2]
                 v   = v  [2:-2]
                 p   = p  [2:-2]
-                xactive = nx - 4
+                xactive -= 4
         
         mesh['x1'] = hf.get('x1')[:]
         if x1max > mesh['x1'][-1]:

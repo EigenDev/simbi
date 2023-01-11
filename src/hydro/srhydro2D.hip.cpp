@@ -1070,12 +1070,13 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     real chkpt_interval,
     int chkpt_idx,
     std::string data_directory,
-    std::string boundary_condition,
+    std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace,
     bool hllc,
     bool quirk_smoothing,
     bool constant_sources,
+    std::vector<std::vector<real>> boundary_sources,
     std::function<double(double)> a,
     std::function<double(double)> adot,
     std::function<double(double, double)> d_outer,
@@ -1106,7 +1107,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny;
     this->first_order     = first_order;
-    this->periodic        = boundary_condition == "periodic";
+    this->periodic        = boundary_conditions[0] == "periodic";
     this->hllc            = hllc;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
@@ -1116,7 +1117,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->idx_active      = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->active_zones    = xphysical_grid * yphysical_grid;
     this->quirk_smoothing = quirk_smoothing;
-    this->bc              = helpers::boundary_cond_map.at(boundary_condition);
     this->geometry        = helpers::geometry_map.at(coord_system);
     this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
     this->x2cell_spacing  = simbi::Cellspacing::LINSPACE;
@@ -1139,6 +1139,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->mesh_motion  = (hubble_param != 0);
     if (x2max == 0.5 * M_PI){
         this->half_sphere = true;
+    }
+
+    inflow_zones.resize(4);
+    for (int i = 0; i < 4; i++) {
+        this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
+        this->inflow_zones.push_back(Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]});
     }
 
     cons.resize(nzones);
@@ -1171,6 +1177,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     sourceS2.copyToGpu();
     sourceTau.copyToGpu();
     object_pos.copyToGpu();
+    inflow_zones.copyToGpu();
+    bcs.copyToGpu();
 
     // Write some info about the setup for writeup later
     setup.x1max              = x1[xphysical_grid - 1];
@@ -1185,7 +1193,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     setup.ad_gamma           = gamma;
     setup.first_order        = first_order;
     setup.coord_system       = coord_system;
-    setup.boundarycond       = boundary_condition;
+    setup.boundary_conditions  = boundary_conditions;
     setup.regime             = "relativistic";
     setup.using_fourvelocity = false;
     setup.x1                 = x1;
@@ -1204,7 +1212,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
     if (t == 0) {
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bc, outer_zones.data(), half_sphere);
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
     
     const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive);
@@ -1231,7 +1239,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     simbi::detail::logger::with_logger(*this, tend, [&](){
         advance(activeP, xstride, ystride);
         cons2prim(fullP);
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bc, outer_zones.data(), half_sphere);
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
         
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP, dtShBytes);

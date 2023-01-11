@@ -4,6 +4,7 @@
 #include "common/hydro_structs.hpp"
 #include "util/managed.hpp"
 #include "build_options.hpp"
+#include "util/ndarray.hpp"
 
 namespace simbi
 {
@@ -28,7 +29,7 @@ namespace simbi
         luint active_zones, idx_active, total_zones, n, nx, ny, nz, init_chkpt_idx, radius, pseudo_radius;
         luint xphysical_grid, yphysical_grid, zphysical_grid;
         simbi::Solver sim_solver;
-        simbi::BoundaryCondition bc;
+        ndarray<simbi::BoundaryCondition> bcs;
         simbi::Geometry geometry;
         simbi::Cellspacing x1cell_spacing, x2cell_spacing, x3cell_spacing;
         luint blockSize, checkpoint_zones;

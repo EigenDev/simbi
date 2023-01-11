@@ -786,11 +786,12 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     real chkpt_interval,
     int  chkpt_idx,
     std::string data_directory, 
-    std::string boundary_condition,
+    std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace, 
     bool hllc,
-    bool constant_sources)
+    bool constant_sources,
+    std::vector<std::vector<real>> boundary_sources)
 {    
     anyDisplayProps();
     real round_place = 1 / chkpt_interval;
@@ -811,7 +812,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->sourceM2        = sources[2];
     this->sourceE         = sources[3];
     this->first_order     = first_order;
-    this->periodic        = boundary_condition == "periodic";
+    this->periodic        = boundary_conditions[0] == "periodic";
     this->hllc            = hllc;
     this->engine_duration = engine_duration;
     this->dlogt           = dlogt;
@@ -822,7 +823,6 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->idx_active      = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->active_zones    = xphysical_grid * yphysical_grid;
     this->quirk_smoothing = quirk_smoothing;
-    this->bc              = helpers::boundary_cond_map.at(boundary_condition);
     this->geometry        = helpers::geometry_map.at(coord_system);
     this->checkpoint_zones= yphysical_grid;
     this->dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
@@ -844,6 +844,13 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     if (x2max == 0.5 * M_PI){
         this->half_sphere = true;
     }
+
+    inflow_zones.resize(4);
+    for (int i = 0; i < 4; i++) {
+        this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
+        this->inflow_zones.push_back(Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]});
+    }
+    
     // Write some info about the setup for writeup later
     setup.x1max          = x1[xphysical_grid - 1];
     setup.x1min          = x1[0];
@@ -857,7 +864,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     setup.ad_gamma       = gamma;
     setup.first_order    = first_order;
     setup.coord_system   = coord_system;
-    setup.boundarycond   = boundary_condition;
+    setup.boundary_conditions = boundary_conditions;
     setup.regime         = "classical";
     setup.x1             = x1;
     setup.x2             = x2;
@@ -884,6 +891,14 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     sourceM1.copyToGpu();
     sourceM2.copyToGpu();
     sourceE.copyToGpu();
+    inflow_zones.copyToGpu();
+    bcs.copyToGpu();
+
+    // TODO: Implement moving mesh at some point
+    if (false) {
+        outer_zones.resize(ny);
+    }
+
 
    
     dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
@@ -915,9 +930,9 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim});
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
-    if (t == 0)
-    {
-        if (!periodic) config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bc, outer_zones.data(), half_sphere);
+    if (t == 0) {
+        if (!periodic) 
+            config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
     const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive) + xblockdim * yblockdim * sizeof(real);
     if constexpr(BuildPlatform == Platform::GPU) {
@@ -942,7 +957,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         advance(activeP, bx, by);
         cons2prim(fullP);
         if (!periodic) {
-            config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bc, outer_zones.data(), half_sphere);
+            config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
         }
         
         if constexpr(BuildPlatform == Platform::GPU) {

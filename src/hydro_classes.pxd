@@ -32,11 +32,12 @@ cdef extern from "hydro/euler1D.hpp" namespace "simbi":
             real chkpt_interval,
             int  chkpt_idx,
             string data_directory,
-            string boundary_condition,
+            vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
             bool hllc,
-            bool constant_sources)
+            bool constant_sources,
+            vector[vector[real]] boundary_sources) except +
 
 cdef extern from "hydro/euler2D.hpp" namespace "simbi":
     cdef cppclass Newtonian2D:
@@ -57,11 +58,12 @@ cdef extern from "hydro/euler2D.hpp" namespace "simbi":
             real chkpt_interval ,
             int  chkpt_idx,
             string data_directory, 
-            string boundary_condition,
+            vector[string] boundary_conditions,
             bool first_order,
             bool linspace, 
             bool hllc,
-            bool constant_sources) except +
+            bool constant_sources,
+            vector[vector[real]] boundary_sources) except +
 
 
 cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
@@ -83,11 +85,12 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             real chkpt_interval, 
             int  chkpt_idx,
             string data_directory,
-            string boundary_condition,
+            vector[string] boundary_conditions,
             bool first_order, 
             bool linspace, 
             bool hllc,
             bool constant_sources,
+            vector[vector[real]] boundary_sources,
             PyObjWrapper a,
             PyObjWrapper adot) except + 
             
@@ -101,11 +104,12 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             real chkpt_interval, 
             int  chkpt_idx,
             string data_directory,
-            string boundary_condition,
+            vector[string] boundary_conditions,
             bool first_order, 
             bool linspace, 
             bool hllc,
             bool constant_sources,
+            vector[vector[real]] boundary_sources,
             PyObjWrapper a,
             PyObjWrapper adot,
             PyObjWrapper d_outer,
@@ -133,12 +137,13 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
             real chkpt_interval,
             int  chkpt_idx,
             string data_directory,
-            string boundary_condition,
+            vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
             bool hllc,
             bool quirk_smoothing,
             bool constant_sources,
+            vector[vector[real]] boundary_sources,
             PyObjWrapper a,
             PyObjWrapper adot)
 
@@ -153,12 +158,13 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
             real chkpt_interval,
             int  chkpt_idx,
             string data_directory,
-            string boundary_condition,
+            vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
             bool hllc,
             bool quirk_smoothing,
             bool constant_sources,
+            vector[vector[real]] boundary_sources,
             PyObjWrapper a,
             PyObjWrapper adot,
             PyObjWrapper d_outer,
@@ -196,8 +202,9 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
             real chkpt_interval,
             int  chkpt_idx,
             string data_directory,
-            string boundary_condition,
+            vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
             bool hllc,
-            bool constant_sources)
+            bool constant_sources,
+            vector[vector[real]] boundary_sources)

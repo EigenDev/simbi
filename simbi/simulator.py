@@ -12,7 +12,7 @@ import warnings
 from typing import Callable
 regimes             = ['classical', 'relativistic']
 coord_systems       = ['spherical', 'cartesian', 'cylindrical', 'planar_cylindrical', 'axis_cylindrical']
-boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
+available_boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
 
 class Hydro:
     def __init__(self, 
@@ -323,7 +323,7 @@ class Hydro:
         chkpt: str = None,
         chkpt_interval:float = 0.1,
         data_directory:str = "data/",
-        boundary_condition: str = "outflow",
+        boundary_conditions: list = "outflow",
         engine_duration: float = 10.0,
         compute_mode: str = 'cpu',
         quirk_smoothing: bool = True,
@@ -333,7 +333,8 @@ class Hydro:
         dens_outer: Callable = None,
         mom_outer: Callable = None,
         edens_outer: Callable = None,
-        object_positions: np.ndarray = None) -> np.ndarray:
+        object_positions: np.ndarray = None,
+        boundary_sources: np.ndarray = None) -> np.ndarray:
         """
         Simulate the Hydro Setup
         
@@ -365,6 +366,16 @@ class Hydro:
             u (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
+        if compute_mode == 'cpu':
+            from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
+        else:
+            try:
+                from gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
+            except Exception as e:
+                warnings.warn("Error in loading GPU extension. Loading CPU instead...", GPUExtNotBuiltWarning)
+                warnings.warn(f"For reference, the gpu_ext had the follow error: {e}", GPUExtNotBuiltWarning)
+                from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
+                
         if scale_factor == None:
             scale_factor = lambda t: 1.0 
         if scale_factor_derivative == None:
@@ -393,38 +404,43 @@ class Hydro:
                 volume_factor = helpers.calc_cell_volume2D(x1, x2, self.coord_system)
         else:
             volume_factor = 1.0
-                
-        if boundary_condition not in boundary_conditions:
-            raise ValueError(f"Invalid boundary condition. Expected one of: {boundary_conditions}")
         
-        if compute_mode == 'cpu':
-            from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-        else:
-            try:
-                from gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-            except Exception as e:
-                warnings.warn("Error in loading GPU extension. Loading CPU instead...", GPUExtNotBuiltWarning)
-                warnings.warn(f"For reference, the gpu_ext had the follow error: {e}", GPUExtNotBuiltWarning)
-                from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-                
+        if not isinstance(boundary_conditions, (list, np.ndarray)):
+            boundary_conditions = [boundary_conditions]
+        for bc in boundary_conditions:
+            if bc not in available_boundary_conditions:
+                raise ValueError(f"Invalid boundary condition. Expected one of: {available_boundary_conditions}")
+        
+        number_of_given_bcs = len(boundary_conditions)
+        if number_of_given_bcs != 2 * self.dimensionality:
+            if number_of_given_bcs == 1:
+                boundary_conditions = boundary_conditions * 2 * self.dimensionality
+            elif number_of_given_bcs == self.dimensionality // 2:
+                temp = []
+                for idx in range(number_of_given_bcs):
+                    temp += [boundary_conditions[idx]] * 2
+                boundary_conditions = temp
+            else:
+                raise ValueError("Please include at a number of boundary conditions equal to at least half the number of cell faces")
+        
         self.u         = np.asarray(self.u)
         self.t         = 0
         self.chkpt_idx = 0
         
         if not chkpt:
-            simbi_ic.initializeModel(self, first_order, boundary_condition, passive_scalars, volume_factor=volume_factor)
+            simbi_ic.initializeModel(self, first_order, boundary_conditions, passive_scalars, volume_factor=volume_factor)
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensionality , mesh_motion)
         
         if self.dimensionality == 1 and self.coord_system in ['planar_cylindrical', 'axis_cylindrical']:
             self.coord_system = 'cylindrical'
             
-        periodic    = boundary_condition == 'periodic'
+        periodic    = all(bc == 'periodic' for bc in boundary_conditions)
         start_time  = tstart if self.t == 0 else self.t
         #Convert strings to byte arrays
-        cython_data_directory     = os.path.join(data_directory, '').encode('utf-8')
-        cython_coordinates        = self.coord_system.encode('utf-8')
-        cython_boundary_condition = boundary_condition.encode('utf-8')
+        cython_data_directory      = os.path.join(data_directory, '').encode('utf-8')
+        cython_coordinates         = self.coord_system.encode('utf-8')
+        cython_boundary_conditions = np.array([bc.encode('utf-8') for bc in boundary_conditions])
         
         # Offset the start time from zero if wanting log 
         # checkpoints, but with initial time of zero
@@ -444,6 +460,9 @@ class Hydro:
             print('Computing Second Order Solution...', flush=True)
 
         object_cells = np.zeros_like(self.u[0], dtype=np.bool) if object_positions is None else np.asarray(object_positions, dtype=np.bool)
+        if boundary_sources is None:
+                boundary_sources = np.zeros((2 * self.dimensionality, self.dimensionality + 2))
+        
         if self.dimensionality  == 1:
             sources = np.zeros_like(self.u) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
@@ -458,22 +477,22 @@ class Hydro:
                     kwargs['s_outer'] =  mom_outer
                     kwargs['e_outer'] =  edens_outer
             
-            
             self.solution = state.simulate(
-                sources            = sources,
-                tstart             = start_time,
-                tend               = tend,
-                dlogt              = dlogt,
-                plm_theta          = plm_theta,
-                engine_duration    = engine_duration,
-                chkpt_interval     = chkpt_interval,
-                chkpt_idx          = self.chkpt_idx,
-                data_directory     = cython_data_directory,
-                boundary_condition = cython_boundary_condition,
-                first_order        = first_order,
-                linspace           = linspace,
-                hllc               = hllc,
-                constant_sources   = constant_sources,
+                sources             = sources,
+                tstart              = start_time,
+                tend                = tend,
+                dlogt               = dlogt,
+                plm_theta           = plm_theta,
+                engine_duration     = engine_duration,
+                chkpt_interval      = chkpt_interval,
+                chkpt_idx           = self.chkpt_idx,
+                data_directory      = cython_data_directory,
+                boundary_conditions = cython_boundary_conditions,
+                first_order         = first_order,
+                linspace            = linspace,
+                hllc                = hllc,
+                constant_sources    = constant_sources,
+                boundary_sources    = boundary_sources,
                 **kwargs)  
                 
         elif self.dimensionality  == 2:            
@@ -493,7 +512,8 @@ class Hydro:
                     kwargs['e_outer']      = edens_outer
                 
                 state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
-                
+            
+            
             self.solution = state.simulate(
                 sources            = sources,
                 tstart             = start_time,
@@ -504,11 +524,12 @@ class Hydro:
                 chkpt_interval     = chkpt_interval,
                 chkpt_idx          = self.chkpt_idx,
                 data_directory     = cython_data_directory,
-                boundary_condition = cython_boundary_condition,
+                boundary_conditions= cython_boundary_conditions,
                 first_order        = first_order,
                 linspace           = linspace,
                 hllc               = hllc,
                 constant_sources   = constant_sources,
+                boundary_sources   = boundary_sources,
                 **kwargs)  
 
         else:
@@ -533,11 +554,12 @@ class Hydro:
                 chkpt_interval     = chkpt_interval,
                 chkpt_idx          = self.chkpt_idx,
                 data_directory     = cython_data_directory,
-                boundary_condition = cython_boundary_condition,
+                boundary_conditions= cython_boundary_conditions,
                 first_order        = first_order,
                 linspace           = linspace,
                 hllc               = hllc,
                 constant_sources   = constant_sources,
+                boundary_sources   = boundary_sources,
                 **kwargs)  
         
         if not periodic:

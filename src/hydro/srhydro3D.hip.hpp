@@ -10,7 +10,6 @@
 #include <vector>
 #include "common/hydro_structs.hpp"
 #include "common/helpers.hpp"
-#include "util/ndarray.hpp"
 #include "base.hpp"
 
 namespace simbi
@@ -24,7 +23,7 @@ namespace simbi
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
-        ndarray<conserved_t> cons, outer_zones;
+        ndarray<conserved_t> cons, outer_zones, inflow_zones;
         ndarray<real> sourceD, sourceS1, sourceS2, sourceS3, sourceTau, pressure_guess, dt_min;
         ndarray<bool> object_pos;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, s3_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
@@ -117,11 +116,12 @@ namespace simbi
             real chkpt_interval,
             int  chkpt_idx,
             std::string data_directory, 
-            std::string boundary_condition,
+            std::vector<std::string> boundary_conditions,
             bool first_order,
             bool linspace, 
             bool hllc,
-            bool constant_sources);
+            bool constant_sources,
+            std::vector<std::vector<real>> boundary_sources);
 
         GPU_CALLABLE_INLINE
         constexpr real get_x1face(const lint ii, const simbi::Geometry geometry, const int side)

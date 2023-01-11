@@ -15,7 +15,6 @@
 #include "build_options.hpp"
 #include "util/exec_policy.hpp"
 #include "build_options.hpp"
-#include "util/ndarray.hpp"
 #include "base.hpp"
 
 namespace simbi
@@ -28,7 +27,7 @@ namespace simbi
           const static int dimensions = 1;
 
           // Create vector instances that will live on host
-          ndarray<conserved_t> cons, outer_zones; 
+          ndarray<conserved_t> cons, outer_zones, inflow_zones; 
           ndarray<primitive_t> prims;
           ndarray<real> sourceD, sourceS, source0, pressure_guess, dt_min;
           
@@ -94,11 +93,12 @@ namespace simbi
                real chkpt_interval, 
                int  chkpt_idx,
                std::string data_directory,
-               std::string boundary_condition,
+               std::vector<std::string> boundary_conditions,
                bool first_order, 
                bool linspace, 
                bool hllc,
                bool constant_sources,
+               std::vector<std::vector<real>> boundary_sources,
                std::function<double(double)> a = nullptr,
                std::function<double(double)> adot = nullptr,
                std::function<double(double)> d_outer = nullptr,

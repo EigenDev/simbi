@@ -13,7 +13,6 @@
 #include "common/enums.hpp"
 #include "build_options.hpp"
 #include "util/exec_policy.hpp"
-#include "util/ndarray.hpp"
 #include "base.hpp"
 
 namespace simbi {
@@ -24,7 +23,7 @@ namespace simbi {
         using primitive_soa_t = hydro1d::PrimitiveSOA;
         const static int dimensions = 1;
 
-        ndarray<conserved_t> cons, outer_zones; 
+        ndarray<conserved_t> cons, outer_zones, inflow_zones; 
         ndarray<primitive_t> prims;
         ndarray<real> sourceRho, sourceMom, sourceE, dt_min;
         
@@ -110,11 +109,12 @@ namespace simbi {
             real chkpt_luinterval,
             int  chkpt_idx,
             std::string data_directory,
-            std::string boundary_condition,
+            std::vector<std::string> boundary_conditions,
             bool first_order,
             bool linspace,
             bool hllc,
-            bool constant_sources);
+            bool constant_sources,
+            std::vector<std::vector<real>> boundary_sources);
     };
 }
 

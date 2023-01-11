@@ -7,25 +7,17 @@ namespace simbi{
         T &conserved_arr, 
         const int grid_size,
         const bool first_order, 
-        const simbi::BoundaryCondition boundary_condition,
-        const U *outer_zones) 
+        const simbi::BoundaryCondition* boundary_conditions,
+        const U *outer_zones,
+        const hydro1d::Conserved* inflow_zones) 
     {
         auto *cons = conserved_arr.data();
         simbi::parallel_for(p, 0, 1, [=] GPU_LAMBDA (const int gid) {
-            if (first_order){
-                cons[0] = cons[1];
-                if (outer_zones)
-                {
-                    cons[grid_size - 1] = outer_zones[0];
-                } else {
-                    cons[grid_size - 1] = cons[grid_size - 2];
-                }
-                
-                
-                switch (boundary_condition)
+            if (first_order){                
+                switch (boundary_conditions[0])
                 {
                 case simbi::BoundaryCondition::INFLOW:
-                    cons[0] = cons[1];
+                    cons[0] = inflow_zones[0];
                     break;
                 case simbi::BoundaryCondition::REFLECTING:
                     cons[0]   = cons[1];
@@ -35,28 +27,35 @@ namespace simbi{
                     cons[0] = cons[1];
                     break;
                 }
-            } else {
-                
-                if (outer_zones)
-                {
-                    cons[grid_size - 1] = outer_zones[0];
-                    cons[grid_size - 2] = outer_zones[0];
-                } else {
-                    cons[grid_size - 1] = cons[grid_size - 3];
-                    cons[grid_size - 2] = cons[grid_size - 3];
-                }
-                
-                switch (boundary_condition)
+
+                switch (boundary_conditions[1])
                 {
                 case simbi::BoundaryCondition::INFLOW:
-                    cons[0] =     cons[2];
-                    cons[1] =     cons[2];
-                    cons[0].m = - cons[2].m;
-                    cons[1].m = - cons[2].m;
+                    cons[grid_size - 1] = inflow_zones[1];
                     break;
                 case simbi::BoundaryCondition::REFLECTING:
-                    cons[0] =     cons[3];
-                    cons[1] =     cons[2];  
+                    cons[grid_size - 1]   =   cons[grid_size - 2];
+                    cons[grid_size - 1].m = - cons[grid_size - 2].m;
+                    break;
+                default:
+                    cons[grid_size - 1] = cons[grid_size - 2];
+                    break;
+                }
+
+                if (outer_zones) {
+                    cons[grid_size - 1] = outer_zones[0];
+                }
+            } else {
+                
+                switch (boundary_conditions[0])
+                {
+                case simbi::BoundaryCondition::INFLOW:
+                    cons[0] = inflow_zones[0];
+                    cons[1] = inflow_zones[1];
+                    break;
+                case simbi::BoundaryCondition::REFLECTING:
+                    cons[0]   = cons[3];
+                    cons[1]   = cons[2];
                     cons[0].m = - cons[3].m;
                     cons[1].m = - cons[2].m;
                     break;
@@ -64,6 +63,29 @@ namespace simbi{
                     cons[0] = cons[2];
                     cons[1] = cons[2];
                     break;
+                }
+
+                switch (boundary_conditions[0])
+                {
+                case simbi::BoundaryCondition::INFLOW:
+                    cons[grid_size - 1] = inflow_zones[0];
+                    cons[grid_size - 2] = inflow_zones[0];
+                    break;
+                case simbi::BoundaryCondition::REFLECTING:
+                    cons[grid_size - 1]   = cons[grid_size - 4];
+                    cons[grid_size - 2]   = cons[grid_size - 3];
+                    cons[grid_size - 1].m = - cons[grid_size - 4].m;
+                    cons[grid_size - 2].m = - cons[grid_size - 3].m;
+                    break;
+                default:
+                    cons[grid_size - 1] = cons[grid_size - 3];
+                    cons[grid_size - 2] = cons[grid_size - 3];
+                    break;
+                }
+
+                if (outer_zones) {
+                    cons[grid_size - 1] = outer_zones[0];
+                    cons[grid_size - 2] = outer_zones[0];
                 }
             }
         });
