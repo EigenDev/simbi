@@ -263,8 +263,6 @@ def initializeModel(model, first_order = False, boundary_conditions = "outflow",
         if not model.u.any():
             if full_periodic:
                 model.u = np.empty(shape = (5, model.zresolution, model.yresolution, model.xresolution), dtype = float)
-                
-                
                 model.u[:, :, :] = np.array([model.init_density, model.init_momentum1,
                                             model.init_momentum2, model.init_momentum3,
                                             model.init_energy])
