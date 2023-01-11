@@ -278,7 +278,10 @@ class Hydro:
                     if isinstance(value[0], Callable):
                         val_str = f"user-defined {key} function(s)"
                 elif isinstance(value, (list, np.ndarray)):
-                    val_str = f"user-defined {key} terms"
+                    if len(value) > 6:
+                        val_str = f"user-defined {key} terms"
+                    else:
+                        val_str = f"{value}"
                 else:
                     val_str = str(value)
                 
