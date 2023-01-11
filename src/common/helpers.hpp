@@ -276,12 +276,7 @@ namespace simbi
 
         inline double sigmoid(const double t, const double tduration, const double time_step, const bool constant_sources) {
             if (constant_sources) {
-                static int count = 0;
-                if (count == 0) {
-                    count++;
-                    return 1 / time_step;
-                }
-                return 0;
+                return 1 / time_step;
             }
             return 1 / (1 + std::exp(static_cast<real>(10.0) * (t - tduration)));
         }

@@ -4,6 +4,7 @@
 # 06/10/2020
 import simbi.helpers as helpers
 import numpy as np 
+from itertools import cycle
 import os
 import sys 
 import inspect
@@ -310,7 +311,28 @@ class Hydro:
                 
             print(f"{my_str} {val_str}", flush=True)
         print("="*80, flush=True)
-                
+    
+    def place_boundary_sources(self, boundary_sources: np.ndarray, first_order: bool):
+        boundary_sources = [np.array([val]).flatten() for val in boundary_sources]
+        max_len = np.max([len(a) for a in boundary_sources])
+        boundary_sources = np.asarray([np.pad(a, (0, max_len - len(a)), 'constant', constant_values=0) for a in boundary_sources])
+        edges   = [0,-1] if first_order else [0, 1, -1, -2]
+        view    = self.u[:self.dimensionality + 2]
+        if view.ndim == 1:
+            slices = [(...,i) for i in edges] 
+        elif view.ndim == 2:
+            slices = [np.s_[:, i, :] for i in edges] + [np.s_[..., i] for i in edges]
+        else:
+            slices = [np.s_[:, i, ...] for i in edges] + [np.s_[..., i, :] for i in edges] + [np.s_[..., i] for i in edges]
+            
+        order   = 1 if first_order else 2
+        for boundary in range(self.dimensionality * len(edges)):
+            source = boundary_sources[boundary // order]
+            if any(val != 0 for val in source):
+                view[slices[boundary]] = source[:, None]
+            
+        return boundary_sources 
+    
     def simulate(
         self, 
         tstart: float = 0.0,
@@ -456,28 +478,19 @@ class Hydro:
             os.makedirs(data_directory)
             print(f"The data directory provided does not exist. Creating the {data_directory} directory now!", flush=True)
 
+        # Loading bar to have chance to check params
         helpers.print_progress()
-        if first_order:
-            print("Computing First Order Solution...", flush=True)
-        else:
-            print('Computing Second Order Solution...', flush=True)
-
         object_cells = np.zeros_like(self.u[0], dtype=np.bool) if object_positions is None else np.asarray(object_positions, dtype=np.bool)
         
-        #############################################################################################
+        #####################################################################################################
+        # Check if boundary source terms given. If given as a jagged array, pad the missing members with zeros
+        #####################################################################################################
         if boundary_sources is None:
             boundary_sources = np.zeros((2 * self.dimensionality, self.dimensionality + 2))
         else:
-            boundary_sources = [np.array([val]).flatten() for val in boundary_sources]
-            max_len = np.max([len(a) for a in boundary_sources])
-            boundary_sources = np.asarray([np.pad(a, (0, max_len - len(a)), 'constant', constant_values=0) for a in boundary_sources])
-            for idx, source in enumerate(boundary_sources):
-                if any(v !=0 for v in source):
-                    if first_order:
-                        if self.dimensionality == 1:
-                            pass
-                print(self.u[:self.dimensionality + 2, -1, -1])
-        zzz = input('')
+            boundary_sources = self.place_boundary_sources(boundary_sources=boundary_sources, first_order=first_order)
+                            
+        print(f"Computing {'First' if first_order else 'Second'} Order Solution...", flush=True)
         if self.dimensionality  == 1:
             sources = np.zeros_like(self.u) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
