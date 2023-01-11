@@ -83,5 +83,5 @@ class thermalBomb(BaseConfig):
         return True
     
     @property
-    def boundary_condition(self) -> str:
-        return "reflecting"
+    def boundary_conditions(self) -> str:
+        return ["reflecting", "outflow", "outflow", "outflow"]

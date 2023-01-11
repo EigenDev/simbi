@@ -73,3 +73,7 @@ class IsentropicRelWave(BaseConfig):
     @property
     def regime(self):
         return "relativistic"
+    
+    @property
+    def boundary_conditions(self) -> str:
+        return "periodic"

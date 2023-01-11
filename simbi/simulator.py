@@ -462,7 +462,7 @@ class Hydro:
         object_cells = np.zeros_like(self.u[0], dtype=np.bool) if object_positions is None else np.asarray(object_positions, dtype=np.bool)
         if boundary_sources is None:
                 boundary_sources = np.zeros((2 * self.dimensionality, self.dimensionality + 2))
-        
+                
         if self.dimensionality  == 1:
             sources = np.zeros_like(self.u) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
