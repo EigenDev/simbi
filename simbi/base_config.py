@@ -1,6 +1,15 @@
-from typing import Callable, Union, Tuple, final
+from typing import Callable, Union, Tuple, final, Optional, TypeVar
 from .dynarg import DynamicArg
+import numpy.typing as npt
 
+from typing import Union, Optional, TypeVar
+
+FloatOrNone = Optional[float] 
+IntOrNone   = Optional[int] 
+ListOrNone  = Optional[list] 
+ArrayOrNone = Optional[npt.NDArray] 
+FuncOrNone  = Optional[Callable] 
+StrOrNone   = Optional[str] 
 
 class_props = [
     'boundary_conditions', 'coord_system', 'data_directory', 
@@ -14,7 +23,7 @@ class_props = [
 __all__ = ['BaseConfig']
     
 class BaseConfig:
-    dynamic_args = None 
+    dynamic_args: Optional[list] = None 
     
     @property
     def initial_state(self) -> tuple:
@@ -45,59 +54,59 @@ class BaseConfig:
         return False
     
     @property
-    def sources(self) -> tuple:
-       return None
-    
-    @property
-    def passive_scalars(self) -> tuple:
-        return 0.0
-    
-    @property
-    def scale_factor(self) -> Callable:
-        return None 
-    
-    @property
-    def scale_factor_derivative(self) -> Callable:
-       return None
-    
-    @property
-    def edens_outer(self) -> Callable:
-        return None 
-    
-    @property
-    def mom_outer(self) -> Union[Callable, Tuple[Callable]]:
+    def sources(self) -> ListOrNone:
         return None
     
     @property
-    def dens_outer(self) -> Callable:
+    def passive_scalars(self) -> ArrayOrNone:
+        return None
+    
+    @property
+    def scale_factor(self) -> FuncOrNone:
+        return None 
+    
+    @property
+    def scale_factor_derivative(self) -> FuncOrNone:
+       return None
+    
+    @property
+    def edens_outer(self) -> FuncOrNone:
+        return None 
+    
+    @property
+    def mom_outer(self) -> FuncOrNone:
+        return None
+    
+    @property
+    def dens_outer(self) -> FuncOrNone:
        return None
    
     @property
-    def default_start_time(self) -> float:
+    def default_start_time(self) -> FloatOrNone:
        return None
    
     @property
-    def default_end_time(self) -> float:
+    def default_end_time(self) -> FloatOrNone:
        return None
    
     @property
     def use_hllc_solver(self) -> bool:
+       return True
+   
+    @property
+    def boundary_conditions(self) -> StrOrNone:
        return None
    
     @property
-    def boundary_conditions(self) -> str:
-       return None
-   
-    @property
-    def plm_theta(self) -> float:
+    def plm_theta(self) -> FloatOrNone:
         return None 
     
     @property
-    def data_directory(self) -> str:
+    def data_directory(self) -> StrOrNone:
         return None
     
     @property 
-    def dlogt(self) -> float:
+    def dlogt(self) -> FloatOrNone:
         return None 
     
     @property
@@ -105,27 +114,27 @@ class BaseConfig:
         return False
     
     @property
-    def constant_sources(self):
+    def constant_sources(self) -> bool:
         return False 
     
     @property
-    def x1(self):
+    def x1(self) -> ListOrNone:
         return None 
     
     @property
-    def x2(self):
+    def x2(self) -> ListOrNone:
         return None 
     
     @property
-    def x3(self):
+    def x3(self) -> ListOrNone:
         return None
     
     @property
-    def object_zones(self):
+    def object_zones(self) -> ListOrNone:
         return None
     
     @property
-    def boundary_sources(self):
+    def boundary_sources(self) -> ListOrNone:
         return None
     
     @final
@@ -181,7 +190,7 @@ class BaseConfig:
 
     @final
     @classmethod
-    def print_problem_params(cls):
+    def print_problem_params(cls) -> None:
         """
         Read from problem params and print to stdout
         """
@@ -207,7 +216,7 @@ class BaseConfig:
             print(f"{member.name:.<30} {val:<15} {member.help}", flush = True)
     
     @final
-    def __del__(self):
+    def __del__(self) -> None:
         """
         Print problem params on class destruction
         """

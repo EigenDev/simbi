@@ -1,7 +1,13 @@
 import numpy as np 
+import numpy.typing as npt
 import sys
 from time import sleep 
-def calc_cell_volume1D(r: np.ndarray) -> np.ndarray:
+from typing import Union, Optional, TypeVar
+
+FloatOrNone = TypeVar("FloatOrNone", float, "None")
+IntOrNone   = TypeVar("IntOrNone", int, "None")
+
+def calc_cell_volume1D(r: npt.NDArray) -> np.ndarray:
     rvertices = np.sqrt(r[1:] * r[:-1])
     rvertices = np.insert(rvertices,  0, r[0])
     rvertices = np.insert(rvertices, r.shape, r[-1])
@@ -9,7 +15,7 @@ def calc_cell_volume1D(r: np.ndarray) -> np.ndarray:
     dr        = rvertices[1:] - rvertices[:-1]
     return rmean * rmean * dr 
 
-def calc_cell_volume2D(x1: np.ndarray, x2: np.ndarray, coord_system: str = 'spherical') -> np.ndarray:
+def calc_cell_volume2D(x1: npt.NDArray, x2: npt.NDArray, coord_system: str = 'spherical') -> np.ndarray:
     if coord_system == 'spherical':
         if x1.ndim == 1 and x2.ndim == 1:
             rr, thetta = np.meshgrid(x1, x2)
@@ -41,7 +47,7 @@ def calc_cell_volume2D(x1: np.ndarray, x2: np.ndarray, coord_system: str = 'sphe
         rmean     = (2.0 / 3.0) *(rvertices[:, 1:]**3 - rvertices[:, :-1]**3) / (rvertices[:, 1:]**2 - rvertices[:, :-1]**2)
         return rmean * (rvertices[:, 1:] - rvertices[:, :-1]) * dz
 
-def calc_cell_volume3D(r: np.ndarray, theta: np.ndarray, phi: np.ndarray) -> np.ndarray:
+def calc_cell_volume3D(r: npt.NDArray, theta: npt.NDArray, phi: npt.NDArray) -> npt.NDArray:
     if r.ndim == 1 and theta.ndim == 1 and phi.ndim == 1:
         thetta, phii, rr = np.meshgrid(theta, phi, r)
     else:
@@ -61,19 +67,8 @@ def calc_cell_volume3D(r: np.ndarray, theta: np.ndarray, phi: np.ndarray) -> np.
     rvertices = np.insert(rvertices,  0, rr[:, :, 0], axis=2)
     rvertices = np.insert(rvertices, rvertices.shape[2], rr[:, :, -1], axis=2)
     return (1./3.) * (rvertices[:, :, 1:]**3 - rvertices[:, :, :-1]**3) * dcos * dphi
-
-def print_problem_params(args, parser) -> None:
-    print("\nProblem paramters:")
-    print("="*80)
-    for arg in vars(args):
-        description = parser._option_string_actions[f'--{arg}'].help
-        val = getattr(args, arg)
-        if (isinstance(val ,float)):
-            val = round(val, 3)
-        val = str(val)
-        print(f"{arg:.<30} {val:<15} {description}", flush = True)
         
-def compute_num_polar_zones(rmin: float=None, rmax: float=None, nr: float = None, zpd: int = None, theta_bounds: tuple = (0.0, np.pi)):
+def compute_num_polar_zones(rmin: FloatOrNone = None, rmax: FloatOrNone = None, nr: FloatOrNone = None, zpd: IntOrNone = None, theta_bounds: tuple = (0.0, np.pi)) -> int:
     if zpd:
         return round((theta_bounds[1] - theta_bounds[0]) * zpd / np.log(10))
     else:

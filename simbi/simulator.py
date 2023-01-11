@@ -312,7 +312,7 @@ class Hydro:
             print(f"{my_str} {val_str}", flush=True)
         print("="*80, flush=True)
     
-    def place_boundary_sources(self, boundary_sources: np.ndarray, first_order: bool):
+    def _place_boundary_sources(self, boundary_sources: np.ndarray, first_order: bool):
         boundary_sources = [np.array([val]).flatten() for val in boundary_sources]
         max_len = np.max([len(a) for a in boundary_sources])
         boundary_sources = np.asarray([np.pad(a, (0, max_len - len(a)), 'constant', constant_values=0) for a in boundary_sources])
@@ -480,7 +480,7 @@ class Hydro:
 
         # Loading bar to have chance to check params
         helpers.print_progress()
-        object_cells = np.zeros_like(self.u[0], dtype=np.bool) if object_positions is None else np.asarray(object_positions, dtype=np.bool)
+        object_cells = np.asarray(object_positions, dtype=np.bool) if object_positions is None else np.zeros_like(self.u[0], dtype=np.bool)
         
         #####################################################################################################
         # Check if boundary source terms given. If given as a jagged array, pad the missing members with zeros
@@ -488,11 +488,11 @@ class Hydro:
         if boundary_sources is None:
             boundary_sources = np.zeros((2 * self.dimensionality, self.dimensionality + 2))
         else:
-            boundary_sources = self.place_boundary_sources(boundary_sources=boundary_sources, first_order=first_order)
+            boundary_sources = self._place_boundary_sources(boundary_sources=boundary_sources, first_order=first_order)
                             
         print(f"Computing {'First' if first_order else 'Second'} Order Solution...", flush=True)
         if self.dimensionality  == 1:
-            sources = np.zeros_like(self.u) if not sources else np.asarray(sources)
+            sources = np.asarray(sources) or np.zeros_like(self.u)
             sources = sources.reshape(sources.shape[0], -1)
             kwargs  = {}
             if self.regime == "classical":
@@ -504,28 +504,10 @@ class Hydro:
                     kwargs['d_outer'] =  dens_outer
                     kwargs['s_outer'] =  mom_outer
                     kwargs['e_outer'] =  edens_outer
-            
-            self.solution = state.simulate(
-                sources             = sources,
-                tstart              = start_time,
-                tend                = tend,
-                dlogt               = dlogt,
-                plm_theta           = plm_theta,
-                engine_duration     = engine_duration,
-                chkpt_interval      = chkpt_interval,
-                chkpt_idx           = self.chkpt_idx,
-                data_directory      = cython_data_directory,
-                boundary_conditions = cython_boundary_conditions,
-                first_order         = first_order,
-                linspace            = linspace,
-                hllc                = hllc,
-                constant_sources    = constant_sources,
-                boundary_sources    = boundary_sources,
-                **kwargs)  
                 
         elif self.dimensionality  == 2:            
             # ignore the chi term
-            sources = np.zeros(self.u[:-1].shape, dtype=float) if not sources else np.asarray(sources)
+            sources = np.asarray(sources) or np.zeros(self.u[:-1].shape, dtype=float)
             sources = sources.reshape(sources.shape[0], -1)
             
             kwargs = {}
@@ -540,25 +522,6 @@ class Hydro:
                     kwargs['e_outer']      = edens_outer
                 
                 state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
-            
-            
-            self.solution = state.simulate(
-                sources            = sources,
-                tstart             = start_time,
-                tend               = tend,
-                dlogt              = dlogt,
-                plm_theta          = plm_theta,
-                engine_duration    = engine_duration,
-                chkpt_interval     = chkpt_interval,
-                chkpt_idx          = self.chkpt_idx,
-                data_directory     = cython_data_directory,
-                boundary_conditions= cython_boundary_conditions,
-                first_order        = first_order,
-                linspace           = linspace,
-                hllc               = hllc,
-                constant_sources   = constant_sources,
-                boundary_sources   = boundary_sources,
-                **kwargs)  
 
         else:
             sources = np.zeros(self.u.shape[:-1], dtype=float) if not sources else np.asarray(sources)
@@ -572,23 +535,23 @@ class Hydro:
                 state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
             
-            self.solution = state.simulate(
-                sources            = sources,
-                tstart             = tstart,
-                tend               = tend,
-                dlogt              = dlogt,
-                plm_theta          = plm_theta,
-                engine_duration    = engine_duration,
-                chkpt_interval     = chkpt_interval,
-                chkpt_idx          = self.chkpt_idx,
-                data_directory     = cython_data_directory,
-                boundary_conditions= cython_boundary_conditions,
-                first_order        = first_order,
-                linspace           = linspace,
-                hllc               = hllc,
-                constant_sources   = constant_sources,
-                boundary_sources   = boundary_sources,
-                **kwargs)  
+        self.solution = state.simulate(
+            sources            = sources,
+            tstart             = start_time,
+            tend               = tend,
+            dlogt              = dlogt,
+            plm_theta          = plm_theta,
+            engine_duration    = engine_duration,
+            chkpt_interval     = chkpt_interval,
+            chkpt_idx          = self.chkpt_idx,
+            data_directory     = cython_data_directory,
+            boundary_conditions= cython_boundary_conditions,
+            first_order        = first_order,
+            linspace           = linspace,
+            hllc               = hllc,
+            constant_sources   = constant_sources,
+            boundary_sources   = boundary_sources,
+            **kwargs)  
         
         if not periodic:
             self._cleanup(first_order)
