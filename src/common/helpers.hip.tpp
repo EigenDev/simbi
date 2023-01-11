@@ -361,7 +361,7 @@ namespace simbi{
                     const real tr           = self->get_x2face(jj, 1); 
                     const real zl           = self->get_x2face(kk, 0); 
                     const real zr           = self->get_x2face(kk, 1); 
-                    const real rmean        = static_cast<real>(2.0 / 3,0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
+                    const real rmean        = static_cast<real>(2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                     const real th           = static_cast<real>(0.5) * (tl + tr);
                     cfl_dt = helpers::my_min3((rr - rl) / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
                                       rmean * (tr - tl) / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
