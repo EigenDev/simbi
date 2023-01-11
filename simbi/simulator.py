@@ -463,9 +463,21 @@ class Hydro:
             print('Computing Second Order Solution...', flush=True)
 
         object_cells = np.zeros_like(self.u[0], dtype=np.bool) if object_positions is None else np.asarray(object_positions, dtype=np.bool)
+        
+        #############################################################################################
         if boundary_sources is None:
-                boundary_sources = np.zeros((2 * self.dimensionality, self.dimensionality + 2))
-                
+            boundary_sources = np.zeros((2 * self.dimensionality, self.dimensionality + 2))
+        else:
+            boundary_sources = [np.array([val]).flatten() for val in boundary_sources]
+            max_len = np.max([len(a) for a in boundary_sources])
+            boundary_sources = np.asarray([np.pad(a, (0, max_len - len(a)), 'constant', constant_values=0) for a in boundary_sources])
+            for idx, source in enumerate(boundary_sources):
+                if any(v !=0 for v in source):
+                    if first_order:
+                        if self.dimensionality == 1:
+                            pass
+                print(self.u[:self.dimensionality + 2, -1, -1])
+        zzz = input('')
         if self.dimensionality  == 1:
             sources = np.zeros_like(self.u) if not sources else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)

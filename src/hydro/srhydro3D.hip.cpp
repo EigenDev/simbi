@@ -1197,7 +1197,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     inflow_zones.resize(6);
     for (int i = 0; i < 6; i++) {
         this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
-        this->inflow_zones.push_back(Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]});
+        this->inflow_zones[i] = Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]};
     }
     
 

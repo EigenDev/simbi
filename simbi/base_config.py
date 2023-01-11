@@ -124,6 +124,10 @@ class BaseConfig:
     def object_zones(self):
         return None
     
+    @property
+    def boundary_sources(self):
+        return None
+    
     @final
     @classmethod
     def find_dynamic_args(cls) -> None:

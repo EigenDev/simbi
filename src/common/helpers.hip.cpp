@@ -324,6 +324,7 @@ namespace simbi{
                                 cons[1 * sx +  (ii + 2) * sy] = boundary_zones[2];
                                 break;
                             default:
+                                // printf("Outflow at x2min boundary\n");
                                 cons[0 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
                                 cons[1 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
                                 break;
@@ -337,8 +338,13 @@ namespace simbi{
                                 cons[(x2grid_size - 2) * sx + (ii + 2) * sy].s2  = - cons[(x2grid_size - 3) * sx + (ii + 2) * sy].s2;
                                 break;
                             case simbi::BoundaryCondition::INFLOW:
-                                cons[0 * sx +  (ii + 2) * sy] = boundary_zones[3];
-                                cons[1 * sx +  (ii + 2) * sy] = boundary_zones[3];
+                                // printf("Inflow at x2max boundary\n");
+                                // #if !GPU_CODE
+                                // simbi::util::writeln("D: {}, S1: {}, S2: {}, Tau: {}", boundary_zones[3].d, boundary_zones[3].s1, boundary_zones[3].s2, boundary_zones[3].tau);
+                                // std::cin.get();
+                                // #endif
+                                cons[(x2grid_size - 1) * sx +  (ii + 2) * sy] = boundary_zones[3];
+                                cons[(x2grid_size - 2) * sx +  (ii + 2) * sy] = boundary_zones[3];
                                 break;
                             default:
                                 cons[(x2grid_size - 1) * sx + (ii + 2) * sy]  = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];

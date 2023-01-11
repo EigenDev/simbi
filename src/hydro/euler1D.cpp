@@ -507,7 +507,7 @@ void Newtonian1D::advance(
     for (size_t i = 0; i < 2; i++)
     {
         this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
-        this->inflow_zones.push_back(Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]});
+        this->inflow_zones[i] = Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
     }
     
     n = 0;

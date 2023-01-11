@@ -848,7 +848,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     inflow_zones.resize(4);
     for (int i = 0; i < 4; i++) {
         this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
-        this->inflow_zones.push_back(Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]});
+        this->inflow_zones[i] = Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]};
     }
     
     // Write some info about the setup for writeup later

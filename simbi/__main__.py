@@ -145,6 +145,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
         kwargs[idx]['quirk_smoothing']          = config.use_quirk_smoothing
         kwargs[idx]['constant_sources']         = config.constant_sources
         kwargs[idx]['object_positions']         = config.object_zones
+        kwargs[idx]['boundary_sources']         = config.boundary_sources
         states.append(state)
     
     if peek_only:

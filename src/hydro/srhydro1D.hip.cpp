@@ -631,11 +631,12 @@ SRHD::simulate1D(
     this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
     this->total_zones     = nx;
     this->checkpoint_zones= active_zones;
+    
     inflow_zones.resize(2);
     for (size_t i = 0; i < 2; i++)
     {
         this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
-        this->inflow_zones.push_back(Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]});
+        this->inflow_zones[i] = Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
     }
     
     // Write some info about the setup for writeup later
