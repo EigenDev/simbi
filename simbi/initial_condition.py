@@ -261,11 +261,12 @@ def initializeModel(model, first_order = False, boundary_conditions = "outflow",
                 
     else:
         if not model.u.any():
-            if not full_periodic:
+            if full_periodic:
                 model.u = np.empty(shape = (5, model.zresolution, model.yresolution, model.xresolution), dtype = float)
                 
-                model.u[:, :, :] = np.array([model.init_rho, model.init_rho*model.init_v1,
-                                            model.init_rho*model.init_v2, model.init_rho*model.init_v3,
+                
+                model.u[:, :, :] = np.array([model.init_density, model.init_momentum1,
+                                            model.init_momentum2, model.init_momentum3,
                                             model.init_energy])
                 
                 model.u *= volume_factor
