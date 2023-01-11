@@ -84,7 +84,27 @@
     ``` bash
     $ ./tools/plot1d.py data/1000.chkpt.000_100.h5 "Marti \& Muller Problem 1" --field rho v p --tex
     ```
+
+    The usual formula for plotting a checkpoint files is like so:
+    ``` bash
+    $ ./tools/<plotting_script_for_ndim> <checkpoint_file> "<name_of_physics_setup>" --field <field_string> [options]
+    ```
 5)  ???
 6)  Profit
+
+## Physics Features (so far)
+1) Special Relativistic Hydro up to 3D
+2) Newtonian Hydro up to 2D (set the `regime` property to `classical` or `relativistic`)
+3) Supports user-defined mesh expansion / contraction (`scale_factor` & `scale_factor_derivative` methods)
+4) Supports user-defined density, momentum, and energy density terms outside of grid (Implementing the `dens_outer`, `mom_outer`, AND, `edens_outer` methods sets this)
+5) Supports source terms in the Euler equations (implementing the `sources` property sets this)
+6) Support source terms at the boundaries (implementing the `boundary_sources` property sets this)
+7) Boundary conditions given as array of strings like so `[bc_x1min, bc_x1max, bc_x2min, bc_x2max, bc_x3min, bc_x3max]` where the supported boundary conditions are `periodic, reflecting, outflow, inflow`. If an inflow boundary condition is set, but no inflow boundary source terms are given, the code will switch to outflow boundary conditions to prevent crashes. 
+8) Can track a single passive scalar (implementing the `passive_scalars` property sets this)
+9) Can insert an immersed boundary (Peskin 2002). It is impermeable by default. (Implementing the `object_cells` property sets this)
+
+TODO: Explore general IB in greater detail for sources and sinks!
+
+
 
 
