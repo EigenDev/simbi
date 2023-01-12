@@ -30,7 +30,7 @@ class thermalBomb(BaseConfig):
         r                = np.geomspace(self.rinit.value, self.rend.value, self.nr)
         self.theta_min   = 0
         self.theta_max   = np.pi if self.full_sphere else 0.5 * np.pi
-        self.npolar      = compute_num_polar_zones(self.rinit, self.rend, self.nr, theta_bounds=(self.theta_min, self.theta_max))
+        self.npolar      = compute_num_polar_zones(rmin=self.rinit, rmax=self.rend, nr=self.nr, theta_bounds=(self.theta_min, self.theta_max))
         dr               = self.rinit * 1.5 
         
         p_zones = find_nearest(r, dr)[0]
