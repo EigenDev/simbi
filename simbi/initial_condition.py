@@ -137,33 +137,15 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                     model.u[:, -(i + 1), :] = model.u[:, -(nghosts + 1), :]
         
 
-def initializeModel(model, first_order = False, boundary_conditions = "outflow", scalars = 0, volume_factor = 1):
+def initializeModel(model, first_order = False, boundary_conditions = "outflow", passive_scalars = None, volume_factor = 1):
     full_periodic = all(bc == 'periodic' for bc in boundary_conditions)
-    
-    # Check if u-array is empty. If it is, generate an array
-    if model.u is None:
-        model.u = np.zeros(shape = (model.nvars, *np.asarray(model.resolution).flatten()))
-        model.u[:, :] = np.array([model.init_density, *model.initS, model.init_energy])
-        model.u *= volume_factor
-    elif model.u is not None and model.dimensionality != 1:
-        raise NotImplementedError("Have yet to implement disconitnuities for 2D and 3D")
-    else:
-        model.u *= volume_factor
-        # Add the extra ghost cells for i-2, i+2
-        right_ghost = model.u[:, -1]
-        left_ghost  = model.u[:, 0]
-        if first_order:
-            model.u = np.insert(model.u, model.u.shape[-1], right_ghost , axis=1)
-            model.u = np.insert(model.u, 0, left_ghost , axis=1)
-        else:
-            model.u = np.insert(model.u, model.u.shape[-1], (right_ghost,right_ghost) , axis=1)
-            model.u = np.insert(model.u, 0, (left_ghost,left_ghost) , axis=1)
-            
-        return 
     
     if full_periodic:
         return
     
+    if passive_scalars is not None:
+        model.u[-1,...] = passive_scalars
+        
     if model.dimensionality  == 1:
         if first_order:
             # Add boundary ghosts

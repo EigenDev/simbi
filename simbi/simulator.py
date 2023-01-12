@@ -32,7 +32,7 @@ class Hydro:
     regime: str
     solution: np.ndarray
     geometry: Any
-    u: Optional[Any]
+    u: Optional[Any] = None
     resolution: Union[tuple, int]
     
     
@@ -103,12 +103,14 @@ class Hydro:
         if len(initial_state) < 5:
             self.dimensionality      = np.asarray(initial_state[0]).ndim
             self.geometry            = cast(Sequence[float], geometry)
-            self.resolution          = cast(int, resolution) if self.dimensionality == 1 else cast(Sequence[int], resolution)     
+            self.resolution          = cast(int, resolution) if self.dimensionality == 1 else cast(Sequence[int], resolution)
             self.nvars               = (2 + 1 * (self.dimensionality == 2) + self.dimensionality)
             
+            
+            # Initialize conserved u-tensor and flux tensors (defaulting to 2 ghost cells)
+            self.u = np.zeros(shape = (self.nvars, *np.asarray(self.resolution).flatten()[::-1]))
             if self.discontinuity:
-                # Initialize conserved u-tensor and flux tensors (defaulting to 2 ghost cells)
-                self.u = np.zeros(shape = (3, self.resolution))
+                
                 rhoL, *velocityL, pressureL = left_state
                 rhoR, *velocityR, pressureR = right_state
                 velocityL = np.asarray(velocityL)
@@ -152,6 +154,9 @@ class Hydro:
                 self.init_density   = rho * lorentz_factor 
                 self.init_momentum  = rho * total_enthalpy * lorentz_factor ** 2 * velocity
                 self.init_energy    = rho * total_enthalpy * lorentz_factor ** 2 - pressure - rho * lorentz_factor
+            
+            
+                self.u[...] = np.array([self.init_density, *self.init_momentum, self.init_energy, np.zeros_like(self.init_density)])
         else:
             raise ValueError("Initial State contains too many variables")
     
@@ -291,14 +296,12 @@ class Hydro:
         if self.dimensionality == 1:
             self.x1 = self.x1 or genspace(*self.geometry[:2], self.resolution)
         elif self.dimensionality == 2:
-            self.x1 = self.x1 or genspace(self.geometry[0, 0],   self.geometry[0,1], self.xresolution)
-            self.x2 = self.x2 or np.linspace(self.geometry[1,0], self.geometry[1,1], self.yresolution)
+            self.x1 = self.x1 or genspace(self.geometry[0][0],   self.geometry[0][1], self.resolution[1])
+            self.x2 = self.x2 or np.linspace(self.geometry[1][0], self.geometry[1][1], self.resolution[0])
         else:
-            self.x1 = self.x1 or genspace(self.geometry[0, 0],    self.geometry[0,1], self.xresolution)
-            self.x2 = self.x2 or np.linspace(self.geometry[1,0],  self.geometry[1,1], self.yresolution)
-            self.x3 = self.x3 or np.linspace(self.geometry[2, 0], self.geometry[2,1], self.zresolution)
-    
-    
+            self.x1 = self.x1 or genspace(self.geometry[0][0],    self.geometry[0][1], self.resolution[1])
+            self.x2 = self.x2 or np.linspace(self.geometry[1][0],  self.geometry[1][1], self.resolution[2])
+            self.x3 = self.x3 or np.linspace(self.geometry[2][0], self.geometry[2][1], self.resolution[3])
     
     def _set_boundary_conditions(self, boundary_conditions: Union[Sequence, str]) -> None:
         self.boundary_conditions = boundary_conditions
@@ -333,7 +336,7 @@ class Hydro:
         linspace: bool = True,
         cfl: float = 0.4,
         sources: Optional[np.ndarray ]= None,
-        passive_scalars: Union[np.ndarray, int] = 0,
+        passive_scalars: Optional[Union[np.ndarray, int]] = None,
         hllc: bool = False,
         chkpt: Optional[str] = None,
         chkpt_interval:       float = 0.1,
@@ -435,8 +438,7 @@ class Hydro:
 
         # Loading bar to have chance to check params
         helpers.print_progress()
-        object_cells = np.asarray(object_positions, dtype=bool) if object_positions is None else np.zeros_like(self.u[0], dtype=bool)
-        
+        object_cells = np.asarray(object_positions, dtype=bool) if object_positions is not None else np.zeros_like(self.u[0], dtype=bool)
         #####################################################################################################
         # Check if boundary source terms given. If given as a jagged array, pad the missing members with zeros
         #####################################################################################################
@@ -490,7 +492,7 @@ class Hydro:
             else:
                 state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, x3=self.x3, coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
-            
+
         self.solution = state.simulate(
             sources            = sources,
             tstart             = self.start_time,
