@@ -74,7 +74,7 @@ class KelvinHelmholtz(BaseConfig):
         return "classical"
     
     @property
-    def boundary_condition(self):
+    def boundary_conditions(self):
         return "periodic"
     
     @property
