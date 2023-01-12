@@ -88,7 +88,7 @@ class Hydro:
             right_state = initial_state[1]
             
             if len(left_state) != len(right_state):
-                raise ValueError("Left and right states myst contain equal number of variables", flush=True)
+                raise ValueError("Left and right states myst contain equal number of variables")
                 
             elif len(left_state) == 3 and len(right_state) == 3:
                 self.dimensionality  = 1
