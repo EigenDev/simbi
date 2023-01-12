@@ -453,9 +453,6 @@ class Hydro:
                             
         print(f"Computing {'First' if first_order else 'Second'} Order Solution...", flush=True)
         kwargs: dict[str, Any] = {}
-        print(self.x1)
-        print(self.u.shape)
-        zzz = input('')
         if self.dimensionality  == 1:
             sources = np.asarray(sources) or np.zeros_like(self.u)
             sources = sources.reshape(sources.shape[0], -1)
