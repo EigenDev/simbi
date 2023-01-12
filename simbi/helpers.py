@@ -2,20 +2,21 @@ import numpy as np
 import numpy.typing as npt
 import sys
 from time import sleep 
-from typing import Union, Optional, TypeVar
+from typing import Union, Optional, TypeVar, Type
 
-FloatOrNone = TypeVar("FloatOrNone", float, "None")
-IntOrNone   = TypeVar("IntOrNone", int, "None")
+# FloatOrNone = Optional[float]
+# IntOrNone   = Optional[int]
+IntOrNone   = TypeVar("IntOrNone", int, None)
+FloatOrNone = TypeVar("FloatOrNone", float, None)
+def calc_cell_volume1D(*, x1: npt.NDArray) -> np.ndarray:
+    x1vertices = np.sqrt(x1[1:] * x1[:-1])
+    x1vertices = np.insert(x1vertices,  0, x1[0])
+    x1vertices = np.insert(x1vertices, x1.shape, x1[-1])
+    x1mean     = 0.75 * (x1vertices[1:]**4 - x1vertices[:-1]**4) / (x1vertices[1:]**3 - x1vertices[:-1]**3)
+    dx1        = x1vertices[1:] - x1vertices[:-1]
+    return x1mean * x1mean * dx1 
 
-def calc_cell_volume1D(r: npt.NDArray) -> np.ndarray:
-    rvertices = np.sqrt(r[1:] * r[:-1])
-    rvertices = np.insert(rvertices,  0, r[0])
-    rvertices = np.insert(rvertices, r.shape, r[-1])
-    rmean     = 0.75 * (rvertices[1:]**4 - rvertices[:-1]**4) / (rvertices[1:]**3 - rvertices[:-1]**3)
-    dr        = rvertices[1:] - rvertices[:-1]
-    return rmean * rmean * dr 
-
-def calc_cell_volume2D(x1: npt.NDArray, x2: npt.NDArray, coord_system: str = 'spherical') -> np.ndarray:
+def calc_cell_volume2D(*, x1: npt.NDArray, x2: npt.NDArray, coord_system: str = 'spherical') -> np.ndarray:
     if coord_system == 'spherical':
         if x1.ndim == 1 and x2.ndim == 1:
             rr, thetta = np.meshgrid(x1, x2)
@@ -47,7 +48,7 @@ def calc_cell_volume2D(x1: npt.NDArray, x2: npt.NDArray, coord_system: str = 'sp
         rmean     = (2.0 / 3.0) *(rvertices[:, 1:]**3 - rvertices[:, :-1]**3) / (rvertices[:, 1:]**2 - rvertices[:, :-1]**2)
         return rmean * (rvertices[:, 1:] - rvertices[:, :-1]) * dz
 
-def calc_cell_volume3D(r: npt.NDArray, theta: npt.NDArray, phi: npt.NDArray) -> npt.NDArray:
+def calc_cell_volume3D(*, r: npt.NDArray, theta: npt.NDArray, phi: npt.NDArray) -> npt.NDArray:
     if r.ndim == 1 and theta.ndim == 1 and phi.ndim == 1:
         thetta, phii, rr = np.meshgrid(theta, phi, r)
     else:
@@ -68,12 +69,23 @@ def calc_cell_volume3D(r: npt.NDArray, theta: npt.NDArray, phi: npt.NDArray) -> 
     rvertices = np.insert(rvertices, rvertices.shape[2], rr[:, :, -1], axis=2)
     return (1./3.) * (rvertices[:, :, 1:]**3 - rvertices[:, :, :-1]**3) * dcos * dphi
         
-def compute_num_polar_zones(rmin: FloatOrNone = None, rmax: FloatOrNone = None, nr: FloatOrNone = None, zpd: IntOrNone = None, theta_bounds: tuple = (0.0, np.pi)) -> int:
-    if zpd:
+def compute_num_polar_zones(*, 
+    rmin: float | None   = None, 
+    rmax: float | None   = None, 
+    nr:   int   | None   = None, 
+    zpd:  int   | None   = None, 
+    theta_bounds: tuple = (0.0, np.pi)) -> int:
+    # Convert the values if None
+    rmin = rmin or 1.0
+    rmax = rmax or 1.0
+    nr   = nr   or 1
+    if zpd is not None:
         return round((theta_bounds[1] - theta_bounds[0]) * zpd / np.log(10))
-    else:
-        dlogr = np.log(rmax / rmin) / nr
+    elif None not in (rmin, rmax, nr):
+        dlogr: float = np.log(rmax / rmin) / nr
         return round(1 + (theta_bounds[1] - theta_bounds[0]) / dlogr)
+    else:
+        raise ValueError("Please either specify zones per decade or rmin, rmax, and nr")
 
 def calc_dlogt(tmin: float, tmax: float, ncheckpoints: int):
     if tmin == 0:
@@ -81,7 +93,7 @@ def calc_dlogt(tmin: float, tmax: float, ncheckpoints: int):
     return np.log10(tmax / tmin) / (ncheckpoints - 1)
 
 
-def progressbar(it, prefix="", size=100, out=sys.stdout): 
+def progressbar(it: range, prefix: str = "", size: int = 100, out=sys.stdout): 
     count = len(it)
     def show(j):
         x = int(size*j/count)

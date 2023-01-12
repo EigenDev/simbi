@@ -14,16 +14,15 @@ def load_checkpoint(model, filename, dim, mesh_motion):
         ds = hf.get("sim_info")
         
         if dim == 1:
-            rho         = hf.get("rho")[:]
-            v           = hf.get("v")[:]
-            p           = hf.get("p")[:]
-            nx          = ds.attrs["nx"]
-            model.t     = ds.attrs["current_time"]
-            
-            x1max          = ds.attrs["x1max"]
-            x1min          = ds.attrs["x1min"]
-            ad_gamma       = ds.attrs["adiabatic_gamma"]
-            model.ckpt_idx = ds.attrs['chkpt_idx']
+            rho              = hf.get("rho")[:]
+            v                = hf.get("v")[:]
+            p                = hf.get("p")[:]
+            nx               = ds.attrs["nx"]
+            model.start_time = ds.attrs["current_time"]
+            x1max            = ds.attrs["x1max"]
+            x1min            = ds.attrs["x1min"]
+            ad_gamma         = ds.attrs["adiabatic_gamma"]
+            model.ckpt_idx   = ds.attrs['chkpt_idx']
             
             if mesh_motion:
                 nx_active = ds.attrs['xactive_zones']
@@ -61,7 +60,7 @@ def load_checkpoint(model, filename, dim, mesh_motion):
             ny      = ds.attrs["ny"]
             scalars = hf.get("chi")[:]
 
-            model.t = ds.attrs["current_time"]
+            model.start_time = ds.attrs["current_time"]
             x1max   = ds.attrs["x1max"]
             x1min   = ds.attrs["x1min"]
             x2max   = ds.attrs["x2max"]

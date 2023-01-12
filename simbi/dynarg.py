@@ -1,12 +1,12 @@
-from typing import Any
+from typing import Any, Union, Optional
 class DynamicArg:
     def __init__(self, 
-                 name: str, 
-                 value: Any, 
-                 help: str, 
+                 name:     str, 
+                 value:    Any, 
+                 help:     str, 
                  var_type: type,
-                 choices: list = None, 
-                 action: str = 'store') -> None:
+                 choices:  Optional[list] = None, 
+                 action:   Optional[str] = 'store') -> None:
         self.name     = name
         self.value    = value
         self.help     = help 

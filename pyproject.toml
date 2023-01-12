@@ -51,6 +51,9 @@ simbi = ["configs/*.py"]
 [tool.setuptools.dynamic]
 readme = {file = ["README.md"]}
 
+[tool.mypy]
+ignore_missing_imports = true
+
 [project.urls]
 repository    = "https://github.com/EigenDev/simbi"
 documentation = "https://github.com/EigenDev/simbi"

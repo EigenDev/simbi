@@ -4,13 +4,13 @@
 # 06/10/2020
 import simbi.helpers as helpers
 import numpy as np 
-from itertools import cycle
 import os
 import sys 
 import inspect
 import simbi.initial_condition as simbi_ic 
 import warnings
-from typing import Callable
+from typing import Callable, Any, cast, SupportsIndex, Sequence
+from itertools import cycle
 regimes             = ['classical', 'relativistic']
 coord_systems       = ['spherical', 'cartesian', 'cylindrical', 'planar_cylindrical', 'axis_cylindrical']
 available_boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
@@ -18,12 +18,12 @@ available_boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
 class Hydro:
     def __init__(self, 
                  gamma: float,
-                 initial_state: tuple,
-                 resolution: tuple,
-                 geometry: tuple=None,
+                 initial_state: Sequence,
+                 resolution: int | Sequence[int],
+                 geometry: Sequence[float] | Sequence[Sequence[float]],
                  coord_system:str = 'cartesian',
-                 regime: str = "classical",
-                 setup = None):
+                 regime: str = "classical",*,
+                 setup = None) -> None:
         """
         The initial conditions of the hydrodynamic system (1D for now)
         
@@ -48,9 +48,10 @@ class Hydro:
         Return:
             None
         """
-        self.x1 = None 
-        self.x2 = None 
-        self.x3 = None
+        self.x1: Any = None 
+        self.x2: Any = None 
+        self.x3: Any = None
+        self.solution: np.ndarray
         if setup:
             coord_system                  = setup.coord_system 
             regime                        = setup.regime 
@@ -110,13 +111,16 @@ class Hydro:
             elif len(left_state) == 5 and len(right_state) == 5:
                 self.dimensionality  = 3
         
-        self.gamma          = gamma 
-        self.geometry       = geometry
-        self.resolution     = resolution 
+        self.geometry: Any
+        self.u: Any
+        self.resolution: tuple | int
         
+        self.gamma      = gamma 
         # Initial Conditions
         # Check for Discontinuity
         if discontinuity:
+            self.geometry = cast(Sequence[float], geometry)
+            self.resolution = cast(int, resolution)
             # Primitive Variables on LHS
             rho_l = self.left_state[0]
             v_l   = self.left_state[1]
@@ -150,15 +154,15 @@ class Hydro:
             
 
             # Initialize conserved u-tensor and flux tensors (defaulting to 2 ghost cells)
-            self.u = np.empty(shape = (3, self.resolution), dtype=float)
+            self.u = np.zeros(shape = (3, self.resolution))
 
-            left_bound  = self.geometry[0]
-            right_bound = self.geometry[1]
-            midpoint    = self.geometry[2]
+            left_bound: float  = cast(float, self.geometry[0])
+            right_bound: float = cast(float, self.geometry[1])
+            midpoint: float    = cast(float, self.geometry[2])
             
             size        = abs(right_bound - left_bound)
             break_pt    = size/midpoint                                              # Define the fluid breakpoint
-            slice_point = int((self.resolution+2)/break_pt)                             # Define the array slicepoint
+            slice_point = int((self.resolution + 2)/break_pt)                             # Define the array slicepoint
             
             if self.regime == "classical":
                 self.u[:, : slice_point] = np.array([rho_l, rho_l*v_l, energy_l]).reshape(3,1)              # Left State
@@ -168,8 +172,9 @@ class Hydro:
                 self.u[:, slice_point: ] = np.array([D_r, S_r, tau_r]).reshape(3,1)              # Right State
                 
         elif len(initial_state) == 3:
-            self.dimensionality  = 1
-            
+            self.dimensionality = 1
+            self.geometry      = cast(Sequence[float], geometry)
+            self.resolution    = cast(int, resolution)     
             self.init_rho      = initial_state[0]
             self.init_v        = initial_state[1]
             self.init_pressure = initial_state[2]
@@ -189,10 +194,12 @@ class Hydro:
             self.u = None 
             
         elif len(initial_state) == 4:
-            self.dimensionality  = 2
             print('Initializing 2D Setup...', flush=True)
             print('',flush=True)
-            self.xresolution, self.yresolution = resolution 
+            self.geometry        = cast(Sequence[Sequence[float]], geometry)
+            self.dimensionality  = 2
+            self.resolution      = cast(tuple[int, int], resolution)
+            self.xresolution, self.yresolution = self.resolution 
             self.init_rho      = initial_state[0]
             self.init_v1       = initial_state[1]
             self.init_v2       = initial_state[2]
@@ -212,15 +219,13 @@ class Hydro:
             self.u = None 
             
         elif len(initial_state) == 5:
-            self.dimensionality  = 3
             print('Initializing 3D Setup...', flush=True)
             print('', flush=True)
             
-            left_x, right_x = geometry[0]
-            left_y, right_y = geometry[1]
-            left_z, right_z = geometry[2]
-            
-            self.xresolution, self.yresolution, self.zresolution = resolution  
+            self.dimensionality  = 3
+            self.resolution      = cast(tuple[int, int, int], resolution)
+            self.geometry        = cast(Sequence[Sequence[float]], geometry)
+            self.xresolution, self.yresolution, self.zresolution = self.resolution  
             self.init_rho      = initial_state[0]
             self.init_v1       = initial_state[1]
             self.init_v2       = initial_state[2]
@@ -242,9 +247,9 @@ class Hydro:
     
     @classmethod
     def gen_from_setup(cls, setup):
-        return cls(*[0]*6, setup=setup)
+        return cls(..., setup=setup)
     
-    def _cleanup(self, first_order=True):
+    def _cleanup(self, first_order: bool) -> None:
         """
         Cleanup the ghost cells from the final simulation
         results
@@ -264,27 +269,27 @@ class Hydro:
             else:
                 self.solution = self.solution[:, 2:-2, 2:-2, 2:-2]
     
-    def _print_params(self, frame):
+    def _print_params(self, frame) -> None:
         params = inspect.getargvalues(frame)
         print("="*80, flush=True)
         print("Simulation Parameters", flush=True)
         print("="*80, flush=True)
-        for key, value in params.locals.items():
+        for key, param in params.locals.items():
             if key != 'self':
-                if isinstance(value, (float, np.float64)):
-                    val_str = f"{value:.2f}"
-                elif isinstance(value, Callable):
+                if isinstance(param, (float, np.float64)):
+                    val_str = f"{param:.2f}"
+                elif callable(param):
                     val_str = f"user-defined {key} function"
-                elif isinstance(value, tuple):
-                    if isinstance(value[0], Callable):
+                elif isinstance(param, tuple):
+                    if any(callable(p) for p in param):
                         val_str = f"user-defined {key} function(s)"
-                elif isinstance(value, (list, np.ndarray)):
-                    if len(value) > 6:
+                elif isinstance(param, (list, np.ndarray)):
+                    if len(param) > 6:
                         val_str = f"user-defined {key} terms"
                     else:
-                        val_str = f"{value}"
+                        val_str = f"{param}"
                 else:
-                    val_str = str(value)
+                    val_str = str(param)
                 
                 my_str = str(key).ljust(30, '.')
                 print(f"{my_str} {val_str}", flush=True)
@@ -312,12 +317,14 @@ class Hydro:
             print(f"{my_str} {val_str}", flush=True)
         print("="*80, flush=True)
     
-    def _place_boundary_sources(self, boundary_sources: np.ndarray, first_order: bool):
+    def _place_boundary_sources(self, boundary_sources: np.ndarray | list, first_order: bool) -> np.ndarray:
         boundary_sources = [np.array([val]).flatten() for val in boundary_sources]
         max_len = np.max([len(a) for a in boundary_sources])
         boundary_sources = np.asarray([np.pad(a, (0, max_len - len(a)), 'constant', constant_values=0) for a in boundary_sources])
         edges   = [0,-1] if first_order else [0, 1, -1, -2]
         view    = self.u[:self.dimensionality + 2]
+        
+        slices: list[Any]
         if view.ndim == 1:
             slices = [(...,i) for i in edges] 
         elif view.ndim == 2:
@@ -333,6 +340,41 @@ class Hydro:
             
         return boundary_sources 
     
+    def _generate_the_grid(self, linspace: bool) -> None:
+        genspace: Callable = np.linspace 
+        if not linspace:
+            genspace = np.geomspace 
+            
+        if self.dimensionality == 1:
+            self.x1 = self.x1 or genspace(*self.geometry[:2], self.resolution)
+        elif self.dimensionality == 2:
+            self.x1 = self.x1 or genspace(self.geometry[0, 0],   self.geometry[0,1], self.xresolution)
+            self.x2 = self.x2 or np.linspace(self.geometry[1,0], self.geometry[1,1], self.yresolution)
+        else:
+            self.x1 = self.x1 or genspace(self.geometry[0, 0],    self.geometry[0,1], self.xresolution)
+            self.x2 = self.x2 or np.linspace(self.geometry[1,0],  self.geometry[1,1], self.yresolution)
+            self.x3 = self.x3 or np.linspace(self.geometry[2, 0], self.geometry[2,1], self.zresolution)
+    
+    def _set_boundary_conditions(self, boundary_conditions: Sequence | str) -> None:
+        self.boundary_conditions = boundary_conditions
+        
+    def _check_boundary_conditions(self, boundary_conditions: Sequence | str):
+        if not isinstance(boundary_conditions, (list, np.ndarray)):
+            boundary_conditions = [boundary_conditions]
+        for bc in boundary_conditions:
+            if bc not in available_boundary_conditions:
+                raise ValueError(f"Invalid boundary condition. Expected one of: {available_boundary_conditions}")
+            
+        number_of_given_bcs = len(boundary_conditions)
+        if number_of_given_bcs != 2 * self.dimensionality:
+            if number_of_given_bcs == 1:
+                boundary_conditions = boundary_conditions * 2 * self.dimensionality
+            elif number_of_given_bcs == self.dimensionality // 2:
+                boundary_conditions = [boundary_conditions[idx] * 2 for idx in range(number_of_given_bcs)]
+            else:
+                raise ValueError("Please include at a number of boundary conditions equal to at least half the number of cell faces")
+            
+        self.boundary_conditions = boundary_conditions
     def simulate(
         self, 
         tstart: float = 0.0,
@@ -342,24 +384,24 @@ class Hydro:
         first_order: bool = True,
         linspace: bool = True,
         cfl: float = 0.4,
-        sources: np.ndarray = None,
-        passive_scalars: np.ndarray = 0,
+        sources: np.ndarray | None = None,
+        passive_scalars: np.ndarray | int = 0,
         hllc: bool = False,
-        chkpt: str = None,
-        chkpt_interval:float = 0.1,
-        data_directory:str = "data/",
-        boundary_conditions: list = "outflow",
+        chkpt: str | None = None,
+        chkpt_interval:       float = 0.1,
+        data_directory:       str = "data/",
+        boundary_conditions: Sequence | str = "outflow",
         engine_duration: float = 10.0,
-        compute_mode: str = 'cpu',
-        quirk_smoothing: bool = True,
+        compute_mode:     str = 'cpu',
+        quirk_smoothing:  bool = True,
         constant_sources: bool = False,
-        scale_factor: Callable = None,
-        scale_factor_derivative: Callable = None,
-        dens_outer: Callable = None,
-        mom_outer: Callable = None,
-        edens_outer: Callable = None,
-        object_positions: np.ndarray = None,
-        boundary_sources: np.ndarray = None) -> np.ndarray:
+        scale_factor: Callable | None = None,
+        scale_factor_derivative: Callable | None = None,
+        dens_outer:  Callable | None = None,
+        mom_outer:   Callable | Sequence[Callable] | None = None,
+        edens_outer: Callable | None = None,
+        object_positions: np.ndarray | None = None,
+        boundary_sources: np.ndarray | None = None) -> np.ndarray:
         """
         Simulate the Hydro Setup
         
@@ -391,67 +433,32 @@ class Hydro:
             u (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
+        self.u          = np.asarray(self.u)
+        self.start_time: float = 0.0
+        self.chkpt_idx: int    = 0
         if compute_mode == 'cpu':
             from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
         else:
             try:
                 from gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-            except Exception as e:
+            except ImportError as e:
                 warnings.warn("Error in loading GPU extension. Loading CPU instead...", GPUExtNotBuiltWarning)
                 warnings.warn(f"For reference, the gpu_ext had the follow error: {e}", GPUExtNotBuiltWarning)
                 from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-                
-        if scale_factor == None:
-            scale_factor = lambda t: 1.0 
-        if scale_factor_derivative == None:
-            scale_factor_derivative = lambda t: 0.0
         
-        if linspace:
-            genspace = np.linspace 
-        else:
-            genspace = np.geomspace 
+        scale_factor = scale_factor or (lambda t: 1.0)
+        scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)        
+        self._generate_the_grid(linspace)
         
-        if self.dimensionality == 1:
-            x1 = genspace(self.geometry[0], self.geometry[1], self.resolution) if self.x1 is None else self.x1
-        elif self.dimensionality == 2:
-            x1 = genspace(*self.geometry[0], self.xresolution)    if self.x1 is None else self.x1
-            x2 = np.linspace(*self.geometry[1], self.yresolution) if self.x2 is None else self.x2
-        else:
-            x1 = genspace(*self.geometry[0], self.xresolution)    if self.x1 is None else self.x1
-            x2 = np.linspace(*self.geometry[1], self.yresolution) if self.x2 is None else self.x2
-            x3 = np.linspace(*self.geometry[2], self.zresolution) if self.x3 is None else self.x3
-        
-        mesh_motion = scale_factor_derivative(1.0) / scale_factor(1.0) != 0
+        mesh_motion = scale_factor_derivative(1.0) / scale_factor(1.0) or False
+        volume_factor: Any = 1.0
         if mesh_motion and self.coord_system != 'cartesian':
             if self.dimensionality == 1:
-                volume_factor = helpers.calc_cell_volume1D(x1)
+                volume_factor = helpers.calc_cell_volume1D(x1=self.x1)
             elif self.dimensionality == 2:
-                volume_factor = helpers.calc_cell_volume2D(x1, x2, self.coord_system)
-        else:
-            volume_factor = 1.0
+                volume_factor = helpers.calc_cell_volume2D(x1=self.x1, x2=self.x2, coord_system=self.coord_system)
         
-        if not isinstance(boundary_conditions, (list, np.ndarray)):
-            boundary_conditions = [boundary_conditions]
-        for bc in boundary_conditions:
-            if bc not in available_boundary_conditions:
-                raise ValueError(f"Invalid boundary condition. Expected one of: {available_boundary_conditions}")
-        
-        number_of_given_bcs = len(boundary_conditions)
-        if number_of_given_bcs != 2 * self.dimensionality:
-            if number_of_given_bcs == 1:
-                boundary_conditions = boundary_conditions * 2 * self.dimensionality
-            elif number_of_given_bcs == self.dimensionality // 2:
-                temp = []
-                for idx in range(number_of_given_bcs):
-                    temp += [boundary_conditions[idx]] * 2
-                boundary_conditions = temp
-            else:
-                raise ValueError("Please include at a number of boundary conditions equal to at least half the number of cell faces")
-        
-        self.u         = np.asarray(self.u)
-        self.t         = 0
-        self.chkpt_idx = 0
-        
+        self._check_boundary_conditions(boundary_conditions)        
         if not chkpt:
             simbi_ic.initializeModel(self, first_order, boundary_conditions, passive_scalars, volume_factor=volume_factor)
         else:
@@ -460,16 +467,16 @@ class Hydro:
         if self.dimensionality == 1 and self.coord_system in ['planar_cylindrical', 'axis_cylindrical']:
             self.coord_system = 'cylindrical'
             
-        periodic    = all(bc == 'periodic' for bc in boundary_conditions)
-        start_time  = tstart if self.t == 0 else self.t
+        periodic        = all(bc == 'periodic' for bc in boundary_conditions)
+        self.start_time = self.start_time or tstart
         #Convert strings to byte arrays
         cython_data_directory      = os.path.join(data_directory, '').encode('utf-8')
         cython_coordinates         = self.coord_system.encode('utf-8')
-        cython_boundary_conditions = np.array([bc.encode('utf-8') for bc in boundary_conditions])
+        cython_boundary_conditions = np.array([bc.encode('utf-8') for bc in self.boundary_conditions])
         
         # Offset the start time from zero if wanting log 
         # checkpoints, but with initial time of zero
-        if dlogt !=0 and start_time == 0:
+        if dlogt !=0 and self.start_time == 0:
             start_time = 1e-16 
             
         # Check whether the specified path exists or not
@@ -480,7 +487,7 @@ class Hydro:
 
         # Loading bar to have chance to check params
         helpers.print_progress()
-        object_cells = np.asarray(object_positions, dtype=np.bool) if object_positions is None else np.zeros_like(self.u[0], dtype=np.bool)
+        object_cells = np.asarray(object_positions, dtype=bool) if object_positions is None else np.zeros_like(self.u[0], dtype=bool)
         
         #####################################################################################################
         # Check if boundary source terms given. If given as a jagged array, pad the missing members with zeros
@@ -491,14 +498,14 @@ class Hydro:
             boundary_sources = self._place_boundary_sources(boundary_sources=boundary_sources, first_order=first_order)
                             
         print(f"Computing {'First' if first_order else 'Second'} Order Solution...", flush=True)
+        kwargs: dict[str, Any] = {}
         if self.dimensionality  == 1:
             sources = np.asarray(sources) or np.zeros_like(self.u)
             sources = sources.reshape(sources.shape[0], -1)
-            kwargs  = {}
             if self.regime == "classical":
-                state = PyState(self.u, self.gamma, cfl, x1 = x1, coord_system = cython_coordinates)
+                state = PyState(self.u, self.gamma, cfl, x1 = self.x1, coord_system = cython_coordinates)
             else:   
-                state = PyStateSR(self.u, self.gamma, cfl, x1 = x1, coord_system = cython_coordinates)
+                state = PyStateSR(self.u, self.gamma, cfl, x1 = self.x1, coord_system = cython_coordinates)
                 kwargs = {'a': scale_factor, 'adot': scale_factor_derivative}
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] =  dens_outer
@@ -509,19 +516,19 @@ class Hydro:
             # ignore the chi term
             sources = np.asarray(sources) or np.zeros(self.u[:-1].shape, dtype=float)
             sources = sources.reshape(sources.shape[0], -1)
-            
-            kwargs = {}
+
             if self.regime == "classical":
-                state = PyState2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
+                state = PyState2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=cython_coordinates)
             else:
                 kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'quirk_smoothing': quirk_smoothing, 'object_cells': object_cells}
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
+                    momentum_components    = cast(Sequence, mom_outer)
                     kwargs['d_outer']      = dens_outer
-                    kwargs['s1_outer']     = mom_outer[0]
-                    kwargs['s2_outer']     = mom_outer[1]
+                    kwargs['s1_outer']     = momentum_components[0]
+                    kwargs['s2_outer']     = momentum_components[1]
                     kwargs['e_outer']      = edens_outer
                 
-                state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
+                state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=cython_coordinates)
 
         else:
             sources = np.zeros(self.u.shape[:-1], dtype=float) if not sources else np.asarray(sources)
@@ -532,12 +539,12 @@ class Hydro:
                 pass
                 # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
             else:
-                state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=x1, x2=x2, x3=x3, coord_system=cython_coordinates)
+                state = PyStateSR3D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, x3=self.x3, coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
             
         self.solution = state.simulate(
             sources            = sources,
-            tstart             = start_time,
+            tstart             = self.start_time,
             tend               = tend,
             dlogt              = dlogt,
             plm_theta          = plm_theta,
