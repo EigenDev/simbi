@@ -145,16 +145,17 @@ class Hydro:
                 self.u[:, slice_point: ] = np.array([densR, *momR, energyR]).reshape(3,1)              # Right State
             else:
                 rho, *velocity, pressure = initial_state
-                vsqr                     = sum(vcomp * vcomp for vcomp in velocity)
+                vsqr                     = self.calc_vsq(velocity)
                 
-                lorentz_factor      = 1 if regime == 'classical' else (1 - vsqr**2) ** (-0.5)
-                internal_energy     = 1 + 0.5 * vsqr if regime == 'classical' else 1
-                total_enthalpy      = internal_energy + self.gamma * pressure / (rho * (self.gamma - 1))
+                lorentz_factor      = self.calc_lorentz_factor(vsqr, regime)
+                internal_energy     = self.calc_internal_energy(vsqr, regime)
+                total_enthalpy      = self.calc_enthalpy(rho, pressure, internal_energy, gamma)
+                enthalpy_limit      = self.calc_spec_enthalpy(rho, pressure, internal_energy, gamma, regime)
                 
-                self.init_density   = rho * lorentz_factor 
-                self.init_momentum  = rho * total_enthalpy * lorentz_factor ** 2 * velocity
-                self.init_energy    = rho * total_enthalpy * lorentz_factor ** 2 - pressure - rho * lorentz_factor
-            
+                self.init_density   = self.calc_labframe_densiity(rho, lorentz_factor) 
+                self.init_momentum  = self.calc_labframe_momentum(rho, lorentz_factor, enthalpy_limit, velocity)
+                self.init_energy    = self.calc_labframe_energy(rho, lorentz_factor, total_enthalpy, pressure)
+                
                 if self.dimensionality == 2:
                     self.u[...] = np.array([self.init_density, *self.init_momentum, self.init_energy, np.zeros_like(self.init_density)])
                 else:
@@ -173,6 +174,10 @@ class Hydro:
     @staticmethod
     def calc_enthalpy(rho, pressure, internal_energy, gamma):
         return internal_energy + gamma * pressure / (rho * (gamma - 1))
+
+    @staticmethod
+    def calc_spec_enthalpy(rho, pressure, internal_energy, gamma, regime):
+        return 1 if regime == 'classical' else Hydro.calc_enthalpy(rho, pressure, internal_energy, gamma)
     
     @staticmethod
     def calc_internal_energy(vsquared, regime):
@@ -193,6 +198,10 @@ class Hydro:
     @staticmethod
     def calc_labframe_momentum(rho, lorentz, enthalpy, velocity):
         return rho * lorentz * lorentz * enthalpy * velocity
+    
+    @staticmethod
+    def calc_labframe_energy(rho, lorentz, enthalpy, pressure):
+        return rho * lorentz * lorentz * enthalpy  - pressure - rho * lorentz
     
     def _cleanup(self, first_order: bool) -> None:
         """
@@ -450,7 +459,7 @@ class Hydro:
             boundary_sources = np.zeros((2 * self.dimensionality, self.dimensionality + 2))
         else:
             boundary_sources = self._place_boundary_sources(boundary_sources=boundary_sources, first_order=first_order)
-                            
+        
         print(f"Computing {'First' if first_order else 'Second'} Order Solution...", flush=True)
         kwargs: dict[str, Any] = {}
         if self.dimensionality  == 1:
