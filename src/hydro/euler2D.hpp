@@ -161,13 +161,11 @@ namespace simbi {
         GPU_CALLABLE_INLINE
         constexpr real get_x2face(const lint ii, const int side)
         {
-
-            const real yl = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
+            const real yl = helpers::my_max(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
             if (side == 0) {
                 return yl;
-            } else {
-                return helpers::my_min(yl + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
-            }
+            } 
+            return helpers::my_min(yl + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
         }
 
         GPU_CALLABLE_INLINE
