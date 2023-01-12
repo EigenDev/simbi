@@ -1,14 +1,9 @@
 import numpy as np 
-import numpy.typing as npt
 import sys
 from time import sleep 
-from typing import Union, Optional, TypeVar, Type
+from typing import Optional 
 
-# FloatOrNone = Optional[float]
-# IntOrNone   = Optional[int]
-IntOrNone   = TypeVar("IntOrNone", int, None)
-FloatOrNone = TypeVar("FloatOrNone", float, None)
-def calc_cell_volume1D(*, x1: npt.NDArray) -> np.ndarray:
+def calc_cell_volume1D(*, x1: np.ndarray) -> np.ndarray:
     x1vertices = np.sqrt(x1[1:] * x1[:-1])
     x1vertices = np.insert(x1vertices,  0, x1[0])
     x1vertices = np.insert(x1vertices, x1.shape, x1[-1])
@@ -16,7 +11,7 @@ def calc_cell_volume1D(*, x1: npt.NDArray) -> np.ndarray:
     dx1        = x1vertices[1:] - x1vertices[:-1]
     return x1mean * x1mean * dx1 
 
-def calc_cell_volume2D(*, x1: npt.NDArray, x2: npt.NDArray, coord_system: str = 'spherical') -> np.ndarray:
+def calc_cell_volume2D(*, x1: np.ndarray, x2: np.ndarray, coord_system: str = 'spherical') -> np.ndarray:
     if coord_system == 'spherical':
         if x1.ndim == 1 and x2.ndim == 1:
             rr, thetta = np.meshgrid(x1, x2)
@@ -48,7 +43,7 @@ def calc_cell_volume2D(*, x1: npt.NDArray, x2: npt.NDArray, coord_system: str = 
         rmean     = (2.0 / 3.0) *(rvertices[:, 1:]**3 - rvertices[:, :-1]**3) / (rvertices[:, 1:]**2 - rvertices[:, :-1]**2)
         return rmean * (rvertices[:, 1:] - rvertices[:, :-1]) * dz
 
-def calc_cell_volume3D(*, r: npt.NDArray, theta: npt.NDArray, phi: npt.NDArray) -> npt.NDArray:
+def calc_cell_volume3D(*, r: np.ndarray, theta: np.ndarray, phi: np.ndarray) -> np.ndarray:
     if r.ndim == 1 and theta.ndim == 1 and phi.ndim == 1:
         thetta, phii, rr = np.meshgrid(theta, phi, r)
     else:
@@ -70,10 +65,10 @@ def calc_cell_volume3D(*, r: npt.NDArray, theta: npt.NDArray, phi: npt.NDArray) 
     return (1./3.) * (rvertices[:, :, 1:]**3 - rvertices[:, :, :-1]**3) * dcos * dphi
         
 def compute_num_polar_zones(*, 
-    rmin: float | None   = None, 
-    rmax: float | None   = None, 
-    nr:   int   | None   = None, 
-    zpd:  int   | None   = None, 
+    rmin: Optional[float]   = None, 
+    rmax: Optional[float]   = None, 
+    nr:   Optional[int]     = None, 
+    zpd:  Optional[int]     = None, 
     theta_bounds: tuple = (0.0, np.pi)) -> int:
     # Convert the values if None
     rmin = rmin or 1.0
