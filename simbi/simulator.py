@@ -155,8 +155,10 @@ class Hydro:
                 self.init_momentum  = rho * total_enthalpy * lorentz_factor ** 2 * velocity
                 self.init_energy    = rho * total_enthalpy * lorentz_factor ** 2 - pressure - rho * lorentz_factor
             
-            
-                self.u[...] = np.array([self.init_density, *self.init_momentum, self.init_energy, np.zeros_like(self.init_density)])
+                if self.dimensionality == 2:
+                    self.u[...] = np.array([self.init_density, *self.init_momentum, self.init_energy, np.zeros_like(self.init_density)])
+                else:
+                    self.u[...] = np.array([self.init_density, *self.init_momentum, self.init_energy])
         else:
             raise ValueError("Initial State contains too many variables")
     
@@ -322,7 +324,7 @@ class Hydro:
                 boundary_conditions = [boundary_conditions[idx] * 2 for idx in range(number_of_given_bcs)]
             else:
                 raise ValueError("Please include at a number of boundary conditions equal to at least half the number of cell faces")
-            
+        
         self.boundary_conditions = boundary_conditions
         
         
@@ -411,7 +413,7 @@ class Hydro:
         
         self._check_boundary_conditions(boundary_conditions)        
         if not chkpt:
-            simbi_ic.initializeModel(self, first_order, boundary_conditions, passive_scalars, volume_factor=volume_factor)
+            simbi_ic.initializeModel(self, first_order, passive_scalars, volume_factor=volume_factor)
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensionality , mesh_motion)
         
@@ -451,7 +453,9 @@ class Hydro:
                             
         print(f"Computing {'First' if first_order else 'Second'} Order Solution...", flush=True)
         kwargs: dict[str, Any] = {}
-        
+        print(self.x1)
+        print(self.u.shape)
+        zzz = input('')
         if self.dimensionality  == 1:
             sources = np.asarray(sources) or np.zeros_like(self.u)
             sources = sources.reshape(sources.shape[0], -1)

@@ -137,9 +137,8 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                     model.u[:, -(i + 1), :] = model.u[:, -(nghosts + 1), :]
         
 
-def initializeModel(model, first_order = False, boundary_conditions = "outflow", passive_scalars = None, volume_factor = 1):
-    full_periodic = all(bc == 'periodic' for bc in boundary_conditions)
-    
+def initializeModel(model, first_order = False, passive_scalars = None, volume_factor = 1):
+    full_periodic = all(bc == 'periodic' for bc in model.boundary_conditions)
     if full_periodic:
         return
     
