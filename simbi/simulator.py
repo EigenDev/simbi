@@ -438,7 +438,9 @@ class Hydro:
 
         # Loading bar to have chance to check params
         helpers.print_progress()
-        object_cells = np.asarray(object_positions, dtype=bool) if object_positions is not None else np.zeros_like(self.u[0], dtype=bool)
+        
+        # Create boolean maks for object immersed boundaries (impermable)
+        object_cells = np.zeros_like(self.u[0], dtype=bool) if object_positions is None else np.asarray(object_positions, dtype=bool) 
         #####################################################################################################
         # Check if boundary source terms given. If given as a jagged array, pad the missing members with zeros
         #####################################################################################################
