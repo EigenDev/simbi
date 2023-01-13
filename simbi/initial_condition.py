@@ -1,14 +1,15 @@
 # Module to config the initial condition for the SIMBI
 # hydro setup. From here on, I will fragment the code 
 # to try and reduce the confusion between functions
-from statistics import mode
 import numpy as np 
 import h5py 
 import simbi.helpers as helpers 
- 
-def load_checkpoint(model, filename, dim, mesh_motion):
+import numpy.typing as npt
+from .key_types import *
+
+def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> None:
     print(f"Loading from checkpoint: {filename}...", flush=True)
-    volume_factor = 1.0
+    volume_factor: Any = 1.0
     with h5py.File(filename, 'r+') as hf:
         t = 0
         ds = hf.get("sim_info")
@@ -31,7 +32,7 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                 else:
                     model.x1 = np.geomspace(x1min, x1max, nx_active)
 
-                volume_factor = helpers.calc_cell_volume1D(model.x1)
+                volume_factor = helpers.calc_cell_volume1D(x1=model.x1)
             
             h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
             
@@ -93,7 +94,7 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                     else:
                         model.x1 = np.geomspace(x1min, x1max, nx_active)
                         model.x2 = np.linspace(x2min,  x2max, ny_active)
-                volume_factor = helpers.calc_cell_volume2D(model.x1, model.x2)
+                volume_factor = helpers.calc_cell_volume2D(x1=model.x1, x2=model.x2, coord_system=model.coord_system)
             rho     = rho.reshape(ny, nx)
             v1      = v1.reshape(ny, nx)
             v2      = v2.reshape(ny, nx)
@@ -137,7 +138,7 @@ def load_checkpoint(model, filename, dim, mesh_motion):
                     model.u[:, -(i + 1), :] = model.u[:, -(nghosts + 1), :]
         
 
-def initializeModel(model, first_order = False, passive_scalars = None, volume_factor = 1):
+def initializeModel(model: Any, first_order: bool, volume_factor: float, passive_scalars: Union[npt.NDArray[Any], Any]) -> None:
     full_periodic = all(bc == 'periodic' for bc in model.boundary_conditions)
     if full_periodic:
         return

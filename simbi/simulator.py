@@ -4,45 +4,46 @@
 # 06/10/2020
 import simbi.helpers as helpers
 import numpy as np 
+import numpy.typing as npt
 import os
 import inspect
 import simbi.initial_condition as simbi_ic 
 import warnings
 from functools import wraps
-from typing import Callable, Any, cast, Optional, Sequence, Union
+from .key_types import *
 
 available_regimes             = ['classical', 'relativistic']
 available_coord_systems       = ['spherical', 'cartesian', 'cylindrical', 'planar_cylindrical', 'axis_cylindrical']
 available_boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
 
 class Hydro:
-    linspace: Optional[bool]                    = None 
-    sources: Optional[Sequence]                 = None 
-    passive_scalars: Optional[Sequence]         = None 
-    scale_factor: Optional[Callable]            = None 
-    scale_factor_derivative: Optional[Callable] = None
-    x1: Optional[Sequence]                      = None 
-    x2: Optional[Sequence]                      = None
-    x3: Optional[Sequence]                      = None
-    discontinuity: bool                         = False
-    dens_outer: Optional[Callable]              = None 
-    edens_outer: Optional[Callable]             = None
-    mom_outer: Optional[Union[Sequence[Callable], Callable]] = None 
+    linspace: BoolOrNone                    = None 
+    sources: SequenceOrNone                 = None 
+    passive_scalars: SequenceOrNone         = None 
+    scale_factor: CallableOrNone            = None 
+    scale_factor_derivative: CallableOrNone = None
+    discontinuity: bool                     = False
+    dens_outer: CallableOrNone              = None 
+    edens_outer: CallableOrNone             = None
+    mom_outer: Optional[Union[Sequence[Callable[...,Any]], Callable[...,Any]]] = None 
+    x1: NDArray[Any]
+    x2: NDArray[Any]
+    x3: NDArray[Any]
     coord_system: str
     regime: str
-    solution: np.ndarray
+    solution: NDArray[Any]
     geometry: Any
-    u: Optional[Any] = None
-    resolution: Union[tuple, int]
+    u: NDArray[Any]
+    resolution: Sequence[int]
     
     
     def __init__(self, *,
                  gamma: float,
-                 initial_state: Sequence,
-                 resolution: Union[int, Sequence[int]],
+                 initial_state: Union[Sequence[Any], NDArray[Any]],
+                 resolution: Union[int, Sequence[int],NDArray[Any]],
                  geometry: Union[Sequence[float], Sequence[Sequence[float]]],
                  coord_system:str = 'cartesian',
-                 regime: str = "classical", **extras) -> None:
+                 regime: str = "classical", **extras: Any) -> None:
         """
         The initial conditions of the hydrodynamic system (1D for now)
         
@@ -75,12 +76,15 @@ class Hydro:
         
         # Update any static vars with attributes obtained from some setup configuration
         clean_attributes = [x for x in extras.keys() if not x.startswith('__')]
-        [setattr(self, attribute, extras[attribute]) for attribute in clean_attributes if attribute in dir(self)]
+        [setattr(self, attribute, extras[attribute]) for attribute in clean_attributes if attribute in dir(self)] # type: ignore
         
         self.coord_system  = coord_system
         self.regime        = regime
         self.discontinuity = len(initial_state) == 2
-        initial_state      = np.asarray(initial_state)
+        initial_state      = helpers.pad_jagged_array(initial_state)
+        if not isinstance(resolution, (Sequence, np.ndarray)):
+            resolution = (resolution,)
+            
         #Check dimensions of state
         if len(initial_state) == 2:
             print('Initializing Problem With a Discontinuity...', flush=True)
@@ -103,14 +107,13 @@ class Hydro:
         if len(initial_state) < 5:
             self.dimensionality      = np.asarray(initial_state[0]).ndim
             self.geometry            = cast(Sequence[float], geometry)
-            self.resolution          = cast(int, resolution) if self.dimensionality == 1 else cast(Sequence[int], resolution)
+            self.resolution          = cast(Sequence[int], resolution)
             self.nvars               = (2 + 1 * (self.dimensionality == 2) + self.dimensionality)
             
             
             # Initialize conserved u-tensor and flux tensors (defaulting to 2 ghost cells)
             self.u = np.zeros(shape = (self.nvars, *np.asarray(self.resolution).flatten()[::-1]))
             if self.discontinuity:
-                
                 rhoL, *velocityL, pressureL = left_state
                 rhoR, *velocityR, pressureR = right_state
                 velocityL = np.asarray(velocityL)
@@ -128,29 +131,30 @@ class Hydro:
                 total_enthalpyR      = self.calc_enthalpy(rhoR, pressureR, internal_energyR, self.gamma)
                 energyR              = self.calc_energy_density(rhoR, lorentz_factorR, total_enthalpyR, pressureR)
                 
-                left_bound: float  = cast(float, self.geometry[0])
-                right_bound: float = cast(float, self.geometry[1])
-                midpoint: float    = cast(float, self.geometry[2])
+                left_bound  = self.geometry[0]
+                right_bound = self.geometry[1]
+                midpoint    = self.geometry[2]
                 
                 grid_size   = abs(right_bound - left_bound)
                 break_pt    = grid_size / midpoint                       # Define the fluid breakpoint
-                slice_point = int((self.resolution + 2)/break_pt)        # Define the array slicepoint
+                slice_point = int(self.resolution[0] // break_pt)        # Define the array slicepoint
                 
                 densL = self.calc_labframe_densiity(rhoL, lorentz_factorL)
                 densR = self.calc_labframe_densiity(rhoR, lorentz_factorR)
                 momL  = self.calc_labframe_momentum(rhoL, lorentz_factorL, total_enthalpyL, velocityL)
                 momR  = self.calc_labframe_momentum(rhoR, lorentz_factorR, total_enthalpyR, velocityR)
                 
-                self.u[:, : slice_point] = np.array([densL, *momL, energyL]).reshape(3,1)              # Left State
-                self.u[:, slice_point: ] = np.array([densR, *momR, energyR]).reshape(3,1)              # Right State
+                self.u[..., : slice_point] = np.array([densL, *momL, energyL])[:,None] # Left State
+                self.u[..., slice_point: ] = np.array([densR, *momR, energyR])[:,None] # Right State
             else:
+                velocity: Any 
                 rho, *velocity, pressure = initial_state
-                vsqr                     = self.calc_vsq(velocity)
-                
-                lorentz_factor      = self.calc_lorentz_factor(vsqr, regime)
-                internal_energy     = self.calc_internal_energy(vsqr, regime)
-                total_enthalpy      = self.calc_enthalpy(rho, pressure, internal_energy, gamma)
-                enthalpy_limit      = self.calc_spec_enthalpy(rho, pressure, internal_energy, gamma, regime)
+                velocity        = np.asarray(velocity)
+                vsqr            = self.calc_vsq(velocity)
+                lorentz_factor  = self.calc_lorentz_factor(vsqr, regime)
+                internal_energy = self.calc_internal_energy(vsqr, regime)
+                total_enthalpy  = self.calc_enthalpy(rho, pressure, internal_energy, gamma)
+                enthalpy_limit  = self.calc_spec_enthalpy(rho, pressure, internal_energy, gamma, regime)
                 
                 self.init_density   = self.calc_labframe_densiity(rho, lorentz_factor) 
                 self.init_momentum  = self.calc_labframe_momentum(rho, lorentz_factor, enthalpy_limit, velocity)
@@ -164,43 +168,43 @@ class Hydro:
             raise ValueError("Initial State contains too many variables")
     
     @classmethod
-    def gen_from_setup(cls, setup):
+    def gen_from_setup(cls, setup: Any) -> Any:
         return cls(**{str(param): getattr(setup, param) for param in dir(setup)})
     
     @staticmethod
-    def calc_lorentz_factor(vsquared, regime):
-        return 1 if regime == 'classical' else (1 - vsquared)**(-0.5)
+    def calc_lorentz_factor(vsquared: NDArray[Any], regime: str) -> FloatOrArray:
+        return 1.0 if regime == 'classical' else (1 - np.asarray(vsquared))**(-0.5)
     
     @staticmethod
-    def calc_enthalpy(rho, pressure, internal_energy, gamma):
+    def calc_enthalpy(rho: FloatOrArray, pressure: FloatOrArray, internal_energy: FloatOrArray, gamma: float) -> FloatOrArray:
         return internal_energy + gamma * pressure / (rho * (gamma - 1))
 
     @staticmethod
-    def calc_spec_enthalpy(rho, pressure, internal_energy, gamma, regime):
-        return 1 if regime == 'classical' else Hydro.calc_enthalpy(rho, pressure, internal_energy, gamma)
+    def calc_spec_enthalpy(rho: FloatOrArray, pressure: FloatOrArray, internal_energy: FloatOrArray, gamma: float, regime: str) -> FloatOrArray:
+        return 1.0 if regime == 'classical' else Hydro.calc_enthalpy(rho, pressure, internal_energy, gamma)
     
     @staticmethod
-    def calc_internal_energy(vsquared, regime):
-        return 1 + 0.5 * vsquared if regime == 'classical' else 1
+    def calc_internal_energy(vsquared: NDArray[Any], regime: str) -> FloatOrArray:
+        return 1.0 + 0.5 * np.asarray(vsquared) if regime == 'classical' else 1
     
     @staticmethod
-    def calc_vsq(velocity):
-        return sum(vcomp * vcomp for vcomp in velocity)
+    def calc_vsq(velocity: Union[NDArray[Any], Sequence[float]])-> NDArray[Any]:
+        return np.array(sum(vcomp * vcomp for vcomp in velocity))
     
     @staticmethod
-    def calc_energy_density(rho, lorentz, enthalpy, pressure):
+    def calc_energy_density(rho: FloatOrArray, lorentz: FloatOrArray, enthalpy: FloatOrArray, pressure: FloatOrArray) -> FloatOrArray:
         return rho * lorentz * lorentz * enthalpy - pressure - rho * lorentz
     
     @staticmethod
-    def calc_labframe_densiity(rho, lorentz):
+    def calc_labframe_densiity(rho: FloatOrArray, lorentz: FloatOrArray) -> FloatOrArray:
         return rho * lorentz 
     
     @staticmethod
-    def calc_labframe_momentum(rho, lorentz, enthalpy, velocity):
+    def calc_labframe_momentum(rho: FloatOrArray, lorentz: FloatOrArray, enthalpy: FloatOrArray, velocity: NDArray[Any]) -> NDArray[Any]:
         return rho * lorentz * lorentz * enthalpy * velocity
     
     @staticmethod
-    def calc_labframe_energy(rho, lorentz, enthalpy, pressure):
+    def calc_labframe_energy(rho: FloatOrArray, lorentz: FloatOrArray, enthalpy: FloatOrArray, pressure: FloatOrArray) -> FloatOrArray:
         return rho * lorentz * lorentz * enthalpy  - pressure - rho * lorentz
     
     def _cleanup(self, first_order: bool) -> None:
@@ -224,7 +228,7 @@ class Hydro:
                 self.solution = self.solution[:, 2:-2, 2:-2, 2:-2]
     
     
-    def _print_params(self, frame) -> None:
+    def _print_params(self, frame: Any) -> None:
         params = inspect.getargvalues(frame)
         print("="*80, flush=True)
         print("Simulation Parameters", flush=True)
@@ -274,7 +278,7 @@ class Hydro:
     
     
     
-    def _place_boundary_sources(self, boundary_sources: Sequence, first_order: bool) -> np.ndarray:
+    def _place_boundary_sources(self, boundary_sources: Union[Sequence[Any], NDArray[Any]], first_order: bool) -> NDArray[Any]:
         boundary_sources = [np.array([val]).flatten() for val in boundary_sources]
         max_len = np.max([len(a) for a in boundary_sources])
         boundary_sources = np.asarray([np.pad(a, (0, max_len - len(a)), 'constant', constant_values=0) for a in boundary_sources])
@@ -300,7 +304,7 @@ class Hydro:
     
     
     def _generate_the_grid(self, linspace: bool) -> None:
-        genspace: Callable = np.linspace 
+        genspace: Callable[...,Any] = np.linspace 
         if not linspace:
             genspace = np.geomspace 
             
@@ -314,13 +318,14 @@ class Hydro:
             self.x2 = self.x2 or np.linspace(self.geometry[1][0],  self.geometry[1][1], self.resolution[2])
             self.x3 = self.x3 or np.linspace(self.geometry[2][0], self.geometry[2][1], self.resolution[3])
     
-    def _set_boundary_conditions(self, boundary_conditions: Union[Sequence, str]) -> None:
+    def _set_boundary_conditions(self, boundary_conditions: Union[Sequence[Any], str, NDArray[Any]]) -> None:
         self.boundary_conditions = boundary_conditions
         
         
-    def _check_boundary_conditions(self, boundary_conditions: Union[Sequence, str]):
-        if not isinstance(boundary_conditions, (list, np.ndarray)):
+    def _check_boundary_conditions(self, boundary_conditions: Union[Sequence[Any], str, NDArray[Any]]) -> None:
+        if not isinstance(boundary_conditions, (Sequence, np.ndarray)):
             boundary_conditions = [boundary_conditions]
+
         for bc in boundary_conditions:
             if bc not in available_boundary_conditions:
                 raise ValueError(f"Invalid boundary condition. Expected one of: {available_boundary_conditions}")
@@ -328,7 +333,7 @@ class Hydro:
         number_of_given_bcs = len(boundary_conditions)
         if number_of_given_bcs != 2 * self.dimensionality:
             if number_of_given_bcs == 1:
-                boundary_conditions = boundary_conditions * 2 * self.dimensionality
+                boundary_conditions = list(boundary_conditions) * 2 * self.dimensionality
             elif number_of_given_bcs == self.dimensionality // 2:
                 boundary_conditions = [boundary_conditions[idx] * 2 for idx in range(number_of_given_bcs)]
             else:
@@ -346,24 +351,24 @@ class Hydro:
         first_order: bool = True,
         linspace: bool = True,
         cfl: float = 0.4,
-        sources: Optional[np.ndarray ]= None,
-        passive_scalars: Optional[Union[np.ndarray, int]] = None,
+        sources: Optional[NDArray[Any] ]= None,
+        passive_scalars: Optional[Union[NDArray[Any], int]] = None,
         hllc: bool = False,
         chkpt: Optional[str] = None,
         chkpt_interval:       float = 0.1,
         data_directory:       str = "data/",
-        boundary_conditions: Union[Sequence, str] = "outflow",
+        boundary_conditions: Union[Sequence[str], str] = "outflow",
         engine_duration: float = 10.0,
         compute_mode:     str = 'cpu',
         quirk_smoothing:  bool = True,
         constant_sources: bool = False,
-        scale_factor:            Optional[Callable] = None,
-        scale_factor_derivative: Optional[Callable] = None,
-        dens_outer:              Optional[Callable] = None,
-        mom_outer:               Optional[Union[Callable, Sequence[Callable]]] = None,
-        edens_outer:             Optional[Callable] = None,
-        object_positions: Optional[Sequence] = None,
-        boundary_sources: Optional[Sequence] = None) -> np.ndarray:
+        scale_factor:            Optional[Callable[...,float]] = None,
+        scale_factor_derivative: Optional[Callable[...,float]] = None,
+        dens_outer:              Optional[Callable[...,float]] = None,
+        mom_outer:               Optional[Union[Callable[...,float], Sequence[Callable[...,float]]]] = None,
+        edens_outer:             Optional[Callable[...,float]] = None,
+        object_positions: Optional[Union[Sequence[Any], NDArray[Any]]] = None,
+        boundary_sources: Optional[Union[Sequence[Any], NDArray[Any]]] = None) -> NDArray[Any]:
         """
         Simulate the Hydro Setup
         
@@ -412,7 +417,7 @@ class Hydro:
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)        
         self._generate_the_grid(linspace)
         
-        mesh_motion = scale_factor_derivative(1.0) / scale_factor(1.0) or False
+        mesh_motion = scale_factor_derivative(1.0) / scale_factor(1.0) != 0
         volume_factor: Any = 1.0
         if mesh_motion and self.coord_system != 'cartesian':
             if self.dimensionality == 1:
@@ -422,9 +427,9 @@ class Hydro:
         
         self._check_boundary_conditions(boundary_conditions)        
         if not chkpt:
-            simbi_ic.initializeModel(self, first_order, passive_scalars, volume_factor=volume_factor)
+            simbi_ic.initializeModel(self, first_order, volume_factor, passive_scalars)
         else:
-            simbi_ic.load_checkpoint(self, chkpt, self.dimensionality , mesh_motion)
+            simbi_ic.load_checkpoint(self, chkpt, self.dimensionality, mesh_motion)
         
         if self.dimensionality == 1 and self.coord_system in ['planar_cylindrical', 'axis_cylindrical']:
             self.coord_system = 'cylindrical'
@@ -451,7 +456,7 @@ class Hydro:
         helpers.print_progress()
         
         # Create boolean maks for object immersed boundaries (impermable)
-        object_cells = np.zeros_like(self.u[0], dtype=bool) if object_positions is None else np.asarray(object_positions, dtype=bool) 
+        object_cells: NDArray[Any] = np.zeros_like(self.u[0], dtype=bool) if object_positions is None else np.asarray(object_positions, dtype=bool) 
         #####################################################################################################
         # Check if boundary source terms given. If given as a jagged array, pad the missing members with zeros
         #####################################################################################################
@@ -485,7 +490,7 @@ class Hydro:
             else:
                 kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'quirk_smoothing': quirk_smoothing, 'object_cells': object_cells}
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
-                    momentum_components    = cast(Sequence, mom_outer)
+                    momentum_components    = cast(Sequence[Callable[...,float]], mom_outer)
                     kwargs['d_outer']      = dens_outer
                     kwargs['s1_outer']     = momentum_components[0]
                     kwargs['s2_outer']     = momentum_components[1]

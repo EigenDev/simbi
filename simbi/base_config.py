@@ -1,15 +1,15 @@
-from typing import Callable, Union, Tuple, final, Optional, TypeVar
+import argparse
 from .dynarg import DynamicArg
-import numpy.typing as npt
+from .key_types import *
 
-from typing import Union, Optional, TypeVar
-
-FloatOrNone = Optional[float] 
-IntOrNone   = Optional[int] 
-ListOrNone  = Optional[list] 
-ArrayOrNone = Optional[npt.NDArray] 
-FuncOrNone  = Optional[Callable] 
-StrOrNone   = Optional[str] 
+def implicit_type_conversion(func: Callable[...,Any]) -> Any:
+    def wrapper(*args: Any, **kwds: Any) -> Any:
+        print("Doing something")
+        result = func(*args, **kwds)
+        if isinstance(result, DynamicArg):
+            return result.var_type(result.value)
+        return result
+    return wrapper
 
 class_props = [
     'boundary_conditions', 'coord_system', 'data_directory', 
@@ -20,13 +20,13 @@ class_props = [
     'regime', 'rho_ref', 'scale_factor',  'scale_factor_derivative', 
     'sources', 'start_time', 'use_hllc_solver']
 
-__all__ = ['BaseConfig']
+__all__ = ['BaseConfig', 'implicit_type_conversion']
     
 class BaseConfig:
     dynamic_args: ListOrNone = None
     
     @property
-    def initial_state(self) -> tuple:
+    def initial_state(self) -> Union[Sequence[Union[float, NDArray[Any]]], NDArray[Any]]:
         raise NotImplementedError("Your subclass need to implement the initial_state property")
     
     @property
@@ -38,15 +38,15 @@ class BaseConfig:
         raise NotImplementedError("Your subclass needs to implement the regime property")
         
     @property
-    def resolution(self) -> tuple:
+    def resolution(self) -> Union[int, Sequence[int], NDArray[Any]]:
         raise NotImplementedError("Your subclass needs to implement the resolution property")
     
     @property
-    def geometry(self) -> tuple:
+    def geometry(self) -> Union[Sequence[float], Sequence[Sequence[float]]]:
         raise NotImplementedError("Your subclass needs to implement the geometry property")
     
     @property
-    def gamma(self) -> float:
+    def gamma(self) -> Union[float, DynamicArg]:
         raise NotImplementedError("Your subclass needs to implement the gamma property")
     
     @property
@@ -62,23 +62,23 @@ class BaseConfig:
         return None
     
     @property
-    def scale_factor(self) -> FuncOrNone:
+    def scale_factor(self) -> CallableOrNone:
         return None 
     
     @property
-    def scale_factor_derivative(self) -> FuncOrNone:
+    def scale_factor_derivative(self) -> CallableOrNone:
        return None
     
     @property
-    def edens_outer(self) -> FuncOrNone:
+    def edens_outer(self) -> CallableOrNone:
         return None 
     
     @property
-    def mom_outer(self) -> FuncOrNone:
+    def mom_outer(self) -> CallableOrNone:
         return None
     
     @property
-    def dens_outer(self) -> FuncOrNone:
+    def dens_outer(self) -> CallableOrNone:
        return None
    
     @property
@@ -94,7 +94,7 @@ class BaseConfig:
        return True
    
     @property
-    def boundary_conditions(self) -> StrOrNone:
+    def boundary_conditions(self) -> Optional[Union[Sequence[str], str]]:
        return None
    
     @property
@@ -118,23 +118,23 @@ class BaseConfig:
         return False 
     
     @property
-    def x1(self) -> ListOrNone:
+    def x1(self) -> ArrayOrNone:
         return None 
     
     @property
-    def x2(self) -> ListOrNone:
+    def x2(self) -> ArrayOrNone:
         return None 
     
     @property
-    def x3(self) -> ListOrNone:
+    def x3(self) -> ArrayOrNone:
         return None
     
     @property
-    def object_zones(self) -> ListOrNone:
+    def object_zones(self) -> Optional[Union[NDArray[Any], Sequence[Any]]]:
         return None
     
     @property
-    def boundary_sources(self) -> ListOrNone:
+    def boundary_sources(self) -> Optional[Union[NDArray[Any], Sequence[Any]]]:
         return None
     
     @final
@@ -151,7 +151,7 @@ class BaseConfig:
         
     @final
     @classmethod
-    def parse_args(cls, parser) -> None:
+    def parse_args(cls, parser: argparse.ArgumentParser) -> None:
         """
         Parse extra problem-specific args from command line
         """
