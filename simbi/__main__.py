@@ -3,9 +3,11 @@ from typing import List
 import os 
 import ast
 import sys
+import subprocess
 import importlib
 from simbi import Hydro
 from pathlib import Path
+from .key_types import Optional, Sequence 
 
 class CustomParser(argparse.ArgumentParser):
     def error(self, message):
@@ -43,7 +45,7 @@ def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     parser.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
     parser.add_argument('--nthreads', '-p', help="number of omp threads to run at", type=max_thread_count, default=None)
     parser.add_argument('--peek', help='print setup-script usage', default=False, action='store_true')
-    
+    parser.add_argument('--type-check', help='flag for static type checking configration files', default=True, action=argparse.BooleanOptionalAction)
     # print help message if no args supplied
     return parser, parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
@@ -78,7 +80,7 @@ def max_thread_count(param) -> int:
     
     return val
 
-def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
+def configure_state(script: str, parser: argparse.ArgumentParser, argv: Optional[Sequence] = None, type_checking_active: bool = True):
     """
     Configure the Hydro state based on the Config class that exists in the passed
     in setup script. Once configured, pass it back to main to be simulated 
@@ -88,8 +90,13 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     base_script    = Path(os.path.abspath(script)).stem
     sys.path.insert(1, f'{script_dirname}')
     
-    print("Validating Script Type Safety...")
-    os.system(f"python -m mypy {script}")
+    if type_checking_active:
+        print("Validating Script Type Safety...\n")
+        try:
+            subprocess.run(['python',  '-m',  'mypy',  f'{script}'], check = True)
+        except subprocess.CalledProcessError:
+            print("\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option")
+            sys.exit(0)
     
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
@@ -158,11 +165,11 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     return states, kwargs, state_docs 
         
 def main(parser: argparse.ArgumentParser = parse_arguments()[0], args: argparse.Namespace = parse_arguments()[1][0], argv: List = parse_arguments()[1][1]):
-    sim_states, kwargs, state_docs  = configure_state(args.setup_script, parser, argv)
+    sim_states, kwargs, state_docs  = configure_state(args.setup_script, parser, argv, args.type_check)
     if args.nthreads:
         os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
     
-    global_nonsim_args = ['setup_script', 'nthreads', 'peek']
+    global_nonsim_args = ['setup_script', 'nthreads', 'peek', 'type_check']
     for idx, sim_state in enumerate(sim_states):
         for arg in vars(args):
             if arg in global_nonsim_args:
