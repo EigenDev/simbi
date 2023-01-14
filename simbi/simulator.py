@@ -311,12 +311,12 @@ class Hydro:
         if self.dimensionality == 1:
             self.x1 = self.x1 or genspace(*self.geometry[:2], *self.resolution)
         elif self.dimensionality == 2:
-            self.x1 = self.x1 or genspace(self.geometry[0][0],   self.geometry[0][1], self.resolution[1])
-            self.x2 = self.x2 or np.linspace(self.geometry[1][0], self.geometry[1][1], self.resolution[0])
+            self.x1 = self.x1 or genspace(self.geometry[0][0],   self.geometry[0][1], self.resolution[0])
+            self.x2 = self.x2 or np.linspace(self.geometry[1][0], self.geometry[1][1], self.resolution[1])
         else:
-            self.x1 = self.x1 or genspace(self.geometry[0][0],    self.geometry[0][1], self.resolution[1])
-            self.x2 = self.x2 or np.linspace(self.geometry[1][0],  self.geometry[1][1], self.resolution[2])
-            self.x3 = self.x3 or np.linspace(self.geometry[2][0], self.geometry[2][1], self.resolution[3])
+            self.x1 = self.x1 or genspace(self.geometry[0][0],    self.geometry[0][1], self.resolution[0])
+            self.x2 = self.x2 or np.linspace(self.geometry[1][0],  self.geometry[1][1], self.resolution[1])
+            self.x3 = self.x3 or np.linspace(self.geometry[2][0], self.geometry[2][1], self.resolution[2])
             
         self.x1 = np.asarray(self.x1)
         self.x2 = np.asarray(self.x2)
@@ -484,7 +484,7 @@ class Hydro:
                     kwargs['s_outer'] =  mom_outer
                     kwargs['e_outer'] =  edens_outer
                 
-        elif self.dimensionality  == 2:            
+        elif self.dimensionality  == 2:     
             # ignore the chi term
             sources = np.zeros(self.u[:-1].shape, dtype=float) if sources is None else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
