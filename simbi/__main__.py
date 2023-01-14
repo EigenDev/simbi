@@ -33,7 +33,7 @@ def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     parser.add_argument('--plm_theta', help='piecewise linear consturction parameter', default=1.5, type=float)
     parser.add_argument('--first_order', help='Set flag if wanting first order accuracy in solution', default=False, action='store_true')
     parser.add_argument('--cfl', help='Courant-Friedrichs-Lewy stability number', default=0.1, type=float)
-    parser.add_argument('--hllc', help='flag for HLLC computation as opposed to HLLE', default=False, action='store_true')
+    parser.add_argument('--hllc', help='flag for HLLC computation as opposed to HLLE', default=True, action=argparse.BooleanOptionalAction)
     parser.add_argument('--chkpt', help='checkpoint file to restart computation from', default=None, type=str)
     parser.add_argument('--chkpt_interval', help='checkpoint interval spacing in simulation time units', default=0.1, type=float)
     parser.add_argument('--data_directory', help='directory to save checkpoint files', default='data/', type=str)
@@ -174,15 +174,13 @@ def main(parser: argparse.ArgumentParser = parse_arguments()[0], args: argparse.
         for arg in vars(args):
             if arg in global_nonsim_args:
                 continue
-            if arg == 'tend' or arg == 'tstart':
+            if arg in ['tend', 'tstart']:
                 command_line_time = getattr(args, arg)
                 # override the default time args if they've been set
                 if command_line_time:
                     kwargs[idx][arg] = command_line_time
-                elif not kwargs[idx][arg]:
-                   kwargs[idx][arg] = 1.0 if arg == 'tend' else 0.0
                 continue
-            if arg in overideable_args and kwargs[idx][arg]:
+            if arg in overideable_args and getattr(args, arg) == kwargs[idx][arg]:
                 continue 
             
             kwargs[idx][arg] = getattr(args, arg)

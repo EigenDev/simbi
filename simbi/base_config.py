@@ -103,12 +103,12 @@ class BaseConfig(metaclass=abc.ABCMeta):
        return None
    
     @simbi_property
-    def default_start_time(self) -> Optional[Union[DynamicArg, float]]:
-       return None
+    def default_start_time(self) -> Union[DynamicArg, float]:
+       return 0.0
    
     @simbi_property
-    def default_end_time(self) -> Optional[Union[DynamicArg, float]]:
-       return None
+    def default_end_time(self) -> Union[DynamicArg, float]:
+       return 1.0
    
     @simbi_property
     def use_hllc_solver(self) -> bool:
@@ -119,12 +119,12 @@ class BaseConfig(metaclass=abc.ABCMeta):
        return None
    
     @simbi_property
-    def plm_theta(self) -> FloatOrNone:
-        return None 
+    def plm_theta(self) -> float:
+        return 1.5
     
     @simbi_property
-    def data_directory(self) -> StrOrNone:
-        return None
+    def data_directory(self) -> str:
+        return 'data/'
     
     @simbi_property 
     def dlogt(self) -> FloatOrNone:
