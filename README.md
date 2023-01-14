@@ -13,17 +13,18 @@
 # Requirements
 
 1)  GCC \>= GCC5 (for c++17 support)
-2)  Cython
+2)  [Cython](https://cython.org/)
 3)  [meson](https://mesonbuild.com/Getting-meson.html)
     `pip install meson` will usually suffice
 4)  A build system like `make` or
     [ninja](https://github.com/ninja-build/ninja/wiki/Pre-built-Ninja-packages)
     -- pre-built packages depending on your system.
 5)  HDF5 libraries
+6)  [mypy](https://mypy-lang.org/), a static type checker
 
 ## For GPU capability
 
-6)  HIP/ROCm if wanting to run on NVIDIA or AMD GPUs, or just CUDA if
+7)  HIP/ROCm if wanting to run on NVIDIA or AMD GPUs, or just CUDA if
     running purely NVIDIA
 
 ## Quick setup guide
@@ -47,7 +48,7 @@
     `meson_options.txt` file for available build options.
 
 2)  Run
-    ``` bash
+    ``` bashbool
     $ ninja -v -C <build_dir> install
     ```
 

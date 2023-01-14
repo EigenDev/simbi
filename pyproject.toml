@@ -28,7 +28,8 @@ dependencies = [
     "numpy", 
     "h5py", 
     "cython", 
-    "meson"
+    "meson",
+    "mypy",
 ]
 
 [project.scripts]
