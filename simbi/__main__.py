@@ -9,10 +9,22 @@ from simbi import Hydro
 from pathlib import Path
 from .key_types import Optional, Sequence 
 
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    
 class CustomParser(argparse.ArgumentParser):
     def error(self, message):
         sys.stderr.write(f'error: {message}\n')
-        self.print_help()
+        if 'configurations' not in message:
+            self.print_help()
         sys.exit(2)
 
 class print_the_version(argparse.Action):
@@ -63,7 +75,9 @@ def valid_pyscript(param):
             if base == Path(file).stem:
                 param = file
         if not param:
-            raise argparse.ArgumentTypeError('<script_file> must have a .py extension or exist in the configs directory')
+            available_configs = sorted([Path(conf).stem for conf in pkg_configs + soft_configs])
+            raise argparse.ArgumentTypeError('No configuration named {}{}{}. The only valid configurations are:\n\n{}'.format(
+                bcolors.OKCYAN, base, bcolors.ENDC, '\n'.join(f'{conf}' for conf in available_configs)))
     return param
 
 def max_thread_count(param) -> int:
