@@ -24,6 +24,10 @@ def simbi_property(func: Callable[P, T]) -> Callable[P, T]:
     def wrapper(*args: P.args, **kwds: P.kwargs) -> T:
         result = func(*args, **kwds)
         if isinstance(result, Iterable) and not isinstance(result, str):
+            if all(isinstance(val, Iterable) for val in result)and not any(isinstance(val, str) for val in result):
+                transform = lambda x: x.var_type(x.value) if isinstance(x, DynamicArg) else x
+                cleaned_result = tuple(tuple(map(transform, i)) for i in result)
+                return cast(T, cleaned_result)
             return cast(T, [res if not isinstance(res, DynamicArg) else res.var_type(res.value) for res in result])
         else:
             if isinstance(result, DynamicArg):
