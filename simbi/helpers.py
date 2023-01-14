@@ -39,20 +39,20 @@ def calc_cell_volume2D(*, x1: generic_numpy_array, x2: generic_numpy_array, coor
     else:
         xx1, xx2 = x1, x2
 
-    x2vertices = 0.5 * (xx2[:, 1:] + xx2[:, :-1])
-    x2vertices = np.insert(x2vertices, 0, xx2[0], axis=1)
-    x2vertices = np.insert(x2vertices, x2vertices.shape[1], xx2[:, -1], axis=1)
+    x2vertices = 0.5 * (xx2[1:] + xx2[:-1])
+    x2vertices = np.insert(x2vertices, 0, xx2[0], axis=0)
+    x2vertices = np.insert(x2vertices, x2vertices.shape[0], xx2[-1], axis=0)
     if coord_system == 'spherical':
         x1vertices = np.sqrt(xx1[...,  1:] * xx1[..., :-1])
-        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
-        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
+        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=1)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[1], xx1[..., -1],axis=1)
         
-        dcos = np.asarray(np.cos(x2vertices[:, :-1]) - np.cos(x2vertices[:, 1:]))
+        dcos = np.asarray(np.cos(x2vertices[:-1]) - np.cos(x2vertices[1:]))
         return np.asarray((1./3.) * (x1vertices[..., 1:]**3 - x1vertices[..., :-1]**3) * dcos * 2.0 * np.pi)
     elif coord_system == 'axis_cylindrical':
         x1vertices = 0.5 * (xx1[...,  1:] + xx1[..., :-1])
-        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
-        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
+        x1vertices = np.insert(x1vertices,  0, xx1[..., 0],axis=1)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[1], xx1[..., -1],axis=1)
         
         dz   = x2vertices[1:] - x2vertices[:-1]
         dr   = x1vertices[:, 1:] - x1vertices[:, :-1]
@@ -60,8 +60,8 @@ def calc_cell_volume2D(*, x1: generic_numpy_array, x2: generic_numpy_array, coor
         return np.asarray(2.0 * np.pi * rmean * dr * dz)
     elif coord_system == 'planar_cylindrical':
         x1vertices = np.sqrt(xx1[...,  1:] * xx1[..., :-1])
-        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
-        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
+        x1vertices = np.insert(x1vertices,  0, xx1[..., 0],axis=1)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[1], xx1[..., -1],axis=1)
         
         dphi = x2vertices[1:] - x2vertices[:-1]
         dr   = x1vertices[:, 1:] - x1vertices[:, :-1]
@@ -69,8 +69,8 @@ def calc_cell_volume2D(*, x1: generic_numpy_array, x2: generic_numpy_array, coor
         return np.asarray(rmean * dr * dphi)
     elif coord_system == 'cartesian':
         x1vertices = 0.5 * (xx1[...,  1:] + xx1[..., :-1])
-        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
-        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
+        x1vertices = np.insert(x1vertices,  0, xx1[..., 0],axis=1)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[1], xx1[..., -1],axis=1)
         dy   = x2vertices[1:] - x2vertices[:-1]
         dx   = x1vertices[:, 1:] - x1vertices[:, :-1]
         return np.asarray(dx * dy)
