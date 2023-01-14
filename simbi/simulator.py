@@ -472,7 +472,7 @@ class Hydro:
         print(f"Computing {'First' if first_order else 'Second'} Order Solution...", flush=True)
         kwargs: dict[str, Any] = {}
         if self.dimensionality  == 1:
-            sources = np.asarray(sources) or np.zeros_like(self.u)
+            sources = np.zeros_like(self.u) if sources is None else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             if self.regime == "classical":
                 state = PyState(self.u, self.gamma, cfl, x1 = self.x1, coord_system = cython_coordinates)
@@ -486,7 +486,7 @@ class Hydro:
                 
         elif self.dimensionality  == 2:            
             # ignore the chi term
-            sources = np.asarray(sources) or np.zeros(self.u[:-1].shape, dtype=float)
+            sources = np.zeros(self.u[:-1].shape, dtype=float) if sources is None else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
 
             if self.regime == "classical":
@@ -503,7 +503,7 @@ class Hydro:
                 state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=cython_coordinates)
 
         else:
-            sources = np.zeros(self.u.shape[:-1], dtype=float) if not sources else np.asarray(sources)
+            sources = np.zeros(self.u.shape[:-1], dtype=float) if sources is None else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
                 
             if self.regime == "classical":
