@@ -191,11 +191,11 @@ def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = Fals
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Plot a 2D Figure From a File (H5).',
+        description='Plot a 1D Figure From a File (H5).',
         epilog='This Only Supports H5 Files Right Now')
     
     parser.add_argument('files', metavar='Filename', nargs='+', help='A Data Source to Be Plotted')
-    parser.add_argument('--setup', '-s',  type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)', default="")
+    parser.add_argument('setup',  type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
     parser.add_argument('--fields', metavar='Field Variable(s)', nargs='+', help='The name of the field variable(s) you\'d like to plot', choices=field_choices, default=['rho'])
     parser.add_argument('--rmax', metavar='Radial Domain Max', default = 0.0, help='The domain range')
     parser.add_argument('--xlims', metavar='Domain',default = None, help='The domain range', nargs='+', type=float)
