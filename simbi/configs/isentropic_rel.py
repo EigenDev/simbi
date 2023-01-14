@@ -1,11 +1,12 @@
-from simbi import BaseConfig, DynamicArg
+from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi.key_types import *
 import numpy as np 
 import argparse 
 
 ALPHA_MAX = 2.0 
 ALPHA_MIN = 1e-3
 
-def range_limited_float_type(arg):
+def range_limited_float_type(arg: Any) -> Any:
     """ Type function for argparse - a float within some predefined bounds """
     try:
         f = float(arg)
@@ -15,21 +16,21 @@ def range_limited_float_type(arg):
         raise argparse.ArgumentTypeError("Argument must be < " + str(ALPHA_MAX) + " and > " + str(ALPHA_MIN))
     return f
 
-def func(x):
-    return np.sin(2*np.pi*x)
+def func(x: NDArray[numpy_float]) -> NDArray[numpy_float]:
+    return np.asarray(np.sin(2*np.pi*x))
 
-def rho(alpha, x):
-    return 1.0 + alpha*func(x)
+def rho(alpha: DynamicArg, x: NDArray[numpy_float]) -> NDArray[numpy_float]:
+    return np.asarray(1.0 + alpha*func(x))
 
-def cs(gamma, rho, pressure):
+def cs(gamma: DynamicArg, rho: Union[NDArray[numpy_float], float], pressure: Union[NDArray[numpy_float], float]) -> NDArray[numpy_float]:
     h = 1.0 + gamma * pressure / (rho * (gamma - 1.0))
-    return np.sqrt(gamma*pressure/(rho * h))
+    return np.asarray(np.sqrt(gamma*pressure/(rho * h)))
 
-def pressure(p_ref:float, gamma:float, rho:float, rho_ref: float):
-    return p_ref*(rho/rho_ref)**gamma
+def pressure(p_ref: float, gamma: DynamicArg, rho: NDArray[numpy_float], rho_ref: float) -> NDArray[numpy_float]:
+    return np.asarray(p_ref * ( rho / rho_ref ) ** float(gamma.value))
 
-def velocity(gamma, rho, rho_ref, pressure, p_ref):
-    return 2/(gamma - 1.)*(cs(gamma, rho, pressure) - cs(gamma, rho_ref, p_ref))
+def velocity(gamma: DynamicArg, rho: NDArray[numpy_float], rho_ref: float, pressure: NDArray[numpy_float], p_ref: float) -> NDArray[numpy_float]:
+    return  np.asarray(2 / (gamma - 1.)*(cs(gamma, rho, pressure) - cs(gamma, rho_ref, p_ref)))
 
 class IsentropicRelWave(BaseConfig):
     """
@@ -40,40 +41,41 @@ class IsentropicRelWave(BaseConfig):
     alpha     = DynamicArg("alpha", 0.5, help = "Wave amplitude", var_type=range_limited_float_type)
     rho_ref = 1.0
     p_ref   = 1.0
-    def __init__(self):
+    
+    def __init__(self) -> None:
         x            = np.linspace(0, 1, self.nzones.value, dtype=float)
         self.density = rho(self.alpha, x)
         self.pre     = pressure(self.p_ref, self.ad_gamma, self.density, self.rho_ref)
         self.beta    = velocity(self.ad_gamma, self.density, self.rho_ref, self.pre, self.p_ref)
     
-    @property
-    def initial_state(self):
+    @simbi_property
+    def initial_state(self) -> Sequence[NDArray[numpy_float]]:
         return (self.density, self.beta, self.pre)
     
-    @property
-    def geometry(self):
+    @simbi_property
+    def geometry(self) -> Sequence[float]:
         return (0.0, 1.0)
 
-    @property
-    def linspace(self):
+    @simbi_property
+    def linspace(self) -> bool:
         return True
     
-    @property
-    def coord_system(self):
+    @simbi_property
+    def coord_system(self) -> str:
         return "cartesian"
 
-    @property
-    def resolution(self):
-        return self.nzones.value 
+    @simbi_property
+    def resolution(self) -> DynamicArg:
+        return self.nzones 
     
-    @property
-    def gamma(self):
-        return self.ad_gamma.value 
+    @simbi_property
+    def gamma(self) -> DynamicArg:
+        return self.ad_gamma 
     
-    @property
-    def regime(self):
+    @simbi_property
+    def regime(self) -> str:
         return "relativistic"
     
-    @property
+    @simbi_property
     def boundary_conditions(self) -> str:
         return "periodic"

@@ -88,6 +88,9 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
     base_script    = Path(os.path.abspath(script)).stem
     sys.path.insert(1, f'{script_dirname}')
     
+    print("Validating Script Type Safety...")
+    os.system(f"python -m mypy {script}")
+    
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
     
@@ -117,7 +120,8 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv = None):
             static_config.print_problem_params()
             peek_only = True
             continue
-            
+        
+        
         # Call initializer once static vars modified
         config = static_config()
         

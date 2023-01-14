@@ -1,5 +1,6 @@
 import numpy as np
-from simbi import BaseConfig, DynamicArg
+from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi.key_types import *
 SEED = 12345
 class KelvinHelmholtz(BaseConfig):
     """
@@ -18,7 +19,7 @@ class KelvinHelmholtz(BaseConfig):
     vxB  = -0.5
     pR   =  2.5
     
-    def __init__(self):
+    def __init__(self) -> None:
         x = np.linspace(self.xmin, self.xmax, self.npts.value)
         y = np.linspace(self.ymin, self.ymax, self.npts.value)
 
@@ -45,42 +46,42 @@ class KelvinHelmholtz(BaseConfig):
         self.vx += vx_rand
         self.vy += vy_rand
             
-    @property
-    def initial_state(self):
+    @simbi_property
+    def initial_state(self) -> Sequence[NDArray[numpy_float]]:
         return (self.rho, self.vx, self.vy, self.p)
     
-    @property
-    def geometry(self):
+    @simbi_property
+    def geometry(self) -> Sequence[Sequence[float]]:
         return ((self.xmin, self.xmax), (self.ymin, self.ymax))
 
-    @property
-    def linspace(self):
+    @simbi_property
+    def linspace(self) -> bool:
         return True
     
-    @property
-    def coord_system(self):
+    @simbi_property
+    def coord_system(self) -> str:
         return "cartesian"
 
-    @property
-    def resolution(self):
-        return (self.npts.value, self.npts.value)
+    @simbi_property
+    def resolution(self) -> Sequence[Any]:
+        return (self.npts, self.npts)
     
-    @property
-    def gamma(self):
+    @simbi_property
+    def gamma(self) -> float:
         return (5.0 / 3.0)
     
-    @property
-    def regime(self):
+    @simbi_property
+    def regime(self) -> str:
         return "classical"
     
-    @property
-    def boundary_conditions(self):
+    @simbi_property
+    def boundary_conditions(self) -> str:
         return "periodic"
     
-    @property
-    def use_hllc_solver(self):
+    @simbi_property
+    def use_hllc_solver(self) -> bool:
         return True
     
-    @property 
-    def data_directory(self):
+    @simbi_property 
+    def data_directory(self) -> str:
         return "data/kh_config"

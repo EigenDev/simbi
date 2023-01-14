@@ -3,81 +3,126 @@ import sys
 from time import sleep
 from .key_types import *
 from typing import TextIO, Generator
-from numbers import Number
 
-generic_numpy_array = np.ndarray[Any, Any]
+generic_numpy_array = NDArray[Any]
 
+def calc_centroid(arr: generic_numpy_array, coord_system: str = 'spherical') -> generic_numpy_array:
+    if coord_system  == 'spherical':
+        return np.asarray(0.75 * (arr[...,1:]**4 - arr[...,:-1] ** 4) / (arr[...,1:]**3 - arr[...,:-1]**3))
+    elif coord_system == 'cylindrical':
+        return np.asarray((2.0 / 3.0) * (arr[...,1:]**3 - arr[...,:-1] ** 3) / (arr[...,1:]**2 - arr[...,:-1]**2))
+    else:
+        return np.asarray(0.5 * (arr[...,1:] - arr[...,:-1]))
+    
 
-def calc_cell_volume1D(*, x1: generic_numpy_array) -> generic_numpy_array:
-    x1vertices = np.sqrt(x1[1:] * x1[:-1])
+def calc_cell_volume1D(*, x1: generic_numpy_array, coord_system: str = 'soherical') -> generic_numpy_array:
+    if coord_system in ['spherical', 'cylindrical']:
+        x1vertices = np.sqrt(x1[1:] * x1[:-1])
+    else:
+        x1vertices = 0.5 * (x1[1:] + x1[:-1])
+        
     x1vertices = np.insert(x1vertices,  0, x1[0])
     x1vertices = np.insert(x1vertices, x1.shape, x1[-1])
-    x1mean = 0.75 * (x1vertices[1:]**4 - x1vertices[:-1]
-                     ** 4) / (x1vertices[1:]**3 - x1vertices[:-1]**3)
     dx1 = x1vertices[1:] - x1vertices[:-1]
-    return cast(generic_numpy_array, x1mean * x1mean * dx1)
+    if coord_system in['spherical', 'cylindrical']:
+        x1mean = calc_centroid(x1vertices, coord_system)
+        return np.asarray(x1mean * x1mean * dx1)
+    elif coord_system == 'cartesian':
+        return np.asarray(dx1) ** 3 
+    else:
+        raise ValueError("The coordinate system given is not avaiable at this time")
 
 
 def calc_cell_volume2D(*, x1: generic_numpy_array, x2: generic_numpy_array, coord_system: str = 'spherical') -> generic_numpy_array:
+    if x1.ndim == 1 and x2.ndim == 1:
+        xx1, xx2 = np.meshgrid(x1, x2)
+    else:
+        xx1, xx2 = x1, x2
+
+    x2vertices = 0.5 * (xx2[:, 1:] + xx2[:, :-1])
+    x2vertices = np.insert(x2vertices, 0, xx2[0], axis=1)
+    x2vertices = np.insert(x2vertices, x2vertices.shape[1], xx2[:, -1], axis=1)
     if coord_system == 'spherical':
-        if x1.ndim == 1 and x2.ndim == 1:
-            rr, thetta = np.meshgrid(x1, x2)
-        else:
-            rr, thetta = x1, x2
-        tvertices = 0.5 * (thetta[1:] + thetta[:-1])
-        tvertices = np.insert(tvertices, 0, thetta[0], axis=0)
-        tvertices = np.insert(
-            tvertices, tvertices.shape[0], thetta[-1], axis=0)
-        dcos = np.cos(tvertices[:-1]) - np.cos(tvertices[1:])
-
-        rvertices = np.sqrt(rr[:, 1:] * rr[:, :-1])
-        rvertices = np.insert(rvertices,  0, rr[:, 0], axis=1)
-        rvertices = np.insert(rvertices, rvertices.shape[1], rr[:, -1], axis=1)
-        return cast(generic_numpy_array, 2.0 * np.pi * (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) * dcos)
+        x1vertices = np.sqrt(xx1[...,  1:] * xx1[..., :-1])
+        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
+        
+        dcos = np.asarray(np.cos(x2vertices[:, :-1]) - np.cos(x2vertices[:, 1:]))
+        return np.asarray((1./3.) * (x1vertices[..., 1:]**3 - x1vertices[..., :-1]**3) * dcos * 2.0 * np.pi)
+    elif coord_system == 'axis_cylindrical':
+        x1vertices = 0.5 * (xx1[...,  1:] + xx1[..., :-1])
+        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
+        
+        dz   = x2vertices[1:] - x2vertices[:-1]
+        dr   = x1vertices[:, 1:] - x1vertices[:, :-1]
+        rmean = (2.0 / 3.0) * (x1vertices[...,1:]**3 - x1vertices[...,:-1]**3) / (x1vertices[...,1:]**2 - x1vertices[...,:-1]**2)
+        return np.asarray(2.0 * np.pi * rmean * dr * dz)
+    elif coord_system == 'planar_cylindrical':
+        x1vertices = np.sqrt(xx1[...,  1:] * xx1[..., :-1])
+        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
+        
+        dphi = x2vertices[1:] - x2vertices[:-1]
+        dr   = x1vertices[:, 1:] - x1vertices[:, :-1]
+        rmean = (2.0 / 3.0) * (x1vertices[...,1:]**3 - x1vertices[...,:-1]**3) / (x1vertices[...,1:]**2 - x1vertices[...,:-1]**2)
+        return np.asarray(rmean * dr * dphi)
+    elif coord_system == 'cartesian':
+        x1vertices = 0.5 * (xx1[...,  1:] + xx1[..., :-1])
+        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
+        dy   = x2vertices[1:] - x2vertices[:-1]
+        dx   = x1vertices[:, 1:] - x1vertices[:, :-1]
+        return np.asarray(dx * dy)
     else:
-        if x1.ndim == 1 and x2.ndim == 1:
-            rr, zz = np.meshgrid(x1, x2)
-        else:
-            rr, zz = x1, x2
-
-        zvertices = 0.5 * (zz[1:] + zz[:-1])
-        zvertices = np.insert(zvertices, 0, zz[0], axis=0)
-        zvertices = np.insert(zvertices, zvertices.shape[0], zz[-1], axis=0)
-        dz = zvertices[1:] - zvertices[:-1]
-
-        rvertices = 0.5 * (rr[:, 1:] + rr[:, :-1])
-        rvertices = np.insert(rvertices,  0, rr[:, 0], axis=1)
-        rvertices = np.insert(rvertices, rvertices.shape[1], rr[:, -1], axis=1)
-        rmean = (2.0 / 3.0) * (rvertices[:, 1:]**3 - rvertices[:, :-1]
-                               ** 3) / (rvertices[:, 1:]**2 - rvertices[:, :-1]**2)
-        return cast(generic_numpy_array, rmean * (rvertices[:, 1:] - rvertices[:, :-1]) * dz)
+        raise ValueError("The coordinate system given is not avaiable at this time")
 
 
-def calc_cell_volume3D(*, r: generic_numpy_array, theta: generic_numpy_array, phi: generic_numpy_array) -> generic_numpy_array:
-    if r.ndim == 1 and theta.ndim == 1 and phi.ndim == 1:
-        thetta, phii, rr = np.meshgrid(theta, phi, r)
+def calc_cell_volume3D(*, x1: generic_numpy_array, x2: generic_numpy_array, x3: generic_numpy_array, coord_system: str = 'spherical') -> generic_numpy_array:
+    if x1.ndim == 1 and x2.ndim == 1 and x3.ndim == 1:
+        xx2, xx3, xx1 = np.meshgrid(x2, x3, x1)
     else:
-        rr, thetta, phii = r, theta, phi
+        xx1, xx2, xx3 = x1, x2, x3
 
-    pvertices = 0.5 * (phii[1:] + phii[:-1])
-    pvertices = np.insert(pvertices, 0, phii[0], axis=0)
-    pvertices = np.insert(pvertices, pvertices.shape[0], phii[-1], axis=0)
-    dphi = pvertices[1:] - pvertices[:-1]
-
-    tvertices = 0.5 * (thetta[:, 1:] + thetta[:, :-1])
-    tvertices = np.insert(tvertices, 0, thetta[0], axis=1)
-    tvertices = np.insert(tvertices, tvertices.shape[1], thetta[:, -1], axis=1)
-    dcos = np.cos(tvertices[:, :-1]) - np.cos(tvertices[:, 1:])
-
-    rvertices = np.sqrt(rr[:, :,  1:] * rr[:, :, :-1])
-    rvertices = np.insert(rvertices,  0, rr[:, :, 0], axis=2)
-    rvertices = np.insert(rvertices, rvertices.shape[2], rr[:, :, -1], axis=2)
-    return cast(generic_numpy_array, (1./3.) * (rvertices[:, :, 1:]**3 - rvertices[:, :, :-1]**3) * dcos * dphi)
+    x3vertices = 0.5 * (xx3[1:] + xx3[:-1])
+    x3vertices = np.insert(x3vertices, 0, xx3[0], axis=0)
+    x3vertices = np.insert(x3vertices, x3vertices.shape[0], xx3[-1], axis=0)
+    
+    x2vertices = 0.5 * (xx2[:, 1:] + xx2[:, :-1])
+    x2vertices = np.insert(x2vertices, 0, xx2[0], axis=1)
+    x2vertices = np.insert(x2vertices, x2vertices.shape[1], xx2[:, -1], axis=1)
+    if coord_system == 'spherical':
+        x1vertices = np.sqrt(xx1[...,  1:] * xx1[..., :-1])
+        x1vertices = np.insert(x1vertices,  0, xx1[:, :, 0], axis=2)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[:, :, -1], axis=2)
+        
+        dphi = x3vertices[1:] - x3vertices[:-1]
+        dcos = np.cos(x2vertices[:, :-1]) - np.cos(x2vertices[:, 1:])
+        return np.asarray((1./3.) * (x1vertices[..., 1:]**3 - x1vertices[..., :-1]**3) * dcos * dphi)
+    elif coord_system == 'cylindrical':
+        x1vertices = 0.5 * (xx1[...,  1:] + xx1[..., :-1])
+        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
+        dz   = x3vertices[1:] - x3vertices[:-1]
+        dphi = x2vertices[:, 1:] - x2vertices[:, :-1]
+        return np.asarray(0.5 * (x1vertices[...,1:]**2 - x1vertices[...,:-1]**2) * dphi * dz)
+    elif coord_system == 'cartesian':
+        x1vertices = 0.5 * (xx1[...,  1:] + xx1[..., :-1])
+        x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
+        x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
+        dx   = x1vertices[...,1:] - x1vertices[...,:-1]
+        dz   = x3vertices[1:] - x3vertices[:-1]
+        dy   = x2vertices[:, 1:] - x2vertices[:, :-1]
+        
+        return np.asarray(dx * dy * dz)
+    else:
+        raise ValueError("The coordinate system given is not avaiable at this time")
+        
 
 
 def compute_num_polar_zones(*,
-                            rmin: Optional[float] = None,
-                            rmax: Optional[float] = None,
+                            rmin: Optional[Any] = None,
+                            rmax: Optional[Any] = None,
                             nr:   Optional[int] = None,
                             zpd:  Optional[int] = None,
                             theta_bounds: tuple[float, float] = (0.0, np.pi)) -> int:
@@ -120,10 +165,18 @@ def print_progress() -> None:
         sleep(0.01)
 
 
-def pad_jagged_array(arr: Union[NDArray[Any] | Sequence[Any]]) -> NDArray[Any]:
+def pad_jagged_array(arr: Union[NDArray[Any], Sequence[Any]]) -> NDArray[Any]:
     arr       = [np.array(val) if isinstance(val, (Sequence, np.ndarray)) else np.array([val]) for val in arr]
     max_dim   = max(a.ndim for a in arr)
     max_size  = np.max([a.size for a in arr if a.ndim == max_dim])
     max_shape = [a.shape for a in arr if a.size == max_size][0]
     arr       = np.array([a if a.shape == max_shape else np.ones(max_shape) * a for a in arr])
     return arr 
+
+def find_nearest(arr: NDArray[Any], val: Any) -> Any:
+    if arr.ndim > 1:
+        ids = np.argmin(np.abs(arr - val), axis=1)
+        return ids
+    else:
+        idx = np.argmin(np.abs(arr - val))
+        return idx, arr[idx]

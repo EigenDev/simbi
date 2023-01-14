@@ -1,4 +1,5 @@
-from simbi import BaseConfig, DynamicArg
+from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi.key_types import *
 
 class StationaryWaveHLL(BaseConfig):
     """
@@ -7,51 +8,51 @@ class StationaryWaveHLL(BaseConfig):
     nzones    = DynamicArg("nzones", 400, help="number of grid zones", var_type=int)
     ad_gamma  = DynamicArg("ad_gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type = float)
     
-    @property
-    def initial_state(self):
+    @simbi_property
+    def initial_state(self) -> Sequence[Sequence[float]]:
         return ((1.4, 0.0, 1.0), (1.0, 0.0, 1.0))
     
-    @property
-    def geometry(self):
+    @simbi_property
+    def geometry(self) -> Sequence[float]:
         return (0.0, 1.0, 0.5)
 
-    @property
-    def linspace(self):
+    @simbi_property
+    def linspace(self) -> bool:
         return True
     
-    @property
-    def coord_system(self):
+    @simbi_property
+    def coord_system(self) -> str:
         return "cartesian"
 
-    @property
-    def resolution(self):
-        return self.nzones.value 
+    @simbi_property
+    def resolution(self) -> DynamicArg:
+        return self.nzones 
     
-    @property
-    def gamma(self):
-        return self.ad_gamma.value 
+    @simbi_property
+    def gamma(self) -> DynamicArg:
+        return self.ad_gamma 
     
-    @property
-    def regime(self):
+    @simbi_property
+    def regime(self) -> str:
         return "classical"
     
-    @property
-    def use_hllc_solver(self):
+    @simbi_property
+    def use_hllc_solver(self) -> bool:
         return False 
     
-    @property
-    def data_directory(self):
+    @simbi_property
+    def data_directory(self) -> str:
         return 'data/stationary/hll'
     
 class StationaryWaveHLLC(StationaryWaveHLL):
     """
     Stationary Wave Test Problems in 1D Newtonian Fluid using HLLC Toro et al. (1992) solver
     """
-    @property
-    def use_hllc_solver(self):
+    @simbi_property
+    def use_hllc_solver(self) -> bool:
         return True 
     
-    @property
-    def data_directory(self):
+    @simbi_property
+    def data_directory(self) -> str:
         return 'data/stationary/hllc'
     

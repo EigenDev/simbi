@@ -1,16 +1,8 @@
 import argparse
+import abc
 from .dynarg import DynamicArg
 from .key_types import *
-
-def implicit_type_conversion(func: Callable[...,Any]) -> Any:
-    def wrapper(*args: Any, **kwds: Any) -> Any:
-        print("Doing something")
-        result = func(*args, **kwds)
-        if isinstance(result, DynamicArg):
-            return result.var_type(result.value)
-        return result
-    return wrapper
-
+from typing import ParamSpec, TypeVar
 class_props = [
     'boundary_conditions', 'coord_system', 'data_directory', 
     'dens_outer', 'resolution', 'dlogt', 'dynamic_args', 
@@ -20,120 +12,145 @@ class_props = [
     'regime', 'rho_ref', 'scale_factor',  'scale_factor_derivative', 
     'sources', 'start_time', 'use_hllc_solver']
 
-__all__ = ['BaseConfig', 'implicit_type_conversion']
-    
-class BaseConfig:
+P = ParamSpec('P')
+T = TypeVar('T')
+
+def simbi_property(func: Callable[P, T]) -> Callable[P, T]:
+    """ Do an implicit type conversion 
+    Type converts the simbi_property object if a DynamicArg 
+    is given as the return value
+    """
+    @property # type: ignore
+    def wrapper(*args: P.args, **kwds: P.kwargs) -> T:
+        result = func(*args, **kwds)
+        if isinstance(result, Iterable) and not isinstance(result, str):
+            return cast(T, [res if not isinstance(res, DynamicArg) else res.var_type(res.value) for res in result])
+        else:
+            if isinstance(result, DynamicArg):
+                return cast(T, result.var_type(result.value))
+        return cast(T, result)
+    return wrapper
+
+
+__all__ = ['BaseConfig', 'simbi_property']
+class BaseConfig(metaclass=abc.ABCMeta):
     dynamic_args: ListOrNone = None
     
-    @property
-    def initial_state(self) -> Union[Sequence[Union[float, NDArray[Any]]], NDArray[Any]]:
-        raise NotImplementedError("Your subclass need to implement the initial_state property")
+    @simbi_property
+    @abc.abstractmethod
+    def initial_state(self) -> Union[Sequence[Union[NDArray[numpy_float], Sequence[float]]], NDArray[numpy_float]]:
+        pass
     
-    @property
+    @simbi_property
+    @abc.abstractmethod
     def coord_system(self) -> str:
-        raise NotImplementedError("Your subclass needs to implement the coord_system property")
+        pass
     
-    @property
+    @simbi_property
+    @abc.abstractmethod
     def regime(self) -> str:
-        raise NotImplementedError("Your subclass needs to implement the regime property")
+        pass
         
-    @property
-    def resolution(self) -> Union[int, Sequence[int], NDArray[Any]]:
-        raise NotImplementedError("Your subclass needs to implement the resolution property")
+    @simbi_property
+    @abc.abstractmethod
+    def resolution(self) -> Union[int, Sequence[Union[int, DynamicArg]], NDArray[numpy_int], DynamicArg, Sequence[Sequence[Union[int, DynamicArg]]]]:
+        pass
     
-    @property
-    def geometry(self) -> Union[Sequence[float], Sequence[Sequence[float]]]:
-        raise NotImplementedError("Your subclass needs to implement the geometry property")
+    @simbi_property
+    @abc.abstractmethod
+    def geometry(self) -> Union[Sequence[Union[float, DynamicArg]], Sequence[Sequence[Union[float, DynamicArg]]]]:
+        pass
     
-    @property
+    @simbi_property
+    @abc.abstractmethod
     def gamma(self) -> Union[float, DynamicArg]:
-        raise NotImplementedError("Your subclass needs to implement the gamma property")
+        pass
     
-    @property
+    @simbi_property
     def linspace(self) -> bool:
         return False
     
-    @property
-    def sources(self) -> ListOrNone:
+    @simbi_property
+    def sources(self) -> Optional[Union[Sequence[NDArray[numpy_float]], NDArray[numpy_float]]]:
         return None
     
-    @property
-    def passive_scalars(self) -> ArrayOrNone:
+    @simbi_property
+    def passive_scalars(self) -> Optional[Union[Sequence[float], NDArray[numpy_float]]]:
         return None
     
-    @property
-    def scale_factor(self) -> CallableOrNone:
+    @simbi_property
+    def scale_factor(self) -> Optional[Callable[[float], float]]:
         return None 
     
-    @property
-    def scale_factor_derivative(self) -> CallableOrNone:
+    @simbi_property
+    def scale_factor_derivative(self) -> Optional[Callable[[float], float]]:
        return None
     
-    @property
-    def edens_outer(self) -> CallableOrNone:
+    @simbi_property
+    def edens_outer(self) -> Optional[Union[Callable[[float], float], Callable[[float, float], float], Callable[[float, float, float], float]]]:
         return None 
     
-    @property
-    def mom_outer(self) -> CallableOrNone:
+    @simbi_property
+    def mom_outer(self) ->  Optional[Union[Callable[[float], float], Sequence[Union[Callable[[float, float], float], Callable[[float, float, float], float]]]]]:
         return None
     
-    @property
-    def dens_outer(self) -> CallableOrNone:
+    @simbi_property
+    def dens_outer(self) ->  Optional[Union[Callable[[float], float], Callable[[float, float], float], Callable[[float, float, float], float]]]:
        return None
    
-    @property
-    def default_start_time(self) -> FloatOrNone:
+    @simbi_property
+    def default_start_time(self) -> Optional[Union[DynamicArg, float]]:
        return None
    
-    @property
-    def default_end_time(self) -> FloatOrNone:
+    @simbi_property
+    def default_end_time(self) -> Optional[Union[DynamicArg, float]]:
        return None
    
-    @property
+    @simbi_property
     def use_hllc_solver(self) -> bool:
        return True
    
-    @property
-    def boundary_conditions(self) -> Optional[Union[Sequence[str], str]]:
+    @simbi_property
+    def boundary_conditions(self) -> Optional[Union[Sequence[str], str, NDArray[numpy_string]]]:
        return None
    
-    @property
+    @simbi_property
     def plm_theta(self) -> FloatOrNone:
         return None 
     
-    @property
+    @simbi_property
     def data_directory(self) -> StrOrNone:
         return None
     
-    @property 
+    @simbi_property 
     def dlogt(self) -> FloatOrNone:
         return None 
     
-    @property
+    @simbi_property
     def use_quirk_smoothing(self) -> bool:
         return False
     
-    @property
+    @simbi_property
     def constant_sources(self) -> bool:
         return False 
     
-    @property
+    @simbi_property
     def x1(self) -> ArrayOrNone:
         return None 
     
-    @property
+    @simbi_property
     def x2(self) -> ArrayOrNone:
         return None 
     
-    @property
+    @simbi_property
     def x3(self) -> ArrayOrNone:
         return None
     
-    @property
+    @simbi_property
     def object_zones(self) -> Optional[Union[NDArray[Any], Sequence[Any]]]:
         return None
     
-    @property
+    @simbi_property
     def boundary_sources(self) -> Optional[Union[NDArray[Any], Sequence[Any]]]:
         return None
     

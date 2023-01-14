@@ -1,11 +1,13 @@
 import numpy as np
-from simbi import BaseConfig, compute_num_polar_zones, DynamicArg
+from simbi import BaseConfig, simbi_property, DynamicArg
+from simbi.key_types import *
+from simbi.helpers import compute_num_polar_zones
 
 RHO_AMB = 1.0
 P_AMB   = RHO_AMB * 1e-10
 NU      = 3.0 
 
-def find_nearest(arr: np.ndarray, val: float):
+def find_nearest(arr: NDArray[numpy_float], val: float) -> Tuple[Any, Any]:
     idx = np.argmin(np.abs(arr - val))
     return idx, arr[idx]
 
@@ -24,7 +26,7 @@ class thermalBomb(BaseConfig):
     zpd           = DynamicArg("zpd", 1024,            help='number of radial zones per decade', var_type=int)
     ad_gamma      = DynamicArg("ad_gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float)
     
-    def __init__(self):
+    def __init__(self) -> None:
         ndec             = np.log10(self.rend / self.rinit)
         self.nr          = round(self.zpd * ndec)
         r                = np.geomspace(self.rinit.value, self.rend.value, self.nr)
@@ -42,46 +44,46 @@ class thermalBomb(BaseConfig):
         self.vx             = np.zeros_like(self.p)
         self.vy             = self.vx.copy()
            
-    @property
-    def initial_state(self):
+    @simbi_property
+    def initial_state(self) -> Sequence[NDArray[numpy_float]]:
         return (self.rho, self.vx, self.vy, self.p)
     
-    @property
-    def geometry(self):
-        return ((self.rinit.value, self.rend.value), (self.theta_min, self.theta_max))
+    @simbi_property
+    def geometry(self) -> Sequence[Sequence[Any]]:
+        return ((self.rinit, self.rend), (self.theta_min, self.theta_max))
 
-    @property
-    def linspace(self):
+    @simbi_property
+    def linspace(self) -> bool:
         return False
     
-    @property
-    def coord_system(self):
+    @simbi_property
+    def coord_system(self) -> str:
         return "spherical"
 
-    @property
-    def resolution(self):
+    @simbi_property
+    def resolution(self) -> Sequence[int]:
         return (self.nr, self.npolar)
     
-    @property
-    def gamma(self):
-        return self.ad_gamma.value
+    @simbi_property
+    def gamma(self) -> DynamicArg:
+        return self.ad_gamma
     
-    @property
-    def regime(self):
+    @simbi_property
+    def regime(self) -> str:
         return "relativistic"
     
-    @property
-    def default_start_time(self):
+    @simbi_property
+    def default_start_time(self) -> float:
         return 0.0
     
-    @property
-    def default_end_time(self):
+    @simbi_property
+    def default_end_time(self) -> float:
         return 1.0
     
-    @property
-    def use_hllc_solver(self):
+    @simbi_property
+    def use_hllc_solver(self) -> bool:
         return True
     
-    @property
-    def boundary_conditions(self) -> str:
+    @simbi_property
+    def boundary_conditions(self) -> Sequence[str]:
         return ["reflecting", "outflow", "outflow", "outflow"]

@@ -26,9 +26,9 @@ class Hydro:
     dens_outer: CallableOrNone              = None 
     edens_outer: CallableOrNone             = None
     mom_outer: Optional[Union[Sequence[Callable[...,Any]], Callable[...,Any]]] = None 
-    x1: NDArray[Any]
-    x2: NDArray[Any]
-    x3: NDArray[Any]
+    x1: Any = None
+    x2: Any = None
+    x3: Any = None
     coord_system: str
     regime: str
     solution: NDArray[Any]
@@ -307,9 +307,9 @@ class Hydro:
         genspace: Callable[...,Any] = np.linspace 
         if not linspace:
             genspace = np.geomspace 
-            
+        
         if self.dimensionality == 1:
-            self.x1 = self.x1 or genspace(*self.geometry[:2], self.resolution)
+            self.x1 = self.x1 or genspace(*self.geometry[:2], *self.resolution)
         elif self.dimensionality == 2:
             self.x1 = self.x1 or genspace(self.geometry[0][0],   self.geometry[0][1], self.resolution[1])
             self.x2 = self.x2 or np.linspace(self.geometry[1][0], self.geometry[1][1], self.resolution[0])
@@ -317,18 +317,22 @@ class Hydro:
             self.x1 = self.x1 or genspace(self.geometry[0][0],    self.geometry[0][1], self.resolution[1])
             self.x2 = self.x2 or np.linspace(self.geometry[1][0],  self.geometry[1][1], self.resolution[2])
             self.x3 = self.x3 or np.linspace(self.geometry[2][0], self.geometry[2][1], self.resolution[3])
-    
+            
+        self.x1 = np.asarray(self.x1)
+        self.x2 = np.asarray(self.x2)
+        self.x3 = np.asarray(self.x3)
+        
     def _set_boundary_conditions(self, boundary_conditions: Union[Sequence[Any], str, NDArray[Any]]) -> None:
         self.boundary_conditions = boundary_conditions
         
         
     def _check_boundary_conditions(self, boundary_conditions: Union[Sequence[Any], str, NDArray[Any]]) -> None:
-        if not isinstance(boundary_conditions, (Sequence, np.ndarray)):
+        if isinstance(boundary_conditions, str):
             boundary_conditions = [boundary_conditions]
-
+        
         for bc in boundary_conditions:
             if bc not in available_boundary_conditions:
-                raise ValueError(f"Invalid boundary condition. Expected one of: {available_boundary_conditions}")
+                raise ValueError(f"Invalid boundary condition. Expected one of: {available_boundary_conditions}. Instead got: {bc}")
             
         number_of_given_bcs = len(boundary_conditions)
         if number_of_given_bcs != 2 * self.dimensionality:
