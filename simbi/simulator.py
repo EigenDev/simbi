@@ -415,7 +415,7 @@ class Hydro:
         self._generate_the_grid(linspace)
         
         mesh_motion = scale_factor_derivative(1.0) / scale_factor(1.0) != 0
-        volume_factor: Any = 1.0
+        volume_factor: Union[float, NDArray[Any]] = 1.0
         if mesh_motion and self.coord_system != 'cartesian':
             if self.dimensionality == 1:
                 volume_factor = helpers.calc_cell_volume1D(x1=self.x1)
@@ -494,7 +494,6 @@ class Hydro:
                     kwargs['e_outer']      = edens_outer
                 
                 state = PyStateSR2D(self.u, self.gamma, cfl=cfl, x1=self.x1, x2=self.x2, coord_system=cython_coordinates)
-
         else:
             sources = np.zeros(self.u.shape[:-1], dtype=float) if sources is None else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
