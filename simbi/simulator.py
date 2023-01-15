@@ -103,7 +103,7 @@ class Hydro:
             self.resolution          = cast(Sequence[int], resolution)
             self.nvars               = (2 + 1 * (self.dimensionality != 1) + self.dimensionality)
             
-            # Initialize conserved u-tensor and flux tensors (defaulting to 2 ghost cells)
+            # Initialize conserved u-array and flux arrays
             self.u = np.zeros(shape = (self.nvars, *np.asarray(self.resolution).flatten()[::-1]))
             if self.discontinuity:
                 print(f'Initializing Problem With a {str(self.dimensionality)}D Discontinuity...', flush=True)
@@ -215,21 +215,13 @@ class Hydro:
         Cleanup the ghost cells from the final simulation
         results
         """
-        if first_order:
-            if self.dimensionality  == 1:
-                self.solution = self.solution[:, 1: -1]
-            elif self.dimensionality  == 2:
-                self.solution = self.solution[:, 1:-1, 1:-1]
-            else:
-                self.solution = self.solution[:, 1:-1, 1:-1, 1:-1]
-        else:
-            if self.dimensionality  == 1:
-                self.solution = self.solution[:, 2: -2]
-            elif self.dimensionality  == 2:
-                self.solution = self.solution[:, 2:-2, 2:-2]
-            else:
-                self.solution = self.solution[:, 2:-2, 2:-2, 2:-2]
-    
+        pad_width = ((0,0),) + tuple(tuple(val) for val in [[2 * (first_order + 1), 2 * (first_order + 1)]] * self.dimensionality) 
+        slices = []
+        for c in pad_width:
+            e = None if c[1] == 0 else -c[1]
+            slices.append(slice(c[0], e))
+            
+        self.solution = self.solution[tuple(slices)]
     
     def _print_params(self, frame: Any) -> None:
         params = inspect.getargvalues(frame)
