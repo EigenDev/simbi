@@ -356,8 +356,8 @@ class Hydro:
         compute_mode:     str = 'cpu',
         quirk_smoothing:  bool = True,
         constant_sources: bool = False,
-        scale_factor:            Optional[Callable[...,float]] = None,
-        scale_factor_derivative: Optional[Callable[...,float]] = None,
+        scale_factor:            Optional[Callable[[float],float]] = None,
+        scale_factor_derivative: Optional[Callable[[float],float]] = None,
         dens_outer:              Optional[Callable[...,float]] = None,
         mom_outer:               Optional[Union[Callable[...,float], Sequence[Callable[...,float]]]] = None,
         edens_outer:             Optional[Callable[...,float]] = None,
@@ -383,12 +383,15 @@ class Hydro:
             bounday_condition (string):  The outer conditions at the domain x1 boundaries
             engine_duration (float):     The duration the source terms will last in the simulation
             compute_mode (string):       The compute mode for simulation execution (cpu or gpu)
-            quirksmoothing (bool):       The switch that controls the Quirk (1960) shock smoothing method
+            quirk_smoothing (bool):       The switch that controls the Quirk (1960) shock smoothing method
+            constant_source (bool):      Set to true if wanting the source terms to never die
             scale_factor              (Callable):   The scalar function for moving mesh. Think cosmology
             scale_factor_derivative   (Callable):   The first derivative of the scalar function for moving mesh
             dens_outer     (Callable):   The density to be fed into outer zones if moving mesh
             mom_outer      (Callables):  idem but for momentum density
             edens_outer    (Callable):   idem but for energy density
+            object_positions (boolean array_lie): An optional boolean array that masks the immersed boundary
+            boundary_source (array_like): An array of conserved quantities at the boundaries of the grid
             
         Returns:
             u (array): The hydro solution containing the primitive variables
