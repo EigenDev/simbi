@@ -10,7 +10,6 @@ derived = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', '
 field_choices = ['rho', 'v1', 'v2', 'v3', 'v', 'p', 'gamma_beta', 'chi'] + derived
 lin_fields    = ['chi', 'gamma_beta', 'u1', 'u2', 'u3']
 
-i = 0
 def parse_arguments(cli_args: list[str] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Visual simulations from SIMBI run')
     parser.add_argument('files',  nargs='+', help='A Data Source to Be Plotted')
@@ -74,7 +73,5 @@ def main():
     visual_module = getattr(importlib.import_module(f'{args.kind}{ndim}d'), f'{args.kind}')
     visual_module(parser)
         
-
-
 if __name__ == '__main__':
     sys.exit(main())
