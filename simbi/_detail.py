@@ -1,5 +1,5 @@
 import argparse 
-
+from typing import Any
 
 class bcolors:
     HEADER = '\033[95m'
@@ -12,7 +12,7 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
     
-def get_subparser(parser: argparse.ArgumentParser, idx: int) -> argparse.ArgumentParser:
+def get_subparser(parser: argparse.ArgumentParser, idx: int) -> Any:
     subparser = [
         subparser 
         for action in parser._actions 
@@ -21,7 +21,7 @@ def get_subparser(parser: argparse.ArgumentParser, idx: int) -> argparse.Argumen
     ]
     return subparser[idx]
 
-def max_thread_count(param) -> int:
+def max_thread_count(param: Any) -> int:
     import multiprocessing
     num_threads_available = multiprocessing.cpu_count()
     

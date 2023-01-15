@@ -53,7 +53,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
     return parser, parser.parse_known_args(args=None if sys.argv[2:] else ['run', '--help'])
 
 def parse_module_arguments():
-    parser = CustomParser(prog='simbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
+    parser = CustomParser(prog='simbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module", conflict_handler='resolve')
     parser.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
     subparsers = parser.add_subparsers(help='available sub-commands', dest='command')
     script_run = subparsers.add_parser('run', help='runs the setup script')
@@ -90,6 +90,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv: Optional
     base_script    = Path(os.path.abspath(script)).stem
     sys.path.insert(1, f'{script_dirname}')
     
+    run_parser = get_subparser(parser, 0)
     if type_checking_active:
         print("Validating Script Type Safety...\n")
         try:

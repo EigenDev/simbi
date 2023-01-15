@@ -2,6 +2,7 @@ import argparse
 import abc
 from .dynarg import DynamicArg
 from .key_types import *
+from ._detail import get_subparser
 from typing import ParamSpec, TypeVar
 class_props = [
     'boundary_conditions', 'coord_system', 'data_directory', 
@@ -35,6 +36,8 @@ def simbi_property(func: Callable[P, T]) -> Callable[P, T]:
         return cast(T, result)
     return wrapper
 
+def err_message(name: str) -> str:
+    return f"Configuration must include a {name} simbi_property"
 
 __all__ = ['BaseConfig', 'simbi_property']
 class BaseConfig(metaclass=abc.ABCMeta):
@@ -43,32 +46,32 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @simbi_property
     @abc.abstractmethod
     def initial_state(self) -> Union[Sequence[Union[NDArray[numpy_float], Sequence[float]]], NDArray[numpy_float]]:
-        pass
+        raise NotImplementedError(err_message('initial_state'))
     
     @simbi_property
     @abc.abstractmethod
     def coord_system(self) -> str:
-        pass
+        raise NotImplementedError(err_message('coord_system'))
     
     @simbi_property
     @abc.abstractmethod
     def regime(self) -> str:
-        pass
+        raise NotImplementedError(err_message('regime'))
         
     @simbi_property
     @abc.abstractmethod
     def resolution(self) -> Union[int, Sequence[Union[int, DynamicArg]], NDArray[numpy_int], DynamicArg, Sequence[Sequence[Union[int, DynamicArg]]]]:
-        pass
+        raise NotImplementedError(err_message('resolution'))
     
     @simbi_property
     @abc.abstractmethod
     def geometry(self) -> Union[Sequence[Union[float, DynamicArg]], Sequence[Sequence[Union[float, DynamicArg]]]]:
-        pass
+        raise NotImplementedError(err_message('geometry'))
     
     @simbi_property
     @abc.abstractmethod
     def gamma(self) -> Union[float, DynamicArg]:
-        pass
+        raise NotImplementedError(err_message('gamma'))
     
     @simbi_property
     def linspace(self) -> bool:
@@ -191,18 +194,19 @@ class BaseConfig(metaclass=abc.ABCMeta):
         """
         Parse extra problem-specific args from command line
         """
+        run_parser = get_subparser(parser, 0)
         if cls.dynamic_args:
             for member in cls.dynamic_args:
                 try:
                     if type(member.value) == bool:
-                        parser.add_argument(
+                        run_parser.add_argument(
                             f'--{member.name}',
                             help    = member.help,
                             action  = member.action,
                             default = member.value,
                         )
                     else:
-                        parser.add_argument(
+                        run_parser.add_argument(
                             f'--{member.name}',
                             help    = member.help,
                             action  = member.action,
@@ -210,10 +214,10 @@ class BaseConfig(metaclass=abc.ABCMeta):
                             choices = member.choices,
                             default = member.value,
                         )
-                except:
+                except argparse.ArgumentError:
                     # ignore duplicate arguments if inheriting from another problem setup 
                     pass
-                    
+                
             args = parser.parse_args()
             # Update dynamic var attributes to reflect new values passed from cli
             for var in cls.dynamic_args:
@@ -248,7 +252,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
             for member in cls.dynamic_args:
                 val = member.value
                 if (isinstance(val, float)):
-                    if order_of_mag(val) < -3 or order_of_mag(val) > 3:
+                    if abs(order_of_mag(val)) > 3:
                         print(f"{member.name:.<30} {val:<15.2e} {member.help}", flush = True)
                         continue
                     val = round(val, 3)
