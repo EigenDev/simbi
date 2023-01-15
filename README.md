@@ -89,12 +89,12 @@
 
     You can plot the above output by running 
     ``` bash
-    $ ./tools/plot1d.py data/1000.chkpt.000_100.h5 "Marti \& Muller Problem 1" --field rho v p --tex
+    $ simbi plot data/1000.chkpt.000_100.h5 "Marti \& Muller Problem 1" --field rho v p --tex
     ```
 
     The usual formula for plotting a checkpoint files is like so:
     ``` bash
-    $ ./tools/<plotting_script_for_ndim> <checkpoint_file> "<name_of_physics_setup>" --field <field_string> [options]
+    $ simbi plot <checkpoint_file> "<name_of_physics_setup>" --field <field_string> [options]
     ```
 5)  ???
 6)  Profit
