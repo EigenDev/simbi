@@ -98,7 +98,7 @@ class Hydro:
             resolution = (resolution,)
         
         self.gamma = gamma 
-        if len(initial_state) < 5:
+        if len(initial_state) < 5 or len(initial_state) < 8 and self.discontinuity:
             self.geometry            = cast(Sequence[float], geometry)
             self.resolution          = cast(Sequence[int], resolution)
             self.nvars               = (2 + 1 * (self.dimensionality != 1) + self.dimensionality)
@@ -150,7 +150,6 @@ class Hydro:
                     else:
                         part[...] = (part[...].transpose() + np.array([dens, *mom, energy, 0.0])).transpose()
             else:
-                # velocity: Any 
                 rho, *velocity, pressure = initial_state
                 velocity        = np.asarray(velocity)
                 vsqr            = self.calc_vsq(velocity)
