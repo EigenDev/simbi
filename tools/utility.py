@@ -203,7 +203,12 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         p   = hf.get('p')[:]         
         chi = (hf.get('chi') or np.zeros_like(rho))[:]
 
-        bcs = (hf.get('boundary_conditions') or [b'outflow']*4)[:]
+        if not hf.get('boundary_conditions'):
+            try:
+                bcs = [ds.attrs['boundary_condition']]
+            except KeyError:
+                bcs = [b'outflow']
+                
         full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
 
         setup['first_order']  = fallback_on_legacy(ds, key='first_order', kind=bool, fall_back=False)
