@@ -79,18 +79,17 @@ class Hydro:
         [setattr(self, attribute, extras[attribute]) for attribute in clean_attributes if attribute in dir(self)] # type: ignore
         
         # check if given simple nexted sequence to split across the grid
-        if any(isinstance(i, (list, tuple, np.ndarray)) for i in initial_state):
-            if all(len(v) == 3 for v in initial_state):
-                self.dimensionality = 1
-                self.discontinuity = True
-            elif all(len(v) == 4 for v in initial_state):
-                self.dimensionality = 2
-                self.discontinuity = True
-            elif all(len(v) == 5 for v in initial_state):
-                self.dimensionality = 3
-                self.discontinuity = True
-            else:
-                pass 
+        if all(len(v) == 3 for v in initial_state):
+            self.dimensionality = 1
+            self.discontinuity = True
+        elif all(len(v) == 4 for v in initial_state):
+            self.dimensionality = 2
+            self.discontinuity = True
+        elif all(len(v) == 5 for v in initial_state):
+            self.dimensionality = 3
+            self.discontinuity = True
+        else:
+            self.dimensionality = np.asarray(initial_state[0]).ndim 
             
         self.coord_system  = coord_system
         self.regime        = regime
@@ -151,7 +150,6 @@ class Hydro:
                     else:
                         part[...] = (part[...].transpose() + np.array([dens, *mom, energy, 0.0])).transpose()
             else:
-                self.dimensionality = np.asarray(initial_state[0]).ndim
                 # velocity: Any 
                 rho, *velocity, pressure = initial_state
                 velocity        = np.asarray(velocity)
