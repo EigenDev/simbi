@@ -869,6 +869,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     setup.x1             = x1;
     setup.x2             = x2;
     setup.mesh_motion    = mesh_motion;
+    setup.dimensions = 2;
 
     cons.resize(nzones);
     prims.resize(nzones);

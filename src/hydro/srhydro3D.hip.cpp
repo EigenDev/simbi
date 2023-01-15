@@ -1206,8 +1206,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     setup.x1min              = x1[0];
     setup.x2max              = x2[yphysical_grid - 1];
     setup.x2min              = x2[0];
-    setup.zmax               = x3[zphysical_grid - 1];
-    setup.zmin               = x3[0];
+    setup.x3max              = x3[zphysical_grid - 1];
+    setup.x3min              = x3[0];
     setup.nx                 = nx;
     setup.ny                 = ny;
     setup.nz                 = nz;
@@ -1225,6 +1225,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     setup.x3                 = x3;
     setup.mesh_motion        = mesh_motion;
     setup.boundary_conditions  = boundary_conditions;
+    setup.dimensions           = 3;
 
     cons.resize(nzones);
     prims.resize(nzones);

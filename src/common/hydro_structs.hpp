@@ -20,13 +20,25 @@ struct PrimData
 
 struct DataWriteMembers
 {
-    real t, ad_gamma;
-    real x1min, x1max, x2min, x2max, zmin, zmax, dt;
-    int nx, ny, nz, xactive_zones, yactive_zones, zactive_zones, chkpt_idx;
+    int nx, ny, nz, xactive_zones, yactive_zones, zactive_zones, chkpt_idx, dimensions;
     bool linspace, first_order, using_fourvelocity, mesh_motion;
+    real t, ad_gamma;
+    real x1min, x1max, x2min, x2max, x3min, x3max, dt;
     std::string coord_system, regime;
     std::vector<real> x1, x2, x3;
     std::vector<std::string> boundary_conditions;
+
+    DataWriteMembers():
+    nx(1),
+    ny(1),
+    nz(1),
+    x1min(0.0),
+    x1max(0.0),
+    x2min(0.0),
+    x2max(0.0),
+    x3min(0.0),
+    x3max(0.0)
+    {}
 };
 
 namespace hydro1d {

@@ -529,6 +529,7 @@ void Newtonian1D::advance(
     setup.x1             = x1;
     setup.mesh_motion    = mesh_motion;
     setup.boundary_conditions = boundary_conditions;
+    setup.dimensions = 1;
 
 
     dt_min.resize(active_zones);

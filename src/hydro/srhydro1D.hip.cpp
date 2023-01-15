@@ -45,14 +45,17 @@ SRHD::SRHD(
 
 }
 
-
 GPU_CALLABLE_MEMBER
 real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side) const
 {
     switch(geometry)
     {
-    case simbi::Geometry::CYLINDRICAL:
-    case simbi::Geometry::SPHERICAL:
+        case simbi::Geometry::CARTESIAN:
+        {
+            // Rigid motion
+            return  hubble_const;
+        }
+        default:
         {
             const real xl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min); 
             if (side == 0) {
@@ -61,11 +64,6 @@ real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geome
                 const real xr = helpers::my_min(xl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)),  x1max);
                 return xr;
             }
-        }
-    case simbi::Geometry::CARTESIAN:
-        {
-            // Rigid motion
-            return  hubble_const;
         }
     }
 }
@@ -663,7 +661,7 @@ SRHD::simulate1D(
     setup.regime             = "relativistic";
     setup.mesh_motion        = mesh_motion;
     setup.boundary_conditions = boundary_conditions;
-
+    setup.dimensions = 1;
     cons.resize(nx);
     prims.resize(nx);
     pressure_guess.resize(nx);

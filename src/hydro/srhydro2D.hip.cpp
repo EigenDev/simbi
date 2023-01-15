@@ -1029,9 +1029,6 @@ void SRHD2D::advance(
                 const real factor       = (mesh_motion) ? dVtot : 1;  
 
                 // Grab central primitives
-                const real rhoc = prim_buff[tya * bx + txa].rho;
-                const real uc   = prim_buff[tya * bx + txa].v1;
-                const real vc   = prim_buff[tya * bx + txa].v2;
                 const real pc   = prim_buff[tya * bx + txa].p;
                 
                 const Conserved geom_source  = {0, pc * (s1R - s1L) * invdV, 0, 0};
@@ -1191,6 +1188,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     setup.x1                 = x1;
     setup.x2                 = x2;
     setup.mesh_motion        = mesh_motion;
+    setup.dimensions         = 2;
 
     // // Setup the system
     const luint xblockdim    = xphysical_grid > BLOCK_SIZE2D ? BLOCK_SIZE2D : xphysical_grid;

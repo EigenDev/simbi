@@ -131,6 +131,13 @@ namespace simbi
             H5::DataSet str_dataset = file.createDataSet("boundary_conditions", str_datatype, bc_dataspace);
             str_dataset.write(arr_c_str.data(), str_datatype);
             str_dataset.close();
+
+            H5::DataType real_type;
+            if (typeid(real) == typeid(double)) {
+                real_type = H5::PredType::NATIVE_DOUBLE;
+            } else {
+                real_type = H5::PredType::NATIVE_FLOAT;
+            }
             switch (dim)
             {
                 case 1:
@@ -147,88 +154,20 @@ namespace simbi
                     H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
 
                     // Write the Primitives 
-                    dataset.write(rho.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(rho.get(), real_type);
                     dataset.close();
                     
-                    dataset = file.createDataSet("v", datatype, dataspace);
-                    dataset.write(v.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset = file.createDataSet("v1", datatype, dataspace);
+                    dataset.write(v.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("p", datatype, dataspace);
-                    dataset.write(p.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(p.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("x1", datatype, dataspacex1);
-                    dataset.write(x1.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(x1.get(), real_type);
                     dataset.close();
-
-                    // Write Datset Attributes
-                    H5::DataType real_type(H5::PredType::NATIVE_DOUBLE);
-                    H5::DataType int_type(H5::PredType::NATIVE_INT);
-                    H5::DataType bool_type(H5::PredType::NATIVE_HBOOL);
-                    H5::DataSpace att_space(H5S_SCALAR);
-
-                    H5::DataSpace empty_dspace(1, dimsf);
-                    H5::DataType  empty_dtype(H5::PredType::NATIVE_INT);
-                    H5::DataSet   sim_info = file.createDataSet("sim_info", empty_dtype, empty_dspace);
-
-                    H5::Attribute att = sim_info.createAttribute("current_time", real_type, att_space);
-                    att.write(real_type, &setup.t);
-                    att.close();
-
-                    att = sim_info.createAttribute("time_step", real_type, att_space);
-                    att.write(real_type, &setup.dt);
-                    att.close();
-
-                    att = sim_info.createAttribute("linspace", bool_type, att_space);
-                    att.write(bool_type, &setup.linspace);
-                    att.close();
-
-                    att = sim_info.createAttribute("using_gamma_beta", bool_type, att_space);
-                    att.write(bool_type, &setup.using_fourvelocity);
-                    att.close();
-
-                    att = sim_info.createAttribute("mesh_motion", bool_type, att_space);
-                    att.write(bool_type, &setup.mesh_motion);
-                    att.close();
-
-                    att = sim_info.createAttribute("first_order", bool_type, att_space);
-                    att.write(bool_type, &setup.first_order);
-                    att.close();
-
-                    att = sim_info.createAttribute("adiabatic_gamma", real_type, att_space);
-                    att.write(real_type, &setup.ad_gamma);
-                    att.close();
-
-                    att = sim_info.createAttribute("x1max", real_type, att_space);
-                    att.write(real_type, &setup.x1max);
-                    att.close();
-
-                    att = sim_info.createAttribute("x1min", real_type, att_space);
-                    att.write(real_type, &setup.x1min);
-                    att.close();
-
-                    att = sim_info.createAttribute("nx", int_type, att_space);
-                    att.write(int_type, &setup.nx);
-                    att.close();
-
-                    att = sim_info.createAttribute("chkpt_idx", int_type, att_space);
-                    att.write(int_type, &setup.chkpt_idx);
-                    att.close();
-
-                    att = sim_info.createAttribute("xactive_zones", int_type, att_space);
-                    att.write(int_type, &setup.xactive_zones);
-                    att.close();
-
-                    att = sim_info.createAttribute("geometry", dtype_str, att_space);
-                    att.write(dtype_str, setup.coord_system.c_str());
-                    att.close();
-
-                    att = sim_info.createAttribute("regime", dtype_str, att_space);
-                    att.write(dtype_str, setup.regime.c_str());
-                    att.close();
-                    
-                    sim_info.close();
                     break;
                 }
                 case 2:
@@ -252,124 +191,32 @@ namespace simbi
                     H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
 
                     // Write the Primitives 
-                    dataset.write(rho.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(rho.get(), real_type);
                     dataset.close();
                     
                     dataset = file.createDataSet("v1", datatype, dataspace);
-                    dataset.write(v1.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(v1.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("v2", datatype, dataspace);
-                    dataset.write(v2.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(v2.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("p", datatype, dataspace);
-                    dataset.write(p.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(p.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("chi", datatype, dataspace);
-                    dataset.write(chi.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(chi.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("x1", datatype, dataspacex1);
-                    dataset.write(x1.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(x1.get(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("x2", datatype, dataspacex2);
-                    dataset.write(x2.get(), H5::PredType::NATIVE_DOUBLE);
+                    dataset.write(x2.get(), real_type);
                     dataset.close();
-
-                    // Write Datset Attributesauto real_type(H5::PredType::NATIVE_DOUBLE);
-                    H5::DataType int_type(H5::PredType::NATIVE_INT);
-                    H5::DataType real_type;
-
-                    if (typeid(real) == typeid(double))
-                    {
-                        real_type = H5::PredType::NATIVE_DOUBLE;
-                    } else {
-                        real_type = H5::PredType::NATIVE_FLOAT;
-                    }
-                    
-                    H5::DataType bool_type(H5::PredType::NATIVE_HBOOL);
-                    H5::DataSpace att_space(H5S_SCALAR);
-
-                    H5::DataSpace empty_dspace(1, dimsf);
-                    H5::DataType  empty_dtype(H5::PredType::NATIVE_INT);
-                    H5::DataSet   sim_info = file.createDataSet("sim_info", empty_dtype, empty_dspace);
-                    
-                    H5::Attribute att = sim_info.createAttribute("current_time", real_type, att_space);
-                    att.write(real_type, &setup.t);
-                    att.close();
-
-                    att = sim_info.createAttribute("time_step", real_type, att_space);
-                    att.write(real_type, &setup.dt);
-                    att.close();
-
-                    att = sim_info.createAttribute("linspace", bool_type, att_space);
-                    att.write(bool_type, &setup.linspace);
-                    att.close();
-
-                    att = sim_info.createAttribute("first_order", bool_type, att_space);
-                    att.write(bool_type, &setup.first_order);
-                    att.close();
-
-                    att = sim_info.createAttribute("using_gamma_beta", bool_type, att_space);
-                    att.write(bool_type, &setup.using_fourvelocity);
-                    att.close();
-
-                    att = sim_info.createAttribute("mesh_motion", bool_type, att_space);
-                    att.write(bool_type, &setup.mesh_motion);
-                    att.close();
-                    
-                    att = sim_info.createAttribute("x1max", real_type, att_space);
-                    att.write(real_type, &setup.x1max);
-                    att.close();
-
-                    att = sim_info.createAttribute("x1min", real_type, att_space);
-                    att.write(real_type, &setup.x1min);
-                    att.close();
-
-                    att = sim_info.createAttribute("x2max", real_type, att_space);
-                    att.write(real_type, &setup.x2max);
-                    att.close();
-
-                    att = sim_info.createAttribute("x2min", real_type, att_space);
-                    att.write(real_type, &setup.x2min);
-                    att.close();
-
-                    att = sim_info.createAttribute("adiabatic_gamma", real_type, att_space);
-                    att.write(real_type, &setup.ad_gamma);
-                    att.close();
-
-                    att = sim_info.createAttribute("nx", int_type, att_space);
-                    att.write(int_type, &setup.nx);
-                    att.close();
-
-                    att = sim_info.createAttribute("ny", int_type, att_space);
-                    att.write(int_type, &setup.ny);
-                    att.close();
-
-                    att = sim_info.createAttribute("chkpt_idx", int_type, att_space);
-                    att.write(int_type, &setup.chkpt_idx);
-                    att.close();
-
-                    att = sim_info.createAttribute("xactive_zones", int_type, att_space);
-                    att.write(int_type, &setup.xactive_zones);
-                    att.close();
-
-                    att = sim_info.createAttribute("yactive_zones", int_type, att_space);
-                    att.write(int_type, &setup.yactive_zones);
-                    att.close();
-
-                    att = sim_info.createAttribute("geometry", dtype_str, att_space);
-                    att.write(dtype_str, setup.coord_system.c_str());
-                    att.close();
-
-                    att = sim_info.createAttribute("regime", dtype_str, att_space);
-                    att.write(dtype_str, setup.regime.c_str());
-                    att.close();
-
-                    sim_info.close();
                 break;
                 }
                 case 3:
@@ -396,12 +243,6 @@ namespace simbi
                     std::copy(setup.x3.begin(),  setup.x3.begin() + setup.x3.size(), x3.get());
 
                     H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
-                    H5::DataType real_type;
-                    if (typeid(real) == typeid(double)) {
-                        real_type = H5::PredType::NATIVE_DOUBLE;
-                    } else {
-                        real_type = H5::PredType::NATIVE_FLOAT;
-                    }
 
                     // Write the Primitives 
                     dataset.write(rho.get(), real_type);
@@ -438,111 +279,109 @@ namespace simbi
                     dataset = file.createDataSet("x3", datatype, dataspacex3);
                     dataset.write(x3.get(), real_type);
                     dataset.close();
-
-                    // Write Datset Attributesauto real_type(real_type);
-                    H5::DataType int_type(H5::PredType::NATIVE_INT);
-                    
-                    H5::DataType bool_type(H5::PredType::NATIVE_HBOOL);
-                    H5::DataSpace att_space(H5S_SCALAR);
-
-                    H5::DataSpace empty_dspace(1, dimsf);
-                    H5::DataType  empty_dtype(H5::PredType::NATIVE_INT);
-                    H5::DataSet   sim_info = file.createDataSet("sim_info", empty_dtype, empty_dspace);
-                    
-                    H5::Attribute att = sim_info.createAttribute("current_time", real_type, att_space);
-                    att.write(real_type, &setup.t);
-                    att.close();
-
-                    att = sim_info.createAttribute("time_step", real_type, att_space);
-                    att.write(real_type, &setup.dt);
-                    att.close();
-
-                    att = sim_info.createAttribute("linspace", bool_type, att_space);
-                    att.write(bool_type, &setup.linspace);
-                    att.close();
-
-                    att = sim_info.createAttribute("first_order", bool_type, att_space);
-                    att.write(bool_type, &setup.first_order);
-                    att.close();
-
-                    att = sim_info.createAttribute("using_gamma_beta", bool_type, att_space);
-                    att.write(bool_type, &setup.using_fourvelocity);
-                    att.close();
-
-                    att = sim_info.createAttribute("mesh_motion", bool_type, att_space);
-                    att.write(bool_type, &setup.mesh_motion);
-                    att.close();
-                    
-                    att = sim_info.createAttribute("x1max", real_type, att_space);
-                    att.write(real_type, &setup.x1max);
-                    att.close();
-
-                    att = sim_info.createAttribute("x1min", real_type, att_space);
-                    att.write(real_type, &setup.x1min);
-                    att.close();
-
-                    att = sim_info.createAttribute("x2max", real_type, att_space);
-                    att.write(real_type, &setup.x2max);
-                    att.close();
-
-                    att = sim_info.createAttribute("x2min", real_type, att_space);
-                    att.write(real_type, &setup.x2min);
-                    att.close();
-
-                    att = sim_info.createAttribute("x3max", real_type, att_space);
-                    att.write(real_type, &setup.zmax);
-                    att.close();
-
-                    att = sim_info.createAttribute("x3min", real_type, att_space);
-                    att.write(real_type, &setup.zmin);
-                    att.close();
-
-                    att = sim_info.createAttribute("adiabatic_gamma", real_type, att_space);
-                    att.write(real_type, &setup.ad_gamma);
-                    att.close();
-
-                    att = sim_info.createAttribute("nx", int_type, att_space);
-                    att.write(int_type, &setup.nx);
-                    att.close();
-
-                    att = sim_info.createAttribute("ny", int_type, att_space);
-                    att.write(int_type, &setup.ny);
-                    att.close();
-
-                    att = sim_info.createAttribute("nz", int_type, att_space);
-                    att.write(int_type, &setup.nz);
-                    att.close();
-
-                    att = sim_info.createAttribute("chkpt_idx", int_type, att_space);
-                    att.write(int_type, &setup.chkpt_idx);
-                    att.close();
-
-                    att = sim_info.createAttribute("xactive_zones", int_type, att_space);
-                    att.write(int_type, &setup.xactive_zones);
-                    att.close();
-
-                    att = sim_info.createAttribute("yactive_zones", int_type, att_space);
-                    att.write(int_type, &setup.yactive_zones);
-                    att.close();
-
-                    att = sim_info.createAttribute("zactive_zones", int_type, att_space);
-                    att.write(int_type, &setup.zactive_zones);
-                    att.close();
-
-                    att = sim_info.createAttribute("geometry", dtype_str, att_space);
-                    att.write(dtype_str, setup.coord_system.c_str());
-                    att.close();
-
-                    att = sim_info.createAttribute("regime", dtype_str, att_space);
-                    att.write(dtype_str, setup.regime.c_str());
-                    att.close();
-
-                    sim_info.close();
                 break;
                 }
+            } // end switch
+        
+            // Write Datset Attributesauto real_type(real_type);
+            H5::DataType int_type(H5::PredType::NATIVE_INT);
             
-            }
+            H5::DataType bool_type(H5::PredType::NATIVE_HBOOL);
+            H5::DataSpace att_space(H5S_SCALAR);
+
+            H5::DataSpace empty_dspace(1, dimsf);
+            H5::DataType  empty_dtype(H5::PredType::NATIVE_INT);
+            H5::DataSet   sim_info = file.createDataSet("sim_info", empty_dtype, empty_dspace);
             
+            H5::Attribute att = sim_info.createAttribute("current_time", real_type, att_space);
+            att.write(real_type, &setup.t);
+            att.close();
+
+            att = sim_info.createAttribute("time_step", real_type, att_space);
+            att.write(real_type, &setup.dt);
+            att.close();
+
+            att = sim_info.createAttribute("linspace", bool_type, att_space);
+            att.write(bool_type, &setup.linspace);
+            att.close();
+
+            att = sim_info.createAttribute("first_order", bool_type, att_space);
+            att.write(bool_type, &setup.first_order);
+            att.close();
+
+            att = sim_info.createAttribute("using_gamma_beta", bool_type, att_space);
+            att.write(bool_type, &setup.using_fourvelocity);
+            att.close();
+
+            att = sim_info.createAttribute("mesh_motion", bool_type, att_space);
+            att.write(bool_type, &setup.mesh_motion);
+            att.close();
+            
+            att = sim_info.createAttribute("x1max", real_type, att_space);
+            att.write(real_type, &setup.x1max);
+            att.close();
+
+            att = sim_info.createAttribute("x1min", real_type, att_space);
+            att.write(real_type, &setup.x1min);
+            att.close();
+
+            att = sim_info.createAttribute("x2max", real_type, att_space);
+            att.write(real_type, &setup.x2max);
+            att.close();
+
+            att = sim_info.createAttribute("x2min", real_type, att_space);
+            att.write(real_type, &setup.x2min);
+            att.close();
+
+            att = sim_info.createAttribute("x3max", real_type, att_space);
+            att.write(real_type, &setup.x3max);
+            att.close();
+
+            att = sim_info.createAttribute("x3min", real_type, att_space);
+            att.write(real_type, &setup.x3min);
+            att.close();
+
+            att = sim_info.createAttribute("adiabatic_gamma", real_type, att_space);
+            att.write(real_type, &setup.ad_gamma);
+            att.close();
+
+            att = sim_info.createAttribute("nx", int_type, att_space);
+            att.write(int_type, &setup.nx);
+            att.close();
+
+            att = sim_info.createAttribute("ny", int_type, att_space);
+            att.write(int_type, &setup.ny);
+            att.close();
+
+            att = sim_info.createAttribute("nz", int_type, att_space);
+            att.write(int_type, &setup.nz);
+            att.close();
+
+            att = sim_info.createAttribute("chkpt_idx", int_type, att_space);
+            att.write(int_type, &setup.chkpt_idx);
+            att.close();
+
+            att = sim_info.createAttribute("xactive_zones", int_type, att_space);
+            att.write(int_type, &setup.xactive_zones);
+            att.close();
+
+            att = sim_info.createAttribute("yactive_zones", int_type, att_space);
+            att.write(int_type, &setup.yactive_zones);
+            att.close();
+
+            att = sim_info.createAttribute("zactive_zones", int_type, att_space);
+            att.write(int_type, &setup.zactive_zones);
+            att.close();
+
+            att = sim_info.createAttribute("geometry", dtype_str, att_space);
+            att.write(dtype_str, setup.coord_system.c_str());
+            att.close();
+
+            att = sim_info.createAttribute("regime", dtype_str, att_space);
+            att.write(dtype_str, setup.regime.c_str());
+            att.close();
+
+            sim_info.close();
         }
         
     } // namespace helpers
