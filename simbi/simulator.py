@@ -29,6 +29,7 @@ class Hydro:
     x1: Any = None
     x2: Any = None
     x3: Any = None
+    boundary_conditions: list[str]
     coord_system: str
     regime: str
     solution: NDArray[Any]
@@ -316,7 +317,7 @@ class Hydro:
         self.x2 = np.asarray(self.x2)
         self.x3 = np.asarray(self.x3)
         
-    def _check_boundary_conditions(self, boundary_conditions: Union[Sequence[Any], str, NDArray[Any]]) -> None:
+    def _check_boundary_conditions(self, boundary_conditions: Union[Sequence[str], str, NDArray[numpy_string]]) -> None:
         if isinstance(boundary_conditions, str):
             boundary_conditions = [boundary_conditions]
         
@@ -333,7 +334,7 @@ class Hydro:
             else:
                 raise ValueError("Please include at a number of boundary conditions equal to at least half the number of cell faces")
         
-        self.boundary_conditions = boundary_conditions
+        self.boundary_conditions = cast(list[str], boundary_conditions)
         
         
     def simulate(
@@ -433,10 +434,23 @@ class Hydro:
             
         periodic        = all(bc == 'periodic' for bc in boundary_conditions)
         self.start_time = self.start_time or tstart
+        
+        #####################################################################################################
+        # Check if boundary source terms given. If given as a jagged array, pad the missing members with zeros
+        #####################################################################################################
+        if boundary_sources is None:
+            boundary_sources = np.zeros((2 * self.dimensionality, self.dimensionality + 2))
+        else:
+            boundary_sources = self._place_boundary_sources(boundary_sources=boundary_sources, first_order=first_order)
+
+        for idx, bc in enumerate(self.boundary_conditions):
+            if bc == 'inflow' and 0 in [boundary_sources[idx][0], boundary_sources[idx][-1]]:
+                self.boundary_conditions[idx] = str('outflow')
+
         #Convert strings to byte arrays
         cython_data_directory      = os.path.join(data_directory, '').encode('utf-8')
         cython_coordinates         = self.coord_system.encode('utf-8')
-        cython_boundary_conditions = np.array([bc.encode('utf-8') for bc in self.boundary_conditions])
+        cython_boundary_conditions: NDArray[numpy_string] = np.array([bc.encode('utf-8') for bc in self.boundary_conditions])
         
         # Offset the start time from zero if wanting log 
         # checkpoints, but with initial time of zero
@@ -454,14 +468,7 @@ class Hydro:
         
         # Create boolean maks for object immersed boundaries (impermable)
         object_cells: NDArray[Any] = np.zeros_like(self.u[0], dtype=bool) if object_positions is None else np.asarray(object_positions, dtype=bool) 
-        #####################################################################################################
-        # Check if boundary source terms given. If given as a jagged array, pad the missing members with zeros
-        #####################################################################################################
-        if boundary_sources is None:
-            boundary_sources = np.zeros((2 * self.dimensionality, self.dimensionality + 2))
-        else:
-            boundary_sources = self._place_boundary_sources(boundary_sources=boundary_sources, first_order=first_order)
-        
+
         print(f"Computing {'First' if first_order else 'Second'} Order Solution...", flush=True)
         kwargs: dict[str, Any] = {}
         if self.dimensionality  == 1:
