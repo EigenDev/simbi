@@ -51,7 +51,7 @@ def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     overridable.add_argument('--hllc', help='flag for HLLC computation as opposed to HLLE', default=None, action=argparse.BooleanOptionalAction)
     overridable.add_argument('--chkpt_interval', help='checkpoint interval spacing in simulation time units', default=None, type=float)
     overridable.add_argument('--data_directory', help='directory to save checkpoint files', default='data/', type=str)
-    overridable.add_argument('--boundary_conditions', help='boundary condition for inner boundary', default='outflow', nargs="+", choices=['reflecting', 'outflow', 'inflow', 'periodic'])
+    overridable.add_argument('--boundary_conditions', help='boundary condition for inner boundary', default=None, nargs="+", choices=['reflecting', 'outflow', 'inflow', 'periodic'])
     overridable.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=None, type=float)
     overridable.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=None, action='store_true')
     overridable.add_argument('--constant_sources', help='flag to indicate source terms provided are constant', default=None, action='store_true')
