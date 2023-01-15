@@ -203,7 +203,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         p   = hf.get('p')[:]         
         chi = (hf.get('chi') or np.zeros_like(rho))[:]
 
-        if not hf.get('boundary_conditions'):
+        if not (bcs := hf.get('boundary_conditions')):
             try:
                 bcs = [ds.attrs['boundary_condition']]
             except KeyError:
