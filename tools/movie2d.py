@@ -1,9 +1,6 @@
-#! /usr/bin/env python
-
-# Tool for making movies from h5 files in directory
 
 import numpy as np 
-import matplotlib.pyplot as plt #! /usr/bin/env python
+import matplotlib.pyplot as plt 
 import matplotlib.ticker as tkr
 import time
 import matplotlib.colors as mcolors
@@ -11,6 +8,7 @@ import argparse
 import h5py 
 import astropy.constants as const
 import utility as util 
+from visual import derived, lin_fields, field_choices
 
 from utility import DEFAULT_SIZE, SMALL_SIZE, BIGGER_SIZE
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -21,12 +19,7 @@ try:
     import cmasher as cmr 
 except:
     print("No cmasher, so defaulting to matplotlib colormaps")
-
-derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'chi_dens',
-                 'gamma_beta_1', 'gamma_beta_2']
-field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'chi'] + derived
-lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2']
-
+    
 def get_frames(dir, max_file_num):
     frames       = sorted([name for name in os.listdir(dir) if os.path.isfile(os.path.join(dir, name))])
     frames.sort(key=len, reverse=False) # sorts by ascending length
@@ -499,7 +492,7 @@ def plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, ds):
     return plots
     
 def create_mesh(fig, ax, filename, cbaxes, args):
-    fields, setups, mesh = util.read_2d_file(args, filename)
+    fields, setups, mesh = util.read_file(args, filename, ndim=2)
     if setups["is_cartesian"]:
         c = plot_cartesian_plot(fig, ax, cbaxes, fields, args, mesh, setups)
     else:      
@@ -507,7 +500,7 @@ def create_mesh(fig, ax, filename, cbaxes, args):
     return c
 
 def get_data(filename, args):
-    fields, setups, _ = util.read_2d_file(args, filename)
+    fields, setups, _ = util.read_file(args, filename, ndim=2)
     if args.fields[0] in derived:
         var = util.prims2var(fields, args.fields[0])
     else:
@@ -515,50 +508,21 @@ def get_data(filename, args):
         
     return setups, var
     
-def main():
-    parser = argparse.ArgumentParser(
-        description='Plot a 2D Figure From a File (H5).',
-        epilog="This Only Supports H5 Files Right Now")
-    
-    parser.add_argument('files', metavar='files', nargs='+',help='A data directory to retrieve the h5 files or a list of h5 files')
-    parser.add_argument('setup', metavar='setup', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--fields', dest = "fields", metavar='Field Variable', nargs='+',help='The name of the field variable you\'d like to plot',choices=field_choices, default=["rho"])
-    parser.add_argument('--rmax', dest = "rmax", metavar='Radial Domain Max',default = 0.0, help='The domain range')
-    parser.add_argument('--cbar_range', dest = "cbar", metavar='Range of Color Bar(s)', nargs='+',default = [None, None], help='The colorbar range you\'d like to plot')
+def movie(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs='+',type=float,default =[None, None], help='The colorbar range you\'d like to plot')
-    parser.add_argument('--cmap', dest = "cmap", metavar='Color Bar Colarmap', default = 'magma', help='The colorbar cmap you\'d like to plot')
     parser.add_argument('--cmap2', dest = "cmap2", metavar='Color Bar #2 Colarmap', default = 'magma', help='The colorbar cmap you\'d like to plot')
-    parser.add_argument('--log', dest='log', action='store_true',default=False, help='Logarithmic Radial Grid Option')
-    parser.add_argument('--first_order', dest='forder', action='store_true',default=False, help='True if this is a grid using RK1')
     parser.add_argument('--rev_cmap', dest='rcmap', action='store_true', default=False, help='True if you want the colormap to be reversed')
     parser.add_argument('--x', dest='x', nargs="+", default = None, type=float,help='List of x values to plot field max against')
     parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X', help='X label name')
-    parser.add_argument('--tex', dest='tex', action='store_true',default=False, help='True if you want the latex formatting')
-    parser.add_argument('--labels', dest='labels', nargs="+", default = None,help='Optionally give a list of labels for multi-file plotting')
-    parser.add_argument('--tidx', dest='tidx', type=int, default = None, help='Set to a value if you wish to plot a 1D curve about some angle')
     parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
     parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 80, 110], type=float, nargs=4)
-    parser.add_argument('--units', dest='units', default = False, action='store_true')
     parser.add_argument('--file_max', dest='file_max', default = None, type=int)
     parser.add_argument('--frame_range', dest='frame_range', default = [None, None], nargs=2, type=int)
-    parser.add_argument('--dbg', dest='dbg', default = False, action='store_true')
     parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
-    parser.add_argument('--pictorial', dest='pictorial', default = False, action='store_true')
-    parser.add_argument('--fig_dims', dest='fig_dims', default = [3.35, 9], type=float, nargs=2)
-    parser.add_argument('--save', dest='save', type=str, default=None, help='Save the fig with some name')
     parser.add_argument('--half', dest='half', action='store_true', default=False, help='True if you want half a polar plot')
     parser.add_argument('--no_cbar', dest='no_cbar', help="Set if ignore cbar", action='store_true', default=False)
     parser.add_argument('--cbar_orient', dest='cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
-    parser.add_argument('--xlims', dest='xlims', default = None, type=float, nargs=2)
-    parser.add_argument('--ylims', dest='ylims', default = None, type=float, nargs=2)
-    parser.add_argument('--print', dest='print', default = False, action='store_true')
-    parser.add_argument('--subplots', dest='subplots', default = None, type=int)
     parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
-    parser.add_argument('--anot_loc', dest='anot_loc', default = None, type=str)
-    parser.add_argument('--legend_loc', dest='legend_loc', default = None, type=str)
-    parser.add_argument('--anot_text', dest='anot_text', default = None, type=str)
-    parser.add_argument('--inset', dest='inset', action= 'store_true', default=False)
-    parser.add_argument('--png', dest='png', action= 'store_true', default=False)
     parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
     parser.add_argument('--transparent', help='transparent bg flag', default=False, action='store_true')
     args = parser.parse_args()
@@ -593,7 +557,7 @@ def main():
         cbar += (num_fields - 1) * [None, None]
     
     # read the first file and infer the system configuration from it
-    init_setup = util.read_2d_file(args, flist[0])[1]
+    init_setup = util.read_file(args, flist[0], ndim=2)[1]
     cartesian = False
     if init_setup["is_cartesian"]:
         fig, ax = plt.subplots(1, 1, figsize=(11,10))
@@ -712,7 +676,3 @@ def main():
                        progress_callback = lambda i, n: print(f'Saving frame {i} of {n}', end='\r', flush=True))
                     #    savefig_kwargs={"transparent": args.transparent, "facecolor": "none"},)
     
-    
-    
-if __name__ == "__main__":
-    main()

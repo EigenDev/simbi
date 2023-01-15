@@ -14,23 +14,12 @@ from typing import Union
 from matplotlib.offsetbox import AnchoredText
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from itertools import cycle
-
-if sys.version_info <= (3,9):
-    action = 'store_false'
-else:
-    action = argparse.BooleanOptionalAction
-    
+from visual import lin_fields, field_choices, derived
 try:
     import cmasher as cmr 
 except:
     print('No Cmasher module, so defaulting to matplotlib colors')
     
-    
-derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'T_eV', 'mass', 'chi_dens',
-                 'gamma_beta_1', 'gamma_beta_2', 'mach', 'u1', 'u2']
-field_choices = ['rho', 'v1', 'v2', 'p', 'gamma_beta', 'chi'] + derived
-lin_fields    = ['chi', 'gamma_beta', 'gamma_beta_1', 'gamma_beta_2', 'u1', 'u2']
-
 def place_annotation(args: argparse.ArgumentParser, fields: dict, ax: plt.Axes, etot: float) -> None:
     order_of_mag = np.floor(np.log10(etot))
     front_factor = int(etot / 10**order_of_mag)
@@ -730,7 +719,7 @@ def plot_cartesian_plot(
     if args.log:
         kwargs = {'norm': mcolors.LogNorm(vmin = vmin, vmax = vmax)}
     else:
-        kwargs = {'norm': mcolors.PowerNorm(gamma=10.0, vmin=vmin, vmax=vmax)}
+        kwargs = {'norm': mcolors.PowerNorm(gamma=args.power, vmin=vmin, vmax=vmax)}
         # kwargs = {'vmin': vmin, 'vmax': vmax}
         
     if args.rcmap:
@@ -832,9 +821,9 @@ def plot_1d_curve(
                 ax.set_xscale('log')
                 if field not in lin_fields:
                     ax.set_yscale('log')
-            if args.oned_files is not None:
-                for one_file in args.oned_files:
-                    oned_var = util.read_1d_file(one_file)[0]
+            if args.extra_files is not None:
+                for one_file in args.extra_files:
+                    oned_var = util.read_file(args, one_file, ndim=1)[0]
                     ax.loglog(r, oned_var[field], label='Spherical')
     
     
@@ -873,7 +862,7 @@ def plot_per_theta(
     
 
     for field in args.fields:
-        fields = fields if args.oned_files is None else util.read_1d_file(args.oned_files[0])[0]
+        fields = fields if args.extra_files is None else util.read_1d_file(args.extra_files[0])[0]
         if field in derived:
             var = util.prims2var(fields, field)
         else:
@@ -1160,10 +1149,10 @@ def plot_hist(
     var       = np.asarray([var[u > gb].sum() for gb in gbs]) 
     
     # if case == 0:
-    #     oned_field, setups1d, mesh1d   = util.read_1d_file(args.oned_files[0])
+    #     oned_field, setups1d, mesh1d   = util.read_1d_file(args.extra_files[0])
     #     calc_1d_hist(oned_field, mesh1d)
     # if case == 2:
-    #     oned_field, setups1d, mesh1d   = util.read_1d_file(args.oned_files[1])
+    #     oned_field, setups1d, mesh1d   = util.read_1d_file(args.extra_files[1])
     #     calc_1d_hist(oned_field, mesh1d)
         
     if ax_col == 0:     
@@ -1172,13 +1161,13 @@ def plot_hist(
             place_annotation(args, fields, ax, etot)
         
         #1D Comparison 
-        if args.oned_files is not None:
+        if args.extra_files is not None:
             if args.sub_split is None:
-                for file in args.oned_files:
+                for file in args.extra_files:
                     oned_field, oned_setup, oned_mesh = util.read_1d_file(file)
                     calc_1d_hist(oned_field, oned_mesh)
             else:
-                oned_field, one_setup, one_mesh = util.read_1d_file(args.oned_files[ax_num])
+                oned_field, one_setup, one_mesh = util.read_1d_file(args.extra_files[ax_num])
                 calc_1d_hist(oned_field)
 
     if args.norm:
@@ -1346,13 +1335,13 @@ def plot_dx_domega(
                 place_annotation(args, fields, ax2, etot)
             
         #1D Comparison 
-        if args.oned_files is not None:
+        if args.extra_files is not None:
             if args.sub_split is None:
-                for file in args.oned_files:
+                for file in args.extra_files:
                     oned_field, one_setup, one_mesh  = util.read_1d_file(file)
                     calc_1d_dx_domega(oned_field)
             else:
-                oned_field, one_setup, one_mesh = util.read_1d_file(args.oned_files[ax_num%len(args.oned_files)])
+                oned_field, one_setup, one_mesh = util.read_1d_file(args.extra_files[ax_num%len(args.extra_files)])
                 calc_1d_dx_domega(oned_field)  
     
     if energy_and_mass:
@@ -1659,82 +1648,28 @@ def plot_vs_time(
             
     plot_vs_time.counter += 1
     
-def main():
-    parser = argparse.ArgumentParser(
-        description='Plot a 2D Figure From a File (H5).',
-        epilog='This Only Supports H5 Files Right Now')
-    
-    parser.add_argument('files', metavar='files', nargs='+', help='A Data Source to Be Plotted')
-    parser.add_argument('setup', metavar='Setup', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable', nargs='+', help='The name of the field variable you\'d like to plot',choices=field_choices, default=['rho'])
-    parser.add_argument('--1d_files', dest='oned_files', nargs='+', help='1D files to check against', default=None)
-    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max', default = 0.0, help='The domain range')
-    parser.add_argument('--cbar_range', dest = 'cbar', metavar='Range of Color Bar', nargs='+', default = [None, None], help='The colorbar range you\'d like to plot')
+def snapshot(parser: argparse.ArgumentParser):
     parser.add_argument('--cbar_sub', dest = 'cbar2', metavar='Range of Color Bar for secondary plot',nargs='+',type=float, default =[None, None], help='The colorbar range you\'d like to plot')
     parser.add_argument('--no_cbar', dest ='no_cbar',action='store_true', default=False, help='colobar visible siwtch')
-    parser.add_argument('--cmap', dest ='cmap', metavar='Color Bar Colarmap', default = 'magma', help='The colorbar cmap you\'d like to plot')
     parser.add_argument('--cmap2', dest ='cmap2', metavar='Color Bar Colarmap 2', default = 'magma', help='The secondary colorbar cmap you\'d like to plot')
-    parser.add_argument('--log', dest='log', action='store_true', default=False,help='Logarithmic Radial Grid Option')
-    parser.add_argument('--first_order', dest='forder', action='store_true',default=False,  help='True if this is a grid using RK1')
     parser.add_argument('--rev_cmap', dest='rcmap', action='store_true',default=False, help='True if you want the colormap to be reversed')
     parser.add_argument('--x', dest='x', nargs='+', default = None, type=float, help='List of x values to plot field max against')
     parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X',  help='X label name')
-    parser.add_argument('--kinetic', dest='kinetic', action='store_true', default=False, help='Plot the kinetic energy on the histogram')
-    parser.add_argument('--enthalpy', dest='enthalpy', action='store_true',default=False,  help='Plot the enthalpy on the histogram')
-    parser.add_argument('--hist', dest='hist', action='store_true',default=False, help='Convert plot to histogram')
-    parser.add_argument('--mass', dest='mass', action='store_true', default=False,  help='Compute mass histogram')
-    parser.add_argument('--dm_du', dest='dm_du', default = False, action='store_true', help='Compute dM/dU over whole domain')
     parser.add_argument('--de_domega', dest='de_domega', action='store_true',default=False, help='Plot the dE/dOmega plot')
     parser.add_argument('--dm_domega', dest='dm_domega', action='store_true',default=False, help='Plot the dM/dOmega plot')
     parser.add_argument('--dec_rad', dest='dec_rad', default = False, action='store_true', help='Compute dr as function of angle')
     parser.add_argument('--cutoffs', dest='cutoffs', default=[0.0], type=float, nargs='+', help='The 4-velocity cutoff value for the dE/dOmega plot')
-    parser.add_argument('--fill_scale', dest ='fill_scale', metavar='Filler maximum', type=float, default = None, help='Set the y-scale to start plt.fill_between')
-    parser.add_argument('--ax_anchor', dest='ax_anchor', type=str, nargs='+', default=None,  help='Anchor annotation text for each plot')
-    parser.add_argument('--norm', dest='norm', action='store_true', default=False, help='True if you want the plot normalized to max value')
-    parser.add_argument('--labels', dest='labels', nargs='+', default = None, help='Optionally give a list of labels for multi-file plotting')
     parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
     parser.add_argument('--cbar_orient', dest='cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
     parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 70, 110], type=float, nargs=4, help="wedge limits")
-    parser.add_argument('--xlims', dest='xlims', default = None, type=float, nargs=2)
-    parser.add_argument('--ylims', dest='ylims', default = None, type=float, nargs=2)
-    parser.add_argument('--units', dest='units', default = False, action='store_true')
-    parser.add_argument('--dbg', dest='dbg', default = False, action='store_true')
-    parser.add_argument('--tex', dest='tex', default = False, action='store_true')
-    parser.add_argument('--print', dest='print', default = False, action='store_true')
     parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
-    parser.add_argument('--pictorial', dest='pictorial', default = False, action='store_true')
     parser.add_argument('--subplots', dest='subplots', default = None, type=int)
     parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
-    parser.add_argument('--anot_loc', dest='anot_loc', default = None, type=str)
-    parser.add_argument('--legend_loc', dest='legend_loc', default = None, type=str)
-    parser.add_argument('--anot_text', dest='anot_text', default = None, type=str)
-    parser.add_argument('--inset', dest='inset', action= 'store_true', default=False)
-    parser.add_argument('--png', dest='png', action= 'store_true', default=False)
     parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
-    parser.add_argument('--fig_dims', dest='fig_dims', default = [4, 4], type=float, nargs=2)
-    parser.add_argument('--legend', dest='legend', default=True, action=action)
     parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=None, nargs='+')
     parser.add_argument('--plot_max_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
-    parser.add_argument('--save', dest='save', type=str,default=None,help='Save the fig with some name')
     args = parser.parse_args()
     
-    if args.tex:
-            plt.rc('font',   size=DEFAULT_SIZE)          # controls default text sizes
-            plt.rc('axes',   titlesize=DEFAULT_SIZE)     # fontsize of the axes title
-            plt.rc('axes',   labelsize=DEFAULT_SIZE)    # fontsize of the x and y labels
-            plt.rc('xtick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
-            plt.rc('ytick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
-            plt.rc('legend', fontsize=DEFAULT_SIZE)      # legend fontsize
-            plt.rc('figure', titlesize=DEFAULT_SIZE)    # fontsize of the figure title
-            
-            plt.rcParams.update(
-                {
-                    "text.usetex": True,
-                    "font.family": "serif",
-                    "font.serif": "Times New Roman",
-                    "font.size": DEFAULT_SIZE
-                }
-            )
     vmin, vmax = args.cbar[:2]
     fields = {}
     setup = {}
@@ -1813,7 +1748,7 @@ def main():
                 ax.legend()
             else:
                 for idx, file in enumerate(flist):
-                    fields, setup, mesh = util.read_2d_file(args, file)
+                    fields, setup, mesh = util.read_file(args, file, ndim=2)
                     i += 1
                     if args.hist and (not args.de_domega and not args.dm_domega):
                         if args.sub_split is None:
@@ -1862,7 +1797,7 @@ def main():
                 times = []
                 label = args.labels[key] if args.labels else key
                 for idx, file in enumerate(flist[key]):
-                    fields, setup, mesh = util.read_2d_file(args, file)
+                    fields, setup, mesh = util.read_file(args, file, ndim=2)
                     viewing_angle       = np.deg2rad(args.viewing[key])
                     tidx, _             = util.find_nearest(setup['x2'], viewing_angle)
                     
@@ -1882,7 +1817,7 @@ def main():
             for ax in axs:
                 ax.label_outer()
     else:
-        fields, setup, mesh = util.read_2d_file(args, args.files[0])
+        fields, setup, mesh = util.read_file(args, args.files[0], ndim=2)
         if args.hist and (not args.de_domega and not args.dm_domega):
             plot_hist(fields, args, mesh, setup)
         elif args.viewing != None:
@@ -1936,6 +1871,3 @@ def main():
         ext = 'pdf' if not args.png else 'png'
         dpi = 600
         plt.savefig('{}.{}'.format(args.save.replace(' ', '_'), ext), dpi=dpi, bbox_inches='tight')
-    
-if __name__ == '__main__':
-    main()

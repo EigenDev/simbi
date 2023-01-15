@@ -17,6 +17,8 @@ SMALL_SIZE   = 6
 DEFAULT_SIZE = 10
 BIGGER_SIZE  = 12
 
+logically_curvlinear = ['spherical', 'cylindrical', 'planar_cylindrical']
+logically_cartesian  = ['cartesian', 'axis_cylindrical']
 #================================
 #   constants of nature
 #================================
@@ -129,318 +131,108 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
 
     return field_str_list if len(args.fields) > 1 else field_str_list[0]
 
-def calc_lorentz_gamma(fields: dict) -> np.ndarray:
-    return (1.0 + fields['gamma_beta']**2)**0.5
-
-def calc_beta(fields: dict) -> np.ndarray:
-    W = calc_lorentz_gamma(fields)
-    return (1.0 - 1.0 / W**2)**0.5
-
 def calc_bfield_shock(fields: dict, eb: float = 0.1) -> np.ndarray:
     W = calc_lorentz_gamma(fields)
     comoving_density = fields['rho'] * W *  rho_scale
     return (32 * np.pi *  eb * comoving_density)**0.5 * W * const.c.cgs 
 
-def read_3d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dict,dict]:
-    setup  = {}
-    fields = {}
-    is_cartesian = False
-    with h5py.File(filename, 'r') as hf: 
-        ds  = hf.get('sim_info')
-        rho = hf.get('rho')[:]
-        v1  = hf.get('v1')[:]
-        v2  = hf.get('v2')[:]
-        v3  = hf.get('v3')[:]
-        p   = hf.get('p')[:]
-        chi = hf.get('chi')[:]
-        bcs = hf.get('boundary_conditions')[:]
-        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
-        t   = ds.attrs['current_time']
-        
-        x1max = ds.attrs['x1max']
-        x1min = ds.attrs['x1min']
-        x2max = ds.attrs['x2max']
-        x2min = ds.attrs['x2min']
-        x3min = ds.attrs['x3min']
-        x3max = ds.attrs['x3max']
-        
-        # New checkpoint files, so check if new attributes were
-        # implemented or not
-        nx = ds.attrs['nx']
-        ny = ds.attrs['ny']
-        nz = ds.attrs['nz']
+def unpad(arr, pad_width):
+    slices = []
+    for c in pad_width:
+        e = None if c[1] == 0 else -c[1]
+        slices.append(slice(c[0], e))
+    return arr[tuple(slices)]
 
-        gamma = ds.attrs['adiabatic_gamma']
-        coord_sysem = ds.attrs['geometry'].decode('utf-8')
-        
-        setup['x1max'] = x1max 
-        setup['x1min'] = x1min 
-        setup['x2max'] = x2max 
-        setup['x2min'] = x2min 
-        setup['x3min'] = x3min 
-        setup['x3max'] = x3max
-        setup['time']  = t
-        
-        rho = rho.reshape(nz, ny, nx)
-        v1  = v1.reshape(nz, ny, nx)
-        v2  = v2.reshape(nz, ny, nx)
-        v3  = v3.reshape(nz, ny, nx)
-        p   = p.reshape(nz, ny, nx)
-        chi = chi.reshape(nz, ny, nx)
-        
-        
-        if args.forder:
-            rho = rho[1:-1, 1: -1, 1: -1]
-            v1  = v1 [1:-1, 1: -1, 1: -1]
-            v2  = v2 [1:-1, 1: -1, 1: -1]
-            v3  = v3 [1:-1, 1: -1, 1: -1]
-            p   = p  [1:-1, 1: -1, 1: -1]
-            chi = chi[1:-1, 1: -1, 1: -1]
-            xactive = nx - 2
-            yactive = ny - 2
-            zactive = nz - 2
-            setup['xactive'] = xactive
-            setup['yactive'] = yactive
-            setup['zactive'] = zactive
-        else:
-            rho = rho[2:-2, 2: -2, 2:-2]
-            v1  = v1 [2:-2, 2: -2, 2:-2]
-            v2  = v2 [2:-2, 2: -2, 2:-2]
-            v3  = v3 [2:-2, 2: -2, 2:-2]
-            p   = p  [2:-2, 2: -2, 2:-2]
-            chi = chi[2:-2, 2: -2, 2:-2]
-            xactive = nx - 4
-            yactive = ny - 4
-            zactive = nz - 4
-            setup['xactive'] = xactive
-            setup['yactive'] = yactive
-            setup['zactive'] = zactive
-        
-        
-        setup['x1'] = hf.get('x1')[:]
-        setup['x2'] = hf.get('x2')[:]
-        setup['x3'] = hf.get('x3')[:]
-        
-        if coord_sysem == 'cartesian':
-            is_cartesian = True
-        
-        W = 1/np.sqrt(1.0 -(v1**2 + v2**2 + v3**2))
-        beta = np.sqrt(v1**2 + v2**2 + v3**2)
-        
-        fields['rho']          = rho
-        fields['v1']           = v1 
-        fields['v2']           = v2 
-        fields['v3']           = v3
-        fields['p']            = p
-        fields['chi']          = chi
-        fields['gamma_beta']   = W*beta
-        fields['ad_gamma']     = gamma
-        setup['is_cartesian']  = is_cartesian
-        
-        
-    znpts, ynpts, xnpts = rho.shape 
+def flatten_fully(x):
+    if any(dim == 1 for dim in x.shape):
+        x = np.vstack(x)
+        if len(x.shape) == 2 and x.shape[0] == 1:
+            return x.flatten()
+        return flatten_fully(x)
+    else:
+        return np.asarray(x) 
     
-    mesh = {}
-    x3, x2, x1 = np.meshgrid(setup['x3'], setup['x2'], setup['x1'], indexing='ij')
-    mesh['x1'] = x1
-    mesh['x2'] = x2
-    mesh['x3'] = x3
-    return fields, setup, mesh 
-
-def read_2d_file(args: argparse.ArgumentParser, filename: str) -> Union[dict,dict,dict]:
-    setup  = {}
-    fields = {}
-    is_cartesian = False
-    with h5py.File(filename, 'r') as hf: 
-        ds  = hf.get('sim_info')
-        rho = hf.get('rho')[:]
-        v1  = hf.get('v1')[:]
-        v2  = hf.get('v2')[:]
-        p   = hf.get('p')[:]
-        chi = hf.get('chi')[:]
-        bcs = hf.get('boundary_conditions')[:]
-        t   = ds.attrs['current_time']
-        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
-        
-        x1max = ds.attrs['x1max']
-        x1min = ds.attrs['x1min']
-        x2max = ds.attrs['x2max']
-        x2min = ds.attrs['x2min']
-        nx    = ds.attrs['nx']
-        ny    = ds.attrs['ny']
-        gamma = ds.attrs['adiabatic_gamma']
-        
-        coord_sysem = ds.attrs['geometry'].decode('utf-8')
-        is_linspace = ds.attrs['linspace']
-        
-        setup['x1max'] = x1max 
-        setup['x1min'] = x1min 
-        setup['x2max'] = x2max 
-        setup['x2min'] = x2min 
-        setup['time']  = t
-        setup['regime'] = ds.attrs['regime'].decode("utf-8")
-        setup['coord_system'] = coord_sysem
-        try:
-            setup['mesh_motion'] = ds.attrs['mesh_motion']
-        except KeyError:
-            setup['mesh_motion']= False
-        
-        rho = rho.reshape(ny, nx)
-        v1  = v1.reshape(ny, nx)
-        v2  = v2.reshape(ny, nx)
-        p   = p.reshape(ny, nx)
-        chi = chi.reshape(ny, nx)
-        
-        if full_periodic:
-            xactive = nx 
-            yactive = ny
-        else:
-            if ds.attrs['first_order']:
-                rho = rho[1:-1, 1: -1]
-                v1  = v1 [1:-1, 1: -1]
-                v2  = v2 [1:-1, 1: -1]
-                p   = p  [1:-1, 1: -1]
-                chi = chi[1:-1, 1: -1]
-                xactive = nx - 2
-                yactive = ny - 2
-            else:
-                rho = rho[2:-2, 2: -2]
-                v1  = v1 [2:-2, 2: -2]
-                v2  = v2 [2:-2, 2: -2]
-                p   = p  [2:-2, 2: -2]
-                chi = chi[2:-2, 2: -2]
-                xactive = nx - 4
-                yactive = ny - 4
-        setup['xactive'] = xactive
-        setup['yactive'] = yactive
-        
-        try:
-            setup['x1'] = hf.get('x1')[:]
-            setup['x2'] = hf.get('x2')[:]
-        except:
-            if is_linspace:
-                setup['x1'] = np.linspace(x1min, x1max, xactive)
-                setup['x2'] = np.linspace(x2min, x2max, yactive)
-            else:
-                setup['x1'] = np.logspace(np.log10(x1min), np.log10(x1max), xactive)
-                setup['x2'] = np.linspace(x2min, x2max, yactive)
-        
-        if x1max > setup['x1'][-1]:
-            if is_linspace:
-                setup['x1'] = np.linspace(x1min, x1max, xactive)
-            else:
-                setup['x1'] = np.geomspace(x1min, x1max, xactive)
-                
-        if coord_sysem in ['cartesian', 'planar_cylindrical', 'axis_cylindrical']:
-            is_cartesian = True
-        
-        if setup['regime'] == 'relativistic':
+def get_dimensionality(files: list[str]) -> int:
+    dims = []
+    all_equal = lambda x: x.count(x[0]) == len(x)
+    for file in files:
+        with h5py.File(file, 'r') as hf:
+            ds  = hf.get('sim_info')
             try:
-                using_gamma_beta = ds.attrs['using_gamma_beta']
-            except:
-                using_gamma_beta = False
-            
-            if using_gamma_beta:
-                W = np.sqrt(1 + v1 ** 2 + v2 ** 2)
-                gamma_beta = np.sqrt(v1**2 + v2**2)
-                v1 /= W 
-                v2 /= W 
-            else:
-                W = 1/np.sqrt(1 - (v1**2 + v2**2))
-                gamma_beta = W * np.sqrt(v1**2 + v2**2)
-            
-            h = 1.0 + gamma * p / (rho * (gamma - 1))
-            fields['W']           = W
-            fields['enthalpy']    = h
-            fields['gamma_beta']  = gamma_beta
-        fields['rho']          = rho
-        fields['v1']           = v1 
-        fields['v2']           = v2 
-        fields['p']            = p
-        fields['chi']          = chi
-        fields['ad_gamma']     = gamma
-        setup['is_cartesian']  = is_cartesian
+                ndim = ds.attrs['dimensions']
+            except KeyError:
+                rho = hf.get('rho')[:]
+                nx  = ds.attrs['nx'] or 1
+                ny  = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
+                nz  = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
+                rho = rho.reshape(nz, ny, nx)
+                rho = flatten_fully(rho)
+                ndim = rho.ndim
+            dims += [ndim]
+            if not all_equal(dims):
+                raise ValueError("All simulation files require identical dimensionality")
     
-    mesh = {}
-    xx1, xx2 = np.meshgrid(setup['x1'], setup['x2'])
-    mesh['x1'] = xx1
-    mesh['x2'] = xx2
-    
-    # import matplotlib.pyplot as plt 
-    # # plt.semilogy(setup['x2'], fields['gamma_beta'][:, 511])
-    # plt.semilogy(setup['x2'], fields['p'][:, 511])
-    # # plt.semilogy(setup['x2'], fields['rho'][:, 511])
-    # plt.show()
-    # exit(0)
-    return fields, setup, mesh 
-
-def read_1d_file(filename: str) -> dict:
-    is_linspace = False
-    fields = {}
-    setups = {}
-    mesh   = {}
-    with h5py.File(filename, 'r') as hf:
-        ds = hf.get('sim_info')
+    return ndim
         
-        rho         = hf.get('rho')[:]
-        v           = hf.get('v')[:]
-        p           = hf.get('p')[:]
-        bcs         = hf.get('boundary_conditions')
-        nx          = ds.attrs['nx']
-        t           = ds.attrs['current_time']
-        x1max       = ds.attrs['x1max']
-        x1min       = ds.attrs['x1min']
-        is_linspace = ds.attrs['linspace']
+            
+def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[dict,dict,dict]:
+    setup  = {}
+    with h5py.File(filename, 'r') as hf: 
+        ds  = hf.get('sim_info')
+        rho = hf.get('rho')[:]
+        v   = [(hf.get(f'v{dim}') or hf.get(f'v'))[:] for dim in range(1,ndim + 1)]
+        p   = hf.get('p')[:]         
+        chi = (hf.get('chi') or np.zeros_like(rho))[:]
+
+        bcs = hf.get('boundary_conditions')[:]
+        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
+        
+        setup['time']          = ds.attrs['current_time']
+        setup['linspace']      = ds.attrs['linspace']
+        setup['regime']        = ds.attrs['regime'].decode("utf-8")
+        setup['coord_system']  = ds.attrs['geometry'].decode('utf-8')
+        setup['is_cartesian']  = setup['coord_system'] in logically_cartesian
+        setup['x1']            = hf.get('x1')[:]
+        setup['x2']            = (hf.get('x2') or np.zeros_like(setup['x1']))[:]
+        setup['x3']            = (hf.get('x3') or np.zeros_like(setup['x1']))[:]
+        setup['first_order']   = ds.attrs['first_order']
+        setup['mesh_motion']   = ds.attrs['mesh_motion']
+        nx = ds.attrs['nx'] or 1
+        ny = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
+        nz = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
+
         gamma       = ds.attrs['adiabatic_gamma']
-        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
-        xactive = nx
-        if not full_periodic:
-            if ds.attrs['first_order']:
-                rho = rho[1:-1]
-                v   = v[1:-1]
-                p   = p[1:-1]
-                xactive -= 2
-            else:
-                rho = rho[2:-2]
-                v   = v  [2:-2]
-                p   = p  [2:-2]
-                xactive -= 4
+        coord_sysem = ds.attrs['geometry'].decode('utf-8')
         
-        mesh['x1'] = hf.get('x1')[:]
-        if x1max > mesh['x1'][-1]:
-            if is_linspace:
-                mesh['x1'] = np.linspace(x1min, x1max, xactive)
-            else:
-                mesh['x1'] = np.geomspace(x1min, x1max, xactive)
-
-        if ds.attrs['regime'].decode("utf-8") == 'relativistic':
-            try:
-                using_gamma_beta = ds.attrs['using_gamma_beta']
-            except:
-                using_gamma_beta = False
-                
-            if using_gamma_beta:
-                W = np.sqrt(1 + v * v)
-                gamma_beta = v
-            else:
-                W = 1/np.sqrt(1 - v**2)
-                gamma_beta = W * v
-            h = 1.0 + gamma * p / (rho * (gamma - 1))
+        rho = flatten_fully(rho.reshape(nz, ny, nx))
+        v   = [flatten_fully(vel.reshape(nz, ny, nx)) for vel in v]
+        p   = flatten_fully(p.reshape(nz, ny, nx))
+        chi = flatten_fully(chi.reshape(nz, ny, nx))
         
-            fields['W']        = W
-            fields['enthalpy'] = h
-            fields['gamma_beta']  = gamma_beta
-            
-        setups['ad_gamma']    = ds.attrs['adiabatic_gamma']
-        setups['time']        = t
-        setups['linspace']    = is_linspace
-        fields['ad_gamma']    = ds.attrs['adiabatic_gamma']
-        fields['rho']         = rho
-        fields['v']           = v
-        fields['p']           = p
-        mesh['xlims']         = x1min, x1max
+        npad = tuple(tuple(val) for val in [[2 * (setup['first_order'] + 1), 2 * (setup['first_order'] + 1)]] * ndim) 
+        rho  = unpad(rho, npad)
+        v    = np.asarray([unpad(vel, npad) for vel in v])
+        p    = unpad(p, npad)
+        chi  = unpad(chi, npad)
         
-    return fields, setups, mesh
+        fields = {f'v{i+1}': v[i] for i in range(len(v))}
+        fields['rho']          = rho
+        fields['p']            = p
+        fields['chi']          = chi
+        fields['ad_gamma']     = gamma
+        
+        vsqr = np.sum(vel * vel for vel in v)
+        W    = 1/np.sqrt(1.0 - vsqr) if setup['regime'] == 'relativistic' else 1
+        fields['gamma_beta']   = np.sqrt(vsqr) * W 
+    
+    mesh = {}
+    if ndim == 1:
+        mesh['x1'] = setup['x1']
+    elif ndim == 2:
+        mesh['x1'], mesh['x2'] = np.meshgrid(setup['x1'], setup['x2'])
+    else:
+        mesh['x3'], mesh['x2'], mesh['x1'] = np.meshgrid(setup['x3'], setup['x2'], setup['x1'], indexing='ij')
+    return fields, setup, mesh 
 
 def prims2var(fields: dict, var: str) -> np.ndarray:
     h = calc_enthalpy(fields)

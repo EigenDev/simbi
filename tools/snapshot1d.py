@@ -17,16 +17,15 @@ import utility as util
 from datetime import datetime
 from itertools import cycle
 from utility import DEFAULT_SIZE, SMALL_SIZE
+from visual import lin_fields, derived, field_choices
 try:
     import cmasher as cmr 
 except:
     pass 
 
-derived       = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'mass', 'mach']
-field_choices = ['rho', 'v', 'p', 'gamma_beta', 'chi'] + derived
-lin_fields    = ['chi', 'gamma_beta']
 def plot_profile(args, fields, mesh, setup, ncols: int, ax = None, overplot = False, subplot = False, case = 0):
-    vmin, vmax = args.clims 
+    vmin = args.cbar[0] or 0.0 
+    vmax = args.cbar[1] or 1.0
     cinterval  = np.linspace(vmin, vmax, ncols)
     cmap       = plt.cm.get_cmap(args.cmap)
     colors     = util.get_colors(cinterval, cmap, vmin, vmax)
@@ -50,6 +49,9 @@ def plot_profile(args, fields, mesh, setup, ncols: int, ax = None, overplot = Fa
                 unit_scale = util.rho_scale
             elif field == 'p' or field == 'energy':
                 unit_scale = util.pre_scale
+        
+        if 'v' in field:
+            field = 'v1'
             
         if field in derived:
             var = util.prims2var(fields, field)
@@ -81,7 +83,7 @@ def plot_profile(args, fields, mesh, setup, ncols: int, ax = None, overplot = Fa
     
     ax.set_xlabel('$r$')
     if args.xlims is None:
-        ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
+        ax.set_xlim(r.min(), r.max()) if args.xmax == 0.0 else ax.set_xlim(r.min(), args.xmax)
     else:
         ax.set_xlim(*args.xlims)
     # Change the format of the field
@@ -126,10 +128,10 @@ def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = Fals
     r           = mesh['x1']
     dV          = util.calc_cell_volume1D(r)
     
-    if args.eks:
+    if args.kinetic:
         mass   = dV * fields['W']**2 * fields['rho']
         energy = (fields['W'] - 1.0) * mass * util.e_scale.value
-    elif args.hhist:
+    elif args.enthalpy:
         energy = (fields['enthalpy'] - 1.0) *  dV * util.e_scale.value
     else:
         energy = edens_total * dV * util.e_scale.value
@@ -169,9 +171,9 @@ def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = Fals
         ax.set_xlim(*args.xlims)
     # ax.set_ylim(sorted_energy[1], 1.5*ets.max())
     ax.set_xlabel(r'$\Gamma\beta $')
-    if args.eks:
+    if args.kinetic:
         ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$')
-    elif args.hhist:
+    elif args.enthalpy:
         ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$')
     else:
         ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
@@ -189,59 +191,18 @@ def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = Fals
         ax.set_title(r'setup: {}, t ={:.2f}'.format(args.setup, tend))
         return fig
 
-def main():
-    parser = argparse.ArgumentParser(
-        description='Plot a 1D Figure From a File (H5).',
-        epilog='This Only Supports H5 Files Right Now')
-    
-    parser.add_argument('files', metavar='Filename', nargs='+', help='A Data Source to Be Plotted')
-    parser.add_argument('setup',  type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--fields', metavar='Field Variable(s)', nargs='+', help='The name of the field variable(s) you\'d like to plot', choices=field_choices, default=['rho'])
-    parser.add_argument('--rmax', metavar='Radial Domain Max', default = 0.0, help='The domain range')
-    parser.add_argument('--xlims', metavar='Domain',default = None, help='The domain range', nargs='+', type=float)
-    parser.add_argument('--fill_scale', metavar='Filler maximum', type=float, default = None, help='Set the y-scale to start plt.fill_between')
-    parser.add_argument('--log', action='store_true', default=False, help='Logarithmic Radial Grid Option')
-    parser.add_argument('--ehist', action='store_true',default=False, help='Plot the energy_vs_gb histogram')
-    parser.add_argument('--eks', action='store_true', default=False,help='Plot the kinetic energy on the histogram')
-    parser.add_argument('--hhist',  action='store_true',default=False,help='Plot the enthalpy on the histogram')
-    parser.add_argument('--labels', nargs='+',help='map labels to filenames')
-    parser.add_argument('--save', default=None, help='If you want save the fig')
-    parser.add_argument('--first_order', dest='forder', action='store_true', default=False, help='True if this is a grid using RK1')
-    parser.add_argument('--plots', type = int, default=1,help=r'Number of subplots you\'d like')
-    parser.add_argument('--units', action='store_true', default=False,help='True if you would like units scale (default is solar units)')
-    parser.add_argument('--tex', default=False, action='store_true', help='set if want Latex typesetting')
-    parser.add_argument('--fig_size', default=(4,3.5), type=float, help='size of figure', nargs=2)
-    parser.add_argument('--cmap', default='viridis', type=str, help='matplotlib color map')
-    parser.add_argument('--clims', default=[0, 1], type=float, nargs='+', help='color limits')
-    parser.add_argument('--legend', default=True, action=argparse.BooleanOptionalAction)
+def snapshot(parser: argparse.ArgumentParser):
     args = parser.parse_args()
-    if args.tex:
-            plt.rc('font',   size=DEFAULT_SIZE)          # controls default text sizes
-            plt.rc('axes',   titlesize=DEFAULT_SIZE)     # fontsize of the axes title
-            plt.rc('axes',   labelsize=DEFAULT_SIZE)    # fontsize of the x and y labels
-            plt.rc('xtick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
-            plt.rc('ytick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
-            plt.rc('legend', fontsize=DEFAULT_SIZE)      # legend fontsize
-            plt.rc('figure', titlesize=DEFAULT_SIZE)    # fontsize of the figure title
-            
-            plt.rcParams.update(
-                {
-                    "text.usetex": True,
-                    "font.family": "serif",
-                    "font.serif": "Times New Roman",
-                    "font.size": DEFAULT_SIZE
-                }
-            )
     
-    fig_size = args.fig_size
+    fig_size = args.fig_dims
     flist, _ = util.get_file_list(args.files)
     ncols    = len(flist) * len(args.fields)
     if len(flist) > 1:
-        if args.plots == 1:
+        if args.nplots == 1:
             fig = plt.figure(figsize=(fig_size[0], fig_size[1]))
             ax = fig.add_subplot(1, 1, 1)
             for idx, file in enumerate(flist):
-                fields, setup, mesh = util.read_1d_file(file)
+                fields, setup, mesh = util.read_file(args, file, ndim=1)
                 if args.ehist or args.eks or args.hhist:
                     plot_hist(args, fields, mesh, setup, ax = ax, overplot= True, case = idx)
                 else:
@@ -251,7 +212,7 @@ def main():
             ax1 = fig.add_subplot(1, 2, 1)
             ax2 = fig.add_subplot(1, 2, 2)
             for idx, file in enumerate(flist):
-                fields, setup, mesh = util.read_1d_file(file)
+                fields, setup, mesh = util.read_file(args, file, ndim=1)
                 plot_hist(args, fields,mesh, setup,  ax = ax1, overplot= True, subplot = True, case = idx)
                 plot_profile(args, fields, mesh, setup, ncols, ax = ax2, overplot=True, subplot = True, case = idx)
                 
@@ -261,8 +222,8 @@ def main():
             ax.legend()
             
     else:
-        fields, setup, mesh = util.read_1d_file(flist[0])
-        if args.ehist or args.hhist or args.eks:
+        fields, setup, mesh = util.read_file(args, flist[0], ndim=1)
+        if args.hist:
             fig = plot_hist(args, fields, mesh, setup)
         else:
             fig = plot_profile(args, fields, mesh, setup, ncols)
@@ -273,6 +234,3 @@ def main():
         fig.savefig('{}.pdf'.format(args.save), bbox_inches='tight')
     else:
         plt.show()
-    
-if __name__ == '__main__':
-    main()
