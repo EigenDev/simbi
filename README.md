@@ -6,7 +6,8 @@
 
 # 2D Relativistic Shock Tube
 
-<https://user-images.githubusercontent.com/29236993/212509179-2e7de318-af8f-40ab-8a47-052d38fdf693.mp4>
+<https://user-images.githubusercontent.com/29236993/212521070-0e2a7ced-cd5f-4006-9039-be67f174fb07.mp4>
+
 
 
 # 1D Moving mesh techniques
