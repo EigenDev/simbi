@@ -78,76 +78,81 @@ class Hydro:
         clean_attributes = [x for x in extras.keys() if not x.startswith('__')]
         [setattr(self, attribute, extras[attribute]) for attribute in clean_attributes if attribute in dir(self)] # type: ignore
         
+        # check if given simple nexted sequence to split across the grid
+        if any(isinstance(i, (list, tuple, np.ndarray)) for i in initial_state):
+            if all(len(v) == 3 for v in initial_state):
+                self.dimensionality = 1
+                self.discontinuity = True
+            elif all(len(v) == 4 for v in initial_state):
+                self.dimensionality = 2
+                self.discontinuity = True
+            elif all(len(v) == 5 for v in initial_state):
+                self.dimensionality = 3
+                self.discontinuity = True
+            else:
+                pass 
+            
         self.coord_system  = coord_system
         self.regime        = regime
-        self.discontinuity = len(initial_state) == 2
         initial_state      = helpers.pad_jagged_array(initial_state)
         if not isinstance(resolution, (Sequence, np.ndarray)):
             resolution = (resolution,)
-            
-        #Check dimensions of state
-        if len(initial_state) == 2:
-            print('Initializing Problem With a Discontinuity...', flush=True)
-            left_state  = initial_state[0]
-            right_state = initial_state[1]
-            
-            if len(left_state) != len(right_state):
-                raise ValueError("Left and right states myst contain equal number of variables")
-                
-            elif len(left_state) == 3 and len(right_state) == 3:
-                self.dimensionality  = 1
-                
-            elif len(left_state) == 4 and len(right_state) == 4:
-                raise NotImplementedError("Discontinuities in 2D have yet to be implemented")
-                
-            elif len(left_state) == 5 and len(right_state) == 5:
-                raise NotImplementedError("Discontinuities in 3D have yet to be implemented")
         
         self.gamma = gamma 
         if len(initial_state) < 5:
-            self.dimensionality      = np.asarray(initial_state[0]).ndim
             self.geometry            = cast(Sequence[float], geometry)
             self.resolution          = cast(Sequence[int], resolution)
-            self.nvars               = (2 + 1 * (self.dimensionality == 2) + self.dimensionality)
-            
+            self.nvars               = (2 + 1 * (self.dimensionality != 1) + self.dimensionality)
             
             # Initialize conserved u-tensor and flux tensors (defaulting to 2 ghost cells)
             self.u = np.zeros(shape = (self.nvars, *np.asarray(self.resolution).flatten()[::-1]))
             if self.discontinuity:
-                rhoL, *velocityL, pressureL = left_state
-                rhoR, *velocityR, pressureR = right_state
-                velocityL = np.asarray(velocityL)
-                velocityR = np.asarray(velocityR)
+                print(f'Initializing Problem With a {str(self.dimensionality)}D Discontinuity...', flush=True)
                 
-                vsqrL                = self.calc_vsq(velocityL)
-                lorentz_factorL      = self.calc_lorentz_factor(vsqrL, regime)
-                internal_energyL     = self.calc_internal_energy(vsqrL, regime)
-                total_enthalpyL      = self.calc_enthalpy(rhoL, pressureL, internal_energyL, self.gamma)
-                energyL              = self.calc_energy_density(rhoL, lorentz_factorL, total_enthalpyL, pressureL)
+                if len(self.geometry) == 3:
+                    geom_tuple: Any = (self.geometry,)
+                else:
+                    geom_tuple = self.geometry
                 
-                vsqrR                = self.calc_vsq(velocityR)
-                lorentz_factorR      = self.calc_lorentz_factor(vsqrR, regime)
-                internal_energyR     = self.calc_internal_energy(vsqrR, regime)
-                total_enthalpyR      = self.calc_enthalpy(rhoR, pressureR, internal_energyR, self.gamma)
-                energyR              = self.calc_energy_density(rhoR, lorentz_factorR, total_enthalpyR, pressureR)
+                break_points = [val[2] for val in geom_tuple if len(val) == 3]
+                if len(break_points) > self.dimensionality:
+                    raise ValueError("Number of break points must be less than or equal to the number of dimensions")
                 
-                left_bound  = self.geometry[0]
-                right_bound = self.geometry[1]
-                midpoint    = self.geometry[2]
+                spacings    = [(geom_tuple[idx][1] - geom_tuple[idx][0]) / self.resolution[idx] for idx in range(len(geom_tuple))]
+                pieces      = [round(break_points[idx] / spacings[idx]) for idx in range(len(geom_tuple))]
                 
-                grid_size   = abs(right_bound - left_bound)
-                break_pt    = grid_size / midpoint                       # Define the fluid breakpoint
-                slice_point = int(self.resolution[0] // break_pt)        # Define the array slicepoint
+                partition_inds: list[Any]
+                if len(break_points) == 1:
+                    partition_inds = [np.s_[:, :pieces[0]], np.s_[:, pieces[0]:]]
+                elif len(break_points) == 2:
+                    partition_inds = [np.s_[:, :pieces[1], :pieces[0]], np.s_[:, :pieces[1], pieces[0]:], np.s_[:, pieces[1]:, :pieces[0]], np.s_[:, pieces[1]:, pieces[0]:]] 
+                else:
+                    partition_inds = [np.s_[:, :pieces[2], :pieces[1], :pieces[0]], np.s_[:, :pieces[2], :pieces[1], pieces[0]:], np.s_[:, :pieces[2], pieces[1]:, :pieces[0]], np.s_[:, :pieces[2], pieces[1]:, pieces[0]:],
+                                      np.s_[:, pieces[2]:, :pieces[1], :pieces[0]], np.s_[:, pieces[2]:, :pieces[1], pieces[0]:], np.s_[:, pieces[2]:, pieces[1]:, :pieces[0]], np.s_[:, pieces[2]:, pieces[1]:, pieces[0]:]] 
                 
-                densL = self.calc_labframe_densiity(rhoL, lorentz_factorL)
-                densR = self.calc_labframe_densiity(rhoR, lorentz_factorR)
-                momL  = self.calc_labframe_momentum(rhoL, lorentz_factorL, total_enthalpyL, velocityL)
-                momR  = self.calc_labframe_momentum(rhoR, lorentz_factorR, total_enthalpyR, velocityR)
-                
-                self.u[..., : slice_point] = np.array([densL, *momL, energyL])[:,None] # Left State
-                self.u[..., slice_point: ] = np.array([densR, *momR, energyR])[:,None] # Right State
+                partitions = [self.u[sector] for sector in partition_inds]
+                for idx, part in enumerate(partitions):
+                    state  = initial_state[idx]
+                    rho, *velocity, pressure = state
+                    velocity = np.asarray(velocity)
+                    
+                    vsqr                = self.calc_vsq(velocity)
+                    lorentz_factor      = self.calc_lorentz_factor(vsqr, regime)
+                    internal_energy     = self.calc_internal_energy(vsqr, regime)
+                    total_enthalpy      = self.calc_enthalpy(rho, pressure, internal_energy, self.gamma)
+                    enthalpy_limit      = self.calc_spec_enthalpy(rho, pressure, internal_energy, gamma, regime)
+                    
+                    energy = self.calc_energy_density(rho, lorentz_factor, total_enthalpy, pressure)
+                    dens   = self.calc_labframe_densiity(rho, lorentz_factor)
+                    mom    = self.calc_labframe_momentum(rho, lorentz_factor, enthalpy_limit, velocity)
+                    
+                    if self.dimensionality == 1:
+                        part[...] = np.array([dens, *mom, energy])[:,None]
+                    else:
+                        part[...] = (part[...].transpose() + np.array([dens, *mom, energy, 0.0])).transpose()
             else:
-                velocity: Any 
+                self.dimensionality = np.asarray(initial_state[0]).ndim
+                # velocity: Any 
                 rho, *velocity, pressure = initial_state
                 velocity        = np.asarray(velocity)
                 vsqr            = self.calc_vsq(velocity)
