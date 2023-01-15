@@ -15,7 +15,7 @@ from typing import Union
 from matplotlib.offsetbox import AnchoredText
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from itertools import cycle
-from visual import lin_fields, derived, field_choices
+from visual import lin_fields, derived
 
 try:
     import cmasher as cmr 

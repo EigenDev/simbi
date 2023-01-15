@@ -8,7 +8,7 @@ import argparse
 import h5py 
 import astropy.constants as const
 import utility as util 
-from visual import derived, lin_fields, field_choices
+from visual import derived, lin_fields
 
 from utility import DEFAULT_SIZE, SMALL_SIZE, BIGGER_SIZE
 from mpl_toolkits.axes_grid1 import make_axes_locatable

@@ -176,6 +176,25 @@ def get_dimensionality(files: list[str]) -> int:
         
             
 def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[dict,dict,dict]:
+    outdated_keys = ['xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax']
+    def fallback_on_legacy(dset: dict, key: str, *, kind: type, fall_back_key: str = 'None', fall_back = None):
+        try:
+            if kind == bytes:
+                res = dset.attrs[key].decode("utf-8")
+            elif kind == np.ndarray:
+                res = dset.get(key)[:]
+            elif kind in (float, bool):
+                res = dset.attrs[key]
+        except KeyError:
+            try:
+                res = dset.attrs[fall_back_key]
+            except KeyError:
+                res = fall_back
+        except TypeError:
+            res = fall_back
+        
+        return res 
+    
     setup  = {}
     with h5py.File(filename, 'r') as hf: 
         ds  = hf.get('sim_info')
@@ -184,36 +203,49 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         p   = hf.get('p')[:]         
         chi = (hf.get('chi') or np.zeros_like(rho))[:]
 
-        bcs = hf.get('boundary_conditions')[:]
+        bcs = (hf.get('boundary_conditions') or [b'outflow']*4)[:]
         full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
-        
-        setup['time']          = ds.attrs['current_time']
-        setup['linspace']      = ds.attrs['linspace']
-        setup['regime']        = ds.attrs['regime'].decode("utf-8")
-        setup['coord_system']  = ds.attrs['geometry'].decode('utf-8')
-        setup['is_cartesian']  = setup['coord_system'] in logically_cartesian
-        setup['x1']            = hf.get('x1')[:]
-        setup['x2']            = (hf.get('x2') or np.zeros_like(setup['x1']))[:]
-        setup['x3']            = (hf.get('x3') or np.zeros_like(setup['x1']))[:]
-        setup['first_order']   = ds.attrs['first_order']
-        setup['mesh_motion']   = ds.attrs['mesh_motion']
-        nx = ds.attrs['nx'] or 1
-        ny = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
-        nz = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
 
-        gamma       = ds.attrs['adiabatic_gamma']
-        coord_sysem = ds.attrs['geometry'].decode('utf-8')
-        
+        setup['first_order']  = fallback_on_legacy(ds, key='first_order', kind=bool, fall_back=False)
+        nx                    = ds.attrs['nx'] if 'nx' in ds.attrs.keys() else 1
+        ny                    = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
+        nz                    = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
+        setup['xactive']      = nx if full_periodic else nx - 2 * (1 + (setup['first_order']^1)) * (nx - 2 > 0)
+        setup['yactive']      = ny if full_periodic else ny - 2 * (1 + (setup['first_order']^1)) * (ny - 2 > 0)
+        setup['zactive']      = nz if full_periodic else nz - 2 * (1 + (setup['first_order']^1)) * (nz - 2 > 0)
+        setup['time']         = ds.attrs['current_time']
+        setup['linspace']     = ds.attrs['linspace']
+        gamma                 = ds.attrs['adiabatic_gamma']
+        setup['x1min']        = fallback_on_legacy(ds, 'x1min', kind=float, fall_back_key='xmin', fall_back=0.0)
+        setup['x1max']        = fallback_on_legacy(ds, 'x1max', kind=float, fall_back_key='xmax', fall_back=0.0)
+        setup['x2min']        = fallback_on_legacy(ds, 'x2min', kind=float, fall_back_key='ymin', fall_back=0.0)
+        setup['x2max']        = fallback_on_legacy(ds, 'x2max', kind=float, fall_back_key='ymax', fall_back=0.0)
+        setup['x3min']        = fallback_on_legacy(ds, 'x3min', kind=float, fall_back_key='zmin', fall_back=0.0)
+        setup['x3max']        = fallback_on_legacy(ds, 'x3max', kind=float, fall_back_key='zmax', fall_back=0.0)
+
+
+        arr_gen                = np.linspace if setup['linspace'] else np.geomspace
+        setup['regime']        = fallback_on_legacy(ds, 'regime', kind=bytes, fall_back='relativistic')
+        setup['coord_system']  = fallback_on_legacy(ds, 'geometry', kind=bytes, fall_back='spherical') 
+        setup['x1']            = fallback_on_legacy(hf, 'x1', kind=np.ndarray, 
+                                                    fall_back=arr_gen(setup['x1min'], setup['x1max'], setup['xactive']))
+        setup['x2']            = fallback_on_legacy(hf, 'x2', kind=np.ndarray, 
+                                                    fall_back=np.linspace(setup['x2min'], setup['x2max'], setup['yactive']))
+        setup['x3']            = fallback_on_legacy(hf, 'x3', kind=np.ndarray, 
+                                                    fall_back=np.linspace(setup['x3min'], setup['x3max'], setup['zactive']))
+        setup['mesh_motion']   = fallback_on_legacy(ds, key='mesh_motion', kind=bool, fall_back=False)
+        setup['is_cartesian']  = setup['coord_system'] in logically_cartesian
         rho = flatten_fully(rho.reshape(nz, ny, nx))
         v   = [flatten_fully(vel.reshape(nz, ny, nx)) for vel in v]
         p   = flatten_fully(p.reshape(nz, ny, nx))
         chi = flatten_fully(chi.reshape(nz, ny, nx))
         
-        npad = tuple(tuple(val) for val in [[2 * (setup['first_order'] + 1), 2 * (setup['first_order'] + 1)]] * ndim) 
-        rho  = unpad(rho, npad)
-        v    = np.asarray([unpad(vel, npad) for vel in v])
-        p    = unpad(p, npad)
-        chi  = unpad(chi, npad)
+        if not full_periodic:
+            npad = tuple(tuple(val) for val in [[2 * (setup['first_order'] + 1), 2 * (setup['first_order'] + 1)]] * ndim) 
+            rho  = unpad(rho, npad)
+            v    = np.asarray([unpad(vel, npad) for vel in v])
+            p    = unpad(p, npad)
+            chi  = unpad(chi, npad)
         
         fields = {f'v{i+1}': v[i] for i in range(len(v))}
         fields['rho']          = rho
@@ -232,6 +264,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         mesh['x1'], mesh['x2'] = np.meshgrid(setup['x1'], setup['x2'])
     else:
         mesh['x3'], mesh['x2'], mesh['x1'] = np.meshgrid(setup['x3'], setup['x2'], setup['x1'], indexing='ij')
+        
     return fields, setup, mesh 
 
 def prims2var(fields: dict, var: str) -> np.ndarray:
@@ -258,8 +291,6 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
         T    = (3.0 * fields['p'] * edens_scale  / a)**0.25
         T_eV = (const.k_B.cgs * T).to(units.eV)
         return T_eV
-    elif var == 'gamma_beta':
-        return W * fields['v']
     elif var == 'chi_dens':
         return fields['chi'] * fields['rho'] * W
     elif var == 'gamma_beta_1':

@@ -1,5 +1,3 @@
-#! /usr/bin/env python
-
 # Tool for making movies from h5 files in directory
 
 import numpy as np 
@@ -11,7 +9,7 @@ import argparse
 import h5py 
 import astropy.constants as const
 import os
-
+from visual import derived, lin_fields
 try:
     import cmasher as cmr 
 except ImportError:
@@ -21,13 +19,9 @@ from cycler import cycler
 from utility import DEFAULT_SIZE, SMALL_SIZE, BIGGER_SIZE
 from matplotlib.animation import FuncAnimation
 
-derived = ['gamma_beta', 'temperature', 'D', 's', 'energy', 'T_eV']
-field_choices = ['rho', 'v', 'p'] + derived
-
 def plot_profile(fig, ax, filename, args):
-    fields, setup, mesh = util.read_1d_file(filename)
-    r, t                = mesh['x1'], setup['time']
-    x1min, x1max        = mesh['xlims']
+    fields, setup, mesh = util.read_file(args, filename, ndim=1)
+    x1, t = mesh['x1'], setup['time']
     if args.units:
         t *= util.time_scale 
     
@@ -40,7 +34,13 @@ def plot_profile(fig, ax, filename, args):
                 unit_scale = util.rho_scale
             elif field == 'p' or field == 'energy':
                 unit_scale = util.edens_scale
+        
+        if field == 'v':
+            field = 'v1'
+            
         if field in derived:
+            print(field)
+            zzz = input('')
             var = util.prims2var(fields, field)
         else:
             var = fields[field]
@@ -51,34 +51,21 @@ def plot_profile(fig, ax, filename, args):
         if len(args.fields) > 1:
             label = field_labels[idx]
         
-        ax.plot(r, var * unit_scale, label=label)
+        ax.plot(x1, var * unit_scale, label=label)
 
-    ax.tick_params(axis='both')
-    if args.log:
-        ax.set_xscale('log')
-        ax.set_yscale('log')
-    elif not setup['linspace']:
-        ax.set_xscale('log')
     
-    ax.set_xlabel('$r$')
     if args.xlims is None:
-        ax.set_xlim(r.min(), r.max()) if args.rmax == 0.0 else ax.set_xlim(r.min(), args.rmax)
+        ax.set_xlim(x1.min(), x1.max()) if args.xmax == 0.0 else ax.set_xlim(r.min(), args.xmax)
     else:
         ax.set_xlim(*args.xlims)
     
     if args.ylims:
         ax.set_ylim(*args.ylims)
-    # Change the format of the field
-    field_str = util.get_field_str(args)
-    
-    if (len(args.fields) == 1):
-        ax.set_ylabel('{}'.format(field_str))
-        
-    ax.spines['right'].set_visible(False)
-    ax.spines['top'].set_visible(False)
+           
     if args.legend:
-        ax.legend()
-    ax.set_title('{} at t = {:.2f}'.format(args.setup[0], t))
+        if (h := ax.get_legend_handles_labels()[0]): 
+            ax.legend()
+    ax.set_title('{} at t = {:.2f}'.format(args.setup, t))
 
 def plot_hist(args, fields, overplot=False, ax=None, case=0):
     if not overplot:
@@ -137,19 +124,6 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
         hist = ax.hist(gbs, bins=gbs, weights=ets, label=r'${}$, t={:.2f}'.format(args.labels[case], tend), histtype='step', rwidth=1.0, linewidth=3.0)
         # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--', label = r'${}$ fit'.format(args.labels[case]))
     
-   
-    # if case == 0:
-    #     ax.hist(gbs_1d, bins=gbs_1d, weights=ets_1d, alpha=0.8, label= r'1D Sphere', histtype='step', linewidth=3.0)
-    
-    sorted_energy = np.sort(ets)
-    plt.xscale('log')
-    plt.yscale('log')
-    # ax.set_ylim(sorted_energy[1], 1.5*ets.max())
-    ax.set_xlabel(r'$\Gamma\beta $', fontsize=20)
-    ax.set_ylabel(r'$E( > \Gamma \beta) \ [\rm{erg}]$', fontsize=20)
-    ax.tick_params('both', labelsize=15)
-    ax.spines['right'].set_visible(False)
-    ax.spines['top'].set_visible(False)
     
     ax.set_title(r'setup: {}'.format(args.setup[0]), fontsize=20)
     ax.legend(fontsize=15)
@@ -159,55 +133,41 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
 
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Plot a 2D Figure From a File (H5).', epilog='This Only Supports H5 Files Right Now')
-    parser.add_argument('files', metavar='files', nargs='+',help='A data directory or list to retrieve the h5 files')
-    parser.add_argument('setup', metavar='Setup', nargs='+', type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    parser.add_argument('--fields', dest = 'fields', metavar='Field Variable', nargs='+',help='The name of the field variable you\'d like to plot',choices=field_choices, default='rho')
-    parser.add_argument('--rmax', dest = 'rmax', metavar='Radial Domain Max',default = 0.0, help='The domain range')
-    parser.add_argument('--tex', dest='tex', action='store_true', default=False,help='Use latex typesetting')
-    parser.add_argument('--log', dest='log', action='store_true', default=False, help='Logarithmic Radial Grid Option')
-    parser.add_argument('--units', dest='units', default=False, action='store_true')
-    parser.add_argument('--save', dest='save', default=None, type=str)
-    parser.add_argument('--ylims', dest='ylims', default=None, type=float, nargs='+')
-    parser.add_argument('--legend', dest='legend', default=True, action=argparse.BooleanOptionalAction)
-    parser.add_argument('--labels', dest='labels', nargs='+',help='map labels to filenames')
-    parser.add_argument('--xlims', dest = 'xlims', metavar='Domain',default = None, help='The domain range', nargs='+', type=float)
+def movie(parser: argparse.ArgumentParser):
     parser.add_argument('--scale_down', dest='scale_down', default=None, type=float, help='list of values to scale down fields', nargs='+')
-    parser.add_argument('--dbg', dest='dbg', default=False, action='store_true', help='set if want dark background in plots')
     parser.add_argument('--frame_range', dest='frame_range', default = [None, None], nargs=2, type=int)
-    parser.add_argument('--cmap', dest='cmap', default='viridis', type=str, help='matplotlib color map')
-    parser.add_argument('--clims', dest='clims', default=[0, 1], type=float, nargs='+', help='color limits')
     args = parser.parse_args()
 
-    vmin, vmax  = args.clims 
+    vmin = args.cbar[0] or 0.0
+    vmax = args.cbar[1] or 1.0
     cinterval   = np.linspace(vmin, vmax, len(args.fields))
     cmap        = plt.cm.get_cmap(args.cmap)
     colors      = util.get_colors(cinterval, cmap, vmin, vmax)
     plt.rc('axes', prop_cycle=(cycler(color=colors)))
     
-    if args.tex:
-        plt.rc('font',   size=BIGGER_SIZE)          # controls default text sizes
-        plt.rc('axes',   titlesize=BIGGER_SIZE)     # fontsize of the axes title
-        plt.rc('axes',   labelsize=BIGGER_SIZE)    # fontsize of the x and y labels
-        plt.rc('xtick',  labelsize=BIGGER_SIZE)     # fontsize of the tick labels
-        plt.rc('ytick',  labelsize=BIGGER_SIZE)     # fontsize of the tick labels
-        plt.rc('legend', fontsize=BIGGER_SIZE)      # legend fontsize
-        plt.rc('figure', titlesize=BIGGER_SIZE)    # fontsize of the figure title
-        
-        plt.rcParams.update(
-            {
-                "text.usetex": True,
-                "font.family": "serif",
-                "font.serif": "Times New Roman",
-                "font.size": BIGGER_SIZE
-            }
-        )
+    
     flist, frame_count = util.get_file_list(args.files)
     flist              = flist[args.frame_range[0]: args.frame_range[1]]
     frame_count        = len(flist)
         
-    fig, ax     = plt.subplots(1, 1, figsize=(15, 8))
+    fig, ax = plt.subplots(1, 1, figsize=(15, 8))
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    
+    setup = util.read_file(args, flist[0], ndim=1)[1]
+    if args.log:
+        ax.set_xscale('log')
+        ax.set_yscale('log')
+    elif not setup['linspace']:
+        ax.set_xscale('log')
+    
+    if args.hist:
+        ax.set_ylabel(r'$E( > \Gamma \beta) \ [\rm{erg}]$')
+        ax.set_xlabel(r'$\Gamma\beta$')
+    else:
+        if (len(args.fields) == 1):
+            ax.set_ylabel('{}'.format(field_str))
+        ax.set_xlabel('r')
     
     if args.dbg:
         plt.style.use('dark_background')
@@ -251,10 +211,3 @@ def main():
         # animation.save('science/{}_{}.mp4'.format(args.setup[0], args.fields))
     else:
         plt.show()
-
-    
-    
-if __name__ == '__main__':
-    main()
-
-import h5py 

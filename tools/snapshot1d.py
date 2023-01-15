@@ -17,7 +17,7 @@ import utility as util
 from datetime import datetime
 from itertools import cycle
 from utility import DEFAULT_SIZE, SMALL_SIZE
-from visual import lin_fields, derived, field_choices
+from visual import lin_fields, derived
 try:
     import cmasher as cmr 
 except:
