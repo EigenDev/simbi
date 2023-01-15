@@ -69,8 +69,8 @@ def main():
                 "font.size": DEFAULT_SIZE
             }
         )
-    file_list, _ = get_file_list(args.files)
-    ndim = get_dimensionality(file_list)
+    file_list, _  = get_file_list(args.files)
+    ndim          = get_dimensionality(file_list)
     visual_module = getattr(importlib.import_module(f'{args.kind}{ndim}d'), f'{args.kind}')
     visual_module(parser)
         
