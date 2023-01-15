@@ -39,30 +39,32 @@ class print_the_version(argparse.Action):
 def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     parser = CustomParser(prog='simbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
     parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
-    parser.add_argument('--tstart',    help='start time for simulation', default=None, type=float)
-    parser.add_argument('--tend',    help='end time for simulation', default=None, type=float)
-    parser.add_argument('--dlogt',     help='logarithmic time bin spacing for checkpoints', default=0.0, type=float)
-    parser.add_argument('--plm_theta', help='piecewise linear consturction parameter', default=1.5, type=float)
-    parser.add_argument('--first_order', help='Set flag if wanting first order accuracy in solution', default=False, action='store_true')
-    parser.add_argument('--cfl', help='Courant-Friedrichs-Lewy stability number', default=0.1, type=float)
-    parser.add_argument('--hllc', help='flag for HLLC computation as opposed to HLLE', default=True, action=argparse.BooleanOptionalAction)
-    parser.add_argument('--chkpt', help='checkpoint file to restart computation from', default=None, type=str)
-    parser.add_argument('--chkpt_interval', help='checkpoint interval spacing in simulation time units', default=0.1, type=float)
-    parser.add_argument('--data_directory', help='directory to save checkpoint files', default='data/', type=str)
-    parser.add_argument('--boundary_conditions', help='boundary condition for inner boundary', default='outflow', nargs="+", choices=['reflecting', 'outflow', 'inflow', 'periodic'])
-    parser.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=0.0, type=float)
-    parser.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
-    parser.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=False, action='store_true')
-    parser.add_argument('--constant_sources', help='flag to indicate source terms provided are constant', default=False, action='store_true')
-    parser.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
-    parser.add_argument('--nthreads', '-p', help="number of omp threads to run at", type=max_thread_count, default=None)
-    parser.add_argument('--peek', help='print setup-script usage', default=False, action='store_true')
-    parser.add_argument('--type-check', help='flag for static type checking configration files', default=True, action=argparse.BooleanOptionalAction)
+    overridable = parser.add_argument_group('override', 'overridable simuations options')
+    global_args = parser.add_argument_group('globals', 'global module-specific options')
+    onthefly    = parser.add_argument_group('onthefly', 'simulation otions that are given on the fly')
+    overridable.add_argument('--tstart',    help='start time for simulation', default=None, type=float)
+    overridable.add_argument('--tend',    help='end time for simulation', default=None, type=float)
+    overridable.add_argument('--dlogt',     help='logarithmic time bin spacing for checkpoints', default=None, type=float)
+    overridable.add_argument('--plm_theta', help='piecewise linear consturction parameter', default=None, type=float)
+    overridable.add_argument('--first_order', help='Set flag if wanting first order accuracy in solution', default=None, action='store_true')
+    overridable.add_argument('--cfl', help='Courant-Friedrichs-Lewy stability number', default=None, type=float)
+    overridable.add_argument('--hllc', help='flag for HLLC computation as opposed to HLLE', default=None, action=argparse.BooleanOptionalAction)
+    overridable.add_argument('--chkpt_interval', help='checkpoint interval spacing in simulation time units', default=None, type=float)
+    overridable.add_argument('--data_directory', help='directory to save checkpoint files', default='data/', type=str)
+    overridable.add_argument('--boundary_conditions', help='boundary condition for inner boundary', default='outflow', nargs="+", choices=['reflecting', 'outflow', 'inflow', 'periodic'])
+    overridable.add_argument('--engine_duration', help='duration of hydrodynamic source terms', default=None, type=float)
+    overridable.add_argument('--quirk_smoothing', help='flag to activate Quirk (1994) smoothing at poles', default=None, action='store_true')
+    overridable.add_argument('--constant_sources', help='flag to indicate source terms provided are constant', default=None, action='store_true')
+    onthefly.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
+    onthefly.add_argument('--chkpt', help='checkpoint file to restart computation from', default=None, type=str)
+    global_args.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
+    global_args.add_argument('--nthreads', '-p', help="number of omp threads to run at", type=max_thread_count, default=None)
+    global_args.add_argument('--peek', help='print setup-script usage', default=False, action='store_true')
+    global_args.add_argument('--type-check', help='flag for static type checking configration files', default=True, action=argparse.BooleanOptionalAction)
     # print help message if no args supplied
     return parser, parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
 configs_src = Path(__file__).resolve().parent / 'configs'
-overideable_args = ['tstart', 'tend', 'hllc', 'boundary_conditions', 'plm_theta', 'dlogt', 'data_directory', 'quirk_smoothing', 'constant_sources']
 def valid_pyscript(param):
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
@@ -152,6 +154,9 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv: Optional
             state_docs += [f"No docstring for problem class: {setup_class}"]
         state: Hydro = Hydro.gen_from_setup(config)
         kwargs[idx] = {}
+        kwargs[idx]['first_order']              = config.first_order
+        kwargs[idx]['cfl']                      = config.cfl_number
+        kwargs[idx]['chkpt_interval']           = config.check_point_interval
         kwargs[idx]['tstart']                   = config.default_start_time
         kwargs[idx]['tend']                     = config.default_end_time
         kwargs[idx]['hllc']                     = config.use_hllc_solver 
@@ -171,30 +176,27 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv: Optional
         kwargs[idx]['constant_sources']         = config.constant_sources
         kwargs[idx]['object_positions']         = config.object_zones
         kwargs[idx]['boundary_sources']         = config.boundary_sources
+        kwargs[idx]['engine_duration']          = config.engine_duration
         states.append(state)
     
     if peek_only:
         exit(0)
-    
+        
     return states, kwargs, state_docs 
         
-def main(parser: argparse.ArgumentParser = parse_arguments()[0], args: argparse.Namespace = parse_arguments()[1][0], argv: List = parse_arguments()[1][1]):
+def main():
+    parser, (args, argv) = parse_arguments()
     sim_states, kwargs, state_docs  = configure_state(args.setup_script, parser, argv, args.type_check)
     if args.nthreads:
         os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
     
-    global_nonsim_args = ['setup_script', 'nthreads', 'peek', 'type_check']
+    sim_actions = [g for g in parser._action_groups if g.title in ['override', 'onthefly']]
+    sim_dicts = [{a.dest:getattr(args,a.dest,None) for a in group._group_actions} for group in sim_actions]
+    overridable_args = vars(argparse.Namespace(**sim_dicts[0])).keys()
+    sim_args = argparse.Namespace(**{**sim_dicts[0], **sim_dicts[1]})
     for idx, sim_state in enumerate(sim_states):
-        for arg in vars(args):
-            if arg in global_nonsim_args:
-                continue
-            if arg in ['tend', 'tstart']:
-                command_line_time = getattr(args, arg)
-                # override the default time args if they've been set
-                if command_line_time:
-                    kwargs[idx][arg] = command_line_time
-                continue
-            if arg in overideable_args and getattr(args, arg) == kwargs[idx][arg]:
+        for arg in vars(sim_args):
+            if arg in overridable_args and getattr(args, arg) is None:
                 continue 
             
             kwargs[idx][arg] = getattr(args, arg)
@@ -205,5 +207,5 @@ def main(parser: argparse.ArgumentParser = parse_arguments()[0], args: argparse.
     
     
 if __name__ == '__main__':
-    sys.exit(main(*parse_arguments()))
+    sys.exit(main())
     

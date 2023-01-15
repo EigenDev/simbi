@@ -10,7 +10,7 @@ class_props = [
     'geometry', 'initial_state', 'linspace', 'mom_outer', 
     'parse_args', 'passive_scalars', 'plm_theta', 
     'regime', 'rho_ref', 'scale_factor',  'scale_factor_derivative', 
-    'sources', 'start_time', 'use_hllc_solver']
+    'sources', 'start_time', 'use_hllc_solver', 'cfl_number']
 
 P = ParamSpec('P')
 T = TypeVar('T')
@@ -115,8 +115,8 @@ class BaseConfig(metaclass=abc.ABCMeta):
        return True
    
     @simbi_property
-    def boundary_conditions(self) -> Optional[Union[Sequence[str], str, NDArray[numpy_string]]]:
-       return None
+    def boundary_conditions(self) -> Union[Sequence[str], str, NDArray[numpy_string]]:
+       return 'outflow'
    
     @simbi_property
     def plm_theta(self) -> float:
@@ -127,8 +127,8 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return 'data/'
     
     @simbi_property 
-    def dlogt(self) -> FloatOrNone:
-        return None 
+    def dlogt(self) -> float:
+        return 0.0 
     
     @simbi_property
     def use_quirk_smoothing(self) -> bool:
@@ -158,7 +158,22 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def boundary_sources(self) -> Optional[Union[NDArray[Any], Sequence[Any]]]:
         return None
     
-    @final
+    @simbi_property
+    def cfl_number(self) -> float:
+        return 0.1
+    
+    @simbi_property
+    def first_order(self) -> bool:
+        return False
+    
+    @simbi_property
+    def check_point_interval(self)-> float:
+        return 0.1 
+    
+    @simbi_property
+    def engine_duration(self) -> float:
+        return 0.0
+    
     @classmethod
     def find_dynamic_args(cls) -> None:
         """
