@@ -8,23 +8,7 @@ import importlib
 from simbi import Hydro
 from pathlib import Path
 from .key_types import Optional, Sequence 
-
-derived = ['D', 'momentum', 'energy', 'energy_rst', 'enthalpy', 'temperature', 'T_eV', 'mass', 'chi_dens',
-          'mach', 'u1', 'u2']
-field_choices = ['rho', 'v1', 'v2', 'v3', 'v', 'p', 'gamma_beta', 'chi'] + derived
-lin_fields    = ['chi', 'gamma_beta', 'u1', 'u2', 'u3']
-
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-    
+from ._detail import * 
 class CustomParser(argparse.ArgumentParser):
     def error(self, message):
 
@@ -41,15 +25,6 @@ class print_the_version(argparse.Action):
         from simbi import __version__ as version
         print(f"SIMBI version {version}")
         parser.exit()
-
-def get_subparser(parser: argparse.ArgumentParser, idx: int) -> argparse.ArgumentParser:
-    subparser = [
-        subparser 
-        for action in parser._actions 
-        if isinstance(action, argparse._SubParsersAction) 
-        for _, subparser in action.choices.items()
-    ]
-    return subparser[idx]
 
 def parse_run_arguments(parser: argparse.ArgumentParser):
     run_parser = get_subparser(parser, 0)
@@ -77,46 +52,6 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
     global_args.add_argument('--type-check', help='flag for static type checking configration files', default=True, action=argparse.BooleanOptionalAction)
     return parser, parser.parse_known_args(args=None if sys.argv[2:] else ['run', '--help'])
 
-
-def parse_plotting_arguments(parser: argparse.ArgumentParser) -> argparse.Namespace:
-    plot_parser = get_subparser(parser, 1)
-    plot_parser.add_argument('files',        nargs='+', help='A Data Source to Be Plotted')
-    plot_parser.add_argument('setup',        type=str, help='The name of the setup you are plotting (e.g., Blandford McKee)')
-    plot_parser.add_argument('--fields',     default=['rho'], nargs='+', help='The name of the field variable you\'d like to plot',choices=field_choices)
-    plot_parser.add_argument('--xmax',       default = 0.0, help='The domain range')
-    plot_parser.add_argument('--log',        default=False, action='store_true',  help='Logarithmic Radial Grid Option')
-    plot_parser.add_argument('--kinetic',    default=False, action='store_true',  help='Plot the kinetic energy on the histogram')
-    plot_parser.add_argument('--enthalpy',   default=False, action='store_true',  help='Plot the enthalpy on the histogram')
-    plot_parser.add_argument('--hist',       default=False, action='store_true',  help='Convert plot to histogram')
-    plot_parser.add_argument('--mass',       default=False, action='store_true',  help='Compute mass histogram')
-    plot_parser.add_argument('--dm_du',      default = False, action='store_true', help='Compute dM/dU over whole domain')
-    plot_parser.add_argument('--ax_anchor',  default=None, type=str, nargs='+', help='Anchor annotation text for each plot')
-    plot_parser.add_argument('--norm',       default=False, action='store_true', help='True if you want the plot normalized to max value')
-    plot_parser.add_argument('--labels',     default = None, nargs='+', help='Optionally give a list of labels for multi-file plotting')
-    plot_parser.add_argument('--xlims',      default = None, type=float, nargs=2)
-    plot_parser.add_argument('--ylims',      default = None, type=float, nargs=2)
-    plot_parser.add_argument('--units',      default = False, action='store_true')
-    plot_parser.add_argument('--power',      default = 1.0, type=float, help='exponent of power-law norm')
-    plot_parser.add_argument('--dbg',        default = False, action='store_true')
-    plot_parser.add_argument('--tex',        default = False, action='store_true')
-    plot_parser.add_argument('--print',      default = False, action='store_true')
-    plot_parser.add_argument('--pictorial',  default = False, action='store_true')
-    plot_parser.add_argument('--anot_loc',   default = None, type=str)
-    plot_parser.add_argument('--legend_loc', default = None, type=str)
-    plot_parser.add_argument('--anot_text',  default = None, type=str)
-    plot_parser.add_argument('--inset',      default=False, action= 'store_true')
-    plot_parser.add_argument('--png',        default=False, action= 'store_true')
-    plot_parser.add_argument('--fig_dims',   default = [4, 4], type=float, nargs=2)
-    plot_parser.add_argument('--legend',     default=True, action=argparse.BooleanOptionalAction)
-    plot_parser.add_argument('--extra_files',default=None, nargs='+', help='extra 1D files to plot alongside 2D plots')
-    plot_parser.add_argument('--save',       default=None, help='Save the fig with some name')
-    plot_parser.add_argument('--kind',       default='snapshot', type=str, choices=['snapsoht', 'movie'])
-    plot_parser.add_argument('--cmap',       default='viridis', type=str, help='matplotlib color map')
-    plot_parser.add_argument('--nplots',     default=1, type=int, help='number of subplots')
-    plot_parser.add_argument('--cbar_range', default = [None, None], dest = 'cbar', nargs=2, help='The colorbar range')
-    plot_parser.add_argument('--fill_scale', type=float, default = None, help='Set the y-scale to start plt.fill_between')
-    return parser, parser.parse_args(args=None if sys.argv[2:] else ['--help'])
-
 def parse_module_arguments():
     parser = CustomParser(prog='simbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
     parser.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
@@ -127,8 +62,8 @@ def parse_module_arguments():
     plot.set_defaults(func=plot_checkpoints)
     return parser, parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
-configs_src = Path(__file__).resolve().parent / 'configs'
 def valid_pyscript(param):
+    configs_src = Path(__file__).resolve().parent / 'configs'
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
         param        = None
@@ -144,20 +79,6 @@ def valid_pyscript(param):
             raise argparse.ArgumentTypeError('No configuration named {}{}{}. The only valid configurations are:\n\n{}'.format(
                 bcolors.OKCYAN, base, bcolors.ENDC, '\n'.join(f'{conf}' for conf in available_configs)))
     return param
-
-def max_thread_count(param) -> int:
-    import multiprocessing
-    num_threads_available = multiprocessing.cpu_count()
-    
-    try:
-        val = int(param)
-    except ValueError:    
-        raise argparse.ArgumentTypeError("\nMust be a integer\n")
-    
-    if val > num_threads_available:
-        raise argparse.ArgumentTypeError(f'\nTrying to set thread count greater than available compute core(s) equal to {num_threads_available}\n')
-    
-    return val
 
 def configure_state(script: str, parser: argparse.ArgumentParser, argv: Optional[Sequence] = None, type_checking_active: bool = True):
     """
@@ -270,7 +191,6 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
             
 def plot_checkpoints(parser: argparse.ArgumentParser, args: argparse.Namespace, argv: list) -> None:
     from .plot import main 
-    parser, args = parse_plotting_arguments(parser)
     main(parser, args, argv)
     
 def main():
