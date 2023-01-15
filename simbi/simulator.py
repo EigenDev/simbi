@@ -316,10 +316,6 @@ class Hydro:
         self.x2 = np.asarray(self.x2)
         self.x3 = np.asarray(self.x3)
         
-    def _set_boundary_conditions(self, boundary_conditions: Union[Sequence[Any], str, NDArray[Any]]) -> None:
-        self.boundary_conditions = boundary_conditions
-        
-        
     def _check_boundary_conditions(self, boundary_conditions: Union[Sequence[Any], str, NDArray[Any]]) -> None:
         if isinstance(boundary_conditions, str):
             boundary_conditions = [boundary_conditions]
