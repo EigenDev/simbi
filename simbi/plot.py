@@ -47,7 +47,7 @@ def parse_extra_arguments(parser: argparse.ArgumentParser) -> argparse.Namespace
     parser.add_argument('--nplots',     default=1, type=int, help='number of subplots')
     parser.add_argument('--cbar_range', default = [None, None], dest = 'cbar', nargs=2, help='The colorbar range')
     parser.add_argument('--fill_scale', type=float, default = None, help='Set the y-scale to start plt.fill_between')
-    return parser, parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
+    return parser, parser.parse_known_args(args=None if sys.argv[2:] else ['--help'])
 
 def main(parser: argparse.ArgumentParser = None, args: argparse.Namespace = None, argv: list[str] = None) -> None:
     parser, (args, argv) = parse_extra_arguments(parser)
