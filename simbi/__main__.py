@@ -201,7 +201,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv: Optional
         
     return states, kwargs, state_docs 
 
-def run(parser: argparse.ArgumentParser) -> None:
+def run(parser: argparse.ArgumentParser, *_) -> None:
     parser, (args, argv) = parse_run_arguments(parser)
     sim_states, kwargs, state_docs  = configure_state(args.setup_script, parser, argv, args.type_check)
     if args.nthreads:
@@ -229,7 +229,7 @@ def plot_checkpoints(parser: argparse.ArgumentParser, args: argparse.Namespace, 
     
 def main():
     parser, (args, _) = parse_module_arguments()
-    args.func(parser)
+    args.func(parser, args, _)
     
 if __name__ == '__main__':
     sys.exit(main())
