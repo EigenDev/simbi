@@ -47,7 +47,7 @@ version_scheme = "post-release"
 local_scheme = "no-local-version"
 
 [tool.setuptools.package-data]
-simbi = ["configs/*.py"]
+simbi = ["configs/*.py", "tools/*.py"]
 
 [tool.setuptools.dynamic]
 readme = {file = ["README.md"]}

@@ -38,10 +38,16 @@ class print_the_version(argparse.Action):
         
 def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     parser = CustomParser(prog='simbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module")
-    parser.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
-    overridable = parser.add_argument_group('override', 'overridable simuations options')
-    global_args = parser.add_argument_group('globals', 'global module-specific options')
-    onthefly    = parser.add_argument_group('onthefly', 'simulation otions that are given on the fly')
+    parser.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
+    subparsers = parser.add_subparsers(help='available sub-commands', dest='command')
+    script_run = subparsers.add_parser('run', help='runs the setup script')
+    script_run.set_defaults(func=run)
+    plot       = subparsers.add_parser('plot', help='plots the given simbi checkpoint file')
+    plot.set_defaults(func=plot_checkpoints)
+    overridable = script_run.add_argument_group('override', 'overridable simuations options')
+    global_args = script_run.add_argument_group('globals', 'global module-specific options')
+    onthefly    = script_run.add_argument_group('onthefly', 'simulation otions that are given on the fly')
+    script_run.add_argument('setup_script', help='setup script for simulation run', type=valid_pyscript)
     overridable.add_argument('--tstart',    help='start time for simulation', default=None, type=float)
     overridable.add_argument('--tend',    help='end time for simulation', default=None, type=float)
     overridable.add_argument('--dlogt',     help='logarithmic time bin spacing for checkpoints', default=None, type=float)
@@ -57,7 +63,6 @@ def parse_arguments(cli_args: List[str] = None) -> argparse.Namespace:
     overridable.add_argument('--constant_sources', help='flag to indicate source terms provided are constant', default=None, action='store_true')
     onthefly.add_argument('--mode', help='execution mode for computation', default='cpu', choices=['cpu', 'gpu'], dest='compute_mode')
     onthefly.add_argument('--chkpt', help='checkpoint file to restart computation from', default=None, type=str)
-    global_args.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
     global_args.add_argument('--nthreads', '-p', help="number of omp threads to run at", type=max_thread_count, default=None)
     global_args.add_argument('--peek', help='print setup-script usage', default=False, action='store_true')
     global_args.add_argument('--type-check', help='flag for static type checking configration files', default=True, action=argparse.BooleanOptionalAction)
@@ -183,14 +188,19 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv: Optional
         exit(0)
         
     return states, kwargs, state_docs 
-        
-def main():
-    parser, (args, argv) = parse_arguments()
+
+def run(parser: argparse.ArgumentParser, args: argparse.Namespace, argv: list) -> None:
     sim_states, kwargs, state_docs  = configure_state(args.setup_script, parser, argv, args.type_check)
     if args.nthreads:
         os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
     
-    sim_actions = [g for g in parser._action_groups if g.title in ['override', 'onthefly']]
+    run_parser = [
+        subparser 
+        for action in parser._actions 
+        if isinstance(action, argparse._SubParsersAction) 
+        for _, subparser in action.choices.items()
+    ][0]
+    sim_actions = [g for g in run_parser._action_groups if g.title in ['override', 'onthefly']]
     sim_dicts = [{a.dest:getattr(args,a.dest,None) for a in group._group_actions} for group in sim_actions]
     overridable_args = vars(argparse.Namespace(**sim_dicts[0])).keys()
     sim_args = argparse.Namespace(**{**sim_dicts[0], **sim_dicts[1]})
@@ -204,7 +214,14 @@ def main():
         print(state_docs[idx], flush=True)
         print("="*80, flush=True)
         sim_state.simulate(**kwargs[idx])
+
+def plot_checkpoints(parser: argparse.ArgumentParser, args: argparse.Namespace, argv: list) -> None:
+    from .plot import main 
+    main(parser, args, argv)
     
+def main():
+    parser, (args, argv) = parse_arguments()
+    args.func(parser, args, argv)
     
 if __name__ == '__main__':
     sys.exit(main())
