@@ -9,9 +9,15 @@ from simbi import Hydro
 from pathlib import Path
 from .key_types import Optional, Sequence 
 from ._detail import * 
+
+try:
+    from rich_argparse import RichHelpFormatter
+    help_formatter = RichHelpFormatter 
+except ImportError:
+    help_formatter = argparse.HelpFormatter 
+
 class CustomParser(argparse.ArgumentParser):
     def error(self, message):
-
         sys.stderr.write(f'error: {message}\n')
         if 'configurations' not in message:
             self.print_help()
@@ -53,12 +59,12 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
     return parser, parser.parse_known_args(args=None if sys.argv[2:] else ['run', '--help'])
 
 def parse_module_arguments():
-    parser = CustomParser(prog='simbi', usage='%(prog)s <setup_script> [options]', description="Relativistic gas dynamics module", conflict_handler='resolve')
+    parser = CustomParser(prog='simbi', usage='%(prog)s {run, plot} <input> [options]', description="Relativistic gas dynamics module", formatter_class=help_formatter)
     parser.add_argument('--version','-V', help='print current version of simbi module', action=print_the_version)
     subparsers = parser.add_subparsers(help='available sub-commands', dest='command')
-    script_run = subparsers.add_parser('run', help='runs the setup script')
+    script_run = subparsers.add_parser('run', help='runs the setup script', formatter_class=help_formatter, usage='simbi run <setup_script> [options]')
     script_run.set_defaults(func=run)
-    plot       = subparsers.add_parser('plot', help='plots the given simbi checkpoint file')
+    plot       = subparsers.add_parser('plot', help='plots the given simbi checkpoint file', formatter_class=help_formatter, usage='simbi plot <checkpoints> <setup_name> [options]')
     plot.set_defaults(func=plot_checkpoints)
     return parser, parser.parse_known_args(args=None if sys.argv[1:] else ['--help'])
 
