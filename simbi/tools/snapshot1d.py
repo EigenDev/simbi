@@ -203,7 +203,7 @@ def snapshot(parser: argparse.ArgumentParser):
             ax = fig.add_subplot(1, 1, 1)
             for idx, file in enumerate(flist):
                 fields, setup, mesh = util.read_file(args, file, ndim=1)
-                if args.ehist or args.eks or args.hhist:
+                if args.hist:
                     plot_hist(args, fields, mesh, setup, ax = ax, overplot= True, case = idx)
                 else:
                     plot_profile(args, fields, mesh, setup,ncols,  ax = ax, overplot=True, case = idx)
