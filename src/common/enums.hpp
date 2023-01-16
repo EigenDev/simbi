@@ -54,6 +54,11 @@ namespace simbi{
         PERIODIC,
     };
 
+    enum class HydroRegime {
+        RELATIVISTC,
+        NEWTONIAN,
+    };
+
     enum class WaveSpeeds {
         SCHNEIDER_ET_AL_93,
         MIGNONE_AND_BODO_05,

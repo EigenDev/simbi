@@ -648,6 +648,13 @@ SRHD::simulate1D(
 
     this->hubble_param       = adot(t) / a(t);
     this->mesh_motion        = (hubble_param != 0);
+    this->all_outer_bounds   = (d_outer && s_outer && e_outer);
+    if (all_outer_bounds){
+        dens_outer = d_outer;
+        mom_outer  = s_outer;
+        nrg_outer  = e_outer;
+    }
+    
     setup.x1max              = x1[active_zones - 1];
     setup.x1min              = x1[0];
     setup.xactive_zones      = active_zones;
@@ -675,7 +682,6 @@ SRHD::simulate1D(
         // initial pressure guess is | |S| - D - tau|
         pressure_guess[ii] = std::abs((state[1][ii]) - state[0][ii] - state[2][ii]);
     }
-
     cons.copyToGpu();
     prims.copyToGpu();
     pressure_guess.copyToGpu();

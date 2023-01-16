@@ -195,4 +195,9 @@ namespace simbi
     };
 }
 
+template<>
+struct is_relativistic<simbi::SRHD3D>
+{
+    static constexpr bool value = true;
+};
 #endif

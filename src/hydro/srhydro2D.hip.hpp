@@ -29,6 +29,10 @@ namespace simbi
         ndarray<bool> object_pos;
         bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros;
         
+        std::function<double(double, double)> dens_outer;
+        std::function<double(double, double)> mom1_outer;
+        std::function<double(double, double)> mom2_outer;
+        std::function<double(double, double)> nrg_outer;
         /* Methods */
         SRHD2D();
         SRHD2D(
@@ -198,4 +202,9 @@ namespace simbi
     };
 }
 
+template<>
+struct is_relativistic<simbi::SRHD2D>
+{
+    static constexpr bool value = true;
+};
 #endif

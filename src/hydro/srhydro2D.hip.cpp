@@ -1127,6 +1127,13 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // Params moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
+    this->all_outer_bounds = (d_outer && s1_outer && s2_outer && e_outer);
+    if (all_outer_bounds){
+        dens_outer = d_outer;
+        mom1_outer = s1_outer;
+        mom2_outer = s2_outer;
+        nrg_outer  = e_outer;
+    }
     if (x2max == 0.5 * M_PI){
         this->half_sphere = true;
     }

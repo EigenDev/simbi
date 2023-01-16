@@ -26,11 +26,15 @@ namespace simbi
           using primitive_soa_t = sr1d::PrimitiveSOA;
           const static int dimensions = 1;
 
+
           // Create vector instances that will live on host
           ndarray<conserved_t> cons, outer_zones, inflow_zones; 
           ndarray<primitive_t> prims;
           ndarray<real> sourceD, sourceS, source0, pressure_guess, dt_min;
           
+          std::function<double(double)> dens_outer;
+          std::function<double(double)> mom_outer;
+          std::function<double(double)> nrg_outer;
           SRHD(){};
           SRHD(
                std::vector<std::vector<real>> state, 
@@ -163,4 +167,9 @@ namespace simbi
      
 } // namespace simbi
 
+template<>
+struct is_relativistic<simbi::SRHD>
+{
+    static constexpr bool value = true;
+};
 #endif
