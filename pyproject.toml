@@ -32,6 +32,9 @@ dependencies = [
     "mypy",
 ]
 
+[project.optional-dependencies]
+rich = ["rich", "rich-argparse"]
+
 [project.scripts]
 simbi = "simbi.__main__:main"
 
