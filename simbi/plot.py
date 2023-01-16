@@ -2,7 +2,7 @@ import argparse
 import sys
 import matplotlib.pyplot as plt 
 import importlib
-from .utility import DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
+from .tools.utility import DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
 from ._detail import *
 from pathlib import Path 
 

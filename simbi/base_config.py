@@ -3,7 +3,7 @@ import abc
 from .dynarg import DynamicArg
 from .key_types import *
 from ._detail import get_subparser
-from typing import ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar, Type, Generic
 class_props = [
     'boundary_conditions', 'coord_system', 'data_directory', 
     'dens_outer', 'resolution', 'dlogt', 'dynamic_args', 
@@ -13,15 +13,26 @@ class_props = [
     'regime', 'rho_ref', 'scale_factor',  'scale_factor_derivative', 
     'sources', 'start_time', 'use_hllc_solver', 'cfl_number']
 
-P = ParamSpec('P')
 T = TypeVar('T')
+G = TypeVar('G')
+P = ParamSpec('P')
+Self = TypeVar('Self')
+
+
+class simbi_classproperty(property):
+    def __get__(self, owner_self: Any, owner_cls: Optional[Any] = ..., /) -> Any:
+        if not self.fget: return self 
+        return self.fget(owner_cls)
+        
+def err_message(name: str) -> str:
+    return f"Configuration must include a {name} simbi_property"
 
 def simbi_property(func: Callable[P, T]) -> Callable[P, T]:
     """ Do an implicit type conversion 
     Type converts the simbi_property object if a DynamicArg 
     is given as the return value
     """
-    @property # type: ignore
+    @property #type: ignore
     def wrapper(*args: P.args, **kwds: P.kwargs) -> T:
         result = func(*args, **kwds)
         if isinstance(result, Iterable) and not isinstance(result, str):
@@ -36,10 +47,7 @@ def simbi_property(func: Callable[P, T]) -> Callable[P, T]:
         return cast(T, result)
     return wrapper
 
-def err_message(name: str) -> str:
-    return f"Configuration must include a {name} simbi_property"
-
-__all__ = ['BaseConfig', 'simbi_property']
+__all__ = ['BaseConfig', 'simbi_property', 'simbi_classproperty']
 class BaseConfig(metaclass=abc.ABCMeta):
     dynamic_args: ListOrNone = None
     
@@ -85,24 +93,25 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def passive_scalars(self) -> Optional[Union[Sequence[float], NDArray[numpy_float]]]:
         return None
     
-    @simbi_property
-    def scale_factor(self) -> Optional[Callable[[float], float]]:
+    
+    @simbi_classproperty
+    def scale_factor(cls) -> Optional[Callable[[float], float]]:
         return None 
     
-    @simbi_property
-    def scale_factor_derivative(self) -> Optional[Callable[[float], float]]:
+    @simbi_classproperty
+    def scale_factor_derivative(cls) -> Optional[Callable[[float], float]]:
        return None
     
-    @simbi_property
-    def edens_outer(self) -> Optional[Union[Callable[[float], float], Callable[[float, float], float], Callable[[float, float, float], float]]]:
+    @simbi_classproperty
+    def edens_outer(cls) -> Optional[Union[Callable[[float], float], Callable[[float, float], float], Callable[[float, float, float], float]]]:
         return None 
     
-    @simbi_property
-    def mom_outer(self) ->  Optional[Union[Callable[[float], float], Sequence[Union[Callable[[float, float], float], Callable[[float, float, float], float]]]]]:
+    @simbi_classproperty
+    def mom_outer(cls) ->  Optional[Union[Callable[[float], float], Sequence[Union[Callable[[float, float], float], Callable[[float, float, float], float]]]]]:
         return None
     
-    @simbi_property
-    def dens_outer(self) ->  Optional[Union[Callable[[float], float], Callable[[float, float], float], Callable[[float, float, float], float]]]:
+    @simbi_classproperty
+    def dens_outer(cls) ->  Optional[Union[Callable[[float], float], Callable[[float, float], float], Callable[[float, float, float], float]]]:
        return None
    
     @simbi_property
@@ -265,3 +274,4 @@ class BaseConfig(metaclass=abc.ABCMeta):
         Print problem params on class destruction
         """
         self.print_problem_params()
+        

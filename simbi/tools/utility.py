@@ -193,7 +193,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         
         return res 
     
-    setup  = {}
+    setup = {}
     with h5py.File(filename, 'r') as hf: 
         ds  = hf.get('sim_info')
         rho = hf.get('rho')[:]
@@ -250,6 +250,9 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
             p    = unpad(p, npad)
             chi  = unpad(chi, npad)
         
+        if setup['x1max'] > setup['x1'][-1]:
+            setup['x1'] = arr_gen(setup['x1min'], setup['x1max'], setup['xactive'])
+            
         fields = {f'v{i+1}': v[i] for i in range(len(v))}
         fields['rho']          = rho
         fields['p']            = p

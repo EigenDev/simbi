@@ -1,4 +1,4 @@
-from simbi import BaseConfig, DynamicArg, simbi_property
+from simbi import BaseConfig, DynamicArg, simbi_property, simbi_classproperty
 from simbi.key_types import *
 
 class MartiMuller(BaseConfig):
@@ -37,22 +37,22 @@ class MartiMuller(BaseConfig):
         return "relativistic"
     
     #-------------------- Uncomment if one wants the mesh to move
-    # @simbi_property
-    # def scale_factor(self) -> Callable[[float], float]:
-    #     return lambda t: 1 
+    @simbi_classproperty
+    def scale_factor(cls) -> Callable[[float], float]:
+        return lambda t: 1 
     
-    # @simbi_property
-    # def scale_factor_derivative(self) -> Callable[[float], float]:
-    #     return lambda t: 0.5
+    @simbi_classproperty
+    def scale_factor_derivative(cls) -> Callable[[float], float]:
+        return lambda t: 0.1
     
-    # @simbi_property
-    # def dens_outer(self) -> Callable[[float], float]:
-    #     return lambda x: 0.1 
+    @simbi_classproperty
+    def dens_outer(cls) -> Callable[[float], float]:
+        return lambda x: 0.1 
     
-    # @simbi_property
-    # def mom_outer(self) -> Callable[[float], float]:
-    #     return lambda x: 0
+    @simbi_classproperty
+    def mom_outer(cls) -> Callable[[float], float]:
+        return lambda x: 0
     
-    # @simbi_property
-    # def edens_outer(self) -> Callable[[float], float]:
-    #     return lambda x: 3e-10
+    @simbi_classproperty
+    def edens_outer(cls) -> Callable[[float], float]:
+        return lambda x: 3e-10
