@@ -96,14 +96,26 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv: Optional
     base_script    = Path(os.path.abspath(script)).stem
     sys.path.insert(1, f'{script_dirname}')
     
-    run_parser = get_subparser(parser, 0)
     if type_checking_active:
+        # from mypy import api
         print("Validating Script Type Safety...\n")
-        try:
-            subprocess.run([sys.executable,  '-m',  'mypy',  f'{script}'], check = True)
-        except subprocess.CalledProcessError:
-            print("\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option")
-            sys.exit(0)
+        subprocess.run(['mypy', '--strict', f'{script}'], check=True)
+        # result = list(api.run(['--strict', f'{script}']))
+        # print(result)
+        # result[:2] = result[0].split('\n')[:2]
+        # if result[0]:
+        #     print(f'\n{bcolors.OKBLUE}Type checking report{bcolors.ENDC}:\n')
+        #     report_color = bcolors.FAIL if 'error' in result[0] else bcolors.OKGREEN
+        #     print(f'{report_color}{result[0]}{bcolors.ENDC}')  # stdout
+
+        # if result[1]:
+        #     print(f'\n{bcolors.WARNING}Error report{bcolors.ENDC}:\n')
+        #     print(result[1])  # stderr
+
+        # exit_color = bcolors.OKGREEN if result[2] == 0 else bcolors.FAIL
+        # print(f'\n{bcolors.BOLD}Exit status{bcolors.ENDC}: {exit_color}{result[2]}{bcolors.ENDC}')
+        # if not result[2] == 0:
+        #     raise TypeError("\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option")
     
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
