@@ -30,10 +30,12 @@ dependencies = [
     "cython", 
     "meson",
     "mypy",
+    "matplotlib",
+    "astropy",
 ]
 
 [project.optional-dependencies]
-rich = ["rich", "rich-argparse"]
+rich = ["rich", "rich-argparse", "cmasher"]
 
 [project.scripts]
 simbi = "simbi.__main__:main"
