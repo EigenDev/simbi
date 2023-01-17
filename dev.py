@@ -45,13 +45,22 @@ def read_from_cache() -> Optional[dict[str, str]]:
         with open(cache_file, 'w+'):
             ...
         return None 
-
-def check_minimal_depencies() -> None:
-    if not is_tool('meson'):
+    
+def check_minimal_dependencies() -> None:
+    try:
+        import mesonbuild 
+    except ImportError:
         subprocess.run([sys.executable, '-m', 'pip', 'install', 'meson'], check=True)
     
-    if not is_tool('cython'):
-        subprocess.run([sys.executable, '-m', 'pip', 'install', 'meson'], check=True)
+    try:
+        import numpy 
+    except ImportError:
+         subprocess.run([sys.executable, '-m', 'pip', 'install', 'numpy'], check=True)
+    
+    try:
+        import cython 
+    except ImportError:
+         subprocess.run([sys.executable, '-m', 'pip', 'install', 'cython'], check=True)
         
 def write_to_cache(args: argparse.Namespace) -> None:
     details = vars(args)
@@ -149,7 +158,7 @@ def install_simbi(args: argparse.Namespace) -> None:
     if args.build_dir == 'build':
         raise argparse.ArgumentError(args.builddir, "please choose a different build name other than 'build'")
 
-    check_minimal_depencies()
+    check_minimal_dependencies()
     simbi_env = os.environ.copy()
     # Check if any args passed to the cli exist that would override the cache args
     cli_args = sys.argv[1:]
