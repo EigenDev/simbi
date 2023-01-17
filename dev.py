@@ -23,7 +23,7 @@ RST='\033[0m' # No Color
 
 flag_overrides = {} 
 flag_overrides['float_precision'] = ['--double', '--float']
-flag_overrides['gpu_compilation'] = ['gpu-compilation', '--cpu-compilation']
+flag_overrides['gpu_compilation'] = ['--gpu-compilation', '--cpu-compilation']
 flag_overrides['column_major']    = ['--row-major', '--column-major']
 flag_overrides['install_mode']    = ['develop', 'default']
 
