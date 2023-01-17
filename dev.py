@@ -74,10 +74,10 @@ def configure(args: argparse.Namespace,
     
 def parse_the_arguments():
     parser = argparse.ArgumentParser('Parser for installing simbi with meson')
-    subparsers = parser.add_subparsers(help='sub-command help')
+    subparsers = parser.add_subparsers(help='sub-commands that install / uninstall the code')
     install_parser = subparsers.add_parser('install', help='install simbi')
     install_parser.set_defaults(func=install_simbi)
-    uninstall_parser = subparsers.add_parser('uninstall', help='uninstall the script')
+    uninstall_parser = subparsers.add_parser('uninstall', help='uninstall simbi')
     uninstall_parser.set_defaults(func=uninstall_simbi)
     install_parser.add_argument(
         '--oned_bz',                      
@@ -138,7 +138,7 @@ def parse_the_arguments():
     major.add_argument('--row-major',   action='store_const', dest='column_major', const=False)
     major.add_argument('--column-major',action='store_const', dest='column_major', const=True)
     install_parser.set_defaults(float_precision=False, column_major=False, gpu_compilation='disabled')
-    return parser, parser.parse_args()
+    return parser, parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
 def install_simbi(args: argparse.Namespace) -> None:
     simbi_dir = Path().resolve()
