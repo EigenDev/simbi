@@ -38,7 +38,7 @@
 <strong>Easy Install</strong>
 1) Run 
     ```bash
-    $ CXX=<your_cpp_compiler> . ./install.sh [options]
+    $ CXX=<your_cpp_compiler> python dev.py install [options]
     ```
 
 <strong>Manual Install</strong>
