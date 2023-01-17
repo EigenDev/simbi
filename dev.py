@@ -61,8 +61,6 @@ def get_output(command: str) -> str:
 
 def configure(args: argparse.Namespace, 
               cxx: str, reconfigure: str, 
-              float_precision: bool,
-              column_major: bool,
               hdf5_include: str, 
               gpu_include: str) -> list[str]:
     command = f'''CXX={cxx} meson setup {args.build_dir} -Dgpu_compilation={args.gpu_compilation}  
@@ -189,8 +187,8 @@ def install_simbi(args: argparse.Namespace) -> None:
     if is_tool('nvcc'):
         gpu_runtime_command=r'echo $PATH | sed "s/:/\n/g" | grep "cuda/bin" | sed "s/\/bin//g" |  head -n 1'
     elif is_tool('hipcc'):
-        gpu_runtime_command=("$(hipconfig --rocmpath)").split() 
-    
+        gpu_runtime_command=['hipconfig', '--rocmpath'] 
+    ''
     gpu_runtime_dir = get_output(gpu_runtime_command)
     gpu_include=f"{gpu_runtime_dir}/include"
     hdf5_path_command   =r'echo $(command -v h5cc) | sed "s/:/\n/g" | grep "bin/h5cc" | sed "s/\/bin//g;s/\/h5cc//g" |  head -n 1'
@@ -221,7 +219,5 @@ def main():
     parser, args = parse_the_arguments()
     args.func(args)
     
-        
-
 if __name__ == '__main__':
     sys.exit(main())
