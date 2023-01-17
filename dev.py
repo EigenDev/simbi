@@ -21,11 +21,11 @@ default['build_dir']="builddir"
 YELLOW='\033[0;33m'
 RST='\033[0m' # No Color
 
-mutually_exclusives = {} 
-mutually_exclusives['float_precision'] = ['--double', '--float']
-mutually_exclusives['gpu_compilation'] = ['gpu-compilation', '--cpu-compilation']
-mutually_exclusives['column_major']    = ['--row-major', '--column-major']
-
+flag_overrides = {} 
+flag_overrides['float_precision'] = ['--double', '--float']
+flag_overrides['gpu_compilation'] = ['gpu-compilation', '--cpu-compilation']
+flag_overrides['column_major']    = ['--row-major', '--column-major']
+flag_overrides['install_mode']    = ['develop', 'default']
 def is_tool(name):
     """Check whether `name` is on PATH and marked as executable."""
     from shutil import which
@@ -151,8 +151,8 @@ def install_simbi(args: argparse.Namespace) -> None:
         for arg in vars(args):
             if arg not in ['verbose', 'configure', 'func']:
                 if getattr(args,arg) == default[arg]:
-                    if arg in mutually_exclusives.keys():
-                        if any(x in mutually_exclusives[arg] for x in cli_args):
+                    if arg in flag_overrides.keys():
+                        if any(x in flag_overrides[arg] for x in cli_args):
                             continue
                     elif arg in cli_args:
                         continue

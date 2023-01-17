@@ -100,7 +100,7 @@ def configure_state(script: str, parser: argparse.ArgumentParser, argv: Optional
     if type_checking_active:
         print("Validating Script Type Safety...\n")
         try:
-            subprocess.run(['python',  '-m',  'mypy',  f'{script}'], check = True)
+            subprocess.run([sys.executable,  '-m',  'mypy',  f'{script}'], check = True)
         except subprocess.CalledProcessError:
             print("\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option")
             sys.exit(0)
