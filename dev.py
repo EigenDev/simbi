@@ -26,10 +26,14 @@ flag_overrides['float_precision'] = ['--double', '--float']
 flag_overrides['gpu_compilation'] = ['gpu-compilation', '--cpu-compilation']
 flag_overrides['column_major']    = ['--row-major', '--column-major']
 flag_overrides['install_mode']    = ['develop', 'default']
+
+def get_tool(name):
+    from shutil import which 
+    return which(name)
+
 def is_tool(name):
     """Check whether `name` is on PATH and marked as executable."""
-    from shutil import which
-    return which(name) is not None
+    return get_tool(name) is not None 
 
 def read_from_cache() -> Optional[dict[str, str]]:
     cached_args = Path(cache_file)
@@ -57,18 +61,18 @@ def write_to_cache(args: argparse.Namespace) -> None:
         f.write(json.dumps(details))
     
 def get_output(command: str) -> str:
-    return subprocess.Popen(command, stdout=subprocess.PIPE, shell=True).stdout.read().decode('utf-8').strip()
+    return subprocess.Popen(command, stdout=subprocess.PIPE).stdout.read().decode('utf-8').strip()
 
 def configure(args: argparse.Namespace, 
-              cxx: str, reconfigure: str, 
+              reconfigure: str, 
               hdf5_include: str, 
               gpu_include: str) -> list[str]:
-    command = f'''CXX={cxx} meson setup {args.build_dir} -Dgpu_compilation={args.gpu_compilation}  
+    command = f'''meson setup {args.build_dir} -Dgpu_compilation={args.gpu_compilation}  
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
     -D1d_block_size={args.oned_bz} -D2d_block_size={args.twod_bz} -D3d_block_size={args.thrd_bz} \
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
     -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} {reconfigure}'''.split()
-    return ' '.join(var for var in command)
+    return command
     
 def parse_the_arguments():
     parser = argparse.ArgumentParser('Parser for installing simbi with meson')
@@ -143,6 +147,8 @@ def install_simbi(args: argparse.Namespace) -> None:
     if args.build_dir == 'build':
         raise argparse.ArgumentError(args.builddir, "please choose a different build name other than 'build'")
 
+    check_minimal_depencies()
+    simbi_env = os.environ.copy()
     # Check if any args passed to the cli exist that would override the cache args
     cli_args = sys.argv[1:]
     if cached_vars := read_from_cache():
@@ -158,61 +164,54 @@ def install_simbi(args: argparse.Namespace) -> None:
                         setattr(args, arg, cached_vars[arg])
     write_to_cache(args)
     
-    simbi_build_dir = args.build_dir 
-    configure_only = False
-    try:
-        subprocess.check_call([
+
+    build_configured =  subprocess.run([
             "meson", 
             "introspect", 
             f"{args.build_dir}", 
             "-i",
-            "--targets"], stdout=subprocess.DEVNULL)
-        build_configured = True
-    except subprocess.CalledProcessError:
-        build_configured = False
+            "--targets"], 
+            stdout=subprocess.DEVNULL, 
+            stderr=subprocess.DEVNULL).returncode == 0
     
-    reconfigure_flag = ''
-    if build_configured:
-        reconfigure_flag = '--reconfigure'
-    
+    reconfigure_flag = '--reconfigure' if build_configured else ''
     verbose_flag = '--verbose' if args.verbose else ''
-    if 'CXX' not in os.environ: 
-        cxx = get_output('echo $(command -v c++)')
+    if 'CXX' not in simbi_env: 
+        simbi_env['CXX'] = get_tool('c++')
         print(f"{YELLOW}WRN{RST}: C++ compiler not set")
-        print(f"Using symbolic link {cxx} as default")
-    else:
-        cxx = os.environ['CXX']
+        print(f"Using symbolic link {simbi_env['CXX']} as default")
     
     gpu_runtime_dir=''
     if is_tool('nvcc'):
-        gpu_runtime_command=r'echo $PATH | sed "s/:/\n/g" | grep "cuda/bin" | sed "s/\/bin//g" |  head -n 1'
+        which_cuda = Path(get_tool('nvcc'))
+        gpu_runtime_dir  = ' '.join([str(path.parent) for path in which_cuda.parents if 'cuda' in str(path.parent)])        
     elif is_tool('hipcc'):
-        gpu_runtime_command=['hipconfig', '--rocmpath'] 
-    ''
-    gpu_runtime_dir = get_output(gpu_runtime_command)
-    gpu_include=f"{gpu_runtime_dir}/include"
-    hdf5_path_command   =r'echo $(command -v h5cc) | sed "s/:/\n/g" | grep "bin/h5cc" | sed "s/\/bin//g;s/\/h5cc//g" |  head -n 1'
-    hdf5_path = get_output(hdf5_path_command)
-    hdf5_include_command=f'( dirname $(find {hdf5_path} -iname "H5Cpp.h" -type f 2>/dev/null -print -quit ) )'
-    hdf5_include = get_output(hdf5_include_command)
+        gpu_runtime_dir = get_output(['hipconfig', '--rocmpath'])
     
-    check_minimal_depencies()
-    config_command = configure(args, cxx, reconfigure_flag, None, None, hdf5_include, gpu_include)
-    subprocess.run(config_command, shell=True)
+    
+    gpu_include=f"{gpu_runtime_dir}/include"
+    h5cc_show = get_output(['h5cc', '-show']).split()
+    hdf5_include = ' '.join([include_dir[2:] for include_dir in filter(lambda x: x.startswith('-I'), h5cc_show)])
+    
+    config_command = configure(args, reconfigure_flag, hdf5_include, gpu_include)
+    subprocess.run(config_command, env=simbi_env)
     if not args.configure:
         build_dir=f"{simbi_dir}/build"
         egg_dir  =f"{simbi_dir}/simbi.egg-info"
-        install_command = f'cd {args.build_dir} && meson compile {verbose_flag} && meson install' 
-        subprocess.run(install_command, check=True, shell=True)
-        subprocess.run(f'rm -rf {egg_dir} {build_dir}', check=True, shell=True)
+        subprocess.Popen(['meson', 'compile'], cwd=f'{args.build_dir}').wait()
+        subprocess.Popen(['meson', 'install'], cwd=f'{args.build_dir}').wait()
+        subprocess.run(['rm', '-rf', f'{egg_dir}', f'{build_dir}'], check=True)
         
 def uninstall_simbi(args: argparse.Namespace) -> None:
     if (config_cache := read_from_cache()):
         build_dir = config_cache['build_dir']
     else:
         build_dir = args.build_dir
-        
-    subprocess.run(['ninja', '-C', f'{build_dir}', 'uninstall'], check=True)
+    
+    try:
+        subprocess.run(['ninja', '-C', f'{build_dir}', 'uninstall'], check=True)
+    except subprocess.CalledProcessError:
+        subprocess.run(['make', '-C', f'{build_dir}', 'uninstall'], check=True)
     subprocess.run([sys.executable, '-m', 'pip', 'uninstall', 'simbi'], check=True)
     
 def main():
