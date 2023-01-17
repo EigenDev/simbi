@@ -27,11 +27,11 @@ flag_overrides['gpu_compilation'] = ['--gpu-compilation', '--cpu-compilation']
 flag_overrides['column_major']    = ['--row-major', '--column-major']
 flag_overrides['install_mode']    = ['develop', 'default']
 
-def get_tool(name):
+def get_tool(name: str) -> str:
     from shutil import which 
     return which(name)
 
-def is_tool(name):
+def is_tool(name : str) -> bool:
     """Check whether `name` is on PATH and marked as executable."""
     return get_tool(name) is not None 
 
@@ -46,7 +46,7 @@ def read_from_cache() -> Optional[dict[str, str]]:
             ...
         return None 
 
-def check_minimal_depencies():
+def check_minimal_depencies() -> None:
     if not is_tool('meson'):
         subprocess.run([sys.executable, '-m', 'pip', 'install', 'meson'], check=True)
     
@@ -67,6 +67,7 @@ def configure(args: argparse.Namespace,
               reconfigure: str, 
               hdf5_include: str, 
               gpu_include: str) -> list[str]:
+    
     command = f'''meson setup {args.build_dir} -Dgpu_compilation={args.gpu_compilation}  
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
     -D1d_block_size={args.oned_bz} -D2d_block_size={args.twod_bz} -D3d_block_size={args.thrd_bz} \
@@ -74,7 +75,7 @@ def configure(args: argparse.Namespace,
     -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} {reconfigure}'''.split()
     return command
     
-def parse_the_arguments():
+def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser = argparse.ArgumentParser('Parser for installing simbi with meson')
     subparsers = parser.add_subparsers(help='sub-commands that install / uninstall the code')
     install_parser = subparsers.add_parser('install', help='install simbi')
@@ -140,6 +141,7 @@ def parse_the_arguments():
     major.add_argument('--row-major',   action='store_const', dest='column_major', const=False)
     major.add_argument('--column-major',action='store_const', dest='column_major', const=True)
     install_parser.set_defaults(float_precision=False, column_major=False, gpu_compilation='disabled')
+    
     return parser, parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
 def install_simbi(args: argparse.Namespace) -> None:
@@ -214,8 +216,8 @@ def uninstall_simbi(args: argparse.Namespace) -> None:
         subprocess.run(['make', '-C', f'{build_dir}', 'uninstall'], check=True)
     subprocess.run([sys.executable, '-m', 'pip', 'uninstall', 'simbi'], check=True)
     
-def main():
-    parser, args = parse_the_arguments()
+def main() -> int:
+    _, args = parse_the_arguments()
     args.func(args)
     
 if __name__ == '__main__':
