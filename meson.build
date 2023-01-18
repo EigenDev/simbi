@@ -256,7 +256,7 @@ endif
 
 message(f'Designated install directory: @py3_install_dir@')
 extras = get_option('extras') ? '[extras]' : ''
-install_flag = get_option('profile') == 'develop' ? '-e'  : ''
+install_flag = get_option('profile') == 'develop' ? '-e'  : []
 install_handle = meson.current_source_dir() + extras
 install_call = ['pip', 'install'] 
 install_call += [install_flag, install_handle, pip_args]
