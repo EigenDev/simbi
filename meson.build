@@ -105,8 +105,8 @@ if get_option('gpu_compilation').enabled()
             # Meson does not support hip yet, so we manually
             # declare the dependency
             hip_dep = declare_dependency(
-                link_args: [f'-L@rocm_path@/lib', f'-L@rocm_path@/hip/lib', '-lamdhip64', '-O3', '-lgcc_s', '-lpthread', '-lm', '-lrt'],
-                include_directories: [f'@rocm_path@/include', f'@rocm_path@/hsa/include', f'@rocm_path@/hip/include']
+                link_args: [f'-L@rocm_path@/lib', '-lamdhip64', '-O3', '-lgcc_s', '-lpthread', '-lm', '-lrt'],
+                include_directories: [f'@rocm_path@/include']
             )
             gpu_depends += [hip_dep]
         endif
