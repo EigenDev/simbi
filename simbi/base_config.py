@@ -3,7 +3,7 @@ import abc
 from .dynarg import DynamicArg
 from .key_types import *
 from ._detail import get_subparser
-from typing import ParamSpec, TypeVar, Type, Generic
+from typing import ParamSpec, TypeVar
 class_props = [
     'boundary_conditions', 'coord_system', 'data_directory', 
     'dens_outer', 'resolution', 'dlogt', 'dynamic_args', 
