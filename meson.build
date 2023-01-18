@@ -43,10 +43,9 @@ install_dir_permission = run_command(py3,
   check : true
 ).stdout().strip()
 
-pip_args = []
+pip_args = '--user'
 if install_dir_permission == 'False'
     py3_install_dir = run_command('python', '-m', 'site', '--user-site', check: true).stdout().strip()
-    pip_args = '--user'
 endif
 #################################################################
 # SOME BOOK KEEPING FOR ALL INSTALLS
@@ -205,7 +204,7 @@ if get_option('gpu_compilation').enabled()
         gpu_cc =  hip.found() ? 'hipcc' : 'nvcc'
         gpu_compiler = find_program(f'@gpu_cc@')
         gpu_objs = []
-        gpu_includes = ['-I../src', '-I.', '-I'+meson.current_build_dir()]
+        gpu_includes = ['-I'+meson.current_source_dir()+'/src', '-I.', '-I'+meson.current_build_dir()]
         gpu_includes += ['-I' + get_option('gpu_include_dir'), '-I' + get_option('hdf5_include_dir')]
         foreach source : sources
             gpu_trg = custom_target(
@@ -256,19 +255,12 @@ if get_option('gpu_compilation').enabled()
 endif
 
 message(f'Designated install directory: @py3_install_dir@')
-if get_option('profile') == 'default'
-    meson.add_install_script(
-        'pip',
-        'install',
-        meson.current_source_dir(),
-        pip_args,
-    )
-else 
-    meson.add_install_script(
-        'pip',
-        'install',
-        '-e',
-        meson.current_source_dir(),
-        pip_args,
-    )
-endif
+extras = get_option('extras') ? '[extras]' : ''
+install_flag = get_option('profile') == 'develop' ? '-e'  : ''
+install_handle = meson.current_source_dir() + extras
+install_call = ['pip', 'install'] 
+install_call += [install_flag, install_handle, pip_args]
+
+meson.add_install_script(
+    install_call
+)

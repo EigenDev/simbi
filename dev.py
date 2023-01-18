@@ -81,7 +81,7 @@ def configure(args: argparse.Namespace,
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
     -D1d_block_size={args.oned_bz} -D2d_block_size={args.twod_bz} -D3d_block_size={args.thrd_bz} \
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
-    -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} {reconfigure}'''.split()
+    -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} -Dextras={args.extras} {reconfigure}'''.split()
     return command
     
 def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
@@ -140,6 +140,12 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         type=str,
         default='builddir',
     )
+    install_parser.add_argument(
+        '--extras',
+        help='flag to install the optional dependencies',
+        action='store_true',
+        default=False,
+    )
     compile_type = install_parser.add_mutually_exclusive_group()
     compile_type.add_argument('--gpu-compilation',  action='store_const', dest='gpu_compilation', const='enabled')
     compile_type.add_argument('--cpu-compilation',  action='store_const', dest='gpu_compilation', const='disabled')
@@ -164,7 +170,7 @@ def install_simbi(args: argparse.Namespace) -> None:
     cli_args = sys.argv[1:]
     if cached_vars := read_from_cache():
         for arg in vars(args):
-            if arg not in ['verbose', 'configure', 'func']:
+            if arg not in ['verbose', 'configure', 'func', 'extras']:
                 if getattr(args,arg) == default[arg]:
                     if arg in flag_overrides.keys():
                         if any(x in flag_overrides[arg] for x in cli_args):
@@ -204,6 +210,10 @@ def install_simbi(args: argparse.Namespace) -> None:
     h5cc_show = get_output(['h5cc', '-show']).split()
     hdf5_include = ' '.join([include_dir[2:] for include_dir in filter(lambda x: x.startswith('-I'), h5cc_show)])
     
+    if not hdf5_include:
+        hdf5_libpath = Path(' '.join([lib_dir[2:] for lib_dir in filter(lambda x: x.startswith('-L'), h5cc_show)]))
+        hdf5_include = hdf5_libpath.parents[0].resolve() / 'include'
+        
     config_command = configure(args, reconfigure_flag, hdf5_include, gpu_include)
     subprocess.run(config_command, env=simbi_env)
     if not args.configure:
@@ -228,6 +238,6 @@ def uninstall_simbi(args: argparse.Namespace) -> None:
 def main() -> int:
     _, args = parse_the_arguments()
     args.func(args)
-    
+
 if __name__ == '__main__':
     sys.exit(main())

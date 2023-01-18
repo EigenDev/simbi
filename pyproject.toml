@@ -35,7 +35,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-rich = ["rich", "rich-argparse", "cmasher"]
+extras = [
+  "rich-argparse",
+  "cmasher",
+]
 
 [project.scripts]
 simbi = "simbi.__main__:main"
