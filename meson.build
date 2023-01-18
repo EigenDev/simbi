@@ -43,9 +43,10 @@ install_dir_permission = run_command(py3,
   check : true
 ).stdout().strip()
 
-pip_args = '--user'
+pip_args = []
 if install_dir_permission == 'False'
     py3_install_dir = run_command('python', '-m', 'site', '--user-site', check: true).stdout().strip()
+    pip_args='--user'
 endif
 #################################################################
 # SOME BOOK KEEPING FOR ALL INSTALLS
