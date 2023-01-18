@@ -161,7 +161,7 @@ def progressbar(it: range, prefix: str = "", size: int = 100, out: TextIO = sys.
 
 
 def print_progress() -> None:
-    for i in progressbar(range(100), "Loading: ", 60):
+    for _ in progressbar(range(100), "Loading: ", 60):
         sleep(0.01)
 
 
