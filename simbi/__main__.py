@@ -227,8 +227,7 @@ def configure_state(
     if type_checking_active:
         from mypy import api
         print("Validating Script Type Safety...\n")
-        result = list(api.run([f'{script}']))
-        print(result)
+        result = list(api.run(['--strict', f'{script}']))
         result[:2] = result[0].split('\n')[:2]
         if result[0]:
             print(f'\n{bcolors.OKBLUE}Type checking report{bcolors.ENDC}:\n')
@@ -310,7 +309,7 @@ def configure_state(
         states.append(state)
 
     if peek_only:
-        exit(0)
+        sys.exit(0)
 
     return states, kwargs, state_docs
 
