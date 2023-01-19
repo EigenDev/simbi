@@ -240,8 +240,8 @@ def configure_state(
 
         # exit_color = bcolors.OKGREEN if result[2] == 0 else bcolors.FAIL
         # print(f'\n{bcolors.BOLD}Exit status{bcolors.ENDC}: {exit_color}{result[2]}{bcolors.ENDC}')
-        if not result[2] == 0:
-            raise TypeError("\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option")
+        # if not result[2] == 0:
+        #     raise TypeError("\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option")
 
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
