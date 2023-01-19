@@ -99,6 +99,7 @@ if get_option('gpu_compilation').enabled()
                 '-std=c++17',
                 '-fPIC', 
                 '-O3', 
+                f'--offload-arch=@gpu_arch@',
                 '-march=native',
             ]
             rocm_path = run_command('hipconfig', '--rocmpath', check: true).stdout().strip()
