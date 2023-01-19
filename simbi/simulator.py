@@ -86,8 +86,8 @@ class Hydro:
         # Update any static vars with attributes obtained from some setup
         # configuration
         clean_attributes = [x for x in extras.keys() if not x.startswith('__')]
-        [setattr(self, attribute, extras[attribute])
-         for attribute in clean_attributes if attribute in dir(self)]  # type: ignore
+        [setattr(self, attribute, extras[attribute]) # type: ignore
+         for attribute in clean_attributes if attribute in dir(self)]
 
         # check if given simple nexted sequence to split across the grid
         if all(len(v) == 3 for v in initial_state):
