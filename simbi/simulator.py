@@ -320,7 +320,7 @@ class Hydro:
         for key, param in params.locals.items():
             if key != 'self':
                 if isinstance(param, (float, np.float64)):
-                    val_str = f"{param:.2f}"
+                    val_str = f"{param:.3f}"
                 elif callable(param):
                     val_str = f"user-defined {key} function"
                 elif isinstance(param, tuple):
@@ -330,7 +330,15 @@ class Hydro:
                     if len(param) > 6:
                         val_str = f"user-defined {key} terms"
                     else:
-                        val_str = f"{param}"
+                        if any(isinstance(val, (float, int)) for val in param):
+                            val_str = []
+                            for val in param:
+                                if isinstance(val, list):
+                                    val_str += [[float(f'{item:.3f}') for item in val]]
+                                else:
+                                    val_str += [val]
+                        else:
+                            val_str = f"{param}"
                 else:
                     val_str = str(param)
 

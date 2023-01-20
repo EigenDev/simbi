@@ -205,10 +205,28 @@ def valid_pyscript(param):
                 [Path(conf).stem for conf in pkg_configs + soft_configs])
             raise argparse.ArgumentTypeError(
                 'No configuration named {}{}{}. The only valid configurations are:\n\n{}'.format(
-                    bcolors.OKCYAN, base, bcolors.ENDC, '\n'.join(
+                    bcolors.OKCYAN, base, bcolors.ENDC, '\n-'.join(
                         f'{conf}' for conf in available_configs)))
     return param
 
+def type_check_input(file: str) -> None:
+    from mypy import api
+    result = api.run([f'{file}'])
+    print(result)
+    result[:2] = result[0].split('\n')[:2]
+    if result[0]:
+        print(f'\n{bcolors.OKBLUE}Type checking report{bcolors.ENDC}:')
+        report_color = bcolors.FAIL if 'error' in result[0] else bcolors.OKGREEN
+        print(f'{report_color}{result[0]}{bcolors.ENDC}')  # stdout
+
+    if result[1]:
+        print(f'\n{bcolors.WARNING}Error report{bcolors.ENDC}:\n')
+        print(result[1])  # stderr
+
+    exit_color = bcolors.OKGREEN if result[2] == 0 else bcolors.FAIL
+    print(f'\n{bcolors.BOLD}Exit status{bcolors.ENDC}: {exit_color}{result[2]}{bcolors.ENDC}')
+    if not result[2] == 0:
+        raise TypeError("\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option")
 
 def configure_state(
         script: str,
@@ -220,29 +238,14 @@ def configure_state(
     in setup script. Once configured, pass it back to main to be simulated
     """
     import sys
-    script_dirname = os.path.dirname(script)
-    base_script = Path(os.path.abspath(script)).stem
+    script_dirname = Path(script).parent
+    base_script = Path(script).stem
     sys.path.insert(1, f'{script_dirname}')
 
     if type_checking_active:
-        from mypy import api
         print("Validating Script Type Safety...\n")
-        # result = list(api.run(['--strict', f'{script}']))
-        # result[:2] = result[0].split('\n')[:2]
-        # if result[0]:
-        #     print(f'\n{bcolors.OKBLUE}Type checking report{bcolors.ENDC}:\n')
-        #     report_color = bcolors.FAIL if 'error' in result[0] else bcolors.OKGREEN
-        #     print(f'{report_color}{result[0]}{bcolors.ENDC}')  # stdout
-
-        # if result[1]:
-        #     print(f'\n{bcolors.WARNING}Error report{bcolors.ENDC}:\n')
-        #     print(result[1])  # stderr
-
-        # exit_color = bcolors.OKGREEN if result[2] == 0 else bcolors.FAIL
-        # print(f'\n{bcolors.BOLD}Exit status{bcolors.ENDC}: {exit_color}{result[2]}{bcolors.ENDC}')
-        # if not result[2] == 0:
-        #     raise TypeError("\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option")
-
+        # type_check_input(script)
+        
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
 
@@ -325,8 +328,10 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
     sim_actions = [
         g for g in run_parser._action_groups if g.title in [
             'override', 'onthefly']]
+    
     sim_dicts = [{a.dest: getattr(args, a.dest, None)
                   for a in group._group_actions} for group in sim_actions]
+    
     overridable_args = vars(argparse.Namespace(**sim_dicts[0])).keys()
     sim_args = argparse.Namespace(**{**sim_dicts[0], **sim_dicts[1]})
     for idx, sim_state in enumerate(sim_states):

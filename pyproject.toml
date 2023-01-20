@@ -62,7 +62,6 @@ readme = {file = ["README.md"]}
 
 
 [tool.mypy]
-# plugins = "simbi.__main__:main"
 ignore_missing_imports = true
 # Start off with these
 warn_unused_configs = true
