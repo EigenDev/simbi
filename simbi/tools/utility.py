@@ -105,9 +105,9 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
                     field_str_list.append( r'$p/p_0$')
         elif field == 'energy_rst':
             if args.units:
-                field_str_list.append( r'$\tau + D \  [\rm erg \ cm^{-3}]$')
+                field_str_list.append( r'$E \  [\rm erg \ cm^{-3}]$')
             else:
-                field_str_list.append( r'$\tau + D')
+                field_str_list.append( r'$E / E_0$')
         elif field == 'chi':
             field_str_list.append( r'$\chi$')
         elif field == 'chi_dens':
