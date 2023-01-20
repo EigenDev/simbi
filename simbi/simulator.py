@@ -109,22 +109,14 @@ class Hydro:
             resolution = (resolution,)
 
         self.gamma = gamma
-        if len(initial_state) < 5 or len(
-                initial_state) < 8 and self.discontinuity:
+        if len(initial_state) < 6 or len(initial_state) < 8 and self.discontinuity:
             self.geometry = cast(Sequence[float], geometry)
             self.resolution = cast(Sequence[int], resolution)
             self.nvars = (2 + 1 * (self.dimensionality != 1) +
                           self.dimensionality)
 
             # Initialize conserved u-array and flux arrays
-            self.u = np.zeros(
-                shape=(
-                    self.nvars,
-                    *
-                    np.asarray(
-                        self.resolution).flatten()[
-                        ::-
-                        1]))
+            self.u = np.zeros(shape=(self.nvars,*np.asarray(self.resolution).flatten()[ ::- 1]))
             if self.discontinuity:
                 print(
                     f'Initializing Problem With a {str(self.dimensionality)}D Discontinuity...',
@@ -216,14 +208,15 @@ class Hydro:
                 self.init_energy = self.calc_labframe_energy(
                     rho, lorentz_factor, total_enthalpy, pressure)
 
-                if self.dimensionality == 2:
-                    self.u[...] = np.array([self.init_density,
-                                            *self.init_momentum,
-                                            self.init_energy,
-                                            np.zeros_like(self.init_density)])
-                else:
+                if self.dimensionality == 1:
                     self.u[...] = np.array(
                         [self.init_density, *self.init_momentum, self.init_energy])
+                else:
+                    self.u[...] = np.array([self.init_density,
+                        *self.init_momentum,
+                        self.init_energy,
+                        np.zeros_like(self.init_density)])
+                    
         else:
             raise ValueError("Initial State contains too many variables")
 
@@ -394,6 +387,8 @@ class Hydro:
         order = 1 if first_order else 2
         for boundary in range(self.dimensionality * len(edges)):
             source = boundary_sources[boundary // order]
+            print(boundary_sources)
+            zzz = input('')
             if any(val != 0 for val in source):
                 view[slices[boundary]] = source[:, None]
 
