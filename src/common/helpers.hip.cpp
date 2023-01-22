@@ -826,21 +826,20 @@ namespace simbi{
                         switch (boundary_conditions[5])
                         {
                         case simbi::BoundaryCondition::REFLECTING:
-                            cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)]    =   cons[(x2grid_size - 4) * sx * sy + (jj + 2) * sx + (ii + 2)];
-                            cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)]    =   cons[(x2grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
-                            cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)].s3 = - cons[(x2grid_size - 4) * sx * sy + (jj + 2) * sx + (ii + 2)].s3;
-                            cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)].s3 = - cons[(x2grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)].s3;
+                            cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)]    =   cons[(x3grid_size - 4) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                            cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)]    =   cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                            cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)].s3 = - cons[(x3grid_size - 4) * sx * sy + (jj + 2) * sx + (ii + 2)].s3;
+                            cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)].s3 = - cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)].s3;
                             break;
                         case simbi::BoundaryCondition::INFLOW:
                             cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)] = inflow_zones[5];
                             cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)] = inflow_zones[5];
                             break;
                         default:
-                            cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x2grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
-                            cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x2grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                            cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                            cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
                             break;
                         }
-
                         break;
                     }
                     
