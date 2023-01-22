@@ -187,11 +187,20 @@ void SRHD::advance(
             }
         }
 
-        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * time_constant;
+        const auto d_source = den_source_all_zeros    ? 0.0 : dens_source[ii];
+        const auto s_source = mom1_source_all_zeros   ? 0.0 : mom_source[ii];
+        const auto e_source = energy_source_all_zeros ? 0.0 : erg_source[ii];
+        const auto sources = Conserved{d_source, s_source, e_source} * time_constant;
         switch(geometry)
         {
             case simbi::Geometry::CARTESIAN:
             {
+                #if !GPU_CODE
+                if (ia == nx / 2) {
+                    simbi::util::writeln("[{}], SFlux: {}", ia, (frf - flf).s * invdx1 * step * dt);
+                    std::cin.get();
+                }
+                #endif
                 cons_data[ia] -= ((frf - flf) * invdx1) * dt * step;
                 break;
             }
@@ -294,6 +303,12 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             //     // printf("peq: %f, npew: %f\n", rho * emin * (gamma - 1.0));
             //     peq = rho * emin * (gamma - 1.0);
             // }
+            #if !GPU_CODE
+            if (ii == nx / 2) {
+                simbi::util::writeln("[{}], S1: {},  v1: {}", ii, S, v);
+                std::cin.get();
+            }
+            #endif
             press_data[ii] = peq;
             prims_data[ii] = Primitive{rho, v, peq};
             workLeftToDo = false;
@@ -629,6 +644,9 @@ SRHD::simulate1D(
     this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
     this->total_zones     = nx;
     this->checkpoint_zones= active_zones;
+    this->den_source_all_zeros    = std::all_of(sourceD.begin(), sourceD.end(), [](real i) {return i==0;});
+    this->mom1_source_all_zeros   = std::all_of(sourceS.begin(), sourceS.end(), [](real i) {return i==0;});
+    this->energy_source_all_zeros = std::all_of(source0.begin(), source0.end(), [](real i) {return i==0;});
     
     inflow_zones.resize(2);
     for (size_t i = 0; i < 2; i++)

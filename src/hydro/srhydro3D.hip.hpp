@@ -26,7 +26,7 @@ namespace simbi
         ndarray<conserved_t> cons, outer_zones, inflow_zones;
         ndarray<real> sourceD, sourceS1, sourceS2, sourceS3, sourceTau, pressure_guess, dt_min;
         ndarray<bool> object_pos;
-        bool d_all_zeros, s1_all_zeros, s2_all_zeros, s3_all_zeros, e_all_zeros, scalar_all_zeros, quirk_smoothing;
+        bool scalar_all_zeros, quirk_smoothing;
 
         /* Methods */
         SRHD3D();
@@ -52,7 +52,7 @@ namespace simbi
             const luint zstride);
 
         GPU_CALLABLE_MEMBER
-        sr3d::Eigenvals calc_Eigenvals(
+        sr3d::Eigenvals calc_eigenvals(
             const sr3d::Primitive &primsL,
             const sr3d::Primitive &primsR,
             const luint nhat);

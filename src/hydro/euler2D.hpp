@@ -26,7 +26,6 @@ namespace simbi {
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons, outer_zones, inflow_zones;
         ndarray<real> sourceRho, sourceM1, sourceM2, sourceE, dt_min;
-        bool rho_all_zeros, m1_all_zeros, m2_all_zeros, e_all_zeros;
         
         Newtonian2D();
         Newtonian2D(

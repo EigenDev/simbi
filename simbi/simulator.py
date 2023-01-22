@@ -122,7 +122,7 @@ class Hydro:
                     f'Initializing Problem With a {str(self.dimensionality)}D Discontinuity...',
                     flush=True)
 
-                if len(self.geometry) == 3:
+                if len(self.geometry) == 3 and isinstance(self.geometry[0], (int, float)):
                     geom_tuple: Any = (self.geometry,)
                 else:
                     geom_tuple = self.geometry
@@ -138,7 +138,7 @@ class Hydro:
                     self.resolution[idx] for idx in range(
                         len(geom_tuple))]
                 pieces = [round(break_points[idx] / spacings[idx])
-                          for idx in range(len(geom_tuple))]
+                          for idx in range(len(break_points))]
 
                 partition_inds: list[Any]
                 if len(break_points) == 1:
@@ -381,17 +381,18 @@ class Hydro:
             slices = [np.s_[:, i, :]
                       for i in edges] + [np.s_[..., i] for i in edges]
         else:
-            slices = [np.s_[:, i, ...] for i in edges] + [np.s_[..., i, :]
-                                                          for i in edges] + [np.s_[..., i] for i in edges]
+            slices = [np.s_[..., i] for i in edges] + [np.s_[..., i, :] for i in edges] + [np.s_[:, i, ...] for i in edges]
 
         order = 1 if first_order else 2
+        if self.dimensionality > 1:
+            source_transform = np.s_[:, None if self.dimensionality == 2 else None, None]
+        else:
+            source_transform = np.s_[:]
+            
         for boundary in range(self.dimensionality * len(edges)):
             source = boundary_sources[boundary // order]
-            print(boundary_sources)
-            zzz = input('')
             if any(val != 0 for val in source):
-                view[slices[boundary]] = source[:, None]
-
+                view[slices[boundary]] = source[source_transform]
         return boundary_sources
 
     def _generate_the_grid(self, linspace: bool) -> None:
@@ -507,7 +508,7 @@ class Hydro:
             boundary_source (array_like): An array of conserved quantities at the boundaries of the grid
 
         Returns:
-            u (array): The hydro solution containing the primitive variables
+            solution (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
         self.u = np.asarray(self.u)
@@ -603,8 +604,7 @@ class Hydro:
             flush=True)
         kwargs: dict[str, Any] = {}
         if self.dimensionality == 1:
-            sources = np.zeros_like(
-                self.u) if sources is None else np.asarray(sources)
+            sources = np.zeros(3) if sources is None else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             if self.regime == "classical":
                 state = PyState(
@@ -628,8 +628,7 @@ class Hydro:
 
         elif self.dimensionality == 2:
             # ignore the chi term
-            sources = np.zeros(
-                self.u[:-1].shape, dtype=float) if sources is None else np.asarray(sources)
+            sources = np.zeros(4) if sources is None else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
 
             if self.regime == "classical":
@@ -662,8 +661,7 @@ class Hydro:
                     x2=self.x2,
                     coord_system=cython_coordinates)
         else:
-            sources = np.zeros(
-                self.u.shape[:-1], dtype=float) if sources is None else np.asarray(sources)
+            sources = np.zeros(5) if sources is None else np.asarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
 
             if self.regime == "classical":
@@ -680,7 +678,7 @@ class Hydro:
                     x3=self.x3,
                     coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
-
+        
         self.solution = state.simulate(
             sources=sources,
             tstart=self.start_time,
@@ -699,6 +697,7 @@ class Hydro:
             boundary_sources=boundary_sources,
             **kwargs)
 
+    
         if not periodic:
             self._cleanup(first_order)
         return self.solution

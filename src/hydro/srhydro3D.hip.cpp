@@ -69,7 +69,7 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
     auto* const prim_data  = prims.data();
     auto* const cons_data  = cons.data();
     auto* const press_data = pressure_guess.data(); 
-    simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
+    simbi::parallel_for(p, (luint)0, nx * ny * nz, [=] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;
@@ -144,7 +144,7 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
             real v3 = S3 * inv_et;
             press_data[gid] = peq;
             prim_data[gid]  = Primitive{rho, v1, v2, v3, peq};
-            workLeftToDo = false;
+            workLeftToDo    = false;
         }
     });
 }
@@ -152,7 +152,7 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 GPU_CALLABLE_MEMBER
-Eigenvals SRHD3D::calc_Eigenvals(
+Eigenvals SRHD3D::calc_eigenvals(
     const Primitive &primsL,
     const Primitive &primsR,
     const luint nhat)
@@ -181,7 +181,7 @@ Eigenvals SRHD3D::calc_Eigenvals(
             const real bl    = (vbar - cbar)/(1 - cbar*vbar);
             const real br    = (vbar + cbar)/(1 + cbar*vbar);
             const real aL    = helpers::my_min(bl, (vL - csL)/(1 - vL*csL));
-            const real aR    = helpers::my_max(br, (vR  + csR)/(1 + vR*csR));
+            const real aR    = helpers::my_max(br, (vR + csR)/(1 + vR*csR));
 
             return Eigenvals(aL, aR, csL, csR);
         }
@@ -229,9 +229,9 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD3D::prims2cons(const Primitive &prims)
 {
     const real rho = prims.rho;
-    const real v1 = prims.v1;
-    const real v2 = prims.v2;
-    const real v3 = prims.v3;
+    const real v1  = prims.v1;
+    const real v2  = prims.v2;
+    const real v3  = prims.v3;
     const real pressure = prims.p;
     const real lorentz_gamma = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
     const real h = 1 + gamma * pressure / (rho * (gamma - 1));
@@ -368,9 +368,9 @@ Conserved SRHD3D::prims2flux(const Primitive &prims, const luint nhat = 1)
     const real v2       = prims.v2;
     const real v3       = prims.v3;
     const real chi      = prims.chi;
-    const real vn       = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
+    const real vn       = prims.vcomponent(nhat);
     const real pressure = prims.p;
-    const real lorentz_gamma = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3*v3));
+    const real lorentz_gamma = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
 
     const real h  = 1 + gamma * pressure / (rho * (gamma - 1));
     const real D  = rho * lorentz_gamma;
@@ -400,18 +400,35 @@ Conserved SRHD3D::calc_hll_flux(
     const Primitive &right_prims,
     const   luint nhat)
 {
-    const Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
+    const Eigenvals lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL = lambda.aL;
     const real aR = lambda.aR;
 
     // Calculate plus/minus alphas
-    const real aLminus = aL < 0 ? aL : 0;
-    const real aRplus  = aR > 0 ? aR : 0;
+    const real aLm = aL < 0 ? aL : 0;
+    const real aRp = aR > 0 ? aR : 0;
+    const real vface = 0.0;
+    Conserved net_flux;
+    // Compute the HLL Flux component-wise
+    if (vface < aLm) {
+        net_flux = left_flux - left_state * vface;
+    }
+    else if (vface > aRp) {
+        net_flux = right_flux - right_state * vface;
+    }
+    else {    
+        Conserved f_hll       = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aRp * aLm) / (aRp - aLm);
+        const Conserved u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
+        net_flux = f_hll - u_hll * vface;
+    }
+    // Upwind the scalar concentration flux
+    if (net_flux.d < 0)
+        net_flux.chi = right_prims.chi * net_flux.d;
+    else
+        net_flux.chi = left_prims.chi  * net_flux.d;
 
     // Compute the HLL Flux component-wise
-    return (left_flux * aRplus - right_flux * aLminus 
-                + (right_state - left_state) * aRplus * aLminus) /
-                    (aRplus - aLminus);
+    return net_flux;
 };
 
 GPU_CALLABLE_MEMBER
@@ -424,7 +441,7 @@ Conserved SRHD3D::calc_hllc_flux(
     const Primitive &right_prims,
     const   luint nhat = 1)
 {
-    const Eigenvals lambda = calc_Eigenvals(left_prims, right_prims, nhat);
+    const Eigenvals lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL = lambda.aL;
     const real aR = lambda.aR;
 
@@ -959,7 +976,6 @@ void SRHD3D::advance(
             }
 
             // Do the same thing, but for the left side interface [i - 1/2]
-            // Do the same thing, but for the left side interface [i - 1/2]
             xprimsL = xleft_mid + helpers::minmod((xleft_mid - xleft_most) * plm_theta, (center - xleft_most) * static_cast<real>(0.5), (center - xleft_mid)*plm_theta) * static_cast<real>(0.5);
             xprimsR = center    - helpers::minmod((center - xleft_mid)*plm_theta, (xright_mid - xleft_mid)*static_cast<real>(0.5), (xright_mid - center)*plm_theta)*static_cast<real>(0.5);
             yprimsL = yleft_mid + helpers::minmod((yleft_mid - yleft_most) * plm_theta, (center - yleft_most) * static_cast<real>(0.5), (center - yleft_mid)*plm_theta) * static_cast<real>(0.5);
@@ -1023,11 +1039,11 @@ void SRHD3D::advance(
 
         //Advance depending on geometry
         const luint real_loc = kk * xpg * ypg + jj * xpg + ii;
-        const real d_source  = dens_source[real_loc];
-        const real s1_source = mom1_source[real_loc];
-        const real s2_source = mom2_source[real_loc];
-        const real s3_source = mom3_source[real_loc];
-        const real e_source  = erg_source[real_loc];
+        const real d_source  = den_source_all_zeros     ? 0.0 : dens_source[real_loc];
+        const real s1_source = mom1_source_all_zeros    ? 0.0 : mom1_source[real_loc];
+        const real s2_source = mom2_source_all_zeros    ? 0.0 : mom2_source[real_loc];
+        const real s3_source = mom3_source_all_zeros    ? 0.0 : mom3_source[real_loc];
+        const real e_source  = energy_source_all_zeros  ? 0.0 : erg_source[real_loc];
         const Conserved source_terms = Conserved{d_source, s1_source, s2_source, s3_source, e_source} * time_constant;
         switch (geometry)
         {
@@ -1068,7 +1084,7 @@ void SRHD3D::advance(
 
                     const Conserved geom_source  = {0, (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , - rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean, 0};
                     cons_data[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 + (hrf - hlf) / dV3 - geom_source - source_terms) * dt * step;
-                break;
+                    break;
                 }
             case simbi::Geometry::CYLINDRICAL:
                 {
@@ -1101,7 +1117,7 @@ void SRHD3D::advance(
 
                     const Conserved geom_source  = {0, (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean , 0, 0};
                     cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV + (hrf - hlf) * invdV - geom_source - source_terms) * dt * step;
-                break;
+                    break;
                 }
         } // end switch
 
@@ -1180,11 +1196,11 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->x3min           = x3[0];
     this->x3max           = x3[zphysical_grid - 1];
     this->checkpoint_zones= zphysical_grid;
-    this->d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
-    this->s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
-    this->s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
-    this->s3_all_zeros = std::all_of(sourceS3.begin(),  sourceS3.end(),  [](real i) {return i == 0;});
-    this->e_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
+    this->den_source_all_zeros     = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
+    this->mom1_source_all_zeros    = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
+    this->mom2_source_all_zeros    = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
+    this->mom3_source_all_zeros    = std::all_of(sourceS3.begin(),  sourceS3.end(),  [](real i) {return i == 0;});
+    this->energy_source_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
     // Stuff for moving mesh 
     // TODO: make happen at some point
     this->hubble_param = 0.0; //adot(t) / a(t);
@@ -1200,7 +1216,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         this->inflow_zones[i] = Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]};
     }
     
-
     // Write some info about the setup for writeup later
     setup.x1max              = x1[xphysical_grid - 1];
     setup.x1min              = x1[0];

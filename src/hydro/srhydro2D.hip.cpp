@@ -48,10 +48,6 @@ SRHD2D::SRHD2D(
         coord_system
     )
 {
-    d_all_zeros  = false;
-    s1_all_zeros = false;
-    s2_all_zeros = false;
-    e_all_zeros  = false;
 }
 
 // Destructor
@@ -945,10 +941,10 @@ void SRHD2D::advance(
 
         //Advance depending on geometry
         const luint real_loc = get_2d_idx(ii, jj, xpg, ypg);
-        const real d_source  = dens_source[real_loc];
-        const real s1_source = mom1_source[real_loc];
-        const real s2_source = mom2_source[real_loc];
-        const real e_source  = erg_source[real_loc];
+        const real d_source  = den_source_all_zeros    ? 0.0 : dens_source[real_loc];
+        const real s1_source = mom1_source_all_zeros   ? 0.0 : mom1_source[real_loc];
+        const real s2_source = mom2_source_all_zeros   ? 0.0 : mom2_source[real_loc];
+        const real e_source  = energy_source_all_zeros ? 0.0 : erg_source[real_loc];
         const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * time_constant;
         switch (geometry)
         {
@@ -1120,10 +1116,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->x2min           = x2[0];
     this->x2max           = x2[yphysical_grid - 1];
     this->checkpoint_zones= yphysical_grid;
-    this->d_all_zeros  = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
-    this->s1_all_zeros = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
-    this->s2_all_zeros = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
-    this->e_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
+    this->den_source_all_zeros    = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
+    this->mom1_source_all_zeros   = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
+    this->mom2_source_all_zeros   = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
+    this->energy_source_all_zeros = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
     // Params moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);

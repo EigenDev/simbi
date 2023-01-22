@@ -27,8 +27,7 @@ namespace simbi
         ndarray<conserved_t> cons, outer_zones, inflow_zones;
         ndarray<real> sourceD, sourceS1, sourceS2, sourceTau, pressure_guess, dt_min;
         ndarray<bool> object_pos;
-        bool d_all_zeros, s1_all_zeros, s2_all_zeros, e_all_zeros, scalar_all_zeros;
-        
+                
         std::function<double(double, double)> dens_outer;
         std::function<double(double, double)> mom1_outer;
         std::function<double(double, double)> mom2_outer;

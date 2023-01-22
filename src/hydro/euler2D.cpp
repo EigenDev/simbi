@@ -686,10 +686,10 @@ void Newtonian2D::advance(
 
         //Advance depending on geometry
         luint real_loc  = (col_maj) ? ii * ypg + jj : jj * xpg + ii;
-        const real rho_source = dens_source[real_loc];
-        const real m1_source  = mom1_source[real_loc];
-        const real m2_source  = mom2_source[real_loc];
-        const real e_source   = erg_source[real_loc];
+        const real rho_source = den_source_all_zeros      ? 0.0 : dens_source[real_loc];
+        const real m1_source  = mom1_source_all_zeros     ? 0.0 : mom1_source[real_loc];
+        const real m2_source  = mom2_source_all_zeros     ? 0.0 : mom2_source[real_loc];
+        const real e_source   = energy_source_all_zeros   ? 0.0 : erg_source[real_loc];
         const Conserved source_terms = {rho_source, m1_source, m2_source, e_source};
         switch (geometry)
         {
@@ -833,10 +833,10 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->x2min   = x2[0];
     this->x2max   = x2[yphysical_grid - 1];
 
-    this->rho_all_zeros  = std::all_of(sourceRho.begin(), sourceRho.end(),   [](real i) {return i == 0;});
-    this->m1_all_zeros   = std::all_of(sourceM1.begin(),  sourceM1.end(),  [](real i) {return i == 0;});
-    this->m2_all_zeros   = std::all_of(sourceM2.begin(),  sourceM2.end(),  [](real i) {return i == 0;});
-    this->e_all_zeros    = std::all_of(sourceE.begin(),   sourceE.end(), [](real i) {return i == 0;});
+    this->den_source_all_zeros    = std::all_of(sourceRho.begin(), sourceRho.end(),   [](real i) {return i == 0;});
+    this->mom1_source_all_zeros   = std::all_of(sourceM1.begin(),  sourceM1.end(),  [](real i) {return i == 0;});
+    this->mom2_source_all_zeros   = std::all_of(sourceM2.begin(),  sourceM2.end(),  [](real i) {return i == 0;});
+    this->energy_source_all_zeros = std::all_of(sourceE.begin(),   sourceE.end(), [](real i) {return i == 0;});
     // Stuff for moving mesh
     this->hubble_param = 0.0; ///adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
@@ -911,11 +911,6 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     x1max   = x1[xphysical_grid - 1];
     x2min   = x2[0];
     x2max   = x2[yphysical_grid - 1];
-
-    rho_all_zeros  = std::all_of(sourceRho.begin(), sourceRho.end(),   [](real i) {return i == 0;});
-    m1_all_zeros   = std::all_of(sourceM1.begin(),  sourceM1.end(),  [](real i) {return i == 0;});
-    m2_all_zeros   = std::all_of(sourceM2.begin(),  sourceM2.end(),  [](real i) {return i == 0;});
-    e_all_zeros    = std::all_of(sourceE.begin(),  sourceE.end(), [](real i) {return i == 0;});
 
 
     // Setup the system

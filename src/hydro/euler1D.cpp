@@ -409,7 +409,10 @@ void Newtonian1D::advance(
                 flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
             }
         }
-        const auto sources = Conserved{dens_source[ii], mom_source[ii], erg_source[ii]} * time_constant;
+        const auto d_source = den_source_all_zeros    ? 0.0 : dens_source[ii];
+        const auto m_source = mom1_source_all_zeros   ? 0.0 : mom_source[ii];
+        const auto e_source = energy_source_all_zeros ? 0.0 : erg_source[ii];
+        const auto sources = Conserved{d_source, m_source, e_source} * time_constant;
         switch (geometry)
         {
         case simbi::Geometry::CARTESIAN:
@@ -495,6 +498,10 @@ void Newtonian1D::advance(
     this->total_zones     = nx;
     this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
     this->checkpoint_zones= active_zones;
+    this->den_source_all_zeros    = std::all_of(sourceRho.begin(), sourceRho.end(), [](real i) {return i==0;});
+    this->mom1_source_all_zeros   = std::all_of(sourceMom.begin(), sourceMom.end(), [](real i) {return i==0;});
+    this->energy_source_all_zeros = std::all_of(sourceE.begin(), sourceE.end(), [](real i) {return i==0;});
+    
     // TODO: invoke mesh motion later
     this->mesh_motion = false;
     if (hllc){
