@@ -69,7 +69,7 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
     auto* const prim_data  = prims.data();
     auto* const cons_data  = cons.data();
     auto* const press_data = pressure_guess.data(); 
-    simbi::parallel_for(p, (luint)0, nx * ny * nz, [=] GPU_LAMBDA (luint gid){
+    simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;
