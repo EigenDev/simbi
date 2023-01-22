@@ -244,7 +244,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         chi = flatten_fully(chi.reshape(nz, ny, nx))
         
         if not full_periodic:
-            npad = tuple(tuple(val) for val in [[2 * (setup['first_order'] + 1), 2 * (setup['first_order'] + 1)]] * ndim) 
+            npad = tuple(tuple(val) for val in [[((setup['first_order']^1) + 1), ((setup['first_order']^1) + 1)]] * ndim) 
             rho  = unpad(rho, npad)
             v    = np.asarray([unpad(vel, npad) for vel in v])
             p    = unpad(p, npad)
@@ -252,7 +252,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         
         if setup['x1max'] > setup['x1'][-1]:
             setup['x1'] = arr_gen(setup['x1min'], setup['x1max'], setup['xactive'])
-            
+        
         fields = {f'v{i+1}': v[i] for i in range(len(v))}
         fields['rho']          = rho
         fields['p']            = p
@@ -270,7 +270,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         mesh['x1'], mesh['x2'] = np.meshgrid(setup['x1'], setup['x2'])
     else:
         mesh['x3'], mesh['x2'], mesh['x1'] = np.meshgrid(setup['x3'], setup['x2'], setup['x1'], indexing='ij')
-        
+    
     return fields, setup, mesh 
 
 def prims2var(fields: dict, var: str) -> np.ndarray:
