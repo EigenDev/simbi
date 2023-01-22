@@ -233,7 +233,7 @@ def parse_plotting_arguments(
         type=float,
         default=None,
         help='Set the y-scale to start plt.fill_between')
-    return parser, parser.parse_args(
+    return parser, parser.parse_known_args(
         args=None if sys.argv[2:] else ['plot', '--help'])
 
 
@@ -241,7 +241,7 @@ def main(
         parser: argparse.ArgumentParser = None,
         args: argparse.Namespace = None,
         *_) -> None:
-    parser, args = parse_plotting_arguments(parser)
+    parser, (args, _) = parse_plotting_arguments(parser)
 
     plt.rc('font', size=DEFAULT_SIZE)          # controls default text sizes
     plt.rc('axes', titlesize=DEFAULT_SIZE)     # fontsize of the axes title
@@ -265,6 +265,7 @@ def main(
     ndim = get_dimensionality(file_list)
     visual_module = getattr(importlib.import_module(
         f'{args.kind}{ndim}d'), f'{args.kind}')
+    
     visual_module(parser)
 
 
