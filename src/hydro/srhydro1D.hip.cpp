@@ -195,12 +195,6 @@ void SRHD::advance(
         {
             case simbi::Geometry::CARTESIAN:
             {
-                #if !GPU_CODE
-                if (ia == nx / 2) {
-                    simbi::util::writeln("[{}], SFlux: {}", ia, (frf - flf).s * invdx1 * step * dt);
-                    std::cin.get();
-                }
-                #endif
                 cons_data[ia] -= ((frf - flf) * invdx1) * dt * step;
                 break;
             }
@@ -303,12 +297,6 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             //     // printf("peq: %f, npew: %f\n", rho * emin * (gamma - 1.0));
             //     peq = rho * emin * (gamma - 1.0);
             // }
-            #if !GPU_CODE
-            if (ii == nx / 2) {
-                simbi::util::writeln("[{}], S1: {},  v1: {}", ii, S, v);
-                std::cin.get();
-            }
-            #endif
             press_data[ii] = peq;
             prims_data[ii] = Primitive{rho, v, peq};
             workLeftToDo = false;
