@@ -16,6 +16,7 @@ from matplotlib.offsetbox import AnchoredText
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from itertools import cycle
 from visual import lin_fields, derived
+from simbi._detail import *
 
 try:
     import cmasher as cmr 
@@ -83,7 +84,7 @@ def plot_polar_plot(
     
     units = unit_scale if args.units else np.ones(num_fields)
      
-    if args.rcmap:
+    if args.rev_cmap:
         color_map = (plt.get_cmap(args.cmap)).reversed()
     else:
         color_map = plt.get_cmap(args.cmap)
@@ -461,7 +462,7 @@ def plot_cartesian_plot(
     args: argparse.ArgumentParser, 
     mesh: dict, 
     dset: dict) -> None:
-    fig, ax = plt.subplots(1, 1, figsize=(10,10), constrained_layout=False)
+    fig, ax = plt.subplots(1, 1, figsize=(10,10))
 
     xx1, xx2, xx3 = mesh['x1'], mesh['x2'], mesh['x3']
     vmin,vmax = args.cbar
@@ -471,7 +472,7 @@ def plot_cartesian_plot(
     else:
         kwargs = {'vmin': vmin, 'vmax': vmax}
         
-    if args.rcmap:
+    if args.rev_cmap:
         color_map = (plt.cm.get_cmap(args.cmap)).reversed()
     else:
         color_map = plt.cm.get_cmap(args.cmap)
@@ -480,34 +481,37 @@ def plot_cartesian_plot(
         var = util.prims2var(fields, args.fields[0])
     else:
         var = fields[args.fields[0]]
-        
+    
     tend = dset['time']
     varz = var[:, xx2.shape[1] // 2, :]
     x1   = xx1[0, 0, :]
     x2   = xx2[0, :, 0]
     x3   = xx3[:, 0, 0]
-    c    = ax.pcolormesh(x1, x3, varz, cmap=color_map, shading='auto', **kwargs)
-    
-    divider = make_axes_locatable(ax)
-    cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
-    
-    if not args.no_cbar:
-        if args.log:
-            logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-            cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes, format=logfmt)
-        else:
-            cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes)
+    if args.one_dim:
+        c = ax.plot(x3, varz[:,0])
+    else:
+        c = ax.pcolormesh(x1, x3, varz, cmap=color_map, shading='auto', **kwargs)
+        divider = make_axes_locatable(ax)
+        cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
+        
+        if not args.no_cbar:
+            if args.log:
+                logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+                cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes, format=logfmt)
+            else:
+                cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes)
 
-    ax.yaxis.grid(True, alpha=0.1)
-    ax.xaxis.grid(True, alpha=0.1)
+    ax.yaxis.grid(False)
+    ax.xaxis.grid(False)
     ax.tick_params(axis='both', labelsize=10)
-    
     # Change the format of the field
     field_str = util.get_field_str(args)
-    if args.log:
-        cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str))
-    else:
-        cbar.ax.set_ylabel(r'{}'.format(field_str))
+    if not args.one_dim:
+        ax.set_aspect('equal')
+        if args.log:
+            cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str))
+        else:
+            cbar.ax.set_ylabel(r'{}'.format(field_str))
     
     if args.setup != "":
         fig.suptitle('{} at t = {:.2f}'.format(args.setup, tend), y=0.95)
@@ -522,7 +526,7 @@ def plot_1d_curve(
     case:       int =0) -> None:
     
     num_fields = len(args.fields)
-    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.filename)))
+    colors = plt.cm.viridis(np.linspace(0.25, 0.75, len(args.files)))
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
@@ -543,11 +547,11 @@ def plot_1d_curve(
         mass        = dV * fields['W'] * fields['rho']
         # linestyle = '-.'
         if args.labels is None:
-            ax.loglog(r, mass[args.tidx]/ np.max(mass[args.tidx]), label = 'mass', linestyle='-.', color=colors[case])
-            ax.loglog(r, fields['p'][args.tidx] / np.max(fields['p'][args.tidx]), label = 'pressure', color=colors[case])
+            ax.loglog(r, mass[args.viewing]/ np.max(mass[args.viewing]), label = 'mass', linestyle='-.', color=colors[case])
+            ax.loglog(r, fields['p'][args.viewing] / np.max(fields['p'][args.viewing]), label = 'pressure', color=colors[case])
         else:
-            ax.loglog(r, mass[args.tidx]/ np.max(mass[args.tidx]), label = f'{args.labels[case]} mass', linestyle='-.', color=colors[case])
-            ax.loglog(r, fields['p'][args.tidx] / np.max(fields['p'][args.tidx]), label = f'{args.labels[case]} pressure', color=colors[case])
+            ax.loglog(r, mass[args.viewing]/ np.max(mass[args.viewing]), label = f'{args.labels[case]} mass', linestyle='-.', color=colors[case])
+            ax.loglog(r, fields['p'][args.viewing] / np.max(fields['p'][args.viewing]), label = f'{args.labels[case]} pressure', color=colors[case])
         ax.legend()
         ax.axvline(0.65, linestyle='--', color='red')
         ax.axvline(1.00, linestyle='--', color='blue')
@@ -559,7 +563,7 @@ def plot_1d_curve(
                 var = fields[field]
                 
             label = None if args.labels is None else '{}'.format(field_str[idx] if num_fields > 1 else field_str)
-            ax.loglog(r, var[args.tidx], label=label)
+            ax.loglog(r, var[args.viewing], label=label)
     
 
     ax.set_xlim(x1min, x1max)
@@ -581,10 +585,10 @@ def plot_1d_curve(
             ax.legend()
     
     if args.setup != "":
-        ax.set_title(r'$\theta = {:.2f}$ time: {:.3f}'.format(mesh['th'][args.tidx] * 180 / np.pi, tend))
+        ax.set_title(r'$\theta = {:.2f}$ time: {:.3f}'.format(mesh['th'][args.viewing] * 180 / np.pi, tend))
     if not overplot:
         return fig
-    # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup,theta[args.tidx], tend), y=0.95)
+    # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup,theta[args.viewing], tend), y=0.95)
     
 def plot_per_theta(
     fields:    dict, 
@@ -596,7 +600,7 @@ def plot_per_theta(
     case:      int =0) -> None:
     print('plotting vs theta...')
     
-    colors = plt.cm.viridis(np.linspace(0.1, 0.90, len(args.filename)))
+    colors = plt.cm.viridis(np.linspace(0.1, 0.90, len(args.files)))
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
@@ -697,7 +701,7 @@ def plot_dec_rad(
     case:      int =0) -> None:
     print('plotting deceleration radius...')
     
-    file_num = len(args.filename)
+    file_num = len(args.files)
     
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
@@ -806,7 +810,7 @@ def plot_hist(
     
     # Check if subplots are split amonst the file inputs. If so, roll the colors
     # to reset when on a different axes object
-    color_len = args.sub_split[ax_num] if args.sub_split is not None else len(args.filename)
+    color_len = args.sub_split[ax_num] if args.sub_split is not None else len(args.files)
     if args.cmap == 'grayscale':
         colors = plt.cm.gray(np.linspace(0.05, 0.75, color_len+1))
     else:
@@ -840,7 +844,7 @@ def plot_hist(
         
         label = r'$\varepsilon = 0$'
         if args.labels is not None:
-            if len(args.labels) == len(args.filename) and not args.sub_split:
+            if len(args.labels) == len(args.files) and not args.sub_split:
                 etot         = np.sum(util.prims2var(fields, "energy") * dV_1d * util.e_scale.value)
                 order_of_mag = np.floor(np.log10(etot))
                 scale        = int(etot / 1e51)
@@ -910,7 +914,7 @@ def plot_hist(
     if args.labels is not None:
         label = '%s'%(args.labels[case])
             
-        if len(args.labels) == len(args.filename) and not args.sub_split:
+        if len(args.labels) == len(args.files) and not args.sub_split:
             etot         = np.sum(util.prims2var(fields, "energy") * dV * util.e_scale.value)
             order_of_mag = np.floor(np.log10(etot))
             scale        = int(etot / 1e51)
@@ -1043,7 +1047,7 @@ def plot_dx_domega(
         return de / dwplot_dx_d
     
     col       = case % len(args.sub_split) if args.sub_split is not None else case
-    color_len = len(args.sub_split) if args.sub_split is not None else len(args.filename)
+    color_len = len(args.sub_split) if args.sub_split is not None else len(args.files)
     colors    = plt.cm.viridis(np.linspace(0.1, 0.80, color_len if color_len > 1 else len(args.cutoffs)))
     coloriter = cycle(colors)
     
@@ -1333,25 +1337,27 @@ def plot_dx_domega(
                     ax0.legend(fontsize=size, loc='best', fancybox=True, framealpha=0.1, borderpad=0.3)
     
 def snapshot(parser: argparse.ArgumentParser):
-    parser.add_argument('--cbar_sub', dest = 'cbar2', metavar='Range of Color Bar for secondary plot',nargs='+',type=float, default =[None, None], help='The colorbar range you\'d like to plot')
-    parser.add_argument('--no_cbar', dest ='no_cbar',action='store_true', default=False, help='colobar visible siwtch')
-    parser.add_argument('--cmap2', dest ='cmap2', metavar='Color Bar Colarmap 2', default = 'magma', help='The secondary colorbar cmap you\'d like to plot')
-    parser.add_argument('--rev_cmap', dest='rcmap', action='store_true',default=False, help='True if you want the colormap to be reversed')
-    parser.add_argument('--x', dest='x', nargs='+', default = None, type=float, help='List of x values to plot field max against')
-    parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X',  help='X label name')
-    parser.add_argument('--de_domega', dest='de_domega', action='store_true',default=False, help='Plot the dE/dOmega plot')
-    parser.add_argument('--dm_domega', dest='dm_domega', action='store_true',default=False, help='Plot the dM/dOmega plot')
-    parser.add_argument('--dec_rad', dest='dec_rad', default = False, action='store_true', help='Compute dr as function of angle')
-    parser.add_argument('--cutoffs', dest='cutoffs', default=[0.0], type=float, nargs='+', help='The 4-velocity cutoff value for the dE/dOmega plot')
-    parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
-    parser.add_argument('--cbar_orient', dest='cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
-    parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 70, 110], type=float, nargs=4, help="wedge limits")
-    parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
-    parser.add_argument('--subplots', dest='subplots', default = None, type=int)
-    parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
-    parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
-    parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=None, nargs='+')
-    parser.add_argument('--plot_max_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
+    plot_parser = get_subparser(parser, 1)
+    plot_parser.add_argument('--cbar_sub', nargs='+',type=float, default =[None, None], help='The colorbar range you\'d like to plot')
+    plot_parser.add_argument('--no_cbar',action='store_true', default=False, help='colobar visible siwtch')
+    plot_parser.add_argument('--cmap2', default = 'magma', help='The secondary colorbar cmap you\'d like to plot')
+    plot_parser.add_argument('--rev_cmap', action='store_true',default=False, help='True if you want the colormap to be reversed')
+    plot_parser.add_argument('--x', nargs='+', default = None, type=float, help='List of x values to plot field max against')
+    plot_parser.add_argument('--xlabel', nargs=1, default = 'X',  help='X label name')
+    plot_parser.add_argument('--de_domega', action='store_true',default=False, help='Plot the dE/dOmega plot')
+    plot_parser.add_argument('--dm_domega', action='store_true',default=False, help='Plot the dM/dOmega plot')
+    plot_parser.add_argument('--dec_rad', default = False, action='store_true', help='Compute dr as function of angle')
+    plot_parser.add_argument('--cutoffs', default=[0.0], type=float, nargs='+', help='The 4-velocity cutoff value for the dE/dOmega plot')
+    plot_parser.add_argument('--nwedge', default=0, type=int, help='Number of wedges')
+    plot_parser.add_argument('--cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
+    plot_parser.add_argument('--wedge_lims',  default = [0.4, 1.4, 70, 110], type=float, nargs=4, help="wedge limits")
+    plot_parser.add_argument('--bipolar',  default = False, action='store_true')
+    plot_parser.add_argument('--subplots', default = None, type=int)
+    plot_parser.add_argument('--one_dim', default=False, action='store_true', help='flag for plotting 1D slice')
+    plot_parser.add_argument('--sub_split', default = None, nargs='+', type=int)
+    plot_parser.add_argument('--tau_s', action= 'store_true', default=False, help='The shock optical depth')
+    plot_parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=None, nargs='+')
+    plot_parser.add_argument('--plot_max_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
     args = parser.parse_args()
     
     if args.tex:
@@ -1385,10 +1391,10 @@ def snapshot(parser: argparse.ArgumentParser):
         
     
     num_subplots   = len(args.sub_split) if args.sub_split is not None else 1
-    if len(args.filename) > 1:
+    if len(args.files) > 1:
         if num_subplots == 1:
             fig, ax = plt.subplots(1, 1, figsize=(8,8))
-            lines_per_plot = len(args.filename)
+            lines_per_plot = len(args.files)
         else:
             fig,axs = plt.subplots(num_subplots, 1, figsize=(8,4 * num_subplots), sharex=True, tight_layout=False)
             if args.setup != "":
@@ -1426,7 +1432,7 @@ def snapshot(parser: argparse.ArgumentParser):
         ax_shift = True
         ax_num   = 0    
         
-        for idx, file in enumerate(args.filename):
+        for idx, file in enumerate(args.files):
             fields, setup, mesh = util.read_file(args, file, ndim=3)
             i += 1
             if args.hist and (not args.de_domega and not args.dm_domega):
@@ -1469,10 +1475,10 @@ def snapshot(parser: argparse.ArgumentParser):
             for ax in axs:
                 ax.label_outer()
     else:
-        fields, setup, mesh = util.read_file(args, args.filename[0], ndim=3)
+        fields, setup, mesh = util.read_file(args, args.files[0], ndim=3)
         if args.hist and (not args.de_domega and not args.dm_domega):
             plot_hist(fields, args, mesh, setup)
-        elif args.tidx != None:
+        elif args.viewing != None:
             plot_1d_curve(fields, args, mesh, setup)
         elif args.de_domega or args.dm_domega:
             plot_dx_domega(fields, args, mesh, setup)
