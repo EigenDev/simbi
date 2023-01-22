@@ -10,6 +10,7 @@ import h5py
 import astropy.constants as const
 import os
 from visual import derived, lin_fields
+from simbi._detail import *
 try:
     import cmasher as cmr 
 except ImportError:
@@ -134,8 +135,9 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
 
 
 def movie(parser: argparse.ArgumentParser):
-    parser.add_argument('--scale_down', dest='scale_down', default=None, type=float, help='list of values to scale down fields', nargs='+')
-    parser.add_argument('--frame_range', dest='frame_range', default = [None, None], nargs=2, type=int)
+    plot_parser = get_subparser(parser, 1)
+    plot_parser.add_argument('--scale_down', dest='scale_down', default=None, type=float, help='list of values to scale down fields', nargs='+')
+    plot_parser.add_argument('--frame_range', dest='frame_range', default = [None, None], nargs=2, type=int)
     args = parser.parse_args()
 
     vmin = args.cbar[0] or 0.0

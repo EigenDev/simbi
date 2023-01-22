@@ -15,6 +15,7 @@ from matplotlib.offsetbox import AnchoredText
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from itertools import cycle
 from visual import lin_fields, derived
+from simbi._detail import *
 try:
     import cmasher as cmr 
 except:
@@ -1649,25 +1650,26 @@ def plot_vs_time(
     plot_vs_time.counter += 1
     
 def snapshot(parser: argparse.ArgumentParser):
-    parser.add_argument('--cbar_sub', dest = 'cbar2', metavar='Range of Color Bar for secondary plot',nargs='+',type=float, default =[None, None], help='The colorbar range you\'d like to plot')
-    parser.add_argument('--no_cbar', dest ='no_cbar',action='store_true', default=False, help='colobar visible siwtch')
-    parser.add_argument('--cmap2', dest ='cmap2', metavar='Color Bar Colarmap 2', default = 'magma', help='The secondary colorbar cmap you\'d like to plot')
-    parser.add_argument('--rev_cmap', dest='rcmap', action='store_true',default=False, help='True if you want the colormap to be reversed')
-    parser.add_argument('--x', dest='x', nargs='+', default = None, type=float, help='List of x values to plot field max against')
-    parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X',  help='X label name')
-    parser.add_argument('--de_domega', dest='de_domega', action='store_true',default=False, help='Plot the dE/dOmega plot')
-    parser.add_argument('--dm_domega', dest='dm_domega', action='store_true',default=False, help='Plot the dM/dOmega plot')
-    parser.add_argument('--dec_rad', dest='dec_rad', default = False, action='store_true', help='Compute dr as function of angle')
-    parser.add_argument('--cutoffs', dest='cutoffs', default=[0.0], type=float, nargs='+', help='The 4-velocity cutoff value for the dE/dOmega plot')
-    parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
-    parser.add_argument('--cbar_orient', dest='cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
-    parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 70, 110], type=float, nargs=4, help="wedge limits")
-    parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
-    parser.add_argument('--subplots', dest='subplots', default = None, type=int)
-    parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
-    parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
-    parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=None, nargs='+')
-    parser.add_argument('--plot_max_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
+    plot_parser = get_subparser(parser, 1)
+    plot_parser.add_argument('--cbar_sub', dest = 'cbar2', metavar='Range of Color Bar for secondary plot',nargs='+',type=float, default =[None, None], help='The colorbar range you\'d like to plot')
+    plot_parser.add_argument('--no_cbar', dest ='no_cbar',action='store_true', default=False, help='colobar visible siwtch')
+    plot_parser.add_argument('--cmap2', dest ='cmap2', metavar='Color Bar Colarmap 2', default = 'magma', help='The secondary colorbar cmap you\'d like to plot')
+    plot_parser.add_argument('--rev_cmap', dest='rcmap', action='store_true',default=False, help='True if you want the colormap to be reversed')
+    plot_parser.add_argument('--x', dest='x', nargs='+', default = None, type=float, help='List of x values to plot field max against')
+    plot_parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X',  help='X label name')
+    plot_parser.add_argument('--de_domega', dest='de_domega', action='store_true',default=False, help='Plot the dE/dOmega plot')
+    plot_parser.add_argument('--dm_domega', dest='dm_domega', action='store_true',default=False, help='Plot the dM/dOmega plot')
+    plot_parser.add_argument('--dec_rad', dest='dec_rad', default = False, action='store_true', help='Compute dr as function of angle')
+    plot_parser.add_argument('--cutoffs', dest='cutoffs', default=[0.0], type=float, nargs='+', help='The 4-velocity cutoff value for the dE/dOmega plot')
+    plot_parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
+    plot_parser.add_argument('--cbar_orient', dest='cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
+    plot_parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 70, 110], type=float, nargs=4, help="wedge limits")
+    plot_parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
+    plot_parser.add_argument('--subplots', dest='subplots', default = None, type=int)
+    plot_parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
+    plot_parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
+    plot_parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=None, nargs='+')
+    plot_parser.add_argument('--plot_max_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
     args = parser.parse_args()
     
     vmin, vmax = args.cbar[:2]

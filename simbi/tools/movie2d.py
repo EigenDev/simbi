@@ -9,7 +9,7 @@ import h5py
 import astropy.constants as const
 import utility as util 
 from visual import derived, lin_fields
-
+from simbi._detail import *
 from utility import DEFAULT_SIZE, SMALL_SIZE, BIGGER_SIZE
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.animation import FuncAnimation
@@ -509,22 +509,23 @@ def get_data(filename, args):
     return setups, var
     
 def movie(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs='+',type=float,default =[None, None], help='The colorbar range you\'d like to plot')
-    parser.add_argument('--cmap2', dest = "cmap2", metavar='Color Bar #2 Colarmap', default = 'magma', help='The colorbar cmap you\'d like to plot')
-    parser.add_argument('--rev_cmap', dest='rcmap', action='store_true', default=False, help='True if you want the colormap to be reversed')
-    parser.add_argument('--x', dest='x', nargs="+", default = None, type=float,help='List of x values to plot field max against')
-    parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X', help='X label name')
-    parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
-    parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 80, 110], type=float, nargs=4)
-    parser.add_argument('--file_max', dest='file_max', default = None, type=int)
-    parser.add_argument('--frame_range', dest='frame_range', default = [None, None], nargs=2, type=int)
-    parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
-    parser.add_argument('--half', dest='half', action='store_true', default=False, help='True if you want half a polar plot')
-    parser.add_argument('--no_cbar', dest='no_cbar', help="Set if ignore cbar", action='store_true', default=False)
-    parser.add_argument('--cbar_orient', dest='cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
-    parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
-    parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
-    parser.add_argument('--transparent', help='transparent bg flag', default=False, action='store_true')
+    plot_parser = get_subparser(parser, 1)
+    plot_parser.add_argument('--cbar_sub', dest = "cbar2", metavar='Range of Color Bar for secondary plot',nargs='+',type=float,default =[None, None], help='The colorbar range you\'d like to plot')
+    plot_parser.add_argument('--cmap2', dest = "cmap2", metavar='Color Bar #2 Colarmap', default = 'magma', help='The colorbar cmap you\'d like to plot')
+    plot_parser.add_argument('--rev_cmap', dest='rcmap', action='store_true', default=False, help='True if you want the colormap to be reversed')
+    plot_parser.add_argument('--x', dest='x', nargs="+", default = None, type=float,help='List of x values to plot field max against')
+    plot_parser.add_argument('--xlabel', dest='xlabel', nargs=1, default = 'X', help='X label name')
+    plot_parser.add_argument('--nwedge', dest='nwedge', default=0, type=int, help='Number of wedges')
+    plot_parser.add_argument('--wedge_lims', dest='wedge_lims', default = [0.4, 1.4, 80, 110], type=float, nargs=4)
+    plot_parser.add_argument('--file_max', dest='file_max', default = None, type=int)
+    plot_parser.add_argument('--frame_range', dest='frame_range', default = [None, None], nargs=2, type=int)
+    plot_parser.add_argument('--bipolar', dest='bipolar', default = False, action='store_true')
+    plot_parser.add_argument('--half', dest='half', action='store_true', default=False, help='True if you want half a polar plot')
+    plot_parser.add_argument('--no_cbar', dest='no_cbar', help="Set if ignore cbar", action='store_true', default=False)
+    plot_parser.add_argument('--cbar_orient', dest='cbar_orient', default='vertical', type=str, help='Colorbar orientation', choices=['horizontal', 'vertical'])
+    plot_parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
+    plot_parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
+    plot_parser.add_argument('--transparent', help='transparent bg flag', default=False, action='store_true')
     args = parser.parse_args()
     
     if args.tex:
