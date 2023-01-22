@@ -144,26 +144,26 @@ class Hydro:
                 if len(break_points) == 1:
                     partition_inds = [
                         np.s_[
-                            :, :pieces[0]], np.s_[
-                            :, pieces[0]:]]
+                            ..., :pieces[0]], np.s_[
+                            ..., pieces[0]:]]
                 elif len(break_points) == 2:
                     partition_inds = [
                         np.s_[
-                            :, :pieces[1], :pieces[0]], np.s_[
-                            :, :pieces[1], pieces[0]:], np.s_[
-                            :, pieces[1]:, :pieces[0]], np.s_[
-                            :, pieces[1]:, pieces[0]:]]
+                            ..., :pieces[1], :pieces[0]], np.s_[
+                            ..., :pieces[1], pieces[0]:], np.s_[
+                            ..., pieces[1]:, :pieces[0]], np.s_[
+                            ..., pieces[1]:, pieces[0]:]]
                 else:
                     partition_inds = [
                         np.s_[
-                            :, :pieces[2], :pieces[1], :pieces[0]], np.s_[
-                            :, :pieces[2], :pieces[1], pieces[0]:], np.s_[
-                            :, :pieces[2], pieces[1]:, :pieces[0]], np.s_[
-                            :, :pieces[2], pieces[1]:, pieces[0]:], np.s_[
-                            :, pieces[2]:, :pieces[1], :pieces[0]], np.s_[
-                            :, pieces[2]:, :pieces[1], pieces[0]:], np.s_[
-                                :, pieces[2]:, pieces[1]:, :pieces[0]], np.s_[
-                                    :, pieces[2]:, pieces[1]:, pieces[0]:]]
+                            ..., :pieces[2], :pieces[1], :pieces[0]], np.s_[
+                            ..., :pieces[2], :pieces[1], pieces[0]:], np.s_[
+                            ..., :pieces[2], pieces[1]:, :pieces[0]], np.s_[
+                            ..., :pieces[2], pieces[1]:, pieces[0]:], np.s_[
+                            ..., pieces[2]:, :pieces[1], :pieces[0]], np.s_[
+                            ..., pieces[2]:, :pieces[1], pieces[0]:], np.s_[
+                                ..., pieces[2]:, pieces[1]:, :pieces[0]], np.s_[
+                                    ..., pieces[2]:, pieces[1]:, pieces[0]:]]
 
                 partitions = [self.u[sector] for sector in partition_inds]
                 for idx, part in enumerate(partitions):
