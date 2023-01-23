@@ -15,10 +15,8 @@ class_props = [
     'sources', 'start_time', 'use_hllc_solver', 'cfl_number',
     'boundary_sources', 'object_zones', 'x1', 'x2', 'x3']
 
-T = TypeVar('T')
-G = TypeVar('G')
+T = TypeVar('T', covariant=True)
 P = ParamSpec('P')
-Self = TypeVar('Self')
 
 
 class simbi_classproperty(property):
@@ -35,13 +33,13 @@ class simbi_property(Generic[T]):
     def __set_name__(self, owner: Any, name: str) -> None:
         self._name = name
         
-    def __get__(self, obj: Any, objtype: Optional[T],/) -> T:
+    def __get__(self, obj: Any, objtype: Optional[Any],/) -> T:
         if self.fget is None:
             raise ValueError("Property has not getter")
         return self.type_converter(self.fget(obj))
     
     @staticmethod
-    def type_converter(input_obj: T) -> T:
+    def type_converter(input_obj: Any) -> T:
         if isinstance(input_obj, Iterable) and not isinstance(input_obj, str):
             if all(isinstance(val, Iterable) for val in input_obj)and not any(isinstance(val, str) for val in input_obj):
                 transform = lambda x: x.var_type(x.value) if isinstance(x, DynamicArg) else x

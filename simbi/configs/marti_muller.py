@@ -17,8 +17,8 @@ class MartiMuller(BaseConfig):
         return (0.0, 1.0, 0.5)
 
     @simbi_property
-    def linspace(self) -> str:
-        return "True"
+    def linspace(self) -> bool:
+        return True
     
     @simbi_property
     def coord_system(self) -> str:
