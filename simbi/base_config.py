@@ -4,6 +4,7 @@ from .dynarg import DynamicArg
 from .key_types import *
 from ._detail import get_subparser
 from typing import ParamSpec, TypeVar, Generic
+
 class_props = [
     'boundary_conditions', 'coord_system', 'data_directory', 
     'dens_outer', 'resolution', 'dlogt', 'dynamic_args', 
@@ -11,7 +12,8 @@ class_props = [
     'geometry', 'initial_state', 'linspace', 'mom_outer', 
     'parse_args', 'passive_scalars', 'plm_theta', 
     'regime', 'rho_ref', 'scale_factor',  'scale_factor_derivative', 
-    'sources', 'start_time', 'use_hllc_solver', 'cfl_number']
+    'sources', 'start_time', 'use_hllc_solver', 'cfl_number',
+    'boundary_sources', 'object_zones', 'x1', 'x2', 'x3']
 
 T = TypeVar('T')
 G = TypeVar('G')
@@ -24,10 +26,10 @@ class simbi_classproperty(property):
         if not self.fget: return self 
         return self.fget(owner_cls)
 
-class simbi_property_des(Generic[T]):
+class simbi_property(Generic[T]):
     def __init__(self, fget: Callable[P, T]) -> None:
         self._name = ''
-        self.fget = fget 
+        self.fget  = fget 
         self.__doc__ = fget.__doc__ 
         
     def __set_name__(self, owner: Any, name: str) -> None:
@@ -51,25 +53,6 @@ class simbi_property_des(Generic[T]):
                 return cast(T, input_obj.var_type(input_obj.value))
         return cast(T, input_obj)
 
-def simbi_property(func: Callable[P, T]) -> Callable[P, T]:
-    """ Do an implicit type conversion 
-    Type converts the simbi_property object if a DynamicArg 
-    is given as the return value
-    """
-    @property #type: ignore
-    def wrapper(*args: P.args, **kwds: P.kwargs) -> T:
-        result = func(*args, **kwds)
-        if isinstance(result, Iterable) and not isinstance(result, str):
-            if all(isinstance(val, Iterable) for val in result)and not any(isinstance(val, str) for val in result):
-                transform = lambda x: x.var_type(x.value) if isinstance(x, DynamicArg) else x
-                cleaned_result = tuple(tuple(map(transform, i)) for i in result)
-                return cast(T, cleaned_result)
-            return cast(T, [res if not isinstance(res, DynamicArg) else res.var_type(res.value) for res in result])
-        else:
-            if isinstance(result, DynamicArg):
-                return cast(T, result.var_type(result.value))
-        return cast(T, result)
-    return wrapper
 def err_message(name: str) -> str:
     return f"Configuration must include a {name} simbi_property"
 
