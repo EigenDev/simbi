@@ -1269,6 +1269,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     sourceS3.copyToGpu();
     sourceTau.copyToGpu();
     object_pos.copyToGpu();
+    inflow_zones.copyToGpu();
     bcs.copyToGpu();
 
     // Setup the system
