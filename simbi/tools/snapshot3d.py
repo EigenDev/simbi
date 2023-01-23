@@ -111,7 +111,7 @@ def plot_polar_plot(
         if x2max == np.pi: 
             units  = np.repeat(units, 2)
             
-        var    = np.asarray(var)
+        var    = np.asanyarray(var)
         var    = np.array([units[idx] * var[idx] for idx in range(var.shape[0])])
         
         tchop  = np.split(tt, 2)
@@ -840,7 +840,7 @@ def plot_hist(
             
         u1d       = fields['gamma_beta']
         gbs_1d    = np.logspace(np.log10(1.e-3), np.log10(u1d.max()), 128)
-        var       = np.asarray([var[np.where(u1d > gb)].sum() for gb in gbs_1d])
+        var       = np.asanyarray([var[np.where(u1d > gb)].sum() for gb in gbs_1d])
         
         label = r'$\varepsilon = 0$'
         if args.labels is not None:
@@ -890,7 +890,7 @@ def plot_hist(
     # Create 4-Velocity bins as well as the Y-value bins directly
     u         = fields['gamma_beta']
     gbs       = np.logspace(np.log10(1.e-3), np.log10(u.max()), 128)
-    var       = np.asarray([var[u > gb].sum() for gb in gbs]) 
+    var       = np.asanyarray([var[u > gb].sum() for gb in gbs]) 
     
         
     if ax_col == 0:     

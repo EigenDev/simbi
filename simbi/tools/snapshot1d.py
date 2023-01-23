@@ -139,7 +139,7 @@ def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = Fals
     u = fields['gamma_beta']
     gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), 128)
     
-    energy = np.asarray([energy[u > gb].sum() for gb in gbs])
+    energy = np.asanyarray([energy[u > gb].sum() for gb in gbs])
     # E_seg_rat  = energy[1:]/energy[:-1]
     # gb_seg_rat = gbs[1:]/gbs[:-1]
     # E_seg_rat[E_seg_rat == 0] = 1

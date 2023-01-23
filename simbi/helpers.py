@@ -8,11 +8,11 @@ generic_numpy_array = NDArray[Any]
 
 def calc_centroid(arr: generic_numpy_array, coord_system: str = 'spherical') -> generic_numpy_array:
     if coord_system  == 'spherical':
-        return np.asarray(0.75 * (arr[...,1:]**4 - arr[...,:-1] ** 4) / (arr[...,1:]**3 - arr[...,:-1]**3))
+        return np.asanyarray(0.75 * (arr[...,1:]**4 - arr[...,:-1] ** 4) / (arr[...,1:]**3 - arr[...,:-1]**3))
     elif coord_system == 'cylindrical':
-        return np.asarray((2.0 / 3.0) * (arr[...,1:]**3 - arr[...,:-1] ** 3) / (arr[...,1:]**2 - arr[...,:-1]**2))
+        return np.asanyarray((2.0 / 3.0) * (arr[...,1:]**3 - arr[...,:-1] ** 3) / (arr[...,1:]**2 - arr[...,:-1]**2))
     else:
-        return np.asarray(0.5 * (arr[...,1:] - arr[...,:-1]))
+        return np.asanyarray(0.5 * (arr[...,1:] - arr[...,:-1]))
     
 
 def calc_cell_volume1D(*, x1: generic_numpy_array, coord_system: str = 'soherical') -> generic_numpy_array:
@@ -26,9 +26,9 @@ def calc_cell_volume1D(*, x1: generic_numpy_array, coord_system: str = 'soherica
     dx1 = x1vertices[1:] - x1vertices[:-1]
     if coord_system in['spherical', 'cylindrical']:
         x1mean = calc_centroid(x1vertices, coord_system)
-        return np.asarray(x1mean * x1mean * dx1)
+        return np.asanyarray(x1mean * x1mean * dx1)
     elif coord_system == 'cartesian':
-        return np.asarray(dx1) ** 3 
+        return np.asanyarray(dx1) ** 3 
     else:
         raise ValueError("The coordinate system given is not avaiable at this time")
 
@@ -47,8 +47,8 @@ def calc_cell_volume2D(*, x1: generic_numpy_array, x2: generic_numpy_array, coor
         x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=1)
         x1vertices = np.insert(x1vertices, x1vertices.shape[1], xx1[..., -1],axis=1)
         
-        dcos = np.asarray(np.cos(x2vertices[:-1]) - np.cos(x2vertices[1:]))
-        return np.asarray((1./3.) * (x1vertices[..., 1:]**3 - x1vertices[..., :-1]**3) * dcos * 2.0 * np.pi)
+        dcos = np.asanyarray(np.cos(x2vertices[:-1]) - np.cos(x2vertices[1:]))
+        return np.asanyarray((1./3.) * (x1vertices[..., 1:]**3 - x1vertices[..., :-1]**3) * dcos * 2.0 * np.pi)
     elif coord_system == 'axis_cylindrical':
         x1vertices = 0.5 * (xx1[...,  1:] + xx1[..., :-1])
         x1vertices = np.insert(x1vertices,  0, xx1[..., 0],axis=1)
@@ -57,7 +57,7 @@ def calc_cell_volume2D(*, x1: generic_numpy_array, x2: generic_numpy_array, coor
         dz   = x2vertices[1:] - x2vertices[:-1]
         dr   = x1vertices[:, 1:] - x1vertices[:, :-1]
         rmean = (2.0 / 3.0) * (x1vertices[...,1:]**3 - x1vertices[...,:-1]**3) / (x1vertices[...,1:]**2 - x1vertices[...,:-1]**2)
-        return np.asarray(2.0 * np.pi * rmean * dr * dz)
+        return np.asanyarray(2.0 * np.pi * rmean * dr * dz)
     elif coord_system == 'planar_cylindrical':
         x1vertices = np.sqrt(xx1[...,  1:] * xx1[..., :-1])
         x1vertices = np.insert(x1vertices,  0, xx1[..., 0],axis=1)
@@ -66,14 +66,14 @@ def calc_cell_volume2D(*, x1: generic_numpy_array, x2: generic_numpy_array, coor
         dphi = x2vertices[1:] - x2vertices[:-1]
         dr   = x1vertices[:, 1:] - x1vertices[:, :-1]
         rmean = (2.0 / 3.0) * (x1vertices[...,1:]**3 - x1vertices[...,:-1]**3) / (x1vertices[...,1:]**2 - x1vertices[...,:-1]**2)
-        return np.asarray(rmean * dr * dphi)
+        return np.asanyarray(rmean * dr * dphi)
     elif coord_system == 'cartesian':
         x1vertices = 0.5 * (xx1[...,  1:] + xx1[..., :-1])
         x1vertices = np.insert(x1vertices,  0, xx1[..., 0],axis=1)
         x1vertices = np.insert(x1vertices, x1vertices.shape[1], xx1[..., -1],axis=1)
         dy   = x2vertices[1:] - x2vertices[:-1]
         dx   = x1vertices[:, 1:] - x1vertices[:, :-1]
-        return np.asarray(dx * dy)
+        return np.asanyarray(dx * dy)
     else:
         raise ValueError("The coordinate system given is not avaiable at this time")
 
@@ -98,14 +98,14 @@ def calc_cell_volume3D(*, x1: generic_numpy_array, x2: generic_numpy_array, x3: 
         
         dphi = x3vertices[1:] - x3vertices[:-1]
         dcos = np.cos(x2vertices[:, :-1]) - np.cos(x2vertices[:, 1:])
-        return np.asarray((1./3.) * (x1vertices[..., 1:]**3 - x1vertices[..., :-1]**3) * dcos * dphi)
+        return np.asanyarray((1./3.) * (x1vertices[..., 1:]**3 - x1vertices[..., :-1]**3) * dcos * dphi)
     elif coord_system == 'cylindrical':
         x1vertices = 0.5 * (xx1[...,  1:] + xx1[..., :-1])
         x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
         x1vertices = np.insert(x1vertices, x1vertices.shape[2], xx1[..., -1], axis=2)
         dz   = x3vertices[1:] - x3vertices[:-1]
         dphi = x2vertices[:, 1:] - x2vertices[:, :-1]
-        return np.asarray(0.5 * (x1vertices[...,1:]**2 - x1vertices[...,:-1]**2) * dphi * dz)
+        return np.asanyarray(0.5 * (x1vertices[...,1:]**2 - x1vertices[...,:-1]**2) * dphi * dz)
     elif coord_system == 'cartesian':
         x1vertices = 0.5 * (xx1[...,  1:] + xx1[..., :-1])
         x1vertices = np.insert(x1vertices,  0, xx1[..., 0], axis=2)
@@ -114,7 +114,7 @@ def calc_cell_volume3D(*, x1: generic_numpy_array, x2: generic_numpy_array, x3: 
         dz   = x3vertices[1:] - x3vertices[:-1]
         dy   = x2vertices[:, 1:] - x2vertices[:, :-1]
         
-        return np.asarray(dx * dy * dz)
+        return np.asanyarray(dx * dy * dz)
     else:
         raise ValueError("The coordinate system given is not avaiable at this time")
         

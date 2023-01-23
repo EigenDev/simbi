@@ -17,20 +17,20 @@ def range_limited_float_type(arg: Any) -> Any:
     return f
 
 def func(x: NDArray[numpy_float]) -> NDArray[numpy_float]:
-    return np.asarray(np.sin(2*np.pi*x))
+    return np.asanyarray(np.sin(2*np.pi*x))
 
 def rho(alpha: DynamicArg, x: NDArray[numpy_float]) -> NDArray[numpy_float]:
-    return np.asarray(1.0 + alpha*func(x))
+    return np.asanyarray(1.0 + alpha*func(x))
 
 def cs(gamma: DynamicArg, rho: Union[NDArray[numpy_float], float], pressure: Union[NDArray[numpy_float], float]) -> NDArray[numpy_float]:
     h = 1.0 + gamma * pressure / (rho * (gamma - 1.0))
-    return np.asarray(np.sqrt(gamma*pressure/(rho * h)))
+    return np.asanyarray(np.sqrt(gamma*pressure/(rho * h)))
 
 def pressure(p_ref: float, gamma: DynamicArg, rho: NDArray[numpy_float], rho_ref: float) -> NDArray[numpy_float]:
-    return np.asarray(p_ref * ( rho / rho_ref ) ** float(gamma.value))
+    return np.asanyarray(p_ref * ( rho / rho_ref ) ** float(gamma.value))
 
 def velocity(gamma: DynamicArg, rho: NDArray[numpy_float], rho_ref: float, pressure: NDArray[numpy_float], p_ref: float) -> NDArray[numpy_float]:
-    return  np.asarray(2 / (gamma - 1.)*(cs(gamma, rho, pressure) - cs(gamma, rho_ref, p_ref)))
+    return  np.asanyarray(2 / (gamma - 1.)*(cs(gamma, rho, pressure) - cs(gamma, rho_ref, p_ref)))
 
 class IsentropicRelWave(BaseConfig):
     """

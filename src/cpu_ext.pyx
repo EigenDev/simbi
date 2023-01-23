@@ -64,7 +64,7 @@ cdef class PyState:
             constant_sources,
             boundary_sources)
 
-        return np.asarray(result)
+        return np.asanyarray(result)
 
     def __dealloc__(self):
         del self.c_state
@@ -151,7 +151,7 @@ cdef class PyStateSR:
                 a_cpp,
                 adot_cpp)
             
-        return np.asarray(result)
+        return np.asanyarray(result)
 
     def __dealloc__(self):
         del self.c_state
@@ -204,7 +204,7 @@ cdef class PyState2D:
             constant_sources,
             boundary_sources)
             
-        result = np.asarray(result)
+        result = np.asanyarray(result)
         result = result.reshape(5, self.c_state.ny, self.c_state.nx)
 
         return result
@@ -311,7 +311,7 @@ cdef class PyStateSR2D:
                 a_cpp,
                 adot_cpp)
 
-        result = np.asarray(result)
+        result = np.asanyarray(result)
         if col_maj:
             result = result.reshape(5, self.c_state.nx, self.c_state.ny)
             result = np.transpose(result, axes=(0, 2, 1))
@@ -377,7 +377,7 @@ cdef class PyStateSR3D:
             hllc,
             constant_sources,
             boundary_sources)
-        result = np.asarray(result)
+        result = np.asanyarray(result)
         result = result.reshape(5, self.c_state.nz, self.c_state.ny, self.c_state.nx)
         return result
 

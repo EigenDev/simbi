@@ -3,7 +3,7 @@ import abc
 from .dynarg import DynamicArg
 from .key_types import *
 from ._detail import get_subparser
-from typing import ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar, Generic
 class_props = [
     'boundary_conditions', 'coord_system', 'data_directory', 
     'dens_outer', 'resolution', 'dlogt', 'dynamic_args', 
@@ -23,29 +23,37 @@ class simbi_classproperty(property):
     def __get__(self, owner_self: Any, owner_cls: Optional[Any] = ..., /) -> Any:
         if not self.fget: return self 
         return self.fget(owner_cls)
+
+class simbi_property(Generic[T]):
+    def __init__(self, fget: Callable[P, T]) -> None:
+        self._name = ''
+        self.fget = fget 
+        self.__doc__ = fget.__doc__ 
         
+    def __set_name__(self, owner: Any, name: str) -> None:
+        self._name = name
+        
+    def __get__(self, obj: Any, objtype: Optional[T],/) -> T:
+        if self.fget is None:
+            raise ValueError("Proeprty has not getter")
+        return self.type_converter(self.fget(obj))
+    
+    @staticmethod
+    def type_converter(input_obj: T) -> T:
+        if isinstance(input_obj, Iterable) and not isinstance(input_obj, str):
+            if all(isinstance(val, Iterable) for val in input_obj)and not any(isinstance(val, str) for val in input_obj):
+                transform = lambda x: x.var_type(x.value) if isinstance(x, DynamicArg) else x
+                cleaned_input_obj = tuple(tuple(map(transform, i)) for i in input_obj)
+                return cast(T, cleaned_input_obj)
+            return cast(T, [res if not isinstance(res, DynamicArg) else res.var_type(res.value) for res in input_obj])
+        else:
+            if isinstance(input_obj, DynamicArg):
+                return cast(T, input_obj.var_type(input_obj.value))
+        return cast(T, input_obj)
+    
 def err_message(name: str) -> str:
     return f"Configuration must include a {name} simbi_property"
 
-def simbi_property(func: Callable[P, T]) -> Callable[P, T]:
-    """ Do an implicit type conversion 
-    Type converts the simbi_property object if a DynamicArg 
-    is given as the return value
-    """
-    @property #type: ignore
-    def wrapper(*args: P.args, **kwds: P.kwargs) -> T:
-        result = func(*args, **kwds)
-        if isinstance(result, Iterable) and not isinstance(result, str):
-            if all(isinstance(val, Iterable) for val in result)and not any(isinstance(val, str) for val in result):
-                transform = lambda x: x.var_type(x.value) if isinstance(x, DynamicArg) else x
-                cleaned_result = tuple(tuple(map(transform, i)) for i in result)
-                return cast(T, cleaned_result)
-            return cast(T, [res if not isinstance(res, DynamicArg) else res.var_type(res.value) for res in result])
-        else:
-            if isinstance(result, DynamicArg):
-                return cast(T, result.var_type(result.value))
-        return cast(T, result)
-    return wrapper
 
 __all__ = ['BaseConfig', 'simbi_property', 'simbi_classproperty']
 class BaseConfig(metaclass=abc.ABCMeta):

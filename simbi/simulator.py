@@ -100,7 +100,7 @@ class Hydro:
             self.dimensionality = 3
             self.discontinuity = True
         else:
-            self.dimensionality = np.asarray(initial_state[0]).ndim
+            self.dimensionality = np.asanyarray(initial_state[0]).ndim
 
         self.coord_system = coord_system
         self.regime = regime
@@ -116,7 +116,7 @@ class Hydro:
                           self.dimensionality)
 
             # Initialize conserved u-array and flux arrays
-            self.u = np.zeros(shape=(self.nvars,*np.asarray(self.resolution).flatten()[ ::- 1]))
+            self.u = np.zeros(shape=(self.nvars,*np.asanyarray(self.resolution).flatten()[ ::- 1]))
             if self.discontinuity:
                 print(
                     f'Initializing Problem With a {str(self.dimensionality)}D Discontinuity...',
@@ -169,7 +169,7 @@ class Hydro:
                 for idx, part in enumerate(partitions):
                     state = initial_state[idx]
                     rho, *velocity, pressure = state
-                    velocity = np.asarray(velocity)
+                    velocity = np.asanyarray(velocity)
 
                     vsqr = self.calc_vsq(velocity)
                     lorentz_factor = self.calc_lorentz_factor(vsqr, regime)
@@ -192,7 +192,7 @@ class Hydro:
                         ) + np.array([dens, *mom, energy, 0.0])).transpose()
             else:
                 rho, *velocity, pressure = initial_state
-                velocity = np.asarray(velocity)
+                velocity = np.asanyarray(velocity)
                 vsqr = self.calc_vsq(velocity)
                 lorentz_factor = self.calc_lorentz_factor(vsqr, regime)
                 internal_energy = self.calc_internal_energy(vsqr, regime)
@@ -230,7 +230,7 @@ class Hydro:
             vsquared: NDArray[Any],
             regime: str) -> FloatOrArray:
         return 1.0 if regime == 'classical' else (
-            1 - np.asarray(vsquared))**(-0.5)
+            1 - np.asanyarray(vsquared))**(-0.5)
 
     @staticmethod
     def calc_enthalpy(
@@ -254,7 +254,7 @@ class Hydro:
     def calc_internal_energy(
             vsquared: NDArray[Any],
             regime: str) -> FloatOrArray:
-        return 1.0 + 0.5 * np.asarray(vsquared) if regime == 'classical' else 1
+        return 1.0 + 0.5 * np.asanyarray(vsquared) if regime == 'classical' else 1
 
     @staticmethod
     def calc_vsq(velocity: Union[NDArray[Any],
@@ -313,7 +313,7 @@ class Hydro:
         for key, param in params.locals.items():
             if key != 'self':
                 if isinstance(param, (float, np.float64)):
-                    val_str = f"{param:.3f}"
+                    val_str: Any = f"{param:.3f}"
                 elif callable(param):
                     val_str = f"user-defined {key} function"
                 elif isinstance(param, tuple):
@@ -369,7 +369,7 @@ class Hydro:
         boundary_sources = [np.array([val]).flatten()
                             for val in boundary_sources]
         max_len = np.max([len(a) for a in boundary_sources])
-        boundary_sources = np.asarray([np.pad(
+        boundary_sources = np.asanyarray([np.pad(
             a, (0, max_len - len(a)), 'constant', constant_values=0) for a in boundary_sources])
         edges = [0, -1] if first_order else [0, 1, -1, -2]
         view = self.u[:self.dimensionality + 2]
@@ -385,7 +385,7 @@ class Hydro:
 
         order = 1 if first_order else 2
         if self.dimensionality > 1:
-            source_transform = np.s_[:, None if self.dimensionality == 2 else None, None]
+            source_transform: Any = np.s_[:, None if self.dimensionality == 2 else None, None]
         else:
             source_transform = np.s_[:]
             
@@ -419,9 +419,9 @@ class Hydro:
             self.x3 = self.x3 or np.linspace(
                 self.geometry[2][0], self.geometry[2][1], self.resolution[2])
 
-        self.x1 = np.asarray(self.x1)
-        self.x2 = np.asarray(self.x2)
-        self.x3 = np.asarray(self.x3)
+        self.x1 = np.asanyarray(self.x1)
+        self.x2 = np.asanyarray(self.x2)
+        self.x3 = np.asanyarray(self.x3)
 
     def _check_boundary_conditions(self,
                                    boundary_conditions: Union[Sequence[str],
@@ -511,7 +511,7 @@ class Hydro:
             solution (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
-        self.u = np.asarray(self.u)
+        self.u = np.asanyarray(self.u)
         self.start_time: float = 0.0
         self.chkpt_idx: int = 0
         if compute_mode == 'cpu':
@@ -596,7 +596,7 @@ class Hydro:
 
         # Create boolean maks for object immersed boundaries (impermable)
         object_cells: NDArray[Any] = np.zeros_like(
-            self.u[0], dtype=bool) if object_positions is None else np.asarray(
+            self.u[0], dtype=bool) if object_positions is None else np.asanyarray(
             object_positions, dtype=bool)
 
         print(
@@ -604,7 +604,7 @@ class Hydro:
             flush=True)
         kwargs: dict[str, Any] = {}
         if self.dimensionality == 1:
-            sources = np.zeros(3) if sources is None else np.asarray(sources)
+            sources = np.zeros(3) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             if self.regime == "classical":
                 state = PyState(
@@ -628,7 +628,7 @@ class Hydro:
 
         elif self.dimensionality == 2:
             # ignore the chi term
-            sources = np.zeros(4) if sources is None else np.asarray(sources)
+            sources = np.zeros(4) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
 
             if self.regime == "classical":
@@ -661,7 +661,7 @@ class Hydro:
                     x2=self.x2,
                     coord_system=cython_coordinates)
         else:
-            sources = np.zeros(5) if sources is None else np.asarray(sources)
+            sources = np.zeros(5) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
 
             if self.regime == "classical":

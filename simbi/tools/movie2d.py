@@ -93,7 +93,7 @@ def plot_polar_plot(fig, axs, cbaxes, fields, args, mesh, dset, subplots=False):
         if x2max == np.pi: 
             units  = np.repeat(units, 2)
             
-        var    = np.asarray(var)
+        var    = np.asanyarray(var)
         var    = np.array([units[idx] * var[idx] for idx in range(var.shape[0])])
         
         tchop  = np.split(tt, 2)

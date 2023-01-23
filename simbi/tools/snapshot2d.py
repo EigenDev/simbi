@@ -357,7 +357,7 @@ def plot_polar_plot(
         if x2max == np.pi: 
             units  = np.repeat(units, 2)
             
-        var    = np.asarray(var, dtype=float)
+        var    = np.asanyarray(var, dtype=float)
         var    = np.array([units[idx] * var[idx] for idx in range(var.shape[0])], dtype=float)
         
         tchop  = np.array_split(tt, 2)
@@ -1095,7 +1095,7 @@ def plot_hist(
             
         u1d       = fields['gamma_beta']
         gbs_1d    = np.logspace(np.log10(1.e-3), np.log10(u1d.max()), 128)
-        var       = np.asarray([var[np.where(u1d > gb)].sum() for gb in gbs_1d])
+        var       = np.asanyarray([var[np.where(u1d > gb)].sum() for gb in gbs_1d])
         
         label = r'$\varepsilon = 0$'
         if args.labels is not None:
@@ -1147,7 +1147,7 @@ def plot_hist(
     # Create 4-Velocity bins as well as the Y-value bins directly
     u         = fields['gamma_beta']
     gbs       = np.logspace(np.log10(1.e-3), np.log10(u.max()), 128)
-    var       = np.asarray([var[u > gb].sum() for gb in gbs]) 
+    var       = np.asanyarray([var[u > gb].sum() for gb in gbs]) 
     
     # if case == 0:
     #     oned_field, setups1d, mesh1d   = util.read_1d_file(args.extra_files[0])
@@ -1626,8 +1626,8 @@ def plot_vs_time(
     ax.set_ylabel(f"Max {xlabel}")
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
-    time = np.asarray(time)
-    data = np.asarray(data)
+    time = np.asanyarray(time)
+    data = np.asanyarray(data)
     ax.plot(time, data, label=label, color=color, alpha=1.0)
     if args.fields[0] == 'gamma_beta' or args.fields[0] == 'u1':
         tref         = 0.22

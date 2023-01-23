@@ -148,7 +148,7 @@ def flatten_fully(x):
             return x.flatten()
         return flatten_fully(x)
     else:
-        return np.asarray(x) 
+        return np.asanyarray(x) 
     
 def get_dimensionality(files: list[str]) -> int:
     dims = []
@@ -246,7 +246,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         if not full_periodic:
             npad = tuple(tuple(val) for val in [[((setup['first_order']^1) + 1), ((setup['first_order']^1) + 1)]] * ndim) 
             rho  = unpad(rho, npad)
-            v    = np.asarray([unpad(vel, npad) for vel in v])
+            v    = np.asanyarray([unpad(vel, npad) for vel in v])
             p    = unpad(p, npad)
             chi  = unpad(chi, npad)
         
@@ -334,7 +334,7 @@ def get_colors(interval: np.ndarray, cmap: plt.cm, vmin: float = None, vmax: flo
     return cmap(interval)
 
 def find_nearest(arr: list, val: float) -> Union[int, float]:
-    arr = np.asarray(arr)
+    arr = np.asanyarray(arr)
     idx = np.argmin(np.abs(arr - val))
     return idx, arr[idx]
     

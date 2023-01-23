@@ -95,8 +95,8 @@ def plot_hist(args, fields, overplot=False, ax=None, case=0):
     w = np.diff(u).max()*1e-1
     n = int(np.ceil( (u.max() - u.min() ) / w ) )
     gbs = np.logspace(np.log10(1.e-4), np.log10(u.max()), n)
-    eks = np.asarray([e_k[u > gb].sum() for gb in gbs])
-    ets = np.asarray([etotal[u > gb].sum() for gb in gbs])
+    eks = np.asanyarray([e_k[u > gb].sum() for gb in gbs])
+    ets = np.asanyarray([etotal[u > gb].sum() for gb in gbs])
     
     E_seg_rat  = ets[1:]/ets[:-1]
     gb_seg_rat = gbs[1:]/gbs[:-1]
