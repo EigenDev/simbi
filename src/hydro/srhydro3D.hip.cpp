@@ -1282,7 +1282,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     const luint xstride      = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
     const luint ystride      = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
     const luint zstride      = (BuildPlatform == Platform::GPU) ? zblockdim + 2 * radius: nz;
-    const luint shBlockSpace = (4 + 2 * radius) * (4 + 2 * radius) * (4 + 2 * radius);
+    const luint shBlockSpace = (xblockdim + 2 * radius) * (yblockdim + 2 * radius) * (zblockdim + 2 * radius);
     const luint shBlockBytes = shBlockSpace * sizeof(Primitive);
     const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
