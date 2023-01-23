@@ -28,7 +28,7 @@ def calc_cell_volume1D(*, x1: generic_numpy_array, coord_system: str = 'soherica
         x1mean = calc_centroid(x1vertices, coord_system)
         return np.asanyarray(x1mean * x1mean * dx1)
     elif coord_system == 'cartesian':
-        return np.asanyarray(dx1) ** 3 
+        return np.asanyarray(dx1 ** 3) 
     else:
         raise ValueError("The coordinate system given is not avaiable at this time")
 
