@@ -60,8 +60,8 @@ namespace simbi{
                     cons[1] = inflow_zones[1];
                     break;
                 case simbi::BoundaryCondition::REFLECTING:
-                    cons[0]   = cons[3];
-                    cons[1]   = cons[2];
+                    cons[0]   =   cons[3];
+                    cons[1]   =   cons[2];
                     cons[0].s = - cons[3].s;
                     cons[1].s = - cons[2].s;
                     break;
@@ -71,15 +71,15 @@ namespace simbi{
                     break;
                 }
 
-                switch (boundary_conditions[0])
+                switch (boundary_conditions[1])
                 {
                 case simbi::BoundaryCondition::INFLOW:
                     cons[grid_size - 1] = inflow_zones[0];
                     cons[grid_size - 2] = inflow_zones[0];
                     break;
                 case simbi::BoundaryCondition::REFLECTING:
-                    cons[grid_size - 1]   = cons[grid_size - 4];
-                    cons[grid_size - 2]   = cons[grid_size - 3];
+                    cons[grid_size - 1]   =   cons[grid_size - 4];
+                    cons[grid_size - 2]   =   cons[grid_size - 3];
                     cons[grid_size - 1].s = - cons[grid_size - 4].s;
                     cons[grid_size - 2].s = - cons[grid_size - 3].s;
                     break;

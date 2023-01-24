@@ -65,7 +65,7 @@ namespace simbi{
                     break;
                 }
 
-                switch (boundary_conditions[0])
+                switch (boundary_conditions[1])
                 {
                 case simbi::BoundaryCondition::INFLOW:
                     cons[grid_size - 1] = inflow_zones[0];
