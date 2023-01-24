@@ -267,7 +267,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             do
             {
                 // compute x_[k+1]
-                g     = helpers::newton_g(gamma, tau, D, S, peq);
+                g     = helpers::newton_g(gamma, tau, D, S, 0.5 * (peq + pstar));
                 peq  -= f / g;
 
                 // compute x*_k
@@ -291,7 +291,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 }
                 iter++;
 
-            } while (std::abs(f / g) >= tol);
+            } while (std::abs(pstar - peq) >= tol);
 
             real v = S / (tau + D + pstar);
             real W = 1 / std::sqrt(1 - v * v);
