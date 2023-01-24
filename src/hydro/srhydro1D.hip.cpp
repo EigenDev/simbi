@@ -329,8 +329,8 @@ Eigenvals SRHD::calc_eigenvals(
     const real rhoR  = primsR.rho;
     const real vR    = primsR.v;
     const real pR    = primsR.p;
-    const real hR    = 1 + gamma * pR  / (rhoR  * (gamma - 1));
-    const real csR   = std::sqrt(gamma * pR  / (rhoR  * hR));
+    const real hR    = 1 + gamma * pR  / (rhoR * (gamma - 1));
+    const real csR   = std::sqrt(gamma * pR  / (rhoR * hR));
 
     switch (comp_wave_speed)
     {
@@ -338,13 +338,13 @@ Eigenvals SRHD::calc_eigenvals(
         {
             // Compute waves based on Schneider et al. 1993 Eq(31 - 33)
             const real vbar = static_cast<real>(0.5) * (vL + vR);
-            const real cbar = static_cast<real>(0.5) * (csR  + csL);
+            const real cbar = static_cast<real>(0.5) * (csR + csL);
 
             const real bR   = (vbar + cbar) / (1 + vbar * cbar);
             const real bL   = (vbar - cbar) / (1 - vbar * cbar);
 
             const real aL = helpers::my_min(bL, (vL - csL) / (1 - vL * csL));
-            const real aR = helpers::my_max(bR, (vR  + csR) / (1 + vR  * csR));
+            const real aR = helpers::my_max(bR, (vR + csR) / (1 + vR * csR));
 
             return Eigenvals(aL, aR);
         }
@@ -369,14 +369,14 @@ Eigenvals SRHD::calc_eigenvals(
 
             // Smoothen for rarefaction fan
             aL = helpers::my_min(aL, (vL - csL)  / (1 - vL * csL));
-            aR = helpers::my_max(aR, (vR  + csR) / (1 + vR * csR));
+            aR = helpers::my_max(aR, (vR + csR) / (1 + vR * csR));
 
             return Eigenvals(aL, aR);
         }
     case simbi::WaveSpeeds::NAIVE:
     {
-        const real aL = helpers::my_min((vR  - csR) / (1 - vR  * csR), (vL - csL) / (1 - vL * csL));
-        const real aR = helpers::my_max((vL + csL) / (1 + vL * csL), (vR  + csR) / (1 + vR  * csR));
+        const real aL = helpers::my_min((vR - csR) / (1 - vR * csR), (vL - csL) / (1 - vL * csL));
+        const real aR = helpers::my_max((vL + csL) / (1 + vL * csL), (vR + csR) / (1 + vR * csR));
 
         return Eigenvals(aL, aR);
     }

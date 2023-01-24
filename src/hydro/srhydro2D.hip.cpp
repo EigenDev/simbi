@@ -84,7 +84,7 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
             const real bl    = (vbar - cbar)/(1 - cbar*vbar);
             const real br    = (vbar + cbar)/(1 + cbar*vbar);
             const real aL    = helpers::my_min(bl, (vL - csL)/(1 - vL*csL));
-            const real aR    = helpers::my_max(br, (vR  + csR)/(1 + vR*csR));
+            const real aR    = helpers::my_max(br, (vR + csR)/(1 + vR*csR));
 
             return Eigenvals(aL, aR, csL, csR);
         }
@@ -97,20 +97,20 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
             // Define temporaries to save computational cycles
             const real qfL   = 1 / (1 + sL);
             const real qfR   = 1 / (1 + sR);
-            const real sqrtR = std::sqrt(sR * (1 - vR  * vR  + sR));
+            const real sqrtR = std::sqrt(sR * (1 - vR * vR + sR));
             const real sqrtL = std::sqrt(sL * (1 - vL * vL + sL));
 
             const real lamLm = (vL - sqrtL) * qfL;
-            const real lamRm = (vR  - sqrtR) * qfR;
+            const real lamRm = (vR - sqrtR) * qfR;
             const real lamLp = (vL + sqrtL) * qfL;
-            const real lamRp = (vR  + sqrtR) * qfR;
+            const real lamRp = (vR + sqrtR) * qfR;
 
             real aL = lamLm < lamRm ? lamLm : lamRm;
             real aR = lamLp > lamRp ? lamLp : lamRp;
 
             // Smoothen for rarefaction fan
             aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
-            aR = helpers::my_max(aR, (vR  + csR) / (1 + vR  * csR));
+            aR = helpers::my_max(aR, (vR + csR) / (1 + vR * csR));
 
             return Eigenvals(aL, aR, csL, csR);
         }
@@ -118,8 +118,8 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
         {
             const real aLm = (vL - csL) / (1 - vL * csL);
             const real aLp = (vL + csL) / (1 + vL * csL);
-            const real aRm = (vR  - csR) / (1 - vR  * csR);
-            const real aRp = (vR  + csR) / (1 + vR  * csR);
+            const real aRm = (vR - csR) / (1 - vR * csR);
+            const real aRp = (vR + csR) / (1 + vR * csR);
 
             const real aL = helpers::my_min(aLm, aRm);
             const real aR = helpers::my_max(aLp, aRp);

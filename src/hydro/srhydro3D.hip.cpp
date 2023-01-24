@@ -190,18 +190,18 @@ Eigenvals SRHD3D::calc_eigenvals(
         {
             //--------Calc the wave speeds based on Mignone and Bodo (2005)
             const real sL = csL * csL * (1 / (gamma * gamma * (1 - csL * csL)));
-            const real sR = csR  * csR  * (1 / (gamma * gamma * (1 - csR  * csR)));
+            const real sR = csR * csR * (1 / (gamma * gamma * (1 - csR * csR)));
 
             // Define temporaries to save computational cycles
             const real qfL   = 1 / (1 + sL);
             const real qfR   = 1 / (1 + sR);
-            const real sqrtR = std::sqrt(sR * (1- vR  * vR  + sR));
+            const real sqrtR = std::sqrt(sR * (1- vR * vR + sR));
             const real sqrtL = std::sqrt(sL * (1- vL * vL + sL));
 
             const real lamLm = (vL - sqrtL) * qfL;
-            const real lamRm = (vR  - sqrtR) * qfR;
+            const real lamRm = (vR - sqrtR) * qfR;
             const real lamLp = (vL + sqrtL) * qfL;
-            const real lamRp = (vR  + sqrtR) * qfR;
+            const real lamRp = (vR + sqrtR) * qfR;
 
             const real aL = lamLm < lamRm ? lamLm : lamRm;
             const real aR = lamLp > lamRp ? lamLp : lamRp;
@@ -212,8 +212,8 @@ Eigenvals SRHD3D::calc_eigenvals(
         {
             const real aLm = (vL - csL) / (1 - vL * csL);
             const real aLp = (vL + csL) / (1 + vL * csL);
-            const real aRm = (vR  - csR) / (1 - vR  * csR);
-            const real aRp = (vR  + csR) / (1 + vR  * csR);
+            const real aRm = (vR - csR) / (1 - vR * csR);
+            const real aRp = (vR + csR) / (1 + vR * csR);
 
             const real aL = helpers::my_min(aLm, aRm);
             const real aR = helpers::my_max(aLp, aRp);
