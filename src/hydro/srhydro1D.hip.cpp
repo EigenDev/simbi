@@ -262,21 +262,22 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             // so far, the convergence rate is the same, but perhaps I need a slight tweak
 
             // compute f(x_0)
-            f = helpers::newton_f(gamma, tau, D, S, peq);
+            // f = helpers::newton_f(gamma, tau, D, S, peq);
             const real tol = D * tol_scale;
             do
             {
                 // compute x_[k+1]
-                g     = helpers::newton_g(gamma, tau, D, S, 0.5 * (peq + pstar));
+                f     = helpers::newton_f(gamma, tau, D, S, peq);
+                g     = helpers::newton_g(gamma, tau, D, S, peq);
                 peq  -= f / g;
 
                 // compute x*_k
-                f     = helpers::newton_f(gamma, tau, D, S, peq);
-                pstar = peq - f / g;
+                // f     = helpers::newton_f(gamma, tau, D, S, peq);
+                // pstar = peq - f / g;
 
                 if (iter >= MAX_ITER || std::isnan(peq))
                 {
-                    real v = S / (tau + D + pstar);
+                    real v = S / (tau + D + peq);
                     real W = 1 / std::sqrt(1 - v * v);
                     const luint idx       = helpers::get_real_idx(ii, radius, active_zones);
                     const real xl         = get_xface(idx, geometry, 0);
@@ -291,9 +292,9 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 }
                 iter++;
 
-            } while (std::abs(pstar - peq) >= tol);
+            } while (std::abs(f / g) >= tol);
 
-            real v = S / (tau + D + pstar);
+            real v = S / (tau + D + peq);
             real W = 1 / std::sqrt(1 - v * v);
             // real mach_ceiling = 100.0;
             // real u            = v /std::sqrt(1 - v * v);
@@ -304,8 +305,8 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             //     // printf("peq: %f, npew: %f\n", rho * emin * (gamma - 1.0));
             //     peq = rho * emin * (gamma - 1.0);
             // }
-            press_data[ii] = pstar;
-            prims_data[ii] = Primitive{D/ W, v, pstar};
+            press_data[ii] = peq;
+            prims_data[ii] = Primitive{D/ W, v, peq};
             workLeftToDo = false;
         }
     });
