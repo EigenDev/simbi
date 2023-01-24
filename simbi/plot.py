@@ -120,6 +120,13 @@ def parse_plotting_arguments(
         type=float,
         help='exponent of power-law norm')
     plot_parser.add_argument(
+        '--scale_downs',
+        default = [1],
+        type=float,
+        nargs = '+',
+        help='list of values to scale plotted variables down by',
+    )
+    plot_parser.add_argument(
         '--dbg',
         default=False,
         action='store_true',
@@ -265,7 +272,7 @@ def main(
     ndim = get_dimensionality(file_list)
     visual_module = getattr(importlib.import_module(
         f'{args.kind}{ndim}d'), f'{args.kind}')
-    
+
     visual_module(parser)
 
 

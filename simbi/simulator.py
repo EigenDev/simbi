@@ -678,7 +678,7 @@ class Hydro:
                     x3=self.x3,
                     coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
-        
+                
         self.solution = state.simulate(
             sources=sources,
             tstart=self.start_time,

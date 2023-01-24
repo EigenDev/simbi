@@ -39,9 +39,11 @@ def plot_profile(args, fields, mesh, setup, ncols: int, ax = None, overplot = Fa
         tend *= util.time_scale 
     
     if not overplot:
-        fig, ax= plt.subplots(1, 1, figsize=(10,8))
+        fig, ax= plt.subplots(1, 1, figsize=args.fig_dims)
     
     field_labels = util.get_field_str(args)
+    labels = field_labels if isinstance(field_labels, list) else [None]
+    scale_cycle = cycle(args.scale_downs)
     for idx, field in enumerate(args.fields):
         unit_scale = 1.0
         if args.units:
@@ -57,16 +59,14 @@ def plot_profile(args, fields, mesh, setup, ncols: int, ax = None, overplot = Fa
             var = util.prims2var(fields, field)
         else:
             var = fields[field]
-        
-        if args.labels:
-            label = r'$\rm {}, t={:.1f}$'.format(args.labels[case], tend)
-        else:
-            label = r'$t-{:.1f}$'.format(tend)
+        scale = next(scale_cycle)
+        var /= scale 
+        if scale != 1:
+            if scale.is_integer():
+                scale = int(scale)
+            labels[idx] = rf'{field_labels[idx]} / {scale}'
             
-        if len(args.fields) > 1:
-            label = field_labels[idx] + ' ' + label
-            
-        ax.plot(r, var * unit_scale, color=colors[case], label=label, linestyle=next(linecycler))
+        ax.plot(r, var * unit_scale, label=labels[idx], linestyle=next(linecycler))
         # if case == 0:
         #     if args.fields[0] == 'gamma_beta':
         #         max_idx = np.argmax(var)

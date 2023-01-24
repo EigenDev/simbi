@@ -167,9 +167,10 @@ def movie(parser: argparse.ArgumentParser):
         ax.set_ylabel(r'$E( > \Gamma \beta) \ [\rm{erg}]$')
         ax.set_xlabel(r'$\Gamma\beta$')
     else:
-        if (len(args.fields) == 1):
-            ax.set_ylabel('{}'.format(field_str))
-        ax.set_xlabel('r')
+        field_strs = util.get_field_str(args)
+        if len(args.fields) == 1:
+            ax.set_ylabel(f'{field_strs}')
+        ax.set_xlabel('x')
     
     if args.dbg:
         plt.style.use('dark_background')

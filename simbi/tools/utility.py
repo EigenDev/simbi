@@ -118,14 +118,18 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
             field_str_list.append("T [K]" if args.units else "T")
         elif field == 'mach':
             field_str_list.append('M')
-        elif field == 'v':
+        elif field == 'v1' or field == 'v':
             field_str_list.append('$v / v_0$')
+        elif field == 'v2':
+            field_str_list.append('$v_2 / v_0$')
+        elif field == 'v3':
+            field_str_list.append('$v_3 / v_0$')
         elif field == 'u1':
             field_str_list.append(r'$\Gamma \beta_1$')
         elif field == 'u2':
             field_str_list.append(r'$\Gamma \beta_2$')
         else:
-            field_str_list.append(field)
+            field_str_list.append(rf'${field}$')
 
     return field_str_list if len(args.fields) > 1 else field_str_list[0]
 

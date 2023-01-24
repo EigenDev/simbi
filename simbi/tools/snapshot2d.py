@@ -733,28 +733,56 @@ def plot_cartesian_plot(
     else:
         var = fields[args.fields[0]]
     tend = dset['time']
-    c = ax.pcolormesh(x1, x2, var, cmap=color_map, shading='auto', **kwargs)
-    if mirror:
-        ax.pcolormesh(-x1, x2, var,  cmap=color_map, shading='auto', **kwargs)
-    divider = make_axes_locatable(ax)
-    cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
+    if args.oned_slice is None:
+        c = ax.pcolormesh(x1, x2, var, cmap=color_map, shading='auto', **kwargs)
+        if mirror:
+            ax.pcolormesh(-x1, x2, var,  cmap=color_map, shading='auto', **kwargs)
+        divider = make_axes_locatable(ax)
+        cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
 
-    if not args.no_cbar:
+        if not args.no_cbar:
+            if args.log:
+                logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+                cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes, format=logfmt)
+            else:
+                cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes)
+
+        ax.tick_params(axis='both', labelsize=10)
+        # Change the format of the field
+        field_str = util.get_field_str(args)
         if args.log:
-            logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-            cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes, format=logfmt)
+            cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str))
         else:
-            cbar = fig.colorbar(c, orientation='vertical', cax=cbaxes)
-
-    ax.tick_params(axis='both', labelsize=10)
-    # Change the format of the field
-    field_str = util.get_field_str(args)
-    if args.log:
-        cbar.ax.set_ylabel(r'$\log$[{}]'.format(field_str))
+            cbar.ax.set_ylabel(r'{}'.format(field_str))
+        
+        ax.set_aspect('equal')
     else:
-        cbar.ax.set_ylabel(r'{}'.format(field_str))
-    
-    ax.set_aspect('equal')
+        field_labels = util.get_field_str(args)
+        labels = field_labels if isinstance(field_labels, list) else [None]
+        scale_cycle = cycle(args.scale_downs)
+        one_axis_var = x1[args.oned_slice] if args.oned_proj == 2 else x2[:,args.oned_slice]
+        for idx, field in enumerate(args.fields):
+            if field in derived:
+                var = util.prims2var(fields, field)
+            else:
+                var = fields[field]
+                
+            scale = next(scale_cycle)
+            var /= scale
+            if scale != 1:
+                if scale.is_integer():
+                    scale = int(scale)
+                labels[idx] = rf'{labels[idx]} / {scale}'
+            
+            proj_var = var[args.oned_slice] if args.oned_proj == 2 else var[:, args.oned_slice]
+            ax.plot(one_axis_var, proj_var, label=labels[idx])
+        
+        if isinstance(field_labels, list):
+            ax.legend()
+        else:
+            ax.set_ylabel(field_labels)
+        ax.set_xlim(one_axis_var[0], one_axis_var[-1])
+        
     if args.setup:
         ax.set_title('{} at t = {:.2f}'.format(args.setup, tend))
     
@@ -1670,6 +1698,8 @@ def snapshot(parser: argparse.ArgumentParser):
     plot_parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
     plot_parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=None, nargs='+')
     plot_parser.add_argument('--plot_max_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
+    plot_parser.add_argument('--oned_slice', help='index of x1 array for one-d projection', default=None, type=int)
+    plot_parser.add_argument('--oned_proj', help='axes to project 2d solution onto', default=None, type=int, choices=[1,2])
     args = parser.parse_args()
     
     vmin, vmax = args.cbar[:2]
