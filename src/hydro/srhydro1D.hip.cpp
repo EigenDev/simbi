@@ -230,7 +230,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
     auto* const prims_data = prims.data();
     auto* const press_data = pressure_guess.data();
     simbi::parallel_for(p, (luint)0, nx, [=] GPU_LAMBDA (luint ii){
-        real eps, pre, v2, et, c2, h, g, f, W, rho, peq;
+        real pre, g, f, peq, pstar;
         volatile __shared__ bool found_failure;
         luint tx = get_threadId();
 
@@ -251,32 +251,34 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 invdV            = 1 / (xmean * xmean * (xr - xl));
             }
             peq            = press_data[ii];
+            pstar          = peq;
             const real D   = cons_data[ii].d   * invdV;
             const real S   = cons_data[ii].s   * invdV;
             const real tau = cons_data[ii].tau * invdV;
             int iter       = 0;
+
+            // compute f(x_0)
+            f = helpers::newton_f(gamma, tau, D, S, peq);
             const real tol = D * tol_scale;
             do
             {
-                pre = peq;
-                et  = tau + D + pre;
-                v2  = S * S / (et * et);
-                W   = 1 / std::sqrt(1 - v2);
-                rho = D / W;
-                eps = (tau + (1 - W) * D + (1 - W * W) * pre) / (D * W);
-                h   = 1 + eps + pre / rho;
-                c2  = gamma *pre / (h * rho); 
-                g   = c2 * v2 - 1;
-                f   = (gamma - 1) * rho * eps - pre;
+                // compute x_[k+1]
+                g     = helpers::newton_g(gamma, tau, D, S, peq);
+                peq  -= f / g;
 
-                peq = pre - f / g;
+                // compute x*_k
+                f     = helpers::newton_f(gamma, tau, D, S, peq);
+                pstar = peq - f / g;
+
                 if (iter >= MAX_ITER || std::isnan(peq))
                 {
+                    real v = S / (tau + D + pstar);
+                    real W = 1 / std::sqrt(1 - v * v);
                     const luint idx       = helpers::get_real_idx(ii, radius, active_zones);
                     const real xl         = get_xface(idx, geometry, 0);
                     const real xr         = get_xface(idx, geometry, 1);
                     const real xmean      = helpers::calc_any_mean(xl, xr, x1cell_spacing);
-                    printf("\nCons2Prim cannot converge\n density: %.3e, pressure: %.3e, vsq: %.3e, coord: %.2e, iter: %d\n", rho, peq, v2, xmean, iter);
+                    printf("\nCons2Prim cannot converge\n density: %.3e, pressure: %.3e, v: %.3e, coord: %.2e, iter: %d\n", D / W, peq, v, xmean, iter);
                     dt             = INFINITY;
                     inFailureState = true;
                     found_failure        = true;
@@ -285,9 +287,10 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 }
                 iter++;
 
-            } while (std::abs(peq - pre) >= tol);
+            } while (std::abs(f / g) >= tol);
 
-            real v = S / (tau + D + peq);
+            real v = S / (tau + D + pstar);
+            real W = 1 / std::sqrt(1 - v * v);
             // real mach_ceiling = 100.0;
             // real u            = v /std::sqrt(1 - v * v);
             // real e            = peq / rho * 3.0;
@@ -297,8 +300,8 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             //     // printf("peq: %f, npew: %f\n", rho * emin * (gamma - 1.0));
             //     peq = rho * emin * (gamma - 1.0);
             // }
-            press_data[ii] = peq;
-            prims_data[ii] = Primitive{rho, v, peq};
+            press_data[ii] = pstar;
+            prims_data[ii] = Primitive{D/ W, v, pstar};
             workLeftToDo = false;
         }
     });
