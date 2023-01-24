@@ -368,7 +368,7 @@ Eigenvals SRHD::calc_eigenvals(
             real aR = lamLp > lamRp ? lamLp : lamRp;
 
             // Smoothen for rarefaction fan
-            aL = helpers::my_min(aL, (vL - csL)  / (1 - vL * csL));
+            aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
             aR = helpers::my_max(aR, (vR + csR) / (1 + vR * csR));
 
             return Eigenvals(aL, aR);
