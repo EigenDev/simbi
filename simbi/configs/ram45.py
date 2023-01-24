@@ -5,7 +5,7 @@ import numpy as np
 class Ram45(BaseConfig):
     """
     1D shock-heating problem in planar geometry
-    This setup was adapted from Zhang and MacFadyen (2006) section 4.5 pg. 9
+    This setup was adapted from Zhang and MacFadyen (2006) section 4.5
     """
     nzones    = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
     ad_gamma  = DynamicArg("ad_gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
