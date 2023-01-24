@@ -88,30 +88,38 @@ class Hydro:
         clean_attributes = [x for x in extras.keys() if not x.startswith('__')]
         [setattr(self, attribute, extras[attribute]) # type: ignore
          for attribute in clean_attributes if attribute in dir(self)]
-
-        # check if given simple nexted sequence to split across the grid
-        if all(len(v) == 3 for v in initial_state):
-            self.dimensionality = 1
-            self.discontinuity = True
-        elif all(len(v) == 4 for v in initial_state):
-            self.dimensionality = 2
-            self.discontinuity = True
-        elif all(len(v) == 5 for v in initial_state):
-            self.dimensionality = 3
-            self.discontinuity = True
+        
+        if not isinstance(resolution, (Sequence, np.ndarray)):
+            resolution = (resolution,)
+        resolution = tuple(resolution)
+        
+        self.geometry   = cast(Sequence[float], geometry)
+        self.resolution = cast(Sequence[int], resolution)
+        tuple_of_tuples = lambda x: any(isinstance(a, Sequence) for a in x)
+        if tuple_of_tuples(initial_state):
+            # check if given simple nexted sequence to split across the grid
+            if all(len(v) == 3 for v in initial_state):
+                self.dimensionality = 1
+                self.discontinuity = True
+            elif all(len(v) == 4 for v in initial_state):
+                self.dimensionality = 2
+                self.discontinuity = True
+            elif all(len(v) == 5 for v in initial_state):
+                self.dimensionality = 3
+                self.discontinuity = True
+            else:
+                raise ValueError("State arrays across discontuinty need to have equal length")
         else:
+            if all(isinstance(x, (float, int)) for x in initial_state):
+                initial_state = tuple(x * np.ones(shape=self.resolution) for x in initial_state)
             self.dimensionality = np.asanyarray(initial_state[0]).ndim
 
         self.coord_system = coord_system
         self.regime = regime
         initial_state = helpers.pad_jagged_array(initial_state)
-        if not isinstance(resolution, (Sequence, np.ndarray)):
-            resolution = (resolution,)
 
         self.gamma = gamma
         if len(initial_state) < 6 or len(initial_state) < 8 and self.discontinuity:
-            self.geometry = cast(Sequence[float], geometry)
-            self.resolution = cast(Sequence[int], resolution)
             self.nvars = (2 + 1 * (self.dimensionality != 1) +
                           self.dimensionality)
 

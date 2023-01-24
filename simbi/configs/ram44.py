@@ -6,12 +6,12 @@ class Ram44(BaseConfig):
     Shock with non-zero transverse velocity in 2D with 2 Partitions
     This setup was adapted from Zhang and MacFadyen (2006) section 4.4 pg. 9
     """
-    nzones    = DynamicArg("nzones", 256, help="number of grid zones", var_type=int)
+    nzones    = DynamicArg("nzones", 400, help="number of grid zones", var_type=int)
     ad_gamma  = DynamicArg("ad_gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type = float)
     
     @simbi_property
     def initial_state(self) -> Sequence[Sequence[float]]:
-        return ((1.0, 0.0, 0.0, 1e3),  # Left 
+        return ((1.0, 0.0, 0.0, 1e3),   # Left 
                 (1.0, 0.0, 0.99, 1e-2)) # Right
     
     @simbi_property

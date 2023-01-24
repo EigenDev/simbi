@@ -10,9 +10,9 @@ class MignoneBodo(BaseConfig):
     
     @simbi_property
     def initial_state(self) -> Sequence[Sequence[float]]:
-        if self.problem == 1:
+        if self.problem == 2:
             return ((1.0, -0.6, 10.0), (10.0, 0.5, 20.0))
-        return ((1.0, 0.9, 1.0), (1.0, 0.5, 10.0))
+        return ((1.0, 0.9, 1.0), (1.0, 0.0, 10.0))
     
     @simbi_property
     def geometry(self) -> Sequence[float]:

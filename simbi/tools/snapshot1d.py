@@ -89,13 +89,13 @@ def plot_profile(args, fields, mesh, setup, ncols: int, ax = None, overplot = Fa
     # Change the format of the field
     field_str = util.get_field_str(args)
     
-    if (len(args.fields) == 1):
+    if len(args.fields) == 1:
         ax.set_ylabel('{}'.format(field_str))
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     # ax.axvline(0.60, color='black', linestyle='--')
     
-    if args.legend:
+    if len(args.fields) > 1 and args.legend:
         ax.legend()
         
     ########

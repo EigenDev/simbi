@@ -12,7 +12,7 @@ class Ram45(BaseConfig):
     
     @simbi_property
     def initial_state(self) -> Sequence[Sequence[float]]:
-        return (np.ones(self.nzones.value), np.ones(self.nzones.value)*(1.0 - 8e-9), np.ones(self.nzones.value)*1e-6)
+        return (1.0, (1.0 - 7e-9), 1e-6)
     
     @simbi_property
     def geometry(self) -> Sequence[Sequence[float]]:
