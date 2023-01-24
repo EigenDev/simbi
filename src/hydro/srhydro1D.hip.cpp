@@ -257,6 +257,10 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             const real tau = cons_data[ii].tau * invdV;
             int iter       = 0;
 
+            // Perform modified Newton Raphson based on
+            // https://www.sciencedirect.com/science/article/pii/S0893965913002930
+            // so far, the convergence rate is the same, but perhaps I need a sligth tweak
+            
             // compute f(x_0)
             f = helpers::newton_f(gamma, tau, D, S, peq);
             const real tol = D * tol_scale;
