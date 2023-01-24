@@ -172,7 +172,7 @@ namespace simbi
                         // Listen to kill signals
                         helpers::catch_signals();
                     } catch (helpers::InterruptException &e) {
-                        util::writeln("Interript Exception: {}", e.what());
+                        util::writeln("Interrupt Exception: {}", e.what());
                         sim_state.inFailureState = true;
                         write2file(sim_state, sim_state.setup, sim_state.data_directory, 
                         sim_state.t, INFINITY, sim_state.chkpt_interval, sim_state.checkpoint_zones);
