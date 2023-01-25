@@ -594,7 +594,7 @@ class Hydro:
         # Offset the start time from zero if wanting log
         # checkpoints, but with initial time of zero
         if dlogt != 0 and self.start_time == 0:
-            start_time = 1e-16
+            self.start_time = 1e-16
 
         # Check whether the specified path exists or not
         if not os.path.exists(data_directory):
@@ -691,7 +691,7 @@ class Hydro:
                     x3=self.x3,
                     coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
-                
+
         self.solution = state.simulate(
             sources=sources,
             tstart=self.start_time,
