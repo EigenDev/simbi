@@ -53,8 +53,7 @@ class simbi_property(Generic[T]):
                     transform = lambda x: x.var_type(x.value) if isinstance(x, DynamicArg) else x
                     return  cast(T, tuple(tuple(map(transform, i)) for i in input_obj))
                 elif any(isinstance(x, DynamicArg) for x in input_obj):
-                    transform = lambda x: x.var_type(x.value) if isinstance(x, DynamicArg) else x
-                    return cast(T, tuple(tuple(map(transform, i)) for i in input_obj))
+                    return tuple(res if not isinstance(res, DynamicArg) else res.var_type(res.value) for res in input_obj)
                 else:
                     return input_obj
             except TypeError:
