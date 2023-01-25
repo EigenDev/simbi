@@ -9,8 +9,12 @@ import os
 import inspect
 import simbi.initial_condition as simbi_ic
 import warnings
-from functools import wraps
 from .key_types import *
+
+def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
+    return '%s:%s: %s:\n%s\n' % (filename, lineno, category.__name__, message)
+
+warnings.formatwarning = warning_on_one_line
 
 available_regimes = ['classical', 'relativistic']
 available_coord_systems = [
