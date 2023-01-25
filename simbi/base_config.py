@@ -109,7 +109,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def passive_scalars(self) -> Optional[Union[Sequence[float], NDArray[numpy_float]]]:
         return None
     
-    
     @simbi_classproperty
     def scale_factor(cls) -> Optional[Callable[[float], float]]:
         return None 
