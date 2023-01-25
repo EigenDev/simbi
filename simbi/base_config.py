@@ -63,7 +63,6 @@ class simbi_property(Generic[T]):
 def err_message(name: str) -> str:
     return f"Configuration must include a {name} simbi_property"
 
-
 __all__ = ['BaseConfig', 'simbi_property', 'simbi_classproperty']
 class BaseConfig(metaclass=abc.ABCMeta):
     dynamic_args: ListOrNone = None
