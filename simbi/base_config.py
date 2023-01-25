@@ -40,16 +40,25 @@ class simbi_property(Generic[T]):
     
     @staticmethod
     def type_converter(input_obj: Any) -> T:
-        if isinstance(input_obj, Iterable) and not isinstance(input_obj, str):
-            if all(isinstance(val, Iterable) for val in input_obj)and not any(isinstance(val, str) for val in input_obj):
-                transform = lambda x: x.var_type(x.value) if isinstance(x, DynamicArg) else x
-                cleaned_input_obj = tuple(tuple(map(transform, i)) for i in input_obj)
-                return cast(T, cleaned_input_obj)
-            return cast(T, [res if not isinstance(res, DynamicArg) else res.var_type(res.value) for res in input_obj])
+        if isinstance(input_obj, str):
+            return input_obj
+        if isinstance(input_obj, DynamicArg):
+            return input_obj.var_type(input_obj.value)
         else:
-            if isinstance(input_obj, DynamicArg):
-                return cast(T, input_obj.var_type(input_obj.value))
-        return cast(T, input_obj)
+            try:
+                if any(isinstance(x, str) for x in input_obj):
+                    return input_obj
+                
+                if any(isinstance(a, Sequence) for a in input_obj):
+                    transform = lambda x: x.var_type(x.value) if isinstance(x, DynamicArg) else x
+                    return  cast(T, tuple(tuple(map(transform, i)) for i in input_obj))
+                elif any(isinstance(x, DynamicArg) for x in input_obj):
+                    transform = lambda x: x.var_type(x.value) if isinstance(x, DynamicArg) else x
+                    return cast(T, tuple(tuple(map(transform, i)) for i in input_obj))
+                else:
+                    return input_obj
+            except TypeError:
+                return input_obj
 
 def err_message(name: str) -> str:
     return f"Configuration must include a {name} simbi_property"

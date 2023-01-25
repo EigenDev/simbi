@@ -77,11 +77,11 @@ class Hydro:
         """
         if coord_system not in available_coord_systems:
             raise ValueError(
-                f"Invalid coordinate system. Expected one of: {available_coord_systems}")
+                f"Invalid coordinate system. Expected one of: {available_coord_systems}. Instead got: {coord_system}")
 
         if regime not in available_regimes:
             raise ValueError(
-                f"Invalid simulation regime. Expected one of: {available_regimes}")
+                f"Invalid simulation regime. Expected one of: {available_regimes}. Instead got {regime}")
 
         # Update any static vars with attributes obtained from some setup
         # configuration
@@ -96,6 +96,7 @@ class Hydro:
         self.geometry   = cast(Sequence[float], geometry)
         self.resolution = cast(Sequence[int], resolution)
         tuple_of_tuples = lambda x: any(isinstance(a, Sequence) for a in x)
+        
         if tuple_of_tuples(initial_state):
             # check if given simple nexted sequence to split across the grid
             if all(len(v) == 3 for v in initial_state):
