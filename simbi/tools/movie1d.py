@@ -40,8 +40,6 @@ def plot_profile(fig, ax, filename, args):
             field = 'v1'
             
         if field in derived:
-            print(field)
-            zzz = input('')
             var = util.prims2var(fields, field)
         else:
             var = fields[field]
