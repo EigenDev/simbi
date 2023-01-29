@@ -402,11 +402,13 @@ class Hydro:
             slices = [np.s_[..., i] for i in edges] + [np.s_[..., i, :] for i in edges] + [np.s_[:, i, ...] for i in edges]
 
         order = 1 if first_order else 2
-        if self.dimensionality > 1:
-            source_transform: Any = np.s_[:, None if self.dimensionality == 2 else None, None]
+        if self.dimensionality == 3:
+            source_transform: Any = np.s_[:, None, None]
+        elif self.dimensionality == 2:
+            source_transform  = np.s_[:, None]
         else:
             source_transform = np.s_[:]
-            
+
         for boundary in range(self.dimensionality * len(edges)):
             source = boundary_sources[boundary // order]
             if any(val != 0 for val in source):
