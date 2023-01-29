@@ -11,8 +11,13 @@ import simbi.initial_condition as simbi_ic
 import warnings
 from .key_types import *
 
-def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
-    return '%s:%s: %s:\n%s\n' % (filename, lineno, category.__name__, message)
+def warning_on_one_line(
+    message: Union[Warning, str], 
+    category: Type[Warning], 
+    filename: str, 
+    lineno: int, 
+    line: Optional[str] = None) -> str:
+    return '{}:{}: {}:\n{}\n'.format(filename, lineno, category.__name__, message)
 
 warnings.formatwarning = warning_on_one_line
 
@@ -101,7 +106,7 @@ class Hydro:
         self.resolution = cast(Sequence[int], resolution)
         tuple_of_tuples = lambda x: any(isinstance(a, Sequence) for a in x)
         
-        if tuple_of_tuples(initial_state):
+        if tuple_of_tuples(initial_state): # type: ignore 
             # check if given simple nexted sequence to split across the grid
             if all(len(v) == 3 for v in initial_state):
                 self.dimensionality = 1

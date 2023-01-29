@@ -36,10 +36,10 @@ class simbi_property(Generic[T]):
     def __get__(self, obj: Any, objtype: Optional[Any],/) -> T:
         if self.fget is None:
             raise ValueError("Property has not getter")
-        return self.type_converter(self.fget(obj))
+        return cast(T, self.type_converter(self.fget(obj))) 
     
     @staticmethod
-    def type_converter(input_obj: Any) -> T:
+    def type_converter(input_obj: Any) -> Any:
         if isinstance(input_obj, str):
             return input_obj
         if isinstance(input_obj, DynamicArg):

@@ -212,8 +212,9 @@ def valid_pyscript(param):
 def type_check_input(file: str) -> None:
     from mypy import api
     result = api.run([f'{file}'])
-    print(result)
-    result[:2] = result[0].split('\n')[:2]
+    if 'shadows library module' in  result[1]:
+        return 
+    
     if result[0]:
         print(f'\n{bcolors.OKBLUE}Type checking report{bcolors.ENDC}:')
         report_color = bcolors.FAIL if 'error' in result[0] else bcolors.OKGREEN
@@ -226,13 +227,14 @@ def type_check_input(file: str) -> None:
     exit_color = bcolors.OKGREEN if result[2] == 0 else bcolors.FAIL
     print(f'\n{bcolors.BOLD}Exit status{bcolors.ENDC}: {exit_color}{result[2]}{bcolors.ENDC}')
     if not result[2] == 0:
-        raise TypeError("\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option")
+        raise TypeError("""\nYour configuration script failed type safety checks. 
+                        Please fix them or run with --no-type-check option""")
 
 def configure_state(
         script: str,
         parser: argparse.ArgumentParser,
-        argv: Optional[Sequence] = None,
-        type_checking_active: bool = True):
+        argv: Optional[Sequence],
+        type_checking_active: bool):
     """
     Configure the Hydro state based on the Config class that exists in the passed
     in setup script. Once configured, pass it back to main to be simulated
@@ -244,7 +246,7 @@ def configure_state(
 
     if type_checking_active:
         print("Validating Script Type Safety...\n")
-        # type_check_input(script)
+        type_check_input(script)
         
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
