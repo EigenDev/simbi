@@ -286,7 +286,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                     printf("\nCons2Prim cannot converge\n density: %.3e, pressure: %.3e, v: %.3e, coord: %.2e, iter: %d\n", D / W, peq, v, xmean, iter);
                     dt             = INFINITY;
                     inFailureState = true;
-                    found_failure        = true;
+                    found_failure  = true;
                     simbi::gpu::api::synchronize();
                     break;
                 }

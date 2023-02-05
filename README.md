@@ -33,7 +33,7 @@
 7)  HIP/ROCm if wanting to run on NVIDIA or AMD GPUs, or just CUDA if
     running purely NVIDIA
 
-## Quick setup guide
+# Quick setup guide
 
 <strong>Easy Install</strong>
 1) Run 
