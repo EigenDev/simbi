@@ -576,7 +576,7 @@ def plot_polar_plot(
         
     ax.axes.xaxis.set_ticklabels([])
     ax.axes.yaxis.set_ticklabels([])
-    ax.set_rmax(x1max) if args.rmax == 0.0 else ax.set_rmax(args.rmax)
+    ax.set_rmax(x1max) if args.xmax == 0.0 else ax.set_rmax(args.xmax)
     ax.set_rmin(x1min)
     
     field_str = util.get_field_str(args)
@@ -800,7 +800,7 @@ def plot_1d_curve(
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
-    r, theta = mesh['x1'], mesh['th']
+    r, theta = mesh['x1'], mesh['x2']
     theta    = theta
     tidx,_   = util.find_nearest(theta, np.deg2rad(args.viewing))
     x1max        = dset['x1max']
@@ -845,7 +845,9 @@ def plot_1d_curve(
                 
             if len(args.fields) > 1:
                 label = field_labels[idx] + ', ' + label
-            ax.plot(r, var[tidx], label=label)
+                
+            
+            ax.plot(r[0], var[tidx], label=label)
             if args.log:
                 ax.set_xscale('log')
                 if field not in lin_fields:
@@ -868,7 +870,7 @@ def plot_1d_curve(
         
     
     if args.setup:
-        ax.set_title(r'$\theta = {:.2f}^{{\circ}}$ time: {:.3f}'.format(mesh['th'][tidx] * 180 / np.pi, tend))
+        ax.set_title(r'$\theta = {:.2f}^{{\circ}}$ time: {:.3f}'.format(mesh['x2'][tidx] * 180 / np.pi, tend))
     if not overplot:
         return fig
     # fig.suptitle(r'{} at $\theta = {:.2f}$ deg, t = {:.2f} s'.format(args.setup,theta[args.tidx], tend), y=0.95)
@@ -887,7 +889,7 @@ def plot_per_theta(
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
-    theta = mesh['th']
+    theta = mesh['x2']
     
 
     for field in args.fields:
@@ -939,8 +941,8 @@ def plot_per_theta(
     kappa  = 0.2 * (1.0 + x) * u.cm**2 / u.g
     
     if args.tau_s:
-        tau = np.zeros_like(mesh['th'])
-        for tidx, t in enumerate(mesh['th']):
+        tau = np.zeros_like(mesh['x2'])
+        for tidx, t in enumerate(mesh['x2']):
             ridx      = np.argmax(fields['gamma_beta'][tidx])
             tau[tidx] = kappa * a_star / (mesh['x1'][tidx,ridx] * R_0)
             
@@ -989,7 +991,7 @@ def plot_dec_rad(
     if not overplot:
         fig, ax= plt.subplots(1, 1, figsize=(10,10),constrained_layout=False)
 
-    theta = mesh['th']
+    theta = mesh['x2']
     mdots = np.logspace(np.log10(1e-6), np.log10(24e-4),128)
 
     colors = plt.cm.viridis(np.linspace(0.1, 0.90, file_num if file_num > 1 else len(mdots)))
@@ -1648,31 +1650,30 @@ def plot_vs_time(
     color: float,
     time: np.ndarray,
     data: np.ndarray,
-    ylog: bool = False) -> None:
-    xlabel = util.get_field_str(args)
-    ax.set_xlabel(r'$t$')
-    ax.set_ylabel(f"Max {xlabel}")
+    ylog: bool = False,
+    weights: Union[np.ndarray, float] = 1.0) -> None:
+    
+    ylabel = util.get_field_str(args)
+    if len(ylabel) > 1:
+        ylabel = ylabel[0]
+    
+    ax.set_ylabel(r'$t$')
+    ax.set_ylabel(rf"$\langle$ {ylabel} $\rangle$")
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     time = np.asanyarray(time)
     data = np.asanyarray(data)
     ax.plot(time, data, label=label, color=color, alpha=1.0)
+
     if args.fields[0] == 'gamma_beta' or args.fields[0] == 'u1':
-        tref         = 0.22
-        tspread      = 0.36
-        tslope       = np.argmin(np.abs(time - tref))
-        tslope2      = np.argmin(np.abs(time - tspread))
-        scale_factor = 1.0 * time[tslope:] 
-        norm         = 1.0 * time[tslope]
         if plot_vs_time.counter == 0:
-            ax.plot(time[tslope:], data[tslope]   * (scale_factor / norm) ** (-1.2), label =r'$\propto t^{-3/2}$', color='blue', linestyle='--')
-            ax.plot(time[tslope2:], data[tslope2] * (time[tslope2:] / time[tslope2]) ** (-3), label =r'$\propto t^{-3}$', color='blue', linestyle='--')
-            ax.plot(time[tslope2:], data[tslope2] * (time[tslope2:] / time[tslope2]) ** (-2.1), label =r'$\propto t^{-2.1}$', color='blue', linestyle='--')
-            # ax.plot(time[tslope:], data[tslope] * np.exp(- (scale_factor - tref) / norm), label =r'$\propto \exp(-t)$', color=color, linestyle='-.')
+            ax.plot(time, data[0] * np.exp(1 - time / time[0]), label =r'$\propto \exp(-t)$', color='grey', linestyle='-.')
+            ax.plot(time, data[0] * (time / time[0]) ** (-2/3), label =r'$\propto t^{-2/3}$', color='grey', linestyle=':')
+            ax.plot(time, data[0] * (time / time[0]) ** (-3), label =r'$\propto t^{-3}$', color='grey', linestyle='--')
     
     if args.log:
         ax.set_xscale('log')
-        if ylog:
+        if ylog or args.fields[0] == 'gamma_beta':
             ax.set(yscale = 'log')
             
     plot_vs_time.counter += 1
@@ -1697,7 +1698,7 @@ def snapshot(parser: argparse.ArgumentParser):
     plot_parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
     plot_parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
     plot_parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=None, nargs='+')
-    plot_parser.add_argument('--plot_max_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
+    plot_parser.add_argument('--weighted_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
     plot_parser.add_argument('--oned_slice', help='index of x1 array for one-d projection', default=None, type=int)
     plot_parser.add_argument('--oned_proj', help='axes to project 2d solution onto', default=None, type=int, choices=[1,2])
     args = parser.parse_args()
@@ -1758,13 +1759,13 @@ def snapshot(parser: argparse.ArgumentParser):
         ax_shift = True
         ax_num   = 0    
         if isinstance(flist, (list, np.ndarray)):
-            if args.plot_max_vs_time:
-                max_vars = []
+            if args.weighted_vs_time:
+                weighted_vars = []
                 times = []
                 colors = ['red', 'black']
                 label = args.labels[0] if args.labels else None
                 for idx, file in enumerate(flist):
-                    fields, setup, mesh = util.read_2d_file(args, file)
+                    fields, setup, mesh = util.read_file(args, file, 2)
                     if args.viewing:
                         viewing_angle       = np.deg2rad(args.viewing[0])
                         tidx, _             = util.find_nearest(setup['x2'], viewing_angle)
@@ -1773,10 +1774,17 @@ def snapshot(parser: argparse.ArgumentParser):
                         var = util.prims2var(fields, args.fields[0])
                     else:
                         var = fields[args.fields[0]]
-                    max_var             = np.max(var[tidx] if args.viewing else var)
-                    max_vars           += [max_var]
-                    times              += [setup['time']]
-                plot_vs_time(args, ax, label, colors[0], times, max_vars, ylog = (args.fields[0] not in lin_fields))
+                        
+                    if len(args.fields) > 1:
+                        weights = util.prims2var(fields, args.fields[1])
+                    else:
+                        weights = 1.0 
+                        
+                    dV              = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
+                    weighted        = np.sum(weights * var * dV) / np.sum(weights * dV)
+                    weighted_vars  += [weighted]
+                    times          += [setup['time']]
+                plot_vs_time(args, ax, label, colors[0], times, weighted_vars, ylog = (args.fields[0] not in lin_fields))
                 ax.legend()
             else:
                 for idx, file in enumerate(flist):
