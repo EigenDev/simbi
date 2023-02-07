@@ -12,7 +12,7 @@ class_props = [
     'geometry', 'initial_state', 'linspace', 'mom_outer', 
     'parse_args', 'passive_scalars', 'plm_theta', 
     'regime', 'rho_ref', 'scale_factor',  'scale_factor_derivative', 
-    'sources', 'start_time', 'use_hllc_solver', 'cfl_number',
+    'sources', 'default_start_time', 'default_end_time', 'use_hllc_solver', 'cfl_number',
     'boundary_sources', 'object_zones', 'x1', 'x2', 'x3']
 
 T = TypeVar('T', covariant=True)
