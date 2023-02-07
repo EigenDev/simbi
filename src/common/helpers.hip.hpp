@@ -179,9 +179,9 @@ namespace simbi
         const luint real_zones,
         const float delta_t
     ) {
-        const float advance_contr    = total_zones * radius * sizeof(T) * (1.0 + 4.0 * radius);
-        const float cons2prim_contr  = total_zones * radius * sizeof(U);
-        const float ghost_conf_contr = (total_zones - real_zones)  * radius * sizeof(T);
+        const float advance_contr    = total_zones * sizeof(T) * (1.0 + 4.0 * radius);
+        const float cons2prim_contr  = total_zones * sizeof(U);
+        const float ghost_conf_contr = (total_zones - real_zones) * sizeof(T);
         return (advance_contr + cons2prim_contr + ghost_conf_contr) / (delta_t * 1e9);
     }
 
