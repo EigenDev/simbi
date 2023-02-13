@@ -14,9 +14,8 @@ import astropy.constants as const
 import astropy.units as u 
 import os
 import utility as util
-from datetime import datetime
+from typing import Union 
 from itertools import cycle
-from utility import DEFAULT_SIZE, SMALL_SIZE
 from visual import lin_fields, derived
 try:
     import cmasher as cmr 
@@ -191,6 +190,49 @@ def plot_hist(args, fields, mesh, setup, overplot=False, ax=None, subplot = Fals
         ax.set_title(r'setup: {}, t ={:.2f}'.format(args.setup, tend))
         return fig
 
+def static_vars(**kwargs):
+    def decorate(func):
+        for k in kwargs:
+            setattr(func, k, kwargs[k])
+        return func
+    return decorate
+
+@static_vars(counter=0)
+def plot_vs_time(
+    args: argparse.ArgumentParser,
+    ax: plt.Axes,
+    label: str,
+    color: float,
+    time: np.ndarray,
+    data: np.ndarray,
+    ylog: bool = False,
+    weights: Union[np.ndarray, float] = 1.0) -> None:
+    
+    ylabel = util.get_field_str(args)
+    if len(ylabel) > 1:
+        ylabel = ylabel[0]
+    
+    ax.set_ylabel(r'$t$')
+    ax.set_ylabel(rf"$\langle$ {ylabel} $\rangle$")
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    time = np.asanyarray(time)
+    data = np.asanyarray(data)
+    ax.plot(time, data, label=label, color=color, alpha=1.0)
+    
+    if args.fields[0] == 'gamma_beta' or args.fields[0] == 'u1':
+        if plot_vs_time.counter == 0:
+            ax.plot(time, data[0] * np.exp(1 - time / time[0]), label =r'$\propto \exp(-t)$', color='grey', linestyle='-.')
+            ax.plot(time, data[0] * (time / time[0]) ** (-3/2), label =r'$\propto t^{-3/2}$', color='grey', linestyle=':')
+            ax.plot(time, data[0] * (time / time[0]) ** (-3), label =r'$\propto t^{-3}$', color='grey', linestyle='--')
+    
+    if args.log:
+        ax.set_xscale('log')
+        if ylog or args.fields[0] == 'gamma_beta':
+            ax.set(yscale = 'log')
+            
+    plot_vs_time.counter += 1
+    
 def snapshot(parser: argparse.ArgumentParser):
     args = parser.parse_args()
     
@@ -198,7 +240,33 @@ def snapshot(parser: argparse.ArgumentParser):
     flist, _ = util.get_file_list(args.files)
     ncols    = len(flist) * len(args.fields)
     if len(flist) > 1:
-        if args.nplots == 1:
+        if args.weighted_vs_time:
+                fig = plt.figure(figsize=(fig_size[0], fig_size[1]))
+                ax = fig.add_subplot(1, 1, 1)
+                weighted_vars = []
+                times = []
+                colors = ['red', 'black']
+                label = args.labels[0] if args.labels else None
+                for idx, file in enumerate(flist):
+                    fields, setup, mesh = util.read_file(args, file, 1)
+                    if args.fields[0] in derived:
+                        var = util.prims2var(fields, args.fields[0])
+                    else:
+                        var = fields[args.fields[0]]
+                        
+                    if len(args.fields) > 1:
+                        weights = util.prims2var(fields, args.fields[1])
+                    else:
+                        weights = 1.0 
+                        
+                    dV              = util.calc_cell_volume1D(mesh['x1'])
+                    weighted        = np.sum(weights * var * dV) / np.sum(weights * dV)
+                    weighted_vars  += [weighted]
+                    times          += [setup['time']]
+                plot_vs_time(args, ax, label, colors[0], times, weighted_vars, ylog = (args.fields[0] not in lin_fields))
+                ax.legend()
+                
+        elif args.nplots == 1:
             fig = plt.figure(figsize=(fig_size[0], fig_size[1]))
             ax = fig.add_subplot(1, 1, 1)
             for idx, file in enumerate(flist):

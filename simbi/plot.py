@@ -240,6 +240,13 @@ def parse_plotting_arguments(
         type=float,
         default=None,
         help='Set the y-scale to start plt.fill_between')
+    plot_parser.add_argument(
+        '--weighted_vs_time', 
+        help='plot maximum of desired var as function of time', 
+        default=False, 
+        action='store_true'
+    )
+    
     return parser, parser.parse_known_args(
         args=None if sys.argv[2:] else ['plot', '--help'])
 

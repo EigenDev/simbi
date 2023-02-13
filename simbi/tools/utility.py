@@ -157,6 +157,10 @@ def flatten_fully(x):
 def get_dimensionality(files: list[str]) -> int:
     dims = []
     all_equal = lambda x: x.count(x[0]) == len(x)
+    if isinstance(files, dict):
+        import itertools
+        files = list(itertools.chain(*files.values()))
+        
     for file in files:
         with h5py.File(file, 'r') as hf:
             ds  = hf.get('sim_info')

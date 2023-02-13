@@ -1657,6 +1657,7 @@ def plot_vs_time(
     if len(ylabel) > 1:
         ylabel = ylabel[0]
     
+    ax.set_title(rf'{args.setup}')
     ax.set_ylabel(r'$t$')
     ax.set_ylabel(rf"$\langle$ {ylabel} $\rangle$")
     ax.spines['right'].set_visible(False)
@@ -1668,14 +1669,16 @@ def plot_vs_time(
     if args.fields[0] == 'gamma_beta' or args.fields[0] == 'u1':
         if plot_vs_time.counter == 0:
             ax.plot(time, data[0] * np.exp(1 - time / time[0]), label =r'$\propto \exp(-t)$', color='grey', linestyle='-.')
-            ax.plot(time, data[0] * (time / time[0]) ** (-2/3), label =r'$\propto t^{-2/3}$', color='grey', linestyle=':')
+            ax.plot(time, data[0] * (time / time[0]) ** (-3/2), label =r'$\propto t^{-3/2}$', color='grey', linestyle=':')
             ax.plot(time, data[0] * (time / time[0]) ** (-3), label =r'$\propto t^{-3}$', color='grey', linestyle='--')
     
     if args.log:
         ax.set_xscale('log')
         if ylog or args.fields[0] == 'gamma_beta':
             ax.set(yscale = 'log')
-            
+    
+    if args.xlims:
+        ax.set_xlim(*args.xlims)
     plot_vs_time.counter += 1
     
 def snapshot(parser: argparse.ArgumentParser):
@@ -1698,7 +1701,6 @@ def snapshot(parser: argparse.ArgumentParser):
     plot_parser.add_argument('--sub_split', dest='sub_split', default = None, nargs='+', type=int)
     plot_parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
     plot_parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=None, nargs='+')
-    plot_parser.add_argument('--weighted_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
     plot_parser.add_argument('--oned_slice', help='index of x1 array for one-d projection', default=None, type=int)
     plot_parser.add_argument('--oned_proj', help='axes to project 2d solution onto', default=None, type=int, choices=[1,2])
     args = parser.parse_args()
@@ -1766,10 +1768,6 @@ def snapshot(parser: argparse.ArgumentParser):
                 label = args.labels[0] if args.labels else None
                 for idx, file in enumerate(flist):
                     fields, setup, mesh = util.read_file(args, file, 2)
-                    if args.viewing:
-                        viewing_angle       = np.deg2rad(args.viewing[0])
-                        tidx, _             = util.find_nearest(setup['x2'], viewing_angle)
-                    
                     if args.fields[0] in derived:
                         var = util.prims2var(fields, args.fields[0])
                     else:
@@ -1833,23 +1831,27 @@ def snapshot(parser: argparse.ArgumentParser):
             ax.spines['top'].set_visible(False)
             colors = ['red', 'black']
             for key in flist.keys():
-                max_vars = []
+                weighted_vars = []
                 times = []
                 label = args.labels[key] if args.labels else key
                 for idx, file in enumerate(flist[key]):
-                    fields, setup, mesh = util.read_file(args, file, ndim=2)
-                    viewing_angle       = np.deg2rad(args.viewing[key])
-                    tidx, _             = util.find_nearest(setup['x2'], viewing_angle)
-                    
+                    fields, setup, mesh = util.read_file(args, file, 2)
                     if args.fields[0] in derived:
                         var = util.prims2var(fields, args.fields[0])
                     else:
                         var = fields[args.fields[0]]
-                    max_var             = np.max(var[tidx])
-                    max_vars           += [max_var]
-                    times              += [setup['time']]
+                        
+                    if len(args.fields) > 1:
+                        weights = util.prims2var(fields, args.fields[1])
+                    else:
+                        weights = 1.0 
+                        
+                    dV              = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
+                    weighted        = np.sum(weights * var * dV) / np.sum(weights * dV)
+                    weighted_vars  += [weighted]
+                    times          += [setup['time']]
 
-                plot_vs_time(args, ax, label, colors[key], times, max_vars, ylog = args.fields[0] not in lin_fields)
+                plot_vs_time(args, ax, label, colors[key], times, weighted_vars, ylog = args.fields[0] not in lin_fields)
                     
                 
             ax.legend()
