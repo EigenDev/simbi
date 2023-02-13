@@ -420,7 +420,7 @@ Conserved SRHD2D::calc_hllc_flux(
     {
     case HLLCTYPE::FLEISCHMANN:
         {
-            constexpr real ma_lim = static_cast<real>(0.01);
+            constexpr real ma_lim = static_cast<real>(0.1);
 
             // --------------Compute the L Star State----------
             real pressure = left_prims.p;
@@ -456,8 +456,8 @@ Conserved SRHD2D::calc_hllc_flux(
             Estar                 = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
             tauStar               = Estar - Dstar;
             const auto starStateR = Conserved{Dstar, S1star, S2star, tauStar};
-            const real ma_left    = vL * std::sqrt((1 - cL * cL) / (1 - vL * vL)) / cL;
-            const real ma_right   = vR * std::sqrt((1 - cR * cR) / (1 - vR * vR)) / cR;
+            const real ma_left    = vL / cL; // * std::sqrt((1 - cL * cL) / (1 - vL * vL));
+            const real ma_right   = vR / cR; // * std::sqrt((1 - cR * cR) / (1 - vR * vR));
             const real ma_local   = helpers::my_max(std::abs(ma_left), std::abs(ma_right));
             const real phi        = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
             const real aL_lm      = (phi - (phi == 0) * (phi - 1)) * aL;
