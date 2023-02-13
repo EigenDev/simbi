@@ -1767,6 +1767,7 @@ def snapshot(parser: argparse.ArgumentParser):
                 colors = ['red', 'black']
                 label = args.labels[0] if args.labels else None
                 for idx, file in enumerate(flist):
+                    print(f'processing file {file}...', flush=True)
                     fields, setup, mesh = util.read_file(args, file, 2)
                     if args.fields[0] in derived:
                         var = util.prims2var(fields, args.fields[0])
@@ -1786,6 +1787,7 @@ def snapshot(parser: argparse.ArgumentParser):
                 ax.legend()
             else:
                 for idx, file in enumerate(flist):
+                    print(f'processing file {file}...', flush=True)
                     fields, setup, mesh = util.read_file(args, file, ndim=2)
                     i += 1
                     if args.hist and (not args.de_domega and not args.dm_domega):
@@ -1835,6 +1837,7 @@ def snapshot(parser: argparse.ArgumentParser):
                 times = []
                 label = args.labels[key] if args.labels else key
                 for idx, file in enumerate(flist[key]):
+                    print(f'processing file {file}...', flush=True)
                     fields, setup, mesh = util.read_file(args, file, 2)
                     if args.fields[0] in derived:
                         var = util.prims2var(fields, args.fields[0])
