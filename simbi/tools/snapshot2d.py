@@ -1705,8 +1705,6 @@ def snapshot(parser: argparse.ArgumentParser):
     plot_parser.add_argument('--oned_proj', help='axes to project 2d solution onto', default=None, type=int, choices=[1,2])
     args = parser.parse_args()
     
-    print(args)
-    zzz = input('')
     vmin, vmax = args.cbar[:2]
     fields = {}
     setup = {}
