@@ -13,7 +13,8 @@ class_props = [
     'parse_args', 'passive_scalars', 'plm_theta', 
     'regime', 'rho_ref', 'scale_factor',  'scale_factor_derivative', 
     'sources', 'default_start_time', 'default_end_time', 'use_hllc_solver', 'cfl_number',
-    'boundary_sources', 'object_zones', 'x1', 'x2', 'x3']
+    'boundary_sources', 'object_zones', 'x1', 'x2', 'x3', 'engine_duration',
+    'check_point_interval', 'first_order']
 
 T = TypeVar('T', covariant=True)
 P = ParamSpec('P')
