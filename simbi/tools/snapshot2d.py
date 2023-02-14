@@ -1893,6 +1893,7 @@ def snapshot(parser: argparse.ArgumentParser):
         import matplotlib
         backend = matplotlib.get_backend()
         if backend == 'agg':
+            print("Detected agg backend, so saving fig as 'backup_save' instead...", flush=True)
             ext = 'pdf' if not args.png else 'png'
             dpi = 600
             plt.savefig('backup_save.{}'.format(ext), dpi=dpi, bbox_inches='tight')
