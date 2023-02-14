@@ -1705,6 +1705,8 @@ def snapshot(parser: argparse.ArgumentParser):
     plot_parser.add_argument('--oned_proj', help='axes to project 2d solution onto', default=None, type=int, choices=[1,2])
     args = parser.parse_args()
     
+    print(args)
+    zzz = input('')
     vmin, vmax = args.cbar[:2]
     fields = {}
     setup = {}
@@ -1890,7 +1892,14 @@ def snapshot(parser: argparse.ArgumentParser):
 
     
     if not args.save:
-        plt.show()
+        import matplotlib
+        backend = matplotlib.get_backend()
+        if backend == 'agg':
+            ext = 'pdf' if not args.png else 'png'
+            dpi = 600
+            plt.savefig('backup_save.{}'.format(ext), dpi=dpi, bbox_inches='tight')
+        else:
+            plt.show()
     else:
         if args.print:
             fig = plt.gcf()

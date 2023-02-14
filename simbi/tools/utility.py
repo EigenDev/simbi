@@ -58,12 +58,10 @@ def calc_cell_volume2D(r: np.ndarray, theta: np.ndarray) -> np.ndarray:
     tvertices = np.insert(tvertices, 0, theta[0], axis=0)
     tvertices = np.insert(tvertices, tvertices.shape[0], theta[-1], axis=0)
     dcos      = np.cos(tvertices[:-1]) - np.cos(tvertices[1:])
-    
+
     rvertices = np.sqrt(r[:, 1:] * r[:, :-1])
     rvertices = np.insert(rvertices,  0, r[:, 0], axis=1)
     rvertices = np.insert(rvertices, rvertices.shape[1], r[:, -1], axis=1)
-    dr        = rvertices[:, 1:] - rvertices[:, :-1]
-    
     return (2.0 * np.pi *  (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos)
 
 def calc_enthalpy(fields: dict) -> np.ndarray:
