@@ -22,16 +22,6 @@ namespace simbi {
         size_t sharedMemBytes;
         simbiStream_t stream;
 
-        ExecutionPolicy(const T nzones) 
-        :  
-        nzones(nzones),  
-        sharedMemBytes(0),
-        stream(0) {
-            const T nBlocks = compute_blocks(nzones, BLOCK_SIZE);
-            this->gridSize  = dim3(nBlocks);
-            this->blockSize = dim3(BLOCK_SIZE);
-        }
-
         ExecutionPolicy(const T nzones, const U blockSize)
         : 
         blockSize(dim3(blockSize)),

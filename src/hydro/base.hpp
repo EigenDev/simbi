@@ -36,6 +36,8 @@ namespace simbi
         luint blockSize, checkpoint_zones;
         std::vector<std::vector<real>> sources;
         std::string data_directory;
+
+        int BLOCK_DIMX, BLOCK_DIMY, BLOCK_DIMZ;
         char* err_reason;
         char err_location[100];
 
@@ -43,6 +45,18 @@ namespace simbi
             if (inFailureState) {
                 throw helpers::SimulationFailureException(err_reason, err_location);
             }
+        }
+
+        const auto get_xblock_dims() const {
+            return std::stoi(getEnvVar("GPUXBLOCK_SIZE"));
+        }
+
+        const auto get_yblock_dims() const {
+            return std::stoi(getEnvVar("GPUYBLOCK_SIZE"));
+        }
+
+        const auto get_zblock_dims() const {
+            return std::stoi(getEnvVar("GPUZBLOCK_SIZE"));
         }
 
         protected:
@@ -63,9 +77,15 @@ namespace simbi
             coord_system(coord_system),
             inFailureState(false),
             nx(state[0].size()),
-            hllc_z((gamma - 1)/ (2 * gamma))
+            hllc_z((gamma - 1)/ (2 * gamma)),
+            BLOCK_DIMX(get_xblock_dims()),
+            BLOCK_DIMY(1),
+            BLOCK_DIMZ(1)
         {
-
+            if constexpr(BuildPlatform == Platform::GPU) {
+                std::cout << "GPU Thread Block Geometry: (" << BLOCK_DIMX 
+                          << ", " << BLOCK_DIMY << ", " << BLOCK_DIMZ << ")" << std::endl; 
+            }
         }
 
         HydroBase(
@@ -88,8 +108,15 @@ namespace simbi
             coord_system(coord_system),
             inFailureState(false),
             nzones(state[0].size()),
-            hllc_z((gamma - 1)/ (2 * gamma))
+            hllc_z((gamma - 1)/ (2 * gamma)),
+            BLOCK_DIMX(get_xblock_dims()),
+            BLOCK_DIMY(get_yblock_dims()),
+            BLOCK_DIMZ(1)
         {
+            if constexpr(BuildPlatform == Platform::GPU) {
+                std::cout << "GPU Thread Block Geometry: (" << BLOCK_DIMX << ", " 
+                << BLOCK_DIMY << ", " << BLOCK_DIMZ << ")" << std::endl; 
+            }
         }
 
          HydroBase(
@@ -116,8 +143,15 @@ namespace simbi
             coord_system(coord_system),
             inFailureState(false),
             nzones(state[0].size()),
-            hllc_z((gamma - 1)/ (2 * gamma))
+            hllc_z((gamma - 1)/ (2 * gamma)),
+            BLOCK_DIMX(get_xblock_dims()),
+            BLOCK_DIMY(get_yblock_dims()),
+            BLOCK_DIMZ(get_zblock_dims())
         {
+            if constexpr(BuildPlatform == Platform::GPU) {
+                std::cout << "GPU Thread Block Geometry: (" << BLOCK_DIMX << ", "
+                 << BLOCK_DIMY << ", " << BLOCK_DIMZ << ")" << std::endl; 
+            }
         }
     };
     

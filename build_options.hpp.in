@@ -2,9 +2,6 @@
 #define BUILD_OPTIONS_HPP
 
 #mesondefine FLOAT_PRECISION
-#mesondefine ONED_BLOCK_SIZE
-#mesondefine TWOD_BLOCK_SIZE
-#mesondefine THREED_BLOCK_SIZE
 #mesondefine COLUMN_MAJOR
 #include <functional>    // std::function
 #include <chrono>        // high_resolution_clock
@@ -13,6 +10,7 @@
 #include <cmath>         // std::sqrt, std::log10, etc/
 #include <string>        // std::string 
 #include <stdint.h>      // int_type, uint64_t, int64_t
+#include <cstdlib>       // std::getenv
 
 using luint = uint64_t;
 using lint  = int64_t;
@@ -29,10 +27,12 @@ constexpr Velocity VelocityType = Velocity::Beta;
 
 
 //=========================== GPU Threads Per Dimension
-constexpr int BLOCK_SIZE   = ONED_BLOCK_SIZE;
-constexpr int BLOCK_SIZE2D = TWOD_BLOCK_SIZE;
-constexpr int BLOCK_SIZE3D = THREED_BLOCK_SIZE;
-constexpr int MAX_ITER     = 1000;
+inline std::string getEnvVar( std::string const & key )
+{
+    char * val = std::getenv( key.c_str() );
+    return val == NULL ? std::string("16") : std::string(val);
+}
+const int MAX_ITER   = 1000;
 
 //========================= FLOAT PRECISION CHECK
 #if FLOAT_PRECISION

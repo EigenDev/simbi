@@ -626,6 +626,10 @@ class Hydro:
         if self.dimensionality == 1:
             sources = np.zeros(3) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
+            
+            if 'GPUXBLOCK_SIZE' not in os.environ:
+                os.environ['GPUXBLOCK_SIZE'] = "128"
+            
             if self.regime == "classical":
                 state = PyState(
                     self.u,
@@ -651,6 +655,12 @@ class Hydro:
             sources = np.zeros(4) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
 
+            if 'GPUXBLOCK_SIZE' not in os.environ:
+                os.environ['GPUXBLOCK_SIZE'] = "16"
+                
+            if 'GPUYBLOCK_SIZE' not in os.environ:
+                os.environ['GPUYBLOCK_SIZE'] = "16" 
+                
             if self.regime == "classical":
                 state = PyState2D(
                     self.u,
@@ -684,6 +694,15 @@ class Hydro:
             sources = np.zeros(5) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
 
+            if 'GPUXBLOCK_SIZE' not in os.environ:
+                os.environ['GPUXBLOCK_SIZE'] = "4"
+                
+            if 'GPUYBLOCK_SIZE' not in os.environ:
+                os.environ['GPUYBLOCK_SIZE'] = "4" 
+                
+            if 'GPUZBLOCK_SIZE' not in os.environ:
+                os.environ['GPUZBLOCK_SIZE'] = "4"
+                
             if self.regime == "classical":
                 # TODO: Implement Newtonian 3D
                 pass

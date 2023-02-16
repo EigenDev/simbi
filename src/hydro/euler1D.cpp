@@ -152,10 +152,10 @@ void Newtonian1D::adapt_dt(){
 void Newtonian1D::adapt_dt(luint blockSize, luint tblock)
 {   
     #if GPU_CODE
-        compute_dt<Primitive><<<dim3(blockSize), dim3(BLOCK_SIZE)>>>(this, prims.data(), dt_min.data());
-        deviceReduceWarpAtomicKernel<1><<<blockSize, BLOCK_SIZE>>>(this, dt_min.data(), active_zones);
+        compute_dt<Primitive><<<dim3(blockSize), dim3(BLOCK_DIMX)>>>(this, prims.data(), dt_min.data());
+        deviceReduceWarpAtomicKernel<1><<<blockSize, BLOCK_DIMX>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
-        // deviceReduceKernel<1><<<blockSize, BLOCK_SIZE>>>(this, dt_min.data(), active_zones);
+        // deviceReduceKernel<1><<<blockSize, BLOCK_DIMX>>>(this, dt_min.data(), active_zones);
         // deviceReduceKernel<1><<<1,1024>>>(this, dt_min.data(), blockSize);
     #endif
 };
@@ -284,6 +284,7 @@ void Newtonian1D::advance(
     const ExecutionPolicy<> &p,
     const luint xstride)
 {
+    const auto xextent      = p.get_xextent();
     auto* const prim_data   = prims.data();
     auto* const cons_data   = cons.data();
     auto* const dens_source = sourceRho.data();
@@ -303,14 +304,14 @@ void Newtonian1D::advance(
         lint ia = ii + radius;
         lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
         #if GPU_CODE
-            luint txl = BLOCK_SIZE;
+            luint txl = xextent;
             // Check if the active index exceeds the active zones
             // if it does, then this thread buffer will take on the
             // ghost index at the very end
             prim_buff[txa] = prim_data[ia];
             if (threadIdx.x < pseudo_radius)
             {
-                if (ia + BLOCK_SIZE > nx - 1) txl = nx - radius - ia + threadIdx.x;
+                if (ia + xextent > nx - 1) txl = nx - radius - ia + threadIdx.x;
                 prim_buff[txa - pseudo_radius] = prim_data[helpers::mod(ia - pseudo_radius, nx)];
                 prim_buff[txa + txl]           = prim_data[(ia + txl) % nx];
             }
@@ -556,11 +557,11 @@ void Newtonian1D::advance(
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
 
-    const auto xblockdim     = nx > BLOCK_SIZE ? BLOCK_SIZE : nx;
+    const auto xblockdim     = nx > BLOCK_DIMX ? BLOCK_DIMX : nx;
     this->radius             = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->pseudo_radius      = (first_order) ? 1 : 2;
     this->step               = (first_order) ? 1 : static_cast<real>(0.5);
-    const luint shBlockSize  = BLOCK_SIZE + 2 * pseudo_radius;
+    const luint shBlockSize  = BLOCK_DIMX + 2 * pseudo_radius;
     const luint shBlockBytes = shBlockSize * sizeof(Primitive);
     const auto fullP         = simbi::ExecutionPolicy(nx, xblockdim);
     const auto activeP       = simbi::ExecutionPolicy(active_zones, xblockdim, shBlockBytes);

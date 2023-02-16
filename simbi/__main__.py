@@ -151,6 +151,12 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         help='flag for static type checking configration files',
         default=True,
         action=argparse.BooleanOptionalAction)
+    global_args.add_argument(
+        '--gpu-block-dims',
+        help='gpu dim3 thread block dimensions',
+        default=None,
+        type=int,
+        nargs='+')
     return parser, parser.parse_known_args(
         args=None if sys.argv[2:] else ['run', '--help'])
 
@@ -336,6 +342,18 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
     
     overridable_args = vars(argparse.Namespace(**sim_dicts[0])).keys()
     sim_args = argparse.Namespace(**{**sim_dicts[0], **sim_dicts[1]})
+    
+    if args.gpu_block_dims:
+        if len(args.gpu_block_dims) == 1:
+            os.environ['GPUXBLOCK_SIZE'] = str(args.gpu_block_dims[0])
+        elif len(args.gpu_block_dims) == 2:
+            os.environ['GPUXBLOCK_SIZE'] = str(args.gpu_block_dims[0])
+            os.environ['GPUYBLOCK_SIZE'] = str(args.gpu_block_dims[1])
+        else:
+            os.environ['GPUXBLOCK_SIZE'] = str(args.gpu_block_dims[0])
+            os.environ['GPUYBLOCK_SIZE'] = str(args.gpu_block_dims[1])
+            os.environ['GPUZBLOCK_SIZE'] = str(args.gpu_block_dims[2])
+            
     for idx, sim_state in enumerate(sim_states):
         for arg in vars(sim_args):
             if arg in overridable_args and getattr(args, arg) is None:
