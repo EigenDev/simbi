@@ -67,9 +67,3 @@ option(
     type: 'boolean',
     value: false
 )
-
-option(
-    'extras',
-    type: 'boolean',
-    value: false,
-)

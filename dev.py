@@ -81,7 +81,7 @@ def configure(args: argparse.Namespace,
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
     -D1d_block_size={args.oned_bz} -D2d_block_size={args.twod_bz} -D3d_block_size={args.thrd_bz} \
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
-    -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} -Dextras={args.extras} {reconfigure}'''.split()
+    -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} {reconfigure}'''.split()
     return command
     
 def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
@@ -219,11 +219,15 @@ def install_simbi(args: argparse.Namespace) -> None:
     config_command = configure(args, reconfigure_flag, hdf5_include, gpu_include)
     subprocess.run(config_command, env=simbi_env)
     if not args.configure:
+        extras = '' if not args.extras else '[extras]'
+        install_mode = [] if args.install_mode == 'default' else '-e'
         build_dir=f"{simbi_dir}/build"
         egg_dir  =f"{simbi_dir}/simbi.egg-info"
-        subprocess.Popen(['meson', 'compile'], cwd=f'{args.build_dir}').wait()
-        subprocess.Popen(['meson', 'install'], cwd=f'{args.build_dir}').wait()
-        subprocess.run(['rm', '-rf', f'{egg_dir}', f'{build_dir}'], check=True)
+        compile_child = subprocess.Popen(['meson', 'compile'], cwd=f'{args.build_dir}').wait()
+        install_child = subprocess.Popen(['meson', 'install'], cwd=f'{args.build_dir}').wait()
+        if compile_child == install_child == 0:
+            subprocess.Popen([sys.executable, '-m', 'pip', 'install', install_mode, '.'+extras]).wait()
+            subprocess.run(['rm', '-rf', f'{egg_dir}', f'{build_dir}'], check=True)
         
 def uninstall_simbi(args: argparse.Namespace) -> None:
     if (config_cache := read_from_cache()):
