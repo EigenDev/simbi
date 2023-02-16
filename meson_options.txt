@@ -42,27 +42,6 @@ option(
 )
 
 option(
-    '1d_block_size',
-    type: 'integer',
-    min: 32,
-    value: 128,
-)
-
-option(
-    '2d_block_size',
-    type: 'integer',
-    min: 1,
-    value: 16
-)
-
-option(
-    '3d_block_size',
-    type: 'integer',
-    min: 2,
-    value: 4
-)
-
-option(
     'four_velocity',
     type: 'boolean',
     value: false

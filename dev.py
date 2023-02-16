@@ -220,13 +220,13 @@ def install_simbi(args: argparse.Namespace) -> None:
     subprocess.run(config_command, env=simbi_env)
     if not args.configure:
         extras = '' if not args.extras else '[extras]'
-        install_mode = [] if args.install_mode == 'default' else '-e'
+        install_mode = '.'+extras if args.install_mode == 'default' else '-e' + '.'+extras
         build_dir=f"{simbi_dir}/build"
         egg_dir  =f"{simbi_dir}/simbi.egg-info"
         compile_child = subprocess.Popen(['meson', 'compile'], cwd=f'{args.build_dir}').wait()
         install_child = subprocess.Popen(['meson', 'install'], cwd=f'{args.build_dir}').wait()
         if compile_child == install_child == 0:
-            subprocess.Popen([sys.executable, '-m', 'pip', 'install', install_mode, '.'+extras]).wait()
+            subprocess.Popen([sys.executable, '-m', 'pip', 'install', install_mode]).wait()
             subprocess.run(['rm', '-rf', f'{egg_dir}', f'{build_dir}'], check=True)
         
 def uninstall_simbi(args: argparse.Namespace) -> None:

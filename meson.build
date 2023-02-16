@@ -7,9 +7,6 @@ project('simbi', 'c', 'cpp', 'cython',
 # BUILD CONFIG
 conf_data = configuration_data()
 conf_data.set10('FLOAT_PRECISION', get_option('float_precision'))
-conf_data.set('ONED_BLOCK_SIZE',   get_option('1d_block_size'))
-conf_data.set('TWOD_BLOCK_SIZE',   get_option('2d_block_size'))
-conf_data.set('THREED_BLOCK_SIZE', get_option('3d_block_size'))
 conf_data.set10('FOUR_VELOCITY',   get_option('four_velocity'))
 conf_data.set10('COLUMN_MAJOR',    get_option('column_major'))
 configure_file(
