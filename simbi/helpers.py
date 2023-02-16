@@ -15,6 +15,49 @@ def calc_centroid(arr: generic_numpy_array, coord_system: str = 'spherical') -> 
         return np.asanyarray(0.5 * (arr[...,1:] - arr[...,:-1]))
     
 
+def calc_vertices(*, arr: generic_numpy_array, direction: int, cell_spacing: str = 'linear') -> Any:
+    if direction not in [1,2,3]:
+        raise ValueError("Direction must be either 1, 2, or 3")
+    dims = arr.ndim
+    padding: Any = [[0,0]] * dims
+    padding[-direction] = [1,1]
+    padding = tuple([tuple(tup) for tup in padding])
+    
+    tmp: generic_numpy_array = np.pad(arr, padding, 'edge')
+    if dims == 1:
+        if cell_spacing == 'linear':
+            return np.asarray(0.5 * (tmp[1:] + tmp[:-1]))
+        else:
+            return np.sqrt(tmp[1:] * tmp[:-1])
+    elif dims == 2:
+        if direction == 2:
+            if cell_spacing == 'linear':
+                return np.asarray(0.5 * (tmp[1:] + tmp[:-1]))
+            else:
+                return np.sqrt(tmp[1:] * tmp[:-1])
+        else:
+            if cell_spacing == 'linear':
+                return np.asarray(0.5 * (tmp[:, 1:] + tmp[:, :-1]))
+            else:
+                return np.sqrt(tmp[:, 1:] * tmp[:, :-1])
+    else:
+        if direction == 3:
+            if cell_spacing == 'linear':
+                return np.asarray(0.5 * (tmp[1:] + tmp[:-1]))
+            else:
+                return np.sqrt(tmp[1:] * tmp[:-1])
+        elif direction == 2:
+            if cell_spacing == 'linear':
+                return np.asarray(0.5 * (tmp[:, 1:] + tmp[:, :-1]))
+            else:
+                return np.sqrt(tmp[:, 1:] * tmp[:, :-1])
+        else:
+            if cell_spacing == 'linear':
+                return np.asarray(0.5 * (tmp[..., 1:] + tmp[...,:-1]))
+            else:
+                return np.sqrt(tmp[...,1:] * tmp[...,:-1])
+    
+            
 def calc_cell_volume1D(*, x1: generic_numpy_array, coord_system: str = 'soherical') -> generic_numpy_array:
     if coord_system in ['spherical', 'cylindrical']:
         x1vertices = np.sqrt(x1[1:] * x1[:-1])
