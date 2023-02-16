@@ -170,15 +170,17 @@ def install_simbi(args: argparse.Namespace) -> None:
     cli_args = sys.argv[1:]
     if cached_vars := read_from_cache():
         for arg in vars(args):
-            if arg not in ['verbose', 'configure', 'func', 'extras']:
-                if getattr(args,arg) == default[arg]:
-                    if arg in flag_overrides.keys():
-                        if any(x in flag_overrides[arg] for x in cli_args):
-                            continue
-                    elif arg in cli_args:
-                        continue
-                    else:
-                        setattr(args, arg, cached_vars[arg])
+            if arg in ['verbose', 'configure', 'func', 'extras']:
+                continue
+            
+            if getattr(args,arg) == default[arg]:
+                if arg in cli_args:
+                    continue
+                
+                if arg in flag_overrides.keys() and any(x in flag_overrides[arg] for x in cli_args):
+                    continue
+                else:
+                    setattr(args, arg, cached_vars[arg])
     write_to_cache(args)
     
 
