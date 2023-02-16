@@ -174,10 +174,10 @@ def compute_num_polar_zones(*,
     rmax = rmax or 1.0
     nr = nr or 1
     if zpd is not None:
-        return round((theta_bounds[1] - theta_bounds[0]) * zpd / np.log(10))
+        return int(round((theta_bounds[1] - theta_bounds[0]) * zpd / np.log(10)))
     elif None not in (rmin, rmax, nr):
         dlogr: float = np.log(rmax / rmin) / nr
-        return round(1 + (theta_bounds[1] - theta_bounds[0]) / dlogr)
+        return int(round(1 + (theta_bounds[1] - theta_bounds[0]) / dlogr))
     else:
         raise ValueError(
             "Please either specify zones per decade or rmin, rmax, and nr")
