@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 cache_file = "simbi_build_cache.txt"
+github_toplevel = "gitrepo_home.txt" 
 default = {}
 default['gpu_compilation']="disabled"
 default['oned_bz']=128
@@ -83,6 +84,14 @@ def configure(args: argparse.Namespace,
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
     -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} {reconfigure}'''.split()
     return command
+
+def generate_home_locator(simbi_dir: str) -> None:
+    git_home_file = Path(simbi_dir) / ('simbi/' + github_toplevel)
+    if git_home_file.exists():
+        return
+    
+    with open(str(git_home_file), 'w') as f:
+        f.write(get_output('git rev-parse --show-toplevel'.split()))
     
 def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser = argparse.ArgumentParser('Parser for installing simbi with meson')
@@ -181,6 +190,7 @@ def install_simbi(args: argparse.Namespace) -> None:
                     continue
                 else:
                     setattr(args, arg, cached_vars[arg])
+    generate_home_locator(simbi_dir=simbi_dir)
     write_to_cache(args)
     
 

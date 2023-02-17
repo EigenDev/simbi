@@ -191,7 +191,10 @@ def parse_module_arguments():
 
 
 def valid_pyscript(param):
-    configs_src = Path(__file__).resolve().parent / 'configs'
+    with open(Path(__file__).resolve().parent / 'gitrepo_home.txt') as f:
+        githome = f.read()
+    
+    configs_src = Path(githome).resolve() / 'simbi_configs'
     base, ext = os.path.splitext(param)
     if ext.lower() != '.py':
         param = None
@@ -216,25 +219,16 @@ def valid_pyscript(param):
     return param
 
 def type_check_input(file: str) -> None:
-    from mypy import api
-    result = api.run([f'{file}'])
-    if 'shadows library module' in  result[1]:
-        return 
+    mypy_check = subprocess.run(
+        [sys.executable, 
+         '-m', 
+         'mypy', 
+         '--strict', 
+         '--ignore-missing-imports', 
+         file])
     
-    if result[0]:
-        print(f'\n{bcolors.OKBLUE}Type checking report{bcolors.ENDC}:')
-        report_color = bcolors.FAIL if 'error' in result[0] else bcolors.OKGREEN
-        print(f'{report_color}{result[0]}{bcolors.ENDC}')  # stdout
-
-    if result[1]:
-        print(f'\n{bcolors.WARNING}Error report{bcolors.ENDC}:\n')
-        print(result[1])  # stderr
-
-    exit_color = bcolors.OKGREEN if result[2] == 0 else bcolors.FAIL
-    print(f'\n{bcolors.BOLD}Exit status{bcolors.ENDC}: {exit_color}{result[2]}{bcolors.ENDC}')
-    if not result[2] == 0:
-        raise TypeError("""\nYour configuration script failed type safety checks. 
-                        Please fix them or run with --no-type-check option""")
+    if mypy_check.returncode != 0:
+        raise TypeError("""\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option""")
 
 def configure_state(
         script: str,
@@ -251,7 +245,7 @@ def configure_state(
     sys.path.insert(1, f'{script_dirname}')
 
     if type_checking_active:
-        print("Validating Script Type Safety...\n")
+        print("Validating Script Type Safety...")
         type_check_input(script)
         
     with open(script) as setup_file:
