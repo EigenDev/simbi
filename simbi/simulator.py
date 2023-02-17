@@ -4,22 +4,12 @@
 # 06/10/2020
 import simbi.helpers as helpers
 import numpy as np
-import numpy.typing as npt
 import os
 import inspect
 import simbi.initial_condition as simbi_ic
-import warnings
+from .slogger import logger
 from .key_types import *
 
-def warning_on_one_line(
-    message: Union[Warning, str], 
-    category: Type[Warning], 
-    filename: str, 
-    lineno: int, 
-    line: Optional[str] = None) -> str:
-    return '{}:{}: {}:\n{}\n'.format(filename, lineno, category.__name__, message)
-
-warnings.formatwarning = warning_on_one_line
 
 available_regimes = ['classical', 'relativistic']
 available_coord_systems = [
@@ -540,12 +530,10 @@ class Hydro:
             try:
                 from gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
             except ImportError as e:
-                warnings.warn(
-                    "Error in loading GPU extension. Loading CPU instead...",
-                    GPUExtNotBuiltWarning)
-                warnings.warn(
-                    f"For reference, the gpu_ext had the follow error: {e}",
-                    GPUExtNotBuiltWarning)
+                logger.warning(
+                    "Error in loading GPU extension. Loading CPU instead...")
+                logger.warning(
+                    f"For reference, the gpu_ext had the follow error: {e}")
                 from cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
 
         scale_factor = scale_factor or (lambda t: 1.0)

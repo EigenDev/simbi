@@ -245,8 +245,10 @@ def configure_state(
     sys.path.insert(1, f'{script_dirname}')
 
     if type_checking_active:
+        print("-"*80)
         print("Validating Script Type Safety...")
         type_check_input(script)
+        print("-"*80)
         
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
