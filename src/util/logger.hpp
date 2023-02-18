@@ -77,6 +77,20 @@ namespace simbi
                 ~Logger(){};
             };
 
+            inline void progress_bar(double percentage) {
+                static int barWidth = 50;
+                std::cout << "[";
+                int pos = barWidth * percentage;
+                for (int i = 0; i < barWidth; ++i) {
+                    if (i < pos) std::cout << "=";
+                    else if (i == pos) std::cout << ">";
+                    else std::cout << " ";
+                }
+                std::cout << "] " << int(percentage * 100.0) << " %\r";
+                std::cout.flush();
+                // std::cout << std::endl;
+            }
+
             inline void print_avg_speed(Logger &logger) {
                 if (logger.ncheck > 0) {
                     util::writeln("Average zone update/sec for {:>5} iterations was {:>5.2e} zones/sec", 
@@ -151,11 +165,12 @@ namespace simbi
 
                             if constexpr(BuildPlatform == Platform::GPU) {
                             const real gpu_emperical_bw = getFlops<conserved_t, primitive_t>(sim_state.pseudo_radius, sim_state.total_zones, sim_state.active_zones, delta_t);
-                            util::writefl<Color::LIGHT_MAGENTA>("\riteration:{:>06}  dt: {:>08.2e}  time: {:>08.2e}  zones/sec: {:>08.2e}  ebw(%): {:>04.2f}", 
+                            util::writefl<Color::LIGHT_MAGENTA>("iteration:{:>06}  dt: {:>08.2e}  time: {:>08.2e}  zones/sec: {:>08.2e}  ebw(%): {:>04.2f} ", 
                             n, sim_state.dt, sim_state.t, speed, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
                             } else {
-                                util::writefl<Color::LIGHT_MAGENTA>("\riteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e}", n, sim_state.dt, sim_state.t, speed);
+                                util::writefl<Color::LIGHT_MAGENTA>("iteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e} ", n, sim_state.dt, sim_state.t, speed);
                             }
+                            progress_bar(sim_state.t / end_time);
                         }
                         
                         // Write to a file at every checkpoint interval
