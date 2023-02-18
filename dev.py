@@ -80,7 +80,6 @@ def configure(args: argparse.Namespace,
     
     command = f'''meson setup {args.build_dir} -Dgpu_compilation={args.gpu_compilation}  
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
-    -D1d_block_size={args.oned_bz} -D2d_block_size={args.twod_bz} -D3d_block_size={args.thrd_bz} \
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
     -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} {reconfigure}'''.split()
     return command
