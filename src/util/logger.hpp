@@ -88,7 +88,6 @@ namespace simbi
                 }
                 std::cout << "] " << int(percentage * 100.0) << " %\r";
                 std::cout.flush();
-                // std::cout << std::endl;
             }
 
             inline void print_avg_speed(Logger &logger) {
