@@ -205,7 +205,7 @@ def valid_pyscript(param):
         soft_configs = [
             file for path in soft_paths for file in path.rglob('*.py')]
         soft_configs += [file for file in Path(
-            'simbi_configs').resolve().rglob('*.py')]
+            'simbi_configs').resolve().rglob('*.py') if file not in pkg_configs]
         for file in pkg_configs + soft_configs:
             if base == Path(file).stem:
                 param = file
@@ -213,9 +213,9 @@ def valid_pyscript(param):
             available_configs = sorted(
                 [Path(conf).stem for conf in pkg_configs + soft_configs])
             raise argparse.ArgumentTypeError(
-                'No configuration named {}{}{}. The only valid configurations are:\n\n{}'.format(
-                    bcolors.OKCYAN, base, bcolors.ENDC, '\n-'.join(
-                        f'{conf}' for conf in available_configs)))
+                'No configuration named {}{}{}. The only valid configurations are:\n{}'.format(
+                    bcolors.OKCYAN, base, bcolors.ENDC, ''.join(
+                        f'> {bcolors.BOLD}{conf}{bcolors.ENDC}\n' for conf in available_configs)))
     return param
 
 def type_check_input(file: str) -> None:
