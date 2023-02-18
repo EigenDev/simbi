@@ -37,7 +37,7 @@ namespace simbi
         std::vector<std::vector<real>> sources;
         std::string data_directory;
 
-        int BLOCK_DIMX, BLOCK_DIMY, BLOCK_DIMZ;
+        int gpu_block_dimx, gpu_block_dimy, gpu_block_dimz;
         char* err_reason;
         char err_location[100];
 
@@ -78,13 +78,13 @@ namespace simbi
             inFailureState(false),
             nx(state[0].size()),
             hllc_z((gamma - 1)/ (2 * gamma)),
-            BLOCK_DIMX(get_xblock_dims()),
-            BLOCK_DIMY(1),
-            BLOCK_DIMZ(1)
+            gpu_block_dimx(get_xblock_dims()),
+            gpu_block_dimy(1),
+            gpu_block_dimz(1)
         {
             if constexpr(BuildPlatform == Platform::GPU) {
-                std::cout << "GPU Thread Block Geometry: (" << BLOCK_DIMX 
-                          << ", " << BLOCK_DIMY << ", " << BLOCK_DIMZ << ")" << std::endl; 
+                std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx 
+                          << ", " << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
             }
         }
 
@@ -109,13 +109,13 @@ namespace simbi
             inFailureState(false),
             nzones(state[0].size()),
             hllc_z((gamma - 1)/ (2 * gamma)),
-            BLOCK_DIMX(get_xblock_dims()),
-            BLOCK_DIMY(get_yblock_dims()),
-            BLOCK_DIMZ(1)
+            gpu_block_dimx(get_xblock_dims()),
+            gpu_block_dimy(get_yblock_dims()),
+            gpu_block_dimz(1)
         {
             if constexpr(BuildPlatform == Platform::GPU) {
-                std::cout << "GPU Thread Block Geometry: (" << BLOCK_DIMX << ", " 
-                << BLOCK_DIMY << ", " << BLOCK_DIMZ << ")" << std::endl; 
+                std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx << ", " 
+                << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
             }
         }
 
@@ -144,13 +144,13 @@ namespace simbi
             inFailureState(false),
             nzones(state[0].size()),
             hllc_z((gamma - 1)/ (2 * gamma)),
-            BLOCK_DIMX(get_xblock_dims()),
-            BLOCK_DIMY(get_yblock_dims()),
-            BLOCK_DIMZ(get_zblock_dims())
+            gpu_block_dimx(get_xblock_dims()),
+            gpu_block_dimy(get_yblock_dims()),
+            gpu_block_dimz(get_zblock_dims())
         {
             if constexpr(BuildPlatform == Platform::GPU) {
-                std::cout << "GPU Thread Block Geometry: (" << BLOCK_DIMX << ", "
-                 << BLOCK_DIMY << ", " << BLOCK_DIMZ << ")" << std::endl; 
+                std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx << ", "
+                 << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
             }
         }
     };

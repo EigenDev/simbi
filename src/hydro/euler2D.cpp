@@ -914,8 +914,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
 
 
     // Setup the system
-    const luint xblockdim       = xphysical_grid > BLOCK_DIMX ? BLOCK_DIMX : xphysical_grid;
-    const luint yblockdim       = yphysical_grid > BLOCK_DIMY ? BLOCK_DIMY : yphysical_grid;
+    const luint xblockdim       = xphysical_grid > gpu_block_dimx ? gpu_block_dimx : xphysical_grid;
+    const luint yblockdim       = yphysical_grid > gpu_block_dimy ? gpu_block_dimy : yphysical_grid;
     this->radius                = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->pseudo_radius         = (first_order) ? 1 : 2;
     this->step                  = (first_order) ? 1 : static_cast<real>(0.5);

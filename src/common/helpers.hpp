@@ -211,7 +211,7 @@ namespace simbi
 
         template<typename T>
         GPU_CALLABLE_INLINE typename std::enable_if<is_3D_primitive<T>::value, T>::type
-        minmod(const T x, const T y, const T z)
+        minmod(const T &x, const T &y, const T &z)
         {
             // const real rho  = 0.25 * std::abs(sgn(x.rho) + sgn(y.rho)) * (sgn(x.rho) + sgn(z.rho)) * my_min(my_min(std::abs(x.rho), std::abs(y.rho)) , std::abs(z.rho)); 
             // const real v1   = 0.25 * std::abs(sgn(x.v1) + sgn(y.v1)) * (sgn(x.v1) + sgn(z.v1)) * my_min(my_min(std::abs(x.v1), std::abs(y.v1)) , std::abs(z.v1));          
@@ -232,7 +232,7 @@ namespace simbi
 
         template<typename T>
         GPU_CALLABLE_INLINE typename std::enable_if<is_2D_primitive<T>::value, T>::type
-        minmod(const T x, const T y, const T z)
+        minmod(const T &x, const T &y, const T &z)
         {
             // const real rho  = 0.25 * std::abs(sgn(x.rho) + sgn(y.rho)) * (sgn(x.rho) + sgn(z.rho)) * my_min3(std::abs(x.rho), std::abs(y.rho) , std::abs(z.rho)); 
             // const real v1   = 0.25 * std::abs(sgn(x.v1)  + sgn(y.v1)) * (sgn(x.v1) + sgn(z.v1)) * my_min3(std::abs(x.v1), std::abs(y.v1) , std::abs(z.v1));          
@@ -251,7 +251,7 @@ namespace simbi
 
         template<typename T>
         GPU_CALLABLE_INLINE typename std::enable_if<is_1D_primitive<T>::value, T>::type
-        minmod(const T x, const T y, const T z)
+        minmod(const T &x, const T &y, const T &z)
         {
             // const real rho = 0.25 * std::abs(sgn(x.rho) + sgn(y.rho)) * (sgn(x.rho) + sgn(z.rho)) * my_min3(std::abs(x.rho), std::abs(y.rho) , std::abs(z.rho)); 
             // const real v   = 0.25 * std::abs(sgn(x.v) + sgn(y.v)) * (sgn(x.v) + sgn(z.v)) * my_min3(std::abs(x.v), std::abs(y.v) , std::abs(z.v));               

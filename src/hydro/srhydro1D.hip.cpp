@@ -427,10 +427,10 @@ template<TIMESTEP_TYPE dt_type>
 void SRHD::adapt_dt(const luint blockSize)
 {   
     #if GPU_CODE
-        compute_dt<Primitive><<<dim3(blockSize), dim3(BLOCK_DIMX)>>>(this, prims.data(), dt_min.data());
-        deviceReduceWarpAtomicKernel<1><<<blockSize, BLOCK_DIMX>>>(this, dt_min.data(), active_zones);
+        compute_dt<Primitive><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
+        deviceReduceWarpAtomicKernel<1><<<blockSize, gpu_block_dimx>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
-        // deviceReduceKernel<1><<<blockSize, BLOCK_DIMX>>>(this, dt_min.data(), active_zones);
+        // deviceReduceKernel<1><<<blockSize, gpu_block_dimx>>>(this, dt_min.data(), active_zones);
         // deviceReduceKernel<1><<<1,1024>>>(this, dt_min.data(), blockSize);
     #endif
 };
@@ -707,11 +707,11 @@ SRHD::simulate1D(
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
 
-    const auto xblockdim      = nx > BLOCK_DIMX ? BLOCK_DIMX : nx;
+    const auto xblockdim      = nx > gpu_block_dimx ? gpu_block_dimx : nx;
     this->radius              = (periodic) ? 0 : (first_order) ? 1 : 2;
     this->pseudo_radius       = (first_order) ? 1 : 2;
     this->step                = (first_order) ? 1 : static_cast<real>(0.5);
-    const luint shBlockSize   = BLOCK_DIMX + 2 * pseudo_radius;
+    const luint shBlockSize   = gpu_block_dimx + 2 * pseudo_radius;
     const luint shBlockBytes  = shBlockSize * sizeof(Primitive);
     const auto fullP          = simbi::ExecutionPolicy(nx, xblockdim);
     const auto activeP        = simbi::ExecutionPolicy(active_zones, xblockdim, shBlockBytes);
