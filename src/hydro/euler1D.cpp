@@ -371,8 +371,9 @@ void Newtonian1D::advance(
             // Compute the reconstructed primitives at the i+1/2 interface
 
             // Reconstructed left primitives vector
-            primsL = center    + helpers::minmod((center - left_mid) * plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center) * plm_theta) * static_cast<real>(0.5);
-            primsR = right_mid - helpers::minmod((right_mid - center)*plm_theta, (right_most - center)*static_cast<real>(0.5), (right_most- right_mid) * plm_theta) * static_cast<real>(0.5);
+            // Do the same thing, but for the left side interface [i + 1/2]
+            primsL  = center     + helpers::plm_gradient(center, left_mid, right_mid, plm_theta)   * static_cast<real>(0.5); 
+            primsR  = right_mid  - helpers::plm_gradient(right_mid, center, right_most, plm_theta) * static_cast<real>(0.5);
 
             // Calculate the left and right states using the reconstructed PLM
             // primitives
@@ -391,9 +392,9 @@ void Newtonian1D::advance(
             }
 
             // Do the same thing, but for the right side interface [i - 1/2]
-            primsL = left_mid + helpers::minmod((left_mid - left_most) * plm_theta, (center - left_most)*static_cast<real>(0.5), (center - left_mid)*plm_theta)*static_cast<real>(0.5);
-            primsR = center   - helpers::minmod((center - left_mid)*plm_theta, (right_mid - left_mid)*static_cast<real>(0.5), (right_mid - center)*plm_theta)*static_cast<real>(0.5);
-
+            primsL  = left_mid  + helpers::plm_gradient(left_mid, left_most, center, plm_theta) * static_cast<real>(0.5); 
+            primsR  = center    - helpers::plm_gradient(center, left_mid, right_mid, plm_theta) * static_cast<real>(0.5);
+            
             // Calculate the left and right states using the reconstructed PLM
             // primitives
             uL = prims2cons(primsL);

@@ -211,40 +211,37 @@ namespace simbi
 
         template<typename T>
         GPU_CALLABLE_INLINE typename std::enable_if<is_3D_primitive<T>::value, T>::type
-        minmod(const T &x, const T &y, const T &z)
+        plm_gradient(const T &a, const T &b, const T &c, const real plm_theta)
         {
-            const real rho = minmod(x.rho, y.rho, z.rho);
-            const real v1  = minmod(x.v1, y.v1, z.v1);
-            const real v2  = minmod(x.v2, y.v2, z.v2);
-            const real v3  = minmod(x.v3, y.v3, z.v3);
-            const real pre = minmod(x.p, y.p, z.p);
-            const real chi = minmod(x.chi, y.chi, z.chi);
-
-            return T{rho, v1, v2, v3, pre, chi};
+            const real rho = minmod((a - b).rho * plm_theta, (c - b).rho * static_cast<real>(0.5), (c - a).rho * plm_theta);
+            const real v1  = minmod((a - b).v1  * plm_theta, (c - b).v1  * static_cast<real>(0.5), (c - a).v1  * plm_theta);
+            const real v2  = minmod((a - b).v2  * plm_theta, (c - b).v2  * static_cast<real>(0.5), (c - a).v2  * plm_theta);
+            const real v3  = minmod((a - b).v3  * plm_theta, (c - b).v3  * static_cast<real>(0.5), (c - a).v3  * plm_theta);
+            const real pre = minmod((a - b).p   * plm_theta, (c - b).p   * static_cast<real>(0.5), (c - a).p   * plm_theta);
+            const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
+            return T{rho, v1, v2, pre, chi};
         }
 
         template<typename T>
         GPU_CALLABLE_INLINE typename std::enable_if<is_2D_primitive<T>::value, T>::type
-        minmod(const T &x, const T &y, const T &z)
+        plm_gradient(const T &a, const T &b, const T &c, const real plm_theta)
         {
-            const real rho = minmod(x.rho, y.rho, z.rho);
-            const real v1  = minmod(x.v1, y.v1, z.v1);
-            const real v2  = minmod(x.v2, y.v2, z.v2);
-            const real pre = minmod(x.p, y.p, z.p);
-            const real chi = minmod(x.chi, y.chi, z.chi);
-
+            const real rho = minmod((a - b).rho * plm_theta, (c - b).rho * static_cast<real>(0.5), (c - a).rho * plm_theta);
+            const real v1  = minmod((a - b).v1  * plm_theta, (c - b).v1  * static_cast<real>(0.5), (c - a).v1  * plm_theta);
+            const real v2  = minmod((a - b).v2  * plm_theta, (c - b).v2  * static_cast<real>(0.5), (c - a).v2  * plm_theta);
+            const real pre = minmod((a - b).p   * plm_theta, (c - b).p   * static_cast<real>(0.5), (c - a).p   * plm_theta);
+            const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
             return T{rho, v1, v2, pre, chi};
         }
 
         template<typename T>
         GPU_CALLABLE_INLINE typename std::enable_if<is_1D_primitive<T>::value, T>::type
-        minmod(const T &x, const T &y, const T &z)
-        {  
-            const real rho = minmod(x.rho, y.rho, z.rho);
-            const real v   = minmod(x.v, y.v, z.v);
-            const real pre = minmod(x.p, y.p, z.p);           
-            // const real chi = minmod(x.chi, y.chi, z.chi);
-
+        plm_gradient(const T &a, const T &b, const T &c, const real plm_theta)
+        {
+            const real rho = minmod((a - b).rho * plm_theta, (c - b).rho * static_cast<real>(0.5), (c - a).rho * plm_theta);
+            const real v   = minmod((a - b).v   * plm_theta, (c - b).v   * static_cast<real>(0.5), (c - a).v   * plm_theta);
+            const real pre = minmod((a - b).p   * plm_theta, (c - b).p   * static_cast<real>(0.5), (c - a).p   * plm_theta);
+            // const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
             return T{rho, v, pre};
         }
 
