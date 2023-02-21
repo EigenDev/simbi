@@ -227,7 +227,7 @@ def parse_plotting_arguments(
         help='kind of visual to output')
     plot_parser.add_argument(
         '--cmap',
-        default='viridis',
+        default=['viridis'],
         type=str,
         nargs = '+',
         help='matplotlib color map')
@@ -251,7 +251,7 @@ def parse_plotting_arguments(
         default=None,
         help='Set the y-scale to start plt.fill_between')
     plot_parser.add_argument(
-        '--weighted_vs_time', 
+        '--weighted-vs-time', 
         help='plot maximum of desired var as function of time', 
         default=False, 
         action='store_true'

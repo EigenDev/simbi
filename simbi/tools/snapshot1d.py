@@ -241,30 +241,30 @@ def snapshot(parser: argparse.ArgumentParser):
     ncols    = len(flist) * len(args.fields)
     if len(flist) > 1:
         if args.weighted_vs_time:
-                fig = plt.figure(figsize=(fig_size[0], fig_size[1]))
-                ax = fig.add_subplot(1, 1, 1)
-                weighted_vars = []
-                times = []
-                colors = ['red', 'black']
-                label = args.labels[0] if args.labels else None
-                for idx, file in enumerate(flist):
-                    fields, setup, mesh = util.read_file(args, file, 1)
-                    if args.fields[0] in derived:
-                        var = util.prims2var(fields, args.fields[0])
-                    else:
-                        var = fields[args.fields[0]]
-                        
-                    if len(args.fields) > 1:
-                        weights = util.prims2var(fields, args.fields[1])
-                    else:
-                        weights = 1.0 
-                        
-                    dV              = util.calc_cell_volume1D(mesh['x1'])
-                    weighted        = np.sum(weights * var * dV) / np.sum(weights * dV)
-                    weighted_vars  += [weighted]
-                    times          += [setup['time']]
-                plot_vs_time(args, ax, label, colors[0], times, weighted_vars, ylog = (args.fields[0] not in lin_fields))
-                ax.legend()
+            fig = plt.figure(figsize=(fig_size[0], fig_size[1]))
+            ax = fig.add_subplot(1, 1, 1)
+            weighted_vars = []
+            times = []
+            colors = ['red', 'black']
+            label = args.labels[0] if args.labels else None
+            for idx, file in enumerate(flist):
+                fields, setup, mesh = util.read_file(args, file, 1)
+                if args.fields[0] in derived:
+                    var = util.prims2var(fields, args.fields[0])
+                else:
+                    var = fields[args.fields[0]]
+                    
+                if len(args.fields) > 1:
+                    weights = util.prims2var(fields, args.fields[1])
+                else:
+                    weights = 1.0 
+                    
+                dV              = util.calc_cell_volume1D(mesh['x1'])
+                weighted        = np.sum(weights * var * dV) / np.sum(weights * dV)
+                weighted_vars  += [weighted]
+                times          += [setup['time']]
+            plot_vs_time(args, ax, label, colors[0], times, weighted_vars, ylog = (args.fields[0] not in lin_fields))
+            ax.legend()
                 
         elif args.nplots == 1:
             fig = plt.figure(figsize=(fig_size[0], fig_size[1]))

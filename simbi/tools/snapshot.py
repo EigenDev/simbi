@@ -199,11 +199,139 @@ class SnapShot:
                         else:
                             set_cbar_label(r'{}'.format(field_str[idx]), labelpad=labelpad)
 
+    def plot_histogram(self) -> None:
+        colors = plt.cm.twilight_shifted(np.linspace(0.25, 0.75, len(self.files)))
+        # ax.set_title(r'setup: {}'.format(args.setup))
+        for ax in (self.axs,):
+            for idx, file in enumerate(self.files):
+                fields, setup, mesh = util.read_file(self, file, self.ndim)
+                time = setup['time']
+                if self.ndim == 1:
+                    dV = util.calc_cell_volume1D(mesh['x1'])
+                elif self.ndim == 2:
+                    dV = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
+                else:
+                    dV = util.calc_cell_volume3D(mesh['x1'], mesh['x2'], mesh['x3'])
+                    
+                if self.kinetic:
+                    mass   = dV * fields['W'] * fields['rho']
+                    var = (fields['W'] - 1.0) * mass * util.e_scale.value
+                elif self.enthalpy:
+                    enthalpy = 1.0 + fields['ad_gamma'] * fields['p'] / (fields['rho'] * (fields['ad_gamma'] - 1.0))
+                    var = (enthalpy - 1.0) *  dV * util.e_scale.value
+                else:
+                    edens_total = util.prims2var(fields, 'energy')
+                    var = edens_total * dV * util.e_scale.value
+
+                u   = fields['gamma_beta']
+                gbs = np.geomspace(1e-4, u.max(), 128)
+                var = np.asanyarray([var[u > gb].sum() for gb in gbs])
+                # E_seg_rat  = energy[1:]/energy[:-1]
+                # gb_seg_rat = gbs[1:]/gbs[:-1]
+                # E_seg_rat[E_seg_rat == 0] = 1
+                
+                # slope = (energy[1:] - energy[:-1])/(gbs[1:] - gbs[:-1])
+                # power_law_region = np.argmin(slope)
+                # up_min           = find_nearest(gbs, 2 * gbs[power_law_region: ][0])[0]
+                # upower           = gbs[up_min: ]
+                
+                # # Fix the power law segment, ignoring the sharp dip at the tail of the CDF
+                # epower_law_seg   = E_seg_rat [up_min: np.argmin(E_seg_rat > 0.8)]
+                # gbpower_law_seg  = gb_seg_rat[up_min: np.argmin(E_seg_rat > 0.8)]
+                # segments         = np.log10(epower_law_seg) / np.log10(gbpower_law_seg)
+                # alpha            = 1.0 - np.mean(segments)
+                # E_0 = energy[up_min] * upower[0] ** (alpha - 1)
+                # print('Avg power law index: {:.2f}'.format(alpha))
+                label = r'$E_T$' if not self.labels else f'{self.labels[idx]}, t={time:.2f}'
+
+                hist = ax.hist(gbs, bins=gbs, weights=var, label=label, color=colors[idx], histtype='step', rwidth=1.0, linewidth=3.0)
+                # ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--', label = r'${}$ fit'.format(args.labels[case]))
+
+
+                if self.nplots == 1:
+                    ax.set_xscale('log')
+                    ax.set_yscale('log')
+                    if self.xlims:
+                        ax.set_xlim(*self.xlims)
+                    ax.set_xlabel(r'$\Gamma\beta $')
+                    if self.kinetic:
+                        ax.set_ylabel(r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$')
+                    elif self.enthalpy:
+                        ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$')
+                    else:
+                        ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
+                    
+                    if self.fill_scale is not None:
+                        fill_below_intersec(gbs, energy, self.fill_scale*var.max(), colors[case])
+                        
+    def plot_mean_vs_time(self) -> None:
+        flist, _ = util.get_file_list(self.files)
+        weighted_vars = []
+        times = []
+        colors = ['red', 'black']
+        label = self.labels[0] if self.labels else None
+        self.axs.set_title(f'{self.setup}')
+        if not isinstance(flist, dict):
+            flist = {0: flist}
+            
+        for key in flist.keys():
+            weighted_vars = []
+            times = []
+            label = self.labels[key] if self.labels else key
+            for idx, file in enumerate(flist[key]):
+                print(f'\rprocessing file {file}...', flush=True, end='')
+                fields, setup, mesh = util.read_file(self, file, self.ndim)
+                if self.fields[0] in derived:
+                    var = util.prims2var(fields, self.fields[0])
+                else:
+                    var = fields[self.fields[0]]
+                    
+                if len(self.fields) > 1:
+                    weights = util.prims2var(fields, self.fields[1])
+                else:
+                    weights = 1.0 
+                    
+                if self.ndim == 1:
+                    dV = util.calc_cell_volume1D(mesh['x1'])
+                elif self.ndim == 2:
+                    dV = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
+                else:
+                    dV = util.calc_cell_volume3D(mesh['x1'], mesh['x2'], mesh['x3'])
+                weighted        = np.sum(weights * var * dV) / np.sum(weights * dV)
+                weighted_vars  += [weighted]
+                times          += [setup['time']]
+    
+            ylabel = util.get_field_str(self)
+            if len(ylabel) > 1:
+                ylabel = ylabel[0]
+            
+            self.axs.set_ylabel(r'$t$')
+            self.axs.set_ylabel(rf"$\langle$ {ylabel} $\rangle$")
+            times = np.asanyarray(times)
+            data  = np.asanyarray(weighted_vars)
+            self.axs.plot(times, data, label=label, color=colors[key], alpha=1.0)
+            
+            if self.fields[0] == 'gamma_beta' or self.fields[0] == 'u1':
+                if True:
+                    self.axs.plot(times, data[0] * np.exp(1 - times / times[0]), label =r'$\propto \exp(-t)$', color='grey', linestyle='-.')
+                    self.axs.plot(times, data[0] * (times / times[0]) ** (-3/2), label =r'$\propto t^{-3/2}$', color='grey', linestyle=':')
+                    self.axs.plot(times, data[0] * (times / times[0]) ** (-3), label =r'$\propto t^{-3}$', color='grey', linestyle='--')
+            
+            if self.log:
+                self.axs.set_xscale('log')
+                if self.fields[0] == 'gamma_beta' or self.fields[0] not in lin_fields:
+                    self.axs.set(yscale = 'log')
+                
     def plot(self):
-        if self.ndim == 1:
-            self.plot_1d()
+        if self.hist:
+            self.plot_histogram()
+        elif self.weighted_vs_time:
+            self.plot_mean_vs_time()
         else:
-            self.plot_multidim()
+            if self.ndim == 1:
+                self.plot_1d()
+            else:
+                self.plot_multidim()
             
     def show(self) -> None:
         plt.show()
@@ -216,17 +344,18 @@ class SnapShot:
 
     def create_figure(self) -> None:
         if self.nplots == 1:
-            if self.cartesian or self.ndim == 1:
+            if self.cartesian or self.ndim == 1 or self.hist:
                 self.fig, self.axs = plt.subplots(1, 1, figsize=self.fig_dims)
             else:
-                self.fig, self.axs = plt.subplots(1, 1, 
-                                subplot_kw={'projection': 'polar'},
-                                figsize=self.fig_dims)
-                self.axs.grid(False)
-                self.axs.set_theta_zero_location('N')
-                self.axs.set_theta_direction(-1)
+                if not self.hist:
+                    self.fig, self.axs = plt.subplots(1, 1, 
+                                    subplot_kw={'projection': 'polar'},
+                                    figsize=self.fig_dims)
+                    self.axs.grid(False)
+                    self.axs.set_theta_zero_location('N')
+                    self.axs.set_theta_direction(-1)
                 
-            if self.ndim == 1:
+            if self.ndim == 1 or self.hist:
                 self.axs.spines['top'].set_visible(False)
                 self.axs.spines['right'].set_visible(False)
         else:
