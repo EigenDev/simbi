@@ -271,15 +271,16 @@ class SnapShot:
         colors = ['red', 'black']
         label = self.labels[0] if self.labels else None
         self.axs.set_title(f'{self.setup}')
+        self.axs.set_xlabel('$t$')
         if not isinstance(flist, dict):
             flist = {0: flist}
             
         for key in flist.keys():
             weighted_vars = []
             times = []
-            label = self.labels[key] if self.labels else key
+            label = self.labels[key] if self.labels else None
             for idx, file in enumerate(flist[key]):
-                print(f'\rprocessing file {file}...', flush=True, end='')
+                print(f'processing file {file}...', flush=True, end='\n')
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 if self.fields[0] in derived:
                     var = util.prims2var(fields, self.fields[0])
@@ -312,7 +313,7 @@ class SnapShot:
             self.axs.plot(times, data, label=label, color=colors[key], alpha=1.0)
             
             if self.fields[0] == 'gamma_beta' or self.fields[0] == 'u1':
-                if True:
+                if key == 0:
                     self.axs.plot(times, data[0] * np.exp(1 - times / times[0]), label =r'$\propto \exp(-t)$', color='grey', linestyle='-.')
                     self.axs.plot(times, data[0] * (times / times[0]) ** (-3/2), label =r'$\propto t^{-3/2}$', color='grey', linestyle=':')
                     self.axs.plot(times, data[0] * (times / times[0]) ** (-3), label =r'$\propto t^{-3}$', color='grey', linestyle='--')
@@ -321,6 +322,9 @@ class SnapShot:
                 self.axs.set_xscale('log')
                 if self.fields[0] == 'gamma_beta' or self.fields[0] not in lin_fields:
                     self.axs.set(yscale = 'log')
+                    
+        if self.legend:
+            self.axs.legend(loc=self.legend_loc)
                 
     def plot(self):
         if self.hist:
@@ -340,7 +344,7 @@ class SnapShot:
         ext = 'png' if self.png else 'pdf'
         fig_name = f'{self.save}.{ext}'.replace('-', '_')
         logger.info(f'Saving figure as {fig_name}')
-        self.fig.savefig(fig_name, dpi=600)
+        self.fig.savefig(fig_name, dpi=600, bbox_inches='tight')
 
     def create_figure(self) -> None:
         if self.nplots == 1:
