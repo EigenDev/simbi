@@ -96,7 +96,7 @@ class SnapShot:
         
         ax.set_xlabel('$x$')
     
-    def plot_nd(self) -> None:
+    def plot_multidim(self) -> None:
         def theta_sign(quadrant: int) -> np.ndarray:
             if quadrant in [0, 3]:
                 return 1 
@@ -203,7 +203,7 @@ class SnapShot:
         if self.ndim == 1:
             self.plot_1d()
         else:
-            self.plot_nd()
+            self.plot_multidim()
             
     def show(self) -> None:
         plt.show()
