@@ -720,7 +720,7 @@ void SRHD2D::advance(
         const real x1r    = get_x1face(ii, geometry, 1);
         const real vfaceR = (geometry == simbi::Geometry::SPHERICAL) ? x1r * hubble_param : hubble_param;
         const real vfaceL = (geometry == simbi::Geometry::SPHERICAL) ? x1l * hubble_param : hubble_param;
-        if (first_order)
+        if (first_order) [[unlikely]]
         {
             //i+1/2
             xprimsL = prim_buff[(txa + 0)      * sy + (tya + 0) * sx];

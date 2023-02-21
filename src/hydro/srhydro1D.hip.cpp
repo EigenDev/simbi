@@ -114,7 +114,7 @@ void SRHD::advance(
         const real x1r    = get_xface(ii, geometry, 1);
         const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
         const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
-        if (first_order)
+        if (first_order) [[unlikely]]
         {
             // Set up the left and right state interfaces for i+1/2
             primsL = prim_buff[(txa + 0) % xstride];

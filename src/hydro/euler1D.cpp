@@ -322,7 +322,7 @@ void Newtonian1D::advance(
         const real x1r    = get_xface(ii, geometry, 1);
         const real vfaceL = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
         const real vfaceR = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
-        if (first_order)
+        if (first_order) [[unlikely]]
         {
             primsL = prim_buff[(txa + 0) % xstride];
             primsR = prim_buff[(txa + 1) % xstride];

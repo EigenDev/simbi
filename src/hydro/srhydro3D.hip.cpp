@@ -751,7 +751,7 @@ void SRHD3D::advance(
         const bool object_above_me    = object_data[helpers::my_min(kk + 1, zpg - 1)  * xpg * ypg + jj * xpg +  ii];
         const bool object_below_me    = object_data[helpers::my_max(static_cast<lint>(kk - 1), static_cast<lint>(0)) * xpg * ypg + jj * xpg +  ii];
 
-        if (first_order){
+        if (first_order) [[unlikely]] {
             xprimsL = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 0)];
             xprimsR = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 1)];
             //j+1/2

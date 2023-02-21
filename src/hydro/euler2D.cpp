@@ -549,7 +549,7 @@ void Newtonian2D::advance(
             simbi::gpu::api::synchronize();
         #endif
 
-        if (first_order)
+        if (first_order) [[unlikely]]
         {
             xprimsL = prim_buff[(txa + 0)      * sy + (tya + 0) * sx];
             xprimsR = prim_buff[(txa + 1) % bx * sy + (tya + 0) * sx];
