@@ -5,7 +5,7 @@ import importlib
 from .tools.utility import DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
 from ._detail import *
 from pathlib import Path
-
+from .tools.visual import derived, field_choices
 derived = [
     'D',
     'momentum',
@@ -18,7 +18,9 @@ derived = [
     'chi_dens',
     'mach',
     'u1',
-    'u2']
+    'u2',
+    'u3',
+    'u']
 field_choices = [
     'rho',
     'v1',
@@ -28,11 +30,17 @@ field_choices = [
     'p',
     'gamma_beta',
     'chi'] + derived
-lin_fields = ['chi', 'gamma_beta', 'u1', 'u2', 'u3']
+lin_fields = ['chi', 'gamma_beta', 'u1', 'u2', 'u3', 'u']
 
 tool_src = Path(__file__).resolve().parent / 'tools'
 
-
+def colorbar_limits(c):
+    try:
+        vmin, vmax = map(float, c.split(','))
+        return vmin, vmax
+    except:
+        raise argparse.ArgumentTypeError("Colorbar limits must be vmin, vmax")
+    
 def parse_plotting_arguments(
         parser: argparse.ArgumentParser) -> argparse.Namespace:
     plot_parser = get_subparser(parser, 1)
@@ -165,12 +173,12 @@ def parse_plotting_arguments(
         type=str,
         help='location of legend',
         choices=[
-            'lower_left',
-            'lower_right',
-            'upper_left',
-            'upper_right',
-            'upper_center',
-            'lower_center',
+            'lower left',
+            'lower right',
+            'upper left',
+            'upper right',
+            'upper center',
+            'lower center',
             'center'])
     plot_parser.add_argument(
         '--anot_text',
@@ -221,6 +229,7 @@ def parse_plotting_arguments(
         '--cmap',
         default='viridis',
         type=str,
+        nargs = '+',
         help='matplotlib color map')
     plot_parser.add_argument(
         '--nplots',
@@ -230,10 +239,11 @@ def parse_plotting_arguments(
     plot_parser.add_argument(
         '--cbar_range',
         default=[
-            None,
-            None],
+            (None,
+            None)],
         dest='cbar',
-        nargs=2,
+        nargs='+',
+        type=colorbar_limits,
         help='The colorbar range')
     plot_parser.add_argument(
         '--fill_scale',
@@ -278,9 +288,9 @@ def main(
     file_list, _ = get_file_list(args.files)
     ndim = get_dimensionality(file_list)
     visual_module = getattr(importlib.import_module(
-        f'{args.kind}{ndim}d'), f'{args.kind}')
+        f'{args.kind}'), f'{args.kind}')
 
-    visual_module(parser)
+    visual_module(parser, ndim)
 
 
 if __name__ == '__main__':

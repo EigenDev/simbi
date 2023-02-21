@@ -1360,23 +1360,6 @@ def snapshot(parser: argparse.ArgumentParser):
     plot_parser.add_argument('--plot_max_vs_time', help='plot maximum of desired var as function of time', default=False, action='store_true')
     args = parser.parse_args()
     
-    if args.tex:
-            plt.rc('font',   size=DEFAULT_SIZE)          # controls default text sizes
-            plt.rc('axes',   titlesize=DEFAULT_SIZE)     # fontsize of the axes title
-            plt.rc('axes',   labelsize=DEFAULT_SIZE)    # fontsize of the x and y labels
-            plt.rc('xtick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
-            plt.rc('ytick',  labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
-            plt.rc('legend', fontsize=DEFAULT_SIZE)      # legend fontsize
-            plt.rc('figure', titlesize=DEFAULT_SIZE)    # fontsize of the figure title
-            
-            plt.rcParams.update(
-                {
-                    "text.usetex": True,
-                    "font.family": "serif",
-                    "font.serif": "Times New Roman",
-                    "font.size": DEFAULT_SIZE
-                }
-            )
     vmin, vmax = args.cbar[:2]
     fields = {}
     setup = {}

@@ -309,6 +309,8 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
         return W * fields['v1']
     elif var == 'gamma_beta_2':
         return W * fields['v2']
+    elif var == 'gamma_beta_3':
+        return W * fields['v3']
     elif var =='sp_enthalpy':
         # Specific enthalpy
         return h - 1.0  
@@ -320,6 +322,10 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
         return W * fields['v1']
     elif var == 'u2':
         return W * fields['v2']
+    elif var == 'u3':
+        return W * fields['v3']
+    elif var == 'u':
+        return fields['gamma_beta']
 
 def get_colors(interval: np.ndarray, cmap: plt.cm, vmin: float = None, vmax: float = None):
     """
