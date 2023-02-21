@@ -10,9 +10,6 @@ cache_file = "simbi_build_cache.txt"
 github_toplevel = "gitrepo_home.txt" 
 default = {}
 default['gpu_compilation']="disabled"
-default['oned_bz']=128
-default['twod_bz']=16  
-default['thrd_bz']=4 
 default['column_major']=False
 default['float_precision']=False
 default['install_mode']="default"  
@@ -99,24 +96,6 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     install_parser.set_defaults(func=install_simbi)
     uninstall_parser = subparsers.add_parser('uninstall', help='uninstall simbi')
     uninstall_parser.set_defaults(func=uninstall_simbi)
-    install_parser.add_argument(
-        '--oned_bz',                      
-        help='block size for 1D simulations (only set for gpu compilation)', 
-        type=int, 
-        default=128
-    )
-    install_parser.add_argument(
-        '--twod_bz',                      
-        help='block size for 2D simulations (only set for gpu compilation)', 
-        type=int, 
-        default=16
-    )
-    install_parser.add_argument(
-        '--thrd_bz',                    
-        help='block size for 3D simulations (only set for gpu compilation)', 
-        type=int, 
-        default=4
-    )
     install_parser.add_argument(
         '--dev-arch',                     
         help='SM architecture specification for gpu compilation', 
