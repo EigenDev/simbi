@@ -2,39 +2,38 @@ import argparse
 import abc
 from .dynarg import DynamicArg
 from .key_types import *
-from ._detail import get_subparser
+from ._detail import get_subparser, bcolors
 from typing import ParamSpec, TypeVar, Generic
-
-class_props = [
-    'boundary_conditions', 'coord_system', 'data_directory', 
-    'dens_outer', 'resolution', 'dlogt', 'dynamic_args', 
-    'edens_outer', 'end_time', 'find_dynamic_args', 'gamma', 
-    'geometry', 'initial_state', 'linspace', 'mom_outer', 
-    'parse_args', 'passive_scalars', 'plm_theta', 
-    'regime', 'rho_ref', 'scale_factor',  'scale_factor_derivative', 
-    'sources', 'default_start_time', 'default_end_time', 'use_hllc_solver', 'cfl_number',
-    'boundary_sources', 'object_zones', 'x1', 'x2', 'x3', 'engine_duration',
-    'check_point_interval', 'first_order']
 
 T = TypeVar('T', covariant=True)
 P = ParamSpec('P')
+    
+class simbi_classproperty:
+    registry: dict[str, Any] = {}
+    def __init__(self, fget: Optional[Callable[...,Any]] = None):
+        self.fget = fget
+        if self.fget:
+            simbi_classproperty.registry[self.fget.__name__] = self.fget
 
-
-class simbi_classproperty(property):
     def __get__(self, owner_self: Any, owner_cls: Optional[Any] = ..., /) -> Any:
-        if not self.fget: return self 
+        if not self.fget:
+            return self 
         return self.fget(owner_cls)
 
 class simbi_property(Generic[T]):
+    registry: dict[str, Any] = {}
     def __init__(self, fget: Callable[P, T]) -> None:
         self._name = ''
         self.fget  = fget 
         self.__doc__ = fget.__doc__ 
+        simbi_property.registry[self.fget.__name__] = 'singelton'
         
     def __set_name__(self, owner: Any, name: str) -> None:
         self._name = name
         
-    def __get__(self, obj: Any, objtype: Optional[Any],/) -> T:
+    def __get__(self, obj: Any, objtype: Optional[Any],/) -> Union[T, 'simbi_property[Any]']:
+        if obj is None:
+            return self 
         if self.fget is None:
             raise ValueError("Property has not getter")
         return cast(T, self.type_converter(self.fget(obj))) 
@@ -64,9 +63,45 @@ def err_message(name: str) -> str:
     return f"Configuration must include a {name} simbi_property"
 
 __all__ = ['BaseConfig', 'simbi_property', 'simbi_classproperty']
+
+def class_register(cls: Any) -> Any:
+    for prop in dir(cls):        
+        if prop in list(simbi_property.registry.keys()) +  list(simbi_classproperty.registry.keys()):
+            cls.base_properties.update(
+                {prop: 'singelton'}
+            )
+    return cls 
+
+@class_register
 class BaseConfig(metaclass=abc.ABCMeta):
     dynamic_args: ListOrNone = None
+    base_properties: dict[str, Any] = {}
     
+    def __init_subclass__(cls: Any, *args: Any, **kwargs: Any) -> None:
+        """Check Child Behavior
+        To save from defining do-nothing properties, raise an error when a user
+        tries to define a rea-only property in their subclass which does not 
+        exist already in the base configuration. 
+         
+        Args:
+            cls (Any): The subclasses instance
+
+        Raises:
+            TypeError: Error if Child tries to create a @property or @simbi_property getter 
+            that is not predefined in the base configuration.
+        """
+        super().__init_subclass__(*args, **kwargs)
+        for prop in dir(cls):
+            if prop.startswith('_'):
+                continue 
+            
+            if isinstance(getattr(cls.__mro__[0], prop), simbi_property):
+                if prop not in BaseConfig.base_properties.keys():
+                    bullet_list = ''.join(f'>{s}\n ' for s in BaseConfig.base_properties.keys())  
+                    raise TypeError(f"simbi_property {bcolors.OKCYAN}{prop}{bcolors.ENDC} defined in {cls.__name__} " +   
+                        f"does not exist in BaseConfig. The available simbi properties are:\n {bullet_list}")  
+
+
     @simbi_property
     @abc.abstractmethod
     def initial_state(self) -> Union[Sequence[Union[NDArray[numpy_float], Sequence[float]]], NDArray[numpy_float]]:
@@ -206,10 +241,10 @@ class BaseConfig(metaclass=abc.ABCMeta):
         """
         Find all derived class member's members defined as DynamicArg class instances 
         """
-        members = [attr for attr in dir(cls) if attr not in class_props and not callable(getattr(cls, attr)) and not attr.startswith("__")]
+        members = [attr for attr in dir(cls) if attr not in simbi_property.registry.keys() and not callable(getattr(cls, attr)) and not attr.startswith("__")]
         cls.dynamic_args = [getattr(cls, member) for member in members if isinstance(getattr(cls,member), DynamicArg)]
         for arg in cls.dynamic_args:
-            if arg.name in class_props:
+            if arg.name in simbi_property.registry.keys():
                 raise ValueError(f"Your dynamic argument name ({arg.name}) is a reserved class property name. Please choose a different name")
         
     @final
