@@ -1,3 +1,4 @@
+import math
 from .key_types import *
 
 __all__ = ['DynamicArg']
@@ -128,3 +129,18 @@ class DynamicArg:
     
     def __str__(self) -> str:
         return str(self.value)
+    
+    def __float__(self) -> float:
+        return float(self.value)
+    
+    def __int__(self) -> int:
+        return int(self.value)
+    
+    def log10(self) -> float:
+        return math.log10(self.value)
+    
+    def exp(self) -> float:
+        return math.exp(self.value)
+    
+    def sqrt(self) -> float:
+        return math.sqrt(self.value)
