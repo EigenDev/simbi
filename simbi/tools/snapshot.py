@@ -43,14 +43,13 @@ class SnapShot:
             plot_parser.add_argument('--tau_s', dest='tau_s', action= 'store_true', default=False, help='The shock optical depth')
             plot_parser.add_argument('--viewing', help = 'viewing angle of simulation in [deg]', type=float, default=None, nargs='+')
             plot_parser.add_argument('--oned_slice', help='index of x1 array for one-d projection', default=None, type=int)
-            plot_parser.add_argument('--oned_proj', help='axes to project 2d solution onto', default=None, type=int, choices=[1,2])
-            if self.ndim == 3:
-                plot_parser.add_argument('--twod_proj', help='axes to project 3d solution onto', default=1, type=int, choices=[1,2,3])
+            plot_parser.add_argument('--projection', help='axes to project multidim solution onto', default=[1,2], type=int, choices=[(1,2),(1,3), (2,3)], nargs=2)
                 
             vars(self).update(**vars(parser.parse_args()))
         
         self.color_map = []
         self.cartesian = True
+        self.flist, _ = util.get_file_list(self.files)
         if self.ndim != 1:  
             for cmap in self.cmap:
                 if self.rcmap:
@@ -58,19 +57,24 @@ class SnapShot:
                 else:
                     self.color_map += [plt.get_cmap(cmap)]
                 
-            self.cartesian = util.read_file(self, self.files[0], self.ndim)[1]['is_cartesian']
+            self.cartesian = util.read_file(self, self.flist[0], self.ndim)[1]['is_cartesian']
         
         self.color_map = cycle(self.color_map)
         self.vrange = self.cbar
         if len(self.vrange) != len(self.fields):
             self.vrange += [(None, None)] * (abs(len(self.fields) - len(self.vrange)))
+        self.vrange = cycle(self.vrange)
+        
+        self.square_plot = False
+        if self.cartesian or self.ndim == 1 or self.hist or self.weighted_vs_time:
+            self.square_plot = True
         self.create_figure()
     
     def plot_1d(self):
         field_str = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
         for ax in (self.axs,):
-            for file in self.files:
+            for file in self.flist:
                 fields, setup, mesh = util.read_file(self, file, ndim=self.ndim)
                 for idx, field in enumerate(self.fields):
                     if field in derived:
@@ -94,7 +98,10 @@ class SnapShot:
         if self.legend:
             ax.legend(loc=self.legend_loc)
         
-        ax.set_xlabel('$x$')
+        if self.cartesian:
+            ax.set_xlabel('$x$')
+        else:
+            ax.set_xlabel('$r$')
     
     def plot_multidim(self) -> None:
         def theta_sign(quadrant: int) -> np.ndarray:
@@ -102,7 +109,7 @@ class SnapShot:
                 return 1 
             else:
                 return -1
-                
+
         field_str = util.get_field_str(self)
         cbar_orientation = 'vertical'
         patches = len(self.fields)
@@ -111,11 +118,16 @@ class SnapShot:
             field_str = [field_str]
         
         theta_cycle = cycle([0, -np.pi * 0.5, -np.pi, np.pi * 0.5])
+        if patches == 1:
+            patches += 1
+            
+        the_fields = cycle(self.fields)
         for ax in (self.axs,):
-            for file in self.files:
+            for file in self.flist:
                 fields, setup, mesh = util.read_file(self, file, ndim=self.ndim)
                 ax.set_title(f'{self.setup} at t = {setup["time"]:.2f}')
-                for idx, field in enumerate(self.fields):
+                for idx in range(patches):
+                    field = next(the_fields)
                     if field in derived:
                         var = util.prims2var(fields, field)
                     else:
@@ -126,8 +138,6 @@ class SnapShot:
                     xx = mesh['x1'] if self.ndim == 2 else mesh[f'x{self.twod_proj[0]}']
                     yy = mesh['x2'] if self.ndim == 2 else mesh[f'x{self.twod_proj[1]}']
                     if not self.cartesian:
-                        self.axs.set_xticklabels([])
-                        self.axs.set_yticklabels([])
                         xx, yy = yy, xx 
                         max_theta = np.abs(xx.max())
                         if max_theta < np.pi:
@@ -138,7 +148,7 @@ class SnapShot:
                             else:
                                 self.axs.set_thetamin(-180)
                                 self.axs.set_thetamax(+180)
-                            xx = xx + next(theta_cycle)
+                            xx = xx[::theta_sign(idx)] + next(theta_cycle)
                         elif max_theta > 0.5 * np.pi and patches > 1:
                             if patches == 2:
                                 hemisphere = np.s_[:]
@@ -153,10 +163,11 @@ class SnapShot:
                             yy  = yy[hemisphere]
                             var = var[hemisphere]
                     
+                    color_range = next(self.vrange)
                     if self.log and field not in lin_fields:
-                        kwargs = {'norm': mcolors.LogNorm(vmin = self.vrange[idx][0], vmax = self.vrange[idx][1])}
+                        kwargs = {'norm': mcolors.LogNorm(vmin = color_range[0], vmax = color_range[1])}
                     else:
-                        kwargs = {'norm': mcolors.PowerNorm(gamma=self.power, vmin=self.vrange[idx][0], vmax=self.vrange[idx][1])}
+                        kwargs = {'norm': mcolors.PowerNorm(gamma=self.power, vmin=color_range[0], vmax=color_range[1])}
                         
                     quads += [ax.pcolormesh(
                         xx, 
@@ -168,42 +179,48 @@ class SnapShot:
                     )]
                         
                     if not self.no_cbar:
-                        if self.cartesian:
-                            divider = make_axes_locatable(ax)
-                            cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
-                        else:
-                            if cbar_orientation == 'horizontal':
-                                single_width = 0.8
-                                x = 0.1 + idx * single_width / 2 
-                                width = single_width / 2
-                                cbaxes  = self.fig.add_axes([x, 0.05, width, 0.05]) 
+                        if idx < len(self.fields):
+                            if self.cartesian:
+                                divider = make_axes_locatable(ax)
+                                cbaxes  = divider.append_axes('right', size='5%', pad=0.05)
                             else:
-                                single_width = 0.8
-                                x = [0.9, 0.08, 0.08, 0.9]
-                                y = [0.5, 0.5, 0.1, 0.1]
-                                cbaxes  = self.fig.add_axes([x[idx], y[idx] ,0.03, 0.40])
-                                
-                        if self.log and field not in lin_fields:
-                            logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
-                            cbar = self.fig.colorbar(quads[idx], orientation=cbar_orientation,cax=cbaxes, format=logfmt)
-                        else:
-                            cbar = self.fig.colorbar(quads[idx], orientation=cbar_orientation, cax=cbaxes)
-                        
-                        # Change the format of the field
-                        set_cbar_label = cbar.ax.set_xlabel if cbar_orientation == 'horizontal' else cbar.ax.set_ylabel
-                        labelpad = -60 if idx in [1,2] else None
-                        if idx in [1,2] and cbar_orientation == 'vertical':
-                            cbaxes.yaxis.set_ticks_position('left')
-                        if self.log and field not in lin_fields:
-                            set_cbar_label(r'$\log$[{}]'.format(field_str[idx]), labelpad=labelpad)
-                        else:
-                            set_cbar_label(r'{}'.format(field_str[idx]), labelpad=labelpad)
+                                if cbar_orientation == 'horizontal':
+                                    single_width = 0.8
+                                    width = single_width / len(self.fields)
+                                    x = 0.1 + (1 - idx) * width * (width != single_width)
+                                    cbaxes  = self.fig.add_axes([x, 0.05, width, 0.05]) 
+                                else:
+                                    single_width = 0.8
+                                    x = [0.9, 0.08, 0.08, 0.9]
+                                    y = [0.5, 0.5, 0.1, 0.1]
+                                    cbaxes  = self.fig.add_axes([x[idx], y[idx] ,0.03, 0.40])
+                                    
+                            if self.log and field not in lin_fields:
+                                logfmt = tkr.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+                                cbar = self.fig.colorbar(quads[idx], orientation=cbar_orientation,cax=cbaxes, format=logfmt)
+                            else:
+                                cbar = self.fig.colorbar(quads[idx], orientation=cbar_orientation, cax=cbaxes)
+                            
+                            # Change the format of the field
+                            set_cbar_label = cbar.ax.set_xlabel if cbar_orientation == 'horizontal' else cbar.ax.set_ylabel
+                            labelpad = None 
+                            if cbar_orientation == 'vertical' and idx in [1,2]:
+                                labelpad = -60
+                            if idx in [1,2] and cbar_orientation == 'vertical':
+                                cbaxes.yaxis.set_ticks_position('left')
+                            if self.log and field not in lin_fields:
+                                set_cbar_label(r'$\log$[{}]'.format(field_str[idx]), labelpad=labelpad)
+                            else:
+                                set_cbar_label(r'{}'.format(field_str[idx]), labelpad=labelpad)
+                            
+                            if self.xmax:
+                                self.axs.set_rmax(self.xmax)
 
     def plot_histogram(self) -> None:
-        colors = plt.cm.twilight_shifted(np.linspace(0.25, 0.75, len(self.files)))
+        colors = plt.cm.twilight_shifted(np.linspace(0.25, 0.75, len(self.flist)))
         # ax.set_title(r'setup: {}'.format(args.setup))
         for ax in (self.axs,):
-            for idx, file in enumerate(self.files):
+            for idx, file in enumerate(self.flist):
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 time = setup['time']
                 if self.ndim == 1:
@@ -262,24 +279,23 @@ class SnapShot:
                         ax.set_ylabel(r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
                     
                     if self.fill_scale is not None:
-                        fill_below_intersec(gbs, energy, self.fill_scale*var.max(), colors[case])
+                        util.fill_below_intersec(gbs, var, self.fill_scale*var.max(), colors[idx])
                         
     def plot_mean_vs_time(self) -> None:
-        flist, _ = util.get_file_list(self.files)
         weighted_vars = []
         times = []
         colors = ['red', 'black']
         label = self.labels[0] if self.labels else None
         self.axs.set_title(f'{self.setup}')
         self.axs.set_xlabel('$t$')
-        if not isinstance(flist, dict):
-            flist = {0: flist}
+        if not isinstance(self.flist, dict):
+            self.flist = {0: self.flist}
             
-        for key in flist.keys():
+        for key in self.flist.keys():
             weighted_vars = []
             times = []
             label = self.labels[key] if self.labels else None
-            for idx, file in enumerate(flist[key]):
+            for idx, file in enumerate(self.flist[key]):
                 print(f'processing file {file}...', flush=True, end='\n')
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 if self.fields[0] in derived:
@@ -306,7 +322,7 @@ class SnapShot:
             if len(ylabel) > 1:
                 ylabel = ylabel[0]
             
-            self.axs.set_ylabel(r'$t$')
+            self.axs.set_xlabel(r'$t$')
             self.axs.set_ylabel(rf"$\langle$ {ylabel} $\rangle$")
             times = np.asanyarray(times)
             data  = np.asanyarray(weighted_vars)
@@ -348,18 +364,21 @@ class SnapShot:
 
     def create_figure(self) -> None:
         if self.nplots == 1:
-            if self.cartesian or self.ndim == 1 or self.hist:
+            if self.square_plot:
                 self.fig, self.axs = plt.subplots(1, 1, figsize=self.fig_dims)
             else:
                 if not self.hist:
                     self.fig, self.axs = plt.subplots(1, 1, 
                                     subplot_kw={'projection': 'polar'},
-                                    figsize=self.fig_dims)
+                                    figsize=self.fig_dims,
+                                    constrained_layout=True)
                     self.axs.grid(False)
                     self.axs.set_theta_zero_location('N')
                     self.axs.set_theta_direction(-1)
+                    self.axs.set_xticklabels([])
+                    self.axs.set_yticklabels([])
                 
-            if self.ndim == 1 or self.hist:
+            if self.ndim == 1 or self.hist or self.weighted_vs_time:
                 self.axs.spines['top'].set_visible(False)
                 self.axs.spines['right'].set_visible(False)
         else:
