@@ -215,7 +215,7 @@ class Visualizer:
         field_str   = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
         for ax in get_iterable(self.axs):
-            for file in get_iterable(self.frames[self.current_frame]):
+            for file in get_iterable(self.flist[self.current_frame]):
                 fields, setup, mesh = util.read_file(
                     self, file, ndim=self.ndim)
                 for idx, field in enumerate(self.fields):
