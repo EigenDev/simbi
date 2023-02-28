@@ -46,7 +46,6 @@ lin_fields = ['chi', 'gamma_beta', 'u1', 'u2', 'u3', 'u']
 
 class Visualizer:
     def __init__(self, parser: argparse.ArgumentParser, ndim: int) -> None:
-        self.frames = []
         self.current_frame = slice(None)
         self.ndim = ndim
         if self.ndim != 1:
