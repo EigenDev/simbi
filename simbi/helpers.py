@@ -223,3 +223,13 @@ def find_nearest(arr: NDArray[Any], val: Any) -> Any:
     else:
         idx = np.argmin(np.abs(arr - val))
         return idx, arr[idx]
+    
+def for_each(func: Callable[..., Any], x: Any) -> None:
+    for i in x:
+        func(i)
+        
+def get_iterable(x: Any) -> Sequence[Any]:
+    if isinstance(x,  Sequence) and not isinstance(x, str):
+        return x
+    else:
+        return (x,)

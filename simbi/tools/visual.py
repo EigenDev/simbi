@@ -9,6 +9,7 @@ from typing import Iterable
 from itertools import cycle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from simbi.slogger import logger
+from simbi.helpers import get_iterable
 from . import utility as util
 
 try:
@@ -212,9 +213,9 @@ class Visualizer:
         self.create_figure()
 
     def plot_1d(self):
-        field_str = util.get_field_str(self)
+        field_str   = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
-        for ax in (self.axs,):
+        for ax in get_iterable(self.axs):
             for file in (self.flist[self.current_frame],):
                 fields, setup, mesh = util.read_file(
                     self, file, ndim=self.ndim)
@@ -251,13 +252,6 @@ class Visualizer:
         else:
             ax.set_xlabel('$r$')
 
-    @staticmethod
-    def get_iterable(x):
-        if isinstance(x, Iterable) and not isinstance(x, str):
-            return x
-        else:
-            return (x,)
-
     def plot_multidim(self) -> None:
         def theta_sign(quadrant: int) -> np.ndarray:
             if quadrant in [0, 3]:
@@ -265,21 +259,18 @@ class Visualizer:
             else:
                 return -1
 
-        field_str = util.get_field_str(self)
+        field_str = get_iterable(util.get_field_str(self))
         cbar_orientation = 'vertical'
         patches = len(self.fields)
-        if not isinstance(field_str, list):
-            field_str = [field_str]
 
         theta_cycle = cycle([0, -np.pi * 0.5, -np.pi, np.pi * 0.5])
         if patches == 1:
             patches += 1
 
         the_fields = cycle(self.fields)
-        for ax in (self.axs,):
-            for file in self.get_iterable(self.flist[self.current_frame]):
-                fields, setup, mesh = util.read_file(
-                    self, file, ndim=self.ndim)
+        for ax in get_iterable(self.axs):
+            for file in get_iterable(self.flist[self.current_frame]):
+                fields, setup, mesh = util.read_file(self, file, ndim=self.ndim)
                 ax.set_title(f'{self.setup} at t = {setup["time"]:.2f}')
                 for idx in range(patches):
                     field = next(the_fields)
@@ -396,9 +387,10 @@ class Visualizer:
         colors = plt.cm.twilight_shifted(
             np.linspace(0.25, 0.75, len(self.flist)))
         # ax.set_title(r'setup: {}'.format(args.setup))
-        for ax in (self.axs,):
+        for ax in get_iterable(self.axs):
             for idx, file in enumerate(
-                    self.get_iterable(self.flist[self.current_frame])):
+                    get_iterable(self.flist[self.current_frame])):
+                
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 time = setup['time']
                 if self.ndim == 1:
@@ -459,24 +451,24 @@ class Visualizer:
                                         rwidth=1.0,
                                         linewidth=3.0)]
 
-                if self.nplots == 1:
-                    ax.set_xscale('log')
-                    ax.set_yscale('log')
-                    if self.xlims:
-                        ax.set_xlim(*self.xlims)
-                    ax.set_xlabel(r'$\Gamma\beta $')
-                    if self.kinetic:
-                        ax.set_ylabel(
-                            r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$')
-                    elif self.enthalpy:
-                        ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$')
-                    else:
-                        ax.set_ylabel(
-                            r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
+            if self.nplots == 1:
+                ax.set_xscale('log')
+                ax.set_yscale('log')
+                if self.xlims:
+                    ax.set_xlim(*self.xlims)
+                ax.set_xlabel(r'$\Gamma\beta $')
+                if self.kinetic:
+                    ax.set_ylabel(
+                        r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$')
+                elif self.enthalpy:
+                    ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$')
+                else:
+                    ax.set_ylabel(
+                        r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
 
-                    if self.fill_scale is not None:
-                        util.fill_below_intersec(
-                            gbs, var, self.fill_scale * var.max(), colors[idx])
+                if self.fill_scale is not None:
+                    util.fill_below_intersec(
+                        gbs, var, self.fill_scale * var.max(), colors[idx])
 
     def plot_mean_vs_time(self) -> None:
         weighted_vars = []
@@ -588,15 +580,15 @@ class Visualizer:
             self.animation.save("{}.mp4".format(
                 self.save.replace(" ", "_")),
                 progress_callback=lambda i, n: print(
-                f'Saving frame {i} of {n}', end='\r', flush=True),
-                # savefig_kwargs={"transparent": args.transparent, "facecolor":
-                # "none"},)
+                f'Saving frame {i} of {n}', end='\r', flush=True)
             )
 
     def create_figure(self) -> None:
         if self.nplots == 1:
             if self.square_plot:
                 self.fig, self.axs = plt.subplots(1, 1, figsize=self.fig_dims)
+                self.axs.spines['top'].set_visible(False)
+                self.axs.spines['right'].set_visible(False)
             else:
                 if not self.hist:
                     self.fig, self.axs = plt.subplots(
@@ -606,11 +598,7 @@ class Visualizer:
                     self.axs.set_theta_zero_location('N')
                     self.axs.set_theta_direction(-1)
                     self.axs.set_xticklabels([])
-                    self.axs.set_yticklabels([])
-
-            if self.ndim == 1 or self.hist or self.weighted_vs_time:
-                self.axs.spines['top'].set_visible(False)
-                self.axs.spines['right'].set_visible(False)
+                    self.axs.set_yticklabels([])      
         else:
             raise NotImplementedError()
 
@@ -638,8 +626,8 @@ class Visualizer:
                 self.axs.set_xlim(mesh['x1'][0], mesh['x1'][-1])
                 self.frames[idx].set_data(mesh['x1'], var)
             else:
-                for drawing in self.frames:
-                    drawing.set_array(var.ravel())
+                # affect the generator w/o using output
+                any(drawing.set_array(var.ravel()) for drawing in self.frames)
 
         return self.frames,
 

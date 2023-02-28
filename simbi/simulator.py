@@ -85,18 +85,15 @@ class Hydro:
         # Update any static vars with attributes obtained from some setup
         # configuration
         clean_attributes = [x for x in extras.keys() if not x.startswith('__')]
-        [setattr(self, attribute, extras[attribute]) # type: ignore
-         for attribute in clean_attributes if attribute in dir(self)]
-        
-        if not isinstance(resolution, (Sequence, np.ndarray)):
-            resolution = (resolution,)
+        helpers.for_each(lambda x: setattr(self, x, extras[x]) if x in dir(self) else None, clean_attributes)
+        resolution = helpers.get_iterable(resolution)
         resolution = tuple(resolution)
         
-        self.geometry   = cast(Sequence[float], geometry)
-        self.resolution = cast(Sequence[int], resolution)
-        tuple_of_tuples = lambda x: any(isinstance(a, Sequence) for a in x)
+        self.geometry   = geometry
+        self.resolution = resolution
+        tuple_of_tuples: Callable[..., bool] = lambda x: any(isinstance(a, Sequence) for a in x)
         
-        if tuple_of_tuples(initial_state): # type: ignore 
+        if tuple_of_tuples(initial_state): 
             # check if given simple nexted sequence to split across the grid
             if all(len(v) == 3 for v in initial_state):
                 self.dimensionality = 1
@@ -115,10 +112,10 @@ class Hydro:
             self.dimensionality = np.asanyarray(initial_state[0]).ndim
 
         self.coord_system = coord_system
-        self.regime = regime
-        initial_state = helpers.pad_jagged_array(initial_state)
-
-        self.gamma = gamma
+        self.regime       = regime
+        initial_state     = helpers.pad_jagged_array(initial_state)
+        self.gamma        = gamma
+        
         if len(initial_state) < 6 or len(initial_state) < 8 and self.discontinuity:
             self.nvars = (2 + 1 * (self.dimensionality != 1) +
                           self.dimensionality)
@@ -437,9 +434,7 @@ class Hydro:
                                    boundary_conditions: Union[Sequence[str],
                                                               str,
                                                               NDArray[numpy_string]]) -> None:
-        if isinstance(boundary_conditions, str):
-            boundary_conditions = [boundary_conditions]
-
+        boundary_conditions = list(helpers.get_iterable(boundary_conditions))
         for bc in boundary_conditions:
             if bc not in available_boundary_conditions:
                 raise ValueError(
@@ -458,7 +453,7 @@ class Hydro:
                 raise ValueError(
                     "Please include at a number of boundary conditions equal to at least half the number of cell faces")
 
-        self.boundary_conditions = cast(list[str], boundary_conditions)
+        self.boundary_conditions = boundary_conditions
 
     def simulate(
             self,
@@ -664,12 +659,11 @@ class Hydro:
                     'quirk_smoothing': quirk_smoothing,
                     'object_cells': object_cells}
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
-                    momentum_components = cast(
-                        Sequence[Callable[..., float]], mom_outer)
-                    kwargs['d_outer'] = dens_outer
-                    kwargs['s1_outer'] = momentum_components[0]
-                    kwargs['s2_outer'] = momentum_components[1]
-                    kwargs['e_outer'] = edens_outer
+                    momentum_components = cast(Sequence[Callable[..., float]], mom_outer)
+                    kwargs['d_outer']   = dens_outer
+                    kwargs['s1_outer']  = momentum_components[0]
+                    kwargs['s2_outer']  = momentum_components[1]
+                    kwargs['e_outer']   = edens_outer
 
                 state = PyStateSR2D(
                     self.u,
@@ -724,11 +718,6 @@ class Hydro:
             boundary_sources=boundary_sources,
             **kwargs)
 
-    
         if not periodic:
             self._cleanup(first_order)
         return self.solution
-
-
-class GPUExtNotBuiltWarning(UserWarning):
-    pass
