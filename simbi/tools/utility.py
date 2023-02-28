@@ -1,6 +1,4 @@
 # Utility functions for visualization scripts 
-
-from math import gamma
 import h5py 
 import astropy.constants as const 
 import astropy.units as units

@@ -2,35 +2,13 @@ import argparse
 import sys
 import matplotlib.pyplot as plt
 import importlib
+from .tools import visual
+
 from .tools.utility import DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
 from ._detail import *
 from pathlib import Path
-from .tools.visual import derived, field_choices
-derived = [
-    'D',
-    'momentum',
-    'energy',
-    'energy_rst',
-    'enthalpy',
-    'temperature',
-    'T_eV',
-    'mass',
-    'chi_dens',
-    'mach',
-    'u1',
-    'u2',
-    'u3',
-    'u']
-field_choices = [
-    'rho',
-    'v1',
-    'v2',
-    'v3',
-    'v',
-    'p',
-    'gamma_beta',
-    'chi'] + derived
-lin_fields = ['chi', 'gamma_beta', 'u1', 'u2', 'u3', 'u']
+
+
 
 tool_src = Path(__file__).resolve().parent / 'tools'
 
@@ -39,7 +17,7 @@ def colorbar_limits(c):
         vmin, vmax = map(float, c.split(','))
         return vmin, vmax
     except:
-        raise argparse.ArgumentTypeError("Colorbar limits must be vmin, vmax")
+        raise argparse.ArgumentTypeError("Colorbar limits must be in the format: vmin,vmax")
     
 def parse_plotting_arguments(
         parser: argparse.ArgumentParser) -> argparse.Namespace:
@@ -57,7 +35,7 @@ def parse_plotting_arguments(
         default=['rho'],
         nargs='+',
         help='the name of the field variable',
-        choices=field_choices)
+        choices=visual.field_choices)
     plot_parser.add_argument('--xmax', default=0.0, help='the domain range')
     plot_parser.add_argument(
         '--log',
@@ -85,12 +63,12 @@ def parse_plotting_arguments(
         action='store_true',
         help='compute mass histogram')
     plot_parser.add_argument(
-        '--dm_du',
+        '--dm-du',
         default=False,
         action='store_true',
         help='compute dM/dU over whole domain')
     plot_parser.add_argument(
-        '--ax_anchor',
+        '--ax-anchor',
         default=None,
         type=str,
         nargs='+',
@@ -128,7 +106,7 @@ def parse_plotting_arguments(
         type=float,
         help='exponent of power-law norm')
     plot_parser.add_argument(
-        '--scale_downs',
+        '--scale-downs',
         default = [1],
         type=float,
         nargs = '+',
@@ -155,7 +133,7 @@ def parse_plotting_arguments(
         action='store_true',
         help='flag for creating figs without data')
     plot_parser.add_argument(
-        '--anot_loc',
+        '--anot-loc',
         default=None,
         type=str,
         help='location of annotations',
@@ -181,7 +159,7 @@ def parse_plotting_arguments(
             'lower center',
             'center'])
     plot_parser.add_argument(
-        '--anot_text',
+        '--anot-text',
         default=None,
         type=str,
         help='text in annotations')
@@ -196,7 +174,7 @@ def parse_plotting_arguments(
         action='store_true',
         help='flag for saving figure as png')
     plot_parser.add_argument(
-        '--fig_dims',
+        '--fig-dims',
         default=[
             4,
             4],
@@ -209,7 +187,7 @@ def parse_plotting_arguments(
         action=argparse.BooleanOptionalAction,
         help='flag for legend output')
     plot_parser.add_argument(
-        '--extra_files',
+        '--extra-files',
         default=None,
         nargs='+',
         help='extra 1D files to plot alongside 2D plots')
@@ -237,7 +215,7 @@ def parse_plotting_arguments(
         type=int,
         help='number of subplots')
     plot_parser.add_argument(
-        '--cbar_range',
+        '--cbar-range',
         default=[
             (None,
             None)],
@@ -246,7 +224,7 @@ def parse_plotting_arguments(
         type=colorbar_limits,
         help='The colorbar range')
     plot_parser.add_argument(
-        '--fill_scale',
+        '--fill-scale',
         type=float,
         default=None,
         help='Set the y-scale to start plt.fill_between')
@@ -254,6 +232,12 @@ def parse_plotting_arguments(
         '--weighted-vs-time', 
         help='plot maximum of desired var as function of time', 
         default=False, 
+        action='store_true'
+    )
+    plot_parser.add_argument(
+        '--powerfit',
+        help='plot power-law fit on top of histogram',
+        default=False,
         action='store_true'
     )
     
@@ -287,10 +271,8 @@ def main(
     sys.path.insert(1, f'{tool_src}')
     file_list, _ = get_file_list(args.files)
     ndim = get_dimensionality(file_list)
-    visual_module = getattr(importlib.import_module(
-        f'{args.kind}'), f'{args.kind}')
 
-    visual_module(parser, ndim)
+    visual.visualize(parser, ndim)
 
 
 if __name__ == '__main__':
