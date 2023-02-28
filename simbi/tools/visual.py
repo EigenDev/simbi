@@ -215,7 +215,7 @@ class Visualizer:
         field_str   = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
         for ax in get_iterable(self.axs):
-            for file in (self.flist[self.current_frame],):
+            for file in get_iterable(self.frames[self.current_frame]):
                 fields, setup, mesh = util.read_file(
                     self, file, ndim=self.ndim)
                 for idx, field in enumerate(self.fields):
@@ -471,9 +471,9 @@ class Visualizer:
 
     def plot_mean_vs_time(self) -> None:
         weighted_vars = []
-        times = []
+        times  = []
         colors = ['red', 'black']
-        label = self.labels[0] if self.labels else None
+        label  = self.labels[0] if self.labels else None
 
         self.axs.set_title(f'{self.setup}')
         self.axs.set_xlabel('$t$')
