@@ -195,7 +195,7 @@ cpu_ext = py3.extension_module(
     dependencies: depends,
     override_options: ['cython_language=cpp'],
     install: true,
-    install_dir: py3_install_dir,
+    install_dir: meson.current_source_dir() + '/simbi',
 )
 
 if get_option('gpu_compilation').enabled()
@@ -248,7 +248,27 @@ if get_option('gpu_compilation').enabled()
             cpp_args: ['-DMANAGED'],
             override_options: ['cython_language=cpp'],
             install: true,
-            install_dir: py3_install_dir,
+            install_dir: meson.current_source_dir() + '/simbi',
         )
     endif
 endif
+
+#-------------
+# Radiation
+#-------------
+rad_src = [
+    'simbi/afterglow/src/rad_units.cpp',
+    'simbi/afterglow/src/rad_units.hpp',
+    'simbi/afterglow/src/units_lib/units.hpp'
+]
+
+py3.extension_module(
+    'rad_hydro',
+    ['simbi/afterglow/src/rad_hydro.pyx'] + rad_src,
+    include_directories: include_directories('simbi/afterglow/src', incdir_numpy),
+    cpp_args: cpp_comp_args,
+    dependencies: [py3_dep, omp],
+    override_options: ['cython_language=cpp'],
+    install: true,
+    install_dir: meson.current_source_dir() + '/simbi'
+)

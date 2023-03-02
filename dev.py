@@ -218,15 +218,6 @@ def install_simbi(args: argparse.Namespace) -> None:
             subprocess.run(['rm', '-rf', f'{egg_dir}', f'{build_dir}'], check=True)
         
 def uninstall_simbi(args: argparse.Namespace) -> None:
-    if (config_cache := read_from_cache()):
-        build_dir = config_cache['build_dir']
-    else:
-        build_dir = args.build_dir
-    
-    try:
-        subprocess.run(['ninja', '-C', f'{build_dir}', 'uninstall'], check=True)
-    except subprocess.CalledProcessError:
-        subprocess.run(['make', '-C', f'{build_dir}', 'uninstall'], check=True)
     subprocess.run([sys.executable, '-m', 'pip', 'uninstall', 'simbi'], check=True)
     
 def main() -> int:
