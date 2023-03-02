@@ -22,6 +22,7 @@ try:
 except ImportError:
     print("cannot find cmasher module, using basic matplotlib colors insteads")
 
+
 def parse_args(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace
@@ -89,7 +90,7 @@ def parse_args(
         help='color value limits',
         nargs='+',
         type=float,
-        default=[0.25,0.75])
+        default=[0.25, 0.75])
     afterglow_parser.add_argument(
         '--dfile_out',
         dest='dfile_out',
@@ -117,7 +118,7 @@ def parse_args(
     afterglow_parser.add_argument(
         '--fig-dims',
         help='figure dimensions',
-        default=(5,4),
+        default=(5, 4),
         type=float,
         nargs='+')
     afterglow_parser.add_argument(
@@ -137,8 +138,8 @@ def parse_args(
         type=float)
     afterglow_parser.add_argument(
         '--z',
-        help='redshift', 
-        type=float, 
+        help='redshift',
+        type=float,
         default=0)
     afterglow_parser.add_argument(
         '--dL',
@@ -177,24 +178,26 @@ def parse_args(
         default=False,
         action='store_true'
     )
-    
-    return parser, parser.parse_args(args=None if sys.argv[2:] else ['afterglow', '--help'])
-    
+
+    return parser, parser.parse_args(
+        args=None if sys.argv[2:] else ['afterglow', '--help'])
+
+
 def run(parser: argparse.ArgumentParser = None,
         args: argparse.Namespace = None,
         *_):
     parser, args = parse_args(parser, args)
-    
+
     scales = Scale(args.scale)
     if args.tex:
         plt.rcParams.update({
             "text.usetex": True,
-            "font.family": "Times New Roman"                     
+            "font.family": "Times New Roman"
         })
 
     files, _ = util.get_file_list(args.files)
-    fig, ax  = plt.subplots(figsize=args.fig_dims)
-    freqs    = np.array(args.nu) * units.Hz
+    fig, ax = plt.subplots(figsize=args.fig_dims)
+    freqs = np.array(args.nu) * units.Hz
 
     if args.cmap is not None:
         vmin, vmax = args.clims
@@ -205,42 +208,49 @@ def run(parser: argparse.ArgumentParser = None,
         colors = ['c', 'y', 'm', 'k']  # list of basic colors
 
     linestyles = ['-', '--', '-.', ':']  # list of basic linestyles
-    lines      = ["-", "--", "-.", ":"]
+    lines = ["-", "--", "-.", ":"]
     linecycler = cycle(lines)
     dim = util.get_dimensionality(files)
     if args.mode != 'checkpoint':
-        nbins      = args.ntbins
+        nbins = args.ntbins
         nbin_edges = nbins + 1
-        tbin_edge  = get_tbin_edges(args, files, scales.time_scale)
-        tbin_edges = np.geomspace(tbin_edge[0] * 0.9,tbin_edge[1] * 1.1, nbin_edges)
-        time_bins  = np.sqrt(tbin_edges[1:] * tbin_edges[:-1])
-        fnu        = {i: np.zeros(nbins) * units.mJy for i in args.nu}
+        tbin_edge = get_tbin_edges(args, files, scales.time_scale)
+        tbin_edges = np.geomspace(
+            tbin_edge[0] * 0.9,
+            tbin_edge[1] * 1.1,
+            nbin_edges)
+        time_bins = np.sqrt(tbin_edges[1:] * tbin_edges[:-1])
+        fnu = {i: np.zeros(nbins) * units.mJy for i in args.nu}
         events_list = np.zeros(shape=(len(files), 2))
-        storage     = {}
+        storage = {}
         scales_dict = {
-            'time_scale':   scales.time_scale.value,
+            'time_scale': scales.time_scale.value,
             'length_scale': scales.length_scale.value,
-            'rho_scale':    scales.rho_scale.value,
-            'pre_scale':    scales.pre_scale.value,
-            'v_scale':      1.0
+            'rho_scale': scales.rho_scale.value,
+            'pre_scale': scales.pre_scale.value,
+            'v_scale': 1.0
         }
         theta_obs = np.deg2rad(args.theta_obs)
-        dL        = get_dL(args.z)
+        dL = get_dL(args.z)
         sim_info = {
             'theta_obs': theta_obs,
-            'nus':       freqs.value,
-            'z':         args.z,
-            'd_L':       dL.value,
-            'eps_e':     args.eps_e,
-            'eps_b':     args.eps_b,
-            'p':         args.p,
+            'nus': freqs.value,
+            'z': args.z,
+            'd_L': dL.value,
+            'eps_e': args.eps_e,
+            'eps_b': args.eps_b,
+            'p': args.p,
         }
 
         if args.mode == 'fnu':
             for idx, file in enumerate(files):
                 fields, setup, mesh = util.read_file(args, file, dim)
                 # Generate a pseudo mesh if computing off-axis afterglows
-                generate_pseudo_mesh(args, mesh, full_sphere=True, full_threed = not args.theta_obs == 0)
+                generate_pseudo_mesh(
+                    args,
+                    mesh,
+                    full_sphere=True,
+                    full_threed=not args.theta_obs == 0)
                 sim_info['dt'] = setup['dt']
                 sim_info['adiabatic_gamma'] = setup['ad_gamma']
                 sim_info['current_time'] = setup['time']
@@ -262,7 +272,11 @@ def run(parser: argparse.ArgumentParser = None,
             for idx, file in enumerate(files):
                 fields, setup, mesh = util.read_file(args, file, dim)
                 # Generate a pseudo mesh if computing off-axis afterglows
-                generate_pseudo_mesh(args, mesh, full_sphere=True, full_threed= not args.theta_obs == 0)
+                generate_pseudo_mesh(
+                    args,
+                    mesh,
+                    full_sphere=True,
+                    full_threed=not args.theta_obs == 0)
                 photon_distro = np.zeros(shape=(mesh['phi']))
                 sim_info['dt'] = setup['dt']
                 sim_info['adiabatic_gamma'] = setup['ad_gamma']
@@ -429,7 +443,7 @@ def run(parser: argparse.ArgumentParser = None,
         # ax.axvline(3.5, linestyle='--', color='red')
     else:
         ax.legend()
-        
+
     if args.save:
         file_str = f"{args.save}".replace(' ', '_')
         print(f'saving as {file_str}.pdf')
