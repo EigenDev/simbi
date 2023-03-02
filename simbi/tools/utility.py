@@ -212,7 +212,9 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
                 bcs = [b'outflow']
                 
         full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
-
+        if 'no_cut' in vars(args).keys() and args.no_cut:
+            full_periodic = True
+                
         setup['first_order']  = fallback_on_legacy(ds, key='first_order', kind=bool, fall_back=False)
         nx                    = ds.attrs['nx'] if 'nx' in ds.attrs.keys() else 1
         ny                    = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
@@ -222,7 +224,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         setup['zactive']      = nz if full_periodic else nz - 2 * (1 + (setup['first_order']^1)) * (nz - 2 > 0)
         setup['time']         = ds.attrs['current_time']
         setup['linspace']     = ds.attrs['linspace']
-        gamma                 = ds.attrs['adiabatic_gamma']
+        setup['ad_gamma']     = ds.attrs['adiabatic_gamma']
         setup['x1min']        = fallback_on_legacy(ds, 'x1min', kind=float, fall_back_key='xmin', fall_back=0.0)
         setup['x1max']        = fallback_on_legacy(ds, 'x1max', kind=float, fall_back_key='xmax', fall_back=0.0)
         setup['x2min']        = fallback_on_legacy(ds, 'x2min', kind=float, fall_back_key='ymin', fall_back=0.0)
@@ -242,6 +244,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
                                                     fall_back=np.linspace(setup['x3min'], setup['x3max'], setup['zactive']))
         setup['mesh_motion']   = fallback_on_legacy(ds, key='mesh_motion', kind=bool, fall_back=False)
         setup['is_cartesian']  = setup['coord_system'] in logically_cartesian
+        setup['dt'] = ds.attrs['dt']
         rho = flatten_fully(rho.reshape(nz, ny, nx))
         v   = [flatten_fully(vel.reshape(nz, ny, nx)) for vel in v]
         p   = flatten_fully(p.reshape(nz, ny, nx))
@@ -261,7 +264,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         fields['rho']          = rho
         fields['p']            = p
         fields['chi']          = chi
-        fields['ad_gamma']     = gamma
+        fields['ad_gamma']     = setup['ad_gamma']
         
         vsqr = np.sum(vel * vel for vel in v)
         W    = 1/np.sqrt(1.0 - vsqr) if setup['regime'] == 'relativistic' else 1

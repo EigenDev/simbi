@@ -21,7 +21,11 @@ class CustomParser(argparse.ArgumentParser):
     def error(self, message):
         sys.stderr.write(f'error: {message}\n')
         if 'configurations' not in message:
-            self.print_help()
+            args, _ = self.parse_known_args()
+            if args.command in ['run', 'plot', 'afterglow']:
+                self.parse_args([args.command, '--help'])
+            else:
+                self.print_help()
         sys.exit(2)
 
 
@@ -164,7 +168,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
 def parse_module_arguments():
     parser = CustomParser(
         prog='simbi',
-        usage='%(prog)s {run, plot} <input> [options]',
+        usage='%(prog)s {run, plot, afterglow} <input> [options]',
         description="Relativistic gas dynamics module",
         formatter_class=help_formatter)
     parser.add_argument(
@@ -179,6 +183,7 @@ def parse_module_arguments():
         help='runs the setup script',
         formatter_class=help_formatter,
         usage='simbi run <setup_script> [options]')
+    
     script_run.set_defaults(func=run)
     plot = subparsers.add_parser(
         'plot',
@@ -186,6 +191,13 @@ def parse_module_arguments():
         formatter_class=help_formatter,
         usage='simbi plot <checkpoints> <setup_name> [options]')
     plot.set_defaults(func=plot_checkpoints)
+    afterglow = subparsers.add_parser(
+        'afterglow',
+        help='compute the afterglow for given data',
+        usage='simbi afterglow <files> [options]',
+        formatter_class=help_formatter
+    )
+    afterglow.set_defaults(func=calc_afterglow)
     return parser, parser.parse_known_args(
         args=None if sys.argv[1:] else ['--help'])
 
@@ -369,7 +381,13 @@ def plot_checkpoints(
     from .plot import main
     main(parser, args, argv)
 
-
+def calc_afterglow(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    argv: list) -> None:
+    from .afterglow import radiation
+    radiation.run(parser, args, argv)
+    
 def main():
     parser, (args, _) = parse_module_arguments()
     args.func(parser, args, _)
