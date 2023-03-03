@@ -36,18 +36,12 @@ def py_calc_fnu(
         fields['p'].flatten()], dtype=float
     )
 
-    if 'x3' in mesh:
-        flattened_mesh = np.asanyarray(
-            [mesh['x1'].flatten(),
-             mesh['x2'].flatten(),
-             mesh['x3']], dtype=object
-        )
-    else:
-        flattened_mesh = np.asanyarray(
-            [mesh['x1'].flatten(),
-             mesh['x2'].flatten()], dtype=object
-        )
-
+    flattened_mesh = np.asanyarray(
+        [mesh['x1'],
+         mesh['x2'],
+         mesh['x3']], dtype=object
+    )
+    
     stripped_flux = np.array(
         [flux_array[key].value.flatten() for key in flux_array.keys()], dtype=float
     )
@@ -75,6 +69,7 @@ def py_calc_fnu(
     quant_scales.v_scale       = 1.0 
     quant_scales.length_scale  = qscales['length_scale']
 
+    
     calc_fnu(
         sim_cond,
         quant_scales,

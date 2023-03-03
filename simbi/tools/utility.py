@@ -244,12 +244,13 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
                                                     fall_back=np.linspace(setup['x3min'], setup['x3max'], setup['zactive']))
         setup['mesh_motion']   = fallback_on_legacy(ds, key='mesh_motion', kind=bool, fall_back=False)
         setup['is_cartesian']  = setup['coord_system'] in logically_cartesian
-        setup['dt'] = ds.attrs['dt']
         rho = flatten_fully(rho.reshape(nz, ny, nx))
         v   = [flatten_fully(vel.reshape(nz, ny, nx)) for vel in v]
         p   = flatten_fully(p.reshape(nz, ny, nx))
         chi = flatten_fully(chi.reshape(nz, ny, nx))
-        
+        if 'dt' in ds.attrs:
+            setup['dt'] = ds.attrs['dt']
+            
         if not full_periodic:
             npad = tuple(tuple(val) for val in [[((setup['first_order']^1) + 1), ((setup['first_order']^1) + 1)]] * ndim) 
             rho  = unpad(rho, npad)
@@ -272,11 +273,14 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
     
     mesh = {}
     if ndim == 1:
-        mesh['x1'] = setup['x1']
+        mesh['x1'] = setup['x1'][:]
     elif ndim == 2:
-        mesh['x1'], mesh['x2'] = np.meshgrid(setup['x1'], setup['x2'])
+        mesh['x1'] = setup['x1'][:] 
+        mesh['x2'] = setup['x2'][:]
     else:
-        mesh['x3'], mesh['x2'], mesh['x1'] = np.meshgrid(setup['x3'], setup['x2'], setup['x1'], indexing='ij')
+        mesh['x1'] = setup['x1'][:] 
+        mesh['x2'] = setup['x2'][:]
+        mesh['x3'] = setup['x3'][:]
     
     return fields, setup, mesh 
 
@@ -383,7 +387,7 @@ def get_file_list(inputs: str) -> list:
     
     if not multidir:
         # sort by length of strings now
-        # files.sort(key=len, reverse=False)
+        files.sort(key=len, reverse=False)
         return files, len(files)
     else:
         [file_dict[key].sort(key=len, reverse=False) for key in file_dict.keys()]

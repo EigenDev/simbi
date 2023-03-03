@@ -178,6 +178,13 @@ def parse_args(
         default=False,
         action='store_true'
     )
+    afterglow_parser.add_argument(
+        '--labels',
+        help='list of label names for simbi checkpoints',
+        default=None,
+        type=str,
+        nargs='+'
+    )
 
     return parser, parser.parse_args(
         args=None if sys.argv[2:] else ['afterglow', '--help'])
@@ -196,8 +203,8 @@ def run(parser: argparse.ArgumentParser = None,
         })
 
     files, _ = util.get_file_list(args.files)
-    fig, ax = plt.subplots(figsize=args.fig_dims)
-    freqs = np.array(args.nu) * units.Hz
+    fig, ax  = plt.subplots(figsize=args.fig_dims)
+    freqs    = np.array(args.nu) * units.Hz
 
     if args.cmap is not None:
         vmin, vmax = args.clims
@@ -207,10 +214,8 @@ def run(parser: argparse.ArgumentParser = None,
     else:
         colors = ['c', 'y', 'm', 'k']  # list of basic colors
 
-    linestyles = ['-', '--', '-.', ':']  # list of basic linestyles
-    lines = ["-", "--", "-.", ":"]
-    linecycler = cycle(lines)
     dim = util.get_dimensionality(files)
+    
     if args.mode != 'checkpoint':
         nbins = args.ntbins
         nbin_edges = nbins + 1
@@ -325,93 +330,75 @@ def run(parser: argparse.ArgumentParser = None,
                 hf.create_dataset('fnu', data=fnu_save)
                 hf.create_dataset('tbins', data=time_bins)
 
+    lines = ["--", "-.", ":", "-"]
+    linecycler = cycle(lines)
     color_cycle = cycle(colors)
-    if args.spectra:
-        sim_lines = [0] * len(args.times)
-        for tidx, time in enumerate(args.times):
-            see_day_idx = util.find_nearest(time_bins.value, time)[0]
-
-            power_of_ten = int(np.floor(np.log10(time)))
-            front_part = time / 10**power_of_ten
-            if front_part == 1.0:
-                time_label = r'10^{%d}' % (power_of_ten)
+    sim_lines = []
+    relevant_var = args.times if args.spectra else args.nu
+    legend_labels = []
+    for idx, val in enumerate(relevant_var):
+        color = next(color_cycle)
+        power_of_ten = int(np.floor(np.log10(val)))
+        front_part = val / 10**power_of_ten
+        var_label = r'$t=' if args.spectra else r'$\nu='
+        if front_part == 1.0:
+            label = f'{var_label}' + r'10^{%d}$' % (power_of_ten) + (' day' if args.spectra else ' Hz')
+        else:
+            label = f'{var_label}' + r'%f \times 10^{%fid}$' % (front_part, power_of_ten) + (' day' if args.spectra else ' Hz')
+        
+        if args.mode == 'compute':
+            if args.spectra:
+                nearest_dat    = util.find_nearest(time_bins.value, time)[0]
+                relevant_flux  = np.asanyarray([fnu[key][nearest_dat].value for key in fnu.keys()])
             else:
-                time_label = r'%.1f \times 10^{%d}' % (
-                    front_part, power_of_ten)
+                relevant_flux = fnu[var]
+                
+            ax.plot(relevant_var, relevent_flux, color=color, label=label)
+        
+        if args.example_data:
+            for dat in args.example_data:
+                example_data = read_afterglow_library_data(dat)
+                if args.spectra:
+                    key = util.find_nearest(example_data['tday'].value, val)[1] * units.day
+                    x = example_data['freq'] * units.Hz 
+                    y = example_data['spectra'][key]
+                else:
+                    key = val * units.Hz
+                    x = example_data['tday']
+                    y = example_data['fnu'][key]
+                    
+                ax.plot(x, y, 'o', color=color, markersize=0.5)
 
-            color = next(color_cycle)
-            spectra = np.asanyarray(
-                [fnu[key][see_day_idx].value for key in fnu.keys()])
-            sim_lines[tidx], = ax.plot(
-                args.nu, spectra, color=color, label=r'$t={} \rm day$'.format(time_label))
-
-            if args.example_data is not None:
-                example_data = read_afterglow_library_data(args.example_data)
-                nearest_day = util.find_nearest(
-                    example_data['tday'].value, time)[1] * units.day
-                ax.plot(
-                    example_data['freq'],
-                    example_data['spectra'][nearest_day],
-                    'o',
-                    color=color,
-                    markersize=0.5)
-
-            if args.extra_files is not None:
-                for dfile in args.extra_files:
-                    dat = read_simbi_afterglow(dfile)
-                    nearest_day = util.find_nearest(dat['tday'].value, time)[0]
-                    spectra = np.asanyarray(
-                        [dat['fnu'][key][nearest_day].value for key in dat['fnu'].keys()])
-                    ax.plot(dat['freq'], spectra, color=color, markersize=0.5)
-    else:
-        sim_lines = [0] * len(args.nu)
-        for nidx, freq in enumerate(args.nu):
-            power_of_ten = int(np.floor(np.log10(freq)))
-            front_part = freq / 10**power_of_ten
-            if front_part == 1.0:
-                freq_label = r'10^{%d}' % (power_of_ten)
-            else:
-                freq_label = r'%f \times 10^{%fid}' % (
-                    front_part, power_of_ten)
-
-            color = next(color_cycle)
-            if args.mode != 'checkpoint':
-                sim_lines[nidx], = ax.plot(
-                    time_bins, fnu[freq], color=color, label=r'$\nu={} \rm Hz$'.format(freq_label))
-
-            if args.example_data is not None:
-                marks = cycle(['o', 's'])
-                for file in args.example_data:
-                    example_data = read_afterglow_library_data(file)
-                    nu_unit = freq * units.Hz
-                    ax.plot(
-                        example_data['tday'],
-                        example_data['fnu'][nu_unit],
-                        next(marks),
-                        color=color,
-                        markersize=1)
-
-            if args.extra_files is not None:
-                for dfile in args.extra_files:
-                    dat = read_simbi_afterglow(dfile)
-                    nu_unit = freq * units.Hz
-                    doot, = ax.plot(
-                        dat['tday'], dat['fnu'][nu_unit], color=color, label=r'$\nu={} \rm Hz$'.format(freq_label))
-                    if not args.mode != 'checkpoint':
-                        sim_lines[nidx] = doot
+        if args.extra_files:
+            for dfile in args.extra_files:
+                linestyle = next(linecycler)
+                dat = read_simbi_afterglow(dfile)
+                if args.spectra:
+                    nearest_day = util.find_nearest(dat['tday'].value, val)[0]
+                    x = dat['freq']
+                    y = spectra = np.array([dat['fnu'][key][nearest_day].value for key in dat['fnu'].keys()])
+                else:
+                    x = dat['tday']
+                    y = dat['fnu'][val * units.Hz]
+                    
+                ax.plot(x, y, color=color, label=label, linestyle=linestyle)
+                
+        if label not in legend_labels:
+            # create dummy axes for color-coded legend labels
+            line, = ax.plot([], [], color=color, label=label)
+            sim_lines += [line]
+            legend_labels += [label]
+        
+        linecycler = cycle(lines)
     if args.xlims is not None:
         tbound1, tbound2 = np.asanyarray(args.xlims) * units.day
     else:
         tbound1 = time_bins[0] if 'time_bins' in locals() else dat['tday'][0]
         tbound2 = time_bins[-1] if 'time_bins' in locals() else dat['tday'][-1]
 
-    if args.title is not None:
-        if dim == 1:
-            ax.set_title(
-                r'$ \rm Light \  curve \ for \ spherical \ BMK \ Test$')
-        else:
-            ax.set_title(r'$ \rm Light \ curve \ for \ conical \ BMK \ Test$')
-
+    if args.title:
+        ax.set_title(rf'{args.title}')
+        
     ylims = args.ylims if args.ylims else (1e-11, 1e4)
     ax.set_ylim(*ylims)
     ax.set_yscale('log')
@@ -438,11 +425,13 @@ def run(parser: argparse.ArgumentParser = None,
                                        label=label,
                                        markerfacecolor='grey',
                                        markersize=5)]
+    if args.extra_files:
+        labels = [None] * len(args.extra_files)
+        if args.labels:
+            for label in args.labels:
+                ex_lines += [mlines.Line2D([0,1],[0,1], linestyle=next(linecycler), label=label, color='grey')]
 
-        ax.legend(handles=[*sim_lines, *ex_lines])
-        # ax.axvline(3.5, linestyle='--', color='red')
-    else:
-        ax.legend()
+    ax.legend(handles=[*sim_lines, *ex_lines])
 
     if args.save:
         file_str = f"{args.save}".replace(' ', '_')

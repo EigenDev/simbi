@@ -145,7 +145,7 @@ def generate_pseudo_mesh(
         ntheta = args.theta_samples or \
             compute_num_polar_zones(
                 rmin=mesh['x1'].min(), 
-                rmax=mesh['x1'][-1], 
+                rmax=mesh['x1'].max(), 
                 nr=mesh['x1'].size,
                 theta_bounds=(theta_min, theta_max)
             )
@@ -160,6 +160,10 @@ def generate_pseudo_mesh(
         elif ndim < 2:
             mesh['xx1'], mesh['xx2'] = np.meshgrid(mesh['x1'], mesh['x2'])
             mesh['xx3'] = 0
+        else:
+            mesh['xx1'] = mesh['x1'][:]
+            mesh['xx2'] = mesh['x2'][:]
+            mesh['xx3'] = 0 
         
 def get_tbin_edges(
         args: argparse.ArgumentParser,
