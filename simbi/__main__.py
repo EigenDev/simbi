@@ -20,9 +20,11 @@ except ImportError:
 class CustomParser(argparse.ArgumentParser):
     def error(self, message):
         sys.stderr.write(f'error: {message}\n')
-        if 'configurations' not in message:
+        if "(choose from 'run', 'plot', 'afterglow')" in message:
+            self.print_help()
+        elif 'configurations' not in message:
             args, _ = self.parse_known_args()
-            if args.command in ['run', 'plot', 'afterglow']:
+            if self.command in ['run', 'plot', 'afterglow']:
                 self.parse_args([args.command, '--help'])
             else:
                 self.print_help()
