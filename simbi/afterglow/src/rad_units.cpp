@@ -49,7 +49,7 @@ namespace sogbo_rad
     */
     constexpr units::frequency calc_gyration_frequency(const units::mag_field bfield)
     {
-        const auto frequency_for_unit_field = (3.0 / 4.0 / M_PI) * (constants::e_charge) / (constants::m_e * constants::c_light);
+        constexpr auto frequency_for_unit_field = (3.0 / 4.0 / M_PI) * (constants::e_charge) / (constants::m_e * constants::c_light);
         return frequency_for_unit_field  * bfield;
     }
 
@@ -178,9 +178,9 @@ namespace sogbo_rad
     }
     
     // Calculate the critical Lorentz factor as function of time and magnetic field
-    constexpr double calc_critical_lorentz(const units::mag_field bfield, const units::mytime time)
+    constexpr double calc_critical_lorentz(const units::mag_field bfield, const units::mytime time_emitter)
     {
-        return (6.0 * M_PI * constants::m_e * constants::c_light) / (constants::sigmaT * bfield * bfield * time);
+        return (6.0 * M_PI * constants::m_e * constants::c_light) / (constants::sigmaT * bfield * bfield * time_emitter);
     }
 
     // Calculate the maximum power per frequency as Eq. (5) in Sari, Piran. Narayan(1999)
@@ -214,7 +214,7 @@ namespace sogbo_rad
     */
     constexpr double calc_minimum_lorentz(const double eps_e, const units::edens e_thermal, const units::ndens n, const double p)
     {
-         return eps_e * (p - 2.0) / (p - 1.0) * e_thermal / (n * constants::m_e * constants::c_light* constants::c_light);
+        return eps_e * (p - 2.0) / (p - 1.0) * e_thermal / (n * constants::m_e * constants::c_light* constants::c_light);
     }
 
     const std::vector<double> vector_multiply(const std::vector<double> &a, const std::vector<double> &b) {
@@ -300,7 +300,6 @@ namespace sogbo_rad
      * @param photon_distribution a 1D array of the time bin edges for the flux calculations
      * @param four_position a 1D array of the frequency bin edges for the flux calculartions
      * 
-     * @return nothing
     */
     const void log_events(
         const sim_conditions args,
@@ -448,7 +447,6 @@ namespace sogbo_rad
      * @param flux_array a flattened 1D array in which the summed frequencies in each bin will live
      * @param chkpt_idx  the integer index of the checkpoint file  
      * 
-     * @return the summed fluxes in each frequency / time bin declared
     */
     const void calc_fnu(
         const sim_conditions args,
@@ -591,7 +589,6 @@ namespace sogbo_rad
                                 const auto dt_day = dt.to(units::day);
                                 const auto dt_obs = t2 - t1;
                                 const double trat = (chkpt_idx > 0) ? dt_day.value / dt_obs : 1.0;
-                                
                                 // Sum the fluxes in the given time bin
                                 flux_array[fidx * (nt - 1) + tidx] += trat * f_nu.value;
                                 break;
