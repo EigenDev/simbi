@@ -1,3 +1,0 @@
-[submodule "simbi/afterglow/src/units_lib"]
-	path = simbi/afterglow/src/units_lib
-	url = https://github.com/EigenDev/units_lib.git
