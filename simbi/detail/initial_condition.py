@@ -1,11 +1,12 @@
 # Module to config the initial condition for the SIMBI
 # hydro setup. From here on, I will fragment the code 
 # to try and reduce the confusion between functions
+
 import numpy as np 
 import h5py 
-import simbi.helpers as helpers 
 import numpy.typing as npt
-from .key_types import *
+from ..key_types import *
+from . import helpers
 
 def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> None:
     print(f"Loading from checkpoint: {filename}...", flush=True)
@@ -119,7 +120,7 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
                 model.u    = np.array([rho, rho * v1, rho * v2, p / (ad_gamma - 1) + 0.5 * rho * (v1 ** 2 + v2 ** 2), rho * scalars])
             
             if mesh_motion:
-                if ds.attrs['boundary_condition'] == 'periodic':
+                if all(bc == 'periodic' for bc in model.boundary_conditions):
                     model.u   *= volume_factor
                 else:
                     if ds.attrs['first_order']:
@@ -145,7 +146,6 @@ def initializeModel(model: Any, first_order: bool, volume_factor: Union[float, N
     
     if passive_scalars is not None:
         model.u[-1,...] = passive_scalars
-    
     
     npad = ((0,0),) + tuple(tuple(val) for val in [[((first_order^1) + 1),  ((first_order^1) + 1)]] * model.dimensionality) 
     model.u = np.pad(model.u, npad, 'edge')  * volume_factor

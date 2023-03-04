@@ -1,7 +1,7 @@
 import numpy as np
 import sys
 from time import sleep
-from .key_types import *
+from ..key_types import *
 from typing import TextIO, Generator
 
 generic_numpy_array = NDArray[Any]

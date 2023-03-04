@@ -20,9 +20,16 @@ from simbi._detail import get_subparser
 try:
     import cmasher as cmr
 except ImportError:
-    print("cannot find cmasher module, using basic matplotlib colors insteads")
+    print("cannot find cmasher module, using basic matplotlib colors instead")
 
+def day_type(param: str) -> 'astropy.units.Quantity':
+    try:
+        param = float(param) * units.day
+    except:
+        raise argparse.ArgumentTypeError("time bin edges must be numeric types")
 
+    return param
+    
 def parse_args(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace
@@ -73,12 +80,12 @@ def parse_args(
         type=str,
         help='data file(s) from other afterglow library',
         nargs='+',
-        default=None)
+        default=[])
     afterglow_parser.add_argument(
         '--load',
         type=str,
         help='data file from simbi-computed light curves',
-        default=None,
+        default=[],
         nargs='+')
     afterglow_parser.add_argument(
         '--cmap',
@@ -205,6 +212,13 @@ def parse_args(
         default=None,
         type=float
     )
+    afterglow_parser.add_argument(
+        '--tbins',
+        help = 'time bin edges in units of days',
+        default=None,
+        nargs = 2,
+        type = day_type
+    )
 
     return parser, parser.parse_args(
         args=None if sys.argv[2:] else ['afterglow', '--help'])
@@ -215,7 +229,9 @@ def run(parser: argparse.ArgumentParser = None,
         *_):
     
     parser, args = parse_args(parser, args)
-
+    args.times.sort()
+    args.nu.sort()
+    
     scales = Scale(args.scale)
     if args.tex:
         plt.rcParams.update({
@@ -243,7 +259,7 @@ def run(parser: argparse.ArgumentParser = None,
         nbins = args.ntbins
         nbin_edges = nbins + 1
         if args.mode == 'fnu':
-            tbin_edge = get_tbin_edges(args, files, scales.time_scale)
+            tbin_edge = args.tbins or get_tbin_edges(args, files, scales.time_scale)
             tbin_edges = np.geomspace(
                 tbin_edge[0] * 0.9,
                 tbin_edge[1] * 1.1,
@@ -311,7 +327,7 @@ def run(parser: argparse.ArgumentParser = None,
 
         # Save the data
         file_name = args.output
-        if os.path.splitext(file_name)[1] != '.h5':
+        if not file_name.endswith('.h5'):
             file_name += '.h5'
 
         isFile  = os.path.isfile(file_name)
@@ -363,34 +379,32 @@ def run(parser: argparse.ArgumentParser = None,
 
             ax.plot(xarr, relevant_flux, color=color, label=label)
         
-        if args.example_data:
-            for dat in args.example_data:
-                example_data = read_afterglow_library_data(dat)
-                if args.spectra:
-                    key = util.find_nearest(example_data['tday'].value, val)[1] * units.day
-                    x = example_data['freq'] * units.Hz 
-                    y = example_data['spectra'][key]
-                    m = 1.0
-                else:
-                    key = val * units.Hz
-                    x = example_data['tday']
-                    y = example_data['fnu'][key]
-                    m = 0.5
-                ax.plot(x, y, 'o', color=color, markersize=m)
+        for dat in args.example_data:
+            example_data = read_afterglow_library_data(dat)
+            if args.spectra:
+                key = util.find_nearest(example_data['tday'].value, val)[1] * units.day
+                x = example_data['freq'] * units.Hz 
+                y = example_data['spectra'][key]
+                m = 1.0
+            else:
+                key = val * units.Hz
+                x = example_data['tday']
+                y = example_data['fnu'][key]
+                m = 0.5
+            ax.plot(x, y, 'o', color=color, markersize=m)
 
-        if args.load:
-            for dfile in args.load:
-                linestyle = next(linecycler)
-                dat = read_simbi_afterglow(dfile)
-                if args.spectra:
-                    nearest_day = util.find_nearest(dat['tday'].value, val)[0]
-                    x = dat['freq']
-                    y = spectra = np.array([dat['fnu'][key][nearest_day].value for key in dat['fnu'].keys()])
-                else:
-                    x = dat['tday']
-                    y = dat['fnu'][val * units.Hz]
+        for dfile in args.load:
+            linestyle = next(linecycler)
+            dat = read_simbi_afterglow(dfile)
+            if args.spectra:
+                nearest_day = util.find_nearest(dat['tday'].value, val)[0]
+                x = sorted(dat['freq'].value)
+                y = spectra = np.array([dat['fnu'][key][nearest_day].value for key in sorted(dat['fnu'].keys())])
+            else:
+                x = dat['tday']
+                y = dat['fnu'][val * units.Hz]
 
-                ax.plot(x, y, color=color, label=label, linestyle=linestyle)
+            ax.plot(x, y, color=color, label=label, linestyle=linestyle)
                 
         if label not in legend_labels:
             # create dummy axes for color-coded legend labels

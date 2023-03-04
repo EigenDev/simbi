@@ -195,7 +195,7 @@ cpu_ext = py3.extension_module(
     dependencies: depends,
     override_options: ['cython_language=cpp'],
     install: true,
-    install_dir: meson.current_source_dir() + '/simbi',
+    install_dir: meson.current_source_dir() + '/simbi/libs',
 )
 
 if get_option('gpu_compilation').enabled()
@@ -248,7 +248,7 @@ if get_option('gpu_compilation').enabled()
             cpp_args: ['-DMANAGED'],
             override_options: ['cython_language=cpp'],
             install: true,
-            install_dir: meson.current_source_dir() + '/simbi',
+            install_dir: meson.current_source_dir() + '/simbi/libs',
         )
     endif
 endif
@@ -270,5 +270,5 @@ py3.extension_module(
     dependencies: [py3_dep, omp],
     override_options: ['cython_language=cpp'],
     install: true,
-    install_dir: meson.current_source_dir() + '/simbi'
+    install_dir: meson.current_source_dir() + '/simbi/libs'
 )

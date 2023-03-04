@@ -1,5 +1,5 @@
 import math
-from .key_types import *
+from ..key_types import *
 
 __all__ = ['DynamicArg']
 class DynamicArg:

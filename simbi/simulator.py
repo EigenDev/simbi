@@ -2,12 +2,12 @@
 # Marcus DuPont
 # New York University
 # 06/10/2020
-import simbi.helpers as helpers
 import numpy as np
 import os
 import inspect
-import simbi.initial_condition as simbi_ic
-from .slogger import logger
+from .detail import initial_condition as simbi_ic
+from .detail import helpers
+from .detail.slogger import logger
 from .key_types import *
 
 
@@ -520,16 +520,16 @@ class Hydro:
         self.start_time: float = 0.0
         self.chkpt_idx: int = 0
         if compute_mode == 'cpu':
-            from .cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
+            from .libs.cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
         else:
             try:
-                from .gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
+                from .libs.gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
             except ImportError as e:
                 logger.warning(
                     "Error in loading GPU extension. Loading CPU instead...")
                 logger.warning(
                     f"For reference, the gpu_ext had the follow error: {e}")
-                from .cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
+                from .libs.cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
 
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
