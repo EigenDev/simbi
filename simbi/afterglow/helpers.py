@@ -56,9 +56,9 @@ def read_afterglow_library_data(filename: str) -> dict:
     """
     if filename.endswith('.h5'):
         with h5py.File(filename, "r") as hf:
-            nu = hf.get('nu')[:] * units.Hz
-            t = hf.get('t')[:] * units.s
-            fnu = hf.get('fnu')[:] * 1e26 * units.mJy
+            nu   = hf.get('nu')[:] * units.Hz
+            t    = hf.get('t')[:] * units.s
+            fnu  = hf.get('fnu')[:] * 1e26 * units.mJy
             fnu2 = hf.get('fnu2')[:] * 1e26 * units.mJy
     elif filename.endswith('.npz'):
         dat = np.load(filename)
@@ -208,6 +208,6 @@ def get_tbin_edges(
 
     tmin = (min(j for j in t_obs_beg[theta_slice] if j > 0)).to(units.day)
     tmax = (max(j for j in t_obs_end[theta_slice] if j > 0)).to(units.day)
-
+    
     return tmin, tmax
 

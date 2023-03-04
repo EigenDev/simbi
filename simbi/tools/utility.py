@@ -175,25 +175,25 @@ def get_dimensionality(files: list[str]) -> int:
                 raise ValueError("All simulation files require identical dimensionality")
     
     return ndim
-        
+    
             
 def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[dict,dict,dict]:
-    outdated_keys = ['xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax']
-    def fallback_on_legacy(dset: dict, key: str, *, kind: type, fall_back_key: str = 'None', fall_back = None):
-        try:
-            if kind == bytes:
-                res = dset.attrs[key].decode("utf-8")
-            elif kind == np.ndarray:
-                res = dset.get(key)[:]
-            elif kind in (float, bool):
-                res = dset.attrs[key]
-        except KeyError:
+    def try_read(dset: dict, key: str, *, fall_back_key: str = 'None', fall_back = None):
+        if isinstance(dset, h5py.File):
             try:
+                res = dset.get(key)[:]
+            except TypeError:
+                res = fall_back
+        else:
+            try:
+                res = dset.attrs[key]
+            except KeyError:
                 res = dset.attrs[fall_back_key]
             except KeyError:
                 res = fall_back
-        except TypeError:
-            res = fall_back
+        
+        if isinstance(res, bytes):
+            res = res.decode('utf-8')
         
         return res 
     
@@ -215,41 +215,36 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         if 'no_cut' in vars(args).keys() and args.no_cut:
             full_periodic = True
                 
-        setup['first_order']  = fallback_on_legacy(ds, key='first_order', kind=bool, fall_back=False)
+        setup['first_order']  = try_read(ds, key='first_order', fall_back=False)
         nx                    = ds.attrs['nx'] if 'nx' in ds.attrs.keys() else 1
         ny                    = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
         nz                    = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
-        setup['xactive']      = nx if full_periodic else nx - 2 * (1 + (setup['first_order']^1)) * (nx - 2 > 0)
-        setup['yactive']      = ny if full_periodic else ny - 2 * (1 + (setup['first_order']^1)) * (ny - 2 > 0)
-        setup['zactive']      = nz if full_periodic else nz - 2 * (1 + (setup['first_order']^1)) * (nz - 2 > 0)
+        
+        setup['x1active']     = nx if full_periodic else nx - 2 * (1 + (setup['first_order']^1)) * (nx - 2 > 0)
+        setup['x2active']     = ny if full_periodic else ny - 2 * (1 + (setup['first_order']^1)) * (ny - 2 > 0)
+        setup['x3active']     = nz if full_periodic else nz - 2 * (1 + (setup['first_order']^1)) * (nz - 2 > 0)
         setup['time']         = ds.attrs['current_time']
         setup['linspace']     = ds.attrs['linspace']
         setup['ad_gamma']     = ds.attrs['adiabatic_gamma']
-        setup['x1min']        = fallback_on_legacy(ds, 'x1min', kind=float, fall_back_key='xmin', fall_back=0.0)
-        setup['x1max']        = fallback_on_legacy(ds, 'x1max', kind=float, fall_back_key='xmax', fall_back=0.0)
-        setup['x2min']        = fallback_on_legacy(ds, 'x2min', kind=float, fall_back_key='ymin', fall_back=0.0)
-        setup['x2max']        = fallback_on_legacy(ds, 'x2max', kind=float, fall_back_key='ymax', fall_back=0.0)
-        setup['x3min']        = fallback_on_legacy(ds, 'x3min', kind=float, fall_back_key='zmin', fall_back=0.0)
-        setup['x3max']        = fallback_on_legacy(ds, 'x3max', kind=float, fall_back_key='zmax', fall_back=0.0)
-
-
-        arr_gen                = np.linspace if setup['linspace'] else np.geomspace
-        setup['regime']        = fallback_on_legacy(ds, 'regime', kind=bytes, fall_back='relativistic')
-        setup['coord_system']  = fallback_on_legacy(ds, 'geometry', kind=bytes, fall_back='spherical') 
-        setup['x1']            = fallback_on_legacy(hf, 'x1', kind=np.ndarray, 
-                                                    fall_back=arr_gen(setup['x1min'], setup['x1max'], setup['xactive']))
-        setup['x2']            = fallback_on_legacy(hf, 'x2', kind=np.ndarray, 
-                                                    fall_back=np.linspace(setup['x2min'], setup['x2max'], setup['yactive']))
-        setup['x3']            = fallback_on_legacy(hf, 'x3', kind=np.ndarray, 
-                                                    fall_back=np.linspace(setup['x3min'], setup['x3max'], setup['zactive']))
-        setup['mesh_motion']   = fallback_on_legacy(ds, key='mesh_motion', kind=bool, fall_back=False)
-        setup['is_cartesian']  = setup['coord_system'] in logically_cartesian
+        setup['x1min']        = try_read(ds, 'x1min', fall_back_key='xmin', fall_back=0.0)
+        setup['x1max']        = try_read(ds, 'x1max', fall_back_key='xmax', fall_back=0.0)
+        setup['x2min']        = try_read(ds, 'x2min', fall_back_key='ymin', fall_back=0.0)
+        setup['x2max']        = try_read(ds, 'x2max', fall_back_key='ymax', fall_back=0.0)
+        setup['x3min']        = try_read(ds, 'x3min', fall_back_key='zmin', fall_back=0.0)
+        setup['x3max']        = try_read(ds, 'x3max', fall_back_key='zmax', fall_back=0.0)
+        setup['regime']       = try_read(ds, 'regime', fall_back='relativistic')
+        setup['coord_system'] = try_read(ds, 'geometry', fall_back='spherical') 
+        setup['mesh_motion']  = try_read(ds, key='mesh_motion', fall_back=False)
+        setup['is_cartesian'] = setup['coord_system'] in logically_cartesian
+        
         rho = flatten_fully(rho.reshape(nz, ny, nx))
         v   = [flatten_fully(vel.reshape(nz, ny, nx)) for vel in v]
         p   = flatten_fully(p.reshape(nz, ny, nx))
         chi = flatten_fully(chi.reshape(nz, ny, nx))
         if 'dt' in ds.attrs:
             setup['dt'] = ds.attrs['dt']
+        else:
+            setup['dt'] = ds.attrs['time_step']
             
         if not full_periodic:
             npad = tuple(tuple(val) for val in [[((setup['first_order']^1) + 1), ((setup['first_order']^1) + 1)]] * ndim) 
@@ -258,9 +253,9 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
             p    = unpad(p, npad)
             chi  = unpad(chi, npad)
         
-        if setup['x1max'] > setup['x1'][-1]:
-            setup['x1'] = arr_gen(setup['x1min'], setup['x1max'], setup['xactive'])
-        
+        #-------------------------------
+        # Load Fields
+        #-------------------------------
         fields = {f'v{i+1}': v[i] for i in range(len(v))}
         fields['rho']          = rho
         fields['p']            = p
@@ -270,17 +265,25 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         vsqr = np.sum(vel * vel for vel in v)
         W    = 1/np.sqrt(1.0 - vsqr) if setup['regime'] == 'relativistic' else 1
         fields['gamma_beta']   = np.sqrt(vsqr) * W 
-    
-    mesh = {}
-    if ndim == 1:
-        mesh['x1'] = setup['x1'][:]
-    elif ndim == 2:
-        mesh['x1'] = setup['x1'][:] 
-        mesh['x2'] = setup['x2'][:]
-    else:
-        mesh['x1'] = setup['x1'][:] 
-        mesh['x2'] = setup['x2'][:]
-        mesh['x3'] = setup['x3'][:]
+
+        #------------------------
+        # Generate Mesh
+        #------------------------
+        arr_gen = np.linspace if setup['linspace'] else np.geomspace
+        funcs  = [arr_gen, np.linspace, np.linspace]
+        mesh = {
+            f'x{i+1}': 
+                try_read(hf, f'x{i+1}',
+                    fall_back=funcs[i](
+                        setup[f'x{i+1}min'], 
+                        setup[f'x{i+1}max'], 
+                        setup[f'x{i+1}active']
+                    )  
+                ) for i in range(ndim)
+        }
+        
+        if setup['x1max'] > mesh['x1'][-1]:
+            mesh['x1'] = arr_gen(setup['x1min'], setup['x1max'], setup['x1active'])
     
     return fields, setup, mesh 
 
