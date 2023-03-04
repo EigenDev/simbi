@@ -96,6 +96,7 @@
     ``` bash
     $ simbi plot <checkpoint_file> "<name_of_physics_setup>" --field <field_string> [options]
     ```
+    One can also do `simbi clone --name <name_of_setup>`, and a new skeleton configuration script will appear in the `simbi_configs` directory named `<name_of_setup>` that you can build off of. 
 5)  ???
 6)  Profit
 
