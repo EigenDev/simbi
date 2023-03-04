@@ -601,7 +601,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
 
                 peq = pre - f / g;
                 iter++;
-                if (iter >= MAX_ITER || std::isnan(peq))
+                if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
                 {
                     const auto ii     = gid % nx;
                     const auto jj     = gid / nx;

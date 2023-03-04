@@ -275,7 +275,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 // f     = helpers::newton_f(gamma, tau, D, S, peq);
                 // pstar = peq - f / g;
 
-                if (iter >= MAX_ITER || std::isnan(peq))
+                if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
                 {
                     real v = S / (tau + D + peq);
                     real W = 1 / std::sqrt(1 - v * v);
