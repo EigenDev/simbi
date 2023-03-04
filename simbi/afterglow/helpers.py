@@ -180,7 +180,7 @@ def get_tbin_edges(
     -----------------------------------
     tmin, tmax: tuple of time bins in units of days
     """
-    at_pole = args.theta_obs == 0
+    at_pole = abs(np.cos(args.theta_obs)) == 1
     ndim    = get_dimensionality(files)
     setup_init, mesh_init   = read_file(args, files[+0], ndim)[1:]
     setup_final, mesh_final = read_file(args, files[-1], ndim)[1:]

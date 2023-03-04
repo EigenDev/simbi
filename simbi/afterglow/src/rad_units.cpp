@@ -479,7 +479,7 @@ namespace sogbo_rad
         const auto x2max   = x2[nj - 1];
         const auto x2min   = x2[0];
         const auto dx2     = (x2max - x2min) / (nj - 1);
-        const bool on_axis = args.theta_obs == 0;
+        const bool at_pole = std::abs(std::cos(args.theta_obs)) == 1;
         
         int nk = 1;
         double sin_phi = 0;
@@ -488,7 +488,7 @@ namespace sogbo_rad
         // Check whether to do 3D (off-axis) or not
         std::vector<double> x3;
         double x3max, x3min;
-        if (!on_axis)
+        if (!at_pole)
         {
             x3     = mesh[2];
             nk     = x3.size();
@@ -506,7 +506,7 @@ namespace sogbo_rad
         const auto d       = args.d_L * units::cm; // Luminosity distance 
         for (int kk=0; kk < nk; kk++)
         {       
-            if (!on_axis)
+            if (!at_pole)
             {
                 const double x3l     = (kk > 0 ) ? x2min + (kk - 0.5) * dx3 :  x3min;
                 const double x3r     = (kk < nk - 1) ? x3l + dx3 * (kk == 0 ? 0.5 : 1.0) :  x3max; 
