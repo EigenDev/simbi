@@ -5,10 +5,10 @@ import ast
 import sys
 import subprocess
 import importlib
-from simbi import Hydro
 from pathlib import Path
+from . import Hydro
 from .key_types import Optional, Sequence
-from ._detail import *
+from .detail._detail import *
 
 try:
     from rich_argparse import RichHelpFormatter
@@ -23,11 +23,11 @@ class CustomParser(argparse.ArgumentParser):
         if "(choose from 'run', 'plot', 'afterglow')" in message:
             self.print_help()
         elif 'configurations' not in message:
-            args, _ = self.parse_known_args()
-            if args.command in ['run', 'plot', 'afterglow']:
-                self.parse_args([args.command, '--help'])
-            else:
-                self.print_help()
+            # args, _ = self.parse_known_args()
+            # if args.command in ['run', 'plot', 'afterglow']:
+            #     self.parse_args([args.command, '--help'])
+            # else:
+            self.print_help()
         sys.exit(2)
 
 
@@ -45,6 +45,84 @@ class print_the_version(argparse.Action):
         print(f"SIMBI version {version}")
         parser.exit()
 
+def parse_module_arguments():
+    parser = CustomParser(
+        prog='simbi',
+        usage='%(prog)s {run, plot, afterglow} <input> [options]',
+        description="Relativistic gas dynamics module",
+        formatter_class=help_formatter)
+    parser.add_argument(
+        '--version',
+        '-V',
+        help='print current version of simbi module',
+        action=print_the_version)
+    subparsers = parser.add_subparsers(
+        help='available sub-commands', dest='command')
+    script_run = subparsers.add_parser(
+        'run',
+        help='runs the setup script',
+        formatter_class=help_formatter,
+        usage='simbi run <setup_script> [options]')
+    
+    script_run.set_defaults(func=run)
+    plot = subparsers.add_parser(
+        'plot',
+        help='plots the given simbi checkpoint file',
+        formatter_class=help_formatter,
+        usage='simbi plot <checkpoints> <setup_name> [options]')
+    plot.set_defaults(func=plot_checkpoints)
+    afterglow = subparsers.add_parser(
+        'afterglow',
+        help='compute the afterglow for given data',
+        usage='simbi afterglow <files> [options]',
+        formatter_class=help_formatter
+    )
+    afterglow.set_defaults(func=calc_afterglow)
+    gen_clone = subparsers.add_parser(
+        'clone',
+        help='generate a shadow clone of a setup script to build off of',
+        usage='simbi clone [--name clone_name]',
+        formatter_class=help_formatter
+    )
+    gen_clone.set_defaults(func=generate_a_setup)
+    gen_clone.add_argument(
+        '--name', 
+        help='name of the generated setup script',
+        default='some_clone.py',
+        type=str,
+        dest='clone_name'
+    )
+    return parser, parser.parse_known_args(
+        args=None if sys.argv[1:] else ['--help'])
+
+
+def valid_pyscript(param):
+    with open(Path(__file__).resolve().parent / 'gitrepo_home.txt') as f:
+        githome = f.read()
+    
+    configs_src = Path(githome).resolve() / 'simbi_configs'
+    base, ext = os.path.splitext(param)
+    if ext.lower() != '.py':
+        param = None
+        pkg_configs = [file for file in configs_src.rglob('*.py')]
+        soft_paths = [
+            soft_path for soft_path in (
+                Path('simbi_configs')).glob("*") if soft_path.is_symlink()]
+        soft_configs = [
+            file for path in soft_paths for file in path.rglob('*.py')]
+        soft_configs += [file for file in Path(
+            'simbi_configs').resolve().rglob('*.py') if file not in pkg_configs]
+        for file in pkg_configs + soft_configs:
+            if base == Path(file).stem:
+                param = file
+        if not param:
+            available_configs = sorted(
+                [Path(conf).stem for conf in pkg_configs + soft_configs])
+            raise argparse.ArgumentTypeError(
+                'No configuration named {}{}{}. The only valid configurations are:\n{}'.format(
+                    bcolors.OKCYAN, base, bcolors.ENDC, ''.join(
+                        f'> {bcolors.BOLD}{conf}{bcolors.ENDC}\n' for conf in available_configs)))
+    return param
 
 def parse_run_arguments(parser: argparse.ArgumentParser):
     run_parser = get_subparser(parser, 0)
@@ -160,77 +238,11 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
     global_args.add_argument(
         '--gpu-block-dims',
         help='gpu dim3 thread block dimensions',
-        default=None,
+        default=[],
         type=int,
         nargs='+')
     return parser, parser.parse_known_args(
         args=None if sys.argv[2:] else ['run', '--help'])
-
-
-def parse_module_arguments():
-    parser = CustomParser(
-        prog='simbi',
-        usage='%(prog)s {run, plot, afterglow} <input> [options]',
-        description="Relativistic gas dynamics module",
-        formatter_class=help_formatter)
-    parser.add_argument(
-        '--version',
-        '-V',
-        help='print current version of simbi module',
-        action=print_the_version)
-    subparsers = parser.add_subparsers(
-        help='available sub-commands', dest='command')
-    script_run = subparsers.add_parser(
-        'run',
-        help='runs the setup script',
-        formatter_class=help_formatter,
-        usage='simbi run <setup_script> [options]')
-    
-    script_run.set_defaults(func=run)
-    plot = subparsers.add_parser(
-        'plot',
-        help='plots the given simbi checkpoint file',
-        formatter_class=help_formatter,
-        usage='simbi plot <checkpoints> <setup_name> [options]')
-    plot.set_defaults(func=plot_checkpoints)
-    afterglow = subparsers.add_parser(
-        'afterglow',
-        help='compute the afterglow for given data',
-        usage='simbi afterglow <files> [options]',
-        formatter_class=help_formatter
-    )
-    afterglow.set_defaults(func=calc_afterglow)
-    return parser, parser.parse_known_args(
-        args=None if sys.argv[1:] else ['--help'])
-
-
-def valid_pyscript(param):
-    with open(Path(__file__).resolve().parent / 'gitrepo_home.txt') as f:
-        githome = f.read()
-    
-    configs_src = Path(githome).resolve() / 'simbi_configs'
-    base, ext = os.path.splitext(param)
-    if ext.lower() != '.py':
-        param = None
-        pkg_configs = [file for file in configs_src.rglob('*.py')]
-        soft_paths = [
-            soft_path for soft_path in (
-                Path('simbi_configs')).glob("*") if soft_path.is_symlink()]
-        soft_configs = [
-            file for path in soft_paths for file in path.rglob('*.py')]
-        soft_configs += [file for file in Path(
-            'simbi_configs').resolve().rglob('*.py') if file not in pkg_configs]
-        for file in pkg_configs + soft_configs:
-            if base == Path(file).stem:
-                param = file
-        if not param:
-            available_configs = sorted(
-                [Path(conf).stem for conf in pkg_configs + soft_configs])
-            raise argparse.ArgumentTypeError(
-                'No configuration named {}{}{}. The only valid configurations are:\n{}'.format(
-                    bcolors.OKCYAN, base, bcolors.ENDC, ''.join(
-                        f'> {bcolors.BOLD}{conf}{bcolors.ENDC}\n' for conf in available_configs)))
-    return param
 
 def type_check_input(file: str) -> None:
     mypy_check = subprocess.run(
@@ -242,7 +254,8 @@ def type_check_input(file: str) -> None:
          file])
     
     if mypy_check.returncode != 0:
-        raise TypeError("""\nYour configuration script failed type safety checks. Please fix them or run with --no-type-check option""")
+        raise TypeError("\nYour configuration script failed type safety checks." +
+                        "Please fix them or run with --no-type-check option")
 
 def configure_state(
         script: str,
@@ -253,14 +266,13 @@ def configure_state(
     Configure the Hydro state based on the Config class that exists in the passed
     in setup script. Once configured, pass it back to main to be simulated
     """
-    import sys
     script_dirname = Path(script).parent
     base_script = Path(script).stem
     sys.path.insert(1, f'{script_dirname}')
 
     if type_checking_active:
         print("-"*80)
-        print("Validating Script Type Safety...")
+        print("Validating Config Script Type Safety...")
         type_check_input(script)
         print("-"*80)
         
@@ -344,26 +356,22 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
 
     run_parser = get_subparser(parser, 0)
     sim_actions = [
-        g for g in run_parser._action_groups if g.title in [
-            'override', 'onthefly']]
+            g for g in run_parser._action_groups if g.title in [
+                'override', 'onthefly']
+        ]
     
-    sim_dicts = [{a.dest: getattr(args, a.dest, None)
-                  for a in group._group_actions} for group in sim_actions]
+    sim_dicts = [{
+        a.dest: getattr(args, a.dest, None)
+        for a in group._group_actions
+        } for group in sim_actions
+    ]
     
     overridable_args = vars(argparse.Namespace(**sim_dicts[0])).keys()
     sim_args = argparse.Namespace(**{**sim_dicts[0], **sim_dicts[1]})
     
-    if args.gpu_block_dims:
-        if len(args.gpu_block_dims) == 1:
-            os.environ['GPUXBLOCK_SIZE'] = str(args.gpu_block_dims[0])
-        elif len(args.gpu_block_dims) == 2:
-            os.environ['GPUXBLOCK_SIZE'] = str(args.gpu_block_dims[0])
-            os.environ['GPUYBLOCK_SIZE'] = str(args.gpu_block_dims[1])
-        else:
-            os.environ['GPUXBLOCK_SIZE'] = str(args.gpu_block_dims[0])
-            os.environ['GPUYBLOCK_SIZE'] = str(args.gpu_block_dims[1])
-            os.environ['GPUZBLOCK_SIZE'] = str(args.gpu_block_dims[2])
-            
+    for coord, block in zip(['X','Y', 'Z'], args.gpu_block_dims):
+        os.environ[f'GPU{coord}BLOCK_SIZE'] = str(block)
+        
     for idx, sim_state in enumerate(sim_states):
         for arg in vars(sim_args):
             if arg in overridable_args and getattr(args, arg) is None:
@@ -380,6 +388,7 @@ def plot_checkpoints(
         parser: argparse.ArgumentParser,
         args: argparse.Namespace,
         argv: list) -> None:
+    
     from .plot import main
     main(parser, args, argv)
 
@@ -387,8 +396,17 @@ def calc_afterglow(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     argv: list) -> None:
+    
     from .afterglow import radiation
     radiation.run(parser, args, argv)
+
+def generate_a_setup(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    *_) -> None:
+    
+    from . import clone 
+    clone.main(args.clone_name)
     
 def main():
     parser, (args, _) = parse_module_arguments()
