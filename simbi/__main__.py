@@ -24,7 +24,7 @@ class CustomParser(argparse.ArgumentParser):
             self.print_help()
         elif 'configurations' not in message:
             args, _ = self.parse_known_args()
-            if self.command in ['run', 'plot', 'afterglow']:
+            if args.command in ['run', 'plot', 'afterglow']:
                 self.parse_args([args.command, '--help'])
             else:
                 self.print_help()
