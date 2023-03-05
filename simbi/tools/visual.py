@@ -612,7 +612,8 @@ class Visualizer:
             self.fig.suptitle(
                 '{} at t = {:.2f}'.format(
                     self.setup, setups['time']), y=1.0)
-
+        
+        scale_cycle = cycle(self.scale_downs)
         for idx, field in enumerate(self.fields):
             if field in derived:
                 var = util.prims2var(fields, field)
@@ -623,7 +624,7 @@ class Visualizer:
 
             if self.ndim == 1:
                 self.axs.set_xlim(mesh['x1'][0], mesh['x1'][-1])
-                self.frames[idx].set_data(mesh['x1'], var)
+                self.frames[idx].set_data(mesh['x1'], var / next(scale_cycle))
             else:
                 # affect the generator w/o using output
                 any(drawing.set_array(var.ravel()) for drawing in self.frames)
