@@ -8,137 +8,112 @@ import numpy.typing as npt
 from ..key_types import *
 from . import helpers
 
+def flatten_fully(x: Any) -> Any:
+    if any(dim == 1 for dim in x.shape):
+        x = np.vstack(x)
+        if len(x.shape) == 2 and x.shape[0] == 1:
+            return x.flatten()
+        return flatten_fully(x)
+    else:
+        return np.asanyarray(x) 
+    
 def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> None:
     print(f"Loading from checkpoint: {filename}...", flush=True)
-    volume_factor: Any = 1.0
-    with h5py.File(filename, 'r+') as hf:
-        t = 0
-        ds = hf.get("sim_info")
-        
-        if dim == 1:
-            rho              = hf.get("rho")[:]
-            v                = hf.get("v")[:]
-            p                = hf.get("p")[:]
-            nx               = ds.attrs["nx"]
-            model.start_time = ds.attrs["current_time"]
-            x1max            = ds.attrs["x1max"]
-            x1min            = ds.attrs["x1min"]
-            ad_gamma         = ds.attrs["adiabatic_gamma"]
-            model.ckpt_idx   = ds.attrs['chkpt_idx']
-            
-            if mesh_motion:
-                nx_active = ds.attrs['xactive_zones']
-                if ds.attrs['linspace']:
-                    model.x1 = np.linspace(x1min, x1max, nx_active)
-                else:
-                    model.x1 = np.geomspace(x1min, x1max, nx_active)
-
-                volume_factor = helpers.calc_cell_volume1D(x1=model.x1)
-            
-            h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
-            
-            W   = 1./np.sqrt(1. - v ** 2)
-            model.D   = rho * W 
-            model.S   = W**2 * rho*h*v
-            model.tau = W**2 * rho*h - p - rho*W
-            model.u   = np.array([model.D, model.S, model.tau])
-            if mesh_motion:
-                if ds.attrs['boundary_condition'] == 'periodic':
-                    model.u   *= volume_factor
-                else:
-                    if ds.attrs['first_order']:
-                        nghosts = 1 
-                    else:
-                        nghosts = 2 
-                    model.u[:, nghosts:-nghosts] *= volume_factor
-                    model.u[:, 0:nghosts]        *= volume_factor[0]
-                    model.u[:, -nghosts: ]       *= volume_factor[-1]
-        else:
-            rho     = hf.get("rho")[:]
-            v1      = hf.get("v1")[:]
-            v2      = hf.get("v2")[:]
-            p       = hf.get("p")[:]
-            nx      = ds.attrs["nx"]
-            ny      = ds.attrs["ny"]
-            scalars = hf.get("chi")[:]
-
-            model.start_time = ds.attrs["current_time"]
-            x1max   = ds.attrs["x1max"]
-            x1min   = ds.attrs["x1min"]
-            x2max   = ds.attrs["x2max"]
-            x2min   = ds.attrs["x2min"]
-
-            ad_gamma = ds.attrs["adiabatic_gamma"]
-            model.chkpt_idx = ds.attrs['chkpt_idx']
-            
-            if mesh_motion:
-                nx_active = ds.attrs['xactive_zones']
-                ny_active = ds.attrs['yactive_zones']
-                if (nx_active == 0 or ny_active == 0):
-                    nx_active = nx 
-                    ny_active = ny 
-                    if ds.attrs['boundary_condition'] != 'periodic':
-                        if ds.attrs['first_order']:
-                            nx_active -= 2
-                            ny_active -= 2
-                        else:
-                            nx_active -= 4
-                            ny_active -= 4
+    setup: dict[str, Any] = {}
+    volume_factor: Union[float, NDArray[numpy_float]] = 1.0
+    with h5py.File(filename, 'r') as hf:         
+        ds   = hf.get('sim_info')
+        ndim = ds.attrs['dimensions']
+        setup['ad_gamma']     = ds.attrs['adiabatic_gamma']
+        setup['regime']       = ds.attrs['regime'].decode('utf-8')
+        setup['coord_system'] = ds.attrs['geometry'].decode('utf-8')
+        setup['mesh_motion']  = ds.attrs['mesh_motion']
+        setup['linspace']     = ds.attrs['linspace']
+        if not (bcs := hf.get('boundary_conditions')):
+            try:
+                bcs = [ds.attrs['boundary_condition']]
+            except KeyError:
+                bcs = [b'outflow']
                 
-                try:
-                    model.x1 = hf.get('x1')[:]
-                    model.x2 = hf.get('x2')[:]
-                except:
-                    if ds.attrs['linspace']:
-                        model.x1 = np.linspace(x1min, x1max, nx_active)
-                        model.x2 = np.linspace(x1min, x2max, ny_active)
-                    else:
-                        model.x1 = np.geomspace(x1min, x1max, nx_active)
-                        model.x2 = np.linspace(x2min,  x2max, ny_active)
-                volume_factor = helpers.calc_cell_volume2D(x1=model.x1, x2=model.x2, coord_system=model.coord_system)
-            rho     = rho.reshape(ny, nx)
-            v1      = v1.reshape(ny, nx)
-            v2      = v2.reshape(ny, nx)
-            p       = p.reshape(ny, nx)
-            scalars = scalars.reshape(ny,nx)
-            
-            if ds.attrs['regime'].decode("utf-8") == 'relativistic':
-                h = 1. + ad_gamma*p/(rho*(ad_gamma - 1.0))
-                if ds.attrs['using_gamma_beta']:
-                    W = np.sqrt(1 + (v1*v1 + v2 * v2))
-                    v1 /= W 
-                    v2 /= W
-                else:
-                    W   = 1./np.sqrt(1. - (v1*v1 + v2*v2))
-                D    = rho * W              
-                S1   = W*W*rho*h*v1         
-                S2   = W*W*rho*h*v2         
-                tau  = W*W*rho*h - p - rho*W
-                Dchi = D * scalars    
-                model.u    = np.array([D, S1, S2, tau, Dchi])
-            else:
-                model.u    = np.array([rho, rho * v1, rho * v2, p / (ad_gamma - 1) + 0.5 * rho * (v1 ** 2 + v2 ** 2), rho * scalars])
-            
-            if mesh_motion:
-                if all(bc == 'periodic' for bc in model.boundary_conditions):
-                    model.u   *= volume_factor
-                else:
-                    if ds.attrs['first_order']:
-                        nghosts = 1 
-                    else:
-                        nghosts = 2 
-                model.u[:, nghosts:-nghosts, nghosts:-nghosts] *= volume_factor
-                model.u[:, nghosts:-nghosts, 0: nghosts]       *= volume_factor[:, 0].reshape(-1,1)
-                model.u[:, nghosts:-nghosts, -nghosts: ]       *= volume_factor[:, -1].reshape(-1,1)
-                model.u[:, 0: nghosts, nghosts:-nghosts]       *= volume_factor[0, :]
-                model.u[:, -nghosts: , nghosts:-nghosts]       *= volume_factor[-1, :]
-                for i in range(nghosts):
-                    model.u[:, :,  (i + 0)] = model.u[:, :,  (nghosts + 0)]
-                    model.u[:, :, -(i + 1)] = model.u[:, :, -(nghosts + 1)]
-                    model.u[:,  (i + 0), :] = model.u[:,  (nghosts + 0), :]
-                    model.u[:, -(i + 1), :] = model.u[:, -(nghosts + 1), :]
+        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
+        #------------------------
+        # Generate Mesh
+        #------------------------
+        arr_gen: Any = np.linspace if setup['linspace'] else np.geomspace
+        funcs  = [arr_gen, np.linspace, np.linspace]
+        mesh = {
+            f'x{i+1}': hf.get(f'x{i+1}')[:] for i in range(ndim)
+        }
         
+        if ds.attrs['x1max'] > mesh['x1'][-1]:
+            mesh['x1'] = arr_gen(ds.attrs['x1min'], ds.attrs['x1max'], ds.attrs['xactive_zones'])
 
+        nx  = ds.attrs['nx'] or 1
+        ny  = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
+        nz  = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
+        
+        if setup['mesh_motion']:
+            if ndim == 1 and setup['coord_system'] != 'cartesian':
+                volume_factor = helpers.calc_cell_volume1D(
+                    x1=mesh['x1'], 
+                    coord_system=setup['coord_system']
+                )
+            elif ndim == 2:
+                volume_factor = helpers.calc_cell_volume2D(
+                    x1=mesh['x1'], 
+                    x2=mesh['x2'],
+                    coord_system=setup['coord_system']
+                )
+            elif ndim == 3:
+                raise NotImplementedError()
+                # volume_factor = helpers.calc_cell_volume3D(
+                #     x1=mesh['x1'], 
+                #     x2=mesh['x2'],
+                #     x3=mesh['x3'],
+                #     coord_system=setup['coord_system']
+                # )
+            
+            if setup['coord_system'] != 'cartesian':
+                npad = tuple(tuple(val) for val in [[((ds.attrs['first_order']^1) + 1), 
+                                                     ((ds.attrs['first_order']^1) + 1)]] * ndim)
+                volume_factor = np.pad(volume_factor, npad, 'edge')
+        
+        rho  = hf.get('rho')[:]
+        v    = [(hf.get(f'v{dim}') or hf.get(f'v'))[:] for dim in range(1,ndim + 1)]
+        p    = hf.get('p')[:]         
+        chi  = (hf.get('chi') or np.zeros_like(rho))[:]
+        rho = flatten_fully(rho.reshape(nz, ny, nx))
+        v   = [flatten_fully(vel.reshape(nz, ny, nx)) for vel in v]
+        p   = flatten_fully(p.reshape(nz, ny, nx))
+        chi = flatten_fully(chi.reshape(nz, ny, nx))
+        
+        #-------------------------------
+        # Load Fields
+        #-------------------------------
+        vsqr = np.sum(vel * vel for vel in v) # type: ignore
+        W    = 1/np.sqrt(1.0 - vsqr) if setup['regime'] == 'relativistic' else 1
+        if setup['regime'] == 'relativistic':
+            h = 1.0 + setup['ad_gamma'] * p / (rho * (setup['ad_gamma'] - 1.0))
+            e = rho * W * W * h - p - rho * W 
+        else:
+            h = 1.0 
+            e = p / (setup['ad_gamma'] - 1.0) + 0.5 * rho * vsqr
+            
+        momentum         = np.asarray([rho * W * W * h * vel for vel in v])
+        model.start_time = ds.attrs['current_time']
+        model.x1         = mesh['x1']
+        if ndim >= 2:
+            model.x2 = mesh['x2']
+        if ndim >= 3:
+            model.x3 = mesh['x3']
+            
+        if ndim == 1:
+            model.u = np.array([rho * W, *momentum, e]) * volume_factor
+        else:
+            model.u = np.array([rho * W, *momentum, e, rho * W * chi]) * volume_factor
+        
+        model.chkpt_idx = ds.attrs['chkpt_idx']
+        
 def initializeModel(model: Any, first_order: bool, volume_factor: Union[float, NDArray[Any]], passive_scalars: Union[npt.NDArray[Any], Any]) -> None:
     full_periodic = all(bc == 'periodic' for bc in model.boundary_conditions)
     if full_periodic:
@@ -148,4 +123,4 @@ def initializeModel(model: Any, first_order: bool, volume_factor: Union[float, N
         model.u[-1,...] = passive_scalars
     
     npad = ((0,0),) + tuple(tuple(val) for val in [[((first_order^1) + 1),  ((first_order^1) + 1)]] * model.dimensionality) 
-    model.u = np.pad(model.u, npad, 'edge')  * volume_factor
+    model.u = np.pad(model.u  * volume_factor, npad, 'edge')
