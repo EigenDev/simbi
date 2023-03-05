@@ -1,4 +1,4 @@
-from .detail import helpers
+from .detail import helpers, slogger
 from .simulator import Hydro
 from .detail.base_config import * 
 from .detail.dynarg import *
