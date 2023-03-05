@@ -14,8 +14,8 @@ import time as pytime
 from itertools import cycle
 from .helpers import get_tbin_edges, get_dL, Scale, generate_pseudo_mesh, read_afterglow_library_data, read_simbi_afterglow
 from simbi import py_calc_fnu, py_log_events
-from simbi.tools import utility as util
-from simbi._detail import get_subparser
+from ..tools import utility as util
+from ..detail._detail import get_subparser
 
 try:
     import cmasher as cmr
@@ -250,7 +250,7 @@ def run(parser: argparse.ArgumentParser = None,
         colors = util.get_colors(cinterval, cmap, vmin, vmax)
     else:
         colors = ['c', 'y', 'm', 'k']  # list of basic colors
-        
+    
     #---------------------------------------------------------
     # Calculations
     #---------------------------------------------------------
