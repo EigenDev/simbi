@@ -12,7 +12,14 @@ import sys
 import h5py
 import time as pytime
 from itertools import cycle
-from .helpers import get_tbin_edges, get_dL, Scale, generate_pseudo_mesh, read_afterglow_library_data, read_simbi_afterglow
+from .helpers import (
+    get_tbin_edges,
+    get_dL,
+    Scale,
+    generate_pseudo_mesh,
+    read_afterglow_library_data,
+    read_simbi_afterglow
+)
 from simbi import py_calc_fnu, py_log_events
 from ..tools import utility as util
 from ..detail._detail import get_subparser
@@ -22,14 +29,17 @@ try:
 except ImportError:
     print("cannot find cmasher module, using basic matplotlib colors instead")
 
+
 def day_type(param: str) -> 'astropy.units.Quantity':
     try:
         param = float(param) * units.day
-    except:
-        raise argparse.ArgumentTypeError("time bin edges must be numeric types")
+    except BaseException:
+        raise argparse.ArgumentTypeError(
+            "time bin edges must be numeric types")
 
     return param
-    
+
+
 def parse_args(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace
@@ -193,10 +203,10 @@ def parse_args(
     )
     afterglow_parser.add_argument(
         '--legend-loc',
-        help = 'location of legend',
+        help='location of legend',
         default=None,
         type=str,
-        choices = [
+        choices=[
             'lower left',
             'lower right',
             'lower center',
@@ -214,10 +224,10 @@ def parse_args(
     )
     afterglow_parser.add_argument(
         '--tbins',
-        help = 'time bin edges in units of days',
+        help='time bin edges in units of days',
         default=None,
-        nargs = 2,
-        type = day_type
+        nargs=2,
+        type=day_type
     )
 
     return parser, parser.parse_args(
@@ -227,11 +237,11 @@ def parse_args(
 def run(parser: argparse.ArgumentParser = None,
         args: argparse.Namespace = None,
         *_):
-    
+
     parser, args = parse_args(parser, args)
     args.times.sort()
     args.nu.sort()
-    
+
     scales = Scale(args.scale)
     if args.tex:
         plt.rcParams.update({
@@ -240,8 +250,8 @@ def run(parser: argparse.ArgumentParser = None,
         })
 
     files, _ = util.get_file_list(args.files)
-    fig, ax  = plt.subplots(figsize=args.fig_dims)
-    freqs    = np.asarray(args.nu) * units.Hz
+    fig, ax = plt.subplots(figsize=args.fig_dims)
+    freqs = np.asarray(args.nu) * units.Hz
 
     if args.cmap is not None:
         vmin, vmax = args.clims
@@ -251,23 +261,24 @@ def run(parser: argparse.ArgumentParser = None,
     else:
         cmap = plt.cm.get_cmap('viridis')
         colors = util.get_colors(np.linspace(0, 1, len(args.nu)), cmap)
-    
-    #---------------------------------------------------------
+
+    # ---------------------------------------------------------
     # Calculations
-    #---------------------------------------------------------
+    # ---------------------------------------------------------
     if args.mode != 'checkpoint':
         dim = util.get_dimensionality(files)
         nbins = args.ntbins
         nbin_edges = nbins + 1
         if args.mode == 'fnu':
-            tbin_edge = args.tbins or get_tbin_edges(args, files, scales.time_scale)
+            tbin_edge = args.tbins or get_tbin_edges(
+                args, files, scales.time_scale)
             tbin_edges = np.geomspace(
                 tbin_edge[0] * 0.9,
                 tbin_edge[1] * 1.1,
                 nbin_edges)
             time_bins = np.sqrt(tbin_edges[1:] * tbin_edges[:-1])
             fnu = {i: np.zeros(nbins) * units.mJy for i in args.nu}
-            
+
         scales_dict = {
             'time_scale': scales.time_scale.value,
             'length_scale': scales.length_scale.value,
@@ -275,15 +286,15 @@ def run(parser: argparse.ArgumentParser = None,
             'pre_scale': scales.pre_scale.value,
             'v_scale': 1.0
         }
-        
+
         sim_info = {
             'theta_obs': np.deg2rad(args.theta_obs),
-            'nus':   freqs.value,
-            'z':     args.z,
-            'd_L':   get_dL(args.z).value,
+            'nus': freqs.value,
+            'z': args.z,
+            'd_L': get_dL(args.z).value,
             'eps_e': args.eps_e,
             'eps_b': args.eps_b,
-            'p':     args.p,
+            'p': args.p,
         }
 
         for idx, file in enumerate(files):
@@ -322,7 +333,7 @@ def run(parser: argparse.ArgumentParser = None,
             print(
                 f"Processed file {file} in {pytime.time() - t1:.2f} s",
                 flush=True)
-                
+
         for key in fnu.keys():
             fnu[key] *= (1 + args.z)
 
@@ -331,7 +342,7 @@ def run(parser: argparse.ArgumentParser = None,
         if not file_name.endswith('.h5'):
             file_name += '.h5'
 
-        isFile  = os.path.isfile(file_name)
+        isFile = os.path.isfile(file_name)
         dirname = os.path.dirname(file_name)
         if os.path.exists(dirname) == False and dirname != '':
             if not isFile:
@@ -350,9 +361,9 @@ def run(parser: argparse.ArgumentParser = None,
             hf.create_dataset('fnu', data=fnu_save)
             hf.create_dataset('tbins', data=time_bins)
 
-    #--------------------------------------------------
+    # --------------------------------------------------
     # Plotting
-    #--------------------------------------------------
+    # --------------------------------------------------
     lines = ["--", "-.", ":", "-"]
     linecycler = cycle(lines)
     color_cycle = cycle(colors)
@@ -365,26 +376,31 @@ def run(parser: argparse.ArgumentParser = None,
         front_part = val / 10**power_of_ten
         var_label = r'$t=' if args.spectra else r'$\nu='
         if front_part == 1.0:
-            label = f'{var_label}' + r'10^{%d}$' % (power_of_ten) + (' day' if args.spectra else ' Hz')
+            label = f'{var_label}' + \
+                r'10^{%d}$' % (power_of_ten) + \
+                (' day' if args.spectra else ' Hz')
         else:
-            label = f'{var_label}' + r'%d \times 10^{%d}$' % (int(front_part), power_of_ten) + (' day' if args.spectra else ' Hz')
-        
+            label = f'{var_label}' + r'%d \times 10^{%d}$' % (
+                int(front_part), power_of_ten) + (' day' if args.spectra else ' Hz')
+
         if args.mode != 'checkpoint':
             if args.spectra:
-                nearest_dat    = util.find_nearest(time_bins.value, time)[0]
-                relevant_flux  = np.asanyarray([fnu[key][nearest_dat].value for key in fnu.keys()])
-                xarr           = args.nu
+                nearest_dat = util.find_nearest(time_bins.value, time)[0]
+                relevant_flux = np.asanyarray(
+                    [fnu[key][nearest_dat].value for key in fnu.keys()])
+                xarr = args.nu
             else:
                 relevant_flux = fnu[val]
                 xarr = time_bins
 
             ax.plot(xarr, relevant_flux, color=color, label=label)
-        
+
         for dat in args.example_data:
             example_data = read_afterglow_library_data(dat)
             if args.spectra:
-                key = util.find_nearest(example_data['tday'].value, val)[1] * units.day
-                x = example_data['freq'] * units.Hz 
+                key = util.find_nearest(example_data['tday'].value, val)[
+                    1] * units.day
+                x = example_data['freq'] * units.Hz
                 y = example_data['spectra'][key]
                 m = 1.0
             else:
@@ -400,30 +416,25 @@ def run(parser: argparse.ArgumentParser = None,
             if args.spectra:
                 nearest_day = util.find_nearest(dat['tday'].value, val)[0]
                 x = sorted(dat['freq'].value)
-                y = spectra = np.array([dat['fnu'][key][nearest_day].value for key in sorted(dat['fnu'].keys())])
+                y = np.array(
+                    [dat['fnu'][key][nearest_day].value for key in sorted(dat['fnu'].keys())])
             else:
                 x = dat['tday']
                 y = dat['fnu'][val * units.Hz]
 
             ax.plot(x, y, color=color, label=label, linestyle=linestyle)
-                
+
         if label not in legend_labels:
             # create dummy axes for color-coded legend labels
             line, = ax.plot([], [], color=color, label=label)
             sim_lines += [line]
             legend_labels += [label]
-        
+
         linecycler = cycle(lines)
-        
-    if args.xlims:
-        tbound1, tbound2 = np.asanyarray(args.xlims) * units.day
-    else:
-        tbound1 = time_bins[0] if 'time_bins' in locals() else dat['tday'][0]
-        tbound2 = time_bins[-1] if 'time_bins' in locals() else dat['tday'][-1]
 
     if args.title:
         ax.set_title(rf'{args.title}')
-        
+
     ylims = args.ylims if args.ylims else (1e-11, 1e4)
     ax.set_ylim(*ylims)
     ax.set_yscale('log')
@@ -431,35 +442,35 @@ def run(parser: argparse.ArgumentParser = None,
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.set_ylabel(r'Flux  Density [mJy]')
+    if args.xlims:
+        ax.set_xlim(*args.xlims)
+
     if args.spectra:
-        if args.xlims is not None:
-            ax.set_xlim(*args.xlims)
         ax.set_xlabel(r'$\nu_{\rm obs} [\rm Hz]$')
     else:
-        ax.set_xlim(tbound1.value, tbound2.value)
         ax.set_xlabel(r'$t_{\rm obs} [\rm day]$')
 
     if args.vline:
         ax.axvline(args.vline, color='black', linestyle=':', alpha=0.8)
-        
+
     ex_lines = []
     marks = cycle(['o', 's'])
     for label in args.example_labels:
         ex_lines += [
-            mlines.Line2D([0],[0],
-            marker=next(marks),
-            color='w',
-            label=label,
-            markerfacecolor='grey',
-            markersize=5)
+            mlines.Line2D([0], [0],
+                          marker=next(marks),
+                          color='w',
+                          label=label,
+                          markerfacecolor='grey',
+                          markersize=5)
         ]
-        
+
     for label in args.labels:
         ex_lines += [
-            mlines.Line2D([0,1],[0,1], 
-            linestyle=next(linecycler), 
-            label=label, 
-            color='grey')
+            mlines.Line2D([0, 1], [0, 1],
+                          linestyle=next(linecycler),
+                          label=label,
+                          color='grey')
         ]
 
     ax.legend(handles=[*sim_lines, *ex_lines], loc=args.legend_loc)

@@ -339,8 +339,10 @@ namespace sogbo_rad
         const double eps_b = args.eps_b;           // Magnetic field fraction of internal energy 
         const double eps_e = args.eps_e;           // shocked electrons fraction of internal energy
 
-        const auto t_prime = args.current_time * qscales.time_scale * units::s; // time in source frame
-
+        // time in source frame
+        const auto t_prime = args.current_time * qscales.time_scale * units::s;
+        // step size between checkpoints
+        const auto dt = args.dt * qscales.time_scale * units::s;   
         for (int kk = 0; kk < x3.size(); kk++) {
             const double x3l     = (kk > 0 ) ? x2min + (kk - 0.5) * dx3 :  x3min;
             const double x3r     = (kk < nk - 1) ? x3l + dx3 * (kk == 0 ? 0.5 : 1.0) :  x3max; 
@@ -400,10 +402,7 @@ namespace sogbo_rad
                     
                     const auto gamma_max = std::max(gamma_min, gamma_crit);
                     const auto gamma_low = std::min(gamma_min, gamma_crit);
-                    const auto dg        = (gamma_max - gamma_low) / (ng - 1);
-
-                    // step size between checkpoints
-                    const auto dt = args.dt * qscales.time_scale * units::s;      
+                    const auto dg        = (gamma_max - gamma_low) / (ng - 1);   
 
                     // Calc cell volumes
                     const double x1l    = (ii > 0 ) ? x1min * std::pow(10, (ii - 0.5) * dlogx1) :  x1min;
@@ -497,13 +496,16 @@ namespace sogbo_rad
             dx3    = (x3max - x3min) / (nk - 1);
         }
 
-        int jreal = 0;
-        int kreal = 0;
-
         const double p     = args.p;               // Electron number index
         const double eps_b = args.eps_b;           // Magnetic field fraction of internal energy 
         const double eps_e = args.eps_e;           // shocked electrons fraction of internal energy
         const auto d       = args.d_L * units::cm; // Luminosity distance 
+
+        // time in source frame
+        const auto t_prime = args.current_time * qscales.time_scale * units::s; 
+        // step size between checkpoints
+        const auto dt = args.dt * qscales.time_scale * units::s;  
+        const auto flux_denom = units::math::pow<std::ratio<-1>>(4.0 * M_PI * d * d);
         for (int kk=0; kk < nk; kk++)
         {       
             if (!at_pole)
@@ -513,10 +515,10 @@ namespace sogbo_rad
                 sin_phi              = std::sin(x3[kk]);
                 cos_phi              = std::cos(x3[kk]);
                 dx3                  = x3r - x3l;
-
-                // If the data is 3D, then there is a real k-space to pull data from
-                kreal = (data_dim > 2) * kk;
             }     
+
+            // If the data is 3D, then there is a real k-space to pull data from
+            const int kreal = (data_dim > 2) * kk;
             #pragma omp parallel
             for (int jj = 0; jj < nj; jj++)
             {
@@ -535,7 +537,6 @@ namespace sogbo_rad
                     const auto central_idx  = kreal * ni * nj + jreal * ni + ii;                 // index for current zone
                     const auto beta         = calc_beta(gb[central_idx]);                        // velocity in units of c
                     const auto w            = calc_lorentz_gamma(gb[central_idx]);               // Lorentz factor
-                    const auto t_prime      = args.current_time * qscales.time_scale * units::s; // time in source frame
                     const auto t_emitter    = t_prime / w;                                       // time in emitter frame
                     //================================================================
                     //                    HYDRO CONDITIONS
@@ -548,9 +549,7 @@ namespace sogbo_rad
                     const auto nu_g          = calc_gyration_frequency(bfield);                                                        // gyration frequency                                                                 // distance to source
                     const auto gamma_min     = calc_minimum_lorentz(eps_e, rho_einternal, n_e_proper, p);                              // Minimum Lorentz factor of electrons 
                     const auto gamma_crit    = calc_critical_lorentz(bfield, t_emitter);                                               // Critical Lorentz factor of electrons
-
-                    // step size between checkpoints
-                    const auto dt = args.dt * qscales.time_scale * units::s;       
+  
 
                     // Calc cell volumes
                     const double x1l    = (ii > 0 ) ? x1min * std::pow(10, (ii - 0.5) * dlogx1) :  x1min;
@@ -576,7 +575,7 @@ namespace sogbo_rad
                         // The frequency we see is doppler boosted, so account for that
                         const units::frequency  nu_source  = args.nus[fidx] * units::hz / delta_doppler;
                         const units::spec_power power_cool = calc_powerlaw_flux(power_prime, p, nu_source, nu_c, nu_m);
-                        const units::spectral_flux f_nu    = (power_cool / (4.0 * M_PI * d * d)).to(units::mjy);
+                        const units::spectral_flux f_nu    = (power_cool * flux_denom).to(units::mjy);
 
                         // place the fluxes in the appropriate time bins
                         for (int tidx = 0; tidx < nt - 1; tidx++)
