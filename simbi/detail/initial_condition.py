@@ -28,7 +28,7 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
         nz  = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
         try:
             ndim = ds.attrs['dimensions']
-        except:
+        except KeyError:
             ndim = 1 + (ny > 1) + (nz > 1)
             
         setup['ad_gamma']     = ds.attrs['adiabatic_gamma']

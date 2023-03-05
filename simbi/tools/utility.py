@@ -163,13 +163,10 @@ def get_dimensionality(files: list[str]) -> int:
             try:
                 ndim = ds.attrs['dimensions']
             except KeyError:
-                rho = hf.get('rho')[:]
                 nx  = ds.attrs['nx'] or 1
                 ny  = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
-                nz  = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
-                rho = rho.reshape(nz, ny, nx)
-                rho = flatten_fully(rho)
-                ndim = rho.ndim
+                nz  = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1  
+                ndim = 1 + (ny > 1) + (nz > 1)
             dims += [ndim]
             if not all_equal(dims):
                 raise ValueError("All simulation files require identical dimensionality")
