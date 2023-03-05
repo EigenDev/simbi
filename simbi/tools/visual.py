@@ -3,14 +3,14 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import sys
 import argparse
-import simbi._detail as detail
 import matplotlib.ticker as tkr
 from typing import Iterable
 from itertools import cycle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from simbi.slogger import logger
-from simbi.helpers import get_iterable
 from . import utility as util
+from ..detail.slogger import logger
+from ..detail.helpers import get_iterable
+from ..detail import _detail as detail
 
 try:
     import cmasher as cmr

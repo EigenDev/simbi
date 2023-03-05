@@ -2,10 +2,10 @@ import argparse
 import sys
 import matplotlib.pyplot as plt
 import importlib
-from .tools import visual
+from . import visual
 
-from .tools.utility import DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
-from ._detail import *
+from .utility import DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
+from ..detail._detail import *
 from pathlib import Path
 
 
