@@ -189,5 +189,6 @@ def main(name: str = None):
     if file.is_file():
         raise ValueError(f"{file} already exists")
     
+    print(f"generating {file} file...")
     with open(file, 'w') as f:
         f.write(setup_clone.format(setup_name = pascalcase(setup_name)))
