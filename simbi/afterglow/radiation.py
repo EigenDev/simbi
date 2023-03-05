@@ -64,7 +64,7 @@ def parse_args(
         '--ntbins',
         type=int,
         help='number of time bins',
-        default=128)
+        default=50)
     afterglow_parser.add_argument(
         '--theta-samples',
         type=int,
@@ -249,7 +249,8 @@ def run(parser: argparse.ArgumentParser = None,
         cmap = plt.cm.get_cmap(args.cmap)
         colors = util.get_colors(cinterval, cmap, vmin, vmax)
     else:
-        colors = ['c', 'y', 'm', 'k']  # list of basic colors
+        cmap = plt.cm.get_cmap('viridis')
+        colors = util.get_colors(np.linspace(0, 1, len(args.nu)), cmap)
     
     #---------------------------------------------------------
     # Calculations
