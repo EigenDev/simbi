@@ -178,7 +178,7 @@ def pascalcase(name: str) -> str:
     
 def main(name: str = None):
     with open(Path(__file__).resolve().parent / 'gitrepo_home.txt') as f:
-            githome = f.read()
+        githome = f.read()
     
     if not name.endswith('.py'):
         name += '.py'
