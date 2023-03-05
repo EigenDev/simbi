@@ -381,6 +381,10 @@ namespace simbi
             att.write(dtype_str, setup.regime.c_str());
             att.close();
 
+            att = sim_info.createAttribute("dimensions", int_type, att_space);
+            att.write(int_type, &setup.dimensions);
+            att.close();
+
             sim_info.close();
         }
         
