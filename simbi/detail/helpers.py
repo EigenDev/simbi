@@ -58,7 +58,7 @@ def calc_vertices(*, arr: generic_numpy_array, direction: int, cell_spacing: str
                 return np.sqrt(tmp[...,1:] * tmp[...,:-1])
     
             
-def calc_cell_volume1D(*, x1: generic_numpy_array, coord_system: str = 'soherical') -> generic_numpy_array:
+def calc_cell_volume1D(*, x1: generic_numpy_array, coord_system: str = 'spherical') -> generic_numpy_array:
     if coord_system in ['spherical', 'cylindrical']:
         x1vertices = np.sqrt(x1[1:] * x1[:-1])
     else:
