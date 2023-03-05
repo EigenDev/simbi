@@ -55,7 +55,7 @@ version_scheme = "post-release"
 local_scheme = "no-local-version"
 
 [tool.setuptools.package-data]
-simbi = ["gitrepo_home.txt", "mypy.ini", "tools/*.py", "*.so"]
+simbi = ["gitrepo_home.txt", "mypy.ini", "tools/*.py", "libs/*.so"]
 
 [tool.setuptools.dynamic]
 readme = {file = ["README.md"]}
