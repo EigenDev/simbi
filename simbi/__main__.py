@@ -249,7 +249,7 @@ def type_check_input(file: str) -> None:
         [sys.executable, 
          '-m', 
          'mypy', 
-         '--strict', 
+         '--strict',
          '--ignore-missing-imports', 
          file])
     
@@ -270,7 +270,10 @@ def configure_state(
     base_script = Path(script).stem
     sys.path.insert(1, f'{script_dirname}')
 
-    if type_checking_active:
+    with open(Path(__file__).resolve().parent / 'gitrepo_home.txt') as f:
+        githome = f.read()
+    
+    if type_checking_active and str(Path().absolute()) == githome:
         print("-"*80)
         print("Validating Config Script Type Safety...")
         type_check_input(script)
@@ -389,7 +392,7 @@ def plot_checkpoints(
         args: argparse.Namespace,
         argv: list) -> None:
     
-    from .plot import main
+    from .tools.plot import main
     main(parser, args, argv)
 
 def calc_afterglow(
