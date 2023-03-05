@@ -22,8 +22,15 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
     setup: dict[str, Any] = {}
     volume_factor: Union[float, NDArray[numpy_float]] = 1.0
     with h5py.File(filename, 'r') as hf:         
-        ds   = hf.get('sim_info')
-        ndim = ds.attrs['dimensions']
+        ds  = hf.get('sim_info')
+        nx  = ds.attrs['nx'] or 1
+        ny  = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
+        nz  = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
+        try:
+            ndim = ds.attrs['dimensions']
+        except:
+            ndim = 1 + (ny > 1) + (nz > 1)
+            
         setup['ad_gamma']     = ds.attrs['adiabatic_gamma']
         setup['regime']       = ds.attrs['regime'].decode('utf-8')
         setup['coord_system'] = ds.attrs['geometry'].decode('utf-8')
@@ -47,10 +54,6 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
         
         if ds.attrs['x1max'] > mesh['x1'][-1]:
             mesh['x1'] = arr_gen(ds.attrs['x1min'], ds.attrs['x1max'], ds.attrs['xactive_zones'])
-
-        nx  = ds.attrs['nx'] or 1
-        ny  = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
-        nz  = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
         
         if setup['mesh_motion']:
             if ndim == 1 and setup['coord_system'] != 'cartesian':
