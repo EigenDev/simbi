@@ -360,10 +360,8 @@ def run(parser: argparse.ArgumentParser = None,
         print(f"Saving file as {file_name}...")
         print(80 * '=')
         with h5py.File(file_name, 'w') as hf:
-            fnu_save = fnu_contig
-            # dset = hf.create_dataset('sogbo_data', dtype='f')
             hf.create_dataset('nu', data=[nu for nu in args.nu])
-            hf.create_dataset('fnu', data=fnu_save)
+            hf.create_dataset('fnu', data=fnu_contig)
             hf.create_dataset('tbins', data=time_bins)
 
     # --------------------------------------------------
