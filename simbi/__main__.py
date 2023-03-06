@@ -17,20 +17,25 @@ except ImportError:
 
 
 class CustomParser(argparse.ArgumentParser):
+    command = []
     def error(self, message):
         sys.stderr.write(f'error: {message}\n')
-        ex_type, ex_value, traceback = sys.exc_info()
-        print(ex_type, ex_value)
         if "(choose from 'run', 'plot', 'afterglow')" in message:
             self.print_help()
         elif 'configurations' not in message:
-            # args, _ = self.parse_known_args()
-            # if args.command in ['run', 'plot', 'afterglow']:
-            #     self.parse_args([args.command, '--help'])
-            # else:
-            self.print_help()
+            if self.command in ['run', 'plot', 'afterglow', 'clone']:
+                self.parse_args([self.command, '--help'])
+            else:
+                self.print_help()
         sys.exit(2)
-
+        
+    def parse_args(self, args=None, namespace=None):
+        args, argv = self.parse_known_args(args, namespace)
+        self.command = args.command
+        if argv:
+            msg = 'unrecognized arguments: {:s}'
+            self.error(msg.format(' '.join(argv)))
+        return args
 
 class print_the_version(argparse.Action):
     def __init__(self, option_strings, dest, **kwargs):
@@ -52,7 +57,7 @@ def parse_module_arguments():
         usage='%(prog)s {run, plot, afterglow, clone} <input> [options]',
         description="Relativistic gas dynamics module",
         formatter_class=help_formatter,
-        exit_on_error=False
+        # exit_on_error=False
     )
     parser.add_argument(
         '--version',
@@ -67,7 +72,7 @@ def parse_module_arguments():
         help='runs the setup script',
         formatter_class=help_formatter,
         usage='simbi run <setup_script> [options]',
-        exit_on_error=False
+        # exit_on_error=False
     )
     
     script_run.set_defaults(func=run)
@@ -76,7 +81,7 @@ def parse_module_arguments():
         help='plots the given simbi checkpoint file',
         formatter_class=help_formatter,
         usage='simbi plot <checkpoints> <setup_name> [options]',
-        exit_on_error=False    
+        # exit_on_error=False    
     )
     plot.set_defaults(func=plot_checkpoints)
     afterglow = subparsers.add_parser(
@@ -84,7 +89,7 @@ def parse_module_arguments():
         help='compute the afterglow for given data',
         usage='simbi afterglow <files> [options]',
         formatter_class=help_formatter,
-        exit_on_error=False
+        # exit_on_error=False
     )
     afterglow.set_defaults(func=calc_afterglow)
     gen_clone = subparsers.add_parser(
@@ -92,7 +97,7 @@ def parse_module_arguments():
         help='generate a shadow clone of a setup script to build off of',
         usage='simbi clone [--name clone_name]',
         formatter_class=help_formatter,
-        exit_on_error=False
+        # exit_on_error=False
     )
     gen_clone.set_defaults(func=generate_a_setup)
     gen_clone.add_argument(
@@ -417,13 +422,10 @@ def generate_a_setup(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     *_) -> None:
-    try:
-        parser.parse_args()
-    except:
-        parser.parse_args(args=['clone', '--help'])
-        
+
+    parser.parse_args()
     from . import clone 
-    clone.main(args.clone_name)
+    clone.generate(args.clone_name)
     
 def main():
     parser, (args, _) = parse_module_arguments()
