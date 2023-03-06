@@ -8,20 +8,6 @@
 
 namespace simbi 
 {
-	namespace {
-        inline unsigned int nthreads = ([] {
-            if(const char* thread_env = std::getenv("NTHREADS"))
-                return static_cast<unsigned int>(std::stoul(std::string(thread_env)));
-
-            if(const char* thread_env = std::getenv("OMP_NUM_THREADS"))
-                return static_cast<unsigned int>(std::stoul(std::string(thread_env)));
-
-            return std::thread::hardware_concurrency();
-        })();
-
-        inline auto thread_pool = simbi::pooling::ThreadPool(nthreads);
-    }
-	
 	template <typename index_type, typename F>
 	void parallel_for(index_type first, index_type last, F function)  {
 		ExecutionPolicy p(last - first);

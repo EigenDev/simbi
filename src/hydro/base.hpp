@@ -5,6 +5,7 @@
 #include "util/managed.hpp"
 #include "build_options.hpp"
 #include "util/ndarray.hpp"
+#include "util/thread_pool.hpp"
 
 namespace simbi
 {
@@ -85,6 +86,9 @@ namespace simbi
             if constexpr(BuildPlatform == Platform::GPU) {
                 std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx 
                           << ", " << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
+            } else {
+                const auto nthreads = simbi::pooling::get_nthreads();
+                thread_pool.set_threads(nthreads);
             }
         }
 

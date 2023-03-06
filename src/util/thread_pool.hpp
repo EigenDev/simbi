@@ -15,6 +15,15 @@ namespace simbi {
 		*/
 		class ThreadPool {
 			public:
+				ThreadPool(const ThreadPool &) = delete;
+				ThreadPool(ThreadPool &&) = delete;
+				ThreadPool &operator=(const ThreadPool &) = delete;
+				ThreadPool &operator=(ThreadPool &&) = delete;
+
+				ThreadPool(){
+
+				}
+
 				ThreadPool(const unsigned int nthreads) : nthreads(nthreads) {
                     std::cout << "ctor called" << "\n";
 					threads.reserve(nthreads);
@@ -73,9 +82,18 @@ namespace simbi {
 					bool poolbusy;
 					{
 						std::unique_lock<std::mutex> lock(queue_mutex);
-						poolbusy = jobs.empty();
+						poolbusy = !jobs.empty();
 					}
 					return poolbusy;
+				}
+
+				void set_threads(const unsigned int nthreads) {
+					this->nthreads = nthreads; 
+					std::cout << "ctor called" << "\n";
+					threads.reserve(nthreads);
+					for (unsigned i = 0; i < nthreads; i++) {
+						threads.emplace_back(std::thread(&ThreadPool::ThreadLoop, this));
+					}
 				}
 
 			private:
@@ -105,7 +123,18 @@ namespace simbi {
 				std::vector<std::thread> threads;
 				std::queue<std::function<void()>> jobs;
 		};
+
+		inline auto get_nthreads = ([] {
+			if(const char* thread_env = std::getenv("NTHREADS"))
+				return static_cast<unsigned int>(std::stoul(std::string(thread_env)));
+
+			if(const char* thread_env = std::getenv("OMP_NUM_THREADS"))
+				return static_cast<unsigned int>(std::stoul(std::string(thread_env)));
+
+			return std::thread::hardware_concurrency();
+		});
 	}// namespace pooling
 } // namespace simbi
 
+extern simbi::pooling::ThreadPool thread_pool;
 #endif 
