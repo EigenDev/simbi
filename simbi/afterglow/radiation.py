@@ -338,9 +338,9 @@ def run(parser: argparse.ArgumentParser = None,
                 f"Processed file {file} in {pytime.time() - t1:.2f} s",
                 flush=True)
 
-        fnu_contig = fnu_contig.reshape(len(args.nu), nbins) 
+        fnu_contig = fnu_contig.reshape(len(args.nu), nbins) * (1.0 + args.z)
         for idx, key in enumerate(fnu.keys()):
-            fnu[key] = fnu_contig[idx] * (1 + args.z) * units.mJy
+            fnu[key] = fnu_contig[idx] * units.mJy
 
         # Save the data
         file_name = args.output
