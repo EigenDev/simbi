@@ -9,7 +9,7 @@ cdef class WrappedVector:
 def py_calc_fnu(
     fields:         dict, 
     tbin_edges:     np.ndarray,
-    flux_array:     dict,
+    flux_array:     np.ndarray,
     mesh:           dict, 
     qscales:        dict, 
     sim_info:       dict,
@@ -30,23 +30,12 @@ def py_calc_fnu(
     chkpt_idx:  the checkpoint index value
     data_dim:   the dimensions of the checkpoint data
     """
-    flattened_fields = np.array(
-        [fields['rho'].flatten(),
-        fields['gamma_beta'].flatten(),
-        fields['p'].flatten()], dtype=float
-    )
-
     flattened_mesh = np.asanyarray(
         [mesh['x1'],
          mesh['x2'],
          mesh['x3']], dtype=object
     )
-    
-    stripped_flux = np.array(
-        [flux_array[key].value.flatten() for key in flux_array.keys()], dtype=float
-    )
-    # Memoryview on a NumPy array
-    cdef vector[double] flattened_flux = stripped_flux[:].flat
+
     cdef sim_conditions sim_cond 
     cdef quant_scales quant_scales
 
@@ -69,22 +58,20 @@ def py_calc_fnu(
     quant_scales.v_scale       = 1.0 
     quant_scales.length_scale  = qscales['length_scale']
 
-    
+    cdef vector[double] fnu = flux_array[:]
     calc_fnu(
         sim_cond,
         quant_scales,
-        flattened_fields, 
+        fields['rho'][:].flat,
+        fields['gamma_beta'][:].flat,
+        fields['p'][:].flat,
         flattened_mesh,
         tbin_edges / (1 + sim_info['z']),
-        flattened_flux, 
+        fnu, 
         chkpt_idx,
         data_dim
     )
-
-    stripped_flux = np.asanyarray(flattened_flux).reshape(len(flux_array.keys()), len(tbin_edges[:-1]))
-    # py_fluxes = np.array(calculated_flux).reshape(len(flux_array.keys()), len(tbin_edges[:-1]))
-    for idx, key in enumerate(flux_array.keys()):
-        flux_array[key] = stripped_flux[idx] * units.mJy
+    flux_array[:] = np.ascontiguousarray(fnu)
 
 def py_log_events(
     fields:         dict, 

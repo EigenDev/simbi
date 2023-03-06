@@ -12,7 +12,9 @@ cdef extern from "rad_units.hpp" namespace "sogbo_rad":
     cdef void calc_fnu(
         sim_conditions args,
         quant_scales  qscales,
-        vector[vector[double]] &fields, 
+        vector[double] &rho,
+        vector[double] &gb,
+        vector[double] &gb,
         vector[vector[double]] &mesh,
         vector[double] &tbin_edges,
         vector[double] &flux_array, 
@@ -23,7 +25,7 @@ cdef extern from "rad_units.hpp" namespace "sogbo_rad":
     cdef void log_events(
         sim_conditions args,
         quant_scales   qscales,
-        vector[vector[double]] &fields,
+        vector[vector[double]] &fields, 
         vector[vector[double]] &mesh,
         vector[double] &photon_distribution,
         vector[double] &four_position,

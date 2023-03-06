@@ -450,9 +450,11 @@ namespace sogbo_rad
     const void calc_fnu(
         const sim_conditions args,
         const quant_scales   qscales,
-        std::vector<std::vector<double>> &fields,
-        std::vector<std::vector<double>> &mesh,  
-        std::vector<double> &tbin_edges,
+        const std::vector<double>  &rho,
+        const std::vector<double>  &gb,
+        const std::vector<double>  &pre,
+        const std::vector<std::vector<double>> &mesh,  
+        const std::vector<double> &tbin_edges,
         std::vector<double> &flux_array,
         const int chkpt_idx,
         const int data_dim
@@ -461,9 +463,6 @@ namespace sogbo_rad
         // Place observer along chosen axis
         const std::vector<double> obs_hat  = {std::sin(args.theta_obs), 0.0, std::cos(args.theta_obs)};
 
-        const auto rho = fields[0];             // fluid frame density 
-        const auto gb  = fields[1];             // four-velocity
-        const auto pre = fields[2];             // pressure
         const auto nt  = tbin_edges.size();     // time bin size
         const auto nf  = args.nus.size();       // frequency bin size
 

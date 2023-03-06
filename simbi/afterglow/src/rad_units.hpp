@@ -192,9 +192,11 @@ namespace sogbo_rad
     const void calc_fnu(
         const sim_conditions args,
         const quant_scales   qscales,
-        std::vector<std::vector<double>> &fields,
-        std::vector<std::vector<double>> &mesh,  
-        std::vector<double> &tbin_edges,
+        const std::vector<double>  &rho,
+        const std::vector<double>  &gb,
+        const std::vector<double>  &pre,
+        const std::vector<std::vector<double>> &mesh,  
+        const std::vector<double> &tbin_edges,
         std::vector<double> &flux_array,
         const int chkpt_idx,
         const int data_dim

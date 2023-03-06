@@ -20,7 +20,7 @@ from .helpers import (
     read_afterglow_library_data,
     read_simbi_afterglow
 )
-from simbi import py_calc_fnu, py_log_events
+from simbi import py_calc_fnu, py_log_events, find_nearest
 from ..tools import utility as util
 from ..detail import get_subparser
 
@@ -265,6 +265,7 @@ def run(parser: argparse.ArgumentParser = None,
     # ---------------------------------------------------------
     # Calculations
     # ---------------------------------------------------------
+    at_pole = abs(np.cos(args.theta_obs)) == 1
     if args.mode != 'checkpoint':
         dim = util.get_dimensionality(files)
         nbins = args.ntbins
@@ -278,6 +279,9 @@ def run(parser: argparse.ArgumentParser = None,
                 nbin_edges)
             time_bins = np.sqrt(tbin_edges[1:] * tbin_edges[:-1])
             fnu = {i: np.zeros(nbins) * units.mJy for i in args.nu}
+            fnu_contig = np.array(
+                [fnu[key].value.flatten() for key in fnu.keys()], dtype=float
+            ).flatten()
 
         scales_dict = {
             'time_scale': scales.time_scale.value,
@@ -304,7 +308,7 @@ def run(parser: argparse.ArgumentParser = None,
                 args,
                 mesh,
                 full_sphere=True,
-                full_threed=not args.theta_obs == 0)
+                full_threed=at_pole)
             sim_info['dt'] = setup['dt']
             sim_info['adiabatic_gamma'] = setup['ad_gamma']
             sim_info['current_time'] = setup['time']
@@ -313,7 +317,7 @@ def run(parser: argparse.ArgumentParser = None,
                 py_calc_fnu(
                     fields=fields,
                     tbin_edges=tbin_edges.value,
-                    flux_array=fnu,
+                    flux_array=fnu_contig,
                     mesh=mesh,
                     qscales=scales_dict,
                     sim_info=sim_info,
@@ -334,8 +338,9 @@ def run(parser: argparse.ArgumentParser = None,
                 f"Processed file {file} in {pytime.time() - t1:.2f} s",
                 flush=True)
 
-        for key in fnu.keys():
-            fnu[key] *= (1 + args.z)
+        fnu_contig = fnu_contig.reshape(len(args.nu), nbins) 
+        for idx, key in enumerate(fnu.keys()):
+            fnu[key] = fnu_contig[idx] * (1 + args.z) * units.mJy
 
         # Save the data
         file_name = args.output
@@ -355,7 +360,7 @@ def run(parser: argparse.ArgumentParser = None,
         print(f"Saving file as {file_name}...")
         print(80 * '=')
         with h5py.File(file_name, 'w') as hf:
-            fnu_save = np.array([fnu[key] for key in fnu.keys()])
+            fnu_save = fnu_contig
             # dset = hf.create_dataset('sogbo_data', dtype='f')
             hf.create_dataset('nu', data=[nu for nu in args.nu])
             hf.create_dataset('fnu', data=fnu_save)
@@ -385,7 +390,7 @@ def run(parser: argparse.ArgumentParser = None,
 
         if args.mode != 'checkpoint':
             if args.spectra:
-                nearest_dat = util.find_nearest(time_bins.value, time)[0]
+                nearest_dat = find_nearest(time_bins.value, time)[0]
                 relevant_flux = np.asanyarray(
                     [fnu[key][nearest_dat].value for key in fnu.keys()])
                 xarr = args.nu
@@ -398,7 +403,7 @@ def run(parser: argparse.ArgumentParser = None,
         for dat in args.example_data:
             example_data = read_afterglow_library_data(dat)
             if args.spectra:
-                key = util.find_nearest(example_data['tday'].value, val)[
+                key = find_nearest(example_data['tday'].value, val)[
                     1] * units.day
                 x = example_data['freq'] * units.Hz
                 y = example_data['spectra'][key]
@@ -414,7 +419,7 @@ def run(parser: argparse.ArgumentParser = None,
             linestyle = next(linecycler)
             dat = read_simbi_afterglow(dfile)
             if args.spectra:
-                nearest_day = util.find_nearest(dat['tday'].value, val)[0]
+                nearest_day = find_nearest(dat['tday'].value, val)[0]
                 x = sorted(dat['freq'].value)
                 y = np.array(
                     [dat['fnu'][key][nearest_day].value for key in sorted(dat['fnu'].keys())])
