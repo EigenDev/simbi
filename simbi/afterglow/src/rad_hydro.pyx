@@ -3,9 +3,6 @@ import astropy.units as units
 cimport numpy as np 
 cimport rad_hydro
 
-cdef class WrappedVector:
-  cdef vector[double] v
-
 def py_calc_fnu(
     fields:         dict, 
     tbin_edges:     np.ndarray,
