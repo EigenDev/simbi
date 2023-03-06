@@ -9,7 +9,12 @@ from itertools import cycle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from . import utility as util
 from ..detail.slogger import logger
-from ..detail.helpers import get_iterable
+from ..detail.helpers import (
+    get_iterable, 
+    calc_cell_volume1D,
+    calc_cell_volume2D,
+    calc_cell_volume3D
+)
 from ..detail import get_subparser
 
 try:
@@ -207,7 +212,7 @@ class Visualizer:
         self.vrange = cycle(self.vrange)
 
         self.square_plot = False
-        if self.cartesian or self.ndim == 1 or self.hist or self.weighted_vs_time:
+        if self.cartesian or self.ndim == 1 or self.hist or self.weight:
             self.square_plot = True
         self.create_figure()
 
@@ -393,12 +398,12 @@ class Visualizer:
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 time = setup['time']
                 if self.ndim == 1:
-                    dV = util.calc_cell_volume1D(mesh['x1'])
+                    dV = calc_cell_volume1D(x1=mesh['x1'])
                 elif self.ndim == 2:
-                    dV = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
+                    dV = calc_cell_volume2D(x1=mesh['x1'], x2=mesh['x2'])
                 else:
-                    dV = util.calc_cell_volume3D(
-                        mesh['x1'], mesh['x2'], mesh['x3'])
+                    dV = calc_cell_volume3D(
+                        x1=mesh['x1'], x2=mesh['x2'], x3=mesh['x3'])
 
                 if self.kinetic:
                     mass = dV * fields['W'] * fields['rho']
@@ -492,18 +497,15 @@ class Visualizer:
                 else:
                     var = fields[self.fields[0]]
 
-                if len(self.fields) > 1:
-                    weights = util.prims2var(fields, self.fields[1])
-                else:
-                    weights = 1.0
+                weights = util.prims2var(fields, self.weight)
 
                 if self.ndim == 1:
-                    dV = util.calc_cell_volume1D(mesh['x1'])
+                    dV = calc_cell_volume1D(x1=mesh['x1'])
                 elif self.ndim == 2:
-                    dV = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
+                    dV = calc_cell_volume2D(x1=mesh['x1'], x2=mesh['x2'])
                 else:
-                    dV = util.calc_cell_volume3D(
-                        mesh['x1'], mesh['x2'], mesh['x3'])
+                    dV = calc_cell_volume3D(
+                        x1=mesh['x1'], x2=mesh['x2'], x3=mesh['x3'])
                 weighted = np.sum(weights * var * dV) / np.sum(weights * dV)
                 weighted_vars += [weighted]
                 times += [setup['time']]
@@ -545,9 +547,6 @@ class Visualizer:
                 self.axs.set(yscale='log')
 
         ylabel = util.get_field_str(self)
-        if len(ylabel) > 1:
-            ylabel = ylabel[0]
-
         self.axs.set_xlabel(r'$t$')
         self.axs.set_ylabel(rf"$\langle$ {ylabel} $\rangle$")
 
@@ -558,7 +557,7 @@ class Visualizer:
         self.frames = []
         if self.hist:
             self.plot_histogram()
-        elif self.weighted_vs_time:
+        elif self.weight:
             self.plot_mean_vs_time()
         else:
             if self.ndim == 1:

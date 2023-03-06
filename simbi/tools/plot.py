@@ -8,8 +8,6 @@ from .utility import DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
 from ..detail import get_subparser
 from pathlib import Path
 
-
-
 tool_src = Path(__file__).resolve().parent / 'tools'
 
 def colorbar_limits(c):
@@ -229,10 +227,11 @@ def parse_plotting_arguments(
         default=None,
         help='Set the y-scale to start plt.fill_between')
     plot_parser.add_argument(
-        '--weighted-vs-time', 
-        help='plot maximum of desired var as function of time', 
-        default=False, 
-        action='store_true'
+        '--weight', 
+        help='plot weighted avg of desired var as function of time', 
+        default=None, 
+        choices = visual.field_choices + visual.derived,
+        type=str
     )
     plot_parser.add_argument(
         '--powerfit',
