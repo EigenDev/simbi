@@ -300,7 +300,7 @@ def run(parser: argparse.ArgumentParser = None,
         }
 
         sim_info = {
-            'theta_obs': np.deg2rad(args.theta_obs),
+            'theta_obs': args.theta_obs,
             'nus': freqs.value,
             'z': args.z,
             'd_L': get_dL(args.z).value,

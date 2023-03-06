@@ -196,7 +196,7 @@ def get_tbin_edges(
     rhat = calc_rhat(mesh_init['xx2'], mesh_init['xx3'] * (at_pole^1))
 
     # Place observer along chosen axis
-    theta_obs_rad = np.deg2rad(args.theta_obs)
+    theta_obs_rad = args.theta_obs
     theta_obs     = theta_obs_rad * np.ones_like(mesh_init['xx1'])
     obs_hat       = calc_rhat(theta_obs, 0.0)
     r_dot_nhat    = vector_dotproduct(rhat, obs_hat)
