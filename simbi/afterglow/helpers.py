@@ -3,8 +3,11 @@ import argparse
 import h5py
 from numpy.typing import NDArray
 from astropy.cosmology import FlatLambdaCDM
-from simbi.detail.helpers import compute_num_polar_zones
-from simbi.tools.utility import get_dimensionality, read_file
+from simbi import (
+    compute_num_polar_zones,
+    get_dimensionality,
+    read_file
+)
 from astropy import units, constants
 
 cosmo = FlatLambdaCDM(

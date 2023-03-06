@@ -5,7 +5,7 @@ import importlib
 from . import visual
 
 from .utility import DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
-from ..detail._detail import *
+from ..detail import get_subparser
 from pathlib import Path
 
 

@@ -32,36 +32,6 @@ rho_scale_bmk = 1.0 * const.m_p.cgs / units.cm**3
 ell_scale     = (e_scale_bmk / rho_scale_bmk / const.c.cgs**2)**(1/3)
 t_scale       = const.c.cgs * ell_scale
 
-
-def calc_rverticies(r: np.ndarray) -> np.ndarray:
-    rvertices = np.sqrt(r[1:] * r[:-1])
-    rvertices = np.insert(rvertices,  0, r[0])
-    rvertices = np.insert(rvertices, r.shape, r[-1])
-    return rvertices 
-
-def calc_theta_verticies(theta: np.ndarray) -> np.ndarray:
-    tvertices = 0.5 * (theta[1:] + theta[:-1])
-    tvertices = np.insert(tvertices, 0, theta[0], axis=0)
-    tvertices = np.insert(tvertices, tvertices.shape[0], theta[-1], axis=0)
-    return tvertices 
-
-def calc_cell_volume1D(r: np.ndarray) -> np.ndarray:
-    rvertices = np.sqrt(r[1:] * r[:-1])
-    rvertices = np.insert(rvertices,  0, r[0])
-    rvertices = np.insert(rvertices, r.shape, r[-1])
-    return 4.0 * np.pi * (1./3.) * (rvertices[1:]**3 - rvertices[:-1]**3)
-
-def calc_cell_volume2D(r: np.ndarray, theta: np.ndarray) -> np.ndarray:
-    tvertices = 0.5 * (theta[1:] + theta[:-1])
-    tvertices = np.insert(tvertices, 0, theta[0], axis=0)
-    tvertices = np.insert(tvertices, tvertices.shape[0], theta[-1], axis=0)
-    dcos      = np.cos(tvertices[:-1]) - np.cos(tvertices[1:])
-
-    rvertices = np.sqrt(r[:, 1:] * r[:, :-1])
-    rvertices = np.insert(rvertices,  0, r[:, 0], axis=1)
-    rvertices = np.insert(rvertices, rvertices.shape[1], r[:, -1], axis=1)
-    return (2.0 * np.pi *  (1./3.) * (rvertices[:, 1:]**3 - rvertices[:, :-1]**3) *  dcos)
-
 def calc_enthalpy(fields: dict) -> np.ndarray:
     return 1.0 + fields['p']*fields['ad_gamma'] / (fields['rho'] * (fields['ad_gamma'] - 1.0))
     
@@ -128,11 +98,6 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
             field_str_list.append(rf'${field}$')
 
     return field_str_list if len(args.fields) > 1 else field_str_list[0]
-
-def calc_bfield_shock(fields: dict, eb: float = 0.1) -> np.ndarray:
-    W = calc_lorentz_gamma(fields)
-    comoving_density = fields['rho'] * W *  rho_scale
-    return (32 * np.pi *  eb * comoving_density)**0.5 * W * const.c.cgs 
 
 def unpad(arr, pad_width):
     slices = []
@@ -349,11 +314,6 @@ def get_colors(interval: np.ndarray, cmap: plt.cm, vmin: float = None, vmax: flo
     """
     norm = plt.Normalize(vmin, vmax)
     return cmap(interval)
-
-def find_nearest(arr: list, val: float) -> Union[int, float]:
-    arr = np.asanyarray(arr)
-    idx = np.argmin(np.abs(arr - val))
-    return idx, arr[idx]
     
 def fill_below_intersec(x: np.ndarray, y: np.ndarray, constraint: float, color: float) -> None:
     ind = find_nearest(y, constraint)[0]

@@ -22,7 +22,7 @@ from .helpers import (
 )
 from simbi import py_calc_fnu, py_log_events
 from ..tools import utility as util
-from ..detail._detail import get_subparser
+from ..detail import get_subparser
 
 try:
     import cmasher as cmr

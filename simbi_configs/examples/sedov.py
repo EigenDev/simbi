@@ -1,6 +1,10 @@
 import numpy as np
-from simbi import BaseConfig, DynamicArg, simbi_property
-from simbi.detail.helpers import compute_num_polar_zones
+from simbi import (
+    BaseConfig, 
+    DynamicArg, 
+    simbi_property,
+    compute_num_polar_zones
+)
 from simbi.key_types import * 
 
 RHO_AMB = 1.0

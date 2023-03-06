@@ -2,7 +2,7 @@ import argparse
 import abc
 from .dynarg import DynamicArg
 from ..key_types import *
-from ._detail import get_subparser, bcolors
+from . import get_subparser, bcolors
 from typing import ParamSpec, TypeVar, Generic
 
 T = TypeVar('T', covariant=True)

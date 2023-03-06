@@ -10,7 +10,7 @@ import h5py
 import astropy.constants as const
 import os
 from visual import derived, lin_fields
-from simbi._detail import *
+from ..detail import get_subparser
 try:
     import cmasher as cmr 
 except ImportError:

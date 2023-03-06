@@ -10,7 +10,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from . import utility as util
 from ..detail.slogger import logger
 from ..detail.helpers import get_iterable
-from ..detail import _detail as detail
+from ..detail import get_subparser
 
 try:
     import cmasher as cmr
@@ -49,7 +49,7 @@ class Visualizer:
         self.current_frame = slice(None)
         self.ndim = ndim
         if self.ndim != 1:
-            plot_parser = detail.get_subparser(parser, 1)
+            plot_parser = get_subparser(parser, 1)
             plot_parser.add_argument(
                 '--cbar_sub',
                 dest='cbar2',

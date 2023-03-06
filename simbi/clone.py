@@ -12,7 +12,7 @@ from simbi import (
     simbi_classproperty, 
     simbi_property
 )
-from simbi.detail.key_types import *
+from simbi.key_types import *
 
 class {setup_name}(BaseConfig):
     \""" Some Hydro Problem

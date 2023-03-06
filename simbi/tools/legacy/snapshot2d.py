@@ -15,7 +15,7 @@ from matplotlib.offsetbox import AnchoredText
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from itertools import cycle
 from visual import lin_fields, derived
-from simbi._detail import *
+from ..detail import get_subparser
 try:
     import cmasher as cmr 
 except:
