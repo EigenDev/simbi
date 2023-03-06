@@ -30,7 +30,7 @@ class CustomParser(argparse.ArgumentParser):
         sys.exit(2)
         
     def parse_args(self, args=None, namespace=None):
-        args, argv = self.parse_known_args(args, namespace)
+        args, argv = super().parse_known_args(args, namespace)
         self.command = args.command
         if argv:
             msg = 'unrecognized arguments: {:s}'
