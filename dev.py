@@ -211,6 +211,8 @@ def install_simbi(args: argparse.Namespace) -> None:
         install_mode = '.'+extras if args.install_mode == 'default' else '-e' + '.'+extras
         build_dir=f"{simbi_dir}/build"
         egg_dir  =f"{simbi_dir}/simbi.egg-info"
+        lib_dir = Path(simbi_dir / "simbi/libs")
+        lib_dir.mkdir(parents=True, exist_ok=True)
         compile_child = subprocess.Popen(['meson', 'compile'], cwd=f'{args.build_dir}').wait()
         install_child = subprocess.Popen(['meson', 'install'], cwd=f'{args.build_dir}').wait()
         if compile_child == install_child == 0:
