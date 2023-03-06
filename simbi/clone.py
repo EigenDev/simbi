@@ -176,7 +176,7 @@ class {setup_name}(BaseConfig):
 def pascalcase(name: str) -> str:
     return ''.join(x for x in name.title() if not x.isspace())
     
-def main(name: str = None):
+def generate(name: str = None):
     with open(Path(__file__).resolve().parent / 'gitrepo_home.txt') as f:
         githome = f.read()
     
