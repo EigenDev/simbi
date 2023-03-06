@@ -39,6 +39,14 @@ def day_type(param: str) -> 'astropy.units.Quantity':
 
     return param
 
+def deg_type(param: str):
+    try:
+        param = np.deg2rad(float(param))
+    except BaseException:
+        raise argparse.ArgumentTypeError(
+            "viewing angle most be numerica type")
+
+    return param
 
 def parse_args(
     parser: argparse.ArgumentParser,
@@ -52,7 +60,7 @@ def parse_args(
     afterglow_parser.add_argument(
         '--theta-obs',
         help='observation angle in degrees',
-        type=float,
+        type=deg_type,
         default=0.0)
     afterglow_parser.add_argument(
         '--nu',
