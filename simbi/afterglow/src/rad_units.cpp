@@ -568,7 +568,7 @@ namespace sogbo_rad
                     const units::emissivity eps_m       = calc_emissivity(bfield, n_e_proper, p);                      // Emissivity per cell 
                     const units::spec_power power_prime = dvolume * eps_m * delta_doppler * delta_doppler;             // Total emitted power per unit frequency in each cell volume
                     
-                    const auto t_obs_day = t_obs.to(units::day);
+                    const auto t_obs_day = t_obs.to(units::day).value;
                     // loop through the given frequencies and put them in their respective locations in dictionary
                     for (int fidx = 0; fidx < nf; fidx++)
                     {
@@ -582,7 +582,7 @@ namespace sogbo_rad
                         {
                             const double t1 = tbin_edges[tidx + 0];
                             const double t2 = tbin_edges[tidx + 1];
-                            if ((t_obs_day.value - t1) <= (t2 - t1))
+                            if (t1 < t_obs_day && t_obs_day < t2)
                             {
                                 // the effective lifetime of the emitting cell must be accounted for
                                 const auto dt_day = dt.to(units::day);
