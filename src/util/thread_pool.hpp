@@ -6,6 +6,7 @@
 #include <queue>
 #include <future>
 #include <iostream>
+#include <atomic>
 
 namespace simbi {
     namespace pooling {
@@ -13,7 +14,7 @@ namespace simbi {
 		 * Practicing ThreadPooling based on these resources:
 		 * https://stackoverflow.com/a/32593825/13874039
 		 * https://www.cnblogs.com/sinkinben/p/16064857.html
-		 * https://gist.github.com/GarrettMooney/de30d476a9bc8df8045dde8d9d503d5e
+		 * https://gist.github.com/tonykero/9512f2fb7f47d1ee687ae8595b17666e
 		*/
 		class ThreadPool {
 			public:
@@ -21,47 +22,61 @@ namespace simbi {
 					static ThreadPool singleton(nthreads);
 					return singleton;
 				}
-				void QueueJob(const std::function<void()>& job) {
+				
+				void queueUp(const std::function<void()>& job) {
 					{
 						std::unique_lock<std::mutex> lock(queue_mutex);
-						jobs.emplace(job);
+						jobs.push(job);
 					}
-					mutex_condition.notify_one();
+					cv_task.notify_one();
 				}
 
 				template<typename index_type, typename F>
-				void parallel_for(const index_type start, const index_type stop, const F func) {
+				void parallel_for(const index_type start, const index_type stop, const F &func) {
 					static unsigned batch_size =  std::ceil((float)(stop - start) / (float)nthreads);
 					auto block_start = start - batch_size;
 					auto block_end   = start;
 					
-					static auto step = [&] {
+					auto step = [&] {
 						block_start += batch_size;
 						block_end   += batch_size;
 						block_end    = (block_end > stop) ? stop : block_end;
 					};
-
 					step();
-					for (auto worker = 0; worker < nthreads; worker++)
+
+					for (auto &worker: threads)
 					{
-						QueueJob([=] {
+						queueUp([block_start, block_end, func] {
 							for (auto q = block_start; q < block_end; q++) {
 								func(q);
 							}
 						});
 						step();
 					}
+
+					waitUntilFinished();
 				}
+
+				bool poolBusy() {
+					bool poolbusy;
+					{
+						std::unique_lock<std::mutex> lock(queue_mutex);
+						poolbusy = !jobs.empty();
+					}
+					return poolbusy;
+				};
 			private:
 				ThreadPool(const ThreadPool &) = delete;
 				ThreadPool &operator=(const ThreadPool &) = delete;
 
-				ThreadPool(const unsigned int nthreads) : nthreads(nthreads) {
+				ThreadPool(const unsigned int nthreads) : nthreads(nthreads), 
+				should_terminate(false), busy(0) {
 					threads.reserve(nthreads);
 					for (unsigned i = 0; i < nthreads; i++) {
-						threads.emplace_back(std::thread(&ThreadPool::ThreadLoop, this));
+						threads.emplace_back(std::thread(&ThreadPool::spawn_thread, this));
 					}
 				}
+
 				~ThreadPool() {
 					// Stop the thread pool and notify all threads ot finish the 
 					// remaining tasks
@@ -69,38 +84,58 @@ namespace simbi {
 						std::unique_lock<std::mutex> lock(queue_mutex);
 						should_terminate = true;
 					}
-					mutex_condition.notify_all();
+					cv_task.notify_all();
 					for (std::thread& active_thread : threads) {
 						active_thread.join();
 					}
 					threads.clear();
 				}
 
-				void ThreadLoop() {
+				// Check pool conditions based on the answer:
+				// https://stackoverflow.com/questions/23896421/efficiently-waiting-for-all-tasks-in-a-threadpool-to-finish
+				void spawn_thread() {
 					while (true) {
 						std::function<void()> job;
+						std::unique_lock<std::mutex> latch(queue_mutex);
+						cv_task.wait(latch, [this] {
+							return !jobs.empty() || should_terminate;
+						});
 						// pop a job from queue and execute it
 						{
-							std::unique_lock<std::mutex> lock(queue_mutex);
-							mutex_condition.wait(lock, [this] {
-								return !jobs.empty() || should_terminate;
-							});
 							if (should_terminate) {
 								return;
 							}
 
-							job = std::move(jobs.front());
+							// got work. set busy.
+							++busy;
+							job = jobs.front();
 							jobs.pop();
 						}
+						latch.unlock();
 						job();
+						latch.lock();
+						--busy;
+						cv_finished.notify_one();
 					}
 				}
+
+				// waits until the queue is empty.
+				void waitUntilFinished() {
+					while (poolBusy()) {
+						/* chill out */
+					}
+					// std::unique_lock<std::mutex> lock(queue_mutex);
+					// cv_finished.wait(lock, [this]{ return jobs.empty() && busy == 0; });
+				}
+
 				unsigned int nthreads;
-				bool should_terminate = false;           // Tells threads to stop looking for jobs
+				bool should_terminate;                   // Tells threads to stop looking for jobs
 				std::mutex queue_mutex;                  // Prevents data races to the job queue
-				std::condition_variable mutex_condition; // Allows threads to wait on new jobs or termination 
+				std::condition_variable cv_task; // Allows threads to wait on new jobs or termination 
+				std::condition_variable cv_finished;
 				std::vector<std::thread> threads;
 				std::queue<std::function<void()>> jobs;
+				unsigned int busy;
 		};
 
 		inline auto get_nthreads = ([] {
