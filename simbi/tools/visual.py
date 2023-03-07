@@ -1,10 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import sys
 import argparse
 import matplotlib.ticker as tkr
-from typing import Iterable
 from itertools import cycle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from . import utility as util
