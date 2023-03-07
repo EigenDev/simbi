@@ -124,10 +124,9 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
 // Adapt the cfl conditonal timestep
 void Newtonian1D::adapt_dt(){
     real min_dt = INFINITY;
-    // #pragma omp parallel 
     {
         // Compute the minimum timestep given cfl
-        #pragma omp parallel for schedule(static) reduction(min:min_dt)
+        // #pragma omp parallel for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++){
             const auto shift_i  = ii + idx_active;
             const real rho      = prims[shift_i].rho;
