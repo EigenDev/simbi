@@ -10,28 +10,58 @@
 namespace simbi {
     namespace pooling {
 		/**
-		 * Practicing ThreadPooling based on this answer:
+		 * Practicing ThreadPooling based on these resources:
 		 * https://stackoverflow.com/a/32593825/13874039
+		 * https://www.cnblogs.com/sinkinben/p/16064857.html
+		 * https://gist.github.com/GarrettMooney/de30d476a9bc8df8045dde8d9d503d5e
 		*/
 		class ThreadPool {
 			public:
-				ThreadPool(const ThreadPool &) = delete;
-				ThreadPool(ThreadPool &&) = delete;
-				ThreadPool &operator=(const ThreadPool &) = delete;
-				ThreadPool &operator=(ThreadPool &&) = delete;
-
-				ThreadPool(){
-
+				static ThreadPool & instance(const unsigned int nthreads){
+					static ThreadPool singleton(nthreads);
+					return singleton;
+				}
+				void QueueJob(const std::function<void()>& job) {
+					{
+						std::unique_lock<std::mutex> lock(queue_mutex);
+						jobs.emplace(job);
+					}
+					mutex_condition.notify_one();
 				}
 
+				template<typename index_type, typename F>
+				void parallel_for(const index_type start, const index_type stop, const F func) {
+					static unsigned batch_size =  std::ceil((float)(stop - start) / (float)nthreads);
+					auto block_start = start - batch_size;
+					auto block_end   = start;
+					
+					static auto step = [&] {
+						block_start += batch_size;
+						block_end   += batch_size;
+						block_end    = (block_end > stop) ? stop : block_end;
+					};
+
+					step();
+					for (auto worker = 0; worker < nthreads; worker++)
+					{
+						QueueJob([=] {
+							for (auto q = block_start; q < block_end; q++) {
+								func(q);
+							}
+						});
+						step();
+					}
+				}
+			private:
+				ThreadPool(const ThreadPool &) = delete;
+				ThreadPool &operator=(const ThreadPool &) = delete;
+
 				ThreadPool(const unsigned int nthreads) : nthreads(nthreads) {
-                    std::cout << "ctor called" << "\n";
 					threads.reserve(nthreads);
 					for (unsigned i = 0; i < nthreads; i++) {
 						threads.emplace_back(std::thread(&ThreadPool::ThreadLoop, this));
 					}
 				}
-
 				~ThreadPool() {
 					// Stop the thread pool and notify all threads ot finish the 
 					// remaining tasks
@@ -46,57 +76,6 @@ namespace simbi {
 					threads.clear();
 				}
 
-				void QueueJob(const std::function<void()>& job) {
-					{
-						std::unique_lock<std::mutex> lock(queue_mutex);
-						jobs.push(job);
-					}
-					mutex_condition.notify_one();
-				}
-
-				template<typename index_type, typename F>
-				void parallel_for(const index_type start, const index_type stop, const F func) {
-					static unsigned batch_size =  std::ceil((float)(stop - start) / (float)nthreads);
-					auto block_start = start - batch_size;
-					auto block_end   = start;
-					
-					auto step = [&] {
-						block_start += batch_size;
-						block_end   += batch_size;
-						block_end    = (block_end > stop) ? stop : block_end;
-					};
-
-					step();
-					for (auto &worker : threads)
-					{
-						QueueJob([=] {
-							for (auto q = block_start; q < block_end; q++) {
-								func(q);
-							}
-						});
-						step();
-					}
-				}
-
-				bool busy() {
-					bool poolbusy;
-					{
-						std::unique_lock<std::mutex> lock(queue_mutex);
-						poolbusy = !jobs.empty();
-					}
-					return poolbusy;
-				}
-
-				void set_threads(const unsigned int nthreads) {
-					this->nthreads = nthreads; 
-					std::cout << "ctor called" << "\n";
-					threads.reserve(nthreads);
-					for (unsigned i = 0; i < nthreads; i++) {
-						threads.emplace_back(std::thread(&ThreadPool::ThreadLoop, this));
-					}
-				}
-
-			private:
 				void ThreadLoop() {
 					while (true) {
 						std::function<void()> job;
@@ -136,5 +115,5 @@ namespace simbi {
 	}// namespace pooling
 } // namespace simbi
 
-extern simbi::pooling::ThreadPool thread_pool;
+static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
 #endif 
