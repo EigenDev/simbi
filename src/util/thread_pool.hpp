@@ -15,6 +15,7 @@ namespace simbi {
 		 * https://stackoverflow.com/a/32593825/13874039
 		 * https://www.cnblogs.com/sinkinben/p/16064857.html
 		 * https://gist.github.com/tonykero/9512f2fb7f47d1ee687ae8595b17666e
+		 * https://stackoverflow.com/questions/23896421/efficiently-waiting-for-all-tasks-in-a-threadpool-to-finish
 		*/
 		class ThreadPool {
 			public:
@@ -91,9 +92,7 @@ namespace simbi {
 					threads.clear();
 				}
 
-				// Check pool conditions based on the answer:
-				// https://stackoverflow.com/questions/23896421/efficiently-waiting-for-all-tasks-in-a-threadpool-to-finish
-				void spawn_thread() {
+				void spawn_thread_proc() {
 					while (true) {
 						std::function<void()> job;
 						std::unique_lock<std::mutex> latch(queue_mutex);
@@ -116,6 +115,28 @@ namespace simbi {
 						latch.lock();
 						--busy;
 						cv_finished.notify_one();
+					}
+				}
+
+				void spawn_thread() {
+					while (true) {
+						std::function<void()> job;
+						// pop a job from queue and execute it
+						{
+							std::unique_lock<std::mutex> latch(queue_mutex);
+							cv_task.wait(latch, [this] {
+								return !jobs.empty() || should_terminate;
+							});
+							if (should_terminate) {
+								return;
+							}
+
+							// got work. set busy.
+							++busy;
+							job = jobs.front();
+							jobs.pop();
+						}
+						job();
 					}
 				}
 
