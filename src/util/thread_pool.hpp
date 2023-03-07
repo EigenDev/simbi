@@ -131,9 +131,7 @@ namespace simbi {
 								return;
 							}
 
-							// got work. set busy.
-							++busy;
-							job = jobs.front();
+							job = std::move(jobs.front());
 							jobs.pop();
 						}
 						job();
