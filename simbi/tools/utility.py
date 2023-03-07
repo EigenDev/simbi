@@ -6,7 +6,10 @@ import numpy as np
 import argparse 
 import matplotlib.pyplot as plt 
 import os
-from typing import Union
+from typing import Union, Any, Callable, Optional
+from numpy.typing import NDArray 
+from numpy import int64 as numpy_int, float64 as numpy_float, cast
+from ..detail.helpers import find_nearest
 
 # FONT SIZES
 SMALL_SIZE   = 6
@@ -32,17 +35,17 @@ rho_scale_bmk = 1.0 * const.m_p.cgs / units.cm**3
 ell_scale     = (e_scale_bmk / rho_scale_bmk / const.c.cgs**2)**(1/3)
 t_scale       = const.c.cgs * ell_scale
 
-def calc_enthalpy(fields: dict) -> np.ndarray:
+def calc_enthalpy(fields: dict[str, NDArray[numpy_float]]) -> Any:
     return 1.0 + fields['p']*fields['ad_gamma'] / (fields['rho'] * (fields['ad_gamma'] - 1.0))
     
-def calc_lorentz_gamma(fields: dict) -> np.ndarray:
+def calc_lorentz_gamma(fields: dict[str, NDArray[numpy_float]]) -> Any:
     return (1.0 + fields['gamma_beta']**2)**0.5
 
-def calc_beta(fields: dict) -> np.ndarray:
+def calc_beta(fields: dict[str, NDArray[numpy_float]]) -> Any:
     W = calc_lorentz_gamma(fields)
     return (1.0 - 1.0 / W**2)**0.5
 
-def get_field_str(args: argparse.ArgumentParser) -> str:
+def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
     field_str_list = []
     for field in args.fields:
         if field == 'rho' or field == 'D':
@@ -99,16 +102,16 @@ def get_field_str(args: argparse.ArgumentParser) -> str:
 
     return field_str_list if len(args.fields) > 1 else field_str_list[0]
 
-def unpad(arr, pad_width):
+def unpad(arr: NDArray[numpy_float], pad_width: tuple[tuple[Any, ...], ...]) -> Any:
     slices = []
     for c in pad_width:
         e = None if c[1] == 0 else -c[1]
         slices.append(slice(c[0], e))
     return arr[tuple(slices)]
 
-def flatten_fully(x):
+def flatten_fully(x: NDArray[numpy_float]) -> Any:
     if any(dim == 1 for dim in x.shape):
-        x = np.vstack(x)
+        x = np.vstack(x) #type: ignore
         if len(x.shape) == 2 and x.shape[0] == 1:
             return x.flatten()
         return flatten_fully(x)
@@ -117,7 +120,7 @@ def flatten_fully(x):
     
 def get_dimensionality(files: list[str]) -> int:
     dims = []
-    all_equal = lambda x: x.count(x[0]) == len(x)
+    all_equal: Callable[[list[int]], bool] = lambda x: x.count(x[0]) == len(x)
     if isinstance(files, dict):
         import itertools
         files = list(itertools.chain(*files.values()))
@@ -126,11 +129,10 @@ def get_dimensionality(files: list[str]) -> int:
         with h5py.File(file, 'r') as hf:
             ds  = hf.get('sim_info')
             try:
-                ndim = ds.attrs['dimensions']
+                ndim: int = ds.attrs['dimensions']
             except KeyError:
-                nx  = ds.attrs['nx'] or 1
-                ny  = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
-                nz  = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1  
+                ny   = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
+                nz   = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1  
                 ndim = 1 + (ny > 1) + (nz > 1)
             dims += [ndim]
             if not all_equal(dims):
@@ -139,8 +141,13 @@ def get_dimensionality(files: list[str]) -> int:
     return ndim
     
             
-def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[dict,dict,dict]:
-    def try_read(dset: dict, key: str, *, fall_back_key: str = 'None', fall_back = None):
+def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[str, Any], dict[str, Any],dict[str, Any]]:
+    rho: Any 
+    v: Any 
+    p: Any 
+    chi: Any 
+    
+    def try_read(dset: Union[h5py.AttributeManager, h5py.File], key: str, *, fall_back_key: str = 'None', fall_back: Any = None) -> Any:
         if isinstance(dset, h5py.File):
             try:
                 res = dset.get(key)[:]
@@ -224,16 +231,17 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
         fields['chi']          = chi
         fields['ad_gamma']     = setup['ad_gamma']
         
-        vsqr = np.sum(vel * vel for vel in v)
+        vsqr = np.sum(vel * vel for vel in v) # type: ignore
         W    = 1/np.sqrt(1.0 - vsqr) if setup['regime'] == 'relativistic' else 1
         fields['gamma_beta']   = np.sqrt(vsqr) * W 
 
         #------------------------
         # Generate Mesh
         #------------------------
+        arr_gen: Union[Callable[..., Any], Callable[..., Any]]
         arr_gen = np.linspace if setup['linspace'] else np.geomspace
         funcs  = [arr_gen, np.linspace, np.linspace]
-        mesh = {
+        mesh = { 
             f'x{i+1}': 
                 try_read(hf, f'x{i+1}',
                     fall_back=funcs[i](
@@ -249,7 +257,7 @@ def read_file(args: argparse.ArgumentParser, filename: str, ndim: int) -> tuple[
     
     return fields, setup, mesh 
 
-def prims2var(fields: dict, var: str) -> np.ndarray:
+def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
     h = calc_enthalpy(fields)
     W = calc_lorentz_gamma(fields)
     if var == 'D':
@@ -297,7 +305,7 @@ def prims2var(fields: dict, var: str) -> np.ndarray:
     elif var == 'u':
         return fields['gamma_beta']
 
-def get_colors(interval: np.ndarray, cmap: plt.cm, vmin: float = None, vmax: float = None):
+def get_colors(interval: NDArray[numpy_float], cmap: plt.cm, vmin: Optional[float] = None, vmax: Optional[float] = None) -> plt.cm:
     """
     Return array of rgba colors for a given matplotlib colormap
     
@@ -312,24 +320,21 @@ def get_colors(interval: np.ndarray, cmap: plt.cm, vmin: float = None, vmax: flo
     -------------------------
     arr: the colormap array generate by the user conditions
     """
-    norm = plt.Normalize(vmin, vmax)
+    plt.Normalize(vmin, vmax)
     return cmap(interval)
     
-def fill_below_intersec(x: np.ndarray, y: np.ndarray, constraint: float, color: float) -> None:
-    ind = find_nearest(y, constraint)[0]
+def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constraint: float, color: float) -> None:
+    ind: int = find_nearest(y, constraint)[0]
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
     
-def get_file_list(inputs: str) -> list:
-    files = []
-    file_dict = {}
+def get_file_list(inputs: str) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
+    files: list[str] = []
+    file_dict: dict[int, list[str]] = {}
     dircount  = 0
     multidir = False
     for idx, obj in enumerate(inputs):
-        #check if path is a file
-        isFile = os.path.isfile(obj)
-
         #check if path is a directory
-        isDirectory = os.path.isdir(obj)
+        isDirectory: bool = os.path.isdir(obj)
         
         if isDirectory:
             file_path = os.path.join(obj, '')
@@ -350,5 +355,5 @@ def get_file_list(inputs: str) -> list:
         files.sort(key=len, reverse=False)
         return files, len(files)
     else:
-        [file_dict[key].sort(key=len, reverse=False) for key in file_dict.keys()]
+        any(file_dict[key].sort(key=len, reverse=False) for key in file_dict.keys())
         return file_dict, isDirectory
