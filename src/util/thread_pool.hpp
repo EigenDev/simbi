@@ -66,7 +66,7 @@ namespace simbi {
 					bool poolbusy;
 					{
 						std::unique_lock<std::mutex> lock(queue_mutex);
-						poolbusy = !jobs.empty();
+						poolbusy = !(jobs.empty() && busy == 0);
 					}
 					return poolbusy;
 				};
