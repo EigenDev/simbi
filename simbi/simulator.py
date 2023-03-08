@@ -594,6 +594,12 @@ class Hydro:
                 f"The data directory provided does not exist. Creating the {data_directory} directory now!",
                 flush=True)
 
+        if compute_mode == 'cpu':
+            if 'USE_OMP' in os.environ:
+                logger.info("Using OpenMP multithreading")
+            else:
+                logger.info("Using STL std::thread multithreading")
+                
         # Loading bar to have chance to check params
         helpers.print_progress()
 
@@ -606,6 +612,7 @@ class Hydro:
             f"Computing {'First' if first_order else 'Second'} Order Solution...",
             flush=True)
         kwargs: dict[str, Any] = {}
+            
         if self.dimensionality == 1:
             sources = np.zeros(3) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
