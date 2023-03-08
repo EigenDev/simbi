@@ -54,7 +54,7 @@ incdir_numpy = run_command(py3,
 ).stdout().strip()
 all_inc       = include_directories(incdir_numpy, 'src')
 linker_args   = []
-cpp_comp_args = ['-std=c++17', '-march=native', '-O3', '-fopenmp', '-flto=auto']
+cpp_comp_args = ['-std=c++20', '-march=native', '-O3', '-fopenmp', '-flto=auto']
 depends       = [py3_dep, hdf5, omp]
 gpu_depends   = []
 gpu_linkers   = []
