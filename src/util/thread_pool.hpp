@@ -9,6 +9,11 @@
 
 namespace simbi {
     namespace pooling {
+		#if __cplusplus > 202002L
+		using std_thread = std::jthread;
+		#else
+		using std_thread = std::thread;
+		#endif 
 		/**
 		 * Practicing ThreadPooling based on these resources:
 		 * https://stackoverflow.com/a/32593825/13874039
@@ -73,7 +78,7 @@ namespace simbi {
 				should_terminate(false), busy(0) {
 					threads.reserve(nthreads);
 					for (unsigned i = 0; i < nthreads; i++) {
-						threads.emplace_back(std::thread(&ThreadPool::spawn_thread_proc, this));
+						threads.emplace_back(std_thread(&ThreadPool::spawn_thread_proc, this));
 					}
 				}
 
@@ -85,9 +90,11 @@ namespace simbi {
 						should_terminate = true;
 					}
 					cv_task.notify_all();
-					for (std::thread& active_thread : threads) {
+					#if __cpluspluc < 202002L
+					for (std_thread& active_thread : threads) {
 						active_thread.join();
 					}
+					#endif 
 					threads.clear();
 				}
 
@@ -106,7 +113,7 @@ namespace simbi {
 
 							// got work. set busy.
 							++busy;
-							job = jobs.front();
+							job = std::move(jobs.front());
 							jobs.pop();
 						}
 						latch.unlock();
@@ -142,8 +149,8 @@ namespace simbi {
 					// while (poolBusy()) {
 					// 	/* chill out */
 					// }
-					std::unique_lock<std::mutex> lock(queue_mutex);
-					cv_finished.wait(lock, [this]{ return jobs.empty() && busy == 0; });
+					std::unique_lock<std::mutex> latch(queue_mutex);
+					cv_finished.wait(latch, [this]{ return jobs.empty() && busy == 0; });
 				}
 
 				unsigned int nthreads;
@@ -151,7 +158,7 @@ namespace simbi {
 				std::mutex queue_mutex;                  // Prevents data races to the job queue
 				std::condition_variable cv_task; // Allows threads to wait on new jobs or termination 
 				std::condition_variable cv_finished;
-				std::vector<std::thread> threads;
+				std::vector<std_thread> threads;
 				std::queue<std::function<void()>> jobs;
 				unsigned int busy;
 		};
@@ -163,7 +170,7 @@ namespace simbi {
 			if(const char* thread_env = std::getenv("OMP_NUM_THREADS"))
 				return static_cast<unsigned int>(std::stoul(std::string(thread_env)));
 
-			return std::thread::hardware_concurrency();
+			return std_thread::hardware_concurrency();
 		});
 
 		template<typename T>
