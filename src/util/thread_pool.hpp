@@ -6,7 +6,6 @@
 #include <queue>
 #include <future>
 #include <iostream>
-#include <atomic>
 
 namespace simbi {
     namespace pooling {
@@ -169,5 +168,5 @@ namespace simbi {
 	}// namespace pooling
 } // namespace simbi
 
-static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
+// static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
 #endif 
