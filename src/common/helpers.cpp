@@ -12,7 +12,7 @@ namespace simbi
 {
     namespace helpers
     {
-        // Flag that detects whether prgram was terminated by external forces
+        // Flag that detects whether program was terminated by external forces
         std::atomic<bool> killsig_received = false;
         
         InterruptException::InterruptException(int s)

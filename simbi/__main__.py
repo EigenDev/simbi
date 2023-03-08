@@ -60,10 +60,11 @@ def parse_module_arguments():
         # exit_on_error=False
     )
     parser.add_argument(
-        '--version',
-        '-V',
-        help='print current version of simbi module',
-        action=print_the_version)
+        '--omp',
+        action=argparse.BooleanOptionalAction,
+        help='set flag if wanting to use openMP multithreading',
+        default=False
+    )
     subparsers = parser.add_subparsers(
         dest='command'
     )
@@ -256,6 +257,14 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         default=[],
         type=int,
         nargs='+')
+    global_args.add_argument(
+        '--omp',
+        help='flag for using openMP multithreading instead of native',
+        default=False,
+        action=argparse.BooleanOptionalAction,
+    )
+
+
     return parser, parser.parse_known_args(
         args=None if sys.argv[2:] else ['run', '--help'])
 
@@ -371,6 +380,10 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
         args.setup_script, parser, argv, args.type_check)
     if args.nthreads:
         os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
+        os.environ['NTHREADS']        = f'{args.nthreads}'
+        
+    if args.omp:
+        os.environ['USE_OMP'] = "1"
 
     run_parser = get_subparser(parser, 0)
     sim_actions = [

@@ -85,6 +85,9 @@ namespace simbi
                 std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx 
                           << ", " << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
             }
+            if (char * omp_set = std::getenv("USE_OMP")) {
+                use_omp = true;
+            }
         }
 
         HydroBase(
@@ -115,6 +118,9 @@ namespace simbi
             if constexpr(BuildPlatform == Platform::GPU) {
                 std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx << ", " 
                 << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
+            }
+            if (char * omp_set = std::getenv("USE_OMP")) {
+                use_omp = true;
             }
         }
 
@@ -151,6 +157,10 @@ namespace simbi
                 std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx << ", "
                  << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
             }
+            if (char * omp_set = std::getenv("USE_OMP")) {
+                use_omp = true;
+            }
+            
         }
     };
     

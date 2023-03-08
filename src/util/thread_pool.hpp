@@ -165,8 +165,25 @@ namespace simbi {
 
 			return std::thread::hardware_concurrency();
 		});
+
+		template<typename T>
+		T fetch_minimum( std::atomic<T>& a,  T val ) {
+			T old = a;
+			while( old > val && !a.compare_exchange_weak(old, val) )
+				{ }
+			return old;
+		}
+
+		template<typename T>
+		void update_minimum(std::atomic<T>& minimum_value, T const& value) noexcept
+		{
+			T prev_value = minimum_value;
+			while(prev_value > value &&
+					!minimum_value.compare_exchange_weak(prev_value, value))
+				{}
+		}
 	}// namespace pooling
 } // namespace simbi
 
-// static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
+static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
 #endif 

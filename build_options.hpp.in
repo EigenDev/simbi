@@ -11,6 +11,10 @@
 #include <string>        // std::string 
 #include <stdint.h>      // int_type, uint64_t, int64_t
 #include <cstdlib>       // std::getenv
+#include <atomic>
+
+// Flag that detects whether program is run using openmp
+inline bool use_omp = false;
 
 using luint = uint64_t;
 using lint  = int64_t;

@@ -388,19 +388,18 @@ Eigenvals SRHD::calc_eigenvals(
 template<TIMESTEP_TYPE dt_type>
 void SRHD::adapt_dt()
 {   
-    real min_dt = INFINITY;
-    #pragma omp parallel 
-    {   
-        real vPlus, vMinus;
+    if (use_omp) {
+        real min_dt = INFINITY;
         // Compute the minimum timestep given cfl
-        #pragma omp for schedule(static) reduction(min:min_dt)
-        for (luint ii = 0; ii < active_zones; ii++)
-        {
-            const real rho    = prims[ii + idx_active].rho;
-            const real p      = prims[ii + idx_active].p;
-            const real v      = prims[ii + idx_active].v;
-            const real h      = 1 + gamma * p / (rho * (gamma - 1));
-            const real cs     = std::sqrt(gamma * p / (rho * h));
+        #pragma omp parallel for schedule(static) reduction(min:min_dt)
+        for (luint ii = 0; ii < active_zones; ii++){
+            real vPlus, vMinus;
+
+            const auto shift_i  = ii + idx_active;
+            const real rho      = prims[shift_i].rho;
+            const real v        = prims[shift_i].v;
+            const real pre      = prims[shift_i].p;
+            const real cs       = std::sqrt(gamma * pre/rho);
             if constexpr(dt_type == simbi::TIMESTEP_TYPE::ADAPTIVE) {
                 vPlus  = (v + cs) / (1 + v * cs);
                 vMinus = (v - cs) / (1 - v * cs);
@@ -408,18 +407,44 @@ void SRHD::adapt_dt()
                 vPlus  = 1;
                 vMinus = 1;
             }
-            
 
-            const real x1l    = get_xface(ii, geometry, 0);
-            const real x1r    = get_xface(ii, geometry, 1);
-            const real dx1    = x1r - x1l;
-            const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
-            const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
-            const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPlus - vfaceR), std::abs(vMinus - vfaceL)));
-            min_dt = min_dt < cfl_dt ? min_dt : cfl_dt;
+            const real x1l      = get_xface(ii, geometry, 0);
+            const real x1r      = get_xface(ii, geometry, 1);
+            const real dx1      = x1r - x1l;
+            const real vfaceL   = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
+            const real vfaceR   = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
+            const real cfl_dt   = dx1 / (helpers::my_max(std::abs(vPlus - vfaceR), std::abs(vMinus - vfaceL)));
+            min_dt              = std::min(min_dt, cfl_dt);
         }
-    }   
-    dt = cfl * min_dt;
+        dt = cfl * min_dt;
+    } else {
+        std::atomic<real> min_dt = INFINITY;
+        thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&](int ii) {
+            real vPlus, vMinus;
+
+            const auto shift_i  = ii + idx_active;
+            const real rho      = prims[shift_i].rho;
+            const real v        = prims[shift_i].v;
+            const real pre      = prims[shift_i].p;
+            const real cs       = std::sqrt(gamma * pre/rho);
+
+            if constexpr(dt_type == simbi::TIMESTEP_TYPE::ADAPTIVE) {
+                vPlus  = (v + cs) / (1 + v * cs);
+                vMinus = (v - cs) / (1 - v * cs);
+            } else {
+                vPlus  = 1;
+                vMinus = 1;
+            }
+            const real x1l      = get_xface(ii, geometry, 0);
+            const real x1r      = get_xface(ii, geometry, 1);
+            const real dx1      = x1r - x1l;
+            const real vfaceL   = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
+            const real vfaceR   = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
+            const real cfl_dt   = dx1 / (helpers::my_max(std::abs(vPlus - vfaceR), std::abs(vMinus - vfaceL)));
+            pooling::update_minimum(min_dt, cfl_dt);
+        });
+        dt = cfl * min_dt;
+    }
 };
 
 template<TIMESTEP_TYPE dt_type>

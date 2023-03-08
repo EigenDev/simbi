@@ -123,8 +123,8 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
 
 // Adapt the cfl conditonal timestep
 void Newtonian1D::adapt_dt(){
-    real min_dt = INFINITY;
-    {
+    if (use_omp) {
+        real min_dt = INFINITY;
         // Compute the minimum timestep given cfl
         #pragma omp parallel for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++){
@@ -143,9 +143,27 @@ void Newtonian1D::adapt_dt(){
             const real cfl_dt   = dx1 / (helpers::my_max(std::abs(vPLus - vfaceR), std::abs(vMinus - vfaceL)));
             min_dt              = std::min(min_dt, cfl_dt);
         }
+        dt = cfl * min_dt;
+    } else {
+        std::atomic<real> min_dt = INFINITY;
+        thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&](int ii) {
+            const auto shift_i  = ii + idx_active;
+            const real rho      = prims[shift_i].rho;
+            const real v        = prims[shift_i].v;
+            const real pre      = prims[shift_i].p;
+            const real cs       = std::sqrt(gamma * pre/rho);
+            const real vPLus    = v + cs;
+            const real vMinus   = v - cs;
+            const real x1l      = get_xface(ii, geometry, 0);
+            const real x1r      = get_xface(ii, geometry, 1);
+            const real dx1      = x1r - x1l;
+            const real vfaceL   = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
+            const real vfaceR   = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
+            const real cfl_dt   = dx1 / (helpers::my_max(std::abs(vPLus - vfaceR), std::abs(vMinus - vfaceL)));
+            pooling::update_minimum(min_dt, cfl_dt);
+        });
+        dt = cfl * min_dt;
     }
-
-    dt = cfl * min_dt;
 };
 
 void Newtonian1D::adapt_dt(luint blockSize, luint tblock)

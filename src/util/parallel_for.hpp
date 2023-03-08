@@ -4,6 +4,7 @@
 #include "util/launch.hpp"
 #include "util/range.hpp"
 #include "device_api.hpp"
+#include "thread_pool.hpp"
 
 namespace simbi 
 {
@@ -19,9 +20,12 @@ namespace simbi
 			#if GPU_CODE
 				for (auto idx : range(first, last, globalThreadCount()))  function(idx);
 			#else	
-				// thread_pool.parallel_for(first, last, function);
-				#pragma omp parallel for schedule(static) 
-				for(auto idx = first; idx < last; idx++) function(idx);
+				if (use_omp) {
+					#pragma omp parallel for schedule(static) 
+					for(auto idx = first; idx < last; idx++) function(idx);
+				} else {
+					thread_pool.parallel_for(first, last, function);
+				}
 			#endif
 			
 		});
