@@ -6,7 +6,7 @@ class SimbiFormatter(logging.Formatter):
 
     FORMATS = {
         logging.DEBUG:    bcolors.UNDERLINE  + format_txt + bcolors.ENDC,
-        logging.INFO:     bcolors.LIGHT_BLUE + format_txt + bcolors.ENDC,
+        logging.INFO:     bcolors.LIGHT_CYAN + format_txt + bcolors.ENDC,
         logging.WARNING:  bcolors.WARNING    + format_txt + bcolors.ENDC,
         logging.ERROR:    bcolors.FAIL       + format_txt + bcolors.ENDC,
         logging.CRITICAL: bcolors.BOLD       + format_txt + bcolors.ENDC,
