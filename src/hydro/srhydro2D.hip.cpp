@@ -278,7 +278,8 @@ void SRHD2D::adapt_dt()
             const auto v1       = prims[aid].v1;
             const auto v2       = prims[aid].v2;
             const auto pressure = prims[aid].p;
-            const auto cs       = std::sqrt(gamma * pressure / rho );
+            const auto h        = 1.0 + gamma * pressure / (rho * (gamma - 1.0));
+            const auto cs       = std::sqrt(gamma * pressure / (rho * h) );
 
             //================ Plus / Minus Wave speed components -================
             if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
@@ -292,13 +293,12 @@ void SRHD2D::adapt_dt()
                 v2p = 1;
                 v2m = 1;
             }
-
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
                     {
                         if (mesh_motion) {
-                            v1p = std::abs(v1p  - hubble_param);
+                            v1p = std::abs(v1p - hubble_param);
                             v1m = std::abs(v1m - hubble_param);
                         }
                         cfl_dt = helpers::my_min(dx1 / (helpers::my_max(v1p, v1m)), dx2 / (helpers::my_max(v2p, v2m)));
@@ -351,12 +351,11 @@ void SRHD2D::adapt_dt()
                         const real x1l    = get_x1face(ii, geometry, 0);
                         const real x1r    = get_x1face(ii, geometry, 1);
                         const real dr     = x1r - x1l;
-                        const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
                         if (mesh_motion)
                         {
-                            const real vfaceL   = x1l * hubble_param;
-                            const real vfaceR   = x1r * hubble_param;
-                            v1p = std::abs(v1p  - vfaceR);
+                            const real vfaceL   = hubble_param;
+                            const real vfaceR   = hubble_param;
+                            v1p = std::abs(v1p - vfaceR);
                             v1m = std::abs(v1m - vfaceL);
                         }
                         cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
