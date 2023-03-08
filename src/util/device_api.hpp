@@ -1,13 +1,9 @@
 #ifndef DEVICE_API_HPP
-#define DEVOCE_API_HPP
-
-
-#ifndef DEVICE_API_HPP
 #define DEVICE_API_HPP
 
 #include "build_options.hpp"
 #include <stdexcept>
-#define NAME_OF(variable) ((decltype(&variable))nullptr, #variable)
+#include <thread>
 
 namespace simbi
 {   
@@ -196,7 +192,7 @@ namespace simbi
             if (use_omp) {
                 return omp_get_thread_num();
             } else {
-                return 1;
+                return 1; //std::hash<std::thread::id>{}(std::this_thread::get_id());
             }
         }
     }
@@ -209,8 +205,5 @@ namespace simbi
     #endif
     }
 } // namespace simbi
-
-#endif
-
 
 #endif
