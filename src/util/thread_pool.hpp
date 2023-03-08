@@ -73,7 +73,7 @@ namespace simbi {
 				should_terminate(false), busy(0) {
 					threads.reserve(nthreads);
 					for (unsigned i = 0; i < nthreads; i++) {
-						threads.emplace_back(std::thread(&ThreadPool::spawn_thread, this));
+						threads.emplace_back(std::thread(&ThreadPool::spawn_thread_proc, this));
 					}
 				}
 
@@ -129,7 +129,7 @@ namespace simbi {
 							if (should_terminate) {
 								return;
 							}
-
+				
 							job = std::move(jobs.front());
 							jobs.pop();
 						}
@@ -139,11 +139,11 @@ namespace simbi {
 
 				// waits until the queue is empty.
 				void waitUntilFinished() {
-					while (poolBusy()) {
-						/* chill out */
-					}
-					// std::unique_lock<std::mutex> lock(queue_mutex);
-					// cv_finished.wait(lock, [this]{ return jobs.empty() && busy == 0; });
+					// while (poolBusy()) {
+					// 	/* chill out */
+					// }
+					std::unique_lock<std::mutex> lock(queue_mutex);
+					cv_finished.wait(lock, [this]{ return jobs.empty() && busy == 0; });
 				}
 
 				unsigned int nthreads;
@@ -175,12 +175,11 @@ namespace simbi {
 		}
 
 		template<typename T>
-		void update_minimum(std::atomic<T>& minimum_value, T const& value) noexcept
+		void update_minimum(std::atomic<T>& a, T const& value) noexcept
 		{
-			T prev_value = minimum_value;
-			while(prev_value > value &&
-					!minimum_value.compare_exchange_weak(prev_value, value))
-				{}
+			T old = a;
+			while(old > value && !a.compare_exchange_weak(old, value))
+				{ }
 		}
 	}// namespace pooling
 } // namespace simbi

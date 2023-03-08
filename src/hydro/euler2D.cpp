@@ -1047,8 +1047,6 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         t_interval += chkpt_interval;
     }
     
-    std::cout << dt << "\n";
-    std::cin.get();
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&](){
         advance(activeP, bx, by);
