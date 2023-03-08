@@ -158,113 +158,215 @@ Conserved SRHD2D::prims2cons(const Primitive &prims) const
 template<TIMESTEP_TYPE dt_type>
 void SRHD2D::adapt_dt()
 {
-    real min_dt = INFINITY;
-    #pragma omp parallel 
-    {
-        real v1p, v1m, v2p, v2m, cfl_dt;
-        // Compute the minimum timestep given cfl
-        for (luint jj = 0; jj < yphysical_grid; jj++)
+    if (use_omp) {
+        real min_dt = INFINITY;
+        #pragma omp parallel 
         {
-            const auto shift_j = jj + idx_active;
-            #pragma omp for reduction(min:min_dt)
-            for (luint ii = 0; ii < xphysical_grid; ii++)
+            real v1p, v1m, v2p, v2m, cfl_dt;
+            // Compute the minimum timestep given cfl
+            for (luint jj = 0; jj < yphysical_grid; jj++)
             {
-                const auto shift_i  = ii + idx_active;
-                const auto aid      = shift_i + nx * shift_j;
-                const auto rho      = prims[aid].rho;
-                const auto v1       = prims[aid].v1;
-                const auto v2       = prims[aid].v2;
-                const auto pressure = prims[aid].p;
-                const auto h        = 1.0 + gamma * pressure / (rho * (gamma - 1.0));
-                const auto cs       = std::sqrt(gamma * pressure / (rho * h));
-
-                //================ Plus / Minus Wave speed components -================
-
-                if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                    v1p = std::abs(v1 + cs) / (1.0 + v1 * cs);
-                    v2p = std::abs(v2 + cs) / (1.0 + v2 * cs);
-                    v1m = std::abs(v1 - cs) / (1.0 - v1 * cs);
-                    v2m = std::abs(v2 - cs) / (1.0 - v2 * cs);
-                } else {
-                    v1p = 1;
-                    v1m = 1;
-                    v2p = 1;
-                    v2m = 1;
-                }
-                switch (geometry)
+                const auto shift_j = jj + idx_active;
+                #pragma omp for reduction(min:min_dt)
+                for (luint ii = 0; ii < xphysical_grid; ii++)
                 {
-                    case simbi::Geometry::CARTESIAN:
-                        {
-                            if (mesh_motion) {
-                                v1p = std::abs(v1p - hubble_param);
-                                v1m = std::abs(v1m - hubble_param);
-                            }
-                            cfl_dt = helpers::my_min(dx1 / (helpers::my_max(v1p, v1m)), dx2 / (helpers::my_max(v2p, v2m)));
-                            break;
-                        }
-                    case simbi::Geometry::SPHERICAL:
-                        {
-                            const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                            const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                            const real dtheta = tr - tl;
-                            const real x1l    = get_x1face(ii, geometry, 0);
-                            const real x1r    = get_x1face(ii, geometry, 1);
-                            const real dr     = x1r - x1l;
-                            const real rmean  = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
-                            if (mesh_motion)
-                            {
-                                const real vfaceL   = x1l * hubble_param;
-                                const real vfaceR   = x1r * hubble_param;
-                                v1p = std::abs(v1p - vfaceR);
-                                v1m = std::abs(v1m - vfaceL);
-                            }
-                            cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
-                            break;
-                        }
+                    const auto shift_i  = ii + idx_active;
+                    const auto aid      = shift_i + nx * shift_j;
+                    const auto rho      = prims[aid].rho;
+                    const auto v1       = prims[aid].v1;
+                    const auto v2       = prims[aid].v2;
+                    const auto pressure = prims[aid].p;
+                    const auto h        = 1.0 + gamma * pressure / (rho * (gamma - 1.0));
+                    const auto cs       = std::sqrt(gamma * pressure / (rho * h));
 
-                    case simbi::Geometry::PLANAR_CYLINDRICAL:
-                        {
-                            const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                            const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                            const real dtheta = tr - tl;
-                            const real x1l    = get_x1face(ii, geometry, 0);
-                            const real x1r    = get_x1face(ii, geometry, 1);
-                            const real dr     = x1r - x1l;
-                            const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
-                            if (mesh_motion)
+                    //================ Plus / Minus Wave speed components -================
+
+                    if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                        v1p = std::abs(v1 + cs) / (1.0 + v1 * cs);
+                        v2p = std::abs(v2 + cs) / (1.0 + v2 * cs);
+                        v1m = std::abs(v1 - cs) / (1.0 - v1 * cs);
+                        v2m = std::abs(v2 - cs) / (1.0 - v2 * cs);
+                    } else {
+                        v1p = 1;
+                        v1m = 1;
+                        v2p = 1;
+                        v2m = 1;
+                    }
+                    switch (geometry)
+                    {
+                        case simbi::Geometry::CARTESIAN:
                             {
-                                const real vfaceL   = x1l * hubble_param;
-                                const real vfaceR   = x1r * hubble_param;
-                                v1p = std::abs(v1p - vfaceR);
-                                v1m = std::abs(v1m - vfaceL);
+                                if (mesh_motion) {
+                                    v1p = std::abs(v1p - hubble_param);
+                                    v1m = std::abs(v1m - hubble_param);
+                                }
+                                cfl_dt = helpers::my_min(dx1 / (helpers::my_max(v1p, v1m)), dx2 / (helpers::my_max(v2p, v2m)));
+                                break;
                             }
-                            cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
-                            break;
-                        }
-                    case simbi::Geometry::AXIS_CYLINDRICAL:
-                        {
-                            const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                            const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                            const real dz     = zr - zl;
-                            const real x1l    = get_x1face(ii, geometry, 0);
-                            const real x1r    = get_x1face(ii, geometry, 1);
-                            const real dr     = x1r - x1l;
-                            if (mesh_motion)
+                        case simbi::Geometry::SPHERICAL:
                             {
-                                const real vfaceL   = hubble_param;
-                                const real vfaceR   = hubble_param;
-                                v1p = std::abs(v1p - vfaceR);
-                                v1m = std::abs(v1m - vfaceL);
+                                const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                                const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                                const real dtheta = tr - tl;
+                                const real x1l    = get_x1face(ii, geometry, 0);
+                                const real x1r    = get_x1face(ii, geometry, 1);
+                                const real dr     = x1r - x1l;
+                                const real rmean  = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
+                                if (mesh_motion)
+                                {
+                                    const real vfaceL   = x1l * hubble_param;
+                                    const real vfaceR   = x1r * hubble_param;
+                                    v1p = std::abs(v1p - vfaceR);
+                                    v1m = std::abs(v1m - vfaceL);
+                                }
+                                cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
+                                break;
                             }
-                            cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
-                            break;
+
+                        case simbi::Geometry::PLANAR_CYLINDRICAL:
+                            {
+                                const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                                const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                                const real dtheta = tr - tl;
+                                const real x1l    = get_x1face(ii, geometry, 0);
+                                const real x1r    = get_x1face(ii, geometry, 1);
+                                const real dr     = x1r - x1l;
+                                const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                                if (mesh_motion)
+                                {
+                                    const real vfaceL   = x1l * hubble_param;
+                                    const real vfaceR   = x1r * hubble_param;
+                                    v1p = std::abs(v1p - vfaceR);
+                                    v1m = std::abs(v1m - vfaceL);
+                                }
+                                cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
+                                break;
+                            }
+                        case simbi::Geometry::AXIS_CYLINDRICAL:
+                            {
+                                const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                                const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                                const real dz     = zr - zl;
+                                const real x1l    = get_x1face(ii, geometry, 0);
+                                const real x1r    = get_x1face(ii, geometry, 1);
+                                const real dr     = x1r - x1l;
+                                if (mesh_motion)
+                                {
+                                    const real vfaceL   = hubble_param;
+                                    const real vfaceR   = hubble_param;
+                                    v1p = std::abs(v1p - vfaceR);
+                                    v1m = std::abs(v1m - vfaceL);
+                                }
+                                cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
+                                break;
+                            }
+                    } // end switch
+                    min_dt = helpers::my_min(min_dt, cfl_dt);
+                } // end ii 
+            } // end jj
+        } // end parallel region
+        dt = cfl * min_dt;
+    } else {
+        std::atomic<real> min_dt = INFINITY;
+        thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&] (luint gid) {
+            real cfl_dt, v1p, v1m, v2p ,v2m;
+
+            const auto ii       = gid % xphysical_grid;
+            const auto jj       = gid / xphysical_grid;
+            const auto aid      = (jj + radius) * nx + (ii + radius);
+            const auto rho      = prims[aid].rho;
+            const auto v1       = prims[aid].v1;
+            const auto v2       = prims[aid].v2;
+            const auto pressure = prims[aid].p;
+            const auto cs       = std::sqrt(gamma * pressure / rho );
+
+            //================ Plus / Minus Wave speed components -================
+            if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                v1p = std::abs(v1 + cs) / (1.0 + v1 * cs);
+                v2p = std::abs(v2 + cs) / (1.0 + v2 * cs);
+                v1m = std::abs(v1 - cs) / (1.0 - v1 * cs);
+                v2m = std::abs(v2 - cs) / (1.0 - v2 * cs);
+            } else {
+                v1p = 1;
+                v1m = 1;
+                v2p = 1;
+                v2m = 1;
+            }
+
+            switch (geometry)
+            {
+                case simbi::Geometry::CARTESIAN:
+                    {
+                        if (mesh_motion) {
+                            v1p = std::abs(v1p  - hubble_param);
+                            v1m = std::abs(v1m - hubble_param);
                         }
-                } // end switch
-                min_dt = helpers::my_min(min_dt, cfl_dt);
-            } // end ii 
-        } // end jj
-    } // end parallel region
-    dt = cfl * min_dt;
+                        cfl_dt = helpers::my_min(dx1 / (helpers::my_max(v1p, v1m)), dx2 / (helpers::my_max(v2p, v2m)));
+                        break;
+                    }
+                case simbi::Geometry::SPHERICAL:
+                    {
+                        const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                        const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real dtheta = tr - tl;
+                        const real x1l    = get_x1face(ii, geometry, 0);
+                        const real x1r    = get_x1face(ii, geometry, 1);
+                        const real dr     = x1r - x1l;
+                        const real rmean  = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
+                        if (mesh_motion)
+                        {
+                            const real vfaceL   = x1l * hubble_param;
+                            const real vfaceR   = x1r * hubble_param;
+                            v1p = std::abs(v1p - vfaceR);
+                            v1m = std::abs(v1m - vfaceL);
+                        }
+                        cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
+                        break;
+                    }
+
+                case simbi::Geometry::PLANAR_CYLINDRICAL:
+                    {
+                        const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                        const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real dtheta = tr - tl;
+                        const real x1l    = get_x1face(ii, geometry, 0);
+                        const real x1r    = get_x1face(ii, geometry, 1);
+                        const real dr     = x1r - x1l;
+                        const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                        if (mesh_motion)
+                        {
+                            const real vfaceL   = x1l * hubble_param;
+                            const real vfaceR   = x1r * hubble_param;
+                            v1p = std::abs(v1p - vfaceR);
+                            v1m = std::abs(v1m - vfaceL);
+                        }
+                        cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
+                        break;
+                    }
+                case simbi::Geometry::AXIS_CYLINDRICAL:
+                    {
+                        const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                        const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real dz     = zr - zl;
+                        const real x1l    = get_x1face(ii, geometry, 0);
+                        const real x1r    = get_x1face(ii, geometry, 1);
+                        const real dr     = x1r - x1l;
+                        const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                        if (mesh_motion)
+                        {
+                            const real vfaceL   = x1l * hubble_param;
+                            const real vfaceR   = x1r * hubble_param;
+                            v1p = std::abs(v1p  - vfaceR);
+                            v1m = std::abs(v1m - vfaceL);
+                        }
+                        cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
+                        break;
+                    }
+            } // end switch
+            pooling::update_minimum(min_dt, cfl_dt);
+        });
+        dt = cfl * min_dt;
+    }
 };
 
 template<TIMESTEP_TYPE dt_type>

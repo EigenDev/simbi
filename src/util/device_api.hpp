@@ -7,7 +7,6 @@
 
 #include "build_options.hpp"
 #include <stdexcept>
-#include <omp.h>
 #define NAME_OF(variable) ((decltype(&variable))nullptr, #variable)
 
 namespace simbi
@@ -194,7 +193,11 @@ namespace simbi
         if constexpr(P == Platform::GPU) {
             return blockDim.x * blockDim.y * threadIdx.z + blockDim.x * threadIdx.y + threadIdx.x;
         } else {
-            return omp_get_thread_num();
+            if (use_omp) {
+                return omp_get_thread_num();
+            } else {
+                return 1;
+            }
         }
     }
 

@@ -12,6 +12,8 @@
 #include <stdint.h>      // int_type, uint64_t, int64_t
 #include <cstdlib>       // std::getenv
 #include <atomic>
+#include <omp.h>
+
 
 // Flag that detects whether program is run using openmp
 inline bool use_omp = false;

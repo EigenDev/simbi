@@ -87,6 +87,9 @@ namespace simbi
             }
             if (char * omp_set = std::getenv("USE_OMP")) {
                 use_omp = true;
+                if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
+                    omp_set_num_threads(std::stoi(omp_tnum));
+                }
             }
         }
 
@@ -121,6 +124,9 @@ namespace simbi
             }
             if (char * omp_set = std::getenv("USE_OMP")) {
                 use_omp = true;
+                if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
+                    omp_set_num_threads(std::stoi(omp_tnum));
+                }
             }
         }
 
@@ -159,6 +165,9 @@ namespace simbi
             }
             if (char * omp_set = std::getenv("USE_OMP")) {
                 use_omp = true;
+                if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
+                    omp_set_num_threads(std::stoi(omp_tnum));
+                }
             }
             
         }
