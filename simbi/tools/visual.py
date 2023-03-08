@@ -286,7 +286,8 @@ class Visualizer:
                     xx = mesh['x1'] if self.ndim == 2 else mesh[f'x{self.projection[0]}']
                     yy = mesh['x2'] if self.ndim == 2 else mesh[f'x{self.projection[1]}']
                     if not self.cartesian:
-                        xx, yy = yy, xx
+                        # turn in mesh grid and then reverse
+                        xx, yy = np.meshgrid(xx,yy)[::-1]
                         max_theta = np.abs(xx.max())
                         if max_theta < np.pi:
                             if patches <= 2:
