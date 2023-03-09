@@ -269,15 +269,13 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         args=None if sys.argv[2:] else ['run', '--help'])
 
 def type_check_input(file: str) -> None:
-    mypy_check = subprocess.run(
+    type_checker = subprocess.run(
         [sys.executable, 
          '-m', 
-         'mypy', 
-         '--strict',
-         '--ignore-missing-imports', 
+         'pyright', 
          file])
     
-    if mypy_check.returncode != 0:
+    if type_checker.returncode != 0:
         raise TypeError("\nYour configuration script failed type safety checks." +
                         "Please fix them or run with --no-type-check option")
 

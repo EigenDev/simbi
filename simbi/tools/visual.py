@@ -51,7 +51,7 @@ def tuple_arg(param: str) -> tuple[int]:
     try:
         return tuple(int(arg) for arg in param.split(','))
     except:
-        raise argparse.ArgumentError("argument must be tuple of ints")
+        raise argparse.ArgumentTypeError("argument must be tuple of ints")
 
 class Visualizer:
     def __init__(self, parser: argparse.ArgumentParser, ndim: int) -> None:

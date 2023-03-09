@@ -3,7 +3,7 @@ import sys
 import matplotlib.pyplot as plt
 import importlib
 from . import visual
-
+from typing import Optional
 from .utility import DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
 from ..detail import get_subparser
 from pathlib import Path
@@ -18,7 +18,8 @@ def colorbar_limits(c):
         raise argparse.ArgumentTypeError("Colorbar limits must be in the format: vmin,vmax")
     
 def parse_plotting_arguments(
-        parser: argparse.ArgumentParser) -> argparse.Namespace:
+        parser: argparse.ArgumentParser) -> tuple[argparse.ArgumentParser, 
+                                                  tuple[argparse.Namespace, list[str]]]:
     plot_parser = get_subparser(parser, 1)
     plot_parser.add_argument(
         'files',
@@ -245,8 +246,8 @@ def parse_plotting_arguments(
 
 
 def main(
-        parser: argparse.ArgumentParser = None,
-        args: argparse.Namespace = None,
+        parser: argparse.ArgumentParser,
+        args:   argparse.Namespace,
         *_) -> None:
     parser, (args, _) = parse_plotting_arguments(parser)
 
@@ -272,7 +273,3 @@ def main(
     ndim = get_dimensionality(file_list)
 
     visual.visualize(parser, ndim)
-
-
-if __name__ == '__main__':
-    sys.exit(main(*(parse_arguments())))

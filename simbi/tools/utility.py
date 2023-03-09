@@ -118,9 +118,10 @@ def flatten_fully(x: NDArray[numpy_float]) -> Any:
     else:
         return np.asanyarray(x) 
     
-def get_dimensionality(files: list[str]) -> int:
+def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     dims = []
     all_equal: Callable[[list[int]], bool] = lambda x: x.count(x[0]) == len(x)
+    ndim = 0
     if isinstance(files, dict):
         import itertools
         files = list(itertools.chain(*files.values()))
@@ -157,9 +158,10 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
             try:
                 res = dset.attrs[key]
             except KeyError:
-                res = dset.attrs[fall_back_key]
-            except KeyError:
-                res = fall_back
+                try:
+                    res = dset.attrs[fall_back_key]
+                except KeyError:
+                    res = fall_back
         
         if isinstance(res, bytes):
             res = res.decode('utf-8')
@@ -332,9 +334,10 @@ def get_file_list(inputs: str) -> Union[tuple[list[str], int], tuple[dict[int, l
     file_dict: dict[int, list[str]] = {}
     dircount  = 0
     multidir = False
+    isDirectory = False
     for idx, obj in enumerate(inputs):
         #check if path is a directory
-        isDirectory: bool = os.path.isdir(obj)
+        isDirectory = os.path.isdir(obj)
         
         if isDirectory:
             file_path = os.path.join(obj, '')

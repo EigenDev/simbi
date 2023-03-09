@@ -1,8 +1,7 @@
 #! /usr/bin/env python
 
 import numpy as np
-import astropy.constants as const
-import astropy.units as units
+from astropy import units, constants
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 import matplotlib.markers as mmarkers
@@ -11,6 +10,7 @@ import os
 import sys
 import h5py
 import time as pytime
+from numpy.typing import NDArray
 from itertools import cycle
 from .helpers import (
     get_tbin_edges,
@@ -30,7 +30,7 @@ except ImportError:
     print("cannot find cmasher module, using basic matplotlib colors instead")
 
 
-def day_type(param: str) -> 'astropy.units.Quantity':
+def day_type(param: str) -> units.Quantity:
     try:
         param = float(param) * units.day
     except BaseException:
@@ -242,8 +242,8 @@ def parse_args(
         args=None if sys.argv[2:] else ['afterglow', '--help'])
 
 
-def run(parser: argparse.ArgumentParser = None,
-        args: argparse.Namespace = None,
+def run(parser: argparse.ArgumentParser,
+        args: argparse.Namespace,
         *_):
 
     parser, args = parse_args(parser, args)
@@ -396,7 +396,7 @@ def run(parser: argparse.ArgumentParser = None,
 
         if args.mode != 'checkpoint':
             if args.spectra:
-                nearest_dat = find_nearest(time_bins.value, time)[0]
+                nearest_dat = find_nearest(time_bins.value, val)[0]
                 relevant_flux = np.asanyarray(
                     [fnu[key][nearest_dat].value for key in fnu.keys()])
                 xarr = args.nu

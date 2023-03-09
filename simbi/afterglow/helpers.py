@@ -2,6 +2,7 @@ import numpy as np
 import argparse
 import h5py
 from numpy.typing import NDArray
+from typing import Union
 from astropy.cosmology import FlatLambdaCDM
 from simbi import (
     compute_num_polar_zones,
@@ -124,10 +125,10 @@ def calc_rhat(theta: NDArray, phi: NDArray) -> NDArray:
     ])
     
 def generate_pseudo_mesh(
-    args: argparse.ArgumentParser,
+    args: argparse.Namespace,
     mesh: dict,
     full_sphere: bool,
-    full_threed: bool = False):
+    full_threed: bool):
     """
     Generate a real or pseudo 3D mesh based on checkpoint data
     assuming a spherical geometry
@@ -169,9 +170,9 @@ def generate_pseudo_mesh(
             mesh['xx3'] = 0 
         
 def get_tbin_edges(
-        args: argparse.ArgumentParser,
-        files: str,
-        time_scale):
+        args: argparse.Namespace,
+        files: Union[list[str], dict[int, list[str]]],
+        time_scale: float):
     """
     Get the bin edges of the lightcurves based on the checkpoints given
 
