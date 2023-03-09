@@ -367,8 +367,7 @@ void Newtonian2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
 {
     #if GPU_CODE
     {
-        luint psize = p.blockSize.x*p.blockSize.y;
-        compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>(this, prims.data(),dt_min.data(), geometry, psize);
+        compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>(this, prims.data(),dt_min.data(), geometry);
         deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
     }
     gpu::api::deviceSynch();

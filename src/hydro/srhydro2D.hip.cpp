@@ -374,13 +374,11 @@ void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
     
     #if GPU_CODE
     {
-        const luint psize = p.blockSize.x*p.blockSize.y;
         compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize, bytes>>>(
             this, 
             prims.data(),
             dt_min.data(),
-            geometry, 
-            psize
+            geometry
         );
         deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
     }
