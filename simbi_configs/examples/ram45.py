@@ -11,7 +11,7 @@ class Ram45(BaseConfig):
     
     @simbi_property
     def initial_state(self) -> Sequence[Any]:
-        return (1.0, (1.0 - 1e-8), 1e-6)
+        return (1.0, (1.0 - 8e-9), 1e-6)
     
     @simbi_property
     def geometry(self) -> Sequence[float]:
