@@ -24,16 +24,14 @@ namespace simbi
     compute_dt(U *s, 
     const V* prim_buffer,
     real *dt_min,
-    const simbi::Geometry geometry, 
-    const luint bytes);
+    const simbi::Geometry geometry);
 
     template<typename T, TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE, typename U, typename V>
     GPU_LAUNCHABLE  typename std::enable_if<is_3D_primitive<T>::value>::type 
     compute_dt(U *s, 
     const V* prim_buffer,
     real *dt_min,
-    const simbi::Geometry geometry, 
-    const luint bytes);
+    const simbi::Geometry geometry);
 
     //======================================
     //              HELPER OVERLOADS
@@ -187,8 +185,7 @@ namespace simbi
 
     #if GPU_CODE
     __device__ __forceinline__ real atomicMinReal (real * addr, real value) {
-        real old;
-        old = __int_as_real(atomicMin((atomic_cast *)addr, __real_as_int(value)));
+        real old = __int_as_real(atomicMin((atomic_cast *)addr, __real_as_int(value)));
         return old;
     }
     #endif 
