@@ -30,7 +30,7 @@
 
 ## For GPU capability
 
-7)  HIP/ROCm if wanting to run on NVIDIA or AMD GPUs, or just CUDA if
+8)  HIP/ROCm if wanting to run on NVIDIA or AMD GPUs, or just CUDA if
     running purely NVIDIA
 
 # Quick setup guide
