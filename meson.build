@@ -1,7 +1,7 @@
 project('simbi', 'c', 'cpp', 'cython',
     version : run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(), 
     license : 'MIT',
-    default_options : [ 'cpp_std=c++17' ],
+    default_options : [ 'cpp_std=c++20' ],
 )
 
 # BUILD CONFIG
