@@ -186,7 +186,13 @@ class Visualizer:
                 help='axes to project multidim solution onto',
                 default=[1, 2, 3],
                 type=tuple_arg,
-                choices=[(1, 2, 3), (1, 3, 2), (2, 3, 1)]
+                choices=[
+                    (1, 2, 3), 
+                    (1, 3, 2), 
+                    (2, 3, 1),
+                    (2, 1, 3),
+                    (3, 1, 2),
+                    (3, 2, 1)]
             )
             plot_parser.add_argument(
                 '--box-depth',
