@@ -398,20 +398,27 @@ void SRHD::adapt_dt()
         // Compute the minimum timestep given cfl
         #pragma omp parallel for schedule(static) reduction(min:min_dt)
         for (luint ii = 0; ii < active_zones; ii++){
-            real vPlus, vMinus;
-
             const auto shift_i  = ii + idx_active;
             const real rho      = prims[shift_i].rho;
             const real v        = prims[shift_i].v;
             const real pre      = prims[shift_i].p;
-            const real cs       = std::sqrt(gamma * pre/rho);
-            if constexpr(dt_type == simbi::TIMESTEP_TYPE::ADAPTIVE) {
-                vPlus  = (v + cs) / (1 + v * cs);
-                vMinus = (v - cs) / (1 - v * cs);
-            } else {
-                vPlus  = 1;
-                vMinus = 1;
-            }
+            const real h        = 1 + pre * gamma / (rho * (gamma - 1));
+            const real cs       = std::sqrt(gamma * pre / (rho * h));
+
+            const real vPlus = ([&]{
+                if constexpr(dt_type == simbi::TIMESTEP_TYPE::ADAPTIVE) {
+                    return  (v + cs) / (1 + v * cs);
+                } else {
+                    return  1;
+                }
+            })();
+            const real vMinus = ([&]{
+                if constexpr(dt_type == simbi::TIMESTEP_TYPE::ADAPTIVE) {
+                    return (v - cs) / (1 - v * cs);
+                } else {
+                    return 1;
+                }
+            })();
 
             const real x1l      = get_xface(ii, geometry, 0);
             const real x1r      = get_xface(ii, geometry, 1);
@@ -425,21 +432,29 @@ void SRHD::adapt_dt()
     } else {
         std::atomic<real> min_dt = INFINITY;
         thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&](int ii) {
-            real vPlus, vMinus;
-
             const auto shift_i  = ii + idx_active;
             const real rho      = prims[shift_i].rho;
             const real v        = prims[shift_i].v;
             const real pre      = prims[shift_i].p;
-            const real cs       = std::sqrt(gamma * pre/rho);
+            const real h        = 1 + pre * gamma / (rho * (gamma - 1));
+            const real cs       = std::sqrt(gamma * pre / (rho * h));
 
-            if constexpr(dt_type == simbi::TIMESTEP_TYPE::ADAPTIVE) {
-                vPlus  = (v + cs) / (1 + v * cs);
-                vMinus = (v - cs) / (1 - v * cs);
-            } else {
-                vPlus  = 1;
-                vMinus = 1;
-            }
+            const real vPlus = ([&]{
+                if constexpr(dt_type == simbi::TIMESTEP_TYPE::ADAPTIVE) {
+                    return (v + cs) / (1 + v * cs);
+                } else {
+                    return 1;
+                }
+            })();
+
+            const real vMinus = ([&]{
+                if constexpr(dt_type == simbi::TIMESTEP_TYPE::ADAPTIVE) {
+                    return (v - cs) / (1 - v * cs);
+                } else {
+                    return 1;
+                }
+            })();
+
             const real x1l      = get_xface(ii, geometry, 0);
             const real x1r      = get_xface(ii, geometry, 1);
             const real dx1      = x1r - x1l;
