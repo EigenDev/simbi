@@ -1,6 +1,5 @@
 from simbi import BaseConfig, DynamicArg, simbi_property
 from simbi.key_types import * 
-import numpy as np 
 
 class Ram45(BaseConfig):
     """
@@ -11,11 +10,11 @@ class Ram45(BaseConfig):
     ad_gamma  = DynamicArg("ad_gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
     
     @simbi_property
-    def initial_state(self) -> Sequence[Sequence[float]]:
-        return (1.0, (1.0 - 8e-9), 1e-6)
+    def initial_state(self) -> Sequence[Any]:
+        return (1.0, (1.0 - 1e-8), 1e-6)
     
     @simbi_property
-    def geometry(self) -> Sequence[Sequence[float]]:
+    def geometry(self) -> Sequence[float]:
         return (0.0, 1.0)
 
     @simbi_property
