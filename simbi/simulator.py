@@ -693,9 +693,8 @@ class Hydro:
                 os.environ['GPUZBLOCK_SIZE'] = "4"
                 
             if self.regime == "classical":
+                raise NotImplementedError("3D Newtonian Fluids not implemented yet")
                 # TODO: Implement Newtonian 3D
-                pass
-                # b = PyState3D(u, self.gamma, cfl=cfl, x1=x1, x2=x2, coord_system=cython_coordinates)
             else:
                 state = PyStateSR3D(
                     self.u,
