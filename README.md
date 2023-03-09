@@ -18,7 +18,7 @@
 
 # Requirements
 
-1)  GCC \>= GCC8 (for c++20 support)
+1)  GCC >= GCC10 (for c++20 support)
 2)  [Cython](https://cython.org/)
 3)  [meson](https://mesonbuild.com/Getting-meson.html)
     `pip install meson` will usually suffice
