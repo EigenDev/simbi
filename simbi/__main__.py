@@ -272,7 +272,9 @@ def type_check_input(file: str) -> None:
     type_checker = subprocess.run(
         [sys.executable, 
          '-m', 
-         'pyright', 
+         'mypy', 
+         '--strict',
+         '--ignore-missing-imports',
          file])
     
     if type_checker.returncode != 0:
