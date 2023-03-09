@@ -56,6 +56,7 @@ def tuple_arg(param: str) -> tuple[int]:
 class Visualizer:
     def __init__(self, parser: argparse.ArgumentParser, ndim: int) -> None:
         self.current_frame = slice(None)
+        self.plotted_references = False
         self.ndim = ndim
         if self.ndim != 1:
             plot_parser = get_subparser(parser, 1)
@@ -368,11 +369,17 @@ class Visualizer:
                                     cbaxes = self.fig.add_axes(
                                         [x, 0.05, width, 0.05])
                                 else:
-                                    single_width = 0.8
-                                    x = [0.9, 0.08, 0.08, 0.9]
-                                    y = [0.5, 0.5, 0.1, 0.1]
+                                    single_height = 0.8
+                                    height = (
+                                        single_height if len(self.fields) == 3 and idx == 0
+                                        else 
+                                        single_height / (len(self.fields) // 2)
+                                    )
+
+                                    x = [0.95, 0.03, 0.08, 0.9]
+                                    y = [0.1, 0.1, 0.1, 0.1]
                                     cbaxes = self.fig.add_axes(
-                                        [x[idx], y[idx], 0.03, 0.40])
+                                        [x[idx], y[idx], 0.03, height])
 
                             if self.log and field not in lin_fields:
                                 logfmt = tkr.LogFormatterExponent(
@@ -536,15 +543,14 @@ class Visualizer:
                                           color=colors[key],
                                           alpha=1.0)]
 
-            if self.fields[0] == 'gamma_beta' or self.fields[0] == 'u1':
+            if self.fields[0] in ['gamma_beta', 'u1'] and not self.plotted_references:
+                self.plotted_references = True
+                exp_curve = np.exp(times[0] - times)
                 if key == 0:
                     self.axs.plot(
                         times,
                         data[0] *
-                        np.exp(
-                            1 -
-                            times /
-                            times[0]),
+                        exp_curve,
                         label=r'$\propto \exp(-t)$',
                         color='grey',
                         linestyle='-.')
