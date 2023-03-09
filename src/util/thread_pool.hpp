@@ -146,9 +146,6 @@ namespace simbi {
 
 				// waits until the queue is empty.
 				void waitUntilFinished() {
-					// while (poolBusy()) {
-					// 	/* chill out */
-					// }
 					std::unique_lock<std::mutex> latch(queue_mutex);
 					cv_finished.wait(latch, [this]{ return jobs.empty() && busy == 0; });
 				}
