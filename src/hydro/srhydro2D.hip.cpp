@@ -702,7 +702,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
 
                 peq = pre - f / g;
                 iter++;
-                if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
+                if (iter >= MAX_ITER || std::isnan(peq))
                 {
                     const auto ii     = gid % nx;
                     const auto jj     = gid / nx;
@@ -722,7 +722,11 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
                     break;
                 }
             } while (std::abs(peq - pre) >= tol);
-
+            
+            if (peq < 0) {
+                inFailureState = true;
+                found_failure  = true;
+            }
             const real inv_et = 1 / (tau + D + peq);
             const real v1     = S1 * inv_et;
             const real v2     = S2 * inv_et;

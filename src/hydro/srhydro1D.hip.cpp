@@ -275,7 +275,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 // f     = helpers::newton_f(gamma, tau, D, S, peq);
                 // pstar = peq - f / g;
 
-                if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
+                if (iter >= MAX_ITER || std::isnan(peq))
                 {
                     real v = S / (tau + D + peq);
                     real W = 1 / std::sqrt(1 - v * v);
@@ -294,6 +294,11 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
 
             } while (std::abs(f / g) >= tol);
 
+            if (peq < 0) {
+                inFailureState = true;
+                found_failure  = true;
+            }
+            
             real v = S / (tau + D + peq);
             real W = 1 / std::sqrt(1 - v * v);
             // real mach_ceiling = 100.0;
@@ -755,7 +760,7 @@ SRHD::simulate1D(
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
         t_interval += chkpt_interval;
     }
-
+    
     // Simulate :)
     const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
     simbi::detail::logger::with_logger(*this, tend, [&](){

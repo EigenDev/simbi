@@ -74,33 +74,34 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;
 
-        luint iter  = 0;
-        real D    = cons_data[gid].d;
-        real S1   = cons_data[gid].s1;
-        real S2   = cons_data[gid].s2;
-        real S3   = cons_data[gid].s3;
-        real tau  = cons_data[gid].tau;
-        real S    = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
-        
-        real peq = press_data[gid];
-        real tol = D * tol_scale;
         auto tid = get_threadId();
         if (tid == 0) 
             found_failure = inFailureState;
         simbi::gpu::api::synchronize();
+
         while (!found_failure && workLeftToDo)
         {
+            const real D    = cons_data[gid].d;
+            const real S1   = cons_data[gid].s1;
+            const real S2   = cons_data[gid].s2;
+            const real S3   = cons_data[gid].s3;
+            const real tau  = cons_data[gid].tau;
+            const real Dchi = cons_data[gid].chi; 
+            const real S    = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
+
+            real peq = press_data[gid];
+            luint iter  = 0;
+            const real tol = D * tol_scale;
             do
             {
                 pre = peq;
                 et  = tau + D + pre;
-                v2 = S * S / (et * et);
+                v2  = S * S / (et * et);
                 W   = 1 / std::sqrt(1 - v2);
                 rho = D / W;
-
                 eps = (tau + (1 - W) * D + (1 - W * W) * pre) / (D * W);
 
-                h = 1 + eps + pre / rho;
+                h  = 1 + eps + pre / rho;
                 c2 = gamma * pre / (h * rho);
 
                 g = c2 * v2 - 1;
@@ -108,7 +109,7 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
 
                 peq = pre - f / g;
                 iter++;
-                if (iter >= MAX_ITER || std::isnan(peq) || peq < 0)
+                if (iter >= MAX_ITER || std::isnan(peq))
                 {
                     const luint xpg    = xphysical_grid;
                     const luint ypg    = yphysical_grid;
@@ -138,10 +139,14 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
 
             } while (std::abs(peq - pre) >= tol);
 
-            real inv_et = 1 / (tau + D + peq); 
-            real v1 = S1 * inv_et;
-            real v2 = S2 * inv_et;
-            real v3 = S3 * inv_et;
+            if (peq < 0) {
+                inFailureState = true;
+                found_failure  = true;
+            }
+            const real inv_et = 1 / (tau + D + peq); 
+            const real v1 = S1 * inv_et;
+            const real v2 = S2 * inv_et;
+            const real v3 = S3 * inv_et;
             press_data[gid] = peq;
             prim_data[gid]  = Primitive{rho, v1, v2, v3, peq};
             workLeftToDo    = false;
@@ -1050,6 +1055,12 @@ void SRHD3D::advance(
         {
             case simbi::Geometry::CARTESIAN:
                 {
+                    // #if !GPU_CODE
+                    // if (ii  == jj == kk == 0) {
+                    //     printf("frf: %.2e flf: %.2e grf: %.2e glf: %.2e hlf: %.2e hrf: %.2e\n", frf.d, flf.d, grf.d, glf.d, hlf.d, hrf.d);
+                    //     std::cin.get();
+                    // }
+                    // #endif
                     cons_data[aid] -= ( (frf  - flf ) * invdx1 + (grf - glf) * invdx2 + (hrf - hlf) * invdx3 - source_terms) * dt * step;
                     break;
                 }
