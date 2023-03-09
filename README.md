@@ -18,15 +18,15 @@
 
 # Requirements
 
-1)  GCC \>= GCC5 (for c++17 support)
+1)  GCC \>= GCC8 (for c++20 support)
 2)  [Cython](https://cython.org/)
 3)  [meson](https://mesonbuild.com/Getting-meson.html)
     `pip install meson` will usually suffice
 4)  A build system like `make` or
     [ninja](https://github.com/ninja-build/ninja/wiki/Pre-built-Ninja-packages)
-    -- pre-built packages depending on your system.
 5)  HDF5 libraries
 6)  [mypy](https://mypy-lang.org/), a static type checker
+7)  Python >= 3.9
 
 ## For GPU capability
 
