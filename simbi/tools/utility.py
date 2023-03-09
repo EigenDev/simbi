@@ -121,7 +121,7 @@ def flatten_fully(x: NDArray[numpy_float]) -> Any:
 def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     dims = []
     all_equal: Callable[[list[int]], bool] = lambda x: x.count(x[0]) == len(x)
-    ndim = 0
+    ndim: int = 0
     if isinstance(files, dict):
         import itertools
         files = list(itertools.chain(*files.values()))
@@ -130,7 +130,7 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
         with h5py.File(file, 'r') as hf:
             ds  = hf.get('sim_info')
             try:
-                ndim: int = ds.attrs['dimensions']
+                ndim = ds.attrs['dimensions']
             except KeyError:
                 ny   = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
                 nz   = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1  
