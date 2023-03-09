@@ -141,8 +141,7 @@ namespace simbi{
     compute_dt(U *self, 
     const V* prim_buffer,
     real* dt_min,
-    const simbi::Geometry geometry, 
-    const luint bytes)
+    const simbi::Geometry geometry)
     {
         #if GPU_CODE
         real cfl_dt, v1p, v1m, v2p, v2m;
@@ -266,20 +265,14 @@ namespace simbi{
     compute_dt(U *self, 
     const V* prim_buffer,
     real *dt_min,
-    const simbi::Geometry geometry, 
-    const luint bytes)
+    const simbi::Geometry geometry)
     {
         #if GPU_CODE
         real cfl_dt;
         const real gamma = self->gamma;
-
-        const luint tx  = threadIdx.x;
-        const luint ty  = threadIdx.y;
-        const luint tz  = threadIdx.z;
-        // const luint tid = blockDim.x * blockDim.y * tz + blockDim.x * ty + tx;
-        const luint ii  = blockDim.x * blockIdx.x + tx;
-        const luint jj  = blockDim.y * blockIdx.y + ty;
-        const luint kk  = blockDim.z * blockIdx.z + tz;
+        const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
+        const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
+        const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
         const luint ia  = ii + self->idx_active;
         const luint ja  = jj + self->idx_active;
         const luint ka  = kk + self->idx_active;
@@ -327,45 +320,42 @@ namespace simbi{
                 minus_v2 = (v2 - cs);
                 minus_v3 = (v3 - cs);
             }
-        
+
+            const auto x1l = self->get_x1face(ii, geometry, 0);
+            const auto x1r = self->get_x1face(ii, geometry, 1);
+            const auto dx1 = x1r - x1l; 
+            const auto x2l = self->get_x2face(jj, 0);
+            const auto x2r = self->get_x2face(jj, 1);
+            const auto dx2 = x2r - x2l; 
+            const auto x3l = self->get_x3face(kk, 0);
+            const auto x3r = self->get_x3face(kk, 1);
+            const auto dx3 = x3r - x3l; 
             switch (geometry)
             {
                 case simbi::Geometry::CARTESIAN:
-                    cfl_dt = helpers::my_min3(self->dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
-                                              self->dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
-                                              self->dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
+                {
+
+                    cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                              dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                                              dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
                     break;
-                
+                }
                 case simbi::Geometry::SPHERICAL:
-                {    
-                    // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl           = self->get_x1face(ii, geometry, 0);
-                    const real rr           = self->get_x1face(ii, geometry, 1);
-                    const real tl           = self->get_x2face(jj, 0);  
-                    const real tr           = self->get_x2face(jj, 1); 
-                    const real ql           = self->get_x2face(kk, 0); 
-                    const real qr           = self->get_x2face(kk, 1); 
-                    const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
-                    const real th           = static_cast<real>(0.5) * (tl + tr);
-                    cfl_dt = helpers::my_min3((rr - rl) / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
-                                      rmean * (tr - tl) / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
-                       rmean * std::sin(th) * (qr - ql) / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
+                {     
+                    const real rmean = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l *x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
+                    const real th    = static_cast<real>(0.5) * (x2l + x2r);
+                    cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                      rmean * dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                       rmean * std::sin(th) * dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
                     break;
                  }
                 case simbi::Geometry::CYLINDRICAL:
                 {    
-                    // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                    const real rl           = self->get_x1face(ii, geometry, 0);
-                    const real rr           = self->get_x1face(ii, geometry, 1);
-                    const real tl           = self->get_x2face(jj, 0);  
-                    const real tr           = self->get_x2face(jj, 1); 
-                    const real zl           = self->get_x2face(kk, 0); 
-                    const real zr           = self->get_x2face(kk, 1); 
-                    const real rmean        = static_cast<real>(2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
-                    const real th           = static_cast<real>(0.5) * (tl + tr);
-                    cfl_dt = helpers::my_min3((rr - rl) / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
-                                      rmean * (tr - tl) / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
-                                              (zr - zl) / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
+                    const real rmean = static_cast<real>(2.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                    const real th    = static_cast<real>(0.5) * (x2l + x2r);
+                    cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                      rmean * dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                                              dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
                     break;
                  }
             } // end switch

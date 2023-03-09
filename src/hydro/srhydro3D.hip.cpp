@@ -352,8 +352,7 @@ void SRHD3D::adapt_dt(const ExecutionPolicy<> &p, const luint bytes)
     
     #if GPU_CODE
     {
-        luint psize = p.blockSize.x*p.blockSize.y;
-        compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize, bytes>>>(this, prims.data(), dt_min.data(), geometry, psize);
+        compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize, bytes>>>(this, prims.data(), dt_min.data(), geometry);
         deviceReduceWarpAtomicKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
     }
@@ -1302,7 +1301,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     if (t == 0) {
         config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(),inflow_zones.data(), half_sphere, geometry);
     }
-    const auto dtShBytes = zblockdim * xblockdim * yblockdim * sizeof(Primitive) + zblockdim * xblockdim * yblockdim * sizeof(real);
+    const auto dtShBytes = zblockdim * xblockdim * yblockdim * sizeof(Primitive);
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP, dtShBytes);
@@ -1317,7 +1316,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, zphysical_grid);
         t_interval += chkpt_interval;
     }
-
+    
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&](){
         advance(activeP, xstride, ystride, zstride);
