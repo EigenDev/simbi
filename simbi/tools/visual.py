@@ -206,8 +206,12 @@ class Visualizer:
                 else:
                     self.color_map += [plt.get_cmap(cmap)]
 
-            self.cartesian = util.read_file(
-                self, self.flist[0], self.ndim)[1]['is_cartesian']
+            if isinstance(self.flist, dict):
+                self.cartesian = util.read_file(
+                    self, self.flist[0][0], self.ndim)[1]['is_cartesian']
+            else:
+                self.cartesian = util.read_file(
+                    self, self.flist[0], self.ndim)[1]['is_cartesian']
 
         self.color_map = cycle(self.color_map)
         self.vrange = self.cbar
