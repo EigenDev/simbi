@@ -47,6 +47,12 @@ field_choices = [
 lin_fields = ['chi', 'gamma_beta', 'u1', 'u2', 'u3', 'u']
 
 
+def tuple_arg(param: str) -> tuple[int]:
+    try:
+        return tuple(int(arg) for arg in param.split(','))
+    except:
+        raise argparse.ArgumentError("argument must be tuple of ints")
+
 class Visualizer:
     def __init__(self, parser: argparse.ArgumentParser, ndim: int) -> None:
         self.current_frame = slice(None)
@@ -177,14 +183,15 @@ class Visualizer:
             plot_parser.add_argument(
                 '--projection',
                 help='axes to project multidim solution onto',
-                default=[1, 2],
-                type=int,
-                choices=[(1, 2), (1, 3), (2, 3)],
-                nargs=2)
+                default=[1, 2, 3],
+                type=tuple_arg,
+                choices=[(1, 2, 3), (1, 3, 2), (2, 3, 1)]
+            )
             plot_parser.add_argument(
-                '--z-projection',
-                help='index for projecting 3D data onto 2D plane',
+                '--box-depth',
+                help='index depth for projecting 3D data onto 2D plane',
                 type=int,
+                default=0,
             )
 
         vars(self).update(**vars(parser.parse_args()))
@@ -285,6 +292,14 @@ class Visualizer:
 
                     xx = mesh['x1'] if self.ndim == 2 else mesh[f'x{self.projection[0]}']
                     yy = mesh['x2'] if self.ndim == 2 else mesh[f'x{self.projection[1]}']
+                    if self.ndim == 3:
+                        if self.projection[2] == 3:
+                            var = var[self.box_depth]
+                        elif self.projection[2] == 2:
+                            var = var[:, self.box_depth, :]
+                        else:
+                            var = var[:, :, self.box_depth]
+                        
                     if not self.cartesian:
                         # turn in mesh grid and then reverse
                         xx, yy = np.meshgrid(xx,yy)[::-1]
