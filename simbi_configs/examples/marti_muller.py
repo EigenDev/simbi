@@ -1,4 +1,4 @@
-from simbi import BaseConfig, DynamicArg, simbi_property, simbi_classproperty
+from simbi import BaseConfig, DynamicArg, simbi_property
 from simbi.key_types import *
 
 class MartiMuller(BaseConfig):
