@@ -219,7 +219,7 @@ namespace simbi
             const real v3  = minmod((a - b).v3  * plm_theta, (c - b).v3  * static_cast<real>(0.5), (c - a).v3  * plm_theta);
             const real pre = minmod((a - b).p   * plm_theta, (c - b).p   * static_cast<real>(0.5), (c - a).p   * plm_theta);
             const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
-            return T{rho, v1, v2, pre, chi};
+            return T{rho, v1, v2, v3, pre, chi};
         }
 
         template<typename T>
