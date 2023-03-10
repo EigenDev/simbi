@@ -291,7 +291,6 @@ class Visualizer:
         for ax in get_iterable(self.axs):
             for file in get_iterable(self.flist[self.current_frame]):
                 fields, setup, mesh = util.read_file(self, file, ndim=self.ndim)
-                ax.set_title(f'{self.setup} at t = {setup["time"]:.2f}')
                 for idx in range(patches):
                     field = next(the_fields)
                     if field in derived:
@@ -360,6 +359,13 @@ class Visualizer:
                         **kwargs
                     )]
 
+                    if self.cartesian:
+                        ax.set_title(f'{self.setup} at t = {setup["time"]:.2f}')
+                    else:
+                        self.fig.suptitle(
+                            '{} at t = {:.2f}'.format(
+                                self.setup, setup['time']), y=1.0)
+                        
                     if not self.no_cbar:
                         if idx < len(self.fields):
                             if self.cartesian:
