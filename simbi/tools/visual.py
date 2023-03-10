@@ -618,15 +618,16 @@ class Visualizer:
                 self.axs.spines['top'].set_visible(False)
                 self.axs.spines['right'].set_visible(False)
             else:
-                if not self.hist:
-                    self.fig, self.axs = plt.subplots(
-                        1, 1, subplot_kw={
-                            'projection': 'polar'}, figsize=self.fig_dims, constrained_layout=True)
-                    self.axs.grid(False)
-                    self.axs.set_theta_zero_location('N')
-                    self.axs.set_theta_direction(-1)
-                    self.axs.set_xticklabels([])
-                    self.axs.set_yticklabels([])      
+                self.fig, self.axs = plt.subplots(
+                    1, 1, 
+                    subplot_kw={'projection': 'polar'}, 
+                    figsize=self.fig_dims, 
+                    constrained_layout=True)
+                self.axs.grid(False)
+                self.axs.set_theta_zero_location('N')
+                self.axs.set_theta_direction(-1)
+                self.axs.set_xticklabels([])
+                self.axs.set_yticklabels([])      
         else:
             raise NotImplementedError()
 
