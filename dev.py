@@ -67,7 +67,7 @@ def write_to_cache(args: argparse.Namespace) -> None:
     details['build_dir'] = str(Path(details['build_dir']).resolve())
     details.pop('func')
     with open(cache_file, 'w') as f:
-        f.write(json.dumps(details))
+        f.write(json.dumps(details, indent=4))
     
 def get_output(command: str) -> str:
     return subprocess.Popen(command, stdout=subprocess.PIPE).stdout.read().decode('utf-8').strip()
