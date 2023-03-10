@@ -528,16 +528,20 @@ class Visualizer:
                 else:
                     var = fields[self.fields[0]]
 
-                weights = util.prims2var(fields, self.weight)
+                if self.weight != self.fields[0]:
+                    weights = util.prims2var(fields, self.weight)
 
-                if self.ndim == 1:
-                    dV = calc_cell_volume1D(x1=mesh['x1'])
-                elif self.ndim == 2:
-                    dV = calc_cell_volume2D(x1=mesh['x1'], x2=mesh['x2'])
+                    if self.ndim == 1:
+                        dV = calc_cell_volume1D(x1=mesh['x1'])
+                    elif self.ndim == 2:
+                        dV = calc_cell_volume2D(x1=mesh['x1'], x2=mesh['x2'])
+                    else:
+                        dV = calc_cell_volume3D(
+                            x1=mesh['x1'], x2=mesh['x2'], x3=mesh['x3'])
+                    weighted = np.sum(weights * var * dV) / np.sum(weights * dV)
                 else:
-                    dV = calc_cell_volume3D(
-                        x1=mesh['x1'], x2=mesh['x2'], x3=mesh['x3'])
-                weighted = np.sum(weights * var * dV) / np.sum(weights * dV)
+                    weighted = np.max(var)
+                    
                 weighted_vars += [weighted]
                 times += [setup['time']]
 
