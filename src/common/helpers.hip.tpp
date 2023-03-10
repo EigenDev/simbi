@@ -103,17 +103,13 @@ namespace simbi{
         {
             const real rho = prim_buffer[aid].rho;
             const real p   = prim_buffer[aid].p;
-            real v   = prim_buffer[aid].v;
+            const real v   = prim_buffer[aid].get_v();
         
             if constexpr(is_relativistic<T>::value)
             {
                 if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                     real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
                     real cs  = std::sqrt(self->gamma * p / (rho * h));
-                    if constexpr(VelocityType == Velocity::FourVelocity) {
-                        real lorentz  = std::sqrt(1 + v * v);
-                        v /= lorentz;
-                    }
                     vPlus  = (v + cs) / (1 + v * cs);
                     vMinus = (v - cs) / (1 - v * cs);
                 } else {
@@ -156,19 +152,14 @@ namespace simbi{
             real plus_v1 , plus_v2 , minus_v1, minus_v2;
             real rho  = prim_buffer[aid].rho;
             real p    = prim_buffer[aid].p;
-            real v1   = prim_buffer[aid].v1;
-            real v2   = prim_buffer[aid].v2;
+            real v1   = prim_buffer[aid].get_v1();
+            real v2   = prim_buffer[aid].get_v2();
 
             if constexpr(is_relativistic<T>::value)
             {
                 if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                     real h   = 1 + gamma * p / (rho * (gamma - 1));
                     real cs  = std::sqrt(gamma * p / (rho * h));
-                    if constexpr(VelocityType == Velocity::FourVelocity) {
-                        real lorentz  = std::sqrt(1 + (v1 * v1 + v2 * v2));
-                        v1           /= lorentz;
-                        v2           /= lorentz;
-                    }
                     plus_v1  = (v1 + cs) / (1 + v1 * cs);
                     plus_v2  = (v2 + cs) / (1 + v2 * cs);
                     minus_v1 = (v1 - cs) / (1 - v1 * cs);
@@ -282,21 +273,15 @@ namespace simbi{
             real plus_v1 , plus_v2 , minus_v1, minus_v2, plus_v3, minus_v3;
             real rho  = prim_buffer[aid].rho;
             real p    = prim_buffer[aid].p;
-            real v1   = prim_buffer[aid].v1;
-            real v2   = prim_buffer[aid].v2;
-            real v3   = prim_buffer[aid].v3;
+            real v1   = prim_buffer[aid].get_v1();
+            real v2   = prim_buffer[aid].get_v2();
+            real v3   = prim_buffer[aid].get_v3();
 
             if constexpr(is_relativistic<T>::value)
             {
                 if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                     real h   = 1 + gamma * p / (rho * (gamma - 1));
                     real cs  = std::sqrt(gamma * p / (rho * h));
-                    if constexpr(VelocityType == Velocity::FourVelocity) {
-                        real lorentz  = std::sqrt(1 + (v1 * v1 + v2 * v2 + v3 * v3));
-                        v1           /= lorentz;
-                        v2           /= lorentz;
-                        v3           /= lorentz;
-                    }
                     plus_v1  = (v1 + cs) / (1 + v1 * cs);
                     plus_v2  = (v2 + cs) / (1 + v2 * cs);
                     plus_v3  = (v3 + cs) / (1 + v3 * cs);

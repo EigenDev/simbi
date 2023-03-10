@@ -15,6 +15,7 @@ default['float_precision']=False
 default['install_mode']="default"  
 default['dev_arch']=86 
 default['build_dir']="builddir"
+default['four_velocity']=False
 
 YELLOW='\033[0;33m'
 RST='\033[0m' # No Color
@@ -23,6 +24,7 @@ flag_overrides = {}
 flag_overrides['float_precision'] = ['--double', '--float']
 flag_overrides['gpu_compilation'] = ['--gpu-compilation', '--cpu-compilation']
 flag_overrides['column_major']    = ['--row-major', '--column-major']
+flag_overrides['four_velocity']   = ['--four-velocity', '--no-four-velocity']
 flag_overrides['install_mode']    = ['develop', 'default']
 
 def get_tool(name: str) -> str:
@@ -78,7 +80,7 @@ def configure(args: argparse.Namespace,
     command = f'''meson setup {args.build_dir} -Dgpu_compilation={args.gpu_compilation}  
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
-    -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} {reconfigure}'''.split()
+    -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} -Dfour_velocity={args.four_velocity} {reconfigure}'''.split()
     return command
 
 def generate_home_locator(simbi_dir: str) -> None:
@@ -131,6 +133,12 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         '--extras',
         help='flag to install the optional dependencies',
         action='store_true',
+        default=False,
+    )
+    install_parser.add_argument(
+        '--four-velocity',
+        help='flag to set four-velocity as the velocity primitivw instead of beta',
+        action=argparse.BooleanOptionalAction,
         default=False,
     )
     compile_type = install_parser.add_mutually_exclusive_group()

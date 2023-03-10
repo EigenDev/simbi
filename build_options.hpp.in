@@ -3,6 +3,7 @@
 
 #mesondefine FLOAT_PRECISION
 #mesondefine COLUMN_MAJOR
+#mesondefine FOUR_VELOCITY
 #include <functional>    // std::function
 #include <chrono>        // high_resolution_clock
 #include <csignal>       // SIGACTION

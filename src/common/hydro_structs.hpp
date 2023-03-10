@@ -72,6 +72,10 @@ namespace hydro1d {
             p      *= c;
             return *this;
         }
+
+        GPU_CALLABLE_MEMBER constexpr real get_v() const {
+            return v;
+        }
     };
 
     struct Conserved {
@@ -151,6 +155,14 @@ namespace sr1d {
             v      *= c;
             p      *= c;
             return *this;
+        }
+
+        GPU_CALLABLE_MEMBER constexpr real get_v() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return v;
+            } else {
+                return v / std::sqrt(1 + v * v);
+            }
         }
     };
 
@@ -292,6 +304,22 @@ namespace sr2d {
             }
         }
 
+        GPU_CALLABLE_MEMBER constexpr real get_v1() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return v1;
+            } else {
+                return v1 / std::sqrt(1 + v1 * v1 + v2 * v2);
+            }
+        }
+
+        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return v2;
+            } else {
+                return v2 / std::sqrt(1 + v1 * v1 + v2 * v2);
+            }
+        } 
+
     };
 
     struct PrimitiveSOA {
@@ -392,6 +420,14 @@ namespace hydro2d {
             p    *= c;
             chi  *= c;
             return *this;
+        }
+
+        GPU_CALLABLE_MEMBER constexpr real get_v1() const {
+            return v1;
+        }
+
+        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+            return v2;
         }
         
         GPU_CALLABLE_MEMBER
@@ -516,6 +552,30 @@ namespace sr3d {
                 return std::sqrt(1 + (v1 * v1 + v2 * v2 + v3 * v3));
             }
         }
+
+        GPU_CALLABLE_MEMBER constexpr real get_v1() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return v1;
+            } else {
+                return v1 / std::sqrt(1 + v1 * v1 + v2 * v2 + v3 * v3);
+            }
+        }
+
+        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return v2;
+            } else {
+                return v2 / std::sqrt(1 + v1 * v1 + v2 * v2 + v3 * v3);
+            }
+        }
+
+        GPU_CALLABLE_MEMBER constexpr real get_v3() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return v3;
+            } else {
+                return v3 / std::sqrt(1 + v1 * v1 + v2 * v2 + v3 * v3);
+            }
+        }
     };
 
     struct PrimitiveSOA {
@@ -618,6 +678,18 @@ namespace hydro3d {
             p      -= c;
             chi    -= c;
             return *this;
+        }
+
+        GPU_CALLABLE_MEMBER  constexpr real get_v1() const {
+            return v1;
+        }
+
+        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+            return v2;
+        }
+
+        GPU_CALLABLE_MEMBER constexpr real get_v3() const {
+            return v3;
         }
     };
 

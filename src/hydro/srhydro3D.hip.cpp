@@ -148,7 +148,11 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
             const real v2 = S2 * inv_et;
             const real v3 = S3 * inv_et;
             press_data[gid] = peq;
-            prim_data[gid]  = Primitive{rho, v1, v2, v3, peq};
+            if constexpr(VelocityType == Velocity::FourVelocity) {
+                prim_data[gid] = Primitive{D/ W, v1 * W, v2 * W, v3 * W, peq, Dchi / D};
+            } else {
+                prim_data[gid] = Primitive{D/ W, v1, v2, v3, peq, Dchi / D};
+            }
             workLeftToDo    = false;
         }
     });
@@ -234,9 +238,9 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD3D::prims2cons(const Primitive &prims)
 {
     const real rho = prims.rho;
-    const real v1  = prims.v1;
-    const real v2  = prims.v2;
-    const real v3  = prims.v3;
+    const real v1  = prims.get_v1();
+    const real v2  = prims.get_v2();
+    const real v3  = prims.get_v3();
     const real pressure = prims.p;
     const real lorentz_gamma = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
     const real h = 1 + gamma * pressure / (rho * (gamma - 1));
@@ -278,9 +282,9 @@ void SRHD3D::adapt_dt()
                     const auto shift_i  = ii + idx_active;
                     const auto aid      = shift_k * nx * ny + shift_j * nx + shift_i;
                     const auto rho      = prims[aid].rho;
-                    const auto v1       = prims[aid].v1;
-                    const auto v2       = prims[aid].v2;
-                    const auto v3       = prims[aid].v3;
+                    const auto v1       = prims[aid].get_v1();
+                    const auto v2       = prims[aid].get_v2();
+                    const auto v3       = prims[aid].get_v3();
                     const auto pressure = prims[aid].p;
                     const auto h        = 1 + gamma * pressure / (rho * (gamma - 1.));
                     const auto cs       = std::sqrt(gamma * pressure / (rho * h));
@@ -368,9 +372,9 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD3D::prims2flux(const Primitive &prims, const luint nhat = 1)
 {
     const real rho      = prims.rho;
-    const real v1       = prims.v1;
-    const real v2       = prims.v2;
-    const real v3       = prims.v3;
+    const real v1       = prims.get_v1();
+    const real v2       = prims.get_v2();
+    const real v3       = prims.get_v3();
     const real chi      = prims.chi;
     const real vn       = prims.vcomponent(nhat);
     const real pressure = prims.p;
@@ -507,7 +511,7 @@ Conserved SRHD3D::calc_hllc_flux(
         {
             case 1:
             {
-                const real v1 = left_prims.v1;
+                const real v1 = left_prims.get_v1();
                 // Left Star State in x-direction of coordinate lattice
                 const real Dstar    = cofactor * (aL - v1) * D;
                 const real S1star   = cofactor * (S1 * (aL - v1) - pressure + pStar);
@@ -524,7 +528,7 @@ Conserved SRHD3D::calc_hllc_flux(
 
             case 2:
             {
-                const real v2 = left_prims.v2;
+                const real v2 = left_prims.get_v2();
                 // Start States in y-direction in the coordinate lattice
                 const real Dstar   = cofactor * (aL - v2) * D;
                 const real S1star  = cofactor * (aL - v2) * S1;
@@ -541,7 +545,7 @@ Conserved SRHD3D::calc_hllc_flux(
 
             case 3:
             {
-                const real v3 = left_prims.v3;
+                const real v3 = left_prims.get_v3();
                 // Start States in y-direction in the coordinate lattice
                 const real Dstar   = cofactor * (aL - v3) * D;
                 const real S1star  = cofactor * (aL - v3) * S1;
@@ -572,7 +576,7 @@ Conserved SRHD3D::calc_hllc_flux(
         {
             case 1:
             {
-                const real v1 = right_prims.v1;
+                const real v1 = right_prims.get_v1();
                 // Left Star State in x-direction of coordinate lattice
                 const real Dstar    = cofactor * (aR - v1) * D;
                 const real S1star   = cofactor * (S1 * (aR - v1) - pressure + pStar);
@@ -589,7 +593,7 @@ Conserved SRHD3D::calc_hllc_flux(
 
             case 2:
             {
-                const real v2 = right_prims.v2;
+                const real v2 = right_prims.get_v2();
                 // Start States in y-direction in the coordinate lattice
                 const real Dstar   = cofactor * (aR - v2) * D;
                 const real S1star  = cofactor * (aR - v2) * S1;
@@ -606,7 +610,7 @@ Conserved SRHD3D::calc_hllc_flux(
 
             case 3:
             {
-                const real v3 = right_prims.v3;
+                const real v3 = right_prims.get_v3();
                 // Start States in y-direction in the coordinate lattice
                 const real Dstar   = cofactor * (aR - v3) * D;
                 const real S1star  = cofactor * (aR - v3) * S1;
@@ -1085,9 +1089,9 @@ void SRHD3D::advance(
 
                     // Grab central primitives
                     const real rhoc = prim_buff[txa + tya * xstride + tza * xstride * ystride].rho;
-                    const real uc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].v1;
-                    const real vc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].v2;
-                    const real wc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].v3;
+                    const real uc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v1();
+                    const real vc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v2();
+                    const real wc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v3();
                     const real pc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].p;
 
                     const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
@@ -1118,9 +1122,9 @@ void SRHD3D::advance(
 
                     // Grab central primitives
                     const real rhoc = prim_buff[txa + tya * xstride + tza * xstride * ystride].rho;
-                    const real uc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].v1;
-                    const real vc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].v2;
-                    const real wc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].v3;
+                    const real uc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v1();
+                    const real vc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v2();
+                    const real wc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v3();
                     const real pc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].p;
 
                     const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
@@ -1244,7 +1248,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     setup.ad_gamma           = gamma;
     setup.first_order        = first_order;
     setup.coord_system       = coord_system;
-    setup.using_fourvelocity = false;
+    setup.using_fourvelocity = (VelocityType == Velocity::FourVelocity);
     setup.regime             = "relativistic";
     setup.x1                 = x1;
     setup.x2                 = x2;

@@ -135,8 +135,8 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD2D::prims2cons(const Primitive &prims) const
 {
     const real rho           = prims.rho;
-    const real v1            = prims.v1;
-    const real v2            = prims.v2;
+    const real v1            = prims.get_v1();
+    const real v2            = prims.get_v2();
     const real pressure      = prims.p;
     const real lorentz_gamma = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
     const real h             = 1 + gamma * pressure / (rho * (gamma - 1));
@@ -173,8 +173,8 @@ void SRHD2D::adapt_dt()
                     const auto shift_i  = ii + idx_active;
                     const auto aid      = shift_i + nx * shift_j;
                     const auto rho      = prims[aid].rho;
-                    const auto v1       = prims[aid].v1;
-                    const auto v2       = prims[aid].v2;
+                    const auto v1       = prims[aid].get_v1();
+                    const auto v2       = prims[aid].get_v2();
                     const auto pressure = prims[aid].p;
                     const auto h        = 1.0 + gamma * pressure / (rho * (gamma - 1.0));
                     const auto cs       = std::sqrt(gamma * pressure / (rho * h));
@@ -275,8 +275,8 @@ void SRHD2D::adapt_dt()
             const auto jj       = gid / xphysical_grid;
             const auto aid      = (jj + radius) * nx + (ii + radius);
             const auto rho      = prims[aid].rho;
-            const auto v1       = prims[aid].v1;
-            const auto v2       = prims[aid].v2;
+            const auto v1       = prims[aid].get_v1();
+            const auto v2       = prims[aid].get_v2();
             const auto pressure = prims[aid].p;
             const auto h        = 1.0 + gamma * pressure / (rho * (gamma - 1.0));
             const auto cs       = std::sqrt(gamma * pressure / (rho * h) );
@@ -396,8 +396,8 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD2D::prims2flux(const Primitive &prims, const luint nhat) const
 {
     const real rho             = prims.rho;
-    const real v1              = prims.v1;
-    const real v2              = prims.v2;
+    const real v1              = prims.get_v1();
+    const real v2              = prims.get_v2();
     const real pressure        = prims.p;
     const real chi             = prims.chi;
     const real vn              = (nhat == 1) ? v1 : v2;
@@ -729,7 +729,11 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
             const real v1     = S1 * inv_et;
             const real v2     = S2 * inv_et;
             press_data[gid] = peq;
-            prim_data[gid]  = Primitive{rho, v1, v2, peq, Dchi / D};
+            if constexpr(VelocityType == Velocity::FourVelocity) {
+                prim_data[gid] = Primitive{D/ W, v1 * W, v2 * W, peq, Dchi / D};
+            } else {
+                prim_data[gid] = Primitive{D/ W, v1, v2, peq, Dchi / D};
+            }
             workLeftToDo = false;
             simbi::gpu::api::synchronize();
         }
@@ -835,14 +839,14 @@ void SRHD2D::advance(
             if (object_to_my_right){
                 xprimsR.rho =  xprimsL.rho;
                 xprimsR.v1  = -xprimsL.v1;
-                xprimsR.v2  =  xprimsL.v2;
+                xprimsR.v1  =  xprimsL.v2;
                 xprimsR.p   =  xprimsL.p;
                 xprimsR.chi =  xprimsL.chi;
             }
 
             if (object_above_me){
                 yprimsR.rho =  yprimsL.rho;
-                yprimsR.v1  =  yprimsL.v1;
+                yprimsR.v2  =  yprimsL.v1;
                 yprimsR.v2  = -yprimsL.v2;
                 yprimsR.p   =  yprimsL.p;
                 yprimsR.chi =  yprimsL.chi;
@@ -879,14 +883,14 @@ void SRHD2D::advance(
             if (object_to_my_left){
                 xprimsL.rho =  xprimsR.rho;
                 xprimsL.v1  = -xprimsR.v1;
-                xprimsL.v2  = -xprimsR.v2;
+                xprimsL.v2  =  xprimsR.v2;
                 xprimsL.p   =  xprimsR.p;
                 xprimsL.chi =  xprimsR.chi;
             }
 
             if (object_below_me){
                 yprimsL.rho =  yprimsR.rho;
-                yprimsL.v1  = -yprimsR.v1;
+                yprimsL.v1  =  yprimsR.v1;
                 yprimsL.v2  = -yprimsR.v2;
                 yprimsL.p   =  yprimsR.p;
                 yprimsL.chi =  yprimsR.chi;
@@ -1076,8 +1080,8 @@ void SRHD2D::advance(
 
                 // Grab central primitives
                 const real rhoc = prim_buff[txa * sy + tya * sx].rho;
-                const real uc   = prim_buff[txa * sy + tya * sx].v1;
-                const real vc   = prim_buff[txa * sy + tya * sx].v2;
+                const real uc   = prim_buff[txa * sy + tya * sx].get_v1();
+                const real vc   = prim_buff[txa * sy + tya * sx].get_v2();
                 const real pc   = prim_buff[txa * sy + tya * sx].p;
 
                 const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
@@ -1103,8 +1107,8 @@ void SRHD2D::advance(
 
                 // Grab central primitives
                 const real rhoc = prim_buff[tya * bx + txa].rho;
-                const real uc   = prim_buff[tya * bx + txa].v1;
-                const real vc   = prim_buff[tya * bx + txa].v2;
+                const real uc   = prim_buff[tya * bx + txa].get_v1();
+                const real vc   = prim_buff[tya * bx + txa].get_v2();
                 const real pc   = prim_buff[tya * bx + txa].p;
                 
                 const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
@@ -1290,7 +1294,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     setup.coord_system       = coord_system;
     setup.boundary_conditions  = boundary_conditions;
     setup.regime             = "relativistic";
-    setup.using_fourvelocity = false;
+    setup.using_fourvelocity = (VelocityType == Velocity::FourVelocity);
     setup.x1                 = x1;
     setup.x2                 = x2;
     setup.mesh_motion        = mesh_motion;

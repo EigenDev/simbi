@@ -311,7 +311,11 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             //     peq = rho * emin * (gamma - 1.0);
             // }
             press_data[ii] = peq;
-            prims_data[ii] = Primitive{D/ W, v, peq};
+            if constexpr(VelocityType == Velocity::FourVelocity) {
+                prims_data[ii] = Primitive{D/ W, v * W, peq};
+            } else {
+                prims_data[ii] = Primitive{D/ W, v, peq};
+            }
             workLeftToDo = false;
         }
     });
@@ -327,13 +331,13 @@ Eigenvals SRHD::calc_eigenvals(
 {
     // Compute L/R Sound Speeds
     const real rhoL = primsL.rho;
-    const real vL   = primsL.v;
+    const real vL   = primsL.get_v();
     const real pL   = primsL.p;
     const real hL   = 1 + gamma * pL / (rhoL * (gamma - 1));
     const real csL  = std::sqrt(gamma * pL / (rhoL * hL));
 
     const real rhoR  = primsR.rho;
-    const real vR    = primsR.v;
+    const real vR    = primsR.get_v();
     const real pR    = primsR.p;
     const real hR    = 1 + gamma * pR  / (rhoR * (gamma - 1));
     const real csR   = std::sqrt(gamma * pR  / (rhoR * hR));
@@ -400,7 +404,7 @@ void SRHD::adapt_dt()
         for (luint ii = 0; ii < active_zones; ii++){
             const auto shift_i  = ii + idx_active;
             const real rho      = prims[shift_i].rho;
-            const real v        = prims[shift_i].v;
+            const real v        = prims[shift_i].get_v();
             const real pre      = prims[shift_i].p;
             const real h        = 1 + pre * gamma / (rho * (gamma - 1));
             const real cs       = std::sqrt(gamma * pre / (rho * h));
@@ -434,7 +438,7 @@ void SRHD::adapt_dt()
         thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&](int ii) {
             const auto shift_i  = ii + idx_active;
             const real rho      = prims[shift_i].rho;
-            const real v        = prims[shift_i].v;
+            const real v        = prims[shift_i].get_v();
             const real pre      = prims[shift_i].p;
             const real h        = 1 + pre * gamma / (rho * (gamma - 1));
             const real cs       = std::sqrt(gamma * pre / (rho * h));
@@ -489,11 +493,10 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD::prims2cons(const Primitive &prim) const
 {
     const real rho = prim.rho;
-    const real v   = prim.v;
+    const real v   = prim.get_v();
     const real pre = prim.p;  
     const real h   = 1 + gamma * pre / (rho * (gamma - 1));
     const real W   = 1 / std::sqrt(1 - v * v);
-
     return Conserved{rho * W, rho * h * W * W * v, rho * h * W * W - pre - rho * W};
 };
 
@@ -505,7 +508,7 @@ GPU_CALLABLE_MEMBER
 Conserved SRHD::prims2flux(const Primitive &prim) const
 {
     const real rho = prim.rho;
-    const real v   = prim.v;
+    const real v   = prim.get_v();
     const real pre = prim.p;
     const real W   = 1 / std::sqrt(1 - v * v);
     const real h   = 1 + gamma * pre / (rho * (gamma - 1));
@@ -587,7 +590,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
 
     
     if (vface <= aStar) {
-        const real v        = left_prims.v;
+        const real v        = left_prims.get_v();
         const real pressure = left_prims.p;
         const real D        = left_state.d;
         const real S        = left_state.s;
@@ -609,7 +612,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         Conserved hllc_flux = left_flux + (star_stateL - left_state) * aLm;
         return    hllc_flux - star_stateL * vface;
     } else {
-        const real v         = right_prims.v;
+        const real v         = right_prims.get_v();
         const real pressure  = right_prims.p;
         const real D         = right_state.d;
         const real S         = right_state.s;
@@ -722,7 +725,7 @@ SRHD::simulate1D(
     setup.ad_gamma           = gamma;
     setup.first_order        = first_order;
     setup.coord_system       = coord_system;
-    setup.using_fourvelocity = false;
+    setup.using_fourvelocity = (VelocityType == Velocity::FourVelocity);
     setup.x1                 = x1;
     setup.regime             = "relativistic";
     setup.mesh_motion        = mesh_motion;
