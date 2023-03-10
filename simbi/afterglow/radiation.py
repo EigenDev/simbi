@@ -316,7 +316,8 @@ def run(parser: argparse.ArgumentParser,
                 args,
                 mesh,
                 full_sphere=True,
-                full_threed=at_pole)
+                full_threed=not at_pole
+            )
             sim_info['dt'] = setup['dt']
             sim_info['adiabatic_gamma'] = setup['ad_gamma']
             sim_info['current_time'] = setup['time']
@@ -413,7 +414,7 @@ def run(parser: argparse.ArgumentParser,
                     1] * units.day
                 x = example_data['freq'] * units.Hz
                 y = example_data['spectra'][key]
-                m = 1.0
+                m = 5.0
             else:
                 key = val * units.Hz
                 x = example_data['tday']
