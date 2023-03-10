@@ -599,7 +599,7 @@ class Hydro:
                 logger.info("Using OpenMP multithreading")
             else:
                 logger.info("Using STL std::thread multithreading")
-                
+        print("")
         # Loading bar to have chance to check params
         helpers.print_progress()
 

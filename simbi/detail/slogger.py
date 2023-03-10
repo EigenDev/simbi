@@ -2,14 +2,15 @@ import logging
 from ._detail import bcolors 
 
 class SimbiFormatter(logging.Formatter):
-    format_txt: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
+    inf_fmt: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    gen_fmt: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
 
     FORMATS = {
-        logging.DEBUG:    bcolors.UNDERLINE  + format_txt + bcolors.ENDC,
-        logging.INFO:     bcolors.LIGHT_CYAN + format_txt + bcolors.ENDC,
-        logging.WARNING:  bcolors.WARNING    + format_txt + bcolors.ENDC,
-        logging.ERROR:    bcolors.FAIL       + format_txt + bcolors.ENDC,
-        logging.CRITICAL: bcolors.BOLD       + format_txt + bcolors.ENDC,
+        logging.DEBUG:    bcolors.UNDERLINE  + gen_fmt + bcolors.ENDC,
+        logging.INFO:     bcolors.LIGHT_CYAN + inf_fmt + bcolors.ENDC,
+        logging.WARNING:  bcolors.WARNING    + gen_fmt + bcolors.ENDC,
+        logging.ERROR:    bcolors.FAIL       + gen_fmt + bcolors.ENDC,
+        logging.CRITICAL: bcolors.BOLD       + gen_fmt + bcolors.ENDC,
     }
 
     def format(self, record: logging.LogRecord) -> str:
