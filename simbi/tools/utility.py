@@ -55,13 +55,15 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
             else:
                 field_str_list.append( r'${}/{}_0$'.format(var,var))
             
-        elif field == 'gamma_beta':
+        elif field in ['gamma_beta', 'u']:
             field_str_list.append( r'$\Gamma \beta$')
-        elif field == 'gamma_beta_1':
+        elif field in ['gamma_beta_1', 'u1']:
             field_str_list.append( r'$\Gamma \beta_1$')
-        elif field == 'gamma_beta_2':
+        elif field in ['gamma_beta_2', 'u2']:
             field_str_list.append( r'$\Gamma \beta_2$')
-        elif field == 'energy' or field == 'p':
+        elif field in ['gamma_beta_3', 'u3']:
+            field_str_list.append( r'$\Gamma \beta_3$')
+        elif field in ['energy', 'p']:
             if args.units:
                 if field == 'energy':
                     field_str_list.append( r'$\tau [\rm erg \ cm^{{-3}}]$')
@@ -93,10 +95,6 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
             field_str_list.append('$v_2 / v_0$')
         elif field == 'v3':
             field_str_list.append('$v_3 / v_0$')
-        elif field == 'u1':
-            field_str_list.append(r'$\Gamma \beta_1$')
-        elif field == 'u2':
-            field_str_list.append(r'$\Gamma \beta_2$')
         else:
             field_str_list.append(rf'${field}$')
 
@@ -125,7 +123,7 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     if isinstance(files, dict):
         import itertools
         files = list(itertools.chain(*files.values()))
-        
+    
     for file in files:
         with h5py.File(file, 'r') as hf:
             ds  = hf.get('sim_info')
@@ -234,7 +232,15 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         fields['ad_gamma']     = setup['ad_gamma']
         
         vsqr = np.sum(vel * vel for vel in v) # type: ignore
-        W    = 1/np.sqrt(1.0 - vsqr) if setup['regime'] == 'relativistic' else 1
+        if setup['regime'] == 'relativistic':
+            if ds.attrs['using_gamma_beta']:
+                W = (1 + vsqr) ** 0.5
+                fields.update({f'v{i+1}': v[i] / W for i in range(len(v))})
+                vsqr /= W**2 
+            else:
+                W = (1 - vsqr) ** (-0.5)
+        else:
+            W = 1
         fields['gamma_beta']   = np.sqrt(vsqr) * W 
 
         #------------------------
