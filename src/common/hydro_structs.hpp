@@ -295,11 +295,7 @@ namespace sr2d {
         
         GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {
-            if constexpr(VelocityType == Velocity::FourVelocity) {
-                return (nhat == 1 ? get_v1() : get_v2()); 
-            } else {
-                return (nhat == 1 ? v1 : v2); 
-            }
+            return (nhat == 1 ? get_v1() : get_v2()); 
         }
 
         GPU_CALLABLE_MEMBER inline real calc_lorentz_gamma() const {
@@ -549,11 +545,7 @@ namespace sr3d {
         }
         GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {
-            if constexpr(VelocityType == Velocity::FourVelocity) {
-                return (nhat == 1 ? get_v1() : (nhat == 2) ?  get_v2() : get_v3()); 
-            } else {
-                return nhat == 1 ? v1 : (nhat == 2) ? v2 : v3;
-            }
+            return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
         }
 
         GPU_CALLABLE_MEMBER inline real calc_lorentz_gamma() const {
