@@ -168,12 +168,12 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         default=None,
         type=float)
     overridable.add_argument(
-        '--plm_theta',
+        '--plm-theta',
         help='piecewise linear consturction parameter',
         default=None,
         type=float)
     overridable.add_argument(
-        '--first_order',
+        '--first-order',
         help='Set flag if wanting first order accuracy in solution',
         default=None,
         action='store_true')
@@ -188,17 +188,17 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         default=None,
         action=argparse.BooleanOptionalAction)
     overridable.add_argument(
-        '--chkpt_interval',
+        '--chkpt-interval',
         help='checkpoint interval spacing in simulation time units',
         default=None,
         type=float)
     overridable.add_argument(
-        '--data_directory',
+        '--data-directory',
         help='directory to save checkpoint files',
         default=None,
         type=str)
     overridable.add_argument(
-        '--boundary_conditions',
+        '--boundary-conditions',
         help='boundary condition for inner boundary',
         default=None,
         nargs="+",
@@ -208,17 +208,17 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
             'inflow',
             'periodic'])
     overridable.add_argument(
-        '--engine_duration',
+        '--engine-duration',
         help='duration of hydrodynamic source terms',
         default=None,
         type=float)
     overridable.add_argument(
-        '--quirk_smoothing',
+        '--quirk-smoothing',
         help='flag to activate Quirk (1994) smoothing at poles',
         default=None,
         action='store_true')
     overridable.add_argument(
-        '--constant_sources',
+        '--constant-sources',
         help='flag to indicate source terms provided are constant',
         default=None,
         action='store_true')
