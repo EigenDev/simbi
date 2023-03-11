@@ -311,11 +311,11 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             //     peq = rho * emin * (gamma - 1.0);
             // }
             press_data[ii] = peq;
-            if constexpr(VelocityType == Velocity::FourVelocity) {
+            #if FOUR_VELOCITY
                 prims_data[ii] = Primitive{D/ W, v * W, peq};
-            } else {
+            #else
                 prims_data[ii] = Primitive{D/ W, v, peq};
-            }
+            #endif
             workLeftToDo = false;
         }
     });

@@ -148,11 +148,11 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
             const real v2 = S2 * inv_et;
             const real v3 = S3 * inv_et;
             press_data[gid] = peq;
-            if constexpr(VelocityType == Velocity::FourVelocity) {
+            #if FOUR_VELOCITY
                 prim_data[gid] = Primitive{D/ W, v1 * W, v2 * W, v3 * W, peq, Dchi / D};
-            } else {
+            #else
                 prim_data[gid] = Primitive{D/ W, v1, v2, v3, peq, Dchi / D};
-            }
+            #endif
             workLeftToDo    = false;
         }
     });
