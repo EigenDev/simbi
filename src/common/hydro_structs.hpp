@@ -73,7 +73,7 @@ namespace hydro1d {
             return *this;
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v() const {
             return v;
         }
     };
@@ -157,7 +157,7 @@ namespace sr1d {
             return *this;
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v;
             } else {
@@ -293,7 +293,7 @@ namespace sr2d {
             return *this;
         }
         
-        GPU_CALLABLE_MEMBER
+        inline GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {
             return (nhat == 1 ? get_v1() : get_v2()); 
         }
@@ -306,7 +306,7 @@ namespace sr2d {
             }
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v1() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v1() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v1;
             } else {
@@ -314,7 +314,7 @@ namespace sr2d {
             }
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v2() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v2;
             } else {
@@ -424,15 +424,15 @@ namespace hydro2d {
             return *this;
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v1() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v1() const {
             return v1;
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v2() const {
             return v2;
         }
         
-        GPU_CALLABLE_MEMBER
+        inline GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {return (nhat == 1 ? v1 : v2); }
 
     };
@@ -543,7 +543,8 @@ namespace sr3d {
             chi    -= c;
             return *this;
         }
-        GPU_CALLABLE_MEMBER
+
+        inline GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
         }
@@ -556,7 +557,7 @@ namespace sr3d {
             }
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v1() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v1() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v1;
             } else {
@@ -564,7 +565,7 @@ namespace sr3d {
             }
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v2() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v2;
             } else {
@@ -572,7 +573,7 @@ namespace sr3d {
             }
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v3() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v3() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v3;
             } else {
@@ -683,15 +684,15 @@ namespace hydro3d {
             return *this;
         }
 
-        GPU_CALLABLE_MEMBER  constexpr real get_v1() const {
+        inline GPU_CALLABLE_MEMBER  constexpr real get_v1() const {
             return v1;
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v2() const {
             return v2;
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v3() const {
+        inline GPU_CALLABLE_MEMBER constexpr real get_v3() const {
             return v3;
         }
     };
