@@ -198,6 +198,36 @@ namespace simbi
             std::function<double(double, double)> s1_outer = nullptr,
             std::function<double(double, double)> s2_outer = nullptr,
             std::function<double(double, double)> e_outer = nullptr);
+
+
+        
+        void emit_troubled_cells() {
+            troubled_cells.copyFromGpu();
+            cons.copyFromGpu();
+            prims.copyFromGpu();
+            for (auto gid = 0; gid < total_zones; gid++)
+            {
+                if (troubled_cells[gid] != 0) {
+                    const auto ii     = gid % nx;
+                    const auto jj     = gid / nx;
+                    const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
+                    const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
+                    const real x1l    = get_x1face(ireal, geometry, 0);
+                    const real x1r    = get_x1face(ireal, geometry, 1);
+                    const real x2l    = get_x2face(jreal, 0);
+                    const real x2r    = get_x2face(jreal, 1);
+                    const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
+                    const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
+                    const real s      = std::sqrt(cons[gid].s1 * cons[gid].s1 + cons[gid].s2 * cons[gid].s2);
+                    const real p      = prims[gid].p;
+                    const real et     = (cons[gid].tau + cons[gid].d + prims[gid].p);
+                    const real v2     = (s * s) / (et * et);
+                    const real w      = 1 / std::sqrt(1 - v2);
+                    printf("\nCons2Prim cannot converge:\nDensity: %.2e, Pressure: %.2e, Vsq: %.2f, et: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", 
+                    cons[gid].d / w, p, v2, et,  x1mean, x2mean, troubled_cells[gid]);
+                }
+            }
+        }
     };
 }
 

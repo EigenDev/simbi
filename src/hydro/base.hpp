@@ -30,6 +30,7 @@ namespace simbi
         luint xphysical_grid, yphysical_grid, zphysical_grid;
         simbi::Solver sim_solver;
         ndarray<simbi::BoundaryCondition> bcs;
+        ndarray<int> troubled_cells;
         simbi::Geometry geometry;
         simbi::Cellspacing x1cell_spacing, x2cell_spacing, x3cell_spacing;
         luint blockSize, checkpoint_zones;
@@ -37,15 +38,7 @@ namespace simbi
         std::string data_directory;
 
         int gpu_block_dimx, gpu_block_dimy, gpu_block_dimz;
-        char* err_reason;
-        char err_location[100];
-
-        void check_state(){
-            if (inFailureState) {
-                throw helpers::SimulationFailureException(err_reason, err_location);
-            }
-        }
-
+        
         const auto get_xblock_dims() const {
             return std::stoi(getEnvVar("GPUXBLOCK_SIZE"));
         }

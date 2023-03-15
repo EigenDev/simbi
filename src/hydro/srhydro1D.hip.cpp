@@ -229,6 +229,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
     auto* const cons_data  = cons.data();
     auto* const prims_data = prims.data();
     auto* const press_data = pressure_guess.data();
+    auto* const troubled_data = troubled_cells.data();
     simbi::parallel_for(p, (luint)0, nx, [=] GPU_LAMBDA (luint ii){
         real pre, g, f, peq, pstar;
         volatile __shared__ bool found_failure;
@@ -277,27 +278,15 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
 
                 if (iter >= MAX_ITER || std::isnan(peq))
                 {
-                    real v = S / (tau + D + peq);
-                    real W = 1 / std::sqrt(1 - v * v);
-                    const luint idx       = helpers::get_real_idx(ii, radius, active_zones);
-                    const real xl         = get_xface(idx, geometry, 0);
-                    const real xr         = get_xface(idx, geometry, 1);
-                    const real xmean      = helpers::calc_any_mean(xl, xr, x1cell_spacing);
-                    printf("\nCons2Prim cannot converge\n density: %.3e, pressure: %.3e, v: %.3e, coord: %.2e, iter: %d\n", D / W, peq, v, xmean, iter);
-                    dt             = INFINITY;
-                    inFailureState = true;
-                    found_failure  = true;
-                    simbi::gpu::api::synchronize();
+                    troubled_data[ii] = iter;
+                    dt                = INFINITY;
+                    inFailureState    = true;
+                    found_failure     = true;
                     break;
                 }
                 iter++;
 
             } while (std::abs(f / g) >= tol);
-
-            if (peq < 0) {
-                inFailureState = true;
-                found_failure  = true;
-            }
             
             real v = S / (tau + D + peq);
             real W = 1 / std::sqrt(1 - v * v);
@@ -316,6 +305,14 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             #else
                 prims_data[ii] = Primitive{D/ W, v, peq};
             #endif
+
+            if (peq < 0) {
+                troubled_data[ii] = iter;
+                dt                = INFINITY;
+                inFailureState    = true;
+                found_failure     = true;
+            }
+            simbi::gpu::api::synchronize();
             workLeftToDo = false;
         }
     });
@@ -478,8 +475,6 @@ void SRHD::adapt_dt(const luint blockSize)
         compute_dt<Primitive><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
         deviceReduceWarpAtomicKernel<1><<<blockSize, gpu_block_dimx>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
-        // deviceReduceKernel<1><<<blockSize, gpu_block_dimx>>>(this, dt_min.data(), active_zones);
-        // deviceReduceKernel<1><<<1,1024>>>(this, dt_min.data(), blockSize);
     #endif
 };
 
@@ -734,6 +729,7 @@ SRHD::simulate1D(
     cons.resize(nx);
     prims.resize(nx);
     pressure_guess.resize(nx);
+    troubled_cells.resize(nx, 0);
     dt_min.resize(active_zones);
     if (mesh_motion) {
         outer_zones.resize(2);
@@ -753,6 +749,7 @@ SRHD::simulate1D(
     source0.copyToGpu();
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
+    troubled_cells.copyToGpu();
 
     const auto xblockdim      = nx > gpu_block_dimx ? gpu_block_dimx : nx;
     this->radius              = (periodic) ? 0 : (first_order) ? 1 : 2;
@@ -782,6 +779,9 @@ SRHD::simulate1D(
     // Simulate :)
     const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
     simbi::detail::logger::with_logger(*this, tend, [&](){
+        if (inFailureState){
+            return;
+        }
         advance(activeP, xstride);
         cons2prim(fullP);
         if (!periodic) {
@@ -796,6 +796,10 @@ SRHD::simulate1D(
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
     });
+    // Check if in failure state, and emit troubled cells
+    if (inFailureState){
+        emit_troubled_cells();
+    }
 
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
     for (luint ii = 0; ii < nx; ii++) {

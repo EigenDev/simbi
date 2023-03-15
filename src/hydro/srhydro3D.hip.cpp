@@ -69,6 +69,7 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
     auto* const prim_data  = prims.data();
     auto* const cons_data  = cons.data();
     auto* const press_data = pressure_guess.data(); 
+    auto* const troubled_data = troubled_cells.data();
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
@@ -111,38 +112,15 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
                 iter++;
                 if (iter >= MAX_ITER || std::isnan(peq))
                 {
-                    const luint xpg    = xphysical_grid;
-                    const luint ypg    = yphysical_grid;
-                    const luint kk    = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z: simbi::detail::get_height(gid, xpg, ypg);
-                    const luint jj    = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: simbi::detail::get_row(gid, xpg, ypg, kk);
-                    const luint ii    = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: simbi::detail::get_column(gid, xpg, ypg, kk);
-                    const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
-                    const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
-                    const lint kreal  = helpers::get_real_idx(kk, radius, zphysical_grid); 
-                    const real x1l    = get_x1face(ireal, geometry, 0);
-                    const real x1r    = get_x1face(ireal, geometry, 1);
-                    const real x2l    = get_x2face(jreal, 0);
-                    const real x2r    = get_x2face(jreal, 1);
-                    const real x3l    = get_x3face(kreal, 0);
-                    const real x3r    = get_x3face(kreal, 1);
-                    const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
-                    const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
-                    const real x3mean = helpers::calc_any_mean(x3l, x3r, x3cell_spacing);
-
-                    printf("\nCons2Prim cannot converge\n Density: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e\n", rho, peq, v2, x1mean, x2mean, x3mean);
-                   
+                    troubled_data[gid] = iter;
                     found_failure  = true;
                     inFailureState = true;
-                    simbi::gpu::api::synchronize();
+                    dt             = INFINITY;
                     break;
                 }
 
             } while (std::abs(peq - pre) >= tol);
 
-            if (peq < 0) {
-                inFailureState = true;
-                found_failure  = true;
-            }
             const real inv_et = 1 / (tau + D + peq); 
             const real v1 = S1 * inv_et;
             const real v2 = S2 * inv_et;
@@ -153,7 +131,15 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
             #else
                 prim_data[gid] = Primitive{D/ W, v1, v2, v3, peq, Dchi / D};
             #endif
-            workLeftToDo    = false;
+            workLeftToDo = false;
+
+            if (peq < 0) {
+                troubled_data[gid] = iter;
+                inFailureState = true;
+                found_failure  = true;
+                dt = INFINITY;
+            }
+            simbi::gpu::api::synchronize();
         }
     });
 }
@@ -1259,6 +1245,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
 
     cons.resize(nzones);
     prims.resize(nzones);
+    troubled_cells.resize(nzones, 0);
     dt_min.resize(active_zones);
     pressure_guess.resize(nzones);
     // Copy the state array into real & profile variables
@@ -1286,6 +1273,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     object_pos.copyToGpu();
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
+    troubled_cells.copyToGpu();
 
     // Setup the system
     const luint xblockdim    = xphysical_grid > gpu_block_dimx ? gpu_block_dimx : xphysical_grid;
@@ -1323,6 +1311,9 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&](){
+        if (inFailureState){
+            return;
+        }
         advance(activeP, xstride, ystride, zstride);
         cons2prim(fullP);
         config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
@@ -1334,6 +1325,10 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
     });
+
+    if (inFailureState){
+        emit_troubled_cells();
+    }
     
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
     for (luint ii = 0; ii < nzones; ii++) {

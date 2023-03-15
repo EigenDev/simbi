@@ -649,6 +649,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
     auto* const cons_data  = cons.data();
     auto* const prim_data  = prims.data();
     auto* const press_data = pressure_guess.data();
+    auto* const troubled_data = troubled_cells.data();
     simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
@@ -702,18 +703,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
                 iter++;
                 if (iter >= MAX_ITER || std::isnan(peq))
                 {
-                    const auto ii     = gid % nx;
-                    const auto jj     = gid / nx;
-                    const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
-                    const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
-                    const real x1l    = get_x1face(ireal, geometry, 0);
-                    const real x1r    = get_x1face(ireal, geometry, 1);
-                    const real x2l    = get_x2face(jreal, 0);
-                    const real x2r    = get_x2face(jreal, 1);
-                    const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
-                    const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
-                    printf("\nCons2Prim cannot converge:\nDensity: %.2e, Pressure: %.2e, Vsq: %.2f, et: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", 
-                    rho, peq, v2, et,  x1mean, x2mean, iter);
+                    troubled_data[gid] = iter;
                     dt             = INFINITY;
                     found_failure  = true;
                     inFailureState = true;
@@ -721,10 +711,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
                 }
             } while (std::abs(peq - pre) >= tol);
             
-            if (peq < 0) {
-                inFailureState = true;
-                found_failure  = true;
-            }
+
             const real inv_et = 1 / (tau + D + peq);
             const real v1     = S1 * inv_et;
             const real v2     = S2 * inv_et;
@@ -735,6 +722,13 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
                 prim_data[gid] = Primitive{D/ W, v1, v2, peq, Dchi / D};
             #endif
             workLeftToDo = false;
+
+            if (peq < 0) {
+                troubled_data[gid] = iter;
+                dt             = INFINITY;
+                inFailureState = true;
+                found_failure  = true;
+            }
             simbi::gpu::api::synchronize();
         }
     });
@@ -1248,6 +1242,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
 
     cons.resize(nzones);
     prims.resize(nzones);
+    troubled_cells.resize(nzones, 0);
     dt_min.resize(active_zones);
     pressure_guess.resize(nzones);
     if (d_outer && s1_outer && s2_outer && e_outer) {
@@ -1278,6 +1273,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     object_pos.copyToGpu();
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
+    troubled_cells.copyToGpu();
 
     // Write some info about the setup for writeup later
     setup.x1max              = x1[xphysical_grid - 1];
@@ -1337,6 +1333,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const luint xstride = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
     const luint ystride = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
     simbi::detail::logger::with_logger(*this, tend, [&](){
+        if (inFailureState){
+            return;
+        }
+        
         advance(activeP, xstride, ystride);
         cons2prim(fullP);
         config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
@@ -1349,6 +1349,10 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
     });
+
+    if (inFailureState){
+        emit_troubled_cells();
+    }
 
     std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
     for (luint ii = 0; ii < nzones; ii++) {

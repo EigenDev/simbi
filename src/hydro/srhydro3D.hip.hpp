@@ -192,6 +192,41 @@ namespace simbi
             return dV;
             
         }
+
+        void emit_troubled_cells() {
+            troubled_cells.copyFromGpu();
+            cons.copyFromGpu();
+            prims.copyFromGpu();
+            for (luint gid = 0; gid < total_zones; gid++)
+            {
+                if (troubled_cells[gid] != 0) {
+                    const luint xpg   = xphysical_grid;
+                    const luint ypg   = yphysical_grid;
+                    const luint kk    = detail::get_height(gid, xpg, ypg);
+                    const luint jj    = detail::get_row(gid, xpg, ypg, kk);
+                    const luint ii    = detail::get_column(gid, xpg, ypg, kk);
+                    const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
+                    const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
+                    const lint kreal  = helpers::get_real_idx(kk, radius, zphysical_grid); 
+                    const real x1l    = get_x1face(ireal, geometry, 0);
+                    const real x1r    = get_x1face(ireal, geometry, 1);
+                    const real x2l    = get_x2face(jreal, 0);
+                    const real x2r    = get_x2face(jreal, 1);
+                    const real x3l    = get_x3face(kreal, 0);
+                    const real x3r    = get_x3face(kreal, 1);
+                    const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
+                    const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
+                    const real x3mean = helpers::calc_any_mean(x3l, x3r, x3cell_spacing);
+
+                    const real et  = (cons[gid].d + cons[gid].tau + prims[gid].p);
+                    const real s   = std::sqrt(cons[gid].s1 * cons[gid].s1 + cons[gid].s2 * cons[gid].s2 + cons[gid].s3 * cons[gid].s3);
+                    const real v2  = (s * s) / (et * et);
+                    const real w   = 1 / std::sqrt(1 - v2);
+                    printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e\n", 
+                    cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, x3mean);
+                }
+            }
+        }
     };
 }
 
