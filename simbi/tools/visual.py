@@ -202,6 +202,14 @@ class Visualizer:
             )
 
         vars(self).update(**vars(parser.parse_args()))
+        
+        if self.cmap == 'grayscale':
+            plt.style.use('grayscale')
+        else:
+            plt.style.use('seaborn-v0_8-colorblind')
+        
+        if self.dbg:
+            plt.style.use('dark_background')
 
         self.color_map = []
         self.cartesian = True
@@ -561,7 +569,7 @@ class Visualizer:
 
             if self.fields[0] in ['gamma_beta', 'u1'] and not self.plotted_references:
                 self.plotted_references = True
-                exp_curve = np.exp(times[0] - times)
+                exp_curve = np.exp(1 - times/times[0])
                 if key == 0:
                     self.axs.plot(
                         times,
