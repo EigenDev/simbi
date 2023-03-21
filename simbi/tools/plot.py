@@ -84,13 +84,13 @@ def parse_plotting_arguments(
         help='list of legend labels')
     plot_parser.add_argument(
         '--xlims',
-        default=None,
+        default=[None, None],
         type=float,
         nargs=2,
         help='limits of x axis')
     plot_parser.add_argument(
         '--ylims',
-        default=None,
+        default=[None, None],
         type=float,
         nargs=2,
         help='limits of y axis')
