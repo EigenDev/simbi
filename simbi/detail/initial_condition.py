@@ -94,7 +94,16 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
         # Load Fields
         #-------------------------------
         vsqr = np.sum(vel * vel for vel in v) # type: ignore
-        W    = 1/np.sqrt(1.0 - vsqr) if setup['regime'] == 'relativistic' else 1
+        if setup['regime'] == 'relativistic':
+            if ds.attrs['using_gamma_beta']:
+                W = (1 + vsqr) ** 0.5
+                v     = [vel / W for vel in v]
+                vsqr /= W**2 
+            else:
+                W = (1 - vsqr) ** (-0.5)
+        else:
+            W = 1
+            
         if setup['regime'] == 'relativistic':
             h = 1.0 + setup['ad_gamma'] * p / (rho * (setup['ad_gamma'] - 1.0))
             e = rho * W * W * h - p - rho * W 
