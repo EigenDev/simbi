@@ -771,9 +771,16 @@ SRHD::simulate1D(
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
 
     // Save initial condition
-    if (t == 0) {
+    if (t == 0 || chkpt_idx == 0) {
+        if (!periodic){
+            config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
+        }
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-        t_interval += chkpt_interval;
+        if (dlogt != 0) {
+            t_interval *= std::pow(10, dlogt);
+        } else {
+            t_interval += chkpt_interval;
+        }
     }
     
     // Simulate :)

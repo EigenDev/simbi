@@ -1041,9 +1041,13 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
 
     // Save initial condition
-    if (t == 0) {
+    if (t == 0 || chkpt_idx == 0) {
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-        t_interval += chkpt_interval;
+        if (dlogt != 0) {
+            t_interval *= std::pow(10, dlogt);
+        } else {
+            t_interval += chkpt_interval;
+        }
     }
     
     // Simulate :)

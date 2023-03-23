@@ -595,9 +595,13 @@ void Newtonian1D::advance(
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
 
     // Save initial condition
-    if (t == 0) {
+    if (t == 0 || chkpt_idx == 0) {
         write2file(*this, setup, data_directory, t, t_interval, this->chkpt_interval, active_zones);
-        t_interval += this->chkpt_interval;
+        if (dlogt != 0) {
+            t_interval *= std::pow(10, dlogt);
+        } else {
+            t_interval += chkpt_interval;
+        }
     }
     const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
 
