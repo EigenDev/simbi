@@ -58,6 +58,7 @@ class Visualizer:
         self.current_frame = slice(None)
         self.plotted_references = False
         self.ndim = ndim
+        self.refs = []
         if self.ndim != 1:
             plot_parser = get_subparser(parser, 1)
             plot_parser.add_argument(
@@ -257,19 +258,26 @@ class Visualizer:
 
                     ax.set_title(f'{self.setup} at t = {setup["time"]:.2f}')
                     ax.set_xlim(mesh['x1'][0], mesh['x1'][-1])
-                    if self.ylims:
-                        ax.set_ylim(*self.ylims)
+                    # if self.ylims:
+                    #     ax.set_ylim(*self.ylims)
                     label = field_str[idx]
                     scale = next(scale_cycle)
                     if scale != 1:
                         label = label + f'/{int(scale)}'
                     line, = ax.plot(mesh['x1'], var / scale, label=label)
                     self.frames += [line]
+                    # BMK REF
+                    x = mesh['x1'][var.argmax():]
+                    ref, = ax.plot(x, var.max() * (x / x[0]) ** (-3/2), linestyle='--', color='grey', alpha=0.4)
+                    self.refx    = x[0]
+                    self.refy    = var.max()
+                    self.refs   += [ref]
 
         if self.log:
             ax.set_xscale('log')
             ax.set_yscale('log')
 
+        ax.set_xscale('log')
         if len(self.fields) == 1:
             ax.set_ylabel(field_str)
         elif self.legend:
@@ -373,6 +381,11 @@ class Visualizer:
                         self.fig.suptitle(
                             '{} at t = {:.2f}'.format(
                                 self.setup, setup['time']), y=1.0)
+                    
+                    # ax.set_xlim(*self.xlims)
+                    # ax.set_ylim(*self.ylims)
+                    ax.set_rmin(yy[0,0])
+                    ax.set_rmax(self.ylims[-1])
                         
                     if not self.no_cbar:
                         if idx < len(self.fields):
@@ -624,7 +637,7 @@ class Visualizer:
             self.fig.savefig(fig_name, dpi=600, bbox_inches='tight')
         else:
             self.animation.save("{}.mp4".format(
-                self.save.replace(" ", "_")),
+                self.save.replace(" ", "_")), dpi=600,
                 progress_callback=lambda i, n: print(
                 f'Saving frame {i} of {n}', end='\r', flush=True)
             )
@@ -673,6 +686,9 @@ class Visualizer:
             if self.ndim == 1:
                 self.axs.set_xlim(mesh['x1'][0], mesh['x1'][-1])
                 self.frames[idx].set_data(mesh['x1'], var / next(scale_cycle))
+                if self.refs:
+                    x = mesh['x1']
+                    self.refs[idx].set_data(x, self.refy * (x / self.refx) ** (-3/2))
             else:
                 # affect the generator w/o using output
                 any(drawing.set_array(var.ravel()) for drawing in self.frames)
