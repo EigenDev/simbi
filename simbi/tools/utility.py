@@ -124,6 +124,7 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
         import itertools
         files = list(itertools.chain(*files.values()))
     
+    files = list(filter(bool, files))
     for file in files:
         with h5py.File(file, 'r') as hf:
             ds  = hf.get('sim_info')
