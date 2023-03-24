@@ -244,6 +244,7 @@ class Visualizer:
     def plot_1d(self):
         field_str   = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
+        refcount = 0
         for ax in get_iterable(self.axs):
             for file in get_iterable(self.flist[self.current_frame]):
                 fields, setup, mesh = util.read_file(
@@ -257,7 +258,7 @@ class Visualizer:
                         var = fields[field]
 
                     ax.set_title(f'{self.setup} at t = {setup["time"]:.2f}')
-                    ax.set_xlim(mesh['x1'][0], mesh['x1'][-1])
+                    # ax.set_xlim(mesh['x1'][0], mesh['x1'][-1])
                     # if self.ylims:
                     #     ax.set_ylim(*self.ylims)
                     label = field_str[idx]
@@ -267,11 +268,14 @@ class Visualizer:
                     line, = ax.plot(mesh['x1'], var / scale, label=label)
                     self.frames += [line]
                     # BMK REF
-                    x = mesh['x1'][var.argmax():]
-                    ref, = ax.plot(x, var.max() * (x / x[0]) ** (-3/2), linestyle='--', color='grey', alpha=0.4)
-                    self.refx    = x[0]
-                    self.refy    = var.max()
-                    self.refs   += [ref]
+                    if refcount == 0:
+                        x = mesh['x1'][var.argmax():]
+                        x = np.linspace(mesh['x1'][var.argmax()], 1, 1000)
+                        ref, = ax.plot(x, var.max() * (x / x[0]) ** (-3/2), linestyle='--', color='grey', alpha=0.4)
+                        self.refx    = x[0]
+                        self.refy    = var.max()
+                        self.refs   += [ref]
+                        refcount += 1
 
         if self.log:
             ax.set_xscale('log')
@@ -580,7 +584,7 @@ class Visualizer:
                                           color=colors[key],
                                           alpha=1.0)]
 
-            if self.fields[0] in ['gamma_beta', 'u1'] and not self.plotted_references:
+            if self.fields[0] in ['gamma_beta', 'u1', 'u'] and not self.plotted_references:
                 self.plotted_references = True
                 exp_curve = np.exp(1 - times/times[0])
                 if key == 0:
@@ -604,7 +608,7 @@ class Visualizer:
 
         if self.log:
             self.axs.set_xscale('log')
-            if self.fields[0] == 'gamma_beta' or self.fields[0] not in lin_fields:
+            if self.fields[0] in ['gamma_beta', 'u', 'u1'] or self.fields[0] not in lin_fields:
                 self.axs.set(yscale='log')
 
         ylabel = util.get_field_str(self)
@@ -686,9 +690,9 @@ class Visualizer:
             if self.ndim == 1:
                 self.axs.set_xlim(mesh['x1'][0], mesh['x1'][-1])
                 self.frames[idx].set_data(mesh['x1'], var / next(scale_cycle))
-                if self.refs:
-                    x = mesh['x1']
-                    self.refs[idx].set_data(x, self.refy * (x / self.refx) ** (-3/2))
+                # if self.refs:
+                    # x = mesh['x1']
+                    # self.refs[idx].set_data(x, self.refy * (x / self.refx) ** (-3/2))
             else:
                 # affect the generator w/o using output
                 any(drawing.set_array(var.ravel()) for drawing in self.frames)
