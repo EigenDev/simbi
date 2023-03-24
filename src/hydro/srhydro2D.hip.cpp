@@ -1245,8 +1245,18 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     troubled_cells.resize(nzones, 0);
     dt_min.resize(active_zones);
     pressure_guess.resize(nzones);
-    if (d_outer && s1_outer && s2_outer && e_outer) {
+    if (mesh_motion && all_outer_bounds) {
         outer_zones.resize(ny);
+        for (luint jj = 0; jj < ny; jj++) {
+            const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
+            const real dV    = get_cell_volume(xphysical_grid - 1, jreal, geometry);
+            outer_zones[jj]  = conserved_t{
+                dens_outer(x1max, x2[jreal]), 
+                mom1_outer(x1max, x2[jreal]), 
+                mom2_outer(x1max, x2[jreal]), 
+                nrg_outer(x1max, x2[jreal])} * dV;
+        }
+        outer_zones.copyToGpu();
     }
 
     // Copy the state array into real & profile variables
@@ -1352,6 +1362,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         }
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
+        if (mesh_motion){
+            hubble_param = adot(t) / a(t);
+        }
     });
 
     if (inFailureState){

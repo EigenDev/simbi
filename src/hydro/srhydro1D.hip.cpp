@@ -731,9 +731,16 @@ SRHD::simulate1D(
     pressure_guess.resize(nx);
     troubled_cells.resize(nx, 0);
     dt_min.resize(active_zones);
-    if (mesh_motion) {
+    if (mesh_motion && all_outer_bounds) {
         outer_zones.resize(2);
+        const real dV  = get_cell_volume(active_zones - 1, geometry);
+        outer_zones[0] = conserved_t{
+            dens_outer(x1max), 
+            mom_outer(x1max), 
+            nrg_outer(x1max)} * dV;
+        outer_zones.copyToGpu();
     }
+
     // Copy the state array into real & profile variables
     for (luint ii = 0; ii < nx; ii++) {
         cons[ii] = Conserved{state[0][ii], state[1][ii], state[2][ii]};
@@ -802,6 +809,9 @@ SRHD::simulate1D(
         }
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
+        if (mesh_motion){
+            hubble_param = adot(t) / a(t);
+        }
     });
     // Check if in failure state, and emit troubled cells
     if (inFailureState){
