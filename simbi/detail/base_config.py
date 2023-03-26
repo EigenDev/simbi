@@ -5,6 +5,8 @@ from ..key_types import *
 from . import get_subparser, bcolors
 from typing import ParamSpec, TypeVar, Generic
 
+__all__ = ['BaseConfig', 'simbi_property', 'simbi_classproperty']
+
 T = TypeVar('T', covariant=True)
 P = ParamSpec('P')
     
@@ -62,8 +64,6 @@ class simbi_property(Generic[T]):
 def err_message(name: str) -> str:
     return f"Configuration must include a {name} simbi_property"
 
-__all__ = ['BaseConfig', 'simbi_property', 'simbi_classproperty']
-
 def class_register(cls: Any) -> Any:
     for prop in dir(cls):        
         if prop in list(simbi_property.registry.keys()) +  list(simbi_classproperty.registry.keys()):
@@ -80,7 +80,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def __init_subclass__(cls: Any, *args: Any, **kwargs: Any) -> None:
         """Check Child Behavior
         To save from defining do-nothing properties, raise an error when a user
-        tries to define a rea-only property in their subclass which does not 
+        tries to define a read-only property in their subclass which does not 
         exist already in the base configuration. 
          
         Args:
