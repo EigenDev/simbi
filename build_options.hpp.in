@@ -4,6 +4,13 @@
 #mesondefine FLOAT_PRECISION
 #mesondefine COLUMN_MAJOR
 #mesondefine FOUR_VELOCITY
+
+#if __cplusplus >= 202002L
+#define CAPTURE_THIS =,this
+#else
+#define CAPTURE_THIS =
+#endif 
+
 #include <functional>    // std::function
 #include <chrono>        // high_resolution_clock
 #include <csignal>       // SIGACTION
