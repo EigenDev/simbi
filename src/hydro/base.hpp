@@ -78,10 +78,10 @@ namespace simbi
             gpu_block_dimy(1),
             gpu_block_dimz(1)
         {
-            if constexpr(BuildPlatform == Platform::GPU) {
-                std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx 
-                          << ", " << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
-            }
+            // if constexpr(BuildPlatform == Platform::GPU) {
+            //     std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx 
+            //               << ", " << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
+            // }
             if (std::getenv("USE_OMP")) {
                 use_omp = true;
                 if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
@@ -117,10 +117,10 @@ namespace simbi
             gpu_block_dimy(get_yblock_dims()),
             gpu_block_dimz(1)
         {
-            if constexpr(BuildPlatform == Platform::GPU) {
-                std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx << ", " 
-                << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
-            }
+            // if constexpr(BuildPlatform == Platform::GPU) {
+            //     std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx << ", " 
+            //     << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
+            // }
             if (std::getenv("USE_OMP")) {
                 use_omp = true;
                 if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
@@ -158,10 +158,10 @@ namespace simbi
             gpu_block_dimy(get_yblock_dims()),
             gpu_block_dimz(get_zblock_dims())
         {
-            if constexpr(BuildPlatform == Platform::GPU) {
-                std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx << ", "
-                 << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
-            }
+            // if constexpr(BuildPlatform == Platform::GPU) {
+            //     std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx << ", "
+            //      << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
+            // }
             if (std::getenv("USE_OMP")) {
                 use_omp = true;
                 if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {

@@ -605,6 +605,21 @@ class Hydro:
                 logger.info("Using OpenMP multithreading")
             else:
                 logger.info("Using STL std::thread multithreading")
+        else:
+            dim3 = [1, 1, 1]
+            for idx, coord in enumerate(['X', 'Y', 'Z']):
+                if user_set := f'GPU{coord}BLOCK_SIZE' in os.environ:
+                    if idx + 1 <= self.dimensionality:
+                        dim3[idx] = int(os.environ[f'GPU{coord}BLOCK_SIZE'])
+                else:
+                    if self.dimensionality == 1 and coord == 'X':
+                        dim3[idx] = 128
+                    elif self.dimensionality == 2 and coord in ['X', 'Y']:
+                        dim3[idx] = 16
+                    elif self.dimensionality == 3 and coord in ['X', 'Y', 'Z']:
+                        dim3[idx] = 4
+            logger.info(f"In GPU mode, GPU block dims are: {tuple(dim3)}")
+            
         print("")
         # Loading bar to have chance to check params
         helpers.print_progress()
