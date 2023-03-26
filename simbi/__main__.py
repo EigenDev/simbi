@@ -509,6 +509,12 @@ def generate_a_setup(
     clone.generate(args.clone_name)
     
 def main():
+    try:
+        from rich.traceback import install
+        install()
+    except ImportError:
+        pass 
+    
     parser, (args, _) = parse_module_arguments()
     args.func(parser, args, _)
 
