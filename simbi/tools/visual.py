@@ -268,20 +268,20 @@ class Visualizer:
                     line, = ax.plot(mesh['x1'], var / scale, label=label)
                     self.frames += [line]
                     # BMK REF
-                    if refcount == 0:
-                        x = mesh['x1'][var.argmax():]
-                        x = np.linspace(mesh['x1'][var.argmax()], 1, 1000)
-                        ref, = ax.plot(x, var.max() * (x / x[0]) ** (-3/2), linestyle='--', color='grey', alpha=0.4)
-                        self.refx    = x[0]
-                        self.refy    = var.max()
-                        self.refs   += [ref]
-                        refcount += 1
+                    # if refcount == 0:
+                    #     x = mesh['x1'][var.argmax():]
+                    #     x = np.linspace(mesh['x1'][var.argmax()], 1, 1000)
+                    #     ref, = ax.plot(x, var.max() * (x / x[0]) ** (-3/2), linestyle='--', color='grey', alpha=0.4)
+                    #     self.refx    = x[0]
+                    #     self.refy    = var.max()
+                    #     self.refs   += [ref]
+                    #     refcount += 1
 
         if self.log:
             ax.set_xscale('log')
             ax.set_yscale('log')
 
-        ax.set_xscale('log')
+        # ax.set_xscale('log')
         if len(self.fields) == 1:
             ax.set_ylabel(field_str)
         elif self.legend:
@@ -386,10 +386,9 @@ class Visualizer:
                             '{} at t = {:.2f}'.format(
                                 self.setup, setup['time']), y=1.0)
                     
-                    # ax.set_xlim(*self.xlims)
-                    # ax.set_ylim(*self.ylims)
-                    ax.set_rmin(yy[0,0])
-                    ax.set_rmax(self.ylims[-1])
+                    if not self.square_plot:
+                        ax.set_rmin(yy[0,0])
+                        ax.set_rmax(self.ylims[-1])
                         
                     if not self.no_cbar:
                         if idx < len(self.fields):
@@ -539,7 +538,6 @@ class Visualizer:
     def plot_mean_vs_time(self) -> None:
         weighted_vars = []
         times  = []
-        colors = ['red', 'black']
         label  = self.labels[0] if self.labels else None
 
         self.axs.set_title(f'{self.setup}')
@@ -547,6 +545,8 @@ class Visualizer:
         if not isinstance(self.flist, dict):
             self.flist = {0: self.flist}
 
+        cmap   = plt.cm.get_cmap(self.cmap[0])
+        colors = util.get_colors(np.linspace(0, 1, len(self.flist.keys())), cmap)
         for key in self.flist.keys():
             weighted_vars = []
             times = []
@@ -583,28 +583,27 @@ class Visualizer:
                                           label=label,
                                           color=colors[key],
                                           alpha=1.0)]
-
-            if self.fields[0] in ['gamma_beta', 'u1', 'u'] and not self.plotted_references:
-                self.plotted_references = True
+            
+            at_the_end = key == len(self.flist.keys()) - 1
+            if self.fields[0] in ['gamma_beta', 'u1', 'u'] and at_the_end:
                 exp_curve = np.exp(1 - times/times[0])
-                if key == 0:
-                    self.axs.plot(
-                        times,
-                        data[0] *
-                        exp_curve,
-                        label=r'$\propto \exp(-t)$',
-                        color='grey',
-                        linestyle='-.')
-                    self.axs.plot(times,
-                                  data[0] * (times / times[0]) ** (-3 / 2),
-                                  label=r'$\propto t^{-3/2}$',
-                                  color='grey',
-                                  linestyle=':')
-                    self.axs.plot(times,
-                                  data[0] * (times / times[0]) ** (-3),
-                                  label=r'$\propto t^{-3}$',
-                                  color='grey',
-                                  linestyle='--')
+                self.axs.plot(
+                    times,
+                    data[0] *
+                    exp_curve,
+                    label=r'$\propto \exp(-t)$',
+                    color='grey',
+                    linestyle='-.')
+                self.axs.plot(times,
+                                data[0] * (times / times[0]) ** (-3 / 2),
+                                label=r'$\propto t^{-3/2}$',
+                                color='grey',
+                                linestyle=':')
+                self.axs.plot(times,
+                                data[0] * (times / times[0]) ** (-3),
+                                label=r'$\propto t^{-3}$',
+                                color='grey',
+                                linestyle='--')
 
         if self.log:
             self.axs.set_xscale('log')
@@ -613,7 +612,10 @@ class Visualizer:
 
         ylabel = util.get_field_str(self)
         self.axs.set_xlabel(r'$t$')
-        self.axs.set_ylabel(rf"$\langle$ {ylabel} $\rangle$")
+        if self.weight == self.fields[0]:
+            self.axs.set_ylabel(rf"$($ {ylabel} $)_{{\rm max}}$")
+        else:
+            self.axs.set_ylabel(rf"$\langle$ {ylabel} $\rangle$")
 
         if self.legend:
             self.axs.legend(loc=self.legend_loc)
