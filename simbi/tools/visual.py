@@ -698,9 +698,11 @@ class Visualizer:
                 # if self.refs:
                     # x = mesh['x1']
                     # self.refs[idx].set_data(x, self.refy * (x / self.refx) ** (-3/2))
-            else:
+            elif self.ndim ==2:
                 # affect the generator w/o using output
                 any(drawing.set_array(var.ravel()) for drawing in self.frames)
+            else:
+                raise NotImplementedError('3D movies not yet implemented')
 
         return self.frames,
 
