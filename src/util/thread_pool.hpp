@@ -9,7 +9,7 @@
 
 namespace simbi {
     namespace pooling {
-		#if __cplusplus > 202002L
+		#if __cplusplus >= 202002L
 		using std_thread = std::jthread;
 		#else
 		using std_thread = std::thread;
@@ -39,17 +39,17 @@ namespace simbi {
 				template<typename index_type, typename F>
 				void parallel_for(const index_type start, const index_type stop, const F &func) {
 					static unsigned batch_size =  std::ceil((float)(stop - start) / (float)nthreads);
-					auto block_start = start - batch_size;
-					auto block_end   = start;
+					int block_start = start - batch_size;
+					int block_end   = start;
 					
 					auto step = [&] {
 						block_start += batch_size;
 						block_end   += batch_size;
-						block_end    = (block_end > stop) ? stop : block_end;
+						block_end    = ((index_type)block_end > stop) ? stop : block_end;
 					};
 					step();
 
-					for (auto &worker: threads)
+					for ([[gnu::unused]] auto &worker: threads)
 					{
 						queueUp([block_start, block_end, func] {
 							for (auto q = block_start; q < block_end; q++) {

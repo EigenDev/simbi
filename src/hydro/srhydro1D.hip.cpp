@@ -74,13 +74,15 @@ void SRHD::advance(
     const ExecutionPolicy<> &p,
     const luint xstride)
 {
+    #if GPU_CODE
     const auto xextent          = p.get_xextent();
+    #endif 
     auto* const cons_data       = cons.data();
     auto* const prim_data       = prims.data();
     auto* const dens_source     = sourceD.data();
     auto* const mom_source      = sourceS.data();
     auto* const erg_source      = source0.data();
-    simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (luint ii) {
+    simbi::parallel_for(p, (luint)0, active_zones, [CAPTURE_THIS]   GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
         #else 
@@ -198,8 +200,7 @@ void SRHD::advance(
                 cons_data[ia] -= ((frf - flf) * invdx1) * dt * step;
                 break;
             }
-            case simbi::Geometry::CYLINDRICAL:
-            case simbi::Geometry::SPHERICAL:
+            default:
             {
                 const real rlf    = x1l + vfaceL * step * dt; 
                 const real rrf    = x1r + vfaceR * step * dt;
@@ -216,9 +217,10 @@ void SRHD::advance(
                 break;
             }
         } // end switch
+        // update x1 endpoints
         if (ii == active_zones - 1) {
             x1max += step * dt * vfaceR;
-        } else if (ii == 0) {
+            const real vfaceL = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
             x1min += step * dt * vfaceL;
         }
     });	
@@ -230,8 +232,9 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
     auto* const prims_data = prims.data();
     auto* const press_data = pressure_guess.data();
     auto* const troubled_data = troubled_cells.data();
-    simbi::parallel_for(p, (luint)0, nx, [=] GPU_LAMBDA (luint ii){
-        real pre, g, f, peq, pstar;
+    simbi::parallel_for(p, (luint)0, nx, [CAPTURE_THIS]   GPU_LAMBDA (luint ii){
+        real g, f, peq;
+        // pre, pstar;
         volatile __shared__ bool found_failure;
         luint tx = get_threadId();
 
@@ -252,7 +255,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 invdV            = 1 / (xmean * xmean * (xr - xl));
             }
             peq            = press_data[ii];
-            pstar          = peq;
+            // pstar          = peq;
             const real D   = cons_data[ii].d   * invdV;
             const real S   = cons_data[ii].s   * invdV;
             const real tau = cons_data[ii].tau * invdV;
@@ -578,9 +581,11 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const real a     = fe;
     const real b     = - (e + fs);
     const real c     = s;
-    const real disc  = std::sqrt(b*b - 4.0*a*c);
-    const real quad  = -static_cast<real>(0.5)*(b + helpers::sgn(b)*disc);
-    const real aStar = c/quad;
+    // const real disc  = std::sqrt(b*b - 4.0*a*c);
+    // const real quad  = -static_cast<real>(0.5)*(b + helpers::sgn(b)*disc);
+    // const real aStar = c/quad;
+    const real scrh  = 1.0 + std::sqrt(1.0 - 4.0*a*c/(b*b));
+    const real aStar = - 2.0*c/(b*scrh);
     const real pStar = -fe * aStar + fs;
 
     

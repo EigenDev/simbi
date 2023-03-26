@@ -73,32 +73,7 @@ namespace simbi {
             const hydro2d::Primitive &left_prims,
             const hydro2d::Primitive &right_prims,
             const luint ehat = 1);
-        
-        GPU_CALLABLE_INLINE
-        constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side)
-        {
-            switch (geometry)
-            {
-            case simbi::Geometry::CARTESIAN:
-                {
-                        return 1.0;
-                }
-            
-            case simbi::Geometry::SPHERICAL:
-                {
-                        const real rl = (ii > 0 ) ? x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1) :  x1min;
-                        if (side == 0) {
-                            return rl;
-                        } else {
-                            return (ii < static_cast<lint>(xphysical_grid - 1)) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
-                        }
-                        break;
-                }
-            case simbi::Geometry::CYLINDRICAL:
-                // TODO: Implement
-                break;
-            }
-        }
+
 
         void adapt_dt();
         void adapt_dt(
@@ -143,8 +118,7 @@ namespace simbi {
                             return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                         }
                 }
-            case simbi::Geometry::PLANAR_CYLINDRICAL:
-            case simbi::Geometry::SPHERICAL:
+            default:
                 {
                         const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                         if (side == 0) {

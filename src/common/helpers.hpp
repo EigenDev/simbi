@@ -275,7 +275,6 @@ namespace simbi
             const auto et    = tau + D + p;
             const auto v2    = S * S / (et * et);
             const auto W     = 1 / std::sqrt(1 - v2);
-            const auto rho   = D / W;
             const auto eps   = (tau + (1 - W) * D + (1 - W * W) * p) / (D * W);
             const auto c2    = (gamma - 1) * gamma * eps / (1 + gamma * eps);
             return c2 * v2 - 1;

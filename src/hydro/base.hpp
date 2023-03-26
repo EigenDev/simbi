@@ -13,11 +13,12 @@ namespace simbi
         std::vector<std::vector<real>> state;
         real gamma;
         real cfl;
-        std::vector<real> x1, x2, x3;
         std::string coord_system;
         volatile bool inFailureState; 
-        luint nzones;
         real hllc_z;
+        luint nx, ny, nz, nzones;
+        std::vector<real> x1, x2, x3;
+        luint gpu_block_dimx, gpu_block_dimy, gpu_block_dimz;
 
         // Common members
         DataWriteMembers setup;
@@ -26,7 +27,7 @@ namespace simbi
         real dlogx1, dx1, dx2, dx3, dlogt, tstart, engine_duration, invdx1, invdx2, invdx3;
         bool first_order, periodic, linspace, hllc, mesh_motion, half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
         bool den_source_all_zeros, mom1_source_all_zeros, mom2_source_all_zeros, mom3_source_all_zeros, energy_source_all_zeros; 
-        luint active_zones, idx_active, total_zones, n, nx, ny, nz, init_chkpt_idx, radius, pseudo_radius;
+        luint active_zones, idx_active, total_zones, n, init_chkpt_idx, radius, pseudo_radius;
         luint xphysical_grid, yphysical_grid, zphysical_grid;
         simbi::Solver sim_solver;
         ndarray<simbi::BoundaryCondition> bcs;
@@ -36,19 +37,17 @@ namespace simbi
         luint blockSize, checkpoint_zones;
         std::vector<std::vector<real>> sources;
         std::string data_directory;
-
-        int gpu_block_dimx, gpu_block_dimy, gpu_block_dimz;
         
         const auto get_xblock_dims() const {
-            return std::stoi(getEnvVar("GPUXBLOCK_SIZE"));
+            return static_cast<luint>(std::stoi(getEnvVar("GPUXBLOCK_SIZE")));
         }
 
         const auto get_yblock_dims() const {
-            return std::stoi(getEnvVar("GPUYBLOCK_SIZE"));
+            return static_cast<luint>(std::stoi(getEnvVar("GPUYBLOCK_SIZE")));
         }
 
         const auto get_zblock_dims() const {
-            return std::stoi(getEnvVar("GPUZBLOCK_SIZE"));
+            return static_cast<luint>(std::stoi(getEnvVar("GPUZBLOCK_SIZE")));
         }
 
         protected:
@@ -65,11 +64,16 @@ namespace simbi
             state(state),
             gamma(gamma),
             cfl(cfl),
-            x1(x1),
             coord_system(coord_system),
             inFailureState(false),
-            nx(state[0].size()),
             hllc_z((gamma - 1)/ (2 * gamma)),
+            nx(state[0].size()),
+            ny(1),
+            nz(1),
+            nzones(state[0].size()),
+            x1(x1),
+            x2({}),
+            x3({}),
             gpu_block_dimx(get_xblock_dims()),
             gpu_block_dimy(1),
             gpu_block_dimz(1)
@@ -78,7 +82,7 @@ namespace simbi
                 std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx 
                           << ", " << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
             }
-            if (char * omp_set = std::getenv("USE_OMP")) {
+            if (std::getenv("USE_OMP")) {
                 use_omp = true;
                 if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
                     omp_set_num_threads(std::stoi(omp_tnum));
@@ -97,16 +101,18 @@ namespace simbi
             std::string coord_system = "cartesian")
         :
             state(state),
-            nx(nx),
-            ny(ny),
             gamma(gamma),
-            x1(x1),
-            x2(x2),
             cfl(cfl),
             coord_system(coord_system),
             inFailureState(false),
-            nzones(state[0].size()),
             hllc_z((gamma - 1)/ (2 * gamma)),
+            nx(nx),
+            ny(ny),
+            nz(1),
+            nzones(state[0].size()),
+            x1(x1),
+            x2(x2),
+            x3({}),
             gpu_block_dimx(get_xblock_dims()),
             gpu_block_dimy(get_yblock_dims()),
             gpu_block_dimz(1)
@@ -115,7 +121,7 @@ namespace simbi
                 std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx << ", " 
                 << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
             }
-            if (char * omp_set = std::getenv("USE_OMP")) {
+            if (std::getenv("USE_OMP")) {
                 use_omp = true;
                 if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
                     omp_set_num_threads(std::stoi(omp_tnum));
@@ -136,18 +142,18 @@ namespace simbi
             std::string coord_system = "cartesian")
         :
             state(state),
-            nx(nx),
-            ny(ny),
-            nz(nz),
             gamma(gamma),
-            x1(x1),
-            x2(x2),
-            x3(x3),
             cfl(cfl),
             coord_system(coord_system),
             inFailureState(false),
-            nzones(state[0].size()),
             hllc_z((gamma - 1)/ (2 * gamma)),
+            nx(nx),
+            ny(ny),
+            nz(nz),
+            nzones(state[0].size()),
+            x1(x1),
+            x2(x2),
+            x3(x3),
             gpu_block_dimx(get_xblock_dims()),
             gpu_block_dimy(get_yblock_dims()),
             gpu_block_dimz(get_zblock_dims())
@@ -156,7 +162,7 @@ namespace simbi
                 std::cout << "GPU Thread Block Geometry: (" << gpu_block_dimx << ", "
                  << gpu_block_dimy << ", " << gpu_block_dimz << ")" << std::endl; 
             }
-            if (char * omp_set = std::getenv("USE_OMP")) {
+            if (std::getenv("USE_OMP")) {
                 use_omp = true;
                 if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
                     omp_set_num_threads(std::stoi(omp_tnum));

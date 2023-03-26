@@ -70,7 +70,7 @@ void SRHD3D::cons2prim(const ExecutionPolicy<> &p)
     auto* const cons_data  = cons.data();
     auto* const press_data = pressure_guess.data(); 
     auto* const troubled_data = troubled_cells.data();
-    simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
+    simbi::parallel_for(p, (luint)0, nzones, [CAPTURE_THIS]   GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;
@@ -315,7 +315,7 @@ void SRHD3D::adapt_dt()
                                         rproj * dx3 / (std::max(v3p, v3m))});
                             break;
                         }
-                    case simbi::Geometry::CYLINDRICAL:
+                    default:
                         {
                             const auto rmean = static_cast<real>(2.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
                             cfl_dt = std::min(
@@ -372,7 +372,7 @@ Conserved SRHD3D::prims2flux(const Primitive &prims, const luint nhat = 1)
     const real S2 = rho * lorentz_gamma * lorentz_gamma * h * v2;
     const real S3 = rho * lorentz_gamma * lorentz_gamma * h * v3;
     const real Sj = (nhat == 1) ? S1 : (nhat == 2) ? S2 : S3;
-    const real tau = rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma;
+    // const real tau = rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma;
 
     return Conserved{
         D  * vn, 
@@ -643,10 +643,12 @@ void SRHD3D::advance(
     auto* const mom3_source = sourceS3.data();
     auto* const erg_source  = sourceTau.data();
     auto* const object_data = object_pos.data();
+    #if GPU_CODE
     const auto last_kindex  = nz - 1 - radius;
     const auto last_jindex  = ny - 1 - radius;
     const auto last_iindex  = nx - 1 - radius;
-    simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
+    #endif
+    simbi::parallel_for(p, (luint)0, extent, [CAPTURE_THIS]   GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
         #else 
@@ -1087,7 +1089,7 @@ void SRHD3D::advance(
                     cons_data[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 + (hrf - hlf) / dV3 - geom_source - source_terms) * dt * step;
                     break;
                 }
-            case simbi::Geometry::CYLINDRICAL:
+            default:
                 {
                     const real rl           = (ii > 0 ) ? x1min * std::pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
                     const real rr           = (ii < xpg - 1) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
@@ -1095,14 +1097,14 @@ void SRHD3D::advance(
                     const real tr           = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
                     const real zl           = (kk > 0 ) ? x3min + (kk - static_cast<real>(0.5)) * dx3 :  x3min;
                     const real zr           = (kk < zpg - 1) ? zl + dx3 * (kk == 0 ? 0.5 : 1.0) :  x3max; 
-                    const real rmean        = static_cast<real>(2.0 / 3,0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
+                    const real rmean        = static_cast<real>(2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                     const real s1R          = rr * (zr - zl) * (tr - tl); 
                     const real s1L          = rl * (zr - zl) * (tr - tl); 
                     const real s2R          = (rr - rl) * (zr - rl);
                     const real s2L          = (rr - rl) * (zr - rl);
-                    const real s3L          = rmean * (rr - rl) * (tr - tl);
-                    const real s3R          = s3L;
-                    const real thmean       = static_cast<real>(0.5) * (tl + tr);
+                    // const real s3L          = rmean * (rr - rl) * (tr - tl);
+                    // const real s3R          = s3L;
+                    // const real thmean       = static_cast<real>(0.5) * (tl + tr);
                     const real dV           = rmean  * (rr - rl) * (zr - zl) * (tr - tl);
                     const real invdV        = 1/ dV;
 

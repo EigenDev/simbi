@@ -116,6 +116,9 @@ namespace simbi
                     } 
                     return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                 }
+
+            default:
+                break;
             } // end switch
         }
 
@@ -205,7 +208,7 @@ namespace simbi
             troubled_cells.copyFromGpu();
             cons.copyFromGpu();
             prims.copyFromGpu();
-            for (auto gid = 0; gid < total_zones; gid++)
+            for (luint gid = 0; gid < total_zones; gid++)
             {
                 if (troubled_cells[gid] != 0) {
                     const auto ii     = gid % nx;
@@ -223,7 +226,7 @@ namespace simbi
                     const real et     = (cons[gid].tau + cons[gid].d + prims[gid].p);
                     const real v2     = (s * s) / (et * et);
                     const real w      = 1 / std::sqrt(1 - v2);
-                    printf("\nCons2Prim cannot converge:\nDensity: %.2e, Pressure: %.2e, Vsq: %.2f, et: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", 
+                    printf("\nCons2Prim cannot converge:\nDensity: %.2e, Pressure: %.2e, Vsq: %.2f, et: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %d\n", 
                     cons[gid].d / w, p, v2, et,  x1mean, x2mean, troubled_cells[gid]);
                 }
             }

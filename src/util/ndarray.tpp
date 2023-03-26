@@ -59,9 +59,9 @@ dimensions(rhs.dimensions)
 template <typename DT>
 simbi::ndarray<DT>::ndarray(const std::vector<DT>& rhs) : 
 sz(rhs.size()),
-arr(new DT[rhs.size()]),
+nd_capacity(rhs.capacity()),
 dimensions(1),
-nd_capacity(rhs.capacity())
+arr(new DT[rhs.size()])
 {
     for (size_type i = 0; i < sz; i++)
     {
@@ -178,7 +178,7 @@ constexpr DT& simbi::ndarray<DT>::operator[](IndexType index)
 {
     // if given index is greater than the
     // size of array print Error
-    if (index >= sz) {
+    if ((size_t)index >= sz) {
         std::cout << "Error: Array index: " <<  index << " out of bounds for ndarray of size: " << sz << "\n";
         exit(0);
     }

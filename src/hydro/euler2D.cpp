@@ -65,7 +65,7 @@ void Newtonian2D::cons2prim(const ExecutionPolicy<> &p)
 {
     auto* const cons_data = cons.data();
     auto* const prim_data = prims.data();
-    simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (const luint gid) {
+    simbi::parallel_for(p, (luint)0, nzones, [CAPTURE_THIS]   GPU_LAMBDA (const luint gid) {
         const real rho     = cons_data[gid].rho;
         const real v1      = cons_data[gid].m1 / rho;
         const real v2      = cons_data[gid].m2 / rho;
@@ -245,7 +245,7 @@ void Newtonian2D::adapt_dt()
                                 const real x1l    = get_x1face(ii, geometry, 0);
                                 const real x1r    = get_x1face(ii, geometry, 1);
                                 const real dr     = x1r - x1l;
-                                const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                                // const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
                                 if (mesh_motion)
                                 {
                                     const real vfaceL   = x1l * hubble_param;
@@ -256,6 +256,8 @@ void Newtonian2D::adapt_dt()
                                 cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
                                 break;
                             }
+                        default:
+                            break;
                     } // end switch
                     min_dt = std::min(min_dt, cfl_dt);
                 } // end ii
@@ -345,7 +347,7 @@ void Newtonian2D::adapt_dt()
                         const real x1l    = get_x1face(ii, geometry, 0);
                         const real x1r    = get_x1face(ii, geometry, 1);
                         const real dr     = x1r - x1l;
-                        const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                        // const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
                         if (mesh_motion)
                         {
                             const real vfaceL   = x1l * hubble_param;
@@ -356,6 +358,8 @@ void Newtonian2D::adapt_dt()
                         cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
                         break;
                     }
+                default:
+                    break;
             } // end switch
             pooling::update_minimum(min_dt, cfl_dt);
         });
@@ -598,7 +602,7 @@ void Newtonian2D::advance(
     auto* const mom1_source  = sourceM1.data();
     auto* const mom2_source  = sourceM2.data();
     auto* const erg_source   = sourceE.data();
-    simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx){
+    simbi::parallel_for(p, (luint)0, extent, [CAPTURE_THIS]   GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
         #else 
@@ -799,8 +803,8 @@ void Newtonian2D::advance(
             
             case simbi::Geometry::SPHERICAL:
                 {
-                const real rl           = get_xface(ii, geometry, 0); 
-                const real rr           = get_xface(ii, geometry, 1);
+                const real rl           = get_x1face(ii, geometry, 0); 
+                const real rr           = get_x1face(ii, geometry, 1);
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
                 const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
                 const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
@@ -827,8 +831,8 @@ void Newtonian2D::advance(
                 const real rl           = get_x1face(ii, geometry, 0); 
                 const real rr           = get_x1face(ii, geometry, 1);
                 const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
-                const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
-                const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                // const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                // const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dVtot        = rmean * (rr - rl) * dx2;
                 const real invdV        = 1.0 / dVtot;
                 const real s1R          = rr * dx2; 
@@ -865,6 +869,8 @@ void Newtonian2D::advance(
                 cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step;
                 break;
                 }
+            default:
+                break;
         } // end switch
     });
 }

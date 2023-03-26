@@ -164,10 +164,9 @@ namespace simbi
                troubled_cells.copyFromGpu();
                cons.copyFromGpu();
                prims.copyFromGpu();
-               for (auto ii = 0; ii < nx; ii++)
+               for (luint ii = 0; ii < nx; ii++)
                {
                     if (troubled_cells[ii] != 0) {
-                         const real p     = prims[ii].p;
                          const real v     = cons[ii].s / (cons[ii].tau + cons[ii].d + prims[ii].p);
                          const real W     = 1 / std::sqrt(1 - v * v);
                          const luint idx  = helpers::get_real_idx(ii, radius, active_zones);

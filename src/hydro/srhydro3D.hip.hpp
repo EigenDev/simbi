@@ -144,7 +144,7 @@ namespace simbi
                     }
                     return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                 }
-            case simbi::Geometry::CYLINDRICAL:
+            default:
                 {
                     const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                     if (side == 0) {
@@ -222,8 +222,8 @@ namespace simbi
                     const real s   = std::sqrt(cons[gid].s1 * cons[gid].s1 + cons[gid].s2 * cons[gid].s2 + cons[gid].s3 * cons[gid].s3);
                     const real v2  = (s * s) / (et * et);
                     const real w   = 1 / std::sqrt(1 - v2);
-                    printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e\n", 
-                    cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, x3mean);
+                    printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %d\n", 
+                    cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, x3mean, troubled_cells[gid]);
                 }
             }
         }

@@ -111,7 +111,7 @@ namespace simbi
                 auto&delta_t = logger.delta_t;
                 constexpr auto write2file = helpers::write_to_file<typename sim_state_t::primitive_soa_t, sim_state_t::dimensions, sim_state_t>;
                 
-                while (sim_state.t < end_time & !sim_state.inFailureState)
+                while ((sim_state.t < end_time) && (!sim_state.inFailureState))
                 {
                     if constexpr(is_relativistic<sim_state_t>::value) {
                         if constexpr(sim_state_t::dimensions == 1) {

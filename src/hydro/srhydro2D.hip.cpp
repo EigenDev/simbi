@@ -260,6 +260,8 @@ void SRHD2D::adapt_dt()
                                 cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
                                 break;
                             }
+                        default:
+                            break;
                     } // end switch
                     min_dt = helpers::my_min(min_dt, cfl_dt);
                 } // end ii 
@@ -361,6 +363,8 @@ void SRHD2D::adapt_dt()
                         cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
                         break;
                     }
+                default:
+                    break;
             } // end switch
             pooling::update_minimum(min_dt, cfl_dt);
         });
@@ -650,7 +654,7 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
     auto* const prim_data  = prims.data();
     auto* const press_data = pressure_guess.data();
     auto* const troubled_data = troubled_cells.data();
-    simbi::parallel_for(p, (luint)0, nzones, [=] GPU_LAMBDA (luint gid){
+    simbi::parallel_for(p, (luint)0, nzones, [CAPTURE_THIS]   GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;        
@@ -761,7 +765,7 @@ void SRHD2D::advance(
     auto* const mom2_source = sourceS2.data();
     auto* const erg_source  = sourceTau.data();
     auto* const object_data = object_pos.data();
-    simbi::parallel_for(p, (luint)0, extent, [=] GPU_LAMBDA (const luint idx) {
+    simbi::parallel_for(p, (luint)0, extent, [CAPTURE_THIS]   GPU_LAMBDA (const luint idx) {
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
         // auto *const prim_buff = prim_data;
@@ -1090,8 +1094,8 @@ void SRHD2D::advance(
                 const real rl           = x1l + vfaceL * step * dt; 
                 const real rr           = x1r + vfaceR * step * dt;
                 const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
-                const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
-                const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                // const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                // const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dVtot        = rmean * (rr - rl) * dx2;
                 const real invdV        = 1.0 / dVtot;
                 const real s1R          = rr * dx2; 
@@ -1132,15 +1136,16 @@ void SRHD2D::advance(
                 cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step * factor;
                 break;
                 }
+            default:
+                break;
         } // end switch
+        // update x1 endpoints
+        if (idx == active_zones - 1) {
+            x1max += step * dt * vfaceR;
+            const real vfaceL = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
+            x1min += step * dt * vfaceL;
+        }
     });
-    // update x1 endpoints
-    const real x1l    = get_x1face(0, geometry, 0);
-    const real x1r    = get_x1face(xphysical_grid, geometry, 1);
-    const real vfaceR = (geometry == simbi::Geometry::SPHERICAL) ? x1r * hubble_param : hubble_param;
-    const real vfaceL = (geometry == simbi::Geometry::SPHERICAL) ? x1l * hubble_param : hubble_param;
-    x1min += step * dt * vfaceL;
-    x1max += step * dt * vfaceR;
 }
 
 //===================================================================================================================

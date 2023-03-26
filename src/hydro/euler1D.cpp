@@ -59,7 +59,7 @@ Newtonian1D::Newtonian1D(
 void Newtonian1D::cons2prim(const ExecutionPolicy<> &p){
     auto* const conserved_buff = cons.data();
     auto* const primitive_buff = prims.data();
-     simbi::parallel_for(p, (luint)0, nx, [=] GPU_LAMBDA (luint ii){ 
+     simbi::parallel_for(p, (luint)0, nx, [CAPTURE_THIS]   GPU_LAMBDA (luint ii){ 
         real rho = conserved_buff[ii].rho;
         real v   = conserved_buff[ii].m / rho;
         real pre = (gamma - 1)*(conserved_buff[ii].e_dens - static_cast<real>(0.5) * rho * v * v);
@@ -301,13 +301,15 @@ void Newtonian1D::advance(
     const ExecutionPolicy<> &p,
     const luint xstride)
 {
+    #if GPU_CODE
     const auto xextent      = p.get_xextent();
+    #endif
     auto* const prim_data   = prims.data();
     auto* const cons_data   = cons.data();
     auto* const dens_source = sourceRho.data();
     auto* const mom_source  = sourceMom.data();
     auto* const erg_source  = sourceE.data();
-    simbi::parallel_for(p, (luint)0, active_zones, [=] GPU_LAMBDA (luint ii) {
+    simbi::parallel_for(p, (luint)0, active_zones, [CAPTURE_THIS]   GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
         #else 
@@ -453,7 +455,7 @@ void Newtonian1D::advance(
                 cons_data[ia] -= ( (frf * sR - flf * sL) / dV - geom_sources - sources) * step * dt * factor;
                 break;
             }
-        case simbi::Geometry::CYLINDRICAL:
+        default:
             {
                 const real rlf    = x1l + vfaceL * step * dt; 
                 const real rrf    = x1r + vfaceR * step * dt;

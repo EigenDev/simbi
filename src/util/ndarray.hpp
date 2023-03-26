@@ -38,6 +38,7 @@ namespace simbi
 				gpu::api::gpuMalloc(&ptr, size);
 				return ptr; 
 			}
+			return nullptr;
 		};
 
 		// Device-side array
