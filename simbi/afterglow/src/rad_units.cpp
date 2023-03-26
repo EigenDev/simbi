@@ -146,7 +146,7 @@ namespace sogbo_rad
     const double vector_dotproduct(const std::vector<double> a, const std::vector<double> b)
     {
         double mag = 0;
-        for (int ii = 0; ii < a.size(); ii++)
+        for (size_t ii = 0; ii < a.size(); ii++)
         {
             mag += a[ii] * b[ii];
         }
@@ -343,7 +343,7 @@ namespace sogbo_rad
         const auto t_prime = args.current_time * qscales.time_scale * units::s;
         // step size between checkpoints
         const auto dt = args.dt * qscales.time_scale * units::s;   
-        for (int kk = 0; kk < x3.size(); kk++) {
+        for (size_t kk = 0; kk < x3.size(); kk++) {
             const double x3l     = (kk > 0 ) ? x2min + (kk - 0.5) * dx3 :  x3min;
             const double x3r     = (kk < nk - 1) ? x3l + dx3 * (kk == 0 ? 0.5 : 1.0) :  x3max; 
             const double sin_phi = std::sin(x3[kk]);
@@ -353,7 +353,7 @@ namespace sogbo_rad
             // If the data is 3D, then there is a real k-space to pull data from
             const int kreal = (data_dim > 2) * kk;
             #pragma omp parallel
-            for (int jj = 0; jj < x2.size(); jj++) {
+            for (size_t jj = 0; jj < x2.size(); jj++) {
                 const double x2l     = (jj > 0 ) ? x2min + (jj - 0.5) * dx2 :  x2min;
                 const double x2r     = (jj < nj - 1) ? x2l + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
                 const double dcos    = std::cos(x2l) - std::cos(x2r);
@@ -361,8 +361,8 @@ namespace sogbo_rad
                 // radial unit vector   
                 const std::vector<double> rhat = {std::sin(x2[jj]) * cos_phi, std::sin(x2[jj]) * sin_phi, std::cos(x2[jj])}; 
                 const int jreal = (data_dim > 1) * jj;
-                #pragma omp nowait
-                for (int ii = 0; ii < x1.size(); ii++) {
+                #pragma omp for nowait
+                for (size_t ii = 0; ii < x1.size(); ii++) {
                     const auto central_idx  = kreal * ni * nj + jreal * ni + ii;                       // index for current zone
                     const auto beta         = calc_beta(gb[central_idx]);                        // velocity in units of c
                     const auto w            = calc_lorentz_gamma(gb[central_idx]);               // Lorentz factor
@@ -419,7 +419,7 @@ namespace sogbo_rad
                         const auto gamma_e         = gamma_min + qq * dg;
                         const auto gamma_sample    = gen_random_from_powerlaw(gamma_e, gamma_e + dg, p, dis(gen));
                         const auto nu_c            = calc_nu(gamma_sample, nu_g);
-                        const auto nphot           = calc_nphotons_per_bin(dvolume, n_e_proper * w, nu_g, ub, dt, gamma_e, beta, p) * dg;
+                        const auto nphot           = calc_nphotons_per_bin(dvolume, n_e, nu_g, ub, dt, gamma_e, beta, p) * dg;
                         // photon energy in erg
                         photon_distribution[kk * ni * nj * ng + jj * ni * ng + ii * ng + qq] = constants::h_planck.value * nu_c.value * nphot;
                     }   
@@ -479,7 +479,7 @@ namespace sogbo_rad
         const auto dx2     = (x2max - x2min) / (nj - 1);
         const bool at_pole = std::abs(std::cos(args.theta_obs)) == 1;
         
-        int nk = 1;
+        size_t nk = 1;
         double sin_phi = 0;
         double cos_phi = 1.0;
         double dx3     = 2.0 * M_PI;
@@ -505,7 +505,7 @@ namespace sogbo_rad
         // step size between checkpoints
         const auto dt = args.dt * qscales.time_scale * units::s;  
         const auto flux_denom = units::math::pow<std::ratio<-1>>(4.0 * M_PI * d * d);
-        for (int kk=0; kk < nk; kk++)
+        for (size_t kk=0; kk < nk; kk++)
         {       
             if (!at_pole)
             {
@@ -519,7 +519,7 @@ namespace sogbo_rad
             // If the data is 3D, then there is a real k-space to pull data from
             const int kreal = (data_dim > 2) * kk;
             #pragma omp parallel
-            for (int jj = 0; jj < nj; jj++)
+            for (size_t jj = 0; jj < nj; jj++)
             {
                 const double x2l     = (jj > 0 ) ? x2min + (jj - 0.5) * dx2 :  x2min;
                 const double x2r     = (jj < nj - 1) ? x2l + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
@@ -531,7 +531,7 @@ namespace sogbo_rad
                 // Data greater than 1D? Cool, there is a j space to pull data from
                 const int jreal = (data_dim > 1) * jj;
                 #pragma omp for nowait
-                for (int ii = 0; ii < ni; ii++)
+                for (size_t ii = 0; ii < ni; ii++)
                 {
                     const auto central_idx  = kreal * ni * nj + jreal * ni + ii;                 // index for current zone
                     const auto beta         = calc_beta(gb[central_idx]);                        // velocity in units of c
@@ -569,7 +569,7 @@ namespace sogbo_rad
                     
                     const auto t_obs_day = t_obs.to(units::day).value;
                     // loop through the given frequencies and put them in their respective locations in dictionary
-                    for (int fidx = 0; fidx < nf; fidx++)
+                    for (size_t fidx = 0; fidx < nf; fidx++)
                     {
                         // The frequency we see is doppler boosted, so account for that
                         const units::frequency  nu_source  = args.nus[fidx] * units::hz / delta_doppler;
@@ -577,7 +577,7 @@ namespace sogbo_rad
                         const units::spectral_flux f_nu    = (power_cool * flux_denom).to(units::mjy);
 
                         // place the fluxes in the appropriate time bins
-                        for (int tidx = 0; tidx < nt - 1; tidx++)
+                        for (size_t tidx = 0; tidx < nt - 1; tidx++)
                         {
                             const double t1 = tbin_edges[tidx + 0];
                             const double t2 = tbin_edges[tidx + 1];

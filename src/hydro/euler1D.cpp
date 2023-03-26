@@ -93,7 +93,8 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
         const real aL = helpers::my_min(helpers::my_min(vL - csL, vR- csR), static_cast<real>(0.0));
         return Eigenvals{aL, aR};
         }
-    case Solver::HLLC:
+    default: // HLLC
+    {
         // real cbar   = static_cast<real>(0.5)*(csL + csR);
         // real rhoBar = static_cast<real>(0.5)*(rhoL + rhoR);
         // real pStar  = static_cast<real>(0.5)*(pL + pR) + static_cast<real>(0.5)*(vL - vR)*cbar*rhoBar;
@@ -117,6 +118,7 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
                         (rhoL*(aL - vL) - rhoR*(aR - vR) ) );
 
         return Eigenvals{aL, aR, aStar, pStar};
+    }
     }
 
 };

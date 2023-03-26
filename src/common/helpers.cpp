@@ -20,7 +20,7 @@ namespace simbi
         {
         }
 
-        const char* InterruptException::what() {
+        const char* InterruptException::what() const noexcept {
             return "Simulation interrupted. Saving last checkpoint...";
         }
 
@@ -40,9 +40,9 @@ namespace simbi
         {
         }
 
-        const std::string SimulationFailureException::what() {
+        const char* SimulationFailureException::what() const noexcept {
             const auto err_ms = "Simulation failed\n reason: " + reason + "\n details: " + details;
-            return err_ms;
+            return err_ms.c_str();
         }
 
         // =========================================================================================================

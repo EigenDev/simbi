@@ -118,7 +118,7 @@ namespace simbi
                 }
 
             default:
-                break;
+                return 0;
             } // end switch
         }
 
@@ -172,7 +172,7 @@ namespace simbi
             }
             
             default:
-                break;
+                return 1;
             }
             
         }

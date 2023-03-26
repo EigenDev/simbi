@@ -203,7 +203,7 @@ Eigenvals SRHD3D::calc_eigenvals(
 
             return Eigenvals(aL, aR, csL, csR);
         }
-    case simbi::WaveSpeeds::NAIVE:
+    default:
         {
             const real aLm = (vL - csL) / (1 - vL * csL);
             const real aLp = (vL + csL) / (1 + vL * csL);
@@ -529,7 +529,7 @@ Conserved SRHD3D::calc_hllc_flux(
                 return left_flux + (interstate_left - left_state) * aL;
             }
 
-            case 3:
+            default: // nhat == 3
             {
                 const real v3 = left_prims.get_v3();
                 // Start States in y-direction in the coordinate lattice
@@ -594,7 +594,7 @@ Conserved SRHD3D::calc_hllc_flux(
                 return right_flux + (interstate_right - right_state) * aR;
             }
 
-            case 3:
+            default: //nhat == 3
             {
                 const real v3 = right_prims.get_v3();
                 // Start States in y-direction in the coordinate lattice

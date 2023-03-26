@@ -114,7 +114,7 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
 
             return Eigenvals(aL, aR, csL, csR);
         }
-    case simbi::WaveSpeeds::NAIVE:
+    default: // NAIVE estimates
         {
             const real aLm = (vL - csL) / (1 - vL * csL);
             const real aLp = (vL + csL) / (1 + vL * csL);

@@ -383,7 +383,7 @@ Eigenvals SRHD::calc_eigenvals(
 
             return Eigenvals(aL, aR);
         }
-    case simbi::WaveSpeeds::NAIVE:
+    default: // NAIVE estimates
     {
         const real aL = helpers::my_min((vR - csR) / (1 - vR * csR), (vL - csL) / (1 - vL * csL));
         const real aR = helpers::my_max((vL + csL) / (1 + vL * csL), (vR + csR) / (1 + vR * csR));

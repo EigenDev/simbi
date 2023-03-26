@@ -37,7 +37,7 @@ namespace simbi
         {
             public:
             InterruptException(int s);
-            const char* what();
+            const char* what() const noexcept;
             int status;
         };
 
@@ -45,7 +45,7 @@ namespace simbi
         {
             public:
             SimulationFailureException(const char* reason, const char* details);
-            const std::string what();
+            const char* what() const noexcept;
             const std::string reason;
             const std::string details;
         };
@@ -206,6 +206,8 @@ namespace simbi
                 return std::sqrt(a * b);
             case simbi::Cellspacing::LINSPACE:
                 return 0.5 * (a + b);
+            default:
+                return INFINITY;
             }
         }
 

@@ -259,7 +259,7 @@ endif
 rad_src = [
     'simbi/afterglow/src/rad_units.cpp',
     'simbi/afterglow/src/rad_units.hpp',
-    'simbi/afterglow/src/units_lib/units.hpp'
+    'simbi/afterglow/src/units/units.hpp'
 ]
 
 py3.extension_module(

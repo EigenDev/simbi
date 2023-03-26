@@ -5,8 +5,8 @@ Header file for low-level synchrotron radiation calculations
 #define RAD_UNITS_HPP
 
 #include <vector>
-#include "units_lib/units.hpp"
-#include "units_lib/constants.hpp"
+#include "units/units.hpp"
+#include "units/constants.hpp"
 
 namespace sogbo_rad
 {
