@@ -8,13 +8,12 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from . import utility as util
 from ..detail.slogger import logger
 from ..detail.helpers import (
-    get_iterable, 
+    get_iterable,
     calc_cell_volume1D,
     calc_cell_volume2D,
     calc_cell_volume3D
 )
 from ..detail import get_subparser
-
 try:
     import cmasher as cmr
 except ImportError:
@@ -50,8 +49,9 @@ lin_fields = ['chi', 'gamma_beta', 'u1', 'u2', 'u3', 'u']
 def tuple_arg(param: str) -> tuple[int]:
     try:
         return tuple(int(arg) for arg in param.split(','))
-    except:
+    except BaseException:
         raise argparse.ArgumentTypeError("argument must be tuple of ints")
+
 
 class Visualizer:
     def __init__(self, parser: argparse.ArgumentParser, ndim: int) -> None:
@@ -188,8 +188,8 @@ class Visualizer:
                 default=[1, 2, 3],
                 type=tuple_arg,
                 choices=[
-                    (1, 2, 3), 
-                    (1, 3, 2), 
+                    (1, 2, 3),
+                    (1, 3, 2),
                     (2, 3, 1),
                     (2, 1, 3),
                     (3, 1, 2),
@@ -203,12 +203,12 @@ class Visualizer:
             )
 
         vars(self).update(**vars(parser.parse_args()))
-        
+
         if self.cmap == 'grayscale':
             plt.style.use('grayscale')
         else:
             plt.style.use('seaborn-v0_8-colorblind')
-        
+
         if self.dbg:
             plt.style.use('dark_background')
 
@@ -242,7 +242,7 @@ class Visualizer:
         self.create_figure()
 
     def plot_1d(self):
-        field_str   = util.get_field_str(self)
+        field_str = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
         refcount = 0
         for ax in get_iterable(self.axs):
@@ -310,7 +310,8 @@ class Visualizer:
         the_fields = cycle(self.fields)
         for ax in get_iterable(self.axs):
             for file in get_iterable(self.flist[self.current_frame]):
-                fields, setup, mesh = util.read_file(self, file, ndim=self.ndim)
+                fields, setup, mesh = util.read_file(
+                    self, file, ndim=self.ndim)
                 for idx in range(patches):
                     field = next(the_fields)
                     if field in derived:
@@ -329,10 +330,10 @@ class Visualizer:
                             var = var[:, self.box_depth, :]
                         else:
                             var = var[:, :, self.box_depth]
-                        
+
                     if not self.cartesian:
                         # turn in mesh grid and then reverse
-                        xx, yy = np.meshgrid(xx,yy)[::-1]
+                        xx, yy = np.meshgrid(xx, yy)[::-1]
                         max_theta = np.abs(xx.max())
                         if max_theta < np.pi:
                             if patches <= 2:
@@ -380,19 +381,20 @@ class Visualizer:
                     )]
 
                     if self.cartesian:
-                        ax.set_title(f'{self.setup} at t = {setup["time"]:.2f}')
+                        ax.set_title(
+                            f'{self.setup} at t = {setup["time"]:.2f}')
                     else:
                         self.fig.suptitle(
                             '{} at t = {:.2f}'.format(
                                 self.setup, setup['time']), y=1.0)
-                    
+
                     if self.ylims:
                         if not self.square_plot:
                             ax.set_rmin(self.ylims[0])
                             ax.set_rmax(self.ylims[1])
                         else:
                             ax.set_ylim(*self.ylims)
-                    
+
                     if not self.no_cbar:
                         if idx < len(self.fields):
                             if self.cartesian:
@@ -410,8 +412,8 @@ class Visualizer:
                                 else:
                                     single_height = 0.8
                                     height = (
-                                        single_height if len(self.fields) in [1,3] and idx == 0
-                                        else 
+                                        single_height if len(self.fields) in [1, 3] and idx == 0
+                                        else
                                         single_height / (len(self.fields) // 2)
                                     )
 
@@ -458,7 +460,7 @@ class Visualizer:
         for ax in get_iterable(self.axs):
             for idx, file in enumerate(
                     get_iterable(self.flist[self.current_frame])):
-                
+
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 time = setup['time']
                 if self.ndim == 1:
@@ -540,16 +542,19 @@ class Visualizer:
 
     def plot_mean_vs_time(self) -> None:
         weighted_vars = []
-        times  = []
-        label  = self.labels[0] if self.labels else None
+        times = []
+        label = self.labels[0] if self.labels else None
 
         self.axs.set_title(f'{self.setup}')
         self.axs.set_xlabel('$t$')
         if not isinstance(self.flist, dict):
             self.flist = {0: self.flist}
 
-        cmap   = plt.cm.get_cmap(self.cmap[0])
-        colors = util.get_colors(np.linspace(0, 1, len(self.flist.keys())), cmap)
+        cmap = plt.cm.get_cmap(self.cmap[0])
+        colors = util.get_colors(
+            np.linspace(
+                0, 1, len(
+                    self.flist.keys())), cmap)
         for key in self.flist.keys():
             weighted_vars = []
             times = []
@@ -572,10 +577,11 @@ class Visualizer:
                     else:
                         dV = calc_cell_volume3D(
                             x1=mesh['x1'], x2=mesh['x2'], x3=mesh['x3'])
-                    weighted = np.sum(weights * var * dV) / np.sum(weights * dV)
+                    weighted = np.sum(weights * var * dV) / \
+                        np.sum(weights * dV)
                 else:
                     weighted = np.max(var)
-                    
+
                 weighted_vars += [weighted]
                 times += [setup['time']]
 
@@ -586,10 +592,10 @@ class Visualizer:
                                           label=label,
                                           color=colors[key],
                                           alpha=1.0)]
-            
+
             at_the_end = key == len(self.flist.keys()) - 1
             if self.fields[0] in ['gamma_beta', 'u1', 'u'] and at_the_end:
-                exp_curve = np.exp(1 - times/times[0])
+                exp_curve = np.exp(1 - times / times[0])
                 self.axs.plot(
                     times,
                     data[0] *
@@ -598,19 +604,20 @@ class Visualizer:
                     color='grey',
                     linestyle='-.')
                 self.axs.plot(times,
-                                data[0] * (times / times[0]) ** (-3 / 2),
-                                label=r'$\propto t^{-3/2}$',
-                                color='grey',
-                                linestyle=':')
+                              data[0] * (times / times[0]) ** (-3 / 2),
+                              label=r'$\propto t^{-3/2}$',
+                              color='grey',
+                              linestyle=':')
                 self.axs.plot(times,
-                                data[0] * (times / times[0]) ** (-3),
-                                label=r'$\propto t^{-3}$',
-                                color='grey',
-                                linestyle='--')
+                              data[0] * (times / times[0]) ** (-3),
+                              label=r'$\propto t^{-3}$',
+                              color='grey',
+                              linestyle='--')
 
         if self.log:
             self.axs.set_xscale('log')
-            if self.fields[0] in ['gamma_beta', 'u', 'u1'] or self.fields[0] not in lin_fields:
+            if self.fields[0] in ['gamma_beta', 'u',
+                                  'u1'] or self.fields[0] not in lin_fields:
                 self.axs.set(yscale='log')
 
         ylabel = util.get_field_str(self)
@@ -659,15 +666,15 @@ class Visualizer:
                 self.axs.spines['right'].set_visible(False)
             else:
                 self.fig, self.axs = plt.subplots(
-                    1, 1, 
-                    subplot_kw={'projection': 'polar'}, 
-                    figsize=self.fig_dims, 
+                    1, 1,
+                    subplot_kw={'projection': 'polar'},
+                    figsize=self.fig_dims,
                     constrained_layout=True)
                 self.axs.grid(False)
                 self.axs.set_theta_zero_location('N')
                 self.axs.set_theta_direction(-1)
                 self.axs.set_xticklabels([])
-                self.axs.set_yticklabels([])      
+                self.axs.set_yticklabels([])
         else:
             raise NotImplementedError()
 
@@ -682,7 +689,7 @@ class Visualizer:
             self.fig.suptitle(
                 '{} at t = {:.2f}'.format(
                     self.setup, setups['time']), y=1.0)
-        
+
         scale_cycle = cycle(self.scale_downs)
         for idx, field in enumerate(self.fields):
             if field in derived:
@@ -696,13 +703,11 @@ class Visualizer:
                 self.axs.set_xlim(mesh['x1'][0], mesh['x1'][-1])
                 self.frames[idx].set_data(mesh['x1'], var / next(scale_cycle))
                 # if self.refs:
-                    # x = mesh['x1']
-                    # self.refs[idx].set_data(x, self.refy * (x / self.refx) ** (-3/2))
-            elif self.ndim ==2:
+                # x = mesh['x1']
+                # self.refs[idx].set_data(x, self.refy * (x / self.refx) ** (-3/2))
+            elif self.ndim == 2:
                 # affect the generator w/o using output
                 any(drawing.set_array(var.ravel()) for drawing in self.frames)
-            else:
-                raise NotImplementedError('3D movies not yet implemented')
 
         return self.frames,
 
@@ -727,6 +732,8 @@ class Visualizer:
 def visualize(parser: argparse.ArgumentParser, ndim: int) -> None:
     viz = Visualizer(parser, ndim)
     if viz.kind == 'movie':
+        if viz.ndim == 3:
+            raise NotImplementedError('3D movies not yet implemented')
         viz.animate()
     else:
         viz.plot()
