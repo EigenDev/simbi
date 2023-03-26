@@ -387,13 +387,12 @@ class Visualizer:
                         self.fig.suptitle(
                             '{} at t = {:.2f}'.format(
                                 self.setup, setup['time']), y=1.0)
-
-                    if self.ylims:
-                        if not self.square_plot:
-                            ax.set_rmin(self.ylims[0])
-                            ax.set_rmax(self.ylims[1])
-                        else:
-                            ax.set_ylim(*self.ylims)
+                        
+                    if not self.cartesian:
+                        ax.set_rmin(self.ylims[0] or yy[0,0])
+                        ax.set_rmax(self.ylims[1] or yy[0,-1])
+                    else:
+                        ax.set_ylim(*self.ylims)
 
                     if not self.no_cbar:
                         if idx < len(self.fields):
