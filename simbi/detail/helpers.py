@@ -219,8 +219,13 @@ def progressbar(it: range, prefix: str = "", size: int = 100, out: TextIO = sys.
 
 
 def print_progress() -> None:
-    for _ in progressbar(range(100), "Loading: ", 60):
-        sleep(0.01)
+    try:
+        from rich.progress import track
+        for _ in track(range(100), description="Loading..."):
+            sleep(0.01)
+    except ImportError:
+        for _ in progressbar(range(100), "Loading: ", 60):
+            sleep(0.01)
 
 
 def pad_jagged_array(arr: Union[NDArray[Any], Sequence[Any]]) -> NDArray[Any]:
