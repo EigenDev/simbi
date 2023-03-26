@@ -107,7 +107,8 @@ namespace simbi {
         }
 
             
-        ~ExecutionPolicy() {}
+        GPU_CALLABLE_MEMBER ~ExecutionPolicy() {}
+
         T compute_blocks(const T nzones, const luint nThreads) const
         {
             return (nzones + nThreads - 1) / nThreads;

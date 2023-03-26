@@ -186,15 +186,15 @@ namespace simbi
     template<Platform P = BuildPlatform>
     GPU_CALLABLE_INLINE
     unsigned int get_threadId() {
-        if constexpr(P == Platform::GPU) {
+        #if GPU_CODE
             return blockDim.x * blockDim.y * threadIdx.z + blockDim.x * threadIdx.y + threadIdx.x;
-        } else {
+        #else
             if (use_omp) {
                 return omp_get_thread_num();
             } else {
                 return 1; //std::hash<std::thread::id>{}(std::this_thread::get_id());
             }
-        }
+        #endif
     }
 
 
