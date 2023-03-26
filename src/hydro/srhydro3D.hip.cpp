@@ -452,7 +452,7 @@ Conserved SRHD3D::calc_hllc_flux(
 
     //-------------------Calculate the HLL Intermediate State
     const auto hll_state = 
-        (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
+        (right_state * aRplus - left_state * aLminus - right_flux + left_flux) / (aRplus - aLminus);
 
     //------------------Calculate the RHLLE Flux---------------
     const auto hll_flux 
@@ -975,8 +975,9 @@ void SRHD3D::advance(
             // Do the same thing, but for the left side interface [i - 1/2]
             xprimsL  = xleft_mid  + helpers::plm_gradient(xleft_mid, xleft_most, center, plm_theta) * static_cast<real>(0.5); 
             xprimsR  = center     - helpers::plm_gradient(center, xleft_mid, xright_mid, plm_theta) * static_cast<real>(0.5);
-            yprimsL  = yleft_mid  + helpers::plm_gradient(yleft_mid, yleft_most, center, plm_theta) * static_cast<real>(0.5);  
-            zprimsR  = center     - helpers::plm_gradient(center, zleft_mid, zright_mid, plm_theta) * static_cast<real>(0.5);
+            yprimsL  = yleft_mid  + helpers::plm_gradient(yleft_mid, yleft_most, center, plm_theta) * static_cast<real>(0.5); 
+            yprimsR  = center     - helpers::plm_gradient(center, yleft_mid, yright_mid, plm_theta) * static_cast<real>(0.5);
+            zprimsL  = zleft_mid  + helpers::plm_gradient(zleft_mid, zleft_most, center, plm_theta) * static_cast<real>(0.5);
             zprimsR  = center     - helpers::plm_gradient(center, zleft_mid, zright_mid, plm_theta) * static_cast<real>(0.5);
 
             
@@ -1046,12 +1047,6 @@ void SRHD3D::advance(
         {
             case simbi::Geometry::CARTESIAN:
                 {
-                    // #if !GPU_CODE
-                    // if (ii  == jj == kk == 0) {
-                    //     printf("frf: %.2e flf: %.2e grf: %.2e glf: %.2e hlf: %.2e hrf: %.2e\n", frf.d, flf.d, grf.d, glf.d, hlf.d, hrf.d);
-                    //     std::cin.get();
-                    // }
-                    // #endif
                     cons_data[aid] -= ( (frf  - flf ) * invdx1 + (grf - glf) * invdx2 + (hrf - hlf) * invdx3 - source_terms) * dt * step;
                     break;
                 }
