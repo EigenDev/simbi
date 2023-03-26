@@ -410,7 +410,7 @@ class Visualizer:
                                 else:
                                     single_height = 0.8
                                     height = (
-                                        single_height if len(self.fields) == 3 and idx == 0
+                                        single_height if len(self.fields) in [1,3] and idx == 0
                                         else 
                                         single_height / (len(self.fields) // 2)
                                     )
