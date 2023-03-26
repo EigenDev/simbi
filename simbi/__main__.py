@@ -15,7 +15,36 @@ try:
 except ImportError:
     help_formatter = argparse.HelpFormatter
 
+class ComputeModeAction(argparse.Action):
+    def __init__(self, option_strings, dest, **kwargs):
+        return super().__init__(
+            option_strings,
+            dest,
+            nargs=0,
+            default=argparse.SUPPRESS,
+            **kwargs)
+        
+    def __call__(self, 
+                 parser: argparse.ArgumentParser, 
+                 namespace: argparse.Namespace, 
+                 values: list, 
+                 option_string: str | None = None) -> None:
+        setattr(namespace, 'compute_mode', self.const)
 
+class print_the_version(argparse.Action):
+    def __init__(self, option_strings, dest, **kwargs):
+        return super().__init__(
+            option_strings,
+            dest,
+            nargs=0,
+            default=argparse.SUPPRESS,
+            **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string, **kwargs):
+        from simbi import __version__ as version
+        print(f"SIMBI version {version}")
+        parser.exit()
+        
 class CustomParser(argparse.ArgumentParser):
     command = []
     def error(self, message):
@@ -37,35 +66,21 @@ class CustomParser(argparse.ArgumentParser):
             self.error(msg.format(' '.join(argv)))
         return args
 
-class print_the_version(argparse.Action):
-    def __init__(self, option_strings, dest, **kwargs):
-        return super().__init__(
-            option_strings,
-            dest,
-            nargs=0,
-            default=argparse.SUPPRESS,
-            **kwargs)
-
-    def __call__(self, parser, namespace, values, option_string, **kwargs):
-        from simbi import __version__ as version
-        print(f"SIMBI version {version}")
-        parser.exit()
-
 def parse_module_arguments():
     parser = CustomParser(
         prog='simbi',
         usage='%(prog)s {run, plot, afterglow, clone} <input> [options]',
         description="Relativistic gas dynamics module",
         formatter_class=help_formatter,
+        add_help=False,
         # exit_on_error=False
     )
     parser.add_argument(
-        '--omp',
-        action=argparse.BooleanOptionalAction,
-        help='set flag if wanting to use openMP multithreading',
-        default=False
+        '--version', 
+        action=print_the_version
     )
-    subparsers = parser.add_subparsers(
+    main_parser = CustomParser(formatter_class=help_formatter, parents=[parser])
+    subparsers = main_parser.add_subparsers(
         dest='command'
     )
     script_run = subparsers.add_parser(
@@ -73,6 +88,7 @@ def parse_module_arguments():
         help='runs the setup script',
         formatter_class=help_formatter,
         usage='simbi run <setup_script> [options]',
+        parents=[parser],
         # exit_on_error=False
     )
     
@@ -82,6 +98,7 @@ def parse_module_arguments():
         help='plots the given simbi checkpoint file',
         formatter_class=help_formatter,
         usage='simbi plot <checkpoints> <setup_name> [options]',
+        parents=[parser],
         # exit_on_error=False    
     )
     plot.set_defaults(func=plot_checkpoints)
@@ -90,6 +107,7 @@ def parse_module_arguments():
         help='compute the afterglow for given data',
         usage='simbi afterglow <files> [options]',
         formatter_class=help_formatter,
+        parents=[parser],
         # exit_on_error=False
     )
     afterglow.set_defaults(func=calc_afterglow)
@@ -98,6 +116,7 @@ def parse_module_arguments():
         help='generate a shadow clone of a setup script to build off of',
         usage='simbi clone [--name clone_name]',
         formatter_class=help_formatter,
+        parents=[parser],
         # exit_on_error=False
     )
     gen_clone.set_defaults(func=generate_a_setup)
@@ -108,34 +127,61 @@ def parse_module_arguments():
         type=str,
         dest='clone_name'
     )
-    return parser, parser.parse_known_args(
+    return main_parser, main_parser.parse_known_args(
         args=None if sys.argv[1:] else ['--help'])
 
 
-def valid_pyscript(param):
+def get_available_configs():
     with open(Path(__file__).resolve().parent / 'gitrepo_home.txt') as f:
         githome = f.read()
-    
+        
     configs_src = Path(githome).resolve() / 'simbi_configs'
+    pkg_configs = [file for file in configs_src.rglob('*.py')]
+    soft_paths = [
+        soft_path for soft_path in (
+            Path('simbi_configs')).glob("*") if soft_path.is_symlink()]
+    soft_configs = [
+        file for path in soft_paths for file in path.rglob('*.py')]
+    soft_configs += [file for file in Path(
+        'simbi_configs').resolve().rglob('*.py') if file not in pkg_configs]
+    
+    return pkg_configs + soft_configs
+
+class print_available_configs(argparse.Action):
+    def __init__(self, option_strings, dest, **kwargs):
+        return super().__init__(
+            option_strings,
+            dest,
+            nargs=0,
+            default=argparse.SUPPRESS,
+            **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string, **kwargs):
+        available_configs = get_available_configs()
+        available_configs = sorted(
+                    [Path(conf).stem for conf in available_configs])
+        
+        print("Available configs are:\n{}".format(
+            ''.join(
+            f'> {bcolors.BOLD}{conf}{bcolors.ENDC}\n' for conf in available_configs)
+            )
+        )
+        parser.exit()
+    
+    
+def valid_simbiscript(param):  
     base, ext = os.path.splitext(param)
+    available_configs = get_available_configs()
     if ext.lower() != '.py':
         param = None
-        pkg_configs = [file for file in configs_src.rglob('*.py')]
-        soft_paths = [
-            soft_path for soft_path in (
-                Path('simbi_configs')).glob("*") if soft_path.is_symlink()]
-        soft_configs = [
-            file for path in soft_paths for file in path.rglob('*.py')]
-        soft_configs += [file for file in Path(
-            'simbi_configs').resolve().rglob('*.py') if file not in pkg_configs]
-        for file in pkg_configs + soft_configs:
+        for file in available_configs:
             if base == Path(file).stem:
                 param = file
         if not param:
             available_configs = sorted(
-                [Path(conf).stem for conf in pkg_configs + soft_configs])
+                [Path(conf).stem for conf in available_configs])
             raise argparse.ArgumentTypeError(
-                'No configuration named {}{}{}. The only valid configurations are:\n{}'.format(
+                'No configuration named {}{}{}. The valid configurations are:\n{}'.format(
                     bcolors.OKCYAN, base, bcolors.ENDC, ''.join(
                         f'> {bcolors.BOLD}{conf}{bcolors.ENDC}\n' for conf in available_configs)))
     return param
@@ -151,7 +197,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
     run_parser.add_argument(
         'setup_script',
         help='setup script for simulation run',
-        type=valid_pyscript)
+        type=valid_simbiscript)
     overridable.add_argument(
         '--tstart',
         help='start time for simulation',
@@ -228,6 +274,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         default='cpu',
         choices=[
             'cpu',
+            'omp',
             'gpu'],
         dest='compute_mode')
     onthefly.add_argument(
@@ -256,12 +303,29 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         help='gpu dim3 thread block dimensions',
         default=[],
         type=int,
-        nargs='+')
+        nargs='+'
+    )
     global_args.add_argument(
-        '--omp',
-        help='flag for using openMP multithreading instead of native',
-        default=False,
-        action=argparse.BooleanOptionalAction,
+        '--configs',
+        help='print the available config files',
+        action=print_available_configs
+    )
+    
+    cgroup = run_parser.add_mutually_exclusive_group()
+    cgroup.add_argument(
+        '--cpu', 
+        action=ComputeModeAction,
+        const='cpu'
+    )
+    cgroup.add_argument(
+        '--gpu', 
+        action=ComputeModeAction,  
+        const='gpu'
+    )
+    cgroup.add_argument(
+        '--omp', 
+        action=ComputeModeAction, 
+        const='omp',
     )
 
 
@@ -296,12 +360,6 @@ def configure_state(
 
     with open(Path(__file__).resolve().parent / 'gitrepo_home.txt') as f:
         githome = f.read()
-    
-    if type_checking_active and str(Path().absolute()) == githome:
-        print("-"*80)
-        print("Validating Config Script Type Safety...")
-        type_check_input(script)
-        print("-"*80)
         
     with open(script) as setup_file:
         root = ast.parse(setup_file.read())
@@ -316,6 +374,16 @@ def configure_state(
                     # if the setup class inherited from another setup class
                     # then we already know it is a descendant of the BaseConfig
                     setup_classes += [node.name]
+                    
+    if not setup_classes:
+        raise ValueError("Invalid simbi configuration")
+    
+    if type_checking_active and str(Path().absolute()) == githome:
+        print("-"*80)
+        print("Validating Config Script Type Safety...")
+        type_check_input(script)
+        print("-"*80)
+        
     states = []
     state_docs = []
     kwargs = {}
@@ -382,7 +450,7 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
         os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
         os.environ['NTHREADS']        = f'{args.nthreads}'
         
-    if args.omp:
+    if args.compute_mode == 'omp':
         os.environ['USE_OMP'] = "1"
 
     run_parser = get_subparser(parser, 0)
@@ -400,7 +468,7 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
     overridable_args = vars(argparse.Namespace(**sim_dicts[0])).keys()
     sim_args = argparse.Namespace(**{**sim_dicts[0], **sim_dicts[1]})
     
-    for coord, block in zip(['X','Y', 'Z'], args.gpu_block_dims):
+    for coord, block in zip(['X','Y','Z'], args.gpu_block_dims):
         os.environ[f'GPU{coord}BLOCK_SIZE'] = str(block)
         
     for idx, sim_state in enumerate(sim_states):
