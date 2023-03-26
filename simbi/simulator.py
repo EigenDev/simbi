@@ -408,22 +408,28 @@ class Hydro:
             genspace = np.geomspace
 
         if self.dimensionality == 1:
-            self.x1 = self.x1 or genspace(*self.geometry[:2], *self.resolution)
+            if self.x1 is None:
+                self.x1 =genspace(*self.geometry[:2], *self.resolution)
         elif self.dimensionality == 2:
-            self.x1 = self.x1 or genspace(
-                self.geometry[0][0],
-                self.geometry[0][1],
-                self.resolution[0])
-            self.x2 = self.x2 or np.linspace(
+            if self.x1 is None:
+                self.x1 = genspace(
+                    self.geometry[0][0],
+                    self.geometry[0][1],
+                    self.resolution[0])
+            if self.x2 is None:
+                self.x2 = np.linspace(
                 self.geometry[1][0], self.geometry[1][1], self.resolution[1])
         else:
-            self.x1 = self.x1 or genspace(
-                self.geometry[0][0],
-                self.geometry[0][1],
-                self.resolution[0])
-            self.x2 = self.x2 or np.linspace(
+            if self.x1 is None:
+                self.x1 = genspace(
+                    self.geometry[0][0],
+                    self.geometry[0][1],
+                    self.resolution[0])
+            if self.x2 is None:
+                self.x2 = np.linspace(
                 self.geometry[1][0], self.geometry[1][1], self.resolution[1])
-            self.x3 = self.x3 or np.linspace(
+            if self.x3 is None:
+                self.x3 = np.linspace(
                 self.geometry[2][0], self.geometry[2][1], self.resolution[2])
 
         self.x1 = np.asanyarray(self.x1)
@@ -519,7 +525,7 @@ class Hydro:
         self.u = np.asanyarray(self.u)
         self.start_time: float = 0.0
         self.chkpt_idx: int = 0
-        if compute_mode == 'cpu':
+        if compute_mode in ['cpu', 'omp']:
             from .libs.cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
         else:
             try:
@@ -594,7 +600,7 @@ class Hydro:
                 f"The data directory provided does not exist. Creating the {data_directory} directory now!",
                 flush=True)
 
-        if compute_mode == 'cpu':
+        if compute_mode in ['cpu', 'omp']:
             if 'USE_OMP' in os.environ:
                 logger.info("Using OpenMP multithreading")
             else:
