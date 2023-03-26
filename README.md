@@ -20,7 +20,7 @@
 
 1)  GCC >= GCC10 (for c++20 support)
 2)  [Cython](https://cython.org/)
-3)  [meson](https://mesonbuild.com/Getting-meson.html)
+3)  [meson](https://mesonbuild.com/Getting-meson.html), 
     `pip install meson` will usually suffice
 4)  A build system like `make` or
     [ninja](https://github.com/ninja-build/ninja/wiki/Pre-built-Ninja-packages)
@@ -32,7 +32,12 @@
 
 8)  HIP/ROCm if wanting to run on NVIDIA or AMD GPUs, or just CUDA if
     running purely NVIDIA
+## Extras
+a) [CMasher](https://cmasher.readthedocs.io/) for richer set of colormaps, blends into matplotlib
 
+b) [rich-argparse](https://pypi.org/project/rich-argparse/) for pretty-print argparse
+
+c) [rich](https://github.com/Textualize/rich) for pretty-printing console outputs
 # Quick setup guide
 
 <strong>Easy Install</strong>

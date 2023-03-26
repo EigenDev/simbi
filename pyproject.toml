@@ -38,6 +38,7 @@ dependencies = [
 extras = [
   "rich-argparse",
   "cmasher",
+  "rich",
 ]
 
 [project.scripts]
