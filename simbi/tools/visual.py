@@ -268,14 +268,14 @@ class Visualizer:
                     line, = ax.plot(mesh['x1'], var / scale, label=label)
                     self.frames += [line]
                     # BMK REF
-                    # if refcount == 0:
-                    #     x = mesh['x1'][var.argmax():]
-                    #     x = np.linspace(mesh['x1'][var.argmax()], 1, 1000)
-                    #     ref, = ax.plot(x, var.max() * (x / x[0]) ** (-3/2), linestyle='--', color='grey', alpha=0.4)
-                    #     self.refx    = x[0]
-                    #     self.refy    = var.max()
-                    #     self.refs   += [ref]
-                    #     refcount += 1
+                    if refcount == 0:
+                        x = mesh['x1'][var.argmax():]
+                        x = np.linspace(mesh['x1'][var.argmax()], 1, 1000)
+                        ref, = ax.plot(x, var.max() * (x / x[0]) ** (-3/2), linestyle='--', color='grey', alpha=0.4)
+                        self.refx    = x[0]
+                        self.refy    = var.max()
+                        self.refs   += [ref]
+                        refcount += 1
 
         if self.log:
             ax.set_xscale('log')
