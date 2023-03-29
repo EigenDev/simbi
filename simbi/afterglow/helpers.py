@@ -15,32 +15,7 @@ cosmo = FlatLambdaCDM(
     H0=70 * units.km / units.s / units.Mpc,
     Tcmb0=2.725 * units.K,
     Om0=0.3
-)
-
-class Scale:
-    def __init__(self, scale='blandford-mckee'):
-        if scale == 'solar':
-            # ================================
-            #   Solar scales
-            # ================================
-            self.length_scale = constants.R_sun.cgs
-            self.rho_scale = ( constants.M_sun / \
-                (4. / 3. * np.pi * self.length_scale ** 3) ).cgs
-            self.e_scale = (constants.M_sun * constants.c ** 2).cgs
-            self.pre_scale = (self.e_scale / \
-                (4. / 3. * np.pi * self.length_scale**3)).cgs
-            self.time_scale = (self.length_scale / constants.c).cgs
-        elif scale == 'blandford-mckee':
-            # ==============
-            # BMK Scales
-            # ==============
-            self.e_scale = 1e53 * units.erg
-            self.rho_scale = 1.0 * constants.m_p.cgs / units.cm**3
-            self.length_scale = (
-                (self.e_scale / (self.rho_scale * constants.c.cgs**2))**(1 / 3)).cgs
-            self.time_scale = self.length_scale / constants.c.cgs
-            self.pre_scale = self.e_scale / self.length_scale ** 3
-        
+)       
         
 def vector_magnitude(a: np.ndarray) -> np.ndarray:
     """return magnitude of vector(s)"""
@@ -143,9 +118,9 @@ def generate_pseudo_mesh(
     None
     """
     ndim = mesh['x1'].ndim
-    theta_min = 0.0
-    theta_max = np.pi if full_sphere else 0.5 * np.pi
     if 'x2' not in mesh:
+        theta_min = 0.0
+        theta_max = np.pi if full_sphere else 0.5 * np.pi
         ntheta = args.theta_samples or \
             compute_num_polar_zones(
                 rmin=mesh['x1'].min(), 
