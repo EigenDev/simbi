@@ -240,6 +240,12 @@ def parse_plotting_arguments(
         default=False,
         action='store_true'
     )
+    plot_parser.add_argument(
+        '--break-time',
+        help='break time of relativistic blast wave',
+        type=float,
+        default=None,
+    )
     
     return parser, parser.parse_known_args(
         args=None if sys.argv[2:] else ['plot', '--help'])
