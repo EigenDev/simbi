@@ -521,9 +521,9 @@ namespace sogbo_rad
             #pragma omp parallel
             for (size_t jj = 0; jj < nj; jj++)
             {
-                const double x2l     = (jj > 0 ) ? x2min + (jj - 0.5) * dx2 :  x2min;
-                const double x2r     = (jj < nj - 1) ? x2l + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
-                const double dcos    = std::cos(x2l) - std::cos(x2r);
+                const double x2l  = (jj > 0 ) ? x2min + (jj - 0.5) * dx2 :  x2min;
+                const double x2r  = (jj < nj - 1) ? x2l + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
+                const double dcos = std::cos(x2l) - std::cos(x2r);
 
                 // radial unit vector   
                 const std::vector<double> rhat = {std::sin(x2[jj]) * cos_phi, std::sin(x2[jj]) * sin_phi, std::cos(x2[jj])}; 
