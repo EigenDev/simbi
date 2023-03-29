@@ -1177,13 +1177,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::function<double(double, double)> e_outer)
 {
     anyDisplayProps();
-    real round_place = 1 / chkpt_interval;
     this->t = tstart;
-    this->t_interval =
-        t == 0 ? 0
-               : dlogt !=0 ? tstart
-               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
-
     // Define the source terms
     this->object_pos      = object_cells;
     this->sourceD         = sources[0];
@@ -1196,10 +1190,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
-    this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny;
     this->first_order     = first_order;
-    this->periodic        = boundary_conditions[0] == "periodic";
     this->hllc            = hllc;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
@@ -1226,6 +1218,9 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->mom1_source_all_zeros   = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
     this->mom2_source_all_zeros   = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
     this->energy_source_all_zeros = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
+    define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
+    define_periodic(boundary_conditions);
+    define_chkpt_idx(chkpt_idx);
     // Params moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);

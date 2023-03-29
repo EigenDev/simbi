@@ -898,25 +898,17 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     std::vector<std::vector<real>> boundary_sources)
 {    
     anyDisplayProps();
-    real round_place = 1 / chkpt_interval;
     this->t = tstart;
-    this->t_interval =
-        t == 0 ? 0
-               : dlogt !=0 ? tstart
-               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
-
     // Define the simulation members
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
-    this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny;
     this->sourceRho       = sources[0];
     this->sourceM1        = sources[1];
     this->sourceM2        = sources[2];
     this->sourceE         = sources[3];
     this->first_order     = first_order;
-    this->periodic        = boundary_conditions[0] == "periodic";
     this->hllc            = hllc;
     this->engine_duration = engine_duration;
     this->dlogt           = dlogt;
@@ -941,6 +933,9 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->mom1_source_all_zeros   = std::all_of(sourceM1.begin(),  sourceM1.end(),  [](real i) {return i == 0;});
     this->mom2_source_all_zeros   = std::all_of(sourceM2.begin(),  sourceM2.end(),  [](real i) {return i == 0;});
     this->energy_source_all_zeros = std::all_of(sourceE.begin(),   sourceE.end(), [](real i) {return i == 0;});
+    define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
+    define_periodic(boundary_conditions);
+    define_chkpt_idx(chkpt_idx);
     // Stuff for moving mesh
     this->hubble_param = 0.0; ///adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);

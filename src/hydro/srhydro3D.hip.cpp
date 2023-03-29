@@ -1143,12 +1143,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     std::vector<std::vector<real>> boundary_sources)
 {   
     anyDisplayProps();
-    real round_place = 1 / chkpt_interval;
     this->t = tstart;
-    this->t_interval =
-        t == 0 ? 0
-               : dlogt !=0 ? tstart
-               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
 
     // Define the source terms
     this->sourceD        = sources[0];
@@ -1163,10 +1158,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->data_directory  = data_directory;
     this->tstart          = tstart;
     this->engine_duration = engine_duration;
-    this->init_chkpt_idx  = chkpt_idx;
     this->total_zones     = nx * ny * nz;
     this->first_order     = first_order;
-    this->periodic        = boundary_conditions[0] == "periodic";
     this->hllc            = hllc;
     this->dlogt           = dlogt;
     this->linspace        = linspace;
@@ -1199,6 +1192,9 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->mom2_source_all_zeros    = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
     this->mom3_source_all_zeros    = std::all_of(sourceS3.begin(),  sourceS3.end(),  [](real i) {return i == 0;});
     this->energy_source_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
+    define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
+    define_periodic(boundary_conditions);
+    define_chkpt_idx(chkpt_idx);
     // Stuff for moving mesh 
     // TODO: make happen at some point
     this->hubble_param = 0.0; //adot(t) / a(t);

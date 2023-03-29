@@ -664,8 +664,6 @@ SRHD::simulate1D(
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
-    this->init_chkpt_idx  = chkpt_idx;
-    this->periodic        = boundary_conditions[0] == "periodic";
     this->first_order     = first_order;
     this->plm_theta       = plm_theta;
     this->linspace        = linspace;
@@ -691,7 +689,9 @@ SRHD::simulate1D(
     this->den_source_all_zeros    = std::all_of(sourceD.begin(), sourceD.end(), [](real i) {return i==0;});
     this->mom1_source_all_zeros   = std::all_of(sourceS.begin(), sourceS.end(), [](real i) {return i==0;});
     this->energy_source_all_zeros = std::all_of(source0.begin(), source0.end(), [](real i) {return i==0;});
-    
+    define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
+    define_periodic(boundary_conditions);
+    define_chkpt_idx(chkpt_idx);
     inflow_zones.resize(2);
     for (size_t i = 0; i < 2; i++)
     {
@@ -702,11 +702,7 @@ SRHD::simulate1D(
     // Write some info about the setup for writeup later
     std::string filename, tnow, tchunk;
     PrimData prods;
-    real round_place = 1 / this->chkpt_interval;
-    this->t_interval =
-        t == 0 ? 0
-               : dlogt !=0 ? tstart
-               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + this->chkpt_interval;
+    
 
     this->hubble_param       = adot(t) / a(t);
     this->mesh_motion        = (hubble_param != 0);

@@ -498,8 +498,6 @@ void Newtonian1D::advance(
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
-    this->init_chkpt_idx  = chkpt_idx;
-    this->periodic        = boundary_conditions[0] == "periodic";
     this->first_order     = first_order;
     this->plm_theta       = plm_theta;
     this->linspace        = linspace;
@@ -524,7 +522,9 @@ void Newtonian1D::advance(
     this->den_source_all_zeros    = std::all_of(sourceRho.begin(), sourceRho.end(), [](real i) {return i==0;});
     this->mom1_source_all_zeros   = std::all_of(sourceMom.begin(), sourceMom.end(), [](real i) {return i==0;});
     this->energy_source_all_zeros = std::all_of(sourceE.begin(), sourceE.end(), [](real i) {return i==0;});
-    
+    define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
+    define_periodic(boundary_conditions);
+    define_chkpt_idx(chkpt_idx);
     // TODO: invoke mesh motion later
     this->mesh_motion = false;
     if (hllc){
@@ -540,13 +540,6 @@ void Newtonian1D::advance(
         this->inflow_zones[i] = Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
     }
     
-    n = 0;
-    // Write some info about the setup for writeup later
-    real round_place = 1 / this->chkpt_interval;
-    this->t_interval =
-        t == 0 ? 0
-               : dlogt !=0 ? tstart
-               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + this->chkpt_interval;
     setup.x1max          = x1[active_zones - 1];
     setup.x1min          = x1[0];
     setup.xactive_zones  = active_zones;
