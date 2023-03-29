@@ -273,13 +273,16 @@ class BaseConfig(metaclass=abc.ABCMeta):
                             choices = member.choices,
                             default = member.value,
                         )
-                except argparse.ArgumentError:
+                
+                except argparse.ArgumentError as e:
                     # ignore duplicate arguments if inheriting from another problem setup 
                     pass
                 
             args = parser.parse_args()
+            
             # Update dynamic var attributes to reflect new values passed from cli
             for var in cls.dynamic_args:
+                var.name = var.name.replace('-', '_')
                 if var.name in vars(args):
                     var.value = vars(args)[var.name]
                     setattr(cls, var.name, DynamicArg(name=var.name, 
