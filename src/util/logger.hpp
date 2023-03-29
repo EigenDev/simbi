@@ -3,6 +3,29 @@
 #include "common/helpers.hip.hpp"
 #include "printb.hpp"
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define VC_EXTRALEAN
+#include <Windows.h>
+#elif defined(__linux__)
+#include <sys/ioctl.h>
+#endif // Windows/Linux
+
+#include <cstdio>
+
+inline void get_terminal_width(int& width) {
+#if defined(_WIN32)
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+    width = (int)(csbi.srWindow.Right-csbi.srWindow.Left+1);
+#elif defined(__linux__)
+    struct winsize w;
+    ioctl(fileno(stdout), TIOCGWINSZ, &w);
+    width = (int)(w.ws_col);
+#endif // Windows/Linux
+}
+
+
 namespace simbi
 {
     namespace detail
@@ -78,7 +101,10 @@ namespace simbi
             };
 
             inline void progress_bar(double percentage) {
-                static int barWidth = 50;
+                int width = 0;
+                get_terminal_width(width);
+                int barWidth = std::floor(width / 3.5);
+                // static int barWidth = 50;
                 std::cout << "[";
                 int pos = barWidth * percentage;
                 for (int i = 0; i < barWidth; ++i) {
