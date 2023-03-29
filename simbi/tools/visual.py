@@ -56,9 +56,11 @@ def tuple_arg(param: str) -> tuple[int]:
 class Visualizer:
     def __init__(self, parser: argparse.ArgumentParser, ndim: int) -> None:
         self.current_frame = slice(None)
+        self.break_time = None
         self.plotted_references = False
         self.ndim = ndim
         self.refs = []
+        
         if self.ndim != 1:
             plot_parser = get_subparser(parser, 1)
             plot_parser.add_argument(
@@ -201,9 +203,7 @@ class Visualizer:
                 type=int,
                 default=0,
             )
-
         vars(self).update(**vars(parser.parse_args()))
-
         if self.cmap == 'grayscale':
             plt.style.use('grayscale')
         else:
@@ -280,7 +280,9 @@ class Visualizer:
         if self.log:
             ax.set_xscale('log')
             ax.set_yscale('log')
-
+        elif not setup['linspace']:
+            ax.set_xscale('log')
+            
         # ax.set_xscale('log')
         if len(self.fields) == 1:
             ax.set_ylabel(field_str)
@@ -594,24 +596,28 @@ class Visualizer:
 
             at_the_end = key == len(self.flist.keys()) - 1
             if self.fields[0] in ['gamma_beta', 'u1', 'u'] and at_the_end:
-                exp_curve = np.exp(1 - times / times[0])
-                self.axs.plot(
-                    times,
-                    data[0] *
-                    exp_curve,
-                    label=r'$\propto \exp(-t)$',
+                self.axs.plot(times,
+                    data[0] * (times / times[0]) ** (-3 / 2),
+                    label=r'$\propto t^{-3/2}$',
                     color='grey',
-                    linestyle='-.')
-                self.axs.plot(times,
-                              data[0] * (times / times[0]) ** (-3 / 2),
-                              label=r'$\propto t^{-3/2}$',
-                              color='grey',
-                              linestyle=':')
-                self.axs.plot(times,
-                              data[0] * (times / times[0]) ** (-3),
-                              label=r'$\propto t^{-3}$',
-                              color='grey',
-                              linestyle='--')
+                    linestyle=':'
+                )
+                if self.break_time:
+                    tb_index = int(np.argmin(np.abs(times - self.break_time)))
+                    tref = times[tb_index:]
+                    exp_curve = np.exp(1 - tref / tref[0])
+                    self.axs.plot(
+                        tref,
+                        data[tb_index] *
+                        exp_curve,
+                        label=r'$\propto \exp(-t)$',
+                        color='grey',
+                        linestyle='-.')
+                    self.axs.plot(tref,
+                                data[tb_index] * (tref / tref[0]) ** (-3),
+                                label=r'$\propto t^{-3}$',
+                                color='grey',
+                                linestyle='--')
 
         if self.log:
             self.axs.set_xscale('log')
