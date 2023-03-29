@@ -310,19 +310,17 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         help='print the available config files',
         action=print_available_configs
     )
-    
-    cgroup = run_parser.add_mutually_exclusive_group()
-    cgroup.add_argument(
+    global_args.add_argument(
         '--cpu', 
         action=ComputeModeAction,
         const='cpu'
     )
-    cgroup.add_argument(
+    global_args.add_argument(
         '--gpu', 
         action=ComputeModeAction,  
         const='gpu'
     )
-    cgroup.add_argument(
+    global_args.add_argument(
         '--omp', 
         action=ComputeModeAction, 
         const='omp',
