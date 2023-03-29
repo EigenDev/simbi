@@ -37,6 +37,7 @@ namespace simbi
         luint blockSize, checkpoint_zones;
         std::vector<std::vector<real>> sources;
         std::string data_directory;
+        ndarray<bool> object_pos;
         
         const auto get_xblock_dims() const {
             return static_cast<luint>(std::stoi(getEnvVar("GPUXBLOCK_SIZE")));
@@ -48,6 +49,42 @@ namespace simbi
 
         const auto get_zblock_dims() const {
             return static_cast<luint>(std::stoi(getEnvVar("GPUZBLOCK_SIZE")));
+        }
+
+        void define_tinterval(real t, real dlogt, real chkpt_interval, real chkpt_idx) {
+            real round_place = 1 / chkpt_interval;
+            t_interval = 
+               t == 0 ? 0
+               : dlogt !=0 ? tstart * std::pow(10, chkpt_idx * dlogt)
+               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
+        }
+
+        void define_total_zones() {
+            this->total_zones = nx * ny * nz;
+        }
+
+        void define_chkpt_idx(int chkpt_idx) {
+            init_chkpt_idx = chkpt_idx + (chkpt_idx > 0);
+        }
+
+        void define_periodic(std::vector<std::string> boundary_conditions) {
+            this->periodic = std::all_of(boundary_conditions.begin(), boundary_conditions.end(), [](std::string s) {return s == "periodic";});
+        }
+
+        void define_xphysical_grid(bool is_first_order) {
+            xphysical_grid =  this->periodic ? nx : (is_first_order) ? nx -2 : nx - 4;
+        }
+
+        void define_yphysical_grid(bool is_first_order) {
+            yphysical_grid =  this->periodic ? ny : (is_first_order) ? ny -2 : ny - 4;
+        }
+
+        void define_zphysical_grid(bool is_first_order) {
+            zphysical_grid = this->periodic ? nz : (is_first_order) ? nz -2 : nz - 4;
+        }
+
+        void define_active_zones(){
+            this->active_zones = xphysical_grid * yphysical_grid * zphysical_grid;
         }
 
         protected:
