@@ -25,7 +25,7 @@ namespace sogbo_rad
     */
     constexpr double calc_beta(const double gamma_beta)
     {
-        return std::sqrt(1.0 - 1.0 / (1.0 + gamma_beta * gamma_beta));
+        return gamma_beta / std::sqrt(1 + gamma_beta * gamma_beta);
     }
 
     /*
@@ -214,7 +214,7 @@ namespace sogbo_rad
     */
     constexpr double calc_minimum_lorentz(const double eps_e, const units::edens e_thermal, const units::ndens n, const double p)
     {
-        return eps_e * (p - 2.0) / (p - 1.0) * e_thermal / (n * constants::m_e * constants::c_light* constants::c_light);
+        return eps_e * (p - 2.0) / (p - 1.0) * e_thermal / (n * constants::m_e * constants::c_light * constants::c_light);
     }
 
     const std::vector<double> vector_multiply(const std::vector<double> &a, const std::vector<double> &b) {
