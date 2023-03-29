@@ -541,7 +541,7 @@ class Hydro:
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
         self._generate_the_grid(linspace)
 
-        mesh_motion = scale_factor_derivative(1.0) / scale_factor(1.0) != 0
+        mesh_motion = scale_factor_derivative(tstart) / scale_factor(tstart) != 0
         volume_factor: Union[float, NDArray[Any]] = 1.0
         if mesh_motion and self.coord_system != 'cartesian':
             if self.dimensionality == 1:
