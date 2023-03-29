@@ -15,12 +15,12 @@ from itertools import cycle
 from .helpers import (
     get_tbin_edges,
     get_dL,
-    Scale,
     generate_pseudo_mesh,
     read_afterglow_library_data,
     read_simbi_afterglow
 )
 from simbi import py_calc_fnu, py_log_events, find_nearest
+from .scales import get_scale_model
 from ..tools import utility as util
 from ..detail import get_subparser
 
@@ -54,7 +54,7 @@ def parse_args(
 ):
     afterglow_parser = get_subparser(parser, 2)
     afterglow_parser.add_argument(
-        'files',
+        '--files',
         nargs='+',
         help='Explicit filenames or directory')
     afterglow_parser.add_argument(
@@ -189,7 +189,7 @@ def parse_args(
         '--mode',
         help='mode to output radiation',
         default='fnu',
-        choices=['fnu', 'events', 'checkpoint'],
+        choices=['fnu', 'events'],
         type=str)
     afterglow_parser.add_argument(
         '--scale',
@@ -250,14 +250,15 @@ def run(parser: argparse.ArgumentParser,
     args.times.sort()
     args.nu.sort()
 
-    scales = Scale(args.scale)
+    scales = get_scale_model(args.scale)
     if args.tex:
         plt.rcParams.update({
             "text.usetex": True,
             "font.family": "Times New Roman"
         })
 
-    files, _ = util.get_file_list(args.files)
+    
+    files = None if not args.files else util.get_file_list(args.files)[0]
     fig, ax = plt.subplots(figsize=args.fig_dims)
     freqs = np.asarray(args.nu) * units.Hz
 
@@ -274,7 +275,7 @@ def run(parser: argparse.ArgumentParser,
     # Calculations
     # ---------------------------------------------------------
     at_pole = abs(np.cos(args.theta_obs)) == 1
-    if args.mode != 'checkpoint':
+    if args.files:
         dim = util.get_dimensionality(files)
         nbins = args.ntbins
         nbin_edges = nbins + 1
@@ -316,7 +317,7 @@ def run(parser: argparse.ArgumentParser,
                 args,
                 mesh,
                 full_sphere=True,
-                full_threed=not at_pole
+                full_threed=False,
             )
             sim_info['dt'] = setup['dt']
             sim_info['adiabatic_gamma'] = setup['ad_gamma']
@@ -395,7 +396,7 @@ def run(parser: argparse.ArgumentParser,
             label = f'{var_label}' + r'%d \times 10^{%d}$' % (
                 int(front_part), power_of_ten) + (' day' if args.spectra else ' Hz')
 
-        if args.mode != 'checkpoint':
+        if files:
             if args.spectra:
                 nearest_dat = find_nearest(time_bins.value, val)[0]
                 relevant_flux = np.asanyarray(
