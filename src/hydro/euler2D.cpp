@@ -898,6 +898,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     std::vector<std::vector<real>> boundary_sources)
 {    
     anyDisplayProps();
+    define_periodic(boundary_conditions);
     this->t = tstart;
     // Define the simulation members
     this->chkpt_interval  = chkpt_interval;
@@ -934,7 +935,6 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->mom2_source_all_zeros   = std::all_of(sourceM2.begin(),  sourceM2.end(),  [](real i) {return i == 0;});
     this->energy_source_all_zeros = std::all_of(sourceE.begin(),   sourceE.end(), [](real i) {return i == 0;});
     define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
-    define_periodic(boundary_conditions);
     define_chkpt_idx(chkpt_idx);
     // Stuff for moving mesh
     this->hubble_param = 0.0; ///adot(t) / a(t);

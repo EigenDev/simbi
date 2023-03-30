@@ -1177,6 +1177,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::function<double(double, double)> e_outer)
 {
     anyDisplayProps();
+    define_periodic(boundary_conditions);
     this->t = tstart;
     // Define the source terms
     this->object_pos      = object_cells;
@@ -1219,7 +1220,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->mom2_source_all_zeros   = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
     this->energy_source_all_zeros = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
     define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
-    define_periodic(boundary_conditions);
     define_chkpt_idx(chkpt_idx);
     // Params moving mesh
     this->hubble_param = adot(t) / a(t);

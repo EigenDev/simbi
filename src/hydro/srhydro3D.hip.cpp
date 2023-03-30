@@ -1143,6 +1143,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     std::vector<std::vector<real>> boundary_sources)
 {   
     anyDisplayProps();
+    define_periodic(boundary_conditions);
     this->t = tstart;
 
     // Define the source terms
@@ -1193,7 +1194,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->mom3_source_all_zeros    = std::all_of(sourceS3.begin(),  sourceS3.end(),  [](real i) {return i == 0;});
     this->energy_source_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
     define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
-    define_periodic(boundary_conditions);
     define_chkpt_idx(chkpt_idx);
     // Stuff for moving mesh 
     // TODO: make happen at some point

@@ -495,6 +495,7 @@ void Newtonian1D::advance(
     std::vector<std::vector<real>> boundary_sources)
 {
     anyDisplayProps();
+    define_periodic(boundary_conditions);
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
@@ -523,7 +524,6 @@ void Newtonian1D::advance(
     this->mom1_source_all_zeros   = std::all_of(sourceMom.begin(), sourceMom.end(), [](real i) {return i==0;});
     this->energy_source_all_zeros = std::all_of(sourceE.begin(), sourceE.end(), [](real i) {return i==0;});
     define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
-    define_periodic(boundary_conditions);
     define_chkpt_idx(chkpt_idx);
     // TODO: invoke mesh motion later
     this->mesh_motion = false;

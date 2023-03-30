@@ -661,6 +661,7 @@ SRHD::simulate1D(
     std::function<double(double)> e_outer)
 {
     anyDisplayProps();
+    define_periodic(boundary_conditions);
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
@@ -689,8 +690,7 @@ SRHD::simulate1D(
     this->den_source_all_zeros    = std::all_of(sourceD.begin(), sourceD.end(), [](real i) {return i==0;});
     this->mom1_source_all_zeros   = std::all_of(sourceS.begin(), sourceS.end(), [](real i) {return i==0;});
     this->energy_source_all_zeros = std::all_of(source0.begin(), source0.end(), [](real i) {return i==0;});
-    define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
-    define_periodic(boundary_conditions);
+    define_tinterval(tstart, dlogt, chkpt_interval, chkpt_idx);
     define_chkpt_idx(chkpt_idx);
     inflow_zones.resize(2);
     for (size_t i = 0; i < 2; i++)
@@ -790,7 +790,7 @@ SRHD::simulate1D(
             t_interval += chkpt_interval;
         }
     }
-    
+
     // Simulate :)
     const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
     simbi::detail::logger::with_logger(*this, tend, [&](){
