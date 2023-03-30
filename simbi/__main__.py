@@ -177,6 +177,9 @@ def valid_simbiscript(param):
         for file in available_configs:
             if base == Path(file).stem:
                 param = file
+            elif base.replace('-', '_') == Path(file).stem:
+                param = file
+                
         if not param:
             available_configs = sorted(
                 [Path(conf).stem for conf in available_configs])
