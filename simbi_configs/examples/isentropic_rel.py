@@ -27,7 +27,7 @@ def cs(gamma: DynamicArg, rho: Union[NDArray[numpy_float], float], pressure: Uni
     return np.asanyarray(np.sqrt(gamma*pressure/(rho * h)))
 
 def pressure(p_ref: float, gamma: DynamicArg, rho: NDArray[numpy_float], rho_ref: float) -> NDArray[numpy_float]:
-    return np.asanyarray(p_ref * ( rho / rho_ref ) ** float(gamma.value))
+    return np.asanyarray(p_ref * ( rho / rho_ref ) ** float(gamma))
 
 def velocity(gamma: DynamicArg, rho: NDArray[numpy_float], rho_ref: float, pressure: NDArray[numpy_float], p_ref: float) -> NDArray[numpy_float]:
     return  np.asanyarray(2 / (gamma - 1.)*(cs(gamma, rho, pressure) - cs(gamma, rho_ref, p_ref)))
