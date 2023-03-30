@@ -82,7 +82,10 @@ c) [rich](https://github.com/Textualize/rich) for pretty-printing console output
     $ simbi run simbi/configs/marti_muller.py --mode gpu --nzones 100 --ad_gamma 1.4 
     # or one could do 
     $ simbi run marti_muller --mode gpu --nzones 100 --ad_gamma 1.4
-    # since the entry point is built to recursively search the configs/ folder for valid .py scripts now
+    # or 
+    $ simbi run marti-muller --mode gpu --nzones 100 --ad_gamma 1.4
+    # since the entry point is built to recursively search the simbi_configs/ folder for valid .py scripts
+    # and dash-cased searches for file matches with underscores
     ```
 
     where `--mode` is a global command line option available for every
