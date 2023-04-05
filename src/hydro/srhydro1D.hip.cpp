@@ -217,12 +217,6 @@ void SRHD::advance(
                 break;
             }
         } // end switch
-        // update x1 endpoints
-        if (ii == active_zones - 1) {
-            x1max += step * dt * vfaceR;
-            const real vfaceL = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
-            x1min += step * dt * vfaceL;
-        }
     });	
 }
 
@@ -811,6 +805,11 @@ SRHD::simulate1D(
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
         if (mesh_motion){
+            // update x1 endpoints  
+            const real vmin = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
+            const real vmax = (geometry == simbi::Geometry::SPHERICAL) ? x1max * hubble_param : hubble_param;
+            x1max += step * dt * vmax;
+            x1min += step * dt * vmin;
             hubble_param = adot(t) / a(t);
         }
     });
