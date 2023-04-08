@@ -328,6 +328,18 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         action=ComputeModeAction, 
         const='omp',
     )
+    global_args.add_argument(
+        '--log-output', 
+        help='log the simulation params to a file',
+        action='store_true', 
+        default=False,
+    )
+    global_args.add_argument(
+        '--log-dir',
+        help='directory to place the log file',
+        type=str,
+        default=None
+    )
 
 
     return parser, parser.parse_known_args(
@@ -389,15 +401,19 @@ def configure_state(
     state_docs = []
     kwargs = {}
     peek_only = False
+    gargs = parser.parse_args()
     for idx, setup_class in enumerate(setup_classes):
         problem_class = getattr(
             importlib.import_module(f'{base_script}'),
             f'{setup_class}')
         static_config = problem_class
+            
         if argv:
-            static_config.parse_args(parser)
+            static_config._parse_args(parser)
 
-        if getattr(parser.parse_args(), 'peek'):
+
+            
+        if getattr(gargs, 'peek'):
             print(f"Printing dynamic arguments present in -- {setup_class}")
             static_config.print_problem_params()
             peek_only = True
@@ -406,6 +422,10 @@ def configure_state(
         # Call initializer once static vars modified
         config = static_config()
 
+        if gargs.log_output:
+            static_config.log_output = True 
+            static_config.set_logdir(gargs.data_directory or config.data_directory)
+                
         if config.__doc__:
             state_docs += [f"{config.__doc__}"]
         else:
@@ -478,9 +498,9 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
                 continue
 
             kwargs[idx][arg] = getattr(args, arg)
-        print("=" * 80, flush=True)
-        print(state_docs[idx], flush=True)
-        print("=" * 80, flush=True)
+        logger.print("=" * 80) # type: ignore
+        logger.print(state_docs[idx]) # type: ignore
+        logger.print("=" * 80) #type: ignore
         sim_state.simulate(**kwargs[idx])
 
 

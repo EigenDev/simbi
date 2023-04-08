@@ -1,5 +1,6 @@
 import argparse
 import abc
+import logging
 from .dynarg import DynamicArg
 from ..key_types import *
 from . import get_subparser, bcolors
@@ -76,6 +77,8 @@ def class_register(cls: Any) -> Any:
 class BaseConfig(metaclass=abc.ABCMeta):
     dynamic_args: ListOrNone = None
     base_properties: dict[str, Any] = {}
+    log_output = False 
+    log_directory: str = ""
     
     def __init_subclass__(cls: Any, *args: Any, **kwargs: Any) -> None:
         """Check Child Behavior
@@ -237,7 +240,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return 0.0
     
     @classmethod
-    def find_dynamic_args(cls) -> None:
+    def _find_dynamic_args(cls) -> None:
         """
         Find all derived class member's members defined as DynamicArg class instances 
         """
@@ -246,10 +249,13 @@ class BaseConfig(metaclass=abc.ABCMeta):
         for arg in cls.dynamic_args:
             if arg.name in simbi_property.registry.keys():
                 raise ValueError(f"Your dynamic argument name ({arg.name}) is a reserved class property name. Please choose a different name")
-        
+    
+    @classmethod
+    def set_logdir(cls, value: str) -> None:
+        setattr(cls, 'log_directory', value)
     @final
     @classmethod
-    def parse_args(cls, parser: argparse.ArgumentParser) -> None:
+    def _parse_args(cls, parser: argparse.ArgumentParser) -> None:
         """
         Parse extra problem-specific args from command line
         """
@@ -289,13 +295,16 @@ class BaseConfig(metaclass=abc.ABCMeta):
                                                     help=var.help, var_type=var.var_type, 
                                                     choices=var.choices, action = var.action, value=var.value))
         else:
-            cls.find_dynamic_args()
-            cls.parse_args(parser)
+            cls._find_dynamic_args()
+            cls._parse_args(parser)
         
 
     @final
     @classmethod
-    def print_problem_params(cls) -> None:
+    def _print_problem_params(cls) -> None:
+        from .slogger import logger, SimbiFormatter
+        from datetime import datetime
+        from pathlib import Path
         """
         Read from problem params and print to stdout
         """
@@ -306,25 +315,35 @@ class BaseConfig(metaclass=abc.ABCMeta):
             return int(math.floor(math.log10(val)))
         
         if not cls.dynamic_args:
-            cls.find_dynamic_args()
+            cls._find_dynamic_args()
+        
+        if cls.log_output:
+            timestr = datetime.now().strftime("%Y%m%d-%H%M%S")
+            Path(cls.log_directory).mkdir(parents=True, exist_ok=True)
+            logfile = Path(cls.log_directory) / f"simbilog_{timestr}.log"
+            logger.info(f"Writing log file: {logfile}")
+            file_handler = logging.FileHandler(logfile)
+            file_handler.setLevel(logging.PRINT) # type: ignore
+            file_handler.setFormatter(SimbiFormatter())
+            logger.addHandler(file_handler)
             
-        print("\nProblem Parameters:", flush=True)
-        print("="*80, flush=True)
+        logger.print("\nProblem Parameters:") #type: ignore
+        logger.print("="*80) # type: ignore
         if cls.dynamic_args:
             for member in cls.dynamic_args:
                 val = member.value
                 if (isinstance(val, float)):
                     if abs(order_of_mag(val)) > 3:
-                        print(f"{member.name:.<30} {val:<15.2e} {member.help}", flush = True)
+                        logger.print(f"{member.name:.<30} {val:<15.2e} {member.help}") # type:  ignore
                         continue
                     val = round(val, 3)
                 val = str(val)
-                print(f"{member.name:.<30} {val:<15} {member.help}", flush = True)
+                logger.print(f"{member.name:.<30} {val:<15} {member.help}") # type: ignore
     
     @final
     def __del__(self) -> None:
         """
         Print problem params on class destruction
         """
-        self.print_problem_params()
+        self._print_problem_params()
         
