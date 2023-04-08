@@ -66,7 +66,7 @@ class SimbiFormatter(logging.Formatter):
         logging.WARNING:  bcolors.WARNING    + gen_fmt + bcolors.ENDC,
         logging.ERROR:    bcolors.FAIL       + gen_fmt + bcolors.ENDC,
         logging.CRITICAL: bcolors.BOLD       + gen_fmt + bcolors.ENDC,
-        logging.PRINT:    bcolors.WHITE      + non_fmt + bcolors.ENDC, #type: ignore
+        logging.PRINT:                         non_fmt, #type: ignore
     }
 
     def format(self, record: logging.LogRecord) -> str:
