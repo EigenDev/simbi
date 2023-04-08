@@ -361,8 +361,8 @@ def type_check_input(file: str) -> None:
 def configure_state(
         script: str,
         parser: argparse.ArgumentParser,
-        argv: Optional[Sequence],
-        type_checking_active: bool):
+        args: argparse.Namespace,
+        argv: Optional[Sequence]):
     """
     Configure the Hydro state based on the Config class that exists in the passed
     in setup script. Once configured, pass it back to main to be simulated
@@ -391,7 +391,7 @@ def configure_state(
     if not setup_classes:
         raise ValueError("Invalid simbi configuration")
     
-    if type_checking_active and str(Path().absolute()) == githome:
+    if args.type_check and str(Path().absolute()) == githome:
         print("-"*80)
         print("Validating Config Script Type Safety...")
         type_check_input(script)
@@ -401,7 +401,6 @@ def configure_state(
     state_docs = []
     kwargs = {}
     peek_only = False
-    gargs = parser.parse_args()
     for idx, setup_class in enumerate(setup_classes):
         problem_class = getattr(
             importlib.import_module(f'{base_script}'),
@@ -413,7 +412,7 @@ def configure_state(
 
 
             
-        if getattr(gargs, 'peek'):
+        if args.peek:
             print(f"Printing dynamic arguments present in -- {setup_class}")
             static_config.print_problem_params()
             peek_only = True
@@ -422,9 +421,9 @@ def configure_state(
         # Call initializer once static vars modified
         config = static_config()
 
-        if gargs.log_output:
+        if args.log_output:
             static_config.log_output = True 
-            static_config.set_logdir(gargs.data_directory or config.data_directory)
+            static_config.set_logdir(args.data_directory or config.data_directory)
                 
         if config.__doc__:
             state_docs += [f"{config.__doc__}"]
@@ -466,7 +465,7 @@ def configure_state(
 def run(parser: argparse.ArgumentParser, *_) -> None:
     parser, (args, argv) = parse_run_arguments(parser)
     sim_states, kwargs, state_docs = configure_state(
-        args.setup_script, parser, argv, args.type_check)
+        args.setup_script, parser, args, argv)
     if args.nthreads:
         os.environ['OMP_NUM_THREADS'] = f'{args.nthreads}'
         os.environ['NTHREADS']        = f'{args.nthreads}'
