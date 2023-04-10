@@ -302,9 +302,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @final
     @classmethod
     def _print_problem_params(cls) -> None:
-        from .slogger import logger, SimbiFormatter
-        from datetime import datetime
-        from pathlib import Path
         """
         Read from problem params and print to stdout
         """
@@ -318,27 +315,30 @@ class BaseConfig(metaclass=abc.ABCMeta):
             cls._find_dynamic_args()
         
         if cls.log_output:
+            from .slogger import logger, SimbiFormatter
+            from datetime import datetime
+            from pathlib import Path
             timestr = datetime.now().strftime("%Y%m%d-%H%M%S")
             Path(cls.log_directory).mkdir(parents=True, exist_ok=True)
             logfile = Path(cls.log_directory) / f"simbilog_{timestr}.log"
             logger.info(f"Writing log file: {logfile}")
             file_handler = logging.FileHandler(logfile)
-            file_handler.setLevel(logging.PRINT) # type: ignore
+            file_handler.setLevel(logging.DEBUG)
             file_handler.setFormatter(SimbiFormatter())
             logger.addHandler(file_handler)
             
-        logger.print("\nProblem Parameters:") #type: ignore
-        logger.print("="*80) # type: ignore
+        logger.debug("\nProblem Parameters:")
+        logger.debug("="*80)
         if cls.dynamic_args:
             for member in cls.dynamic_args:
                 val = member.value
                 if (isinstance(val, float)):
                     if abs(order_of_mag(val)) > 3:
-                        logger.print(f"{member.name:.<30} {val:<15.2e} {member.help}") # type:  ignore
+                        logger.debug(f"{member.name:.<30} {val:<15.2e} {member.help}")
                         continue
                     val = round(val, 3)
                 val = str(val)
-                logger.print(f"{member.name:.<30} {val:<15} {member.help}") # type: ignore
+                logger.debug(f"{member.name:.<30} {val:<15} {member.help}") 
     
     @final
     def __del__(self) -> None:
