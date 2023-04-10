@@ -302,6 +302,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @final
     @classmethod
     def _print_problem_params(cls) -> None:
+        from .slogger import logger, SimbiFormatter
         """
         Read from problem params and print to stdout
         """
@@ -315,7 +316,6 @@ class BaseConfig(metaclass=abc.ABCMeta):
             cls._find_dynamic_args()
         
         if cls.log_output:
-            from .slogger import logger, SimbiFormatter
             from datetime import datetime
             from pathlib import Path
             timestr = datetime.now().strftime("%Y%m%d-%H%M%S")
