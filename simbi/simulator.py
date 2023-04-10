@@ -724,8 +724,6 @@ class Hydro:
                     coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
 
-        #flush the log
-        logger.handlers[0].flush()
         self.solution = state.simulate(
             sources=sources,
             tstart=self.start_time,

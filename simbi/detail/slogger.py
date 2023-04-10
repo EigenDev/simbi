@@ -24,7 +24,7 @@ class SimbiFormatter(logging.Formatter):
 logger = logging.getLogger("SIMBI")
 logger.setLevel(logging.DEBUG)
 
-console_handler = logging.StreamHandler()
+console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setLevel(logging.DEBUG)
 console_handler.setFormatter(SimbiFormatter())
 logger.addHandler(console_handler)
