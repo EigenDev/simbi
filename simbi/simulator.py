@@ -123,7 +123,7 @@ class Hydro:
             # Initialize conserved u-array and flux arrays
             self.u = np.zeros(shape=(self.nvars,*np.asanyarray(self.resolution).flatten()[ ::- 1]))
             if self.discontinuity:
-                logger.debug(  
+                logger.info(  
                     f'Initializing Problem With a {str(self.dimensionality)}D Discontinuity...')
 
                 if len(self.geometry) == 3 and isinstance(self.geometry[0], (int, float)):
@@ -311,9 +311,9 @@ class Hydro:
 
     def _print_params(self, frame: Any) -> None:
         params = inspect.getargvalues(frame)
-        logger.debug("=" * 80) 
-        logger.debug("Simulation Parameters") 
-        logger.debug("=" * 80) 
+        logger.info("=" * 80) 
+        logger.info("Simulation Parameters") 
+        logger.info("=" * 80) 
         for key, param in params.locals.items():
             if key != 'self':
                 if isinstance(param, (float, np.float64)):
@@ -340,7 +340,7 @@ class Hydro:
                     val_str = str(param)
 
                 my_str = str(key).ljust(30, '.')
-                logger.debug(f"{my_str} {val_str}") 
+                logger.info(f"{my_str} {val_str}") 
         system_dict = {
             'adiabatic_gamma': self.gamma,
             'resolution': self.resolution,
@@ -363,8 +363,8 @@ class Hydro:
             else:
                 val_str = str(val)
 
-            logger.debug(f"{my_str} {val_str}") 
-        logger.debug("=" * 80) 
+            logger.info(f"{my_str} {val_str}") 
+        logger.info("=" * 80) 
 
     def _place_boundary_sources(self,
                                 boundary_sources: Union[Sequence[Any],
@@ -595,14 +595,14 @@ class Hydro:
         if not os.path.exists(data_directory):
             # Create a new directory because it does not exist
             os.makedirs(data_directory)
-            logger.debug( 
+            logger.info( 
                 f"The data directory provided does not exist. Creating the {data_directory} directory now!") 
 
         if compute_mode in ['cpu', 'omp']:
             if 'USE_OMP' in os.environ:
-                logger.info("Using OpenMP multithreading")
+                logger.debug("Using OpenMP multithreading")
             else:
-                logger.info("Using STL std::thread multithreading")
+                logger.debug("Using STL std::thread multithreading")
         else:
             dim3 = [1, 1, 1]
             for idx, coord in enumerate(['X', 'Y', 'Z']):
@@ -616,9 +616,9 @@ class Hydro:
                         dim3[idx] = 16
                     elif self.dimensionality == 3 and coord in ['X', 'Y', 'Z']:
                         dim3[idx] = 4
-            logger.info(f"In GPU mode, GPU block dims are: {tuple(dim3)}")
+            logger.debug(f"In GPU mode, GPU block dims are: {tuple(dim3)}")
             
-        logger.debug("") 
+        logger.info("") 
         # Loading bar to have chance to check params
         helpers.print_progress()
 
@@ -627,7 +627,7 @@ class Hydro:
             self.u[0], dtype=bool) if object_positions is None else np.asanyarray(
             object_positions, dtype=bool)
 
-        logger.debug( 
+        logger.info( 
             f"Computing {'First' if first_order else 'Second'} Order Solution...") 
         kwargs: dict[str, Any] = {}
             

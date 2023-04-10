@@ -7,8 +7,8 @@ class SimbiFormatter(logging.Formatter):
     gen_fmt: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s (%(filename)s:%(lineno)d)"
 
     FORMATS = {
-        logging.DEBUG:                         non_fmt,
-        logging.INFO:     bcolors.LIGHT_CYAN + inf_fmt + bcolors.ENDC,
+        logging.INFO:                          non_fmt,
+        logging.DEBUG:    bcolors.LIGHT_CYAN + inf_fmt + bcolors.ENDC,
         logging.WARNING:  bcolors.WARNING    + gen_fmt + bcolors.ENDC,
         logging.ERROR:    bcolors.FAIL       + gen_fmt + bcolors.ENDC,
         logging.CRITICAL: bcolors.BOLD       + gen_fmt + bcolors.ENDC,

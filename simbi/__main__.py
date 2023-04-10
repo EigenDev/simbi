@@ -497,9 +497,9 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
                 continue
 
             kwargs[idx][arg] = getattr(args, arg)
-        logger.debug("=" * 80) # type: ignore
-        logger.debug(state_docs[idx]) # type: ignore
-        logger.debug("=" * 80) #type: ignore
+        logger.info("=" * 80) # type: ignore
+        logger.info(state_docs[idx]) # type: ignore
+        logger.info("=" * 80) #type: ignore
         sim_state.simulate(**kwargs[idx])
 
 
