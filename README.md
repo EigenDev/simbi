@@ -73,6 +73,15 @@ c) [rich](https://github.com/Textualize/rich) for pretty-printing console output
     both the cpu and gpu extensions into your system site-packages or
     `--user` site-packages depending on privileges.
 
+    <strong style="color:red">NOTE: When compiling on a GPU, you must provide your GPU's respective compiler version.
+    That is to say, if I am compiling on an NVIDIA V100 device with compute capability 7.0, I would
+    build with:
+    ```bash
+    # note the lack of a decimal
+    python dev.py install --gpu-compilation --dev-arch 70 [options]
+    ```
+    </strong>
+
 <strong>Running a Configuration</strong>
 
 4)  If all is well, we can test. To test, try running the configuration
