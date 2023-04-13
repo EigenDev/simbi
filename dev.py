@@ -80,7 +80,8 @@ def configure(args: argparse.Namespace,
     command = f'''meson setup {args.build_dir} -Dgpu_compilation={args.gpu_compilation}  
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
-    -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} -Dfour_velocity={args.four_velocity} {reconfigure}'''.split()
+    -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} -Dfour_velocity={args.four_velocity} \
+    -Dcpp_std={args.cpp_version} {reconfigure}'''.split()
     return command
 
 def generate_home_locator(simbi_dir: str) -> None:
@@ -107,8 +108,9 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     install_parser.add_argument(
         '--verbose','-v',                 
         help='flag for verbose compilation output', 
-        action='store_true', 
-        default=False
+        action='store_const', 
+        default=[],
+        const=['--verbose'],
     )
     install_parser.add_argument(
         '--configure',                    
@@ -141,6 +143,14 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         action=argparse.BooleanOptionalAction,
         default=False,
     )
+    install_parser.add_argument(
+        '--cpp17',                
+        help='flag for setting c++ version to c++17 instead of default c++20', 
+        action='store_const', 
+        default='c++20',
+        const='c++17',
+        dest='cpp_version',
+    )
     compile_type = install_parser.add_mutually_exclusive_group()
     compile_type.add_argument('--gpu-compilation',  action='store_const', dest='gpu_compilation', const='enabled')
     compile_type.add_argument('--cpu-compilation',  action='store_const', dest='gpu_compilation', const='disabled')
@@ -165,7 +175,7 @@ def install_simbi(args: argparse.Namespace) -> None:
     cli_args = sys.argv[1:]
     if cached_vars := read_from_cache():
         for arg in vars(args):
-            if arg in ['verbose', 'configure', 'func', 'extras']:
+            if arg in ['verbose', 'configure', 'func', 'extras', 'cpp_version']:
                 continue
             
             if getattr(args,arg) == default[arg]:
@@ -190,7 +200,6 @@ def install_simbi(args: argparse.Namespace) -> None:
             stderr=subprocess.DEVNULL).returncode == 0
     
     reconfigure_flag = '--reconfigure' if build_configured else ''
-    verbose_flag = '--verbose' if args.verbose else ''
     if 'CXX' not in simbi_env: 
         simbi_env['CXX'] = get_tool('c++')
         print(f"{YELLOW}WRN{RST}: C++ compiler not set")
@@ -221,7 +230,7 @@ def install_simbi(args: argparse.Namespace) -> None:
         egg_dir  =f"{simbi_dir}/simbi.egg-info"
         lib_dir = Path(simbi_dir / "simbi/libs")
         lib_dir.mkdir(parents=True, exist_ok=True)
-        compile_child = subprocess.Popen(['meson', 'compile'], cwd=f'{args.build_dir}').wait()
+        compile_child = subprocess.Popen(['meson', 'compile'] + args.verbose, cwd=f'{args.build_dir}').wait()
         install_child = subprocess.Popen(['meson', 'install'], cwd=f'{args.build_dir}').wait()
         if compile_child == install_child == 0:
             subprocess.Popen([sys.executable, '-m', 'pip', 'install', install_mode]).wait()

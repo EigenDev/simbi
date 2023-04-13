@@ -26,7 +26,6 @@ option(
     'gpu_arch',
     type: 'integer',
     value: 70,
-    # choices: [20, 21, 30, 35, 32, 50, 52, 53, 60, 61, 62, 70, 72, 75, 80, 86]
 )
 
 option(
