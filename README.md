@@ -39,7 +39,7 @@ b) [rich-argparse](https://pypi.org/project/rich-argparse/) for pretty-print arg
 
 c) [rich](https://github.com/Textualize/rich) for pretty-printing console outputs
 # Quick setup guide
-
+## Installing
 <strong>Easy Install</strong>
 1) Run 
     ```bash
@@ -72,8 +72,8 @@ c) [rich](https://github.com/Textualize/rich) for pretty-printing console output
 3)  If `meson` detected `hip` or `cuda`, the install script will install
     both the cpu and gpu extensions into your system site-packages or
     `--user` site-packages depending on privileges.
-
-<strong style="color:orange">IMPORTANT: When compiling on a GPU, you must provide your GPU's respective architecture identifier.
+## Important (!)
+<strong style="color:orange">When compiling on a GPU, you must provide your GPU's respective architecture identifier.
 That is to say, if I am compiling on an NVIDIA V100 device with compute capability 7.0, I would
 build with:
 ```bash
@@ -91,6 +91,7 @@ CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
 ```
 </strong>
 
+## Running
 <strong>Running a Configuration</strong>
 
 4)  If all is well, we can test. To test, try running the configuration
