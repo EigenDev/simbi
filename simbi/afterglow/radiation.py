@@ -87,7 +87,7 @@ def parse_args(
         '--theta-samples',
         type=int,
         help='number of theta_samples',
-        default=None)
+        default=200)
     afterglow_parser.add_argument(
         '--phi-samples',
         type=int,
