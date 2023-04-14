@@ -109,7 +109,20 @@ namespace simbi
 
     inline GPU_DEV real warpReduceMin(real val) {
         #if CUDA_CODE
-        int mask = __match_any_sync(__activemask(), val);
+        // Adapted from https://stackoverflow.com/a/59883722/13874039
+        // to work with older cuda versions
+        int mask;
+        #if __CUDA_ARCH__ >= 700
+            mask = __match_any_sync(__activemask(), val);
+        #else
+            unsigned tmask = __activemask();
+            for (int i = 0; i < WARP_SIZE; i++){
+                unsigned long long val = __shfl_sync(tmask, (unsigned long long)val, i);
+                unsigned my_mask = __ballot_sync(tmask, (val == (unsigned long long)val));
+                if (i == (threadIdx.x & (WARP_SIZE-1))) 
+                    mask = my_mask;
+            }
+        #endif
         for (int offset = WARP_SIZE/2; offset > 0; offset /= 2) {
             real next_val = __shfl_down_sync(mask, val, offset);
             val           = (val < next_val) ? val : next_val;
