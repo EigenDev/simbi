@@ -90,7 +90,7 @@ namespace simbi {
 						should_terminate = true;
 					}
 					cv_task.notify_all();
-					#if __cpluspluc < 202002L
+					#if __cplusplus < 202002L
 					for (std_thread& active_thread : threads) {
 						active_thread.join();
 					}
