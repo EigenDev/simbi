@@ -413,7 +413,7 @@ def configure_state(
 
             
         if args.peek:
-            print(f"Printing dynamic arguments present in -- {setup_class}")
+            print(f"{bcolors.YELLOW}Printing dynamic arguments present in -- {setup_class}{bcolors.ENDC}")
             static_config._print_problem_params()
             peek_only = True
             continue
