@@ -47,6 +47,10 @@ def read_from_cache() -> Optional[dict[str, str]]:
         return None 
     
 def check_minimal_dependencies() -> None:
+    MIN_PYTHON = (3, 9)
+    if sys.version_info < MIN_PYTHON:
+        raise RuntimeError("Python {}.{} or later is required".format(*MIN_PYTHON))
+    
     try:
         import mesonbuild 
     except ImportError:
