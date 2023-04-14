@@ -414,7 +414,7 @@ def configure_state(
             
         if args.peek:
             print(f"Printing dynamic arguments present in -- {setup_class}")
-            static_config.print_problem_params()
+            static_config._print_problem_params()
             peek_only = True
             continue
 
