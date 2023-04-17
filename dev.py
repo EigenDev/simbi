@@ -143,7 +143,7 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     )
     install_parser.add_argument(
         '--four-velocity',
-        help='flag to set four-velocity as the velocity primitivw instead of beta',
+        help='flag to set four-velocity as the velocity primitive instead of beta',
         action=argparse.BooleanOptionalAction,
         default=False,
     )
