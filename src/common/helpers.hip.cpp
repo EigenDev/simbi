@@ -884,7 +884,7 @@ namespace simbi{
         #else 
         const auto processor_count = std::thread::hardware_concurrency();
         std::cout << std::string(80, '=')  << "\n";
-        std::cout << "CPU Compute Core(s): " << processor_count << std::endl;
+        std::cout << "CPU Compute Thread(s): " << processor_count << std::endl;
         #endif
     }
 } // namespace simbi
