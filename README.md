@@ -143,7 +143,7 @@ TODO:
   <li>Explore general IB in greater detail for sources and sinks!</li>
   <li>multi-gpu support</li>
   <li>MPI support</li>
-  <li>3D Newtonain</li>
+  <li>3D Newtonian</li>
 </ol>
 
 
