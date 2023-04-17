@@ -196,7 +196,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
     global_args = run_parser.add_argument_group(
         'globals', 'global module-specific options')
     onthefly = run_parser.add_argument_group(
-        'onthefly', 'simulation otions that are given on the fly')
+        'onthefly', 'simulation options that are given on the fly')
     run_parser.add_argument(
         'setup_script',
         help='setup script for simulation run',
@@ -406,12 +406,10 @@ def configure_state(
             importlib.import_module(f'{base_script}'),
             f'{setup_class}')
         static_config = problem_class
-            
+        
         if argv:
             static_config._parse_args(parser)
-
-
-            
+    
         if args.peek:
             print(f"{bcolors.YELLOW}Printing dynamic arguments present in -- {setup_class}{bcolors.ENDC}")
             static_config._print_problem_params()
