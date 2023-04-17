@@ -138,7 +138,14 @@ $ CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
 8) Can track a single passive scalar (implementing the `passive_scalars` property sets this)
 9) Can insert an immersed boundary (Peskin 2002). It is impermeable by default. (Implementing the `object_cells` property sets this)
 
-TODO: Explore general IB in greater detail for sources and sinks!
+TODO: 
+<ol type="a">
+  <li>Explore general IB in greater detail for sources and sinks!</li>
+  <li>multi-gpu support</li>
+  <li>MPI support</li>
+  <li>3D Newtonain</li>
+</ol>
+
 
 
 
