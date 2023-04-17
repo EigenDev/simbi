@@ -75,7 +75,7 @@ def class_register(cls: Any) -> Any:
 
 @class_register
 class BaseConfig(metaclass=abc.ABCMeta):
-    dynamic_args: ListOrNone = None
+    dynamic_args: list[DynamicArg] = []
     base_properties: dict[str, Any] = {}
     log_output = False 
     log_directory: str = ""
@@ -259,45 +259,44 @@ class BaseConfig(metaclass=abc.ABCMeta):
         """
         Parse extra problem-specific args from command line
         """
-        run_parser = get_subparser(parser, 0)
-        if cls.dynamic_args:
-            problem_args = run_parser.add_argument_group(f'{cls.__name__}', f'simulation options specific to {cls.__name__} config')
-            for member in cls.dynamic_args:
-                try:
-                    if type(member.value) == bool:
-                        problem_args.add_argument(
-                            f'--{member.name}',
-                            help    = member.help,
-                            action  = member.action,
-                            default = member.value,
-                        )
-                    else:
-                        problem_args.add_argument(
-                            f'--{member.name}',
-                            help    = member.help,
-                            action  = member.action,
-                            type    = member.var_type,
-                            choices = member.choices,
-                            default = member.value,
-                        )
-                
-                except argparse.ArgumentError as e:
-                    # ignore duplicate arguments if inheriting from another problem setup 
-                    pass
-                
-            args = parser.parse_args()
-            
-            # Update dynamic var attributes to reflect new values passed from cli
-            for var in cls.dynamic_args:
-                var.name = var.name.replace('-', '_')
-                if var.name in vars(args):
-                    var.value = vars(args)[var.name]
-                    setattr(cls, var.name, DynamicArg(name=var.name, 
-                                                    help=var.help, var_type=var.var_type, 
-                                                    choices=var.choices, action = var.action, value=var.value))
-        else:
+        if not cls.dynamic_args:
             cls._find_dynamic_args()
-            cls._parse_args(parser)
+            
+        run_parser = get_subparser(parser, 0)
+        problem_args = run_parser.add_argument_group(f'{cls.__name__}', f'simulation options specific to {cls.__name__} config')
+        for member in cls.dynamic_args:
+            try:
+                if type(member.value) == bool:
+                    problem_args.add_argument(
+                        f'--{member.name}',
+                        help    = member.help,
+                        action  = member.action,
+                        default = member.value,
+                    )
+                else:
+                    problem_args.add_argument(
+                        f'--{member.name}',
+                        help    = member.help,
+                        action  = member.action,
+                        type    = member.var_type,
+                        choices = member.choices,
+                        default = member.value,
+                    )
+            
+            except argparse.ArgumentError as e:
+                # ignore duplicate arguments if inheriting from another problem setup 
+                pass
+            
+        args = parser.parse_args()
+        
+        # Update dynamic var attributes to reflect new values passed from cli
+        for var in cls.dynamic_args:
+            var.name = var.name.replace('-', '_')
+            if var.name in vars(args):
+                var.value = vars(args)[var.name]
+                setattr(cls, var.name, DynamicArg(name=var.name, 
+                                                help=var.help, var_type=var.var_type, 
+                                                choices=var.choices, action = var.action, value=var.value))
         
 
     @final
