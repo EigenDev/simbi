@@ -261,17 +261,18 @@ class BaseConfig(metaclass=abc.ABCMeta):
         """
         run_parser = get_subparser(parser, 0)
         if cls.dynamic_args:
+            problem_args = run_parser.add_argument_group(f'{cls.__name__}', f'simulation options specific to {cls.__name__} config')
             for member in cls.dynamic_args:
                 try:
                     if type(member.value) == bool:
-                        run_parser.add_argument(
+                        problem_args.add_argument(
                             f'--{member.name}',
                             help    = member.help,
                             action  = member.action,
                             default = member.value,
                         )
                     else:
-                        run_parser.add_argument(
+                        problem_args.add_argument(
                             f'--{member.name}',
                             help    = member.help,
                             action  = member.action,
