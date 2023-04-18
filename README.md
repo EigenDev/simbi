@@ -73,7 +73,7 @@ c) [rich](https://github.com/Textualize/rich) for pretty-printing console output
     both the cpu and gpu extensions into your system site-packages or
     `--user` site-packages depending on privileges.
 ## Important (!)
-<strong style="color:orange">When compiling on a GPU, you must provide your GPU's respective architecture identifier.
+When compiling on a GPU, you must provide your GPU's respective architecture identifier.
 That is to say, if I am compiling on an NVIDIA V100 device with compute capability 7.0, I would
 build with:
 ```bash
@@ -89,7 +89,6 @@ $ python dev.py install --cpp17
 # or if manually installing
 $ CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
 ```
-</strong>
 
 ## Running
 <strong>Running a Configuration</strong>
