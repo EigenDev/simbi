@@ -101,7 +101,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
             if isinstance(getattr(cls.__mro__[0], prop), simbi_property):
                 if prop not in BaseConfig.base_properties.keys():
                     bullet_list = ''.join(f'>{s}\n ' for s in BaseConfig.base_properties.keys())  
-                    raise TypeError(f"simbi_property {bcolors.OKCYAN}{prop}{bcolors.ENDC} defined in {cls.__name__} " +   
+                    raise TypeError(fr"simbi_property :: {prop} :: defined in {cls.__name__} " +   
                         f"does not exist in BaseConfig. The available simbi properties are:\n {bullet_list}")  
 
 
