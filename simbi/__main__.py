@@ -186,7 +186,7 @@ def valid_simbiscript(param):
             raise argparse.ArgumentTypeError(
                 'No configuration named {}{}{}. The valid configurations are:\n{}'.format(
                     bcolors.OKCYAN, base, bcolors.ENDC, ''.join(
-                        f'> {bcolors.BOLD}{conf}{bcolors.ENDC}\n' for conf in available_configs)))
+                        f'> {bcolors.BOLD}{conf.replace("_", "-")}{bcolors.ENDC}\n' for conf in available_configs)))
     return param
 
 def parse_run_arguments(parser: argparse.ArgumentParser):
