@@ -49,7 +49,7 @@ class CustomParser(argparse.ArgumentParser):
     command = []
     def error(self, message):
         sys.stderr.write(f'error: {message}\n')
-        if "(choose from 'run', 'plot', 'afterglow')" in message:
+        if "(choose from 'run', 'plot', 'afterglow', 'clone')" in message:
             self.print_help()
         elif 'configurations' not in message:
             if self.command in ['run', 'plot', 'afterglow', 'clone']:
