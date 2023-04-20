@@ -6,7 +6,7 @@ class MartiMuller3D(BaseConfig):
     Marti & Muller (2003), Relativistic  Shock Tube Problem in 3D Fluid
     """
     nzones    = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
-    ad_gamma  = DynamicArg("ad_gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
+    ad_gamma  = DynamicArg("ad-gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
     
     @simbi_property
     def initial_state(self) -> Sequence[Sequence[float]]:

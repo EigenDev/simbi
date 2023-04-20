@@ -28,7 +28,7 @@ class thermalBomb(BaseConfig):
     k             = DynamicArg("k", 0.0,              help='density power law k', var_type=float) 
     full_sphere   = DynamicArg("full_sphere", False,  help='flag for full_sphere computation',  var_type=bool, action='store_true') 
     zpd           = DynamicArg("zpd", 1024,            help='number of radial zones per decade', var_type=int)
-    ad_gamma      = DynamicArg("ad_gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float)
+    ad_gamma      = DynamicArg("ad-gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float)
     
     def __init__(self) -> None:
         ndec             = np.log10(self.rend / self.rinit)

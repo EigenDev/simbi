@@ -37,7 +37,7 @@ class IsentropicRelWave(BaseConfig):
     Relativistic Isentropic Pulse in 1D, Entropy conserving
     """
     nzones    = DynamicArg("nzones", 1000, help="number of grid zones", var_type=int)
-    ad_gamma  = DynamicArg("ad_gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
+    ad_gamma  = DynamicArg("ad-gamma", 4.0 / 3.0, help="Adiabatic gas index", var_type = float)
     alpha     = DynamicArg("alpha", 0.5, help = "Wave amplitude", var_type=range_limited_float_type)
     rho_ref = 1.0
     p_ref   = 1.0

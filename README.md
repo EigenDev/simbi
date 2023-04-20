@@ -97,11 +97,11 @@ $ CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
     scripts provided. For example:
 
     ``` bash
-    $ simbi run simbi/configs/marti_muller.py --mode gpu --nzones 100 --ad_gamma 1.4 
+    $ simbi run simbi/configs/marti_muller.py --mode gpu --nzones 100 --ad-gamma 1.4 
     # or one could do 
-    $ simbi run marti_muller --mode gpu --nzones 100 --ad_gamma 1.4
+    $ simbi run marti_muller --mode gpu --nzones 100 --ad-gamma 1.4
     # or 
-    $ simbi run marti-muller --mode gpu --nzones 100 --ad_gamma 1.4
+    $ simbi run marti-muller --mode gpu --nzones 100 --ad-gamma 1.4
     # since the entry point is built to recursively search the simbi_configs/ folder for valid .py scripts
     # and dash-cased searches for file matches with underscores
     ```

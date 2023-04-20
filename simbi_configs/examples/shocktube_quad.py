@@ -7,7 +7,7 @@ class SodProblemQuad(BaseConfig):
     This setup was adapted from Zhang and MacFadyen (2006) section 4.8 pg. 11
     """
     nzones    = DynamicArg("nzones", 256, help="number of grid zones", var_type=int)
-    ad_gamma  = DynamicArg("ad_gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type = float)
+    ad_gamma  = DynamicArg("ad-gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type = float)
     
     @simbi_property
     def initial_state(self) -> Sequence[Sequence[float]]:

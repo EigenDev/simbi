@@ -7,7 +7,7 @@ class Ram61(BaseConfig):
     This setup was adapted from Zhang and MacFadyen (2006) section 6.1
     """
     nzones    = DynamicArg("nzones", 400, help="number of grid zones", var_type=int)
-    ad_gamma  = DynamicArg("ad_gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type = float)
+    ad_gamma  = DynamicArg("ad-gamma", 5.0 / 3.0, help="Adiabatic gas index", var_type = float)
     
     @simbi_property
     def initial_state(self) -> Sequence[Sequence[float]]:
