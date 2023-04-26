@@ -9,7 +9,7 @@ namespace simbi
         public: 
         static constexpr void* operator new(std::size_t len) {
             if constexpr(gpu_managed) {
-                void *ptr;
+                void *ptr = nullptr;
                 gpu::api::gpuMallocManaged(&ptr, len);
                 gpu::api::deviceSynch();
                 return ptr;

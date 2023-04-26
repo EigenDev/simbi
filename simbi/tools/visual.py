@@ -391,11 +391,14 @@ class Visualizer:
                             else:
                                 if cbar_orientation == 'horizontal':
                                     single_width = 0.8
+                                    height = 0.05
                                     width = single_width / len(self.fields)
-                                    x = 0.1 + (1 - idx) * width * \
-                                        (width != single_width)
+                                    if width == single_width:
+                                        x = 0.1
+                                    else:
+                                        x = (0.1 - 1e-2) + (1 - idx) * (width + 2e-2)
                                     cbaxes = self.fig.add_axes(
-                                        [x, 0.05, width, 0.05])
+                                        [x, 0.20, width, height])
                                 else:
                                     single_height = 0.8
                                     height = (
@@ -522,6 +525,8 @@ class Visualizer:
                                         rwidth=1.0,
                                         linewidth=3.0)]
 
+            if self.setup:
+                ax.set_title(f"{self.setup}")
             if self.nplots == 1:
                 ax.set_xscale('log')
                 ax.set_yscale('log')
