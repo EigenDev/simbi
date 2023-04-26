@@ -385,8 +385,6 @@ namespace simbi{
         #if GPU_CODE
         real min = INFINITY;
         luint ii   = blockIdx.x * blockDim.x + threadIdx.x;
-        luint jj   = blockIdx.y * blockDim.y + threadIdx.y;
-        luint kk   = blockIdx.z * blockDim.z + threadIdx.z;
         luint tid  = threadIdx.z * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
         // luint bid  = blockIdx.z * gridDim.x * gridDim.y + blockIdx.y * gridDim.x + blockIdx.x;
         luint nt   = blockDim.x * blockDim.y * blockDim.z * gridDim.x * gridDim.y * gridDim.z;
@@ -394,8 +392,11 @@ namespace simbi{
         if constexpr(dim == 1) {
             gid = ii;
         } else if constexpr(dim == 2) {
+            luint jj   = blockIdx.y * blockDim.y + threadIdx.y;
             gid  = self->xphysical_grid * jj + ii;
         } else if constexpr(dim == 3) {
+            luint jj   = blockIdx.y * blockDim.y + threadIdx.y;
+            luint kk   = blockIdx.z * blockDim.z + threadIdx.z;
             gid  = self->yphysical_grid * self->xphysical_grid * kk + self->xphysical_grid * jj + ii;
         }
         // reduce multiple elements per thread

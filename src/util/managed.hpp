@@ -13,16 +13,16 @@ namespace simbi
                 gpu::api::gpuMallocManaged(&ptr, len);
                 gpu::api::deviceSynch();
                 return ptr;
-            } else {
-                return ::operator new(len);
-            }
+            } 
+            
+            return ::operator new(len);
         }
         static constexpr void operator delete(void *ptr) {
             if constexpr(gpu_managed) {
                 gpu::api::deviceSynch();
                 gpu::api::gpuFree(ptr);
             } else {
-                return ::operator delete(ptr);
+                ::operator delete(ptr);
             }
         }
     };

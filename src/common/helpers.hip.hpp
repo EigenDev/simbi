@@ -117,8 +117,8 @@ namespace simbi
         #else
             unsigned tmask = __activemask();
             for (int i = 0; i < WARP_SIZE; i++){
-                unsigned long long val = __shfl_sync(tmask, (unsigned long long)val, i);
-                unsigned my_mask = __ballot_sync(tmask, (val == (unsigned long long)val));
+                unsigned long long tval = __shfl_sync(tmask, (unsigned long long)val, i);
+                unsigned my_mask = __ballot_sync(tmask, (tval == (unsigned long long)val));
                 if (i == (threadIdx.x & (WARP_SIZE-1))) 
                     mask = my_mask;
             }
