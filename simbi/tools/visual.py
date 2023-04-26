@@ -382,13 +382,13 @@ class Visualizer:
                         **kwargs
                     )]
 
+                    time = setup['time'] * (util.time_scale if self.units else 1)
                     if self.cartesian:
                         ax.set_title(
-                            f'{self.setup} at t = {setup["time"]:.2f}')
+                            f'{self.setup} at t = {time:.2f}')
                     else:
                         self.fig.suptitle(
-                            '{} at t = {:.2f}'.format(
-                                self.setup, setup['time']), y=1.0)
+                           f'{self.setup} at t = {time:.2f}', y=1.0)
                         
                     if not self.cartesian:
                         ax.set_rmin(self.ylims[0] or yy[0,0])

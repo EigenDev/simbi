@@ -243,6 +243,7 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         else:
             W = 1
         fields['gamma_beta']   = np.sqrt(vsqr) * W 
+        fields['W'] = W
 
         #------------------------
         # Generate Mesh
