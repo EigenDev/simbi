@@ -396,7 +396,7 @@ class Visualizer:
                                     if width == single_width:
                                         x = 0.1
                                     else:
-                                        x = (0.1 - 1e-2) + (1 - idx) * (width + 2e-2)
+                                        x = (0.1 - 4e-2) + (1 - idx) * (width + 8e-2)
                                     cbaxes = self.fig.add_axes(
                                         [x, 0.20, width, height])
                                 else:
@@ -446,7 +446,7 @@ class Visualizer:
                     f'{self.setup} at t = {time:.2f}')
             else:
                 self.fig.suptitle(
-                    f'{self.setup} at t = {time:.2f}', y=1.0)
+                    f'{self.setup} at t = {time:.2f}', y=0.8)
                 
             if not self.cartesian:
                 ax.set_rmin(self.ylims[0] or yy[0,0])
