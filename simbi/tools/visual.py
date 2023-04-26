@@ -382,20 +382,6 @@ class Visualizer:
                         **kwargs
                     )]
 
-                    time = setup['time'] * (util.time_scale if self.units else 1)
-                    if self.cartesian:
-                        ax.set_title(
-                            f'{self.setup} at t = {time:.2f}')
-                    else:
-                        self.fig.suptitle(
-                           f'{self.setup} at t = {time:.2f}', y=1.0)
-                        
-                    if not self.cartesian:
-                        ax.set_rmin(self.ylims[0] or yy[0,0])
-                        ax.set_rmax(self.ylims[1] or yy[0,-1])
-                    else:
-                        ax.set_ylim(*self.ylims)
-
                     if not self.no_cbar:
                         if idx < len(self.fields):
                             if self.cartesian:
@@ -450,9 +436,23 @@ class Visualizer:
                                     r'{}'.format(
                                         field_str[idx]),
                                     labelpad=labelpad)
-
-                            if self.xmax:
-                                self.axs.set_rmax(self.xmax)
+                                
+            time = setup['time'] * (util.time_scale if self.units else 1)
+            if self.cartesian:
+                ax.set_title(
+                    f'{self.setup} at t = {time:.2f}')
+            else:
+                self.fig.suptitle(
+                    f'{self.setup} at t = {time:.2f}', y=1.0)
+                
+            if not self.cartesian:
+                ax.set_rmin(self.ylims[0] or yy[0,0])
+                ax.set_rmax(self.ylims[1] or yy[0,-1])
+            else:
+                ax.set_ylim(*self.ylims)
+                
+            if self.xmax:
+                ax.set_rmax(self.xmax)
 
     def plot_histogram(self) -> None:
         colors = plt.cm.twilight_shifted(
