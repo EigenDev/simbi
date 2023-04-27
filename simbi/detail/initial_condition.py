@@ -132,7 +132,7 @@ def initializeModel(model: Any, first_order: bool, volume_factor: Union[float, N
         return
     
     if passive_scalars is not None:
-        model.u[-1,...] = passive_scalars
+        model.u[-1,...] = passive_scalars * model.u[0]
     
     npad = ((0,0),) + tuple(tuple(val) for val in [[((first_order^1) + 1),  ((first_order^1) + 1)]] * model.dimensionality) 
     model.u = np.pad(model.u  * volume_factor, npad, 'edge')
