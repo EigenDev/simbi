@@ -90,7 +90,15 @@ def calc_cell_volume1D(*, x1: generic_numpy_array, coord_system: str = 'spherica
     else:
         raise ValueError("The coordinate system given is not avaiable at this time")
 
-
+def calc_domega(*, x2: generic_numpy_array, x3: generic_numpy_array | None = None) -> generic_numpy_array:
+    x2v = calc_vertices(arr=x2, direction=1)    
+    dcos = np.cos(x2v[:-1]) - np.cos(x2v[1:])
+    if x3:
+        x3v = calc_vertices(arr=x3, direction=1)
+        return np.asanyarray(dcos * (x3v[1:] - x3v[:-1]))
+    
+    return np.asanyarray(2.0 * np.pi * dcos)
+    
 def calc_cell_volume2D(*, x1: generic_numpy_array, x2: generic_numpy_array, coord_system: str = 'spherical') -> generic_numpy_array:
     if x1.ndim == 1 and x2.ndim == 1:
         xx1, xx2 = np.meshgrid(x1, x2)

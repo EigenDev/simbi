@@ -4,6 +4,7 @@ import matplotlib.colors as mcolors
 import argparse
 import matplotlib.ticker as tkr
 from itertools import cycle
+from cycler import cycler
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from . import utility as util
 from ..detail.slogger import logger
@@ -11,7 +12,9 @@ from ..detail.helpers import (
     get_iterable,
     calc_cell_volume1D,
     calc_cell_volume2D,
-    calc_cell_volume3D
+    calc_cell_volume3D,
+    calc_domega,
+    find_nearest,
 )
 from ..detail import get_subparser
 try:
@@ -74,11 +77,11 @@ class Visualizer:
                     None],
                 help='The colorbar range you\'d like to plot')
             plot_parser.add_argument(
-                '--no_cbar',
-                dest='no_cbar',
-                action='store_true',
-                default=False,
-                help='colobar visible siwtch')
+                '--cbar',
+                action=argparse.BooleanOptionalAction,
+                default=True,
+                help='colobar visible switch'
+            )
             plot_parser.add_argument(
                 '--cmap2',
                 dest='cmap2',
@@ -86,38 +89,29 @@ class Visualizer:
                 default='magma',
                 help='The secondary colorbar cmap you\'d like to plot')
             plot_parser.add_argument(
-                '--rev_cmap',
+                '--rev-cmap',
                 dest='rcmap',
                 action='store_true',
                 default=False,
                 help='True if you want the colormap to be reversed')
             plot_parser.add_argument(
                 '--x',
-                dest='x',
                 nargs='+',
                 default=None,
                 type=float,
                 help='List of x values to plot field max against')
             plot_parser.add_argument(
                 '--xlabel',
-                dest='xlabel',
                 nargs=1,
                 default='X',
                 help='X label name')
             plot_parser.add_argument(
-                '--de_domega',
-                dest='de_domega',
+                '--dx-domega',
                 action='store_true',
                 default=False,
-                help='Plot the dE/dOmega plot')
+                help='Plot the d(var)/dOmega plot')
             plot_parser.add_argument(
-                '--dm_domega',
-                dest='dm_domega',
-                action='store_true',
-                default=False,
-                help='Plot the dM/dOmega plot')
-            plot_parser.add_argument(
-                '--dec_rad',
+                '--dec-rad',
                 dest='dec_rad',
                 default=False,
                 action='store_true',
@@ -136,7 +130,7 @@ class Visualizer:
                 type=int,
                 help='Number of wedges')
             plot_parser.add_argument(
-                '--cbar_orient',
+                '--cbar-orient',
                 dest='cbar_orient',
                 default='vertical',
                 type=str,
@@ -145,7 +139,7 @@ class Visualizer:
                     'horizontal',
                     'vertical'])
             plot_parser.add_argument(
-                '--wedge_lims',
+                '--wedge-lims',
                 dest='wedge_lims',
                 default=[0.4, 1.4, 70, 110],
                 type=float,
@@ -163,12 +157,12 @@ class Visualizer:
                 type=int)
             plot_parser.add_argument(
                 '--sub_split',
-                dest='sub_split',
+                dest='sub-split',
                 default=None,
                 nargs='+',
                 type=int)
             plot_parser.add_argument(
-                '--tau_s',
+                '--tau-s',
                 dest='tau_s',
                 action='store_true',
                 default=False,
@@ -180,10 +174,19 @@ class Visualizer:
                 default=None,
                 nargs='+')
             plot_parser.add_argument(
-                '--oned_slice',
-                help='index of x1 array for one-d projection',
+                '--oned',
+                help='free coordinate for one-d projection',
                 default=None,
-                type=int)
+                choices = ['x1', 'x2', 'x3'],
+                type=str
+            )
+            plot_parser.add_argument(
+                '--coords',
+                help = 'coordinates of fixed vars for 1d projection',
+                type=float,
+                nargs = '+',
+                default=[0],
+            )
             plot_parser.add_argument(
                 '--projection',
                 help='axes to project multidim solution onto',
@@ -237,7 +240,12 @@ class Visualizer:
         self.vrange = cycle(self.vrange)
 
         self.square_plot = False
-        if self.cartesian or self.ndim == 1 or self.hist or self.weight:
+        if (self.cartesian or 
+           self.ndim == 1 or 
+           self.hist or 
+           self.weight or 
+           self.dx_domega or
+           self.oned):
             self.square_plot = True
         self.create_figure()
 
@@ -257,7 +265,6 @@ class Visualizer:
                             field = 'v1'
                         var = fields[field]
 
-                    ax.set_title(f'{self.setup} at t = {setup["time"]:.2f}')
                     # ax.set_xlim(mesh['x1'][0], mesh['x1'][-1])
                     # if self.ylims:
                     #     ax.set_ylim(*self.ylims)
@@ -265,6 +272,18 @@ class Visualizer:
                     scale = next(scale_cycle)
                     if scale != 1:
                         label = label + f'/{int(scale)}'
+                    
+                    if self.oned:
+                        x = mesh[self.oned]
+                        yidx = find_nearest(mesh['x2'], self.coords[0])[0]
+                        var = var[yidx]
+                        if len(self.coords) > 1:
+                            zidx = find_nearest(mesh['x3'], self.coords[1])[0]
+                            var = [zid,yidx]
+                    else:
+                        x = mesh['x1']
+                        
+                    
                     line, = ax.plot(mesh['x1'], var / scale, label=label)
                     self.frames += [line]
                     # BMK REF
@@ -277,6 +296,13 @@ class Visualizer:
                         self.refs   += [ref]
                         refcount += 1
 
+        box_coord = ''
+        if self.oned:
+            box_coord = f' $x_2 = {self.coords[0]}$'
+            if len(self.coords) > 1:
+                box_coord += f', $x_3={self.coords[1]}$'
+                
+        ax.set_title(f'{self.setup} at t = {setup["time"]:.2f}' + box_coord)
         if self.log:
             ax.set_xscale('log')
             ax.set_yscale('log')
@@ -382,7 +408,7 @@ class Visualizer:
                         **kwargs
                     )]
 
-                    if not self.no_cbar:
+                    if self.cbar:
                         if idx < len(self.fields):
                             if self.cartesian:
                                 divider = make_axes_locatable(ax)
@@ -466,7 +492,7 @@ class Visualizer:
                     get_iterable(self.flist[self.current_frame])):
 
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
-                time = setup['time']
+                time = setup['time'] * util.time_scale
                 if self.ndim == 1:
                     dV = calc_cell_volume1D(x1=mesh['x1'])
                 elif self.ndim == 2:
@@ -516,7 +542,7 @@ class Visualizer:
                     print('Avg power law index: {:.2f}'.format(alpha))
                     ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
 
-                label = r'$E_T$' if not self.labels else f'{self.labels[idx]}, t={time:.2f}'
+                label = r'$E_T$' if not self.labels else f'{self.labels[idx]}, t={time:.1f}'
                 self.frames += [ax.hist(gbs,
                                         bins=gbs,
                                         weights=var,
@@ -527,7 +553,11 @@ class Visualizer:
                                         linewidth=3.0)]
 
             if self.setup:
-                ax.set_title(f"{self.setup}")
+                if len(self.frames) == 1:
+                    setup = self.setup + f",$~t={time:.1f}$"
+                else:
+                    setup = self.setup
+                ax.set_title(f"{setup}")
             if self.nplots == 1:
                 ax.set_xscale('log')
                 ax.set_yscale('log')
@@ -548,6 +578,9 @@ class Visualizer:
                 if self.fill_scale is not None:
                     util.fill_below_intersec(
                         gbs, var, self.fill_scale * var.max(), colors[idx])
+
+                if self.labels:
+                    ax.legend()
 
     def plot_mean_vs_time(self) -> None:
         weighted_vars = []
@@ -643,14 +676,91 @@ class Visualizer:
         if self.legend:
             self.axs.legend(loc=self.legend_loc)
 
+    def plot_dx_domega(self) -> None:
+        linestyles = cycle(['-', '--', ':', '-.', '.'])
+        for ax in get_iterable(self.axs):
+            for idx, file in enumerate(
+                    get_iterable(self.flist[self.current_frame])):
+                linestyle = next(linestyles)
+                fields, setup, mesh = util.read_file(self, file, self.ndim)
+                gb = fields['gamma_beta']
+                time = setup['time'] * util.time_scale
+                
+                if self.ndim == 2:
+                    dV = calc_cell_volume2D(x1=mesh['x1'], x2=mesh['x2'])
+                    domega = calc_domega(x2=mesh['x2'])
+                else:
+                    dV = calc_cell_volume3D(
+                        x1=mesh['x1'], x2=mesh['x2'], x3=mesh['x3'])
+                    domega = calc_domega(x2=mesh['x2'],x3=mesh['x3'])
+
+                if self.kinetic:
+                    mass = dV * fields['W'] * fields['rho']
+                    var = (fields['W'] - 1.0) * mass * util.e_scale.value
+                elif self.enthalpy:
+                    enthalpy = 1.0 + \
+                        fields['ad_gamma'] * fields['p'] / \
+                        (fields['rho'] * (fields['ad_gamma'] - 1.0))
+                    var = (enthalpy - 1.0) * dV * util.e_scale.value
+                else:
+                    edens_total = util.prims2var(fields, 'energy')
+                    var = edens_total * dV * util.e_scale.value
+                
+                theta  = np.rad2deg(mesh['x2'])
+                for cutoff in self.cutoffs:
+                    deg_per_bin      = 0.001 # degrees in bin 
+                    dtheta           = (mesh['x2'][-1] - mesh['x2'][0]) / theta.size
+                    num_bins         = int((mesh['x2'][-1] - mesh['x2'][0]) / deg_per_bin) 
+                    if num_bins > theta.size:
+                        num_bins = theta.size
+                    tbins            = np.linspace(mesh['x2'][0], mesh['x2'][-1], num_bins)
+                    dx_domega        = var / domega[:, np.newaxis]
+                    cdf              = np.array([x[gb[idx] > cutoff].sum() for idx, x in enumerate(var)])
+                    bin_step         = int(theta.size / num_bins)
+                    dx_domega        = np.array([cdf[i:i+bin_step].sum() for i in range(0, bin_step * num_bins, bin_step)])
+                    
+                    iso_var         = 4.0 * np.pi * dx_domega
+                    tbins           = np.rad2deg(tbins)
+                    if idx == 0:
+                        label = rf'$\Gamma \beta > {cutoff:.1f}$'
+                    else:
+                        label = None
+                    ax.step(tbins, iso_var, label=label, linestyle=linestyle)
+                    ax.set_yscale('log')
+                    
+                    # dx_domega = 4.0 * np.pi * cdf / domega
+                    # ax.semilogy(theta, cdf, label=rf'$\Gamma \beta > {cutoff:.1f}$')
+                    
+            ax.set_xlabel(r'$\theta~\rm[deg]$')
+            if self.kinetic:
+                ylabel = '$dE_k/d\Omega$'
+            elif self.mass:
+                ylabel = '$dM/d\Omega$'
+            else:
+                ylabel = '$dE/d\Omega$'
+            
+            ax.set_ylabel(ylabel)
+            ax.set_xlim(theta[0], theta[-1])
+            
+            if self.ylims:
+                ax.set_ylim(*self.ylims)
+            
+            if self.setup:
+                ax.set_title(f"{self.setup}")
+            ax.legend()
+                
+                    
+                
     def plot(self) -> None:
         self.frames = []
         if self.hist:
             self.plot_histogram()
         elif self.weight:
             self.plot_mean_vs_time()
+        elif self.dx_domega:
+            self.plot_dx_domega()
         else:
-            if self.ndim == 1:
+            if self.ndim == 1 or self.oned:
                 self.plot_1d()
             else:
                 self.plot_multidim()
@@ -674,6 +784,9 @@ class Visualizer:
     def create_figure(self) -> None:
         if self.nplots == 1:
             if self.square_plot:
+                # colormap = plt.get_cmap(self.cmap[0])
+                # default_cycler = (cycler(color=[colormap(k) for k in np.linspace(0, 1, 4)]))
+                # plt.rc('axes', prop_cycle=default_cycler)
                 self.fig, self.axs = plt.subplots(1, 1, figsize=self.fig_dims)
                 self.axs.spines['top'].set_visible(False)
                 self.axs.spines['right'].set_visible(False)
