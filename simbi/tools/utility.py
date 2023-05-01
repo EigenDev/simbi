@@ -29,6 +29,7 @@ rho_scale    = m / (4./3. * np.pi * R_0 ** 3)
 e_scale      = m * c **2
 edens_scale  = e_scale / (4./3. * np.pi * R_0**3)
 time_scale   = R_0 / c
+mass_scale   = m
 
 e_scale_bmk   = 1e53 * units.erg
 rho_scale_bmk = 1.0 * const.m_p.cgs / units.cm**3

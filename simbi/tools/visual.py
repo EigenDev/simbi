@@ -483,6 +483,8 @@ class Visualizer:
                         fields['ad_gamma'] * fields['p'] / \
                         (fields['rho'] * (fields['ad_gamma'] - 1.0))
                     var = (enthalpy - 1.0) * dV * util.e_scale.value
+                elif self.mass:
+                    var = dV * fields['W'] * fields['rho'] * util.mass_scale.value
                 else:
                     edens_total = util.prims2var(fields, 'energy')
                     var = edens_total * dV * util.e_scale.value
@@ -491,11 +493,11 @@ class Visualizer:
                 gbs = np.geomspace(1e-4, u.max(), 128)
                 var = np.asanyarray([var[u > gb].sum() for gb in gbs])
                 if self.powerfit:
-                    E_seg_rat = energy[1:] / energy[:-1]
+                    E_seg_rat = var[1:] / var[:-1]
                     gb_seg_rat = gbs[1:] / gbs[:-1]
                     E_seg_rat[E_seg_rat == 0] = 1
 
-                    slope = (energy[1:] - energy[:-1]) / (gbs[1:] - gbs[:-1])
+                    slope = (var[1:] - var[:-1]) / (gbs[1:] - gbs[:-1])
                     power_law_region = np.argmin(slope)
                     up_min = find_nearest(
                         gbs, 2 * gbs[power_law_region:][0])[0]
@@ -510,10 +512,9 @@ class Visualizer:
                     segments = np.log10(epower_law_seg) / \
                         np.log10(gbpower_law_seg)
                     alpha = 1.0 - np.mean(segments)
-                    E_0 = energy[up_min] * upower[0] ** (alpha - 1)
+                    E_0 = var[up_min] * upower[0] ** (alpha - 1)
                     print('Avg power law index: {:.2f}'.format(alpha))
-                    ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--',
-                            label=r'${}$ fit'.format(args.labels[case]))
+                    ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
 
                 label = r'$E_T$' if not self.labels else f'{self.labels[idx]}, t={time:.2f}'
                 self.frames += [ax.hist(gbs,
@@ -538,6 +539,8 @@ class Visualizer:
                         r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$')
                 elif self.enthalpy:
                     ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$')
+                elif self.mass:
+                    ax.set_ylabel(r'$M ( > \Gamma \beta) \ [\rm{g}]$')
                 else:
                     ax.set_ylabel(
                         r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
