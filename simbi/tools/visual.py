@@ -814,7 +814,7 @@ class Visualizer:
         else:
             self.fig.suptitle(
                 '{} at t = {:.2f}'.format(
-                    self.setup, setups['time']), y=1.0)
+                    self.setup, setups['time']), y=0.8)
 
         scale_cycle = cycle(self.scale_downs)
         for idx, field in enumerate(self.fields):
@@ -847,7 +847,7 @@ class Visualizer:
             # The function that does the updating of the Figure
             self.update_frame,
             # Frame information (here just frame number)
-            np.arange(self.frame_count),
+            np.arange(1,self.frame_count),
             # blit = True,
             # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
             interval=1000 / 10,
