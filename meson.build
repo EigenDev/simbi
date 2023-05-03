@@ -65,7 +65,9 @@ gpu_comp_args = []
 if get_option('gpu_compilation').enabled()
     hip  = dependency('HIP', cmake_module_path : '/opt/rocm', required: false)
     cuda = dependency('CUDA', required: false)
-    host_compiler    = meson.get_compiler('cpp').get_id()
+    comp_id  = meson.get_compiler('cpp').get_id()
+    comp_ver = meson.get_compiler('cpp').version().split('.')[0]
+    host_compiler = f'@comp_id@-@comp_ver@'
     if hip.found()
         env = environment()
         check_hip_config = run_command('/opt/rocm/hip/bin/hipconfig','--platform', check: true)
@@ -81,7 +83,7 @@ if get_option('gpu_compilation').enabled()
                 '-DGPU_PLATFORM_NVIDIA=1',
                 '-std=c++17',
                 f'-arch=sm_@gpu_arch@', 
-                f'-ccbin=@host_compiler@',
+                '-ccbin=gcc-11',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
