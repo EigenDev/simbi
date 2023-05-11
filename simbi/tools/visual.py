@@ -484,9 +484,8 @@ class Visualizer:
                 ax.set_rmax(self.xmax)
 
     def plot_histogram(self) -> None:
-        colors = plt.cm.twilight_shifted(
-            np.linspace(0.25, 0.75, len(self.flist)))
-        # ax.set_title(r'setup: {}'.format(args.setup))
+        colormap = plt.get_cmap(self.cmap[0])
+        colors = np.array([colormap(k) for k in np.linspace(0, 0.75, len(self.files))])
         for ax in get_iterable(self.axs):
             for idx, file in enumerate(
                     get_iterable(self.flist[self.current_frame])):
@@ -558,6 +557,8 @@ class Visualizer:
                 else:
                     setup = self.setup
                 ax.set_title(f"{setup}")
+                
+            
             if self.nplots == 1:
                 ax.set_xscale('log')
                 ax.set_yscale('log')
@@ -575,6 +576,8 @@ class Visualizer:
                     ax.set_ylabel(
                         r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
 
+                mean_gb = np.sum(gbs[gbs > 10] * var[gbs > 10]) / np.sum(var[gbs > 10])
+                print(f"Mean gb > 10: {mean_gb}")
                 if self.fill_scale is not None:
                     util.fill_below_intersec(
                         gbs, var, self.fill_scale * var.max(), colors[idx])
@@ -635,30 +638,30 @@ class Visualizer:
                                           color=colors[key],
                                           alpha=1.0)]
 
-            at_the_end = key == len(self.flist.keys()) - 1
-            if self.fields[0] in ['gamma_beta', 'u1', 'u'] and at_the_end:
-                self.axs.plot(times,
-                    data[0] * (times / times[0]) ** (-3 / 2),
-                    label=r'$\propto t^{-3/2}$',
-                    color='grey',
-                    linestyle=':'
-                )
-                if self.break_time:
-                    tb_index = int(np.argmin(np.abs(times - self.break_time)))
-                    tref = times[tb_index:]
-                    exp_curve = np.exp(1 - tref / tref[0])
-                    self.axs.plot(
-                        tref,
-                        data[tb_index] *
-                        exp_curve,
-                        label=r'$\propto \exp(-t)$',
-                        color='grey',
-                        linestyle='-.')
-                    self.axs.plot(tref,
-                                data[tb_index] * (tref / tref[0]) ** (-3),
-                                label=r'$\propto t^{-3}$',
-                                color='grey',
-                                linestyle='--')
+            # at_the_end = key == len(self.flist.keys()) - 1
+            # if self.fields[0] in ['gamma_beta', 'u1', 'u'] and at_the_end:
+            #     self.axs.plot(times,
+            #         data[0] * (times / times[0]) ** (-3 / 2),
+            #         label=r'$\propto t^{-3/2}$',
+            #         color='grey',
+            #         linestyle=':'
+            #     )
+            #     if self.break_time:
+            #         tb_index = int(np.argmin(np.abs(times - self.break_time)))
+            #         tref = times[tb_index:]
+            #         exp_curve = np.exp(1 - tref / tref[0])
+            #         self.axs.plot(
+            #             tref,
+            #             data[tb_index] *
+            #             exp_curve,
+            #             label=r'$\propto \exp(-t)$',
+            #             color='grey',
+            #             linestyle='-.')
+            #         self.axs.plot(tref,
+            #                     data[tb_index] * (tref / tref[0]) ** (-3),
+            #                     label=r'$\propto t^{-3}$',
+            #                     color='grey',
+            #                     linestyle='--')
 
         if self.log:
             self.axs.set_xscale('log')
@@ -677,11 +680,16 @@ class Visualizer:
             self.axs.legend(loc=self.legend_loc)
 
     def plot_dx_domega(self) -> None:
-        linestyles = cycle(['-', '--', ':', '-.', '.'])
+        linestyles = cycle(['-', '--', ':', '-.'])
+        colormap = plt.get_cmap(self.cmap[0])
+        if len(self.files) > 1:
+            colors = np.array([colormap(k) for k in np.linspace(0, 0.75, len(self.files))])
+        else:
+            colors = np.array([colormap(k) for k in np.linspace(0, 0.75, len(self.cutoffs))])
+            
         for ax in get_iterable(self.axs):
             for idx, file in enumerate(
                     get_iterable(self.flist[self.current_frame])):
-                linestyle = next(linestyles)
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 gb = fields['gamma_beta']
                 time = setup['time'] * util.time_scale
@@ -702,45 +710,74 @@ class Visualizer:
                         fields['ad_gamma'] * fields['p'] / \
                         (fields['rho'] * (fields['ad_gamma'] - 1.0))
                     var = (enthalpy - 1.0) * dV * util.e_scale.value
+                elif self.mass:
+                    var = dV * fields['W'] * fields['rho'] * util.mass_scale.value
                 else:
                     edens_total = util.prims2var(fields, 'energy')
                     var = edens_total * dV * util.e_scale.value
                 
                 theta  = np.rad2deg(mesh['x2'])
-                for cutoff in self.cutoffs:
+                for cidx, cutoff in enumerate(self.cutoffs):
+                    linestyle = next(linestyles)
                     deg_per_bin      = 0.001 # degrees in bin 
                     dtheta           = (mesh['x2'][-1] - mesh['x2'][0]) / theta.size
                     num_bins         = int((mesh['x2'][-1] - mesh['x2'][0]) / deg_per_bin) 
                     if num_bins > theta.size:
                         num_bins = theta.size
                     tbins            = np.linspace(mesh['x2'][0], mesh['x2'][-1], num_bins)
-                    dx_domega        = var / domega[:, np.newaxis]
-                    cdf              = np.array([x[gb[idx] > cutoff].sum() for idx, x in enumerate(var)])
+                    tbin_edges       = np.linspace(mesh['x2'][0], mesh['x2'][-1], num_bins + 1)
+                    dvar             = var / domega[:,np.newaxis]
+                    cdf              = np.array([x[gb[idx] > cutoff].sum() for idx, x in enumerate(dvar)])
                     bin_step         = int(theta.size / num_bins)
+                    domega_bins      = 2.0 * np.pi * np.array([np.cos(tl) - np.cos(tr) for tl, tr in zip(tbin_edges, tbin_edges[1:])])
                     dx_domega        = np.array([cdf[i:i+bin_step].sum() for i in range(0, bin_step * num_bins, bin_step)])
                     
-                    iso_var         = 4.0 * np.pi * dx_domega
+                    iso_var = 4.0 * np.pi * dx_domega
+                    
+                    # if the maximum is near the pole,
+                    # it's a jet otherwise it's a ring
+                    if np.rad2deg(tbins[np.argmax(iso_var)]) <= 45:
+                        x = 2
+                    else:
+                        x = 1
+                    
+                    eiso    = 4.0 * np.pi * (dx_domega * dx_domega * domega_bins).sum() / (dx_domega * domega_bins).sum()
+                    etot = (domega_bins * dx_domega).sum()
+                    thetax = x * np.arcsin((etot / eiso) ** (1 / x))
+                    print(f"{'X_iso':.<50}: ", eiso)  
+                    print(f"{'X_available':.<50}: ", etot)
+                    print(f"{'opening angle[deg]':.<50}: ", np.rad2deg(thetax))
+                    print("")
+
                     tbins           = np.rad2deg(tbins)
+                    if cutoff.is_integer():
+                        fmt = '1d'
+                        cutoff = int(cutoff)
+                    else:
+                        fmt = '.1f'
                     if idx == 0:
-                        label = rf'$\Gamma \beta > {cutoff:.1f}$'
+                        label = rf'$\Gamma \beta > {cutoff:d}$'
                     else:
                         label = None
-                    ax.step(tbins, iso_var, label=label, linestyle=linestyle)
+                    color_idx = idx if len(self.fields) > 1 else cidx
+                    ax.step(tbins, iso_var, label=label, linestyle=linestyle, color=colors[cidx])
+                    # ax.plot(theta, cdf, 'o')
                     ax.set_yscale('log')
-                    
-                    # dx_domega = 4.0 * np.pi * cdf / domega
-                    # ax.semilogy(theta, cdf, label=rf'$\Gamma \beta > {cutoff:.1f}$')
                     
             ax.set_xlabel(r'$\theta~\rm[deg]$')
             if self.kinetic:
-                ylabel = '$dE_k/d\Omega$'
+                ylabel = r'$E_{k,\rm iso}(> \Gamma\beta) [\rm erg]$'
             elif self.mass:
-                ylabel = '$dM/d\Omega$'
+                ylabel = r'$M_{k,\rm iso}(> \Gamma\beta) [\rm g]$'
             else:
-                ylabel = '$dE/d\Omega$'
+                ylabel = r'$E_{\rm iso}(> \gamma\beta) [\rm g]$'
             
             ax.set_ylabel(ylabel)
-            ax.set_xlim(theta[0], theta[-1])
+            
+            if self.xlims:
+                ax.set_xlim(*self.xlims)
+            else:
+                ax.set_xlim(theta[0], theta[-1])
             
             if self.ylims:
                 ax.set_ylim(*self.ylims)
