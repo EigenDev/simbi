@@ -302,7 +302,7 @@ class Visualizer:
             if len(self.coords) > 1:
                 box_coord += f', $x_3={self.coords[1]}$'
                 
-        ax.set_title(f'{self.setup} at t = {setup["time"]:.2f}' + box_coord)
+        ax.set_title(f'{self.setup} t = {setup["time"]:.2f}' + box_coord)
         if self.log:
             ax.set_xscale('log')
             ax.set_yscale('log')
@@ -465,14 +465,32 @@ class Visualizer:
                                     r'{}'.format(
                                         field_str[idx]),
                                     labelpad=labelpad)
-                                
-            time = setup['time'] * (util.time_scale if self.units else 1)
+                     
+            
+            #========================================================
+            #               DASHED CURVE
+            #========================================================
+            angs    = np.linspace(mesh['x2'][0], mesh['x2'][-1], 1000)
+            eps     = 0.0
+            a       = 0.50 * (1 - eps)**(-1/3)
+            b       = 0.50 * (1 - eps)**(2/3)
+            radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+            r_theta = radius(angs)
+            
+            ax.plot( angs,  r_theta, linewidth=1, linestyle='--', color='white')
+            ax.plot(-angs,  r_theta, linewidth=1, linestyle='--', color='white')
+            
+            time = setup['time']
+            precision = 0 if self.print else 2
+            if self.units:
+                time *= util.time_scale 
+                
             if self.cartesian:
                 ax.set_title(
-                    f'{self.setup} at t = {time:.2f}')
+                    f'{self.setup} t = {time:.{precision}f}')
             else:
                 self.fig.suptitle(
-                    f'{self.setup} at t = {time:.2f}', y=0.8)
+                    f'{self.setup} t = {time:.{precision}f}', y=0.8)
                 
             if not self.cartesian:
                 ax.set_rmin(self.ylims[0] or yy[0,0])
@@ -482,6 +500,7 @@ class Visualizer:
                 
             if self.xmax:
                 ax.set_rmax(self.xmax)
+            
 
     def plot_histogram(self) -> None:
         colormap = plt.get_cmap(self.cmap[0])
