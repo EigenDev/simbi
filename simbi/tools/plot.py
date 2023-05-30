@@ -145,7 +145,7 @@ def parse_plotting_arguments(
             'lower_center',
             'center'])
     plot_parser.add_argument(
-        '--legend_loc',
+        '--legend-loc',
         default=None,
         type=str,
         help='location of legend',
