@@ -9,7 +9,7 @@ authors = [
     {email = "md4469@nyu.edu"}
 ]
 description = "Python module to solve hydrodynamic equations using a hip/cuda/c++ backend"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["physics", "relativity"]
 license = {file = 'LICENSE'}
 classifiers = [

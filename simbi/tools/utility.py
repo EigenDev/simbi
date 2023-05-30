@@ -294,6 +294,7 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
         T_eV = (const.k_B.cgs * T).to(units.eV)
         return T_eV
     elif var == 'chi_dens':
+        fields['chi'][fields['chi'] == 0] = 1.e-10
         return fields['chi'] * fields['rho'] * W
     elif var == 'gamma_beta_1':
         return W * fields['v1']
