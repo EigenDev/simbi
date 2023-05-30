@@ -4,7 +4,6 @@ import matplotlib.colors as mcolors
 import argparse
 import matplotlib.ticker as tkr
 from itertools import cycle
-from cycler import cycler
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from . import utility as util
 from ..detail.slogger import logger
@@ -18,7 +17,7 @@ from ..detail.helpers import (
 )
 from ..detail import get_subparser
 try:
-    import cmasher as cmr
+    import cmasher
 except ImportError:
     pass
 
@@ -63,6 +62,7 @@ class Visualizer:
         self.plotted_references = False
         self.ndim = ndim
         self.refs = []
+        self.oned_slice = False
         
         if self.ndim != 1:
             plot_parser = get_subparser(parser, 1)
@@ -206,6 +206,18 @@ class Visualizer:
                 type=int,
                 default=0,
             )
+            plot_parser.add_argument(
+                '--pan-speed',
+                help='speed of camaera pan for animations',
+                type=float,
+                default = None,
+            )
+            plot_parser.add_argument(
+                '--extent',
+                help='max extent for end of camera span',
+                type=float,
+                default = None,
+            )
         vars(self).update(**vars(parser.parse_args()))
         if self.cmap == 'grayscale':
             plt.style.use('grayscale')
@@ -245,7 +257,7 @@ class Visualizer:
            self.hist or 
            self.weight or 
            self.dx_domega or
-           self.oned):
+           self.oned_slice):
             self.square_plot = True
         self.create_figure()
 
@@ -273,8 +285,8 @@ class Visualizer:
                     if scale != 1:
                         label = label + f'/{int(scale)}'
                     
-                    if self.oned:
-                        x = mesh[self.oned]
+                    if self.oned_slice:
+                        x = mesh[self.oned_slice]
                         yidx = find_nearest(mesh['x2'], self.coords[0])[0]
                         var = var[yidx]
                         if len(self.coords) > 1:
@@ -297,7 +309,7 @@ class Visualizer:
                         refcount += 1
 
         box_coord = ''
-        if self.oned:
+        if self.oned_slice:
             box_coord = f' $x_2 = {self.coords[0]}$'
             if len(self.coords) > 1:
                 box_coord += f', $x_3={self.coords[1]}$'
@@ -407,6 +419,18 @@ class Visualizer:
                         shading='auto',
                         **kwargs
                     )]
+                    
+                    # Dashed line for science use
+                    angs    = np.linspace(mesh['x2'][0], mesh['x2'][-1], mesh['x2'].size)
+                    eps     = 0.0
+                    a       = 0.45 * (1 - eps)**(-1/3)
+                    b       = 0.45 * (1 - eps)**(2/3)
+                    radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+                    r_theta = radius(angs)
+                    # r_theta = equipotential_surfaces()
+                    
+                    ax.plot(np.radians(np.linspace(0, np.rad2deg(mesh['x2'][-1]), mesh['x2'].size)),  1.0 * r_theta, linewidth=1, linestyle='--', color='white')
+                    ax.plot(-np.radians(np.linspace(0, np.rad2deg(mesh['x2'][-1]), mesh['x2'].size)), 1.0 * r_theta, linewidth=1, linestyle='--', color='white')
 
                     if self.cbar:
                         if idx < len(self.fields):
@@ -439,10 +463,10 @@ class Visualizer:
                                         [x[idx], y[idx], 0.03, height])
 
                             if self.log and field not in lin_fields:
-                                logfmt = tkr.LogFormatterExponent(
+                                cbarfmt = tkr.LogFormatterExponent(
                                     base=10.0, labelOnlyBase=True)
                                 cbar = self.fig.colorbar(
-                                    self.frames[idx], orientation=cbar_orientation, cax=cbaxes, format=logfmt)
+                                    self.frames[idx], orientation=cbar_orientation, cax=cbaxes, format=cbarfmt)
                             else:
                                 cbar = self.fig.colorbar(
                                     self.frames[idx], orientation=cbar_orientation, cax=cbaxes)
@@ -469,10 +493,10 @@ class Visualizer:
             time = setup['time'] * (util.time_scale if self.units else 1)
             if self.cartesian:
                 ax.set_title(
-                    f'{self.setup} at t = {time:.2f}')
+                    f'{self.setup} t = {time:.2f}')
             else:
                 self.fig.suptitle(
-                    f'{self.setup} at t = {time:.2f}', y=0.8)
+                    f'{self.setup} t = {time:.1f}', y=0.75)
                 
             if not self.cartesian:
                 ax.set_rmin(self.ylims[0] or yy[0,0])
@@ -482,6 +506,10 @@ class Visualizer:
                 
             if self.xmax:
                 ax.set_rmax(self.xmax)
+                
+            self.cbaxes  = cbaxes 
+            self.cbarfmt = cbarfmt
+            self.cbar_orientation = cbar_orientation
 
     def plot_histogram(self) -> None:
         colors = plt.cm.twilight_shifted(
@@ -580,7 +608,7 @@ class Visualizer:
                         gbs, var, self.fill_scale * var.max(), colors[idx])
 
                 if self.labels:
-                    ax.legend()
+                    ax.legend(loc=self.legend_loc)
 
     def plot_mean_vs_time(self) -> None:
         weighted_vars = []
@@ -677,7 +705,10 @@ class Visualizer:
             self.axs.legend(loc=self.legend_loc)
 
     def plot_dx_domega(self) -> None:
-        linestyles = cycle(['-', '--', ':', '-.', '.'])
+        linestyles = cycle(['-', '--', ':', '-.'])
+        colormap = plt.get_cmap(self.cmap[0])
+        colors = np.array([colormap(k) for k in np.linspace(0, 1, len(self.cutoffs))])
+        # default_cycler = (cycler(color=[colormap(k) for k in np.linspace(0, 1, 4)]))
         for ax in get_iterable(self.axs):
             for idx, file in enumerate(
                     get_iterable(self.flist[self.current_frame])):
@@ -707,9 +738,8 @@ class Visualizer:
                     var = edens_total * dV * util.e_scale.value
                 
                 theta  = np.rad2deg(mesh['x2'])
-                for cutoff in self.cutoffs:
+                for cidx, cutoff in enumerate(self.cutoffs):
                     deg_per_bin      = 0.001 # degrees in bin 
-                    dtheta           = (mesh['x2'][-1] - mesh['x2'][0]) / theta.size
                     num_bins         = int((mesh['x2'][-1] - mesh['x2'][0]) / deg_per_bin) 
                     if num_bins > theta.size:
                         num_bins = theta.size
@@ -722,11 +752,19 @@ class Visualizer:
                     iso_var         = 4.0 * np.pi * dx_domega
                     tbins           = np.rad2deg(tbins)
                     if idx == 0:
-                        label = rf'$\Gamma \beta > {cutoff:.1f}$'
+                        if cutoff.is_integer():
+                            cutoff = int(cutoff)
+                        label = rf'$\Gamma \beta > {cutoff}$'
                     else:
                         label = None
-                    ax.step(tbins, iso_var, label=label, linestyle=linestyle)
+                    ax.step(tbins, iso_var, label=label, linestyle=linestyle, color=colors[cidx])
                     ax.set_yscale('log')
+                    
+                    if cutoff == self.cutoffs[-1]:
+                        max_energy = iso_var.max()
+                        remaining_energy = iso_var[iso_var <= 0.1 * max_energy].sum()
+                        
+                        print(f"Energy outside of the beam: {remaining_energy:.2e}")
                     
                     # dx_domega = 4.0 * np.pi * cdf / domega
                     # ax.semilogy(theta, cdf, label=rf'$\Gamma \beta > {cutoff:.1f}$')
@@ -757,10 +795,10 @@ class Visualizer:
             self.plot_histogram()
         elif self.weight:
             self.plot_mean_vs_time()
-        elif self.dx_domega:
+        elif self.ndim > 1 and self.dx_domega:
             self.plot_dx_domega()
         else:
-            if self.ndim == 1 or self.oned:
+            if self.ndim == 1 or self.oned_slice:
                 self.plot_1d()
             else:
                 self.plot_multidim()
@@ -773,7 +811,7 @@ class Visualizer:
             ext = 'png' if self.png else 'pdf'
             fig_name = f'{self.save}.{ext}'.replace('-', '_')
             logger.info(f'Saving figure as {fig_name}')
-            self.fig.savefig(fig_name, dpi=600, bbox_inches='tight')
+            self.fig.savefig(fig_name, dpi=600, bbox_inches='tight', transparent=True)
         else:
             self.animation.save("{}.mp4".format(
                 self.save.replace(" ", "_")), dpi=600,
@@ -809,12 +847,13 @@ class Visualizer:
         fields, setups, mesh = util.read_file(
             self, self.flist[frame], ndim=self.ndim)
         time = setups['time'] * (util.time_scale if self.units else 1.0)
+        
         if self.cartesian:
             self.axs.set_title('{} at t = {:.2f}'.format(self.setup, time))
         else:
             self.fig.suptitle(
                 '{} at t = {:.2f}'.format(
-                    self.setup, setups['time']), y=1.0)
+                    self.setup, setups['time']), y=0.75)
 
         scale_cycle = cycle(self.scale_downs)
         for idx, field in enumerate(self.fields):
@@ -834,6 +873,15 @@ class Visualizer:
             elif self.ndim == 2:
                 # affect the generator w/o using output
                 any(drawing.set_array(var.ravel()) for drawing in self.frames)
+                
+                if not self.square_plot:
+                    if not self.ylims or not self.xmax:
+                        self.axs.set_ylim(mesh['x1'][0], mesh['x1'][-1])
+                    elif self.pan_speed:
+                        max_extent = self.extent or mesh['x1'][-1]
+                        min_extent = self.xmax or 1.5 * mesh['x1'][0]
+                        self.axs.set_rmax(min_extent +  max_extent * self.pan_speed * (frame / len(self.flist)) )
+                
 
         return self.frames,
 
@@ -841,17 +889,18 @@ class Visualizer:
         from matplotlib.animation import FuncAnimation
         self.current_frame = 0
         self.plot()
+        # self.frames.pop(0)
         self.animation = FuncAnimation(
             # Your Matplotlib Figure object
             self.fig,
             # The function that does the updating of the Figure
             self.update_frame,
             # Frame information (here just frame number)
-            np.arange(self.frame_count),
+            np.arange(1,self.frame_count),
             # blit = True,
             # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
             interval=1000 / 10,
-            repeat=True
+            repeat=True,
         )
 
 
