@@ -340,7 +340,7 @@ def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constr
     if axis == 'x':
         ind: int = find_nearest(x, constraint)[0]
     else:
-        ind: int = find_nearest(y, constraint)[0]
+        ind = find_nearest(y, constraint)[0]
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
     
 def get_file_list(inputs: str, sort: bool = False) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
