@@ -223,11 +223,6 @@ def parse_plotting_arguments(
         type=colorbar_limits,
         help='The colorbar range')
     plot_parser.add_argument(
-        '--fill-scale',
-        type=float,
-        default=None,
-        help='Set the y-scale to start plt.fill_between')
-    plot_parser.add_argument(
         '--weight', 
         help='plot weighted avg of desired var as function of time', 
         default=None, 
@@ -246,6 +241,24 @@ def parse_plotting_arguments(
         type=float,
         default=None,
     )
+    plot_parser.add_argument(
+        '--sort',
+        help='flag to sort file list',
+        type= argparse.BooleanOptionalAction,
+        default=False,
+    )
+    
+    fillgroup = plot_parser.add_mutually_exclusive_group()
+    fillgroup.add_argument(
+        '--xfill-scale',
+        type=float,
+        default=None,
+        help='Set the x-scale to start plt.fill_between')
+    fillgroup.add_argument(
+        '--yfill-scale',
+        type=float,
+        default=None,
+        help='Set the y-scale to start plt.fill_between')
     
     return parser, parser.parse_known_args(
         args=None if sys.argv[2:] else ['plot', '--help'])

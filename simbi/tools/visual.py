@@ -229,7 +229,7 @@ class Visualizer:
 
         self.color_map = []
         self.cartesian = True
-        self.flist, self.frame_count = util.get_file_list(self.files)
+        self.flist, self.frame_count = util.get_file_list(self.files, self.sort)
         if self.ndim != 1:
             for cmap in self.cmap:
                 if self.rcmap:
@@ -491,12 +491,12 @@ class Visualizer:
                                     labelpad=labelpad)
                                 
             time = setup['time'] * (util.time_scale if self.units else 1)
+            precision = 0 if self.print else 2
+            title = f'{self.setup} t = {time:.{precision}f}'
             if self.cartesian:
-                ax.set_title(
-                    f'{self.setup} t = {time:.2f}')
+                ax.set_title(title)
             else:
-                self.fig.suptitle(
-                    f'{self.setup} t = {time:.1f}', y=0.75)
+                self.fig.suptitle(title, y=0.80)
                 
             if not self.cartesian:
                 ax.set_rmin(self.ylims[0] or yy[0,0])
@@ -570,6 +570,18 @@ class Visualizer:
                     ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
 
                 label = r'$E_T$' if not self.labels else f'{self.labels[idx]}, t={time:.1f}'
+                
+                for cutoff in self.cutoffs:
+                    mean_gb = np.sum(gbs[gbs > cutoff] * var[gbs > cutoff]) / np.sum(var[gbs > cutoff])
+                    print(f"Mean gb > {cutoff}: {mean_gb}")
+                    
+                if self.xfill_scale:
+                    util.fill_below_intersec(
+                        gbs, var, self.xfill_scale, colors[idx], axis='x')
+                elif self.yfill_scale:
+                     util.fill_below_intersec(
+                        gbs, var, self.yfill_scale * var.max(), colors[idx], axis='y')
+                    
                 self.frames += [ax.hist(gbs,
                                         bins=gbs,
                                         weights=var,
@@ -578,6 +590,8 @@ class Visualizer:
                                         histtype='step',
                                         rwidth=1.0,
                                         linewidth=3.0)]
+                
+                
 
             if self.setup:
                 if len(self.frames) == 1:
@@ -603,13 +617,7 @@ class Visualizer:
                 else:
                     ax.set_ylabel(
                         r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
-
-                mean_gb = np.sum(gbs[gbs > 10] * var[gbs > 10]) / np.sum(var[gbs > 10])
-                print(f"Mean gb > 10: {mean_gb}")
-                if self.fill_scale is not None:
-                    util.fill_below_intersec(
-                        gbs, var, self.fill_scale * var.max(), colors[idx])
-
+                    
                 if self.labels:
                     ax.legend(loc=self.legend_loc)
 
@@ -839,7 +847,7 @@ class Visualizer:
         if self.kind == 'snapshot':
             ext = 'png' if self.png else 'pdf'
             fig_name = f'{self.save}.{ext}'.replace('-', '_')
-            logger.info(f'Saving figure as {fig_name}')
+            logger.debug(f'Saving figure as {fig_name}')
             self.fig.savefig(fig_name, dpi=600, bbox_inches='tight', transparent=True)
         else:
             self.animation.save("{}.mp4".format(
