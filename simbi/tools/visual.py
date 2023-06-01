@@ -174,7 +174,7 @@ class Visualizer:
                 default=None,
                 nargs='+')
             plot_parser.add_argument(
-                '--oned',
+                '--oned-slice',
                 help='free coordinate for one-d projection',
                 default=None,
                 choices = ['x1', 'x2', 'x3'],
@@ -812,7 +812,8 @@ class Visualizer:
             
             ax.set_ylabel(ylabel)
             
-            if self.xlims:
+
+            if any(self.xlims):
                 ax.set_xlim(*self.xlims)
             else:
                 ax.set_xlim(theta[0], theta[-1])
