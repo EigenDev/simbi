@@ -218,7 +218,6 @@ def parse_plotting_arguments(
         default=[
             (None,
             None)],
-        dest='cbar',
         nargs='+',
         type=colorbar_limits,
         help='The colorbar range')
@@ -246,6 +245,14 @@ def parse_plotting_arguments(
         help='flag to sort file list',
         type= argparse.BooleanOptionalAction,
         default=False,
+    )
+    plot_parser.add_argument(
+        '--cutoffs',
+        dest='cutoffs',
+        default=[0.0],
+        type=float,
+        nargs='+',
+        help='The 4-velocity cutoff value for the dE/dOmega plot'
     )
     
     fillgroup = plot_parser.add_mutually_exclusive_group()

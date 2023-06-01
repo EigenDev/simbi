@@ -117,13 +117,6 @@ class Visualizer:
                 action='store_true',
                 help='Compute dr as function of angle')
             plot_parser.add_argument(
-                '--cutoffs',
-                dest='cutoffs',
-                default=[0.0],
-                type=float,
-                nargs='+',
-                help='The 4-velocity cutoff value for the dE/dOmega plot')
-            plot_parser.add_argument(
                 '--nwedge',
                 dest='nwedge',
                 default=0,
@@ -245,7 +238,7 @@ class Visualizer:
                     self, self.flist[0], self.ndim)[1]['is_cartesian']
 
         self.color_map = cycle(self.color_map)
-        self.vrange = self.cbar
+        self.vrange = self.cbar_range
         if len(self.vrange) != len(self.fields):
             self.vrange += [(None, None)] * \
                 (abs(len(self.fields) - len(self.vrange)))
@@ -375,7 +368,18 @@ class Visualizer:
                         # turn in mesh grid and then reverse
                         xx, yy = np.meshgrid(xx, yy)[::-1]
                         max_theta = np.abs(xx.max())
-                        if max_theta < np.pi:
+                        if any(self.xlims):
+                            dtheta = self.xlims[1] - self.xlims[0]
+                            ax.set_thetamin(self.xlims[0])
+                            ax.set_thetamax(self.xlims[1] + (patches - 1) * dtheta)
+                            low_wing = util.find_nearest(mesh['x2'], np.deg2rad(self.xlims[0]))[0]
+                            hi_wing  = util.find_nearest(mesh['x2'], np.deg2rad(self.xlims[1]))[0]
+                            xx = xx[low_wing: hi_wing] + idx * np.deg2rad(dtheta)
+                            yy = yy[low_wing: hi_wing]
+                            var = var[low_wing: hi_wing]
+                            if idx == 1:
+                                xx = xx[::-1]
+                        elif max_theta < np.pi:
                             if patches <= 2:
                                 cbar_orientation = 'horizontal'
                                 self.axs.set_thetamin(-90)
@@ -492,11 +496,18 @@ class Visualizer:
                                 
             time = setup['time'] * (util.time_scale if self.units else 1)
             precision = 0 if self.print else 2
-            title = f'{self.setup} t = {time:.{precision}f}'
-            if self.cartesian:
-                ax.set_title(title)
-            else:
-                self.fig.suptitle(title, y=0.80)
+            if self.setup:
+                title = f'{self.setup} t = {time:.{precision}f}'
+                if self.cartesian:
+                    ax.set_title(title)
+                else:
+                    #speciifc to publication figure
+                    kwargs = {
+                        'y': 0.30,
+                        'x': 0.80,
+                        'color': 'white'
+                    }
+                    self.fig.suptitle(title, **kwargs)
                 
             if not self.cartesian:
                 ax.set_rmin(self.ylims[0] or yy[0,0])
@@ -506,10 +517,11 @@ class Visualizer:
                 
             if self.xmax:
                 ax.set_rmax(self.xmax)
-                
-            self.cbaxes  = cbaxes 
-            self.cbarfmt = cbarfmt
-            self.cbar_orientation = cbar_orientation
+            
+            if self.cbar:
+                self.cbaxes  = cbaxes 
+                self.cbarfmt = cbarfmt
+                self.cbar_orientation = cbar_orientation
 
     def plot_histogram(self) -> None:
         colormap = plt.get_cmap(self.cmap[0])
@@ -604,7 +616,7 @@ class Visualizer:
             if self.nplots == 1:
                 ax.set_xscale('log')
                 ax.set_yscale('log')
-                if self.xlims:
+                if any(self.xlims):
                     ax.set_xlim(*self.xlims)
                 ax.set_xlabel(r'$\Gamma\beta $')
                 if self.kinetic:
