@@ -4,7 +4,6 @@ import matplotlib.colors as mcolors
 import argparse
 import matplotlib.ticker as tkr
 from itertools import cycle
-from cycler import cycler
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from . import utility as util
 from ..detail.slogger import logger
@@ -18,7 +17,7 @@ from ..detail.helpers import (
 )
 from ..detail import get_subparser
 try:
-    import cmasher as cmr
+    import cmasher
 except ImportError:
     pass
 
@@ -63,6 +62,7 @@ class Visualizer:
         self.plotted_references = False
         self.ndim = ndim
         self.refs = []
+        self.oned_slice = False
         
         if self.ndim != 1:
             plot_parser = get_subparser(parser, 1)
@@ -117,13 +117,6 @@ class Visualizer:
                 action='store_true',
                 help='Compute dr as function of angle')
             plot_parser.add_argument(
-                '--cutoffs',
-                dest='cutoffs',
-                default=[0.0],
-                type=float,
-                nargs='+',
-                help='The 4-velocity cutoff value for the dE/dOmega plot')
-            plot_parser.add_argument(
                 '--nwedge',
                 dest='nwedge',
                 default=0,
@@ -174,7 +167,7 @@ class Visualizer:
                 default=None,
                 nargs='+')
             plot_parser.add_argument(
-                '--oned',
+                '--oned-slice',
                 help='free coordinate for one-d projection',
                 default=None,
                 choices = ['x1', 'x2', 'x3'],
@@ -206,6 +199,18 @@ class Visualizer:
                 type=int,
                 default=0,
             )
+            plot_parser.add_argument(
+                '--pan-speed',
+                help='speed of camaera pan for animations',
+                type=float,
+                default = None,
+            )
+            plot_parser.add_argument(
+                '--extent',
+                help='max extent for end of camera span',
+                type=float,
+                default = None,
+            )
         vars(self).update(**vars(parser.parse_args()))
         if self.cmap == 'grayscale':
             plt.style.use('grayscale')
@@ -217,7 +222,7 @@ class Visualizer:
 
         self.color_map = []
         self.cartesian = True
-        self.flist, self.frame_count = util.get_file_list(self.files)
+        self.flist, self.frame_count = util.get_file_list(self.files, self.sort)
         if self.ndim != 1:
             for cmap in self.cmap:
                 if self.rcmap:
@@ -234,6 +239,7 @@ class Visualizer:
 
         self.color_map = cycle(self.color_map)
         self.vrange = self.cbar_range
+        self.vrange = self.cbar_range
         if len(self.vrange) != len(self.fields):
             self.vrange += [(None, None)] * \
                 (abs(len(self.fields) - len(self.vrange)))
@@ -245,7 +251,7 @@ class Visualizer:
            self.hist or 
            self.weight or 
            self.dx_domega or
-           self.oned):
+           self.oned_slice):
             self.square_plot = True
         self.create_figure()
 
@@ -273,8 +279,8 @@ class Visualizer:
                     if scale != 1:
                         label = label + f'/{int(scale)}'
                     
-                    if self.oned:
-                        x = mesh[self.oned]
+                    if self.oned_slice:
+                        x = mesh[self.oned_slice]
                         yidx = find_nearest(mesh['x2'], self.coords[0])[0]
                         var = var[yidx]
                         if len(self.coords) > 1:
@@ -297,7 +303,7 @@ class Visualizer:
                         refcount += 1
 
         box_coord = ''
-        if self.oned:
+        if self.oned_slice:
             box_coord = f' $x_2 = {self.coords[0]}$'
             if len(self.coords) > 1:
                 box_coord += f', $x_3={self.coords[1]}$'
@@ -367,16 +373,16 @@ class Visualizer:
                         # turn in mesh grid and then reverse
                         xx, yy = np.meshgrid(xx, yy)[::-1]
                         max_theta = np.abs(xx.max())
-                                                    
                         if any(self.xlims):
-                            # plot the fields in a wedge instead
-                            theta_lims = np.deg2rad(self.xlims)
-                            min_theta_edge = find_nearest(mesh['x2'], theta_lims[0])[0]
-                            max_theta_edge = find_nearest(mesh['x2'], theta_lims[1])[0]
-                            xx = xx[min_theta_edge:max_theta_edge] + idx * (theta_lims[1] - theta_lims[0])
-                            yy = yy[min_theta_edge:max_theta_edge]
-                            var = var[min_theta_edge:max_theta_edge]
-                            if idx > 0:
+                            dtheta = self.xlims[1] - self.xlims[0]
+                            ax.set_thetamin(self.xlims[0])
+                            ax.set_thetamax(self.xlims[1] + (patches - 1) * dtheta)
+                            low_wing = util.find_nearest(mesh['x2'], np.deg2rad(self.xlims[0]))[0]
+                            hi_wing  = util.find_nearest(mesh['x2'], np.deg2rad(self.xlims[1]))[0]
+                            xx = xx[low_wing: hi_wing] + idx * np.deg2rad(dtheta)
+                            yy = yy[low_wing: hi_wing]
+                            var = var[low_wing: hi_wing]
+                            if idx == 1:
                                 xx = xx[::-1]
                         elif max_theta < np.pi:
                             if patches <= 2:
@@ -423,6 +429,18 @@ class Visualizer:
                         shading='auto',
                         **kwargs
                     )]
+                    
+                    # Dashed line for science use
+                    angs    = np.linspace(mesh['x2'][0], mesh['x2'][-1], mesh['x2'].size)
+                    eps     = 0.0
+                    a       = 0.45 * (1 - eps)**(-1/3)
+                    b       = 0.45 * (1 - eps)**(2/3)
+                    radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+                    r_theta = radius(angs)
+                    # r_theta = equipotential_surfaces()
+                    
+                    ax.plot(np.radians(np.linspace(0, np.rad2deg(mesh['x2'][-1]), mesh['x2'].size)),  1.0 * r_theta, linewidth=1, linestyle='--', color='white')
+                    ax.plot(-np.radians(np.linspace(0, np.rad2deg(mesh['x2'][-1]), mesh['x2'].size)), 1.0 * r_theta, linewidth=1, linestyle='--', color='white')
 
                     if self.cbar:
                         if idx < len(self.fields):
@@ -462,10 +480,10 @@ class Visualizer:
                                             [x[idx], y[idx], 0.03, height])
 
                             if self.log and field not in lin_fields:
-                                logfmt = tkr.LogFormatterExponent(
+                                cbarfmt = tkr.LogFormatterExponent(
                                     base=10.0, labelOnlyBase=True)
                                 cbar = self.fig.colorbar(
-                                    self.frames[idx], orientation=cbar_orientation, cax=cbaxes, format=logfmt)
+                                    self.frames[idx], orientation=cbar_orientation, cax=cbaxes, format=cbarfmt)
                             else:
                                 cbar = self.fig.colorbar(
                                     self.frames[idx], orientation=cbar_orientation, cax=cbaxes)
@@ -530,7 +548,12 @@ class Visualizer:
                 
             if self.xmax:
                 ax.set_rmax(self.xmax)
-            
+                        
+            if self.cbar:
+                self.cbaxes  = cbaxes 
+                self.cbarfmt = cbarfmt
+                self.cbar_orientation = cbar_orientation
+
 
     def plot_histogram(self) -> None:
         colormap = plt.get_cmap(self.cmap[0])
@@ -597,6 +620,18 @@ class Visualizer:
                     ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
 
                 label = r'$E_T$' if not self.labels else f'{self.labels[idx]}, t={time:.1f}'
+                
+                for cutoff in self.cutoffs:
+                    mean_gb = np.sum(gbs[gbs > cutoff] * var[gbs > cutoff]) / np.sum(var[gbs > cutoff])
+                    print(f"Mean gb > {cutoff}: {mean_gb}")
+                    
+                if self.xfill_scale:
+                    util.fill_below_intersec(
+                        gbs, var, self.xfill_scale, colors[idx], axis='x')
+                elif self.yfill_scale:
+                     util.fill_below_intersec(
+                        gbs, var, self.yfill_scale * var.max(), colors[idx], axis='y')
+                    
                 self.frames += [ax.hist(gbs,
                                         bins=gbs,
                                         weights=var,
@@ -605,6 +640,8 @@ class Visualizer:
                                         histtype='step',
                                         rwidth=1.0,
                                         linewidth=3.0)]
+                
+                
 
             if self.setup:
                 if len(self.frames) == 1:
@@ -617,7 +654,7 @@ class Visualizer:
             if self.nplots == 1:
                 ax.set_xscale('log')
                 ax.set_yscale('log')
-                if self.xlims:
+                if any(self.xlims):
                     ax.set_xlim(*self.xlims)
                 ax.set_xlabel(r'$\Gamma\beta $')
                 if self.kinetic:
@@ -636,7 +673,7 @@ class Visualizer:
                         gbs, var, self.fill_scale * var.max(), colors[idx])
 
                 if self.labels:
-                    ax.legend()
+                    ax.legend(loc=self.legend_loc)
 
     def plot_mean_vs_time(self) -> None:
         weighted_vars = []
@@ -773,7 +810,6 @@ class Visualizer:
                 for cidx, cutoff in enumerate(self.cutoffs):
                     linestyle = next(linestyles)
                     deg_per_bin      = 0.001 # degrees in bin 
-                    dtheta           = (mesh['x2'][-1] - mesh['x2'][0]) / theta.size
                     num_bins         = int((mesh['x2'][-1] - mesh['x2'][0]) / deg_per_bin) 
                     if num_bins > theta.size:
                         num_bins = theta.size
@@ -842,7 +878,8 @@ class Visualizer:
             
             ax.set_ylabel(ylabel)
             
-            if self.xlims:
+
+            if any(self.xlims):
                 ax.set_xlim(*self.xlims)
             else:
                 ax.set_xlim(theta[0], theta[-1])
@@ -862,10 +899,10 @@ class Visualizer:
             self.plot_histogram()
         elif self.weight:
             self.plot_mean_vs_time()
-        elif self.dx_domega:
+        elif self.ndim > 1 and self.dx_domega:
             self.plot_dx_domega()
         else:
-            if self.ndim == 1 or self.oned:
+            if self.ndim == 1 or self.oned_slice:
                 self.plot_1d()
             else:
                 self.plot_multidim()
@@ -877,8 +914,8 @@ class Visualizer:
         if self.kind == 'snapshot':
             ext = 'png' if self.png else 'pdf'
             fig_name = f'{self.save}.{ext}'.replace('-', '_')
-            logger.info(f'Saving figure as {fig_name}')
-            self.fig.savefig(fig_name, dpi=600, bbox_inches='tight', transparent=True)
+            logger.debug(f'Saving figure as {fig_name}')
+            self.fig.savefig(fig_name, dpi=600, bbox_inches='tight', transparent=True, transparent=True)
         else:
             self.animation.save("{}.mp4".format(
                 self.save.replace(" ", "_")), dpi=600,
@@ -914,6 +951,7 @@ class Visualizer:
         fields, setups, mesh = util.read_file(
             self, self.flist[frame], ndim=self.ndim)
         time = setups['time'] * (util.time_scale if self.units else 1.0)
+        
         if self.cartesian:
             self.axs.set_title('{} at t = {:.2f}'.format(self.setup, time))
         else:
@@ -939,6 +977,15 @@ class Visualizer:
             elif self.ndim == 2:
                 # affect the generator w/o using output
                 any(drawing.set_array(var.ravel()) for drawing in self.frames)
+                
+                if not self.square_plot:
+                    if not self.ylims or not self.xmax:
+                        self.axs.set_ylim(mesh['x1'][0], mesh['x1'][-1])
+                    elif self.pan_speed:
+                        max_extent = self.extent or mesh['x1'][-1]
+                        min_extent = self.xmax or 1.5 * mesh['x1'][0]
+                        self.axs.set_rmax(min_extent +  max_extent * self.pan_speed * (frame / len(self.flist)) )
+                
 
         return self.frames,
 
@@ -946,6 +993,7 @@ class Visualizer:
         from matplotlib.animation import FuncAnimation
         self.current_frame = 0
         self.plot()
+        # self.frames.pop(0)
         self.animation = FuncAnimation(
             # Your Matplotlib Figure object
             self.fig,
@@ -956,7 +1004,7 @@ class Visualizer:
             # blit = True,
             # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
             interval=1000 / 10,
-            repeat=True
+            repeat=True,
         )
 
 

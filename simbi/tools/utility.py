@@ -336,11 +336,14 @@ def get_colors(interval: NDArray[numpy_float], cmap: plt.cm, vmin: Optional[floa
     plt.Normalize(vmin, vmax)
     return cmap(interval)
     
-def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constraint: float, color: float) -> None:
-    ind: int = find_nearest(y, constraint)[0]
+def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constraint: float, color: float, axis: str) -> None:
+    if axis == 'x':
+        ind: int = find_nearest(x, constraint)[0]
+    else:
+        ind = find_nearest(y, constraint)[0]
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
     
-def get_file_list(inputs: str) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
+def get_file_list(inputs: str, sort: bool = False) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
     files: list[str] = []
     file_dict: dict[int, list[str]] = {}
     dircount  = 0
@@ -366,7 +369,8 @@ def get_file_list(inputs: str) -> Union[tuple[list[str], int], tuple[dict[int, l
     
     if not multidir:
         # sort by length of strings now
-        # files.sort(key=len, reverse=False)
+        if sort:
+            files.sort(key=len, reverse=False)
         return files, len(files)
     else:
         any(file_dict[key].sort(key=len, reverse=False) for key in file_dict.keys())

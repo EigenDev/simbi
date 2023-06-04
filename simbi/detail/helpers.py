@@ -82,9 +82,9 @@ def calc_cell_volume1D(*, x1: generic_numpy_array, coord_system: str = 'spherica
     x1vertices = np.insert(x1vertices,  0, x1[0])
     x1vertices = np.insert(x1vertices, x1.shape, x1[-1])
     dx1 = x1vertices[1:] - x1vertices[:-1]
-    if coord_system in['spherical', 'cylindrical']:
+    if coord_system in ['spherical', 'cylindrical']:
         x1mean = calc_centroid(x1vertices, coord_system)
-        return np.asanyarray(x1mean * x1mean * dx1)
+        return np.asanyarray(4.0 * np.pi * x1mean * x1mean * dx1)
     elif coord_system == 'cartesian':
         return np.asanyarray(dx1 ** 3) 
     else:
