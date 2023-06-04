@@ -366,7 +366,7 @@ def get_file_list(inputs: str) -> Union[tuple[list[str], int], tuple[dict[int, l
     
     if not multidir:
         # sort by length of strings now
-        files.sort(key=len, reverse=False)
+        # files.sort(key=len, reverse=False)
         return files, len(files)
     else:
         any(file_dict[key].sort(key=len, reverse=False) for key in file_dict.keys())

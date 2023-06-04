@@ -218,7 +218,6 @@ def parse_plotting_arguments(
         default=[
             (None,
             None)],
-        dest='cbar',
         nargs='+',
         type=colorbar_limits,
         help='The colorbar range')

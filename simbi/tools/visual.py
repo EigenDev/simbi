@@ -233,7 +233,7 @@ class Visualizer:
                     self, self.flist[0], self.ndim)[1]['is_cartesian']
 
         self.color_map = cycle(self.color_map)
-        self.vrange = self.cbar
+        self.vrange = self.cbar_range
         if len(self.vrange) != len(self.fields):
             self.vrange += [(None, None)] * \
                 (abs(len(self.fields) - len(self.vrange)))
@@ -336,6 +336,10 @@ class Visualizer:
             patches += 1
 
         the_fields = cycle(self.fields)
+        if any(self.xlims) and not self.cartesian:
+            edge    = self.xlims[1] + (len(self.fields) - 1) * (self.xlims[1] - self.xlims[0])
+            xextent = np.deg2rad([self.xlims[0], edge])
+        
         for ax in get_iterable(self.axs):
             for file in get_iterable(self.flist[self.current_frame]):
                 fields, setup, mesh = util.read_file(
@@ -363,7 +367,18 @@ class Visualizer:
                         # turn in mesh grid and then reverse
                         xx, yy = np.meshgrid(xx, yy)[::-1]
                         max_theta = np.abs(xx.max())
-                        if max_theta < np.pi:
+                                                    
+                        if any(self.xlims):
+                            # plot the fields in a wedge instead
+                            theta_lims = np.deg2rad(self.xlims)
+                            min_theta_edge = find_nearest(mesh['x2'], theta_lims[0])[0]
+                            max_theta_edge = find_nearest(mesh['x2'], theta_lims[1])[0]
+                            xx = xx[min_theta_edge:max_theta_edge] + idx * (theta_lims[1] - theta_lims[0])
+                            yy = yy[min_theta_edge:max_theta_edge]
+                            var = var[min_theta_edge:max_theta_edge]
+                            if idx > 0:
+                                xx = xx[::-1]
+                        elif max_theta < np.pi:
                             if patches <= 2:
                                 cbar_orientation = 'horizontal'
                                 self.axs.set_thetamin(-90)
@@ -399,6 +414,7 @@ class Visualizer:
                                 vmin=color_range[0],
                                 vmax=color_range[1])}
 
+                    
                     self.frames += [ax.pcolormesh(
                         xx,
                         yy,
@@ -428,15 +444,22 @@ class Visualizer:
                                 else:
                                     single_height = 0.8
                                     height = (
+                                        single_height * 0.5 if self.xlims and not self.cartesian
+                                        else 
                                         single_height if len(self.fields) in [1, 3] and idx == 0
                                         else
                                         single_height / (len(self.fields) // 2)
                                     )
-
-                                    x = [0.95, 0.03, 0.08, 0.9]
-                                    y = [0.1, 0.1, 0.1, 0.1]
-                                    cbaxes = self.fig.add_axes(
-                                        [x[idx], y[idx], 0.03, height])
+                                    if self.xlims and not self.cartesian:
+                                        x = [0.95, 0.95]
+                                        y = [0.50, 0.10]
+                                        cbaxes = self.fig.add_axes(
+                                            [x[idx], y[idx], 0.03, height])
+                                    else:
+                                        x = [0.95, 0.03, 0.08, 0.9]
+                                        y = [0.1, 0.1, 0.1, 0.1]
+                                        cbaxes = self.fig.add_axes(
+                                            [x[idx], y[idx], 0.03, height])
 
                             if self.log and field not in lin_fields:
                                 logfmt = tkr.LogFormatterExponent(
@@ -450,8 +473,8 @@ class Visualizer:
                             # Change the format of the field
                             set_cbar_label = cbar.ax.set_xlabel if cbar_orientation == 'horizontal' else cbar.ax.set_ylabel
                             labelpad = None
-                            if cbar_orientation == 'vertical' and idx in [
-                                    1, 2]:
+                            if cbar_orientation == 'vertical' and (idx in [
+                                    1, 2] and not (self.xlims and not self.cartesian)):
                                 labelpad = -60
                             if idx in [
                                     1, 2] and cbar_orientation == 'vertical':
@@ -470,7 +493,10 @@ class Visualizer:
             #========================================================
             #               DASHED CURVE
             #========================================================
-            angs    = np.linspace(mesh['x2'][0], mesh['x2'][-1], 1000)
+            if any(self.xlims):
+                angs = np.linspace(xextent[0], xextent[1], 1000)
+            else:
+                angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], 1000)
             eps     = 0.0
             a       = 0.50 * (1 - eps)**(-1/3)
             b       = 0.50 * (1 - eps)**(2/3)
@@ -484,17 +510,21 @@ class Visualizer:
             precision = 0 if self.print else 2
             if self.units:
                 time *= util.time_scale 
-                
-            if self.cartesian:
-                ax.set_title(
-                    f'{self.setup} t = {time:.{precision}f}')
-            else:
-                self.fig.suptitle(
-                    f'{self.setup} t = {time:.{precision}f}', y=0.8)
+            
+            if self.setup:
+                if self.cartesian:
+                    ax.set_title(
+                        f'{self.setup} t = {time:.{precision}f}')
+                else:
+                    self.fig.suptitle(
+                        f'{self.setup} t = {time:.{precision}f}', y=0.8)
                 
             if not self.cartesian:
                 ax.set_rmin(self.ylims[0] or yy[0,0])
                 ax.set_rmax(self.ylims[1] or yy[0,-1])
+                if any(self.xlims):
+                    ax.set_thetamin(np.rad2deg(xextent[0]))
+                    ax.set_thetamax(np.rad2deg(xextent[1]))
             else:
                 ax.set_ylim(*self.ylims)
                 
@@ -533,7 +563,13 @@ class Visualizer:
                     edens_total = util.prims2var(fields, 'energy')
                     var = edens_total * dV * util.e_scale.value
 
-                u = fields['gamma_beta']
+                u   = fields['gamma_beta']
+                
+                for cutoff in self.cutoffs:
+                    if cutoff > 0:
+                        mean_gb = np.sum(u[u > cutoff] * var[u > cutoff]) / np.sum(var[u > cutoff])
+                        print(f"Mean gb > {cutoff}: {mean_gb}")
+                        
                 gbs = np.geomspace(1e-4, u.max(), 128)
                 var = np.asanyarray([var[u > gb].sum() for gb in gbs])
                 if self.powerfit:
@@ -594,9 +630,7 @@ class Visualizer:
                 else:
                     ax.set_ylabel(
                         r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
-
-                mean_gb = np.sum(gbs[gbs > 10] * var[gbs > 10]) / np.sum(var[gbs > 10])
-                print(f"Mean gb > 10: {mean_gb}")
+                        
                 if self.fill_scale is not None:
                     util.fill_below_intersec(
                         gbs, var, self.fill_scale * var.max(), colors[idx])
@@ -743,14 +777,26 @@ class Visualizer:
                     num_bins         = int((mesh['x2'][-1] - mesh['x2'][0]) / deg_per_bin) 
                     if num_bins > theta.size:
                         num_bins = theta.size
-                    tbins            = np.linspace(mesh['x2'][0], mesh['x2'][-1], num_bins)
-                    tbin_edges       = np.linspace(mesh['x2'][0], mesh['x2'][-1], num_bins + 1)
-                    dvar             = var / domega[:,np.newaxis]
-                    cdf              = np.array([x[gb[idx] > cutoff].sum() for idx, x in enumerate(dvar)])
-                    bin_step         = int(theta.size / num_bins)
-                    domega_bins      = 2.0 * np.pi * np.array([np.cos(tl) - np.cos(tr) for tl, tr in zip(tbin_edges, tbin_edges[1:])])
-                    dx_domega        = np.array([cdf[i:i+bin_step].sum() for i in range(0, bin_step * num_bins, bin_step)])
+                    tbins       = np.linspace(mesh['x2'][0], mesh['x2'][-1], num_bins)
+                    tbin_edges  = np.linspace(mesh['x2'][0], mesh['x2'][-1], num_bins + 1)
+                    domega_bins = 2.0 * np.pi * np.array([np.cos(tl) - np.cos(tr) for tl, tr in zip(tbin_edges, tbin_edges[1:])])
+                    #===================
+                    # Manual Way
+                    #===================
+                    # dvar        = var / domega[:,np.newaxis]
+                    # cdf         = np.array([x[gb[idx] > cutoff].sum() for idx, x in enumerate(dvar)])
+                    # bin_step    = int(theta.size / num_bins)
+                    # domega_bins = 2.0 * np.pi * np.array([np.cos(tl) - np.cos(tr) for tl, tr in zip(tbin_edges, tbin_edges[1:])])
+                    # dx_domega   = np.array([cdf[i:i+bin_step].sum() for i in range(0, bin_step * num_bins, bin_step)])
+                    # iso_var     = 4.0 * np.pi * dx_domega
                     
+                    #==================
+                    # Numpy Hist way
+                    #==================
+                    cdf   = np.array([x[gb[idx] > cutoff].sum() for idx, x in enumerate(var)])
+                    dx, _ = np.histogram(mesh['x2'], weights=cdf, bins=tbin_edges)
+                    dw, _ = np.histogram(mesh['x2'], weights=domega, bins=tbin_edges)
+                    dx_domega = dx / dw 
                     iso_var = 4.0 * np.pi * dx_domega
                     
                     # if the maximum is near the pole,
@@ -763,12 +809,13 @@ class Visualizer:
                     eiso    = 4.0 * np.pi * (dx_domega * dx_domega * domega_bins).sum() / (dx_domega * domega_bins).sum()
                     etot = (domega_bins * dx_domega).sum()
                     thetax = x * np.arcsin((etot / eiso) ** (1 / x))
+                    print(f"{'gamma_beta':.<50}: ", cutoff)
                     print(f"{'X_iso':.<50}: ", eiso)  
                     print(f"{'X_available':.<50}: ", etot)
                     print(f"{'opening angle[deg]':.<50}: ", np.rad2deg(thetax))
                     print("")
 
-                    tbins           = np.rad2deg(tbins)
+                    tbins = np.rad2deg(tbins)
                     if cutoff.is_integer():
                         fmt = '1d'
                         cutoff = int(cutoff)
@@ -780,8 +827,10 @@ class Visualizer:
                         label = None
                     color_idx = idx if len(self.fields) > 1 else cidx
                     ax.step(tbins, iso_var, label=label, linestyle=linestyle, color=colors[cidx])
-                    # ax.plot(theta, cdf, 'o')
                     ax.set_yscale('log')
+                    
+                    esn = np.sum(var[gb < 0.1])
+                    print(f"Energy left for supernova: {esn:.2e}")
                     
             ax.set_xlabel(r'$\theta~\rm[deg]$')
             if self.kinetic:
@@ -829,7 +878,7 @@ class Visualizer:
             ext = 'png' if self.png else 'pdf'
             fig_name = f'{self.save}.{ext}'.replace('-', '_')
             logger.info(f'Saving figure as {fig_name}')
-            self.fig.savefig(fig_name, dpi=600, bbox_inches='tight')
+            self.fig.savefig(fig_name, dpi=600, bbox_inches='tight', transparent=True)
         else:
             self.animation.save("{}.mp4".format(
                 self.save.replace(" ", "_")), dpi=600,
