@@ -921,7 +921,7 @@ class Visualizer:
             ext = 'png' if self.png else 'pdf'
             fig_name = f'{self.save}.{ext}'.replace('-', '_')
             logger.debug(f'Saving figure as {fig_name}')
-            self.fig.savefig(fig_name, dpi=600, bbox_inches='tight', transparent=True, transparent=True)
+            self.fig.savefig(fig_name, dpi=600, bbox_inches='tight', transparent=True)
         else:
             self.animation.save("{}.mp4".format(
                 self.save.replace(" ", "_")), dpi=600,
