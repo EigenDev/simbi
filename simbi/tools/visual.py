@@ -503,9 +503,10 @@ class Visualizer:
                 else:
                     #speciifc to publication figure
                     kwargs = {
-                        'y': 0.30,
-                        'x': 0.80,
-                        'color': 'white'
+                        'y': 0.80,
+                        # 'y': 0.30,
+                        # 'x': 0.80,
+                        # 'color': 'white'
                     }
                     self.fig.suptitle(title, **kwargs)
                 
