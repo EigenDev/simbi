@@ -293,6 +293,13 @@ def main(
                 "font.size": DEFAULT_SIZE
             }
         )
+        
+        if args.print:
+            plt.rcParams.update(
+                {
+                'legend.fontsize': 2,
+                }
+            )
 
     sys.path.insert(1, f'{tool_src}')
     file_list, _ = get_file_list(args.files)

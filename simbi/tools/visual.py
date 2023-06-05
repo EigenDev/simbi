@@ -375,15 +375,18 @@ class Visualizer:
                         max_theta = np.abs(xx.max())
                         if any(self.xlims):
                             dtheta = self.xlims[1] - self.xlims[0]
-                            ax.set_thetamin(self.xlims[0])
-                            ax.set_thetamax(self.xlims[1] + (patches - 1) * dtheta)
+                            ax.set_thetamin(self.xlims[0] - (patches - 1) * dtheta * self.bipolar)
+                            ax.set_thetamax(self.xlims[1] + (patches - 1) * dtheta * (not self.bipolar))
                             low_wing = util.find_nearest(mesh['x2'], np.deg2rad(self.xlims[0]))[0]
                             hi_wing  = util.find_nearest(mesh['x2'], np.deg2rad(self.xlims[1]))[0]
                             xx = xx[low_wing: hi_wing] + idx * np.deg2rad(dtheta)
                             yy = yy[low_wing: hi_wing]
                             var = var[low_wing: hi_wing]
                             if idx == 1:
-                                xx = xx[::-1]
+                                if self.bipolar:
+                                    xx = - xx[::+1] + np.deg2rad(dtheta)
+                                else:
+                                    xx = xx[::-1]
                         elif max_theta < np.pi:
                             if patches <= 2:
                                 cbar_orientation = 'horizontal'
@@ -430,18 +433,6 @@ class Visualizer:
                         **kwargs
                     )]
                     
-                    # Dashed line for science use
-                    angs    = np.linspace(mesh['x2'][0], mesh['x2'][-1], mesh['x2'].size)
-                    eps     = 0.0
-                    a       = 0.45 * (1 - eps)**(-1/3)
-                    b       = 0.45 * (1 - eps)**(2/3)
-                    radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
-                    r_theta = radius(angs)
-                    # r_theta = equipotential_surfaces()
-                    
-                    ax.plot(np.radians(np.linspace(0, np.rad2deg(mesh['x2'][-1]), mesh['x2'].size)),  1.0 * r_theta, linewidth=1, linestyle='--', color='white')
-                    ax.plot(-np.radians(np.linspace(0, np.rad2deg(mesh['x2'][-1]), mesh['x2'].size)), 1.0 * r_theta, linewidth=1, linestyle='--', color='white')
-
                     if self.cbar:
                         if idx < len(self.fields):
                             if self.cartesian:
@@ -516,39 +507,50 @@ class Visualizer:
             else:
                 angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], 1000)
             eps     = 0.0
-            a       = 0.50 * (1 - eps)**(-1/3)
-            b       = 0.50 * (1 - eps)**(2/3)
+            a       = 0.005 * (1 - eps)**(-1/3)
+            b       = 0.005 * (1 - eps)**(2/3)
             radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
             r_theta = radius(angs)
+            # r_theta = equipotential_surfaces()
             
             ax.plot( angs,  r_theta, linewidth=1, linestyle='--', color='white')
             ax.plot(-angs,  r_theta, linewidth=1, linestyle='--', color='white')
             
-            time = setup['time']
-            precision = 0 if self.print else 2
+            time = setup['time'] * util.time_scale
+            if time.value < 1 and self.print:
+                precision = 1
+            elif self.print:
+                precision = 2
+            else:
+                precision = 0
             if self.units:
                 time *= util.time_scale 
             
             if self.setup:
+                title = f'{self.setup} t = {time:.{precision}f}'
                 if self.cartesian:
-                    ax.set_title(
-                        f'{self.setup} t = {time:.{precision}f}')
+                    ax.set_title(title)
                 else:
                     #speciifc to publication figure
                     kwargs = {
                         'y': 0.80,
+                        #-------------------- Text for ring wedges
                         # 'y': 0.30,
                         # 'x': 0.80,
                         # 'color': 'white'
+                        #------------------- Text for jet wedges
+                        # 'y': 0.9,
+                        # 'x': 0.32,
+                        # 'color': 'white',
                     }
                     self.fig.suptitle(title, **kwargs)
                 
             if not self.cartesian:
                 ax.set_rmin(self.ylims[0] or yy[0,0])
                 ax.set_rmax(self.ylims[1] or yy[0,-1])
-                if any(self.xlims):
-                    ax.set_thetamin(np.rad2deg(xextent[0]))
-                    ax.set_thetamax(np.rad2deg(xextent[1]))
+                # if any(self.xlims):
+                    # ax.set_thetamin(np.rad2deg(xextent[0]))
+                    # ax.set_thetamax(np.rad2deg(xextent[1]))
             else:
                 ax.set_ylim(*self.ylims)
                 
@@ -563,7 +565,7 @@ class Visualizer:
 
     def plot_histogram(self) -> None:
         colormap = plt.get_cmap(self.cmap[0])
-        colors = np.array([colormap(k) for k in np.linspace(0, 0.75, len(self.files))])
+        colors = np.array([colormap(k) for k in np.linspace(0, 0.90, len(self.files))])
         for ax in get_iterable(self.axs):
             for idx, file in enumerate(
                     get_iterable(self.flist[self.current_frame])):
@@ -592,8 +594,7 @@ class Visualizer:
                     edens_total = util.prims2var(fields, 'energy')
                     var = edens_total * dV * util.e_scale.value
 
-                u   = fields['gamma_beta']
-                
+                u = fields['gamma_beta']
                 for cutoff in self.cutoffs:
                     if cutoff > 0:
                         mean_gb = np.sum(u[u > cutoff] * var[u > cutoff]) / np.sum(var[u > cutoff])
@@ -625,11 +626,7 @@ class Visualizer:
                     print('Avg power law index: {:.2f}'.format(alpha))
                     ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
 
-                label = r'$E_T$' if not self.labels else f'{self.labels[idx]}, t={time:.1f}'
-                
-                for cutoff in self.cutoffs:
-                    mean_gb = np.sum(gbs[gbs > cutoff] * var[gbs > cutoff]) / np.sum(var[gbs > cutoff])
-                    print(f"Mean gb > {cutoff}: {mean_gb}")
+                label = None if not self.labels else f'{self.labels[idx]}'
                     
                 if self.xfill_scale:
                     util.fill_below_intersec(
@@ -646,7 +643,7 @@ class Visualizer:
                                         histtype='step',
                                         rwidth=1.0,
                                         linewidth=3.0)]
-                
+                print(f"Computed histogram for {file}")
                 
 
             if self.setup:
@@ -674,7 +671,7 @@ class Visualizer:
                     ax.set_ylabel(
                         r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
                         
-                if self.fill_scale is not None:
+                if any([self.xfill_scale, self.yfill_scale]):
                     util.fill_below_intersec(
                         gbs, var, self.fill_scale * var.max(), colors[idx])
 
@@ -868,7 +865,7 @@ class Visualizer:
                     else:
                         label = None
                     color_idx = idx if len(self.fields) > 1 else cidx
-                    ax.step(tbins, iso_var, label=label, linestyle=linestyle, color=colors[cidx])
+                    ax.step(tbins, iso_var, label=label, linestyle=linestyle, color=colors[cidx], linewidth=1.5)
                     ax.set_yscale('log')
                     
                     esn = np.sum(var[gb < 0.1])
@@ -880,7 +877,7 @@ class Visualizer:
             elif self.mass:
                 ylabel = r'$M_{k,\rm iso}(> \Gamma\beta) [\rm g]$'
             else:
-                ylabel = r'$E_{\rm iso}(> \gamma\beta) [\rm g]$'
+                ylabel = r'$E_{\rm iso}(> \Gamma\beta) [\rm g]$'
             
             ax.set_ylabel(ylabel)
             
