@@ -297,7 +297,7 @@ def main(
         if args.print:
             plt.rcParams.update(
                 {
-                'legend.fontsize': 2,
+                'legend.fontsize': SMALL_SIZE,
                 }
             )
 

@@ -293,7 +293,7 @@ class Visualizer:
                     line, = ax.plot(mesh['x1'], var / scale, label=label)
                     self.frames += [line]
                     # BMK REF
-                    if refcount == 0:
+                    if self.pictorial and refcount == 0:
                         x = mesh['x1'][var.argmax():]
                         x = np.linspace(mesh['x1'][var.argmax()], 1, 1000)
                         ref, = ax.plot(x, var.max() * (x / x[0]) ** (-3/2), linestyle='--', color='grey', alpha=0.4)
@@ -506,7 +506,7 @@ class Visualizer:
                 angs = np.linspace(xextent[0], xextent[1], 1000)
             else:
                 angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], 1000)
-            eps     = 0.0
+            eps     = 0.2
             a       = 0.005 * (1 - eps)**(-1/3)
             b       = 0.005 * (1 - eps)**(2/3)
             radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
