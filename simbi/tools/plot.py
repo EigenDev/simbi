@@ -16,7 +16,12 @@ def colorbar_limits(c):
         return vmin, vmax
     except:
         raise argparse.ArgumentTypeError("Colorbar limits must be in the format: vmin,vmax")
-    
+
+def nullable_string(val: str) -> Optional[str]:
+    if not val:
+        return None 
+    return val 
+
 def parse_plotting_arguments(
         parser: argparse.ArgumentParser) -> tuple[argparse.ArgumentParser, 
                                                   tuple[argparse.Namespace, list[str]]]:
@@ -248,11 +253,16 @@ def parse_plotting_arguments(
     )
     plot_parser.add_argument(
         '--cutoffs',
-        dest='cutoffs',
         default=[0.0],
         type=float,
         nargs='+',
         help='The 4-velocity cutoff value for the dE/dOmega plot'
+    )
+    plot_parser.add_argument(
+        '--bbox-kind',
+        default='tight',
+        type=nullable_string,
+        help='tset bbox type during figure save'
     )
     
     fillgroup = plot_parser.add_mutually_exclusive_group()
