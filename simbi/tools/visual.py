@@ -389,7 +389,7 @@ class Visualizer:
                                     xx = xx[::-1]
                         elif max_theta < np.pi:
                             # ax.set_position( [0.1, -0.45, 0.8, 2])
-                            ax.set_position( [0.05, -0.40, 0.9, 2])
+                            # ax.set_position( [0.05, -0.40, 0.9, 2])
                             # ax.set_position( [0.1, -0.18, 0.9, 1.43])
                             if patches <= 2:
                                 cbar_orientation = 'horizontal'
@@ -452,7 +452,7 @@ class Visualizer:
                                     else:
                                         x = (0.1 - 4e-2) + (1 - idx) * (width + 8e-2)
                                     cbaxes = self.fig.add_axes(
-                                        [x, 0.13, width, height])
+                                        [x, 0.2, width, height])
                                 else:
                                     single_height = 0.8
                                     height = (
@@ -509,7 +509,7 @@ class Visualizer:
                 angs = np.linspace(xextent[0], xextent[1], 1000)
             else:
                 angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], 1000)
-            eps     = 0.02
+            eps     = 0.2
             a       = 0.005 * (1 - eps)**(-1/3)
             b       = 0.005 * (1 - eps)**(2/3)
             radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
