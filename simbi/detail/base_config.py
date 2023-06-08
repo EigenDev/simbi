@@ -239,6 +239,10 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def engine_duration(self) -> float:
         return 0.0
     
+    @simbi_property
+    def gravity_sources(self) -> Optional[NDArray[Any]]:
+        return None
+    
     @classmethod
     def _find_dynamic_args(cls) -> None:
         """

@@ -441,6 +441,7 @@ def configure_state(
         kwargs[idx]['data_directory'] = config.data_directory
         kwargs[idx]['linspace'] = config.linspace
         kwargs[idx]['sources'] = config.sources
+        kwargs[idx]['gsources'] = config.gravity_sources
         kwargs[idx]['passive_scalars'] = config.passive_scalars
         kwargs[idx]['scale_factor'] = config.scale_factor
         kwargs[idx]['scale_factor_derivative'] = config.scale_factor_derivative

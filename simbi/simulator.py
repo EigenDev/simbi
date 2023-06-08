@@ -318,6 +318,10 @@ class Hydro:
             if key != 'self':
                 if isinstance(param, (float, np.float64)):
                     val_str: Any = f"{param:.3f}"
+                elif key == 'sources':
+                    val_str = f'user-defined sources terms'
+                elif key == 'gsources':
+                    val_str = f'user-defined gravity sources'
                 elif callable(param):
                     val_str = f"user-defined {key} function"
                 elif isinstance(param, tuple):
@@ -470,6 +474,7 @@ class Hydro:
             linspace: bool = True,
             cfl: float = 0.4,
             sources: Optional[NDArray[Any]] = None,
+            gsources: Optional[NDArray[Any]] = None,
             passive_scalars: Optional[Union[NDArray[Any], int]] = None,
             hllc: bool = False,
             chkpt: Optional[str] = None,
@@ -634,6 +639,7 @@ class Hydro:
         if self.dimensionality == 1:
             sources = np.zeros(3) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
+            gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
             
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "128"
@@ -652,7 +658,7 @@ class Hydro:
                     cfl,
                     x1=self.x1,
                     coord_system=cython_coordinates)
-                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative}
+                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'gravity_sources': gsources}
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] = dens_outer
                     kwargs['s_outer'] = mom_outer
