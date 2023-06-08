@@ -272,8 +272,8 @@ class Visualizer:
                         var = fields[field]
 
                     # ax.set_xlim(mesh['x1'][0], mesh['x1'][-1])
-                    # if self.ylims:
-                    #     ax.set_ylim(*self.ylims)
+                    if self.ylims:
+                        ax.set_ylim(*self.ylims)
                     label = field_str[idx]
                     scale = next(scale_cycle)
                     if scale != 1:
@@ -285,7 +285,7 @@ class Visualizer:
                         var = var[yidx]
                         if len(self.coords) > 1:
                             zidx = find_nearest(mesh['x3'], self.coords[1])[0]
-                            var = [zid,yidx]
+                            var = [zidx,yidx]
                     else:
                         x = mesh['x1']
                         
