@@ -77,6 +77,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
         vector[vector[real]] state
         vector[vector [real]] simulate1D(
             vector[vector[real]] sources, 
+            vector[real] gsources,
             real tstart,
             real tend, 
             real dlogt, 
@@ -96,6 +97,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             
         vector[vector [real]] simulate1D(
             vector[vector[real]] sources, 
+            vector[real] gsources,
             real tstart,
             real tend, 
             real dlogt, 

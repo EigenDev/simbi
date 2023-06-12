@@ -83,6 +83,7 @@ cdef class PyStateSR:
         
     def simulate(self,
         vector[vector[real]] sources,
+        vector[real] gravity_sources,
         real tstart,
         real tend, 
         real dlogt, 
@@ -112,6 +113,7 @@ cdef class PyStateSR:
         if d_outer and s_outer and e_outer:
             result = self.c_state.simulate1D(
                 sources, 
+                gravity_sources,
                 tstart,
                 tend, 
                 dlogt, 
@@ -134,6 +136,7 @@ cdef class PyStateSR:
         else:
             result = self.c_state.simulate1D(
                 sources, 
+                gravity_sources,
                 tstart,
                 tend, 
                 dlogt, 

@@ -85,7 +85,7 @@ def configure(args: argparse.Namespace,
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
     -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} -Dfour_velocity={args.four_velocity} \
-    -Dcpp_std={args.cpp_version} {reconfigure}'''.split()
+    -Dcpp_std={args.cpp_version} -Dbuildtype={args.build_type} {reconfigure}'''.split()
     return command
 
 def generate_home_locator(simbi_dir: str) -> None:
@@ -158,13 +158,16 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     compile_type = install_parser.add_mutually_exclusive_group()
     compile_type.add_argument('--gpu-compilation',  action='store_const', dest='gpu_compilation', const='enabled')
     compile_type.add_argument('--cpu-compilation',  action='store_const', dest='gpu_compilation', const='disabled')
+    build_type = install_parser.add_mutually_exclusive_group()
+    build_type.add_argument('--release',  action='store_const', dest='build_type', const='release')
+    build_type.add_argument('--debug',  action='store_const', dest='build_type', const='debug')
     precision = install_parser.add_mutually_exclusive_group()
     precision.add_argument('--double',  action='store_const', dest='float_precision', const=False)
     precision.add_argument('--float',   action='store_const', dest='float_precision', const=True)
     major = install_parser.add_mutually_exclusive_group()
     major.add_argument('--row-major',   action='store_const', dest='column_major', const=False)
     major.add_argument('--column-major',action='store_const', dest='column_major', const=True)
-    install_parser.set_defaults(float_precision=False, column_major=False, gpu_compilation='disabled')
+    install_parser.set_defaults(float_precision=False, column_major=False, gpu_compilation='disabled', build_type='release')
     
     return parser, parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
@@ -179,7 +182,7 @@ def install_simbi(args: argparse.Namespace) -> None:
     cli_args = sys.argv[1:]
     if cached_vars := read_from_cache():
         for arg in vars(args):
-            if arg in ['verbose', 'configure', 'func', 'extras', 'cpp_version']:
+            if arg in ['verbose', 'configure', 'func', 'extras', 'cpp_version', 'build_type']:
                 continue
             
             if getattr(args,arg) == default[arg]:

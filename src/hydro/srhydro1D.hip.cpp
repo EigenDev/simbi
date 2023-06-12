@@ -82,6 +82,7 @@ void SRHD::advance(
     auto* const dens_source     = sourceD.data();
     auto* const mom_source      = sourceS.data();
     auto* const erg_source      = source0.data();
+    auto* const grav_source     = sourceG.data();
     simbi::parallel_for(p, (luint)0, active_zones, [CAPTURE_THIS]   GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
@@ -189,10 +190,13 @@ void SRHD::advance(
             }
         }
 
-        const auto d_source = den_source_all_zeros    ? 0.0 : dens_source[ii];
-        const auto s_source = mom1_source_all_zeros   ? 0.0 : mom_source[ii];
-        const auto e_source = energy_source_all_zeros ? 0.0 : erg_source[ii];
+        const auto d_source = den_source_all_zeros    ? 0.0 :  dens_source[ii];
+        const auto s_source = mom1_source_all_zeros   ? 0.0 :  mom_source[ii];
+        const auto e_source = energy_source_all_zeros ? 0.0 :  erg_source[ii];
+        const auto gs_source = grav_source_all_zeros  ? 0.0 :  cons_data[ia].d * grav_source[ii];
+        const auto ge_source = gs_source * prim_buff[txa].v;
         const auto sources = Conserved{d_source, s_source, e_source} * time_constant;
+        const auto gravity = Conserved{0, gs_source, ge_source};
         switch(geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -213,7 +217,7 @@ void SRHD::advance(
                 const real invdV  = 1 / dV;
 
                 const auto geom_sources = Conserved{0.0, pc * (sR - sL) * invdV, 0.0};
-                cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources) * step * dt * factor;
+                cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources - gravity) * step * dt * factor;
                 break;
             }
         } // end switch
@@ -634,6 +638,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
 std::vector<std::vector<real>>
 SRHD::simulate1D(
     std::vector<std::vector<real>> &sources,
+    std::vector<real> &gsource,
     real tstart,
     real tend,
     real dlogt,
@@ -665,6 +670,7 @@ SRHD::simulate1D(
     this->sourceD         = sources[0];
     this->sourceS         = sources[1];
     this->source0         = sources[2];
+    this->sourceG         = gsource;
     this->hllc            = hllc;
     this->engine_duration = engine_duration;
     this->t               = tstart;
@@ -684,6 +690,7 @@ SRHD::simulate1D(
     this->den_source_all_zeros    = std::all_of(sourceD.begin(), sourceD.end(), [](real i) {return i==0;});
     this->mom1_source_all_zeros   = std::all_of(sourceS.begin(), sourceS.end(), [](real i) {return i==0;});
     this->energy_source_all_zeros = std::all_of(source0.begin(), source0.end(), [](real i) {return i==0;});
+    this->grav_source_all_zeros = std::all_of(sourceG.begin(), sourceG.end(), [](real i){return i==0;});
     define_tinterval(tstart, dlogt, chkpt_interval, chkpt_idx);
     define_chkpt_idx(chkpt_idx);
     inflow_zones.resize(2);
@@ -749,6 +756,7 @@ SRHD::simulate1D(
     sourceD.copyToGpu();
     sourceS.copyToGpu();
     source0.copyToGpu();
+    sourceG.copyToGpu();
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
     troubled_cells.copyToGpu();

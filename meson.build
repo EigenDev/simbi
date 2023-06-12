@@ -1,7 +1,7 @@
 project('simbi', 'c', 'cpp', 'cython',
     version : run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(), 
     license : 'MIT',
-    default_options : [ 'cpp_std=c++20' ],
+    default_options : [ 'cpp_std=c++20' , 'b_lto=true', 'cpp_args=-march=native'],
 )
 
 # BUILD CONFIG
@@ -53,8 +53,6 @@ incdir_numpy = run_command(py3,
   check : true
 ).stdout().strip()
 all_inc       = include_directories(incdir_numpy, 'src')
-linker_args   = []
-cpp_comp_args = ['-march=native', '-O3', '-fopenmp', '-flto=auto']
 depends       = [py3_dep, hdf5, omp]
 gpu_depends   = []
 gpu_linkers   = []
@@ -193,7 +191,7 @@ cpu_ext = py3.extension_module(
     'cpu_ext',
     ['src/cpu_ext.pyx', 'src/call_obj.pyx'] + sources + headers,
     include_directories: all_inc,
-    cpp_args: cpp_comp_args + ['-DGPU_CODE=0'],
+    cpp_args: ['-DGPU_CODE=0'],
     dependencies: depends,
     override_options: ['cython_language=cpp'],
     install: true,
@@ -268,7 +266,6 @@ py3.extension_module(
     'rad_hydro',
     ['simbi/afterglow/src/rad_hydro.pyx'] + rad_src,
     include_directories: include_directories('simbi/afterglow/src', incdir_numpy),
-    cpp_args: cpp_comp_args,
     dependencies: [py3_dep, omp],
     override_options: ['cython_language=cpp'],
     install: true,

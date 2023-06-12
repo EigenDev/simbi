@@ -27,6 +27,7 @@ namespace simbi
         real dlogx1, dx1, dx2, dx3, dlogt, tstart, engine_duration, invdx1, invdx2, invdx3;
         bool first_order, periodic, linspace, hllc, mesh_motion, adaptive_mesh_motion, half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
         bool den_source_all_zeros, mom1_source_all_zeros, mom2_source_all_zeros, mom3_source_all_zeros, energy_source_all_zeros; 
+        bool grav_source_all_zeros;
         luint active_zones, idx_active, total_zones, n, init_chkpt_idx, radius, pseudo_radius;
         luint xphysical_grid, yphysical_grid, zphysical_grid;
         simbi::Solver sim_solver;
