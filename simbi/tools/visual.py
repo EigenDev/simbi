@@ -670,10 +670,6 @@ class Visualizer:
                 else:
                     ax.set_ylabel(
                         r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
-                        
-                if any([self.xfill_scale, self.yfill_scale]):
-                    util.fill_below_intersec(
-                        gbs, var, self.fill_scale * var.max(), colors[idx])
 
                 if self.labels:
                     ax.legend(loc=self.legend_loc)
