@@ -242,7 +242,7 @@ void SRHD2D::adapt_dt()
                                 cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
                                 break;
                             }
-                        case simbi::Geometry::AXIS_CYLINDRICAL:
+                        default:
                             {
                                 const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
                                 const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
@@ -260,8 +260,6 @@ void SRHD2D::adapt_dt()
                                 cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
                                 break;
                             }
-                        default:
-                            break;
                     } // end switch
                     min_dt = helpers::my_min(min_dt, cfl_dt);
                 } // end ii 
@@ -765,6 +763,7 @@ void SRHD2D::advance(
     auto* const mom2_source = sourceS2.data();
     auto* const erg_source  = sourceTau.data();
     auto* const object_data = object_pos.data();
+    auto* const grav_source = sourceG.data();
     simbi::parallel_for(p, (luint)0, extent, [CAPTURE_THIS]   GPU_LAMBDA (const luint idx) {
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
@@ -1050,6 +1049,12 @@ void SRHD2D::advance(
         const real s1_source = mom1_source_all_zeros   ? 0.0 : mom1_source[real_loc];
         const real s2_source = mom2_source_all_zeros   ? 0.0 : mom2_source[real_loc];
         const real e_source  = energy_source_all_zeros ? 0.0 : erg_source[real_loc];
+        // Gravity
+        const auto g_source   = grav_source_all_zeros  ? 0.0 :  grav_source[ii];
+        const auto gs1_source = g_source * cons_data[aid].d;
+        const auto gs2_source = 0; 
+        const auto ge_source  = gs1_source * prim_buff[txa].v1;
+        const auto gravity = Conserved{0, gs1_source, gs2_source, ge_source};
         const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * time_constant;
         switch (geometry)
         {
@@ -1086,7 +1091,7 @@ void SRHD2D::advance(
                 const real gam2 = 1/(1 - (uc * uc + vc * vc));
 
                 const Conserved geom_source  = {0, (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L) * invdV , 0};
-                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step * factor;
+                cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms - gravity) * dt * step * factor;
                 break;
                 }
              case simbi::Geometry::PLANAR_CYLINDRICAL:
@@ -1148,6 +1153,7 @@ void SRHD2D::advance(
 std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::vector<std::vector<real>> &sources,
     std::vector<bool> &object_cells,
+    std::vector<real> &gsource,
     real tstart,
     real tend,
     real dlogt,
@@ -1179,7 +1185,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->sourceS1        = sources[1];
     this->sourceS2        = sources[2];
     this->sourceTau       = sources[3];
-
+    this->sourceG         = gsource;
     // Define sim state params
     this->engine_duration = engine_duration;
     this->chkpt_interval  = chkpt_interval;
@@ -1213,6 +1219,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->mom1_source_all_zeros   = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
     this->mom2_source_all_zeros   = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
     this->energy_source_all_zeros = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
+    this->grav_source_all_zeros   = std::all_of(sourceG.begin(), sourceG.end(), [](real i) {return i == 0;});
     define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
     define_chkpt_idx(chkpt_idx);
     // Params moving mesh
@@ -1278,6 +1285,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
     troubled_cells.copyToGpu();
+    sourceG.copyToGpu();
 
     // Write some info about the setup for writeup later
     setup.x1max              = x1[xphysical_grid - 1];

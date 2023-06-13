@@ -180,6 +180,7 @@ namespace simbi
         std::vector<std::vector<real>> simulate2D(
             std::vector<std::vector<real>> &sources,
             std::vector<bool> &object_cells,
+            std::vector<real> &gsource,
             real tstart,
             real tend,
             real dlogt,

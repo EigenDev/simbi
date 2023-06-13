@@ -31,7 +31,6 @@ namespace simbi
           ndarray<conserved_t> cons, outer_zones, inflow_zones; 
           ndarray<primitive_t> prims;
           ndarray<real> sourceD, sourceS, source0, pressure_guess, dt_min;
-          ndarray<real> sourceG;
           
           std::function<double(double)> dens_outer;
           std::function<double(double)> mom_outer;

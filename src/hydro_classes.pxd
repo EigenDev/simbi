@@ -131,6 +131,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
         vector[vector[real]] simulate2D(
             vector[vector[real]] sources,
             vector[bool] object_cells,
+            vector[real] gsources,
             real tstart,
             real tend,
             real dlogt,
@@ -152,6 +153,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
         vector[vector[real]] simulate2D(
             vector[vector[real]] sources,
             vector[bool] object_cells,
+            vector[real] gsources,
             real tstart,
             real tend,
             real dlogt,
