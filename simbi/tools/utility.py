@@ -25,9 +25,9 @@ R_0 = const.R_sun.cgs
 c   = const.c.cgs
 m   = const.M_sun.cgs
  
-rho_scale    = m / (4./3. * np.pi * R_0 ** 3) 
+rho_scale    = m / R_0 ** 3 
 e_scale      = m * c **2
-edens_scale  = e_scale / (4./3. * np.pi * R_0**3)
+edens_scale  = e_scale / R_0**3
 time_scale   = R_0 / c
 mass_scale   = m
 
