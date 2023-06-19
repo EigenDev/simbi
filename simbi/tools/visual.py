@@ -270,6 +270,7 @@ class Visualizer:
                         if field == 'v':
                             field = 'v1'
                         var = fields[field]
+                        
                     label = field_str[idx]
                     scale = next(scale_cycle)
                     if scale != 1:
@@ -317,6 +318,11 @@ class Visualizer:
         elif self.legend:
             ax.legend(loc=self.legend_loc)
 
+        if any(self.xlims):
+            ax.set_xlim(*self.xlims)
+            
+        if any(self.ylims):
+            ax.set_ylim(*self.ylims)
         if self.cartesian:
             ax.set_xlabel('$x$')
         else:
@@ -677,10 +683,6 @@ class Visualizer:
                 else:
                     ax.set_ylabel(
                         r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
-                        
-                if any([self.xfill_scale, self.yfill_scale]):
-                    util.fill_below_intersec(
-                        gbs, var, self.fill_scale * var.max(), colors[idx])
 
                 if self.labels:
                     ax.legend(loc=self.legend_loc)

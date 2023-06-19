@@ -668,7 +668,8 @@ class Hydro:
             # ignore the chi term
             sources = np.zeros(4) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
-
+            gsources = np.zeros(4) if gsources is None else np.asanyarray(gsources).flatten()
+            
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "16"
                 
@@ -688,7 +689,9 @@ class Hydro:
                     'a': scale_factor,
                     'adot': scale_factor_derivative,
                     'quirk_smoothing': quirk_smoothing,
-                    'object_cells': object_cells}
+                    'object_cells': object_cells,
+                    'gravity_sources': gsources,
+                }
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
                     momentum_components = cast(Sequence[Callable[..., float]], mom_outer)
                     kwargs['d_outer']   = dens_outer
@@ -729,7 +732,7 @@ class Hydro:
                     x3=self.x3,
                     coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
-
+                
         self.solution = state.simulate(
             sources=sources,
             tstart=self.start_time,

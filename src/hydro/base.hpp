@@ -33,6 +33,7 @@ namespace simbi
         simbi::Solver sim_solver;
         ndarray<simbi::BoundaryCondition> bcs;
         ndarray<int> troubled_cells;
+        ndarray<real> sourceG;
         simbi::Geometry geometry;
         simbi::Cellspacing x1cell_spacing, x2cell_spacing, x3cell_spacing;
         luint blockSize, checkpoint_zones;

@@ -237,6 +237,7 @@ cdef class PyStateSR2D:
     def simulate(self, 
         vector[vector[real]] sources,
         np.ndarray[bool, ndim=2] object_cells,
+        vector[real] gravity_sources,
         real tstart,
         real tend,
         real dlogt,
@@ -271,6 +272,7 @@ cdef class PyStateSR2D:
             result = self.c_state.simulate2D(
                 sources,
                 object_contig,
+                gravity_sources,
                 tstart,
                 tend,
                 dlogt,
@@ -296,6 +298,7 @@ cdef class PyStateSR2D:
             result = self.c_state.simulate2D(
                 sources,
                 object_contig,
+                gravity_sources,
                 tstart,
                 tend,
                 dlogt,
