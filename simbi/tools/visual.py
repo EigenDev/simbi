@@ -270,10 +270,6 @@ class Visualizer:
                         if field == 'v':
                             field = 'v1'
                         var = fields[field]
-
-                    # ax.set_xlim(mesh['x1'][0], mesh['x1'][-1])
-                    if self.ylims:
-                        ax.set_ylim(*self.ylims)
                     label = field_str[idx]
                     scale = next(scale_cycle)
                     if scale != 1:
@@ -325,6 +321,14 @@ class Visualizer:
             ax.set_xlabel('$x$')
         else:
             ax.set_xlabel('$r$')
+        
+        if any(self.xlims):
+            ax.set_xlim(*self.xlims)
+        else:
+            ax.set_xlim(mesh['x1'][0], mesh['x1'][-1])
+            
+        if any(self.ylims):
+            ax.set_ylim(*self.ylims)
 
     def plot_multidim(self) -> None:
         def theta_sign(quadrant: int) -> np.ndarray:
