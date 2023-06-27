@@ -168,7 +168,7 @@ void Newtonian1D::adapt_dt(){
     }
 };
 
-void Newtonian1D::adapt_dt(luint blockSize, luint tblock)
+void Newtonian1D::adapt_dt(luint blockSize)
 {   
     #if GPU_CODE
         compute_dt<Primitive><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
@@ -583,7 +583,7 @@ void Newtonian1D::advance(
     
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
-        adapt_dt(activeP.gridSize.x, xblockdim);
+        adapt_dt(activeP.gridSize.x);
     } else {
         cons2prim(fullP);
         adapt_dt();
@@ -610,7 +610,7 @@ void Newtonian1D::advance(
         }   
         
         if constexpr(BuildPlatform == Platform::GPU) {
-            adapt_dt(activeP.gridSize.x,xblockdim);
+            adapt_dt(activeP.gridSize.x);
         } else {
             adapt_dt();
         }

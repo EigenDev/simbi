@@ -77,8 +77,7 @@ namespace simbi {
 
         void adapt_dt();
         void adapt_dt(
-            const ExecutionPolicy<> &p, 
-            luint bytes);
+            const ExecutionPolicy<> &p);
 
         void advance(
                const ExecutionPolicy<> &p, 

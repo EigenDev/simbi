@@ -367,11 +367,11 @@ void Newtonian2D::adapt_dt()
     }
 };
 
-void Newtonian2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
+void Newtonian2D::adapt_dt(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
     {
-        compute_dt<Primitive><<<p.gridSize,p.blockSize, bytes>>>(this, prims.data(),dt_min.data(), geometry);
+        compute_dt<Primitive><<<p.gridSize,p.blockSize>>>(this, prims.data(),dt_min.data(), geometry);
         deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
     }
     gpu::api::deviceSynch();
@@ -1029,10 +1029,9 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         if (!periodic) 
             config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
-    const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive) + xblockdim * yblockdim * sizeof(real);
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
-        adapt_dt(activeP, dtShBytes);
+        adapt_dt(activeP);
     } else {
         cons2prim(fullP);
         adapt_dt();
@@ -1060,7 +1059,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
         }
         
         if constexpr(BuildPlatform == Platform::GPU) {
-            adapt_dt(activeP, dtShBytes);
+            adapt_dt(activeP);
         } else {
             adapt_dt();
         }

@@ -103,7 +103,7 @@ namespace simbi
         void adapt_dt();
 
         template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
-        void adapt_dt(const ExecutionPolicy<> &p, const luint bytes);
+        void adapt_dt(const ExecutionPolicy<> &p);
 
         std::vector<std::vector<real>> simulate3D(
             const std::vector<std::vector<real>> &sources,

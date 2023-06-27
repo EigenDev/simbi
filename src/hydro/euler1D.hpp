@@ -42,7 +42,7 @@ namespace simbi {
 
         void cons2prim(const ExecutionPolicy<> &p);
         void adapt_dt();
-        void adapt_dt(luint blockSize, luint tblock);
+        void adapt_dt(luint blockSize);
         
         GPU_CALLABLE_MEMBER
         hydro1d::Conserved prims2cons(const hydro1d::Primitive &prims);

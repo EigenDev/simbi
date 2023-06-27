@@ -337,12 +337,12 @@ void SRHD3D::adapt_dt()
     };
 
 template<TIMESTEP_TYPE dt_type>
-void SRHD3D::adapt_dt(const ExecutionPolicy<> &p, const luint bytes)
+void SRHD3D::adapt_dt(const ExecutionPolicy<> &p)
 {
     
     #if GPU_CODE
     {
-        compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize, bytes>>>(this, prims.data(), dt_min.data(), geometry);
+        compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
         deviceReduceWarpAtomicKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
     }
@@ -1286,10 +1286,9 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     if (t == 0) {
         config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(),inflow_zones.data(), half_sphere, geometry);
     }
-    const auto dtShBytes = zblockdim * xblockdim * yblockdim * sizeof(Primitive);
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
-        adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP, dtShBytes);
+        adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP);
     } else {
         cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>();
@@ -1315,7 +1314,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         cons2prim(fullP);
         config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
         if constexpr(BuildPlatform == Platform::GPU) {
-            adapt_dt(activeP, dtShBytes);
+            adapt_dt(activeP);
         } else {
             adapt_dt();
         }

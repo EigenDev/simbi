@@ -371,12 +371,12 @@ void SRHD2D::adapt_dt()
 };
 
 template<TIMESTEP_TYPE dt_type>
-void SRHD2D::adapt_dt(const ExecutionPolicy<> &p, luint bytes)
+void SRHD2D::adapt_dt(const ExecutionPolicy<> &p)
 {
     
     #if GPU_CODE
     {
-        compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize, bytes>>>(
+        compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize>>>(
             this, 
             prims.data(),
             dt_min.data(),
@@ -1319,14 +1319,17 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const auto fullP         = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim});
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
+    if constexpr(BuildPlatform == Platform::GPU){
+        std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
+
+    }
     if (t == 0) {
         config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
     
-    const auto dtShBytes = xblockdim * yblockdim * sizeof(Primitive);
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
-        adapt_dt(activeP, dtShBytes);
+        adapt_dt(activeP);
     } else {
         cons2prim(fullP);
         adapt_dt();
@@ -1358,7 +1361,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
         
         if constexpr(BuildPlatform == Platform::GPU) {
-            adapt_dt(activeP, dtShBytes);
+            adapt_dt(activeP);
         } else {
             adapt_dt();
         }
