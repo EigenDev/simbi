@@ -59,12 +59,19 @@ def check_minimal_dependencies() -> None:
     try:
         import numpy 
     except ImportError:
-         subprocess.run([sys.executable, '-m', 'pip', 'install', 'numpy'], check=True)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'numpy'], check=True)
     
     try:
         import cython 
     except ImportError:
-         subprocess.run([sys.executable, '-m', 'pip', 'install', 'cython'], check=True)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'cython'], check=True)
+    
+    try:
+        import ninja 
+    except ImportError:
+        if not is_tool('make'):
+            subprocess.run([sys.executable, '-m', 'pip', 'install', 'ninja'], check=True)
+
         
 def write_to_cache(args: argparse.Namespace) -> None:
     details = vars(args)
