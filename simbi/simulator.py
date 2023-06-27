@@ -318,9 +318,9 @@ class Hydro:
             if key != 'self':
                 if isinstance(param, (float, np.float64)):
                     val_str: Any = f"{param:.3f}"
-                elif key == 'sources':
+                elif key == 'sources' and param is not None:
                     val_str = f'user-defined sources terms'
-                elif key == 'gsources':
+                elif key == 'gsources' and param is not None:
                     val_str = f'user-defined gravity sources'
                 elif callable(param):
                     val_str = f"user-defined {key} function"
