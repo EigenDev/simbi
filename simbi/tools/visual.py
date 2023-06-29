@@ -667,6 +667,8 @@ class Visualizer:
                 ax.set_yscale('log')
                 if any(self.xlims):
                     ax.set_xlim(*self.xlims)
+                if any(self.ylims):
+                    ax.set_ylim(*self.ylims)
                 ax.set_xlabel(r'$\Gamma\beta $')
                 if self.kinetic:
                     ax.set_ylabel(
