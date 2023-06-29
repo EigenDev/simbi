@@ -317,6 +317,10 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
         return W * fields['v3']
     elif var == 'u':
         return fields['gamma_beta']
+    elif var == 'tau_s':
+        return (1 - 1/W**2)**(-0.5)
+    else:
+        raise NotImplementedError("derived variable {var} not implemented")
 
 def get_colors(interval: NDArray[numpy_float], cmap: plt.cm, vmin: Optional[float] = None, vmax: Optional[float] = None) -> plt.cm:
     """

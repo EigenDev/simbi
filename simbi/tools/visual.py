@@ -35,7 +35,8 @@ derived = [
     'u1',
     'u2',
     'u3',
-    'u']
+    'u',
+    'tau_s']
 field_choices = [
     'rho',
     'v1',
@@ -154,12 +155,6 @@ class Visualizer:
                 default=None,
                 nargs='+',
                 type=int)
-            plot_parser.add_argument(
-                '--tau-s',
-                dest='tau_s',
-                action='store_true',
-                default=False,
-                help='The shock optical depth')
             plot_parser.add_argument(
                 '--viewing',
                 help='viewing angle of simulation in [deg]',
