@@ -461,9 +461,9 @@ class Visualizer:
                                 else:
                                     height = 0.8
                                     if any(self.xlims) and not self.cartesian:
-                                        height *= 0.5
+                                        height /= 2
                                     elif len(self.fields) == 3 and idx != 0:
-                                        height /= (len(self.fields) // 2)
+                                        height /= 2
                                         
                                     if any(self.xlims) and not self.cartesian:
                                         x = [0.95, 0.95]
@@ -471,8 +471,15 @@ class Visualizer:
                                         cbaxes = self.fig.add_axes(
                                             [x[idx], y[idx], 0.03, height])
                                     else:
-                                        x = [0.95, 0.03, 0.08, 0.9]
-                                        y = [0.1, 0.1, 0.1, 0.1]
+                                        if len(self.fields) <= 2:
+                                            x = [0.95, 0.03]
+                                            y = [0.10, 0.10]
+                                        elif len(self.fields) == 3:
+                                            x = [0.95, 0.03, 0.03]
+                                            y = [0.10, 0.50, 0.10]
+                                        else:
+                                            x = [0.95, 0.03, 0.03, 0.95]
+                                            y = [0.1, 0.1, 0.1, 0.1]
                                         cbaxes = self.fig.add_axes(
                                             [x[idx], y[idx], 0.03, height])
 
