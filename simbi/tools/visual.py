@@ -608,7 +608,7 @@ class Visualizer:
                         mean_gb = np.sum(u[u > cutoff] * var[u > cutoff]) / np.sum(var[u > cutoff])
                         print(f"Mean gb > {cutoff}: {mean_gb}")
                         
-                gbs = np.geomspace(1e-4, u.max(), 128)
+                gbs = np.geomspace(1e-5, u.max(), 128)
                 var = np.asanyarray([var[u > gb].sum() for gb in gbs])
                 if self.powerfit:
                     E_seg_rat = var[1:] / var[:-1]
@@ -867,7 +867,11 @@ class Visualizer:
                     else:
                         fmt = '.1f'
                     if idx == 0:
-                        label = rf'$\Gamma \beta > {cutoff:d}$'
+                        if float(cutoff).is_integer():
+                            cprecision = 0
+                        else:
+                            cprecision = 1
+                        label = rf'$\Gamma \beta > {cutoff:.{cprecision}f}$'
                     else:
                         label = None
                     color_idx = idx if len(self.fields) > 1 else cidx

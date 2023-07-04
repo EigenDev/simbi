@@ -1054,7 +1054,7 @@ void SRHD2D::advance(
         const auto gs1_source = g_source * cons_data[aid].d;
         const auto gs2_source = 0; 
         const auto ge_source  = gs1_source * prim_buff[txa].v1;
-        const auto gravity = Conserved{0, gs1_source, gs2_source, ge_source};
+        const auto gravity    = Conserved{0, gs1_source, gs2_source, ge_source};
         const Conserved source_terms = Conserved{d_source, s1_source, s2_source, e_source} * time_constant;
         switch (geometry)
         {
