@@ -459,15 +459,13 @@ class Visualizer:
                                     cbaxes = self.fig.add_axes(
                                         [x, 0.2, width, height])
                                 else:
-                                    single_height = 0.8
-                                    height = (
-                                        single_height * 0.5 if self.xlims and not self.cartesian
-                                        else 
-                                        single_height if len(self.fields) in [1, 3] and idx == 0
-                                        else
-                                        single_height / (len(self.fields) // 2)
-                                    )
-                                    if self.xlims and not self.cartesian:
+                                    height = 0.8
+                                    if any(self.xlims) and not self.cartesian:
+                                        height *= 0.5
+                                    elif len(self.fields) == 3 and idx != 0:
+                                        height /= (len(self.fields) // 2)
+                                        
+                                    if any(self.xlims) and not self.cartesian:
                                         x = [0.95, 0.95]
                                         y = [0.50, 0.10]
                                         cbaxes = self.fig.add_axes(
@@ -491,8 +489,8 @@ class Visualizer:
                             set_cbar_label = cbar.ax.set_xlabel if cbar_orientation == 'horizontal' else cbar.ax.set_ylabel
                             labelpad = None
                             if cbar_orientation == 'vertical' and (idx in [
-                                    1, 2] and not (self.xlims and not self.cartesian)):
-                                labelpad = -60
+                                    1, 2] and not (any(self.xlims) and not self.cartesian)):
+                                labelpad = -50
                             if idx in [
                                     1, 2] and cbar_orientation == 'vertical':
                                 cbaxes.yaxis.set_ticks_position('left')
@@ -541,7 +539,7 @@ class Visualizer:
                 else:
                     #speciifc to publication figure
                     kwargs = {
-                        'y': 0.80,
+                        'y': 1.02 if mesh['x2'].max() == np.pi else 0.8,
                         #-------------------- Text for ring wedges
                         # 'y': 0.30,
                         # 'x': 0.80,
@@ -851,7 +849,7 @@ class Visualizer:
                     else:
                         x = 1
                     
-                    eiso    = 4.0 * np.pi * (dx_domega * dx_domega * domega_bins).sum() / (dx_domega * domega_bins).sum()
+                    eiso = 4.0 * np.pi * (dx_domega * dx_domega * domega_bins).sum() / (dx_domega * domega_bins).sum()
                     etot = (domega_bins * dx_domega).sum()
                     thetax = x * np.arcsin((etot / eiso) ** (1 / x))
                     print(f"{'gamma_beta':.<50}: ", cutoff)
@@ -862,27 +860,29 @@ class Visualizer:
 
                     tbins = np.rad2deg(tbins)
                     if cutoff.is_integer():
-                        fmt = '1d'
-                        cutoff = int(cutoff)
+                        cprecision = 0
                     else:
-                        fmt = '.1f'
+                        cprecision = 1
+                        
                     if idx == 0:
-                        if float(cutoff).is_integer():
-                            cprecision = 0
-                        else:
-                            cprecision = 1
                         label = rf'$\Gamma \beta > {cutoff:.{cprecision}f}$'
                     else:
                         label = None
                     color_idx = idx if len(self.fields) > 1 else cidx
+                    if self.norm:
+                        iso_var /= (4.0 * np.pi)
                     ax.step(tbins, iso_var, label=label, linestyle=linestyle, color=colors[cidx], linewidth=1.5)
-                    ax.set_yscale('log')
+                    
+                    if self.log:
+                        ax.set_yscale('log')
                     
                     esn = np.sum(var[gb < 0.1])
                     print(f"Energy left for supernova: {esn:.2e}")
                     
             ax.set_xlabel(r'$\theta~\rm[deg]$')
-            if self.kinetic:
+            if self.norm:
+                ylabel = r'$E_{k}(> \Gamma\beta) [\rm erg]$'
+            elif self.kinetic:
                 ylabel = r'$E_{k,\rm iso}(> \Gamma\beta) [\rm erg]$'
             elif self.mass:
                 ylabel = r'$M_{k,\rm iso}(> \Gamma\beta) [\rm g]$'
@@ -928,7 +928,7 @@ class Visualizer:
             ext = 'png' if self.png else 'pdf'
             fig_name = f'{self.save}.{ext}'.replace('-', '_')
             logger.debug(f'Saving figure as {fig_name}')
-            self.fig.savefig(fig_name, dpi=600, transparent=True, bbox_inches=self.bbox_kind)
+            self.fig.savefig(fig_name, dpi=600, transparent=self.transparent, bbox_inches=self.bbox_kind)
         else:
             self.animation.save("{}.mp4".format(
                 self.save.replace(" ", "_")), dpi=600,

@@ -67,11 +67,6 @@ def parse_plotting_arguments(
         action='store_true',
         help='compute mass histogram')
     plot_parser.add_argument(
-        '--dm-du',
-        default=False,
-        action='store_true',
-        help='compute dM/dU over whole domain')
-    plot_parser.add_argument(
         '--ax-anchor',
         default=None,
         type=str,
@@ -263,6 +258,12 @@ def parse_plotting_arguments(
         default='tight',
         type=nullable_string,
         help='tset bbox type during figure save'
+    )
+    plot_parser.add_argument(
+        '--transparent',
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help='flag for transparent plot background on save'
     )
     
     fillgroup = plot_parser.add_mutually_exclusive_group()
