@@ -170,10 +170,10 @@ class Visualizer:
             )
             plot_parser.add_argument(
                 '--coords',
-                help = 'coordinates of fixed vars for 1d projection',
+                help = 'coordinates of fixed vars for (n-m)d projection',
                 type=float,
                 nargs = '+',
-                default=[0],
+                default=[0.0],
             )
             plot_parser.add_argument(
                 '--projection',
@@ -273,10 +273,16 @@ class Visualizer:
                     
                     if self.oned_slice:
                         x = mesh[self.oned_slice]
-                        yidx = find_nearest(mesh['x2'], self.coords[0])[0]
+                        x2coord = self.coords[0]
+                        if not self.cartesian:
+                            x2coord = np.deg2rad(self.coords[0])
+                        yidx = find_nearest(mesh['x2'], x2coord)[0]
                         var = var[yidx]
                         if len(self.coords) > 1:
-                            zidx = find_nearest(mesh['x3'], self.coords[1])[0]
+                            x3coord = self.coord[1]
+                            if not self.cartesian:
+                                x3coord = np.deg2rad(self.coords[1])
+                            zidx = find_nearest(mesh['x3'], x3coord)[0]
                             var = [zidx,yidx]
                     else:
                         x = mesh['x1']
@@ -296,9 +302,10 @@ class Visualizer:
 
         box_coord = ''
         if self.oned_slice:
-            box_coord = f' $x_2 = {self.coords[0]}$'
+            precisions = [0 if x.is_integer() else 1 for x in self.coords]
+            box_coord = f' $x_2 = {self.coords[0]:.{precisions[0]}f}$'
             if len(self.coords) > 1:
-                box_coord += f', $x_3={self.coords[1]}$'
+                box_coord += f', $x_3={self.coords[1]:.{precisions[1]}f}$'
                 
         ax.set_title(f'{self.setup} t = {setup["time"]:.2f}' + box_coord)
         if self.log:
@@ -515,19 +522,19 @@ class Visualizer:
             #========================================================
             #               DASHED CURVE
             #========================================================
-            if any(self.xlims):
-                angs = np.linspace(xextent[0], xextent[1], 1000)
-            else:
-                angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], 1000)
-            eps     = 0.2
-            a       = 0.005 * (1 - eps)**(-1/3)
-            b       = 0.005 * (1 - eps)**(2/3)
-            radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
-            r_theta = radius(angs)
-            # r_theta = equipotential_surfaces()
+            # if any(self.xlims):
+            #     angs = np.linspace(xextent[0], xextent[1], 1000)
+            # else:
+            #     angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], 1000)
+            # eps     = 0.2
+            # a       = 0.005 * (1 - eps)**(-1/3)
+            # b       = 0.005 * (1 - eps)**(2/3)
+            # radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+            # r_theta = radius(angs)
+            # # r_theta = equipotential_surfaces()
             
-            ax.plot( angs,  r_theta, linewidth=1, linestyle='--', color='white')
-            ax.plot(-angs,  r_theta, linewidth=1, linestyle='--', color='white')
+            # ax.plot( angs,  r_theta, linewidth=1, linestyle='--', color='white')
+            # ax.plot(-angs,  r_theta, linewidth=1, linestyle='--', color='white')
             
             time = setup['time'] * util.time_scale
             if time.value < 1 and self.print:
