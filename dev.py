@@ -227,7 +227,7 @@ def install_simbi(args: argparse.Namespace) -> None:
         gpu_runtime_dir = get_output(['hipconfig', '--rocmpath'])
     
     
-    gpu_include=f"{gpu_runtime_dir}/include"
+    gpu_include=f"{gpu_runtime_dir.split()[0]}/include"
     h5cc_show = get_output(['h5cc', '-show']).split()
     hdf5_include = ' '.join([include_dir[2:] for include_dir in filter(lambda x: x.startswith('-I'), h5cc_show)])
     
@@ -236,7 +236,7 @@ def install_simbi(args: argparse.Namespace) -> None:
         hdf5_include = hdf5_libpath.parents[0].resolve() / 'include'
         
     config_command = configure(args, reconfigure_flag, hdf5_include, gpu_include)
-    subprocess.run(config_command, env=simbi_env)
+    subprocess.run(config_command, env=simbi_env, check=True)
     if not args.configure:
         extras = '' if not args.extras else '[extras]'
         install_mode = '.'+extras if args.install_mode == 'default' else '-e' + '.'+extras
