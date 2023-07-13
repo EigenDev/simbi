@@ -56,6 +56,7 @@ def tuple_arg(param: str) -> tuple[int]:
         raise argparse.ArgumentTypeError("argument must be tuple of ints")
 
 
+
 class Visualizer:
     def __init__(self, parser: argparse.ArgumentParser, ndim: int) -> None:
         self.current_frame = slice(None)
@@ -265,7 +266,13 @@ class Visualizer:
                         if field == 'v':
                             field = 'v1'
                         var = fields[field]
-                        
+                    
+                    if self.units:
+                        if field in ['p', 'energy', 'energy_rst']:
+                            var *= util.edens_scale.value
+                        elif field in ['rho', 'D']:
+                            var *= util.rho_scale.value
+                            
                     label = field_str[idx]
                     scale = next(scale_cycle)
                     if scale != 1:
@@ -370,6 +377,12 @@ class Visualizer:
                         if field == 'v':
                             field = 'v1'
                         var = fields[field]
+                        
+                    if self.units:
+                        if field in ['p', 'energy', 'energy_rst']:
+                            var *= util.edens_scale.value
+                        elif field in ['rho', 'D']:
+                            var *= util.rho_scale.value
 
                     xx = mesh['x1'] if self.ndim == 2 else mesh[f'x{self.projection[0]}']
                     yy = mesh['x2'] if self.ndim == 2 else mesh[f'x{self.projection[1]}']
@@ -522,19 +535,20 @@ class Visualizer:
             #========================================================
             #               DASHED CURVE
             #========================================================
-            # if any(self.xlims):
-            #     angs = np.linspace(xextent[0], xextent[1], 1000)
-            # else:
-            #     angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], 1000)
-            # eps     = 0.2
-            # a       = 0.005 * (1 - eps)**(-1/3)
-            # b       = 0.005 * (1 - eps)**(2/3)
-            # radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+            if any(self.xlims):
+                angs = np.linspace(xextent[0], xextent[1], 1000)
+            else:
+                angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], mesh['x2'].size)
+            eps     = 0.2
+            a       = 0.005 * (1 - eps)**(-1/3)
+            b       = 0.005 * (1 - eps)**(2/3)
+            radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
             # r_theta = radius(angs)
-            # # r_theta = equipotential_surfaces()
+            from .extras.helpers import equipotential_surfaces
+            r_theta = equipotential_surfaces(**self.extra_args)
             
-            # ax.plot( angs,  r_theta, linewidth=1, linestyle='--', color='white')
-            # ax.plot(-angs,  r_theta, linewidth=1, linestyle='--', color='white')
+            ax.plot( angs,  r_theta, linewidth=1, linestyle='--', color='white')
+            ax.plot(-angs,  r_theta, linewidth=1, linestyle='--', color='white')
             
             time = setup['time'] * util.time_scale
             if time.value < 1 and self.print:
@@ -823,6 +837,9 @@ class Visualizer:
                     var = (enthalpy - 1.0) * dV * util.e_scale.value
                 elif self.mass:
                     var = dV * fields['W'] * fields['rho'] * util.mass_scale.value
+                elif self.momentum:
+                    mass = dV * fields['W'] * fields['rho'] * util.mass_scale.value
+                    var  = mass * (1 - 1/fields['W']**2)**(0.5) * util.c.value
                 else:
                     edens_total = util.prims2var(fields, 'energy')
                     var = edens_total * dV * util.e_scale.value
@@ -863,12 +880,12 @@ class Visualizer:
                     else:
                         x = 1
                     
-                    eiso = 4.0 * np.pi * (dx_domega * dx_domega * domega_bins).sum() / (dx_domega * domega_bins).sum()
-                    etot = (domega_bins * dx_domega).sum()
-                    thetax = x * np.arcsin((etot / eiso) ** (1 / x))
+                    viso = 4.0 * np.pi * (dx_domega * dx_domega * domega_bins).sum() / (dx_domega * domega_bins).sum()
+                    vtot = (domega_bins * dx_domega).sum()
+                    thetax = x * np.arcsin((vtot / viso) ** (1 / x))
                     print(f"{'gamma_beta':.<50}: ", cutoff)
-                    print(f"{'X_iso':.<50}: ", eiso)  
-                    print(f"{'X_available':.<50}: ", etot)
+                    print(f"{'X_iso':.<50}: ", viso)  
+                    print(f"{'X_available':.<50}: ", vtot)
                     print(f"{'opening angle[deg]':.<50}: ", np.rad2deg(thetax))
                     print("")
 
@@ -885,6 +902,8 @@ class Visualizer:
                     color_idx = idx if len(self.fields) > 1 else cidx
                     if self.norm:
                         iso_var /= (4.0 * np.pi)
+                        
+                    tbins -= 90
                     ax.step(tbins, iso_var, label=label, linestyle=linestyle, color=colors[cidx], linewidth=1.5)
                     
                     if self.log:
@@ -899,7 +918,9 @@ class Visualizer:
             elif self.kinetic:
                 ylabel = r'$E_{k,\rm iso}(> \Gamma\beta) [\rm erg]$'
             elif self.mass:
-                ylabel = r'$M_{k,\rm iso}(> \Gamma\beta) [\rm g]$'
+                ylabel = r'$M_{\rm iso}(> \Gamma\beta) [\rm g]$'
+            elif self.momentum:
+                ylabel = r'$dP/d\Omega(> \Gamma\beta) [\rm g~cm~s^{-1}]$'
             else:
                 ylabel = r'$E_{\rm iso}(> \Gamma\beta) [\rm g]$'
             
