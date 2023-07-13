@@ -81,7 +81,7 @@ if get_option('gpu_compilation').enabled()
                 '-DGPU_PLATFORM_NVIDIA=1',
                 '-std=c++17',
                 f'-arch=sm_@gpu_arch@', 
-                '-ccbin=gcc-11',
+                f'-ccbin=@host_compiler@',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
