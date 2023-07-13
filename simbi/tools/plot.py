@@ -10,6 +10,18 @@ from pathlib import Path
 
 tool_src = Path(__file__).resolve().parent / 'tools'
 
+class ParseKVAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, dict())
+        for each in values:
+            try:
+                key, value = each.split("=")
+                getattr(namespace, self.dest)[key] = value
+            except ValueError as ex:
+                message = "\nTraceback: {}".format(ex)
+                message += "\nError on '{}' || It should be 'key=value'".format(each)
+                raise argparse.ArgumentError(self, str(message))
+            
 def colorbar_limits(c):
     try:
         vmin, vmax = map(float, c.split(','))
@@ -66,6 +78,11 @@ def parse_plotting_arguments(
         default=False,
         action='store_true',
         help='compute mass histogram')
+    plot_parser.add_argument(
+        '--momentum',
+        default=False,
+        action='store_true',
+        help='compute momentum histogram')
     plot_parser.add_argument(
         '--ax-anchor',
         default=None,
@@ -264,6 +281,13 @@ def parse_plotting_arguments(
         default=False,
         action=argparse.BooleanOptionalAction,
         help='flag for transparent plot background on save'
+    )
+    plot_parser.add_argument(
+        "--extra-args",
+        nargs='+',
+        action=ParseKVAction,
+        help='accepts dict style args KEY=VALUE',
+        metavar="KEY=VALUE",
     )
     
     fillgroup = plot_parser.add_mutually_exclusive_group()
