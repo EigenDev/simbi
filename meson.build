@@ -63,9 +63,14 @@ gpu_comp_args = []
 if get_option('gpu_compilation').enabled()
     hip  = dependency('HIP', cmake_module_path : '/opt/rocm', required: false)
     cuda = dependency('CUDA', required: false)
-    comp_id  = meson.get_compiler('cpp').get_id()
-    comp_ver = meson.get_compiler('cpp').version().split('.')[0]
-    host_compiler = comp_id # f'@comp_id@-@comp_ver@'
+    host_compiler  = meson.get_compiler('cpp')
+    host_compiler_name = host_compiler.get_id()
+    host_compiler_version = host_compiler.version().split('.')[0]
+    if host_compiler_name == 'gcc'
+        if host_compiler_version.to_int() >= 13
+            error(f'The detected gcc version: gcc-@host_compiler_version@ is incompatible with cuda version')
+        endif
+    endif
 
     if hip.found()
         env = environment()
@@ -82,7 +87,7 @@ if get_option('gpu_compilation').enabled()
                 '-DGPU_PLATFORM_NVIDIA=1',
                 '-std=c++17',
                 f'-arch=sm_@gpu_arch@', 
-                f'-ccbin=@host_compiler@',
+                f'-ccbin=@host_compiler_name@',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
@@ -123,7 +128,7 @@ if get_option('gpu_compilation').enabled()
                 '-std=c++17',
                 '-DGPU_PLATFORM_NVIDIA=1',
                 f'-arch=sm_@gpu_arch@', 
-                f'-ccbin=@host_compiler@',
+                f'-ccbin=@host_compiler_name@',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
