@@ -65,7 +65,8 @@ if get_option('gpu_compilation').enabled()
     cuda = dependency('CUDA', required: false)
     comp_id  = meson.get_compiler('cpp').get_id()
     comp_ver = meson.get_compiler('cpp').version().split('.')[0]
-    host_compiler = f'@comp_id@-@comp_ver@'
+    host_compiler = comp_id # f'@comp_id@-@comp_ver@'
+
     if hip.found()
         env = environment()
         check_hip_config = run_command('/opt/rocm/hip/bin/hipconfig','--platform', check: true)
