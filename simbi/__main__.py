@@ -355,7 +355,7 @@ def type_check_input(file: str) -> None:
          file])
     
     if type_checker.returncode != 0:
-        raise TypeError("\nYour configuration script failed type safety checks." +
+        raise TypeError("\nYour configuration script failed type safety checks. " +
                         "Please fix them or run with --no-type-check option")
 
 def configure_state(
