@@ -66,7 +66,7 @@ if get_option('gpu_compilation').enabled()
     host_compiler  = meson.get_compiler('cpp')
     host_compiler_name = host_compiler.get_id()
     host_compiler_version = host_compiler.version().split('.')[0]
-    if host_compiler_name == 'gcc'
+    if host_compiler_name == 'g++' or host_compiler_name == 'gcc'
         if host_compiler_version.to_int() >= 13
             error(f'The detected gcc version: gcc-@host_compiler_version@ is incompatible with cuda version')
         endif
@@ -74,7 +74,7 @@ if get_option('gpu_compilation').enabled()
 
     if hip.found()
         env = environment()
-        check_hip_config = run_command('/opt/rocm/hip/bin/hipconfig','--platform', check: true)
+        check_hip_config = run_command('hipconfig','--platform', check: true)
         hip_platform     = check_hip_config.stdout().strip()
         hip_platform_err = check_hip_config.stderr().strip()
         gpu_arch = get_option('gpu_arch')
@@ -86,7 +86,7 @@ if get_option('gpu_compilation').enabled()
             gpu_comp_args = [
                 '-DGPU_PLATFORM_NVIDIA=1',
                 '-std=c++17',
-                f'-arch=sm_@gpu_arch@', 
+                f'-arch=sm_@gpu_arch@',
                 f'-ccbin=@host_compiler_name@',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
@@ -211,6 +211,7 @@ if get_option('gpu_compilation').enabled()
         gpu_objs = []
         gpu_includes = ['-I'+meson.current_source_dir()+'/src', '-I.', '-I'+meson.current_build_dir()]
         gpu_includes += ['-I' + get_option('gpu_include_dir'), '-I' + get_option('hdf5_include_dir')]
+        gpu_link_trgs = []
         foreach source : sources
             gpu_trg = custom_target(
                 fs.name(source) + '_target',
