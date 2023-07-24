@@ -256,8 +256,8 @@ def for_each(func: Callable[..., Any], x: Any) -> None:
     for i in x:
         func(i)
         
-def get_iterable(x: Any) -> Sequence[Any]:
+def get_iterable(x: Any, func: Callable[..., Sequence[Any]] = list) -> Sequence[Any]:
     if isinstance(x,  Sequence) and not isinstance(x, str):
-        return x
+        return func(x)
     else:
-        return (x,)
+        return func((x,))
