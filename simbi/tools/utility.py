@@ -85,7 +85,7 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
         elif field == 'chi_dens':
             field_str_list.append( r'$D \cdot \chi$')
         elif field == 'T_eV':
-            field_str_list.append("T [eV]" if args.units else "T")
+            field_str_list.append("T [eV]")
         elif field == 'temperature':
             field_str_list.append("T [K]" if args.units else "T")
         elif field == 'mach':
