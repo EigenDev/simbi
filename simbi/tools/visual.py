@@ -679,7 +679,7 @@ class Visualizer:
                 elif self.yfill_scale:
                      util.fill_below_intersec(
                         gbs, var, self.yfill_scale * var.max(), next(colors), axis='y')
-                    
+                
                 self.frames += [ax.hist(gbs,
                                         bins=gbs,
                                         weights=var,

@@ -155,7 +155,7 @@ def calc_cell_volume3D(*, x1: generic_numpy_array, x2: generic_numpy_array, x3: 
     x3vertices = np.insert(x3vertices, x3vertices.shape[0], xx3[-1], axis=0)
     
     x2vertices = 0.5 * (xx2[:, 1:] + xx2[:, :-1])
-    x2vertices = np.insert(x2vertices, 0, xx2[0], axis=1)
+    x2vertices = np.insert(x2vertices, 0, xx2[:,0,:], axis=1)
     x2vertices = np.insert(x2vertices, x2vertices.shape[1], xx2[:, -1], axis=1)
     if coord_system == 'spherical':
         x1vertices = np.sqrt(xx1[...,  1:] * xx1[..., :-1])
@@ -257,7 +257,7 @@ def for_each(func: Callable[..., Any], x: Any) -> None:
         func(i)
         
 def get_iterable(x: Any, func: Callable[..., Sequence[Any]] = list) -> Sequence[Any]:
-    if isinstance(x,  Sequence) and not isinstance(x, str):
+    if isinstance(x,  (Sequence, np.ndarray)) and not isinstance(x, str):
         return func(x)
     else:
         return func((x,))
