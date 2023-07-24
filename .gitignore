@@ -9,6 +9,7 @@ science/
 science
 movies/
 plots/
+simbi/tools/extras/*
 .vscode/
 version.py
 call_obj.cpp
