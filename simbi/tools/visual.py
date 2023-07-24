@@ -192,7 +192,7 @@ class Visualizer:
             plot_parser.add_argument(
                 '--box-depth',
                 help='index depth for projecting 3D data onto 2D plane',
-                type=int,
+                type=float,
                 default=0,
             )
             plot_parser.add_argument(
@@ -255,7 +255,7 @@ class Visualizer:
         field_str = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
         refcount = 0
-        for ax in get_iterable(self.axs):
+        for ax in get_iterable(self.axs, func = list if self.nplots == 1 else iter):
             for file in get_iterable(self.flist[self.current_frame]):
                 fields, setup, mesh = util.read_file(
                     self, file, ndim=self.ndim)
@@ -388,11 +388,14 @@ class Visualizer:
                     yy = mesh['x2'] if self.ndim == 2 else mesh[f'x{self.projection[1]}']
                     if self.ndim == 3:
                         if self.projection[2] == 3:
-                            var = var[self.box_depth]
+                            coord_idx = find_nearest(mesh['x3'], self.box_depth)[0]
+                            var = var[coord_idx]
                         elif self.projection[2] == 2:
-                            var = var[:, self.box_depth, :]
+                            coord_idx = find_nearest(mesh['x2'], self.box_depth)[0]
+                            var = var[:, coord_idx, :]
                         else:
-                            var = var[:, :, self.box_depth]
+                            coord_idx = find_nearest(mesh['x1'], self.box_depth)[0]
+                            var = var[:, :, coord_idx]
 
                     if not self.cartesian:
                         # turn in mesh grid and then reverse
@@ -424,7 +427,7 @@ class Visualizer:
                                 self.axs.set_thetamin(-180)
                                 self.axs.set_thetamax(+180)
                             xx = xx[::theta_sign(idx)] + next(theta_cycle)
-                        elif max_theta > 0.5 * np.pi and patches > 1:
+                        elif (max_theta > 0.5 * np.pi and max_theta < 2.0 * np.pi) and patches > 1:
                             if patches == 2:
                                 hemisphere = np.s_[:]
                             elif patches == 3 and idx == 0:
@@ -437,7 +440,7 @@ class Visualizer:
                             xx = theta_sign(idx) * xx[hemisphere]
                             yy = yy[hemisphere]
                             var = var[hemisphere]
-
+                            
                     color_range = next(self.vrange)
                     if self.log and field not in lin_fields:
                         kwargs = {
@@ -535,23 +538,24 @@ class Visualizer:
             #========================================================
             #               DASHED CURVE
             #========================================================
-            if any(self.xlims):
-                angs = np.linspace(xextent[0], xextent[1], 1000)
-            else:
-                angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], mesh['x2'].size)
-            eps     = 0.2
-            a       = 0.005 * (1 - eps)**(-1/3)
-            b       = 0.005 * (1 - eps)**(2/3)
-            radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
-            # r_theta = radius(angs)
-            from .extras.helpers import equipotential_surfaces
-            r_theta = equipotential_surfaces(**self.extra_args)
+            if self.extra_args:
+                if any(self.xlims):
+                    angs = np.linspace(xextent[0], xextent[1], 1000)
+                else:
+                    angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], mesh['x2'].size)
+                eps     = 0.0
+                a       = 3.0 * (1 - eps)**(-1/3)
+                b       = 3.0 * (1 - eps)**(2/3)
+                radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+                # r_theta = radius(angs)
+                from .extras.helpers import equipotential_surfaces
+                r_theta = equipotential_surfaces(**self.extra_args)
+                
+                ax.plot( angs,  r_theta, linewidth=1, linestyle='--', color='grey')
+                ax.plot(-angs,  r_theta, linewidth=1, linestyle='--', color='grey')
             
-            ax.plot( angs,  r_theta, linewidth=1, linestyle='--', color='white')
-            ax.plot(-angs,  r_theta, linewidth=1, linestyle='--', color='white')
-            
-            time = setup['time'] * util.time_scale
-            if time.value < 1 and self.print:
+            time = setup['time'] # * units.s
+            if time < 1 and self.print:
                 precision = 1
             elif self.print:
                 precision = 2
@@ -567,7 +571,7 @@ class Visualizer:
                 else:
                     #speciifc to publication figure
                     kwargs = {
-                        'y': 1.02 if mesh['x2'].max() == np.pi else 0.8,
+                        'y': 1.03 if mesh['x2'].max() == np.pi else 0.8,
                         #-------------------- Text for ring wedges
                         # 'y': 0.30,
                         # 'x': 0.80,
@@ -599,11 +603,18 @@ class Visualizer:
 
     def plot_histogram(self) -> None:
         colormap = plt.get_cmap(self.cmap[0])
-        colors = np.array([colormap(k) for k in np.linspace(0, 0.90, len(self.files))])
-        for ax in get_iterable(self.axs):
+        nind_curves = len(self.files) if self.nplots == 1 else len(self.files) // self.nplots
+        colors = cycle(np.array([colormap(k) for k in np.linspace(0, 0.90, nind_curves)]))
+        set_labels = cycle([None]) if not self.labels else cycle(self.labels)
+        for axidx, ax in enumerate(ax_iter := get_iterable(self.axs, func = list if self.nplots == 1 else iter)):
             for idx, file in enumerate(
                     get_iterable(self.flist[self.current_frame])):
 
+                if self.nplots > 1:
+                    if idx == len(self.flist) // 2:
+                        ax = next(ax_iter)
+                        axidx += 1
+                    
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 time = setup['time'] * util.time_scale
                 if self.ndim == 1:
@@ -660,42 +671,36 @@ class Visualizer:
                     print('Avg power law index: {:.2f}'.format(alpha))
                     ax.plot(upower, E_0 * upower**(-(alpha - 1)), '--')
 
-                label = None if not self.labels else f'{self.labels[idx]}'
+                label = next(set_labels)
                     
                 if self.xfill_scale:
                     util.fill_below_intersec(
-                        gbs, var, self.xfill_scale, colors[idx], axis='x')
+                        gbs, var, self.xfill_scale, next(colors), axis='x')
                 elif self.yfill_scale:
                      util.fill_below_intersec(
-                        gbs, var, self.yfill_scale * var.max(), colors[idx], axis='y')
+                        gbs, var, self.yfill_scale * var.max(), next(colors), axis='y')
                     
                 self.frames += [ax.hist(gbs,
                                         bins=gbs,
                                         weights=var,
                                         label=label,
-                                        color=colors[idx],
+                                        color=next(colors),
                                         histtype='step',
                                         rwidth=1.0,
                                         linewidth=3.0)]
                 print(f"Computed histogram for {file}")
-                
-
-            if self.setup:
-                if len(self.frames) == 1:
-                    setup = self.setup + f",$~t={time:.1f}$"
-                else:
-                    setup = self.setup
-                ax.set_title(f"{setup}")
-                
-            
-            if self.nplots == 1:
                 ax.set_xscale('log')
                 ax.set_yscale('log')
+                ax.set_xticks([0.0001, 0.001, 0.01, 0.1, 1, 10, 100])
+                ax.set_xticklabels(["0.0001", "0.001", "0.01", "0.1", "1", "10", "100"])
                 if any(self.xlims):
                     ax.set_xlim(*self.xlims)
-                if any(self.ylims):
-                    ax.set_ylim(*self.ylims)
-                ax.set_xlabel(r'$\Gamma\beta $')
+                    
+                if self.nplots == 1 or idx == len(self.flist) - 1:
+                    if any(self.ylims):
+                        ax.set_ylim(*self.ylims)
+                    ax.set_xlabel(r'$\Gamma\beta $')
+                    
                 if self.kinetic:
                     ax.set_ylabel(
                         r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$')
@@ -706,9 +711,22 @@ class Visualizer:
                 else:
                     ax.set_ylabel(
                         r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
-
-                if self.labels:
+                    
+            if self.setup:
+                if len(self.frames) == 1:
+                    setup = self.setup + f",$~t={time:.1f}$"
+                else:
+                    setup = self.setup
+                ax.set_title(f"{setup}")
+                
+            if self.labels:
+                if len(self.axs) > 1:
+                    self.axs[0].legend(loc=self.legend_loc)
+                else:
                     ax.legend(loc=self.legend_loc)
+            
+           
+                
 
     def plot_mean_vs_time(self) -> None:
         weighted_vars = []
@@ -903,18 +921,32 @@ class Visualizer:
                     if self.norm:
                         iso_var /= (4.0 * np.pi)
                         
-                    tbins -= 90
+                    if self.xlims == [-90, 90]:
+                        tbins -= 90
                     ax.step(tbins, iso_var, label=label, linestyle=linestyle, color=colors[cidx], linewidth=1.5)
                     
                     if self.log:
                         ax.set_yscale('log')
+                    
+                    # inset axes....
+                    if self.inset is not None:
+                        import ast
+                        if cidx == 0:
+                            axins = ax.inset_axes([0.15, 0.15, 0.47, 0.47])
+                        axins.step(tbins, iso_var, linestyle=linestyle, color=colors[cidx], linewidth=1.5)
+                        # subregion of the original image
+                        axins.set_xlim(*ast.literal_eval(self.inset['xlims']))
+                        axins.set_ylim(*ast.literal_eval(self.inset['ylims']))
+
+                    
+
                     
                     esn = np.sum(var[gb < 0.1])
                     print(f"Energy left for supernova: {esn:.2e}")
                     
             ax.set_xlabel(r'$\theta~\rm[deg]$')
             if self.norm:
-                ylabel = r'$E_{k}(> \Gamma\beta) [\rm erg]$'
+                ylabel = r'$dE_k/d\Omega(> \Gamma\beta) [\rm erg]$'
             elif self.kinetic:
                 ylabel = r'$E_{k,\rm iso}(> \Gamma\beta) [\rm erg]$'
             elif self.mass:
@@ -992,7 +1024,13 @@ class Visualizer:
                 self.axs.set_xticklabels([])
                 self.axs.set_yticklabels([])
         else:
-            raise NotImplementedError()
+            if not self.square_plot:
+                raise NotImplementedError()
+
+            self.fig, self.axs = plt.subplots(2, 1, figsize=self.fig_dims,sharex=True)
+            for ax in self.axs:
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
 
     def update_frame(self, frame: int):
         self.current_frame = frame
