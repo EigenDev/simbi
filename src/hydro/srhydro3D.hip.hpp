@@ -31,14 +31,14 @@ namespace simbi
         /* Methods */
         SRHD3D();
         SRHD3D(
-            std::vector<std::vector<real>> state3D, 
+            std::vector<std::vector<real>> &state3D, 
             luint nx, 
             luint ny,
             luint nz, 
             real gamma, 
-            std::vector<real> x1,
-            std::vector<real> x2, 
-            std::vector<real> x3,
+            std::vector<real> &x1,
+            std::vector<real> &x2, 
+            std::vector<real> &x3,
             real cfl, 
             std::string coord_system);
         ~SRHD3D();

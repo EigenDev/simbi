@@ -28,10 +28,10 @@ using Eigenvals  =  sr1d::Eigenvals;
 
 // Overloaded Constructor
 SRHD::SRHD(
-    std::vector<std::vector<real>> state, 
+    std::vector<std::vector<real>> &state, 
     real gamma, 
     real cfl,
-    std::vector<real> x1, 
+    std::vector<real> &x1, 
     std::string coord_system = "cartesian") 
 :
     HydroBase(

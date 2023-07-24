@@ -31,10 +31,10 @@ constexpr auto write2file = helpers::write_to_file<hydro1d::PrimitiveSOA, 1, New
 
 // Overloaded Constructor
 Newtonian1D::Newtonian1D(
-    std::vector< std::vector<real> > state, 
+    std::vector< std::vector<real> > &state, 
     real gamma, 
     real cfl, 
-    std::vector<real> x1,
+    std::vector<real> &x1,
     std::string coord_system = "cartesian") 
     :
     HydroBase(

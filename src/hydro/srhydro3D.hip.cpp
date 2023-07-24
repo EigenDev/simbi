@@ -28,11 +28,11 @@ SRHD3D::SRHD3D() {}
 
 // Overloaded Constructor
 SRHD3D::SRHD3D(
-    std::vector<std::vector<real>> state, 
+    std::vector<std::vector<real>> &state, 
     luint nx, luint ny, luint nz, real gamma,
-    std::vector<real> x1, 
-    std::vector<real> x2,
-    std::vector<real> x3, 
+    std::vector<real> &x1, 
+    std::vector<real> &x2,
+    std::vector<real> &x3, 
     real cfl,
     std::string coord_system = "cartesian")
 :
@@ -1152,7 +1152,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->sourceS2       = sources[2];
     this->sourceS3       = sources[3];
     this->sourceTau      = sources[4];
-
+    
     // Define simulation params
     this->object_pos      = object_cells;
     this->chkpt_interval  = chkpt_interval;
@@ -1195,6 +1195,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->energy_source_all_zeros  = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
     define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
     define_chkpt_idx(chkpt_idx);
+
     // Stuff for moving mesh 
     // TODO: make happen at some point
     this->hubble_param = 0.0; //adot(t) / a(t);
@@ -1209,7 +1210,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
         this->inflow_zones[i] = Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]};
     }
-    
+
     // Write some info about the setup for writeup later
     setup.x1max              = x1[xphysical_grid - 1];
     setup.x1min              = x1[0];
@@ -1241,6 +1242,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     troubled_cells.resize(nzones, 0);
     dt_min.resize(active_zones);
     pressure_guess.resize(nzones);
+
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < state[0].size(); i++)
     {

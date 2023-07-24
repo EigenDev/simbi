@@ -29,10 +29,10 @@ namespace simbi {
         
         Newtonian1D() = default;
         Newtonian1D(
-            std::vector<std::vector<real>> state, 
+            std::vector<std::vector<real>> &state, 
             real gamma, 
             real cfl,
-            std::vector<real> x1, 
+            std::vector<real> &x1, 
             std::string coord_system);
         ~Newtonian1D() {};
 

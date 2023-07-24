@@ -29,12 +29,12 @@ Newtonian2D::Newtonian2D () {}
 
 // Overloaded Constructor
 Newtonian2D::Newtonian2D(
-    std::vector<std::vector<real> > state, 
+    std::vector<std::vector<real>> &state, 
     luint nx,
     luint ny,
     real gamma, 
-    std::vector<real> x1, 
-    std::vector<real> x2, 
+    std::vector<real> &x1, 
+    std::vector<real> &x2, 
     real cfl, 
     std::string coord_system = "cartesian")
 :

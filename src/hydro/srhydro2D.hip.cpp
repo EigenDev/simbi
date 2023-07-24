@@ -28,12 +28,12 @@ SRHD2D::SRHD2D() {}
 
 // Overloaded Constructor
 SRHD2D::SRHD2D(
-    std::vector<std::vector<real>> state, 
+    std::vector<std::vector<real>> &state, 
     luint nx, 
     luint ny, 
     real gamma,
-    std::vector<real> x1, 
-    std::vector<real> x2, 
+    std::vector<real> &x1, 
+    std::vector<real> &x2, 
     real cfl,
     std::string coord_system = "cartesian")
 :
