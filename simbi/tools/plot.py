@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import importlib
 from . import visual
 from typing import Optional
-from .utility import DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
+from .utility import BIGGER_SIZE, DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
 from ..detail import get_subparser
 from pathlib import Path
 
@@ -181,9 +181,11 @@ def parse_plotting_arguments(
         help='text in annotations')
     plot_parser.add_argument(
         '--inset',
-        default=False,
-        action='store_true',
-        help='flag for inset plot')
+        default=None,
+        action=ParseKVAction,
+        metavar='KEY=VALUE',
+        nargs='+',
+        help='flag for inset plot. Takes KEY=VALUE for inset x-ylims')
     plot_parser.add_argument(
         '--png',
         default=False,
@@ -312,20 +314,20 @@ def main(
         *_) -> None:
     parser, (args, _) = parse_plotting_arguments(parser)
 
-    plt.rc('font', size=DEFAULT_SIZE)          # controls default text sizes
-    plt.rc('axes', titlesize=DEFAULT_SIZE)     # fontsize of the axes title
-    plt.rc('axes', labelsize=DEFAULT_SIZE)     # fontsize of the x and y labels
-    plt.rc('xtick', labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
-    plt.rc('ytick', labelsize=DEFAULT_SIZE)     # fontsize of the tick labels
-    plt.rc('legend', fontsize=DEFAULT_SIZE)      # legend fontsize
-    plt.rc('figure', titlesize=DEFAULT_SIZE)     # fontsize of the figure title
+    plt.rc('font', size=BIGGER_SIZE)          # controls default text sizes
+    plt.rc('axes', titlesize=BIGGER_SIZE)     # fontsize of the axes title
+    plt.rc('axes', labelsize=BIGGER_SIZE)     # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=BIGGER_SIZE)     # fontsize of the tick labels
+    plt.rc('ytick', labelsize=BIGGER_SIZE)     # fontsize of the tick labels
+    plt.rc('legend', fontsize=BIGGER_SIZE)      # legend fontsize
+    plt.rc('figure', titlesize=BIGGER_SIZE)     # fontsize of the figure title
     if args.tex:
         plt.rcParams.update(
             {
                 "text.usetex": True,
                 "font.family": "serif",
                 "font.serif": "Times New Roman",
-                "font.size": DEFAULT_SIZE
+                "font.size": BIGGER_SIZE
             }
         )
         
