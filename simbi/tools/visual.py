@@ -4,8 +4,10 @@ import matplotlib.colors as mcolors
 import argparse
 import matplotlib.ticker as tkr
 from itertools import cycle
+from cycler import cycler
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from . import utility as util
+from ..detail import ParseKVAction
 from ..detail.slogger import logger
 from ..detail.helpers import (
     get_iterable,
@@ -172,9 +174,9 @@ class Visualizer:
             plot_parser.add_argument(
                 '--coords',
                 help = 'coordinates of fixed vars for (n-m)d projection',
-                type=float,
+                action=ParseKVAction,
                 nargs = '+',
-                default=[0.0],
+                default={'x2': [0.0], 'x3': [0.0]},
             )
             plot_parser.add_argument(
                 '--projection',
@@ -249,6 +251,9 @@ class Visualizer:
            self.dx_domega or
            self.oned_slice):
             self.square_plot = True
+            
+        if self.oned_slice and 'x3' not in self.coords:
+            self.coords['x3'] = '0.0'
         self.create_figure()
 
     def plot_1d(self):
@@ -280,22 +285,23 @@ class Visualizer:
                     
                     if self.oned_slice:
                         x = mesh[self.oned_slice]
-                        x2coord = self.coords[0]
-                        if not self.cartesian:
-                            x2coord = np.deg2rad(self.coords[0])
-                        yidx = find_nearest(mesh['x2'], x2coord)[0]
-                        var = var[yidx]
-                        if len(self.coords) > 1:
-                            x3coord = self.coord[1]
-                            if not self.cartesian:
-                                x3coord = np.deg2rad(self.coords[1])
-                            zidx = find_nearest(mesh['x3'], x3coord)[0]
-                            var = [zidx,yidx]
+                        for x3coord in map(float, self.coords['x3'].split(',')):
+                            for x2coord in map(float, self.coords['x2'].split(',')):
+                                label = field_str + f", $x_2={x2coord:.2f}$"
+                                if not self.cartesian:
+                                    x2coord = np.deg2rad(x2coord)
+                                yidx = find_nearest(mesh['x2'], x2coord)[0]
+                                if self.ndim == 2:
+                                    yvar = var[yidx]
+                                else:
+                                    zidx = find_nearest(mesh['x3'], x3coord)[0]
+                                    yvar=var[zidx,yidx]
+                                    label += f', $x_3={x3coord:.2f}$'
+                                line, = ax.plot(mesh['x1'], yvar / scale, label=label)
                     else:
                         x = mesh['x1']
+                        line, = ax.plot(mesh['x1'], var / scale, label=label)
                         
-                    
-                    line, = ax.plot(mesh['x1'], var / scale, label=label)
                     self.frames += [line]
                     # BMK REF
                     if self.pictorial and refcount == 0:
@@ -306,15 +312,8 @@ class Visualizer:
                         self.refy    = var.max()
                         self.refs   += [ref]
                         refcount += 1
-
-        box_coord = ''
-        if self.oned_slice:
-            precisions = [0 if x.is_integer() else 1 for x in self.coords]
-            box_coord = f' $x_2 = {self.coords[0]:.{precisions[0]}f}$'
-            if len(self.coords) > 1:
-                box_coord += f', $x_3={self.coords[1]:.{precisions[1]}f}$'
                 
-        ax.set_title(f'{self.setup} t = {setup["time"]:.2f}' + box_coord)
+        ax.set_title(f'{self.setup} t = {setup["time"]:.2f}')
         if self.log:
             ax.set_xscale('log')
             ax.set_yscale('log')
@@ -324,7 +323,7 @@ class Visualizer:
         # ax.set_xscale('log')
         if len(self.fields) == 1:
             ax.set_ylabel(field_str)
-        elif self.legend:
+        if self.legend:
             ax.legend(loc=self.legend_loc)
 
         if any(self.xlims):
@@ -512,6 +511,7 @@ class Visualizer:
                                 cbar = self.fig.colorbar(
                                     self.frames[idx], orientation=cbar_orientation, cax=cbaxes, format=cbarfmt)
                             else:
+                                cbarfmt = None
                                 cbar = self.fig.colorbar(
                                     self.frames[idx], orientation=cbar_orientation, cax=cbaxes)
 
@@ -544,8 +544,8 @@ class Visualizer:
                 else:
                     angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], mesh['x2'].size)
                 eps     = 0.0
-                a       = 3.0 * (1 - eps)**(-1/3)
-                b       = 3.0 * (1 - eps)**(2/3)
+                a       = 2.5 * (1 - eps)**(-1/3)
+                b       = 2.5 * (1 - eps)**(2/3)
                 radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
                 # r_theta = radius(angs)
                 from .extras.helpers import equipotential_surfaces
@@ -603,8 +603,6 @@ class Visualizer:
 
     def plot_histogram(self) -> None:
         colormap = plt.get_cmap(self.cmap[0])
-        nind_curves = len(self.files) if self.nplots == 1 else len(self.files) // self.nplots
-        colors = cycle(np.array([colormap(k) for k in np.linspace(0, 0.90, nind_curves)]))
         set_labels = cycle([None]) if not self.labels else cycle(self.labels)
         for axidx, ax in enumerate(ax_iter := get_iterable(self.axs, func = list if self.nplots == 1 else iter)):
             for idx, file in enumerate(
@@ -675,16 +673,15 @@ class Visualizer:
                     
                 if self.xfill_scale:
                     util.fill_below_intersec(
-                        gbs, var, self.xfill_scale, next(colors), axis='x')
+                        gbs, var, self.xfill_scale, axis='x')
                 elif self.yfill_scale:
                      util.fill_below_intersec(
-                        gbs, var, self.yfill_scale * var.max(), next(colors), axis='y')
+                        gbs, var, self.yfill_scale * var.max(), axis='y')
                 
                 self.frames += [ax.hist(gbs,
                                         bins=gbs,
                                         weights=var,
                                         label=label,
-                                        color=next(colors),
                                         histtype='step',
                                         rwidth=1.0,
                                         linewidth=3.0)]
@@ -720,7 +717,7 @@ class Visualizer:
                 ax.set_title(f"{setup}")
                 
             if self.labels:
-                if len(self.axs) > 1:
+                if sum(1 for _ in ax_iter) > 1:
                     self.axs[0].legend(loc=self.legend_loc)
                 else:
                     ax.legend(loc=self.legend_loc)
@@ -738,11 +735,6 @@ class Visualizer:
         if not isinstance(self.flist, dict):
             self.flist = {0: self.flist}
 
-        cmap = plt.cm.get_cmap(self.cmap[0])
-        colors = util.get_colors(
-            np.linspace(
-                0, 1, len(
-                    self.flist.keys())), cmap)
         for key in self.flist.keys():
             weighted_vars = []
             times = []
@@ -778,7 +770,6 @@ class Visualizer:
             self.frames += [self.axs.plot(times,
                                           data,
                                           label=label,
-                                          color=colors[key],
                                           alpha=1.0)]
 
             # at_the_end = key == len(self.flist.keys()) - 1
@@ -823,20 +814,18 @@ class Visualizer:
             self.axs.legend(loc=self.legend_loc)
 
     def plot_dx_domega(self) -> None:
-        linestyles = cycle(['-', '--', ':', '-.'])
-        colormap = plt.get_cmap(self.cmap[0])
-        if len(self.files) > 1:
-            colors = np.array([colormap(k) for k in np.linspace(0, 0.75, len(self.files))])
-        else:
-            colors = np.array([colormap(k) for k in np.linspace(0, 0.75, len(self.cutoffs))])
-            
-        for ax in get_iterable(self.axs):
+        for axidx, ax in enumerate(ax_iter := get_iterable(self.axs, func=list if self.nplots == 1 else iter)):
             for idx, file in enumerate(
                     get_iterable(self.flist[self.current_frame])):
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 gb = fields['gamma_beta']
                 time = setup['time'] * util.time_scale
                 
+                if self.nplots > 1:
+                    if idx == len(self.flist) // 2:
+                        ax = next(ax_iter)
+                        axidx += 1
+                        
                 if self.ndim == 2:
                     dV = calc_cell_volume2D(x1=mesh['x1'], x2=mesh['x2'])
                     domega = calc_domega(x2=mesh['x2'])
@@ -864,8 +853,7 @@ class Visualizer:
                 
                 theta  = np.rad2deg(mesh['x2'])
                 for cidx, cutoff in enumerate(self.cutoffs):
-                    linestyle = next(linestyles)
-                    deg_per_bin      = 0.001 # degrees in bin 
+                    deg_per_bin      = 0.0001 # degrees in bin 
                     num_bins         = int((mesh['x2'][-1] - mesh['x2'][0]) / deg_per_bin) 
                     if num_bins > theta.size:
                         num_bins = theta.size
@@ -919,34 +907,62 @@ class Visualizer:
                         label = None
                     color_idx = idx if len(self.fields) > 1 else cidx
                     if self.norm:
-                        iso_var /= (4.0 * np.pi)
+                        iso_var *= dw / (4.0 * np.pi)
+                        # iso_var /= (4.0 * np.pi)
                         
                     if self.xlims == [-90, 90]:
                         tbins -= 90
-                    ax.step(tbins, iso_var, label=label, linestyle=linestyle, color=colors[cidx], linewidth=1.5)
-                    
+                    # ax.plot(np.rad2deg(mesh['x2']), cdf, label=label)
+                    ax.step(tbins, iso_var, label=label)
                     if self.log:
                         ax.set_yscale('log')
-                    
+                        
+                    if self.broken_ax:
+                        d = .5  # proportion of vertical to horizontal extent of the slanted line
+                        kwargs = dict(marker=[(-1, -d), (1, d)], markersize=12,
+                                    linestyle="none", color='k', mec='k', mew=1, clip_on=False)
+                        
+                        # hide the spines between ax and ax2
+                        if axidx == 0:
+                            ax.spines['bottom'].set_visible(False)
+                            ax.set_ylim(1e49,1e50)
+                            ax.plot(0, 0, transform=self.axs[0].transAxes, **kwargs)
+                            ax.set_xticks([])
+                            # mf = tkr.ScalarFormatter(useMathText=True)
+                            # mf.set_powerlimits((-1,1))
+                            # ax.yaxis.set_major_formatter(mf)
+                            # ax.set_yticklabels([r'$10^{50}$', r'$10^{51}$'])
+                            # mf = tkr.ScalarFormatter(useMathText=True)
+                            # mf.set_powerlimits((-2,2))
+                            # plt.gca().yaxis.set_major_formatter(mf)
+                            # ax.ticklabel_format(axis='y', scilimits=[-3, 3])
+                        else:
+                            ax.plot(0, 1, transform=self.axs[1].transAxes, **kwargs)
+                            ax.set_ylim(1e45,5e46)
+                        
                     # inset axes....
                     if self.inset is not None:
                         import ast
                         if cidx == 0:
-                            axins = ax.inset_axes([0.15, 0.15, 0.47, 0.47])
-                        axins.step(tbins, iso_var, linestyle=linestyle, color=colors[cidx], linewidth=1.5)
+                            if self.broken_ax:
+                                axins = self.axs[1].inset_axes([0.2, 0.15, 0.47, 0.87])
+                            else:
+                                axins = ax.inset_axes([0.2, 0.15, 0.47, 0.47])
+                        axins.step(tbins, iso_var)
                         # subregion of the original image
                         axins.set_xlim(*ast.literal_eval(self.inset['xlims']))
                         axins.set_ylim(*ast.literal_eval(self.inset['ylims']))
-
-                    
-
                     
                     esn = np.sum(var[gb < 0.1])
                     print(f"Energy left for supernova: {esn:.2e}")
-                    
-            ax.set_xlabel(r'$\theta~\rm[deg]$')
+            
+            
+            if axidx == len(get_iterable(self.axs)) - 1: 
+                ax.set_xlabel(r'$\phi~\rm[deg]$')
+                
             if self.norm:
-                ylabel = r'$dE_k/d\Omega(> \Gamma\beta) [\rm erg]$'
+                ylabel = r'$E_{k,\phi}(> \Gamma\beta) [\rm erg]$'
+                # ylabel = r'$dE_{k}/d\Omega(> \Gamma\beta) [\rm erg]$'
             elif self.kinetic:
                 ylabel = r'$E_{k,\rm iso}(> \Gamma\beta) [\rm erg]$'
             elif self.mass:
@@ -956,7 +972,10 @@ class Visualizer:
             else:
                 ylabel = r'$E_{\rm iso}(> \Gamma\beta) [\rm g]$'
             
-            ax.set_ylabel(ylabel)
+            if len(get_iterable(self.axs)) > 1:
+                self.fig.supylabel(ylabel)
+            else:
+                ax.set_ylabel(ylabel)
             
 
             if any(self.xlims):
@@ -969,9 +988,11 @@ class Visualizer:
             
             if self.setup:
                 ax.set_title(f"{self.setup}")
-            ax.legend()
-                
-                    
+            if len(get_iterable(self.axs)) > 1:
+                self.axs[0].legend()
+            else:
+                ax.legend()
+    
                 
     def plot(self) -> None:
         self.frames = []
@@ -1006,12 +1027,26 @@ class Visualizer:
     def create_figure(self) -> None:
         if self.nplots == 1:
             if self.square_plot:
-                # colormap = plt.get_cmap(self.cmap[0])
-                # default_cycler = (cycler(color=[colormap(k) for k in np.linspace(0, 1, 4)]))
-                # plt.rc('axes', prop_cycle=default_cycler)
-                self.fig, self.axs = plt.subplots(1, 1, figsize=self.fig_dims)
-                self.axs.spines['top'].set_visible(False)
-                self.axs.spines['right'].set_visible(False)
+                colormap = plt.get_cmap(self.cmap[0])
+                if self.nplots == 1:
+                    nind_curves = max(len(self.fields), len(self.files),
+                                      len(self.cutoffs), len(self.coords['x2'].split(',')) *
+                                      len(self.coords['x3'].split(',')))
+                else:
+                    nind_curves = len(self.files) // self.nplots
+                
+                colors     = np.array([colormap(k) for k in np.linspace(0, 0.90, nind_curves)])
+                linestyles = [x[0] for x in zip(cycle(['-', '--', ':', '-.']), colors)]
+                default_cycler = (cycler(color=colors) +
+                                  cycler(linestyle=linestyles)
+                )
+                plt.rc('axes', prop_cycle=default_cycler)
+                nplots = self.broken_ax + 1
+                self.fig, self.axs = plt.subplots(nplots, 1, figsize=self.fig_dims, sharex=False)
+                # self.fig.subplots_adjust(hspace=0.05)
+                for ax in get_iterable(self.axs):
+                    ax.spines['top'].set_visible(False)
+                    ax.spines['right'].set_visible(False)
             else:
                 self.fig, self.axs = plt.subplots(
                     1, 1,

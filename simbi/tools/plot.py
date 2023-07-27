@@ -5,22 +5,10 @@ import importlib
 from . import visual
 from typing import Optional
 from .utility import BIGGER_SIZE, DEFAULT_SIZE, SMALL_SIZE, get_dimensionality, get_file_list
-from ..detail import get_subparser
+from ..detail import get_subparser, ParseKVAction
 from pathlib import Path
 
 tool_src = Path(__file__).resolve().parent / 'tools'
-
-class ParseKVAction(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        setattr(namespace, self.dest, dict())
-        for each in values:
-            try:
-                key, value = each.split("=")
-                getattr(namespace, self.dest)[key] = value
-            except ValueError as ex:
-                message = "\nTraceback: {}".format(ex)
-                message += "\nError on '{}' || It should be 'key=value'".format(each)
-                raise argparse.ArgumentError(self, str(message))
             
 def colorbar_limits(c):
     try:
@@ -291,7 +279,12 @@ def parse_plotting_arguments(
         help='accepts dict style args KEY=VALUE',
         metavar="KEY=VALUE",
     )
-    
+    plot_parser.add_argument(
+        "--broken-ax",
+        action='store_true',
+        default=False,
+        help='flag to break bounds on dx-domega plot',
+    )
     fillgroup = plot_parser.add_mutually_exclusive_group()
     fillgroup.add_argument(
         '--xfill-scale',
