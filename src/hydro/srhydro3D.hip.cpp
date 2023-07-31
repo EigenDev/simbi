@@ -1052,23 +1052,23 @@ void SRHD3D::advance(
                 }
             case simbi::Geometry::SPHERICAL:
                 {
-                    const real rl           = (ii > 0 ) ? x1min * std::pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
-                    const real rr           = (ii < xpg - 1) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
-                    const real tl           = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
-                    const real tr           = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
-                    const real ql           = (kk > 0 ) ? x3min + (kk - static_cast<real>(0.5)) * dx3 :  x3min;
-                    const real qr           = (kk < zpg - 1) ? ql + dx3 * (kk == 0 ? 0.5 : 1.0) :  x3max; 
-                    const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
-                    const real s1R          = rr * rr; 
-                    const real s1L          = rl * rl; 
-                    const real s2R          = std::sin(tr);
-                    const real s2L          = std::sin(tl);
-                    const real thmean       = static_cast<real>(0.5) * (tl + tr);
-                    const real sint         = std::sin(thmean);
-                    const real dV1          = rmean * rmean * (rr - rl);             
-                    const real dV2          = rmean * sint  * (tr - tl); 
-                    const real dV3          = rmean * sint  * (qr - ql); 
-                    const real cot          = std::cos(thmean) / sint;
+                    const real rl     = (ii > 0 ) ? x1min * std::pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
+                    const real rr     = (ii < xpg - 1) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
+                    const real tl     = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
+                    const real tr     = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
+                    const real ql     = (kk > 0 ) ? x3min + (kk - static_cast<real>(0.5)) * dx3 :  x3min;
+                    const real qr     = (kk < zpg - 1) ? ql + dx3 * (kk == 0 ? 0.5 : 1.0) :  x3max; 
+                    const real rmean  = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
+                    const real s1R    = rr * rr; 
+                    const real s1L    = rl * rl; 
+                    const real s2R    = std::sin(tr);
+                    const real s2L    = std::sin(tl);
+                    const real thmean = static_cast<real>(0.5) * (tl + tr);
+                    const real sint   = std::sin(thmean);
+                    const real dV1    = rmean * rmean * (rr - rl);             
+                    const real dV2    = rmean * sint  * (tr - tl); 
+                    const real dV3    = rmean * sint  * (qr - ql); 
+                    const real cot    = std::cos(thmean) / sint;
 
                     // Grab central primitives
                     const real rhoc = prim_buff[txa + tya * xstride + tza * xstride * ystride].rho;
@@ -1080,7 +1080,12 @@ void SRHD3D::advance(
                     const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
                     const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
 
-                    const Conserved geom_source  = {0, (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1, - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L)/dV2 , - rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean, 0};
+                    const Conserved geom_source  = {0, 
+                        (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1,
+                        rhoc * hc * gam2 * (wc * wc * cot - uc * vc) / rmean + pc * (s2R - s2L)/dV2 , 
+                        - rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean, 
+                        0
+                    };
                     cons_data[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 + (hrf - hlf) / dV3 - geom_source - source_terms) * dt * step;
                     break;
                 }

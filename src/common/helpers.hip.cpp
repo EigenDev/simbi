@@ -745,8 +745,8 @@ namespace simbi{
                         cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)];
                         cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
                         if (half_sphere) {
-                            cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)].s2 = - cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)].s2;
-                            cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)].s2 = - cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)].s2;
+                            cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)].s2 *= - 1;
+                            cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)].s2 *= - 1;
                         }
                         break;
                     case simbi::Geometry::CYLINDRICAL:
