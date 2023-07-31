@@ -21,7 +21,7 @@ cdef extern from "common/enums.hpp":
 cdef extern from "hydro/euler1D.hpp" namespace "simbi":
     cdef cppclass Newtonian1D:
         Newtonian1D() except + 
-        Newtonian1D(&vector[vector[real]], real, real, &vector[real], string) except +  
+        Newtonian1D(vector[vector[real]], real, real, vector[real], string) except +  
         vector[vector [real]] simulate1D(
             vector[vector[real]] sources,
             real tstart,
@@ -42,7 +42,7 @@ cdef extern from "hydro/euler1D.hpp" namespace "simbi":
 cdef extern from "hydro/euler2D.hpp" namespace "simbi":
     cdef cppclass Newtonian2D:
         Newtonian2D() except +
-        Newtonian2D(&vector[vector[real]], int nx, int ny, real, &vector[real], &vector[real],
+        Newtonian2D(vector[vector[real]], int nx, int ny, real, vector[real], vector[real],
                     real, string) except + 
         real theta, gamma
         bool first_order
@@ -69,7 +69,7 @@ cdef extern from "hydro/euler2D.hpp" namespace "simbi":
 cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD:
         SRHD() except +
-        SRHD(&vector[vector[real]], real, real, &vector[real], string) except + 
+        SRHD(vector[vector[real]], real, real, vector[real], string) except + 
         real theta, gamma, tend, dlogt, cfl
         bool first_order, linspace
         string coord_system
@@ -121,7 +121,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
 cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD2D:
         SRHD2D() except +
-        SRHD2D(&vector[vector[real]], int, int, real, &vector[real], &vector[real],
+        SRHD2D(vector[vector[real]], int, int, real, vector[real], vector[real],
                     real, string) except + 
         real theta, gamma
         int nx, ny
@@ -180,14 +180,14 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
     cdef cppclass SRHD3D:
         SRHD3D() except +
         SRHD3D(
-            &vector[vector[real]] state, 
+            vector[vector[real]] state, 
             int nx, 
             int ny,
             int nz,
             real ad_gamma,
-            &vector[real] x1, 
-            &vector[real] x2,
-            &vector[real] x3,
+            vector[real] x1, 
+            vector[real] x2,
+            vector[real] x3,
             real cfl,
             string coord_system) except + 
         real theta, gamma
