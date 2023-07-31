@@ -9,6 +9,7 @@ science/
 science
 movies/
 plots/
+scripts/
 simbi/tools/extras/*
 .vscode/
 version.py
