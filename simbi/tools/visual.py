@@ -176,7 +176,7 @@ class Visualizer:
                 help = 'coordinates of fixed vars for (n-m)d projection',
                 action=ParseKVAction,
                 nargs = '+',
-                default={'x2': [0.0], 'x3': [0.0]},
+                default={'x2': '0.0', 'x3': '0.0'},
             )
             plot_parser.add_argument(
                 '--projection',
@@ -277,8 +277,11 @@ class Visualizer:
                             var *= util.edens_scale.value
                         elif field in ['rho', 'D']:
                             var *= util.rho_scale.value
-                            
-                    label = field_str[idx]
+                    
+                    if not isinstance(field_str, str):
+                        label = field_str[idx]
+                    else:
+                        label = field_str
                     scale = next(scale_cycle)
                     if scale != 1:
                         label = label + f'/{int(scale)}'
@@ -287,17 +290,19 @@ class Visualizer:
                         x = mesh[self.oned_slice]
                         for x3coord in map(float, self.coords['x3'].split(',')):
                             for x2coord in map(float, self.coords['x2'].split(',')):
-                                label = field_str + f", $x_2={x2coord:.2f}$"
+                                coord_label =label + f", $x_2={x2coord:.1f}$"
                                 if not self.cartesian:
                                     x2coord = np.deg2rad(x2coord)
                                 yidx = find_nearest(mesh['x2'], x2coord)[0]
                                 if self.ndim == 2:
                                     yvar = var[yidx]
                                 else:
+                                    coord_label += f', $x_3={x3coord:.1f}$'
+                                    if not self.cartesian:
+                                        x3coord = np.deg2rad(x3coord)
                                     zidx = find_nearest(mesh['x3'], x3coord)[0]
                                     yvar=var[zidx,yidx]
-                                    label += f', $x_3={x3coord:.2f}$'
-                                line, = ax.plot(mesh['x1'], yvar / scale, label=label)
+                                line, = ax.plot(mesh['x1'], yvar / scale, label=coord_label)
                     else:
                         x = mesh['x1']
                         line, = ax.plot(mesh['x1'], var / scale, label=label)
@@ -907,8 +912,8 @@ class Visualizer:
                         label = None
                     color_idx = idx if len(self.fields) > 1 else cidx
                     if self.norm:
-                        iso_var *= dw / (4.0 * np.pi)
-                        # iso_var /= (4.0 * np.pi)
+                        # iso_var *= dw / (4.0 * np.pi)
+                        iso_var /= (4.0 * np.pi)
                         
                     if self.xlims == [-90, 90]:
                         tbins -= 90
@@ -938,7 +943,7 @@ class Visualizer:
                             # ax.ticklabel_format(axis='y', scilimits=[-3, 3])
                         else:
                             ax.plot(0, 1, transform=self.axs[1].transAxes, **kwargs)
-                            ax.set_ylim(1e45,5e46)
+                            ax.set_ylim(1e44,5e45)
                         
                     # inset axes....
                     if self.inset is not None:
@@ -961,8 +966,8 @@ class Visualizer:
                 ax.set_xlabel(r'$\phi~\rm[deg]$')
                 
             if self.norm:
-                ylabel = r'$E_{k,\phi}(> \Gamma\beta) [\rm erg]$'
-                # ylabel = r'$dE_{k}/d\Omega(> \Gamma\beta) [\rm erg]$'
+                # ylabel = r'$E_{k,\phi}(> \Gamma\beta) [\rm erg]$'
+                ylabel = r'$dE_{k}/d\Omega(> \Gamma\beta) [\rm erg]$'
             elif self.kinetic:
                 ylabel = r'$E_{k,\rm iso}(> \Gamma\beta) [\rm erg]$'
             elif self.mass:
