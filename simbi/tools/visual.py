@@ -6,6 +6,7 @@ import matplotlib.ticker as tkr
 from itertools import cycle
 from cycler import cycler
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.offsetbox import AnchoredText
 from . import utility as util
 from ..detail import ParseKVAction
 from ..detail.slogger import logger
@@ -56,8 +57,6 @@ def tuple_arg(param: str) -> tuple[int]:
         return tuple(int(arg) for arg in param.split(','))
     except BaseException:
         raise argparse.ArgumentTypeError("argument must be tuple of ints")
-
-
 
 class Visualizer:
     def __init__(self, parser: argparse.ArgumentParser, ndim: int) -> None:
@@ -256,6 +255,14 @@ class Visualizer:
             self.coords['x3'] = '0.0'
         self.create_figure()
 
+    def place_annotation(self, ax: plt.Axes, anchor_text: str) -> None:
+        at = AnchoredText(
+            rf'{anchor_text}',
+            frameon=False, 
+            loc=self.annot_loc,
+        )
+        ax.add_artist(at)
+    
     def plot_1d(self):
         field_str = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
@@ -531,7 +538,7 @@ class Visualizer:
                                 cbaxes.yaxis.set_ticks_position('left')
                             if self.log and field not in lin_fields:
                                 set_cbar_label(
-                                    r'$\log$[{}]'.format(
+                                    r'$\log~${}'.format(
                                         field_str[idx]), labelpad=labelpad)
                             else:
                                 set_cbar_label(
@@ -549,8 +556,8 @@ class Visualizer:
                 else:
                     angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], mesh['x2'].size)
                 eps     = 0.0
-                a       = 2.5 * (1 - eps)**(-1/3)
-                b       = 2.5 * (1 - eps)**(2/3)
+                a       = 3.5 * (1 - eps)**(-1/3)
+                b       = 3.5 * (1 - eps)**(2/3)
                 radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
                 # r_theta = radius(angs)
                 from .extras.helpers import equipotential_surfaces
@@ -609,6 +616,7 @@ class Visualizer:
     def plot_histogram(self) -> None:
         colormap = plt.get_cmap(self.cmap[0])
         set_labels = cycle([None]) if not self.labels else cycle(self.labels)
+        annotation_placed = False
         for axidx, ax in enumerate(ax_iter := get_iterable(self.axs, func = list if self.nplots == 1 else iter)):
             for idx, file in enumerate(
                     get_iterable(self.flist[self.current_frame])):
@@ -617,6 +625,7 @@ class Visualizer:
                     if idx == len(self.flist) // 2:
                         ax = next(ax_iter)
                         axidx += 1
+                        annotation_placed = False
                     
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 time = setup['time'] * util.time_scale
@@ -705,7 +714,7 @@ class Visualizer:
                     
                 if self.kinetic:
                     ax.set_ylabel(
-                        r'$E_{\rm K}( > \Gamma \beta) \ [\rm{erg}]$')
+                        r'$E_{\rm k}( > \Gamma \beta) \ [\rm{erg}]$')
                 elif self.enthalpy:
                     ax.set_ylabel(r'$H ( > \Gamma \beta) \ [\rm{erg}]$')
                 elif self.mass:
@@ -713,6 +722,15 @@ class Visualizer:
                 else:
                     ax.set_ylabel(
                         r'$E_{\rm T}( > \Gamma \beta) \ [\rm{erg}]$')
+                
+                if self.annot_text:
+                    if not annotation_placed:
+                        try:
+                            annotation = self.annot_text[axidx]
+                        except IndexError:
+                            annotation = ''
+                        self.place_annotation(ax, annotation)
+                        annotation_placed = True
                     
             if self.setup:
                 if len(self.frames) == 1:
@@ -722,10 +740,11 @@ class Visualizer:
                 ax.set_title(f"{setup}")
                 
             if self.labels:
-                if sum(1 for _ in ax_iter) > 1:
+                if self.nplots > 1:
                     self.axs[0].legend(loc=self.legend_loc)
                 else:
                     ax.legend(loc=self.legend_loc)
+                    
             
            
                 
@@ -819,6 +838,7 @@ class Visualizer:
             self.axs.legend(loc=self.legend_loc)
 
     def plot_dx_domega(self) -> None:
+        annotation_placed = False
         for axidx, ax in enumerate(ax_iter := get_iterable(self.axs, func=list if self.nplots == 1 else iter)):
             for idx, file in enumerate(
                     get_iterable(self.flist[self.current_frame])):
@@ -830,6 +850,7 @@ class Visualizer:
                     if idx == len(self.flist) // 2:
                         ax = next(ax_iter)
                         axidx += 1
+                        annotation_placed = False
                         
                 if self.ndim == 2:
                     dV = calc_cell_volume2D(x1=mesh['x1'], x2=mesh['x2'])
@@ -993,11 +1014,20 @@ class Visualizer:
             
             if self.setup:
                 ax.set_title(f"{self.setup}")
-            if len(get_iterable(self.axs)) > 1:
-                self.axs[0].legend()
-            else:
-                ax.legend()
-    
+            
+            if self.annot_text:
+                    if not annotation_placed:
+                        try:
+                            annotation = self.annot_text[axidx]
+                        except IndexError:
+                            annotation = ''
+                        self.place_annotation(ax, annotation)
+                        annotation_placed = True
+                        
+        if self.nplots > 1 or self.broken_ax:
+            self.axs[0].legend()
+        else:
+            ax.legend()
                 
     def plot(self) -> None:
         self.frames = []
@@ -1024,28 +1054,31 @@ class Visualizer:
             self.fig.savefig(fig_name, dpi=600, transparent=self.transparent, bbox_inches=self.bbox_kind)
         else:
             self.animation.save("{}.mp4".format(
-                self.save.replace(" ", "_")), dpi=600,
+                self.save.replace(" ", "_")), 
+                dpi=600,
+                # bbox_inches=self.bbox_kind,
                 progress_callback=lambda i, n: print(
                 f'Saving frame {i} of {n}', end='\r', flush=True)
             )
 
     def create_figure(self) -> None:
+        colormap = plt.get_cmap(self.cmap[0])
+        if self.nplots == 1:
+            nind_curves = max(len(self.fields), len(self.files),
+                            len(self.cutoffs), len(self.coords['x2'].split(',')) *
+                            len(self.coords['x3'].split(',')))
+        else:
+            nind_curves = len(self.files) // self.nplots
+        colors     = np.array([colormap(k) for k in np.linspace(0, 0.90, nind_curves)])
+        linestyles = ['-', '--', ':', '-.']
+        # linestyles = [x[0] for x in zip(cycle(['-', '--', ':', '-.']), colors)]
+        default_cycler = (cycler(linestyle=linestyles) * 
+                          cycler(color=colors)
+                        
+        )
+        plt.rc('axes', prop_cycle=default_cycler)
         if self.nplots == 1:
             if self.square_plot:
-                colormap = plt.get_cmap(self.cmap[0])
-                if self.nplots == 1:
-                    nind_curves = max(len(self.fields), len(self.files),
-                                      len(self.cutoffs), len(self.coords['x2'].split(',')) *
-                                      len(self.coords['x3'].split(',')))
-                else:
-                    nind_curves = len(self.files) // self.nplots
-                
-                colors     = np.array([colormap(k) for k in np.linspace(0, 0.90, nind_curves)])
-                linestyles = [x[0] for x in zip(cycle(['-', '--', ':', '-.']), colors)]
-                default_cycler = (cycler(color=colors) +
-                                  cycler(linestyle=linestyles)
-                )
-                plt.rc('axes', prop_cycle=default_cycler)
                 nplots = self.broken_ax + 1
                 self.fig, self.axs = plt.subplots(nplots, 1, figsize=self.fig_dims, sharex=False)
                 # self.fig.subplots_adjust(hspace=0.05)
@@ -1077,13 +1110,24 @@ class Visualizer:
         fields, setups, mesh = util.read_file(
             self, self.flist[frame], ndim=self.ndim)
         time = setups['time'] * (util.time_scale if self.units else 1.0)
-        
-        if self.cartesian:
-            self.axs.set_title('{} at t = {:.2f}'.format(self.setup, time))
-        else:
-            self.fig.suptitle(
-                '{} at t = {:.2f}'.format(
-                    self.setup, setups['time']), y=0.8)
+        if self.setup:
+            title = rf'{self.setup} at t = {time:.1f}'
+            if self.cartesian:
+                self.axs.set_title(title)
+            else:
+                #speciifc to publication figure
+                kwargs = {
+                    'y': 0.95 if mesh['x2'].max() == np.pi else 0.8,
+                    #-------------------- Text for ring wedges
+                    # 'y': 0.30,
+                    # 'x': 0.80,
+                    # 'color': 'white'
+                    #------------------- Text for jet wedges
+                    # 'y': 0.9,
+                    # 'x': 0.32,
+                    # 'color': 'white',
+                }
+                self.fig.suptitle(title, **kwargs)
 
         scale_cycle = cycle(self.scale_downs)
         for idx, field in enumerate(self.fields):
@@ -1094,6 +1138,12 @@ class Visualizer:
                     field = 'v1'
                 var = fields[field]
 
+            if self.units:
+                if field in ['p', 'energy', 'energy_rst']:
+                    var *= util.edens_scale.value
+                elif field in ['rho', 'D']:
+                    var *= util.rho_scale.value
+                    
             if self.ndim == 1:
                 self.axs.set_xlim(mesh['x1'][0], mesh['x1'][-1])
                 self.frames[idx].set_data(mesh['x1'], var / next(scale_cycle))
@@ -1101,8 +1151,11 @@ class Visualizer:
                 # x = mesh['x1']
                 # self.refs[idx].set_data(x, self.refy * (x / self.refx) ** (-3/2))
             elif self.ndim == 2:
-                # affect the generator w/o using output
-                any(drawing.set_array(var.ravel()) for drawing in self.frames)
+                if len(self.fields) > 1:
+                    self.frames[idx].set_array(var.ravel())
+                else:
+                    # affect the generator w/o using output
+                    any(drawing.set_array(var.ravel()) for drawing in self.frames[idx])
                 
                 if not self.square_plot:
                     if not self.ylims or not self.xmax:
@@ -1126,7 +1179,7 @@ class Visualizer:
             # The function that does the updating of the Figure
             self.update_frame,
             # Frame information (here just frame number)
-            np.arange(1,self.frame_count),
+            np.arange(self.frame_count),
             # blit = True,
             # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
             interval=1000 / 10,
