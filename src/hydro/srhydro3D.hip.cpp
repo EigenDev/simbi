@@ -883,28 +883,24 @@ void SRHD3D::advance(
                 hlf = calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
             }   
         } else{
-            Primitive xleft_most, xright_most, xleft_mid, xright_mid, center;
-            Primitive yleft_most, yright_most, yleft_mid, yright_mid;
-            Primitive zleft_most, zright_most, zleft_mid, zright_mid;
-
             // Coordinate X
-            xleft_most  = prim_buff[tza * xstride * ystride + tya * xstride + (txa - 2)];
-            xleft_mid   = prim_buff[tza * xstride * ystride + tya * xstride + (txa - 1)];
-            center      = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 0)];
-            xright_mid  = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 1)];
-            xright_most = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 2)];
+            Primitive xleft_most  = prim_buff[tza * xstride * ystride + tya * xstride + (txa - 2)];
+            Primitive xleft_mid   = prim_buff[tza * xstride * ystride + tya * xstride + (txa - 1)];
+            Primitive center      = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 0)];
+            Primitive xright_mid  = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 1)];
+            Primitive xright_most = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 2)];
 
             // Coordinate Y
-            yleft_most  = prim_buff[tza * xstride * ystride + (tya - 2) * xstride + txa];
-            yleft_mid   = prim_buff[tza * xstride * ystride + (tya - 1) * xstride + txa];
-            yright_mid  = prim_buff[tza * xstride * ystride + (tya + 1) * xstride + txa];
-            yright_most = prim_buff[tza * xstride * ystride + (tya + 2) * xstride + txa];
+            Primitive yleft_most  = prim_buff[tza * xstride * ystride + (tya - 2) * xstride + txa];
+            Primitive yleft_mid   = prim_buff[tza * xstride * ystride + (tya - 1) * xstride + txa];
+            Primitive yright_mid  = prim_buff[tza * xstride * ystride + (tya + 1) * xstride + txa];
+            Primitive yright_most = prim_buff[tza * xstride * ystride + (tya + 2) * xstride + txa];
 
             // Coordinate z
-            zleft_most  = prim_buff[(tza - 2) * xstride * ystride + tya * xstride + txa];
-            zleft_mid   = prim_buff[(tza - 1) * xstride * ystride + tya * xstride + txa];
-            zright_mid  = prim_buff[(tza + 1) * xstride * ystride + tya * xstride + txa];
-            zright_most = prim_buff[(tza + 2) * xstride * ystride + tya * xstride + txa];
+            Primitive zleft_most  = prim_buff[(tza - 2) * xstride * ystride + tya * xstride + txa];
+            Primitive zleft_mid   = prim_buff[(tza - 1) * xstride * ystride + tya * xstride + txa];
+            Primitive zright_mid  = prim_buff[(tza + 1) * xstride * ystride + tya * xstride + txa];
+            Primitive zright_most = prim_buff[(tza + 2) * xstride * ystride + tya * xstride + txa];
             
             // Reconstructed left X Primitive vector at the i+1/2 interface
             xprimsL  = center     + helpers::plm_gradient(center, xleft_mid, xright_mid, plm_theta)   * static_cast<real>(0.5); 
