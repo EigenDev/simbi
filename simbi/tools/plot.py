@@ -137,17 +137,17 @@ def parse_plotting_arguments(
         action='store_true',
         help='flag for creating figs without data')
     plot_parser.add_argument(
-        '--anot-loc',
+        '--annot-loc',
         default=None,
         type=str,
         help='location of annotations',
         choices=[
-            'lower_left',
-            'lower_right',
-            'upper_left',
-            'upper_right',
-            'upper_center',
-            'lower_center',
+            'lower left',
+            'lower right',
+            'upper left',
+            'upper right',
+            'upper center',
+            'lower center',
             'center'])
     plot_parser.add_argument(
         '--legend-loc',
@@ -163,10 +163,12 @@ def parse_plotting_arguments(
             'lower center',
             'center'])
     plot_parser.add_argument(
-        '--anot-text',
+        '--annot-text',
         default=None,
+        nargs='+',
         type=str,
-        help='text in annotations')
+        help='text in annotations'
+    )
     plot_parser.add_argument(
         '--inset',
         default=None,
