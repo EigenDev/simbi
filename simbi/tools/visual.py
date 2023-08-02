@@ -1053,8 +1053,10 @@ class Visualizer:
             logger.debug(f'Saving figure as {fig_name}')
             self.fig.savefig(fig_name, dpi=600, transparent=self.transparent, bbox_inches=self.bbox_kind)
         else:
-            self.animation.save("{}.mp4".format(
-                self.save.replace(" ", "_")), 
+            ext = 'mp4'
+            fig_name = f'{self.save}.{ext}'.replace('-', '_')
+            logger.debug(f'Saving movie as {fig_name}')
+            self.animation.save(fig_name, 
                 dpi=600,
                 # bbox_inches=self.bbox_kind,
                 progress_callback=lambda i, n: print(
