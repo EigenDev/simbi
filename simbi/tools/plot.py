@@ -287,6 +287,12 @@ def parse_plotting_arguments(
         default=False,
         help='flag to break bounds on dx-domega plot',
     )
+    plot_parser.add_argument(
+        "--frame-rate",
+        type=int,
+        default=10,
+        help='frame rate in ms',
+    )
     fillgroup = plot_parser.add_mutually_exclusive_group()
     fillgroup.add_argument(
         '--xfill-scale',

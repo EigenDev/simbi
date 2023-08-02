@@ -324,8 +324,9 @@ class Visualizer:
                         self.refy    = var.max()
                         self.refs   += [ref]
                         refcount += 1
-                
-        ax.set_title(f'{self.setup} t = {setup["time"]:.2f}')
+        
+        if self.setup:
+            ax.set_title(f'{self.setup} t = {setup["time"]:.1f}')
         if self.log:
             ax.set_xscale('log')
             ax.set_yscale('log')
@@ -399,6 +400,8 @@ class Visualizer:
                     yy = mesh['x2'] if self.ndim == 2 else mesh[f'x{self.projection[1]}']
                     if self.ndim == 3:
                         if self.projection[2] == 3:
+                            if not self.cartesian:
+                                self.box_depth = np.deg2rad(self.box_depth) + np.pi * (idx > 0)
                             coord_idx = find_nearest(mesh['x3'], self.box_depth)[0]
                             var = var[coord_idx]
                         elif self.projection[2] == 2:
@@ -1114,7 +1117,7 @@ class Visualizer:
         time = setups['time'] * (util.time_scale if self.units else 1.0)
         if self.setup:
             title = rf'{self.setup} at t = {time:.1f}'
-            if self.cartesian:
+            if self.cartesian or self.oned_slice:
                 self.axs.set_title(title)
             else:
                 #speciifc to publication figure
@@ -1146,9 +1149,26 @@ class Visualizer:
                 elif field in ['rho', 'D']:
                     var *= util.rho_scale.value
                     
-            if self.ndim == 1:
+            if self.ndim == 1 or self.oned_slice:
+                yvar = var
                 self.axs.set_xlim(mesh['x1'][0], mesh['x1'][-1])
-                self.frames[idx].set_data(mesh['x1'], var / next(scale_cycle))
+                if self.oned_slice:
+                    x = mesh[self.oned_slice]
+                    for x3coord in map(float, self.coords['x3'].split(',')):
+                        for x2coord in map(float, self.coords['x2'].split(',')):
+                            # coord_label =label + f", $x_2={x2coord:.1f}$"
+                            if not self.cartesian:
+                                x2coord = np.deg2rad(x2coord)
+                            yidx = find_nearest(mesh['x2'], x2coord)[0]
+                            if self.ndim == 2:
+                                yvar = var[yidx]
+                            else:
+                                # coord_label += f', $x_3={x3coord:.1f}$'
+                                if not self.cartesian:
+                                    x3coord = np.deg2rad(x3coord)
+                                zidx = find_nearest(mesh['x3'], x3coord)[0]
+                                yvar=var[zidx,yidx]
+                self.frames[idx].set_data(mesh['x1'], yvar / next(scale_cycle))
                 # if self.refs:
                 # x = mesh['x1']
                 # self.refs[idx].set_data(x, self.refy * (x / self.refx) ** (-3/2))
@@ -1184,7 +1204,7 @@ class Visualizer:
             np.arange(self.frame_count),
             # blit = True,
             # Frame-time in ms; i.e. for a given frame-rate x, 1000/x
-            interval=1000 / 10,
+            interval=1000 / self.frame_rate,
             repeat=True,
         )
 
