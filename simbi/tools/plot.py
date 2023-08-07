@@ -148,7 +148,9 @@ def parse_plotting_arguments(
             'upper right',
             'upper center',
             'lower center',
-            'center'])
+            'center',
+            'center right',
+            'center left'])
     plot_parser.add_argument(
         '--legend-loc',
         default=None,
@@ -161,7 +163,9 @@ def parse_plotting_arguments(
             'upper right',
             'upper center',
             'lower center',
-            'center'])
+            'center'
+            'center left',
+            'center right'])
     plot_parser.add_argument(
         '--annot-text',
         default=None,

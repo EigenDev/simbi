@@ -66,6 +66,7 @@ class Visualizer:
         self.ndim = ndim
         self.refs = []
         self.oned_slice = False
+        self.coords = {'x2': '0.0', 'x3': '0.0'}
         
         if self.ndim != 1:
             plot_parser = get_subparser(parser, 1)
@@ -251,8 +252,6 @@ class Visualizer:
            self.oned_slice):
             self.square_plot = True
             
-        if self.oned_slice and 'x3' not in self.coords:
-            self.coords['x3'] = '0.0'
         self.create_figure()
 
     def place_annotation(self, ax: plt.Axes, anchor_text: str) -> None:
@@ -889,6 +888,7 @@ class Visualizer:
                     tbins       = np.linspace(mesh['x2'][0], mesh['x2'][-1], num_bins)
                     tbin_edges  = np.linspace(mesh['x2'][0], mesh['x2'][-1], num_bins + 1)
                     domega_bins = 2.0 * np.pi * np.array([np.cos(tl) - np.cos(tr) for tl, tr in zip(tbin_edges, tbin_edges[1:])])
+                    
                     #===================
                     # Manual Way
                     #===================
@@ -936,8 +936,8 @@ class Visualizer:
                         label = None
                     color_idx = idx if len(self.fields) > 1 else cidx
                     if self.norm:
-                        # iso_var *= dw / (4.0 * np.pi)
-                        iso_var /= (4.0 * np.pi)
+                        iso_var *= dw / (4.0 * np.pi)
+                        # iso_var /= (4.0 * np.pi)
                         
                     if self.xlims == [-90, 90]:
                         tbins -= 90
@@ -1028,9 +1028,9 @@ class Visualizer:
                         annotation_placed = True
                         
         if self.nplots > 1 or self.broken_ax:
-            self.axs[0].legend()
+            self.axs[0].legend(loc=self.legend_loc)
         else:
-            ax.legend()
+            ax.legend(loc=self.legend_loc)
                 
     def plot(self) -> None:
         self.frames = []
