@@ -7,6 +7,7 @@ from itertools import cycle
 from cycler import cycler
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.offsetbox import AnchoredText
+from typing import Iterable
 from . import utility as util
 from ..detail import ParseKVAction
 from ..detail.slogger import logger
@@ -39,7 +40,7 @@ derived = [
     'u2',
     'u3',
     'u',
-    'tau_s']
+    'tau-s']
 field_choices = [
     'rho',
     'v1',
@@ -49,7 +50,7 @@ field_choices = [
     'p',
     'gamma_beta',
     'chi'] + derived
-lin_fields = ['chi', 'gamma_beta', 'u1', 'u2', 'u3', 'u']
+lin_fields = ['chi', 'gamma_beta', 'u1', 'u2', 'u3', 'u', 'tau-s']
 
 
 def tuple_arg(param: str) -> tuple[int]:
@@ -66,7 +67,6 @@ class Visualizer:
         self.ndim = ndim
         self.refs = []
         self.oned_slice = False
-        self.coords = {'x2': '0.0', 'x3': '0.0'}
         
         if self.ndim != 1:
             plot_parser = get_subparser(parser, 1)
@@ -251,6 +251,11 @@ class Visualizer:
            self.dx_domega or
            self.oned_slice):
             self.square_plot = True
+        
+        if 'x2' not in self.coords:
+            self.coords['x2'] = '0.0'
+        if 'x3' not in self.coords:
+            self.coords['x3'] = '0.0'
             
         self.create_figure()
 
@@ -467,7 +472,6 @@ class Visualizer:
                                 vmin=color_range[0],
                                 vmax=color_range[1])}
 
-                    
                     self.frames += [ax.pcolormesh(
                         xx,
                         yy,
@@ -1074,7 +1078,7 @@ class Visualizer:
                             len(self.coords['x3'].split(',')))
         else:
             nind_curves = len(self.files) // self.nplots
-        colors     = np.array([colormap(k) for k in np.linspace(0, 0.90, nind_curves)])
+        colors     = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
         linestyles = ['-', '--', ':', '-.']
         # linestyles = [x[0] for x in zip(cycle(['-', '--', ':', '-.']), colors)]
         default_cycler = (cycler(linestyle=linestyles) * 
@@ -1177,10 +1181,13 @@ class Visualizer:
                     self.frames[idx].set_array(var.ravel())
                 else:
                     # affect the generator w/o using output
-                    any(drawing.set_array(var.ravel()) for drawing in self.frames[idx])
+                    if not isinstance(self.frames, Iterable):
+                        any(drawing.set_array(var.ravel()) for drawing in self.frames)
+                    else:
+                        any(drawing.set_array(var.ravel()) for drawing in self.frames[idx])
                 
                 if not self.square_plot:
-                    if not self.ylims or not self.xmax:
+                    if not any(self.ylims) or not any(self.xmax):
                         self.axs.set_ylim(mesh['x1'][0], mesh['x1'][-1])
                     elif self.pan_speed:
                         max_extent = self.extent or mesh['x1'][-1]

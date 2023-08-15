@@ -5,7 +5,6 @@ import astropy.units as units
 import numpy as np 
 import argparse 
 import matplotlib.pyplot as plt 
-import os
 from typing import Union, Any, Callable, Optional
 from numpy.typing import NDArray 
 from numpy import int64 as numpy_int, float64 as numpy_float, cast
@@ -96,6 +95,8 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
             field_str_list.append('$v_2 / v_0$')
         elif field == 'v3':
             field_str_list.append('$v_3 / v_0$')
+        elif field == 'tau-s':
+            field_str_list.append(r'$\tau_s$')
         else:
             field_str_list.append(rf'${field}$')
 
@@ -316,7 +317,7 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
         return W * fields['v3']
     elif var == 'u':
         return fields['gamma_beta']
-    elif var == 'tau_s':
+    elif var == 'tau-s':
         return (1 - 1/W**2)**(-0.5)
     else:
         raise NotImplementedError("derived variable {var} not implemented")
@@ -347,25 +348,24 @@ def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constr
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
     
 def get_file_list(inputs: str, sort: bool = False) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
+    from pathlib import Path
     files: list[str] = []
     file_dict: dict[int, list[str]] = {}
     dircount  = 0
     multidir = False
     isDirectory = False
     for idx, obj in enumerate(inputs):
+        fstring = Path(obj)
         #check if path is a directory
-        isDirectory = os.path.isdir(obj)
-        
-        if isDirectory:
-            file_path = os.path.join(obj, '')
+        if fstring.is_dir():
             if dircount == 0:
-                files += sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
+                files += sorted([f for f in fstring.glob('*.h5') if f.is_file()])
             else:
                 multidir = True
                 if dircount == 1:
                     file_dict[idx - 1] = files
-                file_dict[idx]     = sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
-            dircount += 1
+                file_dict[idx] = sorted([f for f in fstring.glob('*.h5') if f.is_file()])
+                dircount += 1
         else:
             files += [file for file in inputs]
             break
