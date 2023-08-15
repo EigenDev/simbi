@@ -359,12 +359,12 @@ def get_file_list(inputs: str, sort: bool = False) -> Union[tuple[list[str], int
         #check if path is a directory
         if fstring.is_dir():
             if dircount == 0:
-                files += sorted([f for f in fstring.glob('*.h5') if f.is_file()])
+                files += sorted([str(f) for f in fstring.glob('*.h5') if f.is_file()])
             else:
                 multidir = True
                 if dircount == 1:
                     file_dict[idx - 1] = files
-                file_dict[idx] = sorted([f for f in fstring.glob('*.h5') if f.is_file()])
+                file_dict[idx] = sorted([str(f) for f in fstring.glob('*.h5') if f.is_file()])
                 dircount += 1
         else:
             files += [file for file in inputs]
