@@ -67,7 +67,6 @@ class Visualizer:
         self.ndim = ndim
         self.refs = []
         self.oned_slice = False
-        
         if self.ndim != 1:
             plot_parser = get_subparser(parser, 1)
             plot_parser.add_argument(
@@ -252,10 +251,11 @@ class Visualizer:
            self.oned_slice):
             self.square_plot = True
         
-        if 'x2' not in self.coords:
-            self.coords['x2'] = '0.0'
-        if 'x3' not in self.coords:
-            self.coords['x3'] = '0.0'
+        if self.ndim > 1:
+            if 'x2' not in self.coords:
+                self.coords['x2'] = '0.0'
+            if 'x3' not in self.coords:
+                self.coords['x3'] = '0.0'
             
         self.create_figure()
 
