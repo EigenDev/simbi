@@ -107,7 +107,7 @@ namespace simbi
 
         std::vector<std::vector<real>> simulate3D(
             const std::vector<std::vector<real>> &sources,
-            std::vector<bool> &object_cells,
+            const std::vector<bool> &object_cells,
             real tstart, 
             real tend, 
             real dlogt, 

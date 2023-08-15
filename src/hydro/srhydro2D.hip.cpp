@@ -1152,7 +1152,7 @@ void SRHD2D::advance(
 //===================================================================================================================
 std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::vector<std::vector<real>> &sources,
-    std::vector<bool> &object_cells,
+    const std::vector<bool> &object_cells,
     std::vector<real> &gsource,
     real tstart,
     real tend,

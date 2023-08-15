@@ -1127,7 +1127,7 @@ void SRHD3D::advance(
 //===================================================================================================================
 std::vector<std::vector<real>> SRHD3D::simulate3D(
     const std::vector<std::vector<real>> &sources,
-    std::vector<bool> &object_cells,
+    const std::vector<bool> &object_cells,
     real tstart, 
     real tend, 
     real dlogt, 
