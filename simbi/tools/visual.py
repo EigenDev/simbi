@@ -1187,7 +1187,7 @@ class Visualizer:
                         any(drawing.set_array(var.ravel()) for drawing in self.frames[idx])
                 
                 if not self.square_plot:
-                    if not any(self.ylims) or not any(self.xmax):
+                    if not self.xmax and not any(self.ylims):
                         self.axs.set_ylim(mesh['x1'][0], mesh['x1'][-1])
                     elif self.pan_speed:
                         max_extent = self.extent or mesh['x1'][-1]

@@ -40,7 +40,12 @@ def parse_plotting_arguments(
         nargs='+',
         help='the name of the field variable',
         choices=visual.field_choices)
-    plot_parser.add_argument('--xmax', default=0.0, help='the domain range')
+    plot_parser.add_argument(
+        '--xmax', 
+        default=None, 
+        help='the domain range',
+        type=float,
+    )
     plot_parser.add_argument(
         '--log',
         default=False,
