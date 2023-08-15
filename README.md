@@ -70,8 +70,7 @@ c) [rich](https://github.com/Textualize/rich) for pretty-printing console output
     ```
 
 3)  If `meson` detected `hip` or `cuda`, the install script will install
-    both the cpu and gpu extensions into your system site-packages or
-    `--user` site-packages depending on privileges.
+    both the cpu and gpu extensions into the `simbi/libs` directory.
 ## Important (!)
 When compiling on a GPU, you must provide your GPU's respective architecture identifier.
 That is to say, if I am compiling on an NVIDIA V100 device with compute capability 7.0, I would
