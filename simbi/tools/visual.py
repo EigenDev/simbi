@@ -267,7 +267,7 @@ class Visualizer:
         )
         ax.add_artist(at)
     
-    def plot_1d(self):
+    def plot_line(self):
         field_str = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
         refcount = 0
@@ -330,7 +330,7 @@ class Visualizer:
                         refcount += 1
         
         if self.setup:
-            ax.set_title(f'{self.setup} t = {setup["time"]:.1f}')
+            ax.set_title(f'{self.setup} t = {setup["time"]:.5f}')
         if self.log:
             ax.set_xscale('log')
             ax.set_yscale('log')
@@ -561,13 +561,15 @@ class Visualizer:
                     angs = np.linspace(xextent[0], xextent[1], 1000)
                 else:
                     angs = np.linspace(mesh['x2'][0], mesh['x2'][-1], mesh['x2'].size)
-                eps     = 0.0
-                a       = 3.5 * (1 - eps)**(-1/3)
-                b       = 3.5 * (1 - eps)**(2/3)
-                radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
-                # r_theta = radius(angs)
-                from .extras.helpers import equipotential_surfaces
-                r_theta = equipotential_surfaces(**self.extra_args)
+                if 'eps' in self.extra_args:
+                    eps     = float(self.extra_args['eps'])
+                    a       = self.extra_args['radius'] * (1 - eps)**(-1/3)
+                    b       = self.extra_args['radius'] * (1 - eps)**(2/3)
+                    radius  = lambda theta: a*b/((a*np.cos(theta))**2 + (b*np.sin(theta))**2)**0.5
+                    r_theta = radius(angs)
+                else:
+                    from .extras.helpers import equipotential_surfaces
+                    r_theta = equipotential_surfaces(**self.extra_args)
                 
                 ax.plot( angs,  r_theta, linewidth=1, linestyle='--', color='grey')
                 ax.plot(-angs,  r_theta, linewidth=1, linestyle='--', color='grey')
@@ -1046,7 +1048,7 @@ class Visualizer:
             self.plot_dx_domega()
         else:
             if self.ndim == 1 or self.oned_slice:
-                self.plot_1d()
+                self.plot_line()
             else:
                 self.plot_multidim()
 
