@@ -1185,10 +1185,11 @@ class Visualizer:
                     self.frames[idx].set_array(var.ravel())
                 else:
                     # affect the generator w/o using output
-                    if not isinstance(self.frames, Iterable):
-                        any(drawing.set_array(var.ravel()) for drawing in self.frames)
-                    else:
+                    if len(self.fields) > 1:
                         any(drawing.set_array(var.ravel()) for drawing in self.frames[idx])
+                    else:
+                        any(drawing.set_array(var.ravel()) for drawing in self.frames)
+                        
                 
                 if not self.square_plot:
                     if not self.xmax and not any(self.ylims):
