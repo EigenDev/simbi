@@ -29,6 +29,9 @@ namespace simbi{
                     cons[0]   =   cons[1];
                     cons[0].s = - cons[1].s;
                     break;
+                case simbi::BoundaryCondition::PERIODIC:
+                    cons[0] = cons[grid_size - 2];
+                    break;
                 default:
                     cons[0] = cons[1];
                     break;
@@ -42,6 +45,9 @@ namespace simbi{
                 case simbi::BoundaryCondition::REFLECTING:
                     cons[grid_size - 1]   =   cons[grid_size - 2];
                     cons[grid_size - 1].s = - cons[grid_size - 2].s;
+                    break;
+                case simbi::BoundaryCondition::PERIODIC:
+                    cons[grid_size - 1] = cons[1];
                     break;
                 default:
                     cons[grid_size - 1] = cons[grid_size - 2];
@@ -65,6 +71,10 @@ namespace simbi{
                     cons[0].s = - cons[3].s;
                     cons[1].s = - cons[2].s;
                     break;
+                case simbi::BoundaryCondition::PERIODIC:
+                    cons[0] = cons[grid_size - 4];
+                    cons[1] = cons[grid_size - 3];
+                    break;
                 default:
                     cons[0] = cons[2];
                     cons[1] = cons[2];
@@ -82,6 +92,10 @@ namespace simbi{
                     cons[grid_size - 2]   =   cons[grid_size - 3];
                     cons[grid_size - 1].s = - cons[grid_size - 4].s;
                     cons[grid_size - 2].s = - cons[grid_size - 3].s;
+                    break;
+                case simbi::BoundaryCondition::PERIODIC:
+                    cons[grid_size - 1] = cons[3];
+                    cons[grid_size - 2] = cons[2];
                     break;
                 default:
                     cons[grid_size - 1] = cons[grid_size - 3];
@@ -140,6 +154,10 @@ namespace simbi{
                     cons[0].m = - cons[2].m;
                     cons[1].m = - cons[2].m;
                     break;
+                case simbi::BoundaryCondition::PERIODIC:
+                    cons[grid_size - 1] = cons[3];
+                    cons[grid_size - 2] = cons[2];
+                    break;
                 default:
                     cons[0]   =   cons[2];
                     cons[1]   =   cons[2];
@@ -182,6 +200,9 @@ namespace simbi{
                     case simbi::BoundaryCondition::INFLOW:
                         cons[(jj + 1) * sx + 0 * sy] =  boundary_zones[0];
                         break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(jj + 1) * sx + 0 * sy] =  cons[(jj + 1) * sx + (x1grid_size - 2) * sy];
+                        break;
                     default:
                         cons[(jj + 1) * sx +  0 * sy] = cons[(jj + 1) * sx +  1 * sy];
                         break;
@@ -195,6 +216,9 @@ namespace simbi{
                         break;
                     case simbi::BoundaryCondition::INFLOW:
                         cons[(jj + 1) * sx + (x1grid_size - 1) * sy] = boundary_zones[1];
+                        break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(jj + 1) * sx + (x1grid_size - 1) * sy] =  cons[(jj + 1) * sx + 1 * sy];
                         break;
                     default:
                         cons[(jj + 1) * sx + (x1grid_size - 1) * sy] = cons[(jj + 1) * sx +  (x1grid_size - 2) * sy];
@@ -226,6 +250,9 @@ namespace simbi{
                             case simbi::BoundaryCondition::INFLOW:
                                 cons[0 * sx + (ii + 1) * sy] = boundary_zones[2];
                                 break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[0 * sx + (ii + 1) * sy] = cons[(x2grid_size - 2) * sx + (ii + 1) * sy];
+                                break;
                             default:
                                 cons[0 * sx + (ii + 1) * sy]  = cons[1 * sx + (ii + 1) * sy];
                                 break;
@@ -239,6 +266,9 @@ namespace simbi{
                                 break;
                             case simbi::BoundaryCondition::INFLOW:
                                 cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = boundary_zones[3];
+                                break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[(x2grid_size - 1) * sx + (ii + 1) * sy] =  cons[1 * sx + (ii + 1) * sy];
                                 break;
                             default:
                                 // Fix the ghost zones at the radial boundaries
@@ -266,6 +296,10 @@ namespace simbi{
                         cons[(jj + 2) * sx +  0 * sy]   = boundary_zones[0];
                         cons[(jj + 2) * sx +  1 * sy]   = boundary_zones[0];
                         break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  (x1grid_size - 4) * sy];
+                        cons[(jj + 2) * sx +  1 * sy]   = cons[(jj + 2) * sx +  (x1grid_size - 3) * sy];
+                        break;
                     default:
                         cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  2 * sy];
                         cons[(jj + 2) * sx +  1 * sy]   = cons[(jj + 2) * sx +  2 * sy];
@@ -281,8 +315,12 @@ namespace simbi{
                         cons[(jj + 2) * sx + (x1grid_size - 2) * sy].s1 = - cons[(jj + 2) * sx + (x1grid_size - 3) * sy].s1;
                         break;
                     case simbi::BoundaryCondition::INFLOW:
-                        cons[(jj + 2) * sx +  0 * sy]   = boundary_zones[1];
-                        cons[(jj + 2) * sx +  1 * sy]   = boundary_zones[1];
+                        cons[(jj + 2) * sx +  (x1grid_size - 1) * sy]   = boundary_zones[1];
+                        cons[(jj + 2) * sx +  (x1grid_size - 2) * sy]   = boundary_zones[1];
+                        break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(jj + 2) * sx +  (x1grid_size - 1) * sy]   = cons[(jj + 2) * sx +  3 * sy];
+                        cons[(jj + 2) * sx +  (x1grid_size - 2) * sy]   = cons[(jj + 2) * sx +  2 * sy];
                         break;
                     default:
                         cons[(jj + 2) * sx +  (x1grid_size - 1) * sy] = cons[(jj + 2) * sx +  (x1grid_size - 3) * sy];
@@ -323,6 +361,10 @@ namespace simbi{
                                 cons[0 * sx +  (ii + 2) * sy] = boundary_zones[2];
                                 cons[1 * sx +  (ii + 2) * sy] = boundary_zones[2];
                                 break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[0 * sx + (ii + 2) * sy]  = cons[(x2grid_size - 4) * sx + (ii + 2) * sy];
+                                cons[1 * sx + (ii + 2) * sy]  = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
+                                break;
                             default:
                                 cons[0 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
                                 cons[1 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
@@ -339,6 +381,10 @@ namespace simbi{
                             case simbi::BoundaryCondition::INFLOW:
                                 cons[(x2grid_size - 1) * sx +  (ii + 2) * sy] = boundary_zones[3];
                                 cons[(x2grid_size - 2) * sx +  (ii + 2) * sy] = boundary_zones[3];
+                                break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[(x2grid_size - 1) * sx + (ii + 2) * sy]  = cons[3 * sx + (ii + 2) * sy];
+                                cons[(x2grid_size - 2) * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
                                 break;
                             default:
                                 cons[(x2grid_size - 1) * sx + (ii + 2) * sy]  = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
@@ -381,6 +427,9 @@ namespace simbi{
                     case simbi::BoundaryCondition::INFLOW:
                         cons[(jj + 1) * sx + 0 * sy] =  boundary_zones[0];
                         break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(jj + 1) * sx +  0 * sy] = cons[(jj + 1) * sx +  (x1grid_size - 2) * sy];
+                        break;
                     default:
                         cons[(jj + 1) * sx +  0 * sy] = cons[(jj + 1) * sx +  1 * sy];
                         break;
@@ -394,6 +443,9 @@ namespace simbi{
                         break;
                     case simbi::BoundaryCondition::INFLOW:
                         cons[(jj + 1) * sx + (x1grid_size - 1) * sy] = boundary_zones[1];
+                        break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(jj + 1) * sx + (x1grid_size - 1) * sy] = cons[(jj + 1) * sx +  1 * sy];
                         break;
                     default:
                         cons[(jj + 1) * sx + (x1grid_size - 1) * sy] = cons[(jj + 1) * sx +  (x1grid_size - 2) * sy];
@@ -425,6 +477,9 @@ namespace simbi{
                             case simbi::BoundaryCondition::INFLOW:
                                 cons[0 * sx + (ii + 1) * sy] = boundary_zones[2];
                                 break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[0 * sx + (ii + 1) * sy]  = cons[(x1grid_size - 2) * sx + (ii + 1) * sy];
+                                break;
                             default:
                                 cons[0 * sx + (ii + 1) * sy]  = cons[1 * sx + (ii + 1) * sy];
                                 break;
@@ -438,6 +493,9 @@ namespace simbi{
                                 break;
                             case simbi::BoundaryCondition::INFLOW:
                                 cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = boundary_zones[3];
+                                break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[(x2grid_size - 1) * sx + (ii + 1) * sy] = cons[1 * sx + (ii + 1) * sy];
                                 break;
                             default:
                                 // Fix the ghost zones at the radial boundaries
@@ -465,6 +523,10 @@ namespace simbi{
                         cons[(jj + 2) * sx +  0 * sy]   = boundary_zones[0];
                         cons[(jj + 2) * sx +  1 * sy]   = boundary_zones[0];
                         break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  (x1grid_size - 4) * sy];
+                        cons[(jj + 2) * sx +  1 * sy]   = cons[(jj + 2) * sx +  (x1grid_size - 3) * sy];
+                        break;
                     default:
                         cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  2 * sy];
                         cons[(jj + 2) * sx +  1 * sy]   = cons[(jj + 2) * sx +  2 * sy];
@@ -482,6 +544,10 @@ namespace simbi{
                     case simbi::BoundaryCondition::INFLOW:
                         cons[(jj + 2) * sx +  0 * sy]   = boundary_zones[1];
                         cons[(jj + 2) * sx +  1 * sy]   = boundary_zones[1];
+                        break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(jj + 2) * sx +  (x1grid_size - 1) * sy] = cons[(jj + 2) * sx +  3 * sy];
+                        cons[(jj + 2) * sx +  (x1grid_size - 2) * sy] = cons[(jj + 2) * sx +  2 * sy];
                         break;
                     default:
                         cons[(jj + 2) * sx +  (x1grid_size - 1) * sy] = cons[(jj + 2) * sx +  (x1grid_size - 3) * sy];
@@ -522,6 +588,10 @@ namespace simbi{
                                 cons[0 * sx +  (ii + 2) * sy] = boundary_zones[2];
                                 cons[1 * sx +  (ii + 2) * sy] = boundary_zones[2];
                                 break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[0 * sx + (ii + 2) * sy]  = cons[(x2grid_size - 4) * sx + (ii + 2) * sy];
+                                cons[1 * sx + (ii + 2) * sy]  = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
+                                break;
                             default:
                                 cons[0 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
                                 cons[1 * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
@@ -538,6 +608,10 @@ namespace simbi{
                             case simbi::BoundaryCondition::INFLOW:
                                 cons[0 * sx +  (ii + 2) * sy] = boundary_zones[3];
                                 cons[1 * sx +  (ii + 2) * sy] = boundary_zones[3];
+                                break;
+                            case simbi::BoundaryCondition::PERIODIC:
+                                cons[(x2grid_size - 1) * sx + (ii + 2) * sy]  = cons[3 * sx + (ii + 2) * sy];
+                                cons[(x2grid_size - 2) * sx + (ii + 2) * sy]  = cons[2 * sx + (ii + 2) * sy];
                                 break;
                             default:
                                 cons[(x2grid_size - 1) * sx + (ii + 2) * sy]  = cons[(x2grid_size - 3) * sx + (ii + 2) * sy];
@@ -588,6 +662,9 @@ namespace simbi{
                     case simbi::BoundaryCondition::INFLOW:
                         cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0] = inflow_zones[0];
                         break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0] = cons[(kk + 1) * sx * sy + (jj + 1) * sx + (x1grid_size - 2)];
+                        break;
                     default:
                         cons[(kk + 1) * sx * sy + (jj + 1) * sx + 0] = cons[(kk + 1) * sx * sy + (jj + 1) * sx + 1];
                         break;
@@ -601,6 +678,9 @@ namespace simbi{
                         break;
                     case simbi::BoundaryCondition::INFLOW:
                         cons[(kk + 1) * sx * sy + (jj + 1) * sx + (x1grid_size - 1)] = inflow_zones[1];
+                        break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(kk + 1) * sx * sy + (jj + 1) * sx + (x1grid_size - 1)] = cons[(kk + 1) * sx * sy + (jj + 1) * sx + 1];
                         break;
                     default:
                         cons[(kk + 1) * sx * sy + (jj + 1) * sx + (x1grid_size - 1)] = cons[(kk + 1) * sx * sy + (jj + 1) * sx + (x1grid_size - 2)];
@@ -633,6 +713,9 @@ namespace simbi{
                         case simbi::BoundaryCondition::INFLOW:
                             cons[(kk + 1) * sx * sy + 0 * sx + (ii + 1)] = inflow_zones[2];
                             break;
+                        case simbi::BoundaryCondition::PERIODIC:
+                            cons[(kk + 1) * sx * sy + 0 * sx + (ii + 1)] = cons[(kk + 1) * sx * sy + (x2grid_size - 1) * sx + (ii + 1)];
+                            break;
                         default:
                             cons[(kk + 1) * sx * sy + 0 * sx + (ii + 1)] = cons[(kk + 1) * sx * sy + 1 * sx + (ii + 1)];
                             break;
@@ -646,6 +729,9 @@ namespace simbi{
                             break;
                         case simbi::BoundaryCondition::INFLOW:
                             cons[(kk + 1) * sx * sy + (x2grid_size - 1) * sx + (ii + 1)] = inflow_zones[3];
+                            break;
+                        case simbi::BoundaryCondition::PERIODIC:
+                            cons[(kk + 1) * sx * sy + (x2grid_size - 1) * sx + (ii + 1)] = cons[(kk + 1) * sx * sy + 1 * sx + (ii + 1)];
                             break;
                         default:
                             cons[(kk + 1) * sx * sy + (x2grid_size - 1) * sx + (ii + 1)] = cons[(kk + 1) * sx * sy + (x2grid_size - 1) * sx + (ii + 1)];
@@ -673,6 +759,9 @@ namespace simbi{
                         case simbi::BoundaryCondition::INFLOW:
                             cons[0 * sx * sy + (jj + 1) * sx + (ii + 1)] = inflow_zones[4];
                             break;
+                        case simbi::BoundaryCondition::PERIODIC:
+                            cons[0 * sx * sy + (jj + 1) * sx + (ii + 1)] = cons[(x3grid_size - 2) * sx * sy + (jj + 1) * sx + (ii + 1)];
+                            break;
                         default:
                             cons[0 * sx * sy + (jj + 1) * sx + (ii + 1)] = cons[1 * sx * sy + (jj + 1) * sx + (ii + 1)];
                             break;
@@ -685,6 +774,9 @@ namespace simbi{
                             break;
                         case simbi::BoundaryCondition::INFLOW:
                             cons[(x3grid_size - 1) * sx * sy + (jj + 1) * sx + (ii + 1)] = inflow_zones[5];
+                            break;
+                        case simbi::BoundaryCondition::PERIODIC:
+                            cons[(x3grid_size - 1) * sx * sy + (jj + 1) * sx + (ii + 1)] = cons[1 * sx * sy + (jj + 1) * sx + (ii + 1)];
                             break;
                         default:
                             cons[(x3grid_size - 1) * sx * sy + (jj + 1) * sx + (ii + 1)] = cons[(x3grid_size - 2) * sx * sy + (jj + 1) * sx + (ii + 1)];
@@ -711,6 +803,10 @@ namespace simbi{
                         cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0] = inflow_zones[0];
                         cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1] = inflow_zones[0];
                         break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + (x1grid_size - 4)];
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + (x1grid_size - 3)];
+                        break;
                     default:
                         cons[(kk + 2) * sx * sy + (jj + 2) * sx + 0] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2];
                         cons[(kk + 2) * sx * sy + (jj + 2) * sx + 1] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2];
@@ -728,6 +824,10 @@ namespace simbi{
                     case simbi::BoundaryCondition::INFLOW:
                         cons[(kk + 2) * sx * sy + (jj + 2) * sx + (x1grid_size - 1)] = inflow_zones[1];
                         cons[(kk + 2) * sx * sy + (jj + 2) * sx + (x1grid_size - 2)] = inflow_zones[1];
+                        break;
+                    case simbi::BoundaryCondition::PERIODIC:
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + (x1grid_size - 1)] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + 3];
+                        cons[(kk + 2) * sx * sy + (jj + 2) * sx + (x1grid_size - 2)] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + 2];
                         break;
                     default:
                         cons[(kk + 2) * sx * sy + (jj + 2) * sx + (x1grid_size - 1)] = cons[(kk + 2) * sx * sy + (jj + 2) * sx + (x1grid_size - 3)];
@@ -768,6 +868,10 @@ namespace simbi{
                             cons[(kk + 2) * sx * sy + 0 * sx + (ii + 2)] = inflow_zones[2];
                             cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)] = inflow_zones[2];
                             break;
+                        case simbi::BoundaryCondition::PERIODIC:
+                            cons[(kk + 2) * sx * sy + 0 * sx + (ii + 2)] = cons[(kk + 2)* sx * sy + (x2grid_size - 4) * sx + (ii + 2)];
+                            cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)] = cons[(kk + 2)* sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
+                            break;
                         default:
                             cons[(kk + 2) * sx * sy + 0 * sx + (ii + 2)] = cons[(kk + 2)* sx * sy + 2 * sx + (ii + 2)];
                             cons[(kk + 2) * sx * sy + 1 * sx + (ii + 2)] = cons[(kk + 2)* sx * sy + 2 * sx + (ii + 2)];
@@ -785,6 +889,10 @@ namespace simbi{
                         case simbi::BoundaryCondition::INFLOW:
                             cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)] = inflow_zones[3];
                             cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)] = inflow_zones[3];
+                            break;
+                        case simbi::BoundaryCondition::PERIODIC:
+                            cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + 3 * sx + (ii + 2)];
+                            cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + 2 * sx + (ii + 2)];
                             break;
                         default:
                             cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)]    =   cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
@@ -818,6 +926,10 @@ namespace simbi{
                             cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)] = inflow_zones[4];
                             cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)] = inflow_zones[4];
                             break;
+                        case simbi::BoundaryCondition::PERIODIC:
+                            cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x2grid_size - 4) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                            cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x2grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                            break;
                         default:
                             cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[2 * sx * sy + (jj + 2) * sx + (ii + 2)];
                             cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[2 * sx * sy + (jj + 2) * sx + (ii + 2)];
@@ -834,6 +946,10 @@ namespace simbi{
                         case simbi::BoundaryCondition::INFLOW:
                             cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)] = inflow_zones[5];
                             cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)] = inflow_zones[5];
+                            break;
+                        case simbi::BoundaryCondition::PERIODIC:
+                            cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[3 * sx * sy + (jj + 2) * sx + (ii + 2)];
+                            cons[(x3grid_size - 2) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[2 * sx * sy + (jj + 2) * sx + (ii + 2)];
                             break;
                         default:
                             cons[(x3grid_size - 1) * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];

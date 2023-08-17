@@ -23,6 +23,8 @@ namespace simbi{
                     cons[0]   = cons[1];
                     cons[0].m = - cons[1].m;
                     break;
+                case simbi::BoundaryCondition::PERIODIC:
+                    cons[0] = cons[grid_size - 2];
                 default:
                     cons[0] = cons[1];
                     break;
@@ -37,6 +39,8 @@ namespace simbi{
                     cons[grid_size - 1]   =   cons[grid_size - 2];
                     cons[grid_size - 1].m = - cons[grid_size - 2].m;
                     break;
+                case simbi::BoundaryCondition::PERIODIC:
+                    cons[grid_size - 1] = cons[1];
                 default:
                     cons[grid_size - 1] = cons[grid_size - 2];
                     break;
@@ -59,6 +63,9 @@ namespace simbi{
                     cons[0].m = - cons[3].m;
                     cons[1].m = - cons[2].m;
                     break;
+                case simbi::BoundaryCondition::PERIODIC:
+                    cons[0] = cons[grid_size - 4];
+                    cons[1] = cons[grid_size - 3];
                 default:
                     cons[0] = cons[2];
                     cons[1] = cons[2];
@@ -77,6 +84,9 @@ namespace simbi{
                     cons[grid_size - 1].m = - cons[grid_size - 4].m;
                     cons[grid_size - 2].m = - cons[grid_size - 3].m;
                     break;
+                case simbi::BoundaryCondition::PERIODIC:
+                    cons[grid_size - 1] = cons[3];
+                    cons[grid_size - 2] = cons[2];
                 default:
                     cons[grid_size - 1] = cons[grid_size - 3];
                     cons[grid_size - 2] = cons[grid_size - 3];
