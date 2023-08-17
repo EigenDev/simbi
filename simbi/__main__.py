@@ -266,7 +266,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         '--quirk-smoothing',
         help='flag to activate Quirk (1994) smoothing at poles',
         default=None,
-        action='store_true')
+        action=argparse.BooleanOptionalAction)
     overridable.add_argument(
         '--constant-sources',
         help='flag to indicate source terms provided are constant',
