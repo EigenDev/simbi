@@ -176,8 +176,8 @@ class BaseConfig(metaclass=abc.ABCMeta):
        return 1.0
    
     @simbi_property
-    def use_hllc_solver(self) -> bool:
-       return True
+    def solver(self) -> str:
+       return 'hllc'
    
     @simbi_property
     def boundary_conditions(self) -> Union[Sequence[str], str, NDArray[numpy_string]]:

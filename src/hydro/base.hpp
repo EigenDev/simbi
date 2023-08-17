@@ -25,7 +25,7 @@ namespace simbi
         real dt, t, tend, t_interval, chkpt_interval, plm_theta, time_constant, hubble_param; 
         real x1min, x1max, x2min, x2max, x3min, x3max, step;
         real dlogx1, dx1, dx2, dx3, dlogt, tstart, engine_duration, invdx1, invdx2, invdx3;
-        bool first_order, periodic, linspace, hllc, mesh_motion, adaptive_mesh_motion, half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
+        bool first_order, periodic, linspace, mesh_motion, adaptive_mesh_motion, half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
         bool den_source_all_zeros, mom1_source_all_zeros, mom2_source_all_zeros, mom3_source_all_zeros, energy_source_all_zeros; 
         bool grav_source_all_zeros;
         luint active_zones, idx_active, total_zones, n, init_chkpt_idx, radius, pseudo_radius;

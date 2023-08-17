@@ -35,7 +35,7 @@ cdef extern from "hydro/euler1D.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources) except +
 
@@ -61,7 +61,7 @@ cdef extern from "hydro/euler2D.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order,
             bool linspace, 
-            bool hllc,
+            string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources) except +
 
@@ -89,7 +89,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order, 
             bool linspace, 
-            bool hllc,
+            string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources,
             PyObjWrapper a,
@@ -109,7 +109,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order, 
             bool linspace, 
-            bool hllc,
+            string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources,
             PyObjWrapper a,
@@ -143,7 +143,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            string solver,
             bool quirk_smoothing,
             bool constant_sources,
             vector[vector[real]] boundary_sources,
@@ -165,7 +165,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            string solver,
             bool quirk_smoothing,
             bool constant_sources,
             vector[vector[real]] boundary_sources,
@@ -209,6 +209,6 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources)

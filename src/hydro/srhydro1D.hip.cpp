@@ -128,10 +128,15 @@ void SRHD::advance(
             fR     = prims2flux(primsR);
 
             // Calc HLL Flux at i+1/2 interface
-            if (hllc){
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
-            } else {
+                break;
+            
+            default:
                 frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
+                break;
             }
 
             // Set up the left and right state interfaces for i-1/2
@@ -144,11 +149,16 @@ void SRHD::advance(
             fR = prims2flux(primsR);
 
             // Calc HLL Flux at i-1/2 interface
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
-            } else {
+                break;
+            
+            default:
                 flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
-            }   
+                break;
+            } 
         } else {
             const Primitive left_most  = prim_buff[helpers::mod(txa - 2, xstride)];
             const Primitive left_mid   = prim_buff[helpers::mod(txa - 1, xstride)];
@@ -167,10 +177,15 @@ void SRHD::advance(
             fL = prims2flux(primsL);
             fR = prims2flux(primsR);
 
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
-            } else {
+                break;
+            
+            default:
                 frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
+                break;
             }
             
             // Do the same thing, but for the right side interface [i - 1/2]
@@ -183,11 +198,16 @@ void SRHD::advance(
             fL = prims2flux(primsL);
             fR = prims2flux(primsR);
 
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
-            } else {
+                break;
+            
+            default:
                 flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
-            }
+                break;
+            } 
         }
 
         const auto d_source = den_source_all_zeros    ? 0.0 :  dens_source[ii];
@@ -650,7 +670,7 @@ SRHD::simulate1D(
     std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace,
-    bool hllc,
+    const std::string solver,
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources,
     std::function<double(double)> a,
@@ -671,7 +691,7 @@ SRHD::simulate1D(
     this->sourceS         = sources[1];
     this->source0         = sources[2];
     this->sourceG         = gsource;
-    this->hllc            = hllc;
+    this->sim_solver      = helpers::solver_map.at(solver);
     this->engine_duration = engine_duration;
     this->t               = tstart;
     this->tend            = tend;

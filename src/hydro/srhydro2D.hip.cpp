@@ -862,12 +862,16 @@ void SRHD2D::advance(
             gR = prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i+1/2 interface
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                 grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
-            } else {
+                break;
+            default:
                 frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                 grf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                break;
             }
 
             // Set up the left and right state interfaces for i-1/2
@@ -905,13 +909,17 @@ void SRHD2D::advance(
             gR = prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i-1/2 interface
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
                 glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
-            } else {
+                break;
+            default:
                 flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
                 glf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
-            }   
+                break;
+            }
         } else { 
             // Coordinate X
             const Primitive xleft_most  = prim_buff[(helpers::mod(txa - 2, bx)    * sy + tya * sx)];
@@ -961,7 +969,9 @@ void SRHD2D::advance(
             gL = prims2flux(yprimsL, 2);
             gR = prims2flux(yprimsR, 2);
 
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 if(quirk_smoothing)
                 {
                     if (quirk_strong_shock(xprimsL.p, xprimsR.p) ){
@@ -979,9 +989,12 @@ void SRHD2D::advance(
                     frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                     grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
                 }
-            } else {
+                break;
+            
+            default:
                 frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                 grf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                break;
             }
 
             // Do the same thing, but for the left side interface [i,j - 1/2]
@@ -1019,7 +1032,9 @@ void SRHD2D::advance(
             gL = prims2flux(yprimsL, 2);
             gR = prims2flux(yprimsR, 2);
 
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 if (quirk_smoothing)
                 {
                     if (quirk_strong_shock(xprimsL.p, xprimsR.p) ){
@@ -1037,9 +1052,12 @@ void SRHD2D::advance(
                     flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
                     glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
                 }
-            } else {
+                break;
+            
+            default:
                 flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
                 glf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                break;
             }
         }
 
@@ -1165,7 +1183,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace,
-    bool hllc,
+    const std::string solver,
     bool quirk_smoothing,
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources,
@@ -1193,7 +1211,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->tstart          = tstart;
     this->total_zones     = nx * ny;
     this->first_order     = first_order;
-    this->hllc            = hllc;
+    this->sim_solver      = helpers::solver_map.at(solver);
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
     this->dlogt           = dlogt;

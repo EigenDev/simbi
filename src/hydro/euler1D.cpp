@@ -354,10 +354,15 @@ void Newtonian1D::advance(
             fR = prims2flux(primsR);
 
             // Calc HLL Flux at i+1/2 interface
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
-            } else {
+                break;
+            
+            default:
                 frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                break;
             }
 
             // Set up the left and right state interfaces for i-1/2
@@ -370,13 +375,15 @@ void Newtonian1D::advance(
             fR = prims2flux(primsR);
 
             // Calc HLL Flux at i-1/2 interface
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
-            }
-            else
-            {
+                break;
+            
+            default:
                 flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                break;
             }
         }
         else
@@ -403,13 +410,15 @@ void Newtonian1D::advance(
             fL = prims2flux(primsL);
             fR = prims2flux(primsR);
 
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
-            }
-            else
-            {
+                break;
+            
+            default:
                 frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                break;
             }
 
             // Do the same thing, but for the right side interface [i - 1/2]
@@ -423,13 +432,15 @@ void Newtonian1D::advance(
             fL = prims2flux(primsL);
             fR = prims2flux(primsR);
 
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
-            }
-            else
-            {
+                break;
+            
+            default:
                 flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                break;
             }
         }
         const auto d_source = den_source_all_zeros    ? 0.0 : dens_source[ii];
@@ -490,7 +501,7 @@ void Newtonian1D::advance(
     std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace,
-    bool hllc,
+    const std::string solver,
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources)
 {
@@ -505,7 +516,7 @@ void Newtonian1D::advance(
     this->sourceRho       = sources[0];
     this->sourceMom       = sources[1];
     this->sourceE         = sources[2];
-    this->hllc            = hllc;
+    this->sim_solver      = helpers::solver_map.at(solver);
     this->engine_duration = engine_duration;
     this->t               = tstart;
     this->dlogt           = dlogt;
@@ -527,11 +538,6 @@ void Newtonian1D::advance(
     define_chkpt_idx(chkpt_idx);
     // TODO: invoke mesh motion later
     this->mesh_motion = false;
-    if (hllc){
-        this->sim_solver = simbi::Solver::HLLC;
-    } else {
-        this->sim_solver = simbi::Solver::HLLE;
-    }
 
     inflow_zones.resize(2);
     for (size_t i = 0; i < 2; i++)

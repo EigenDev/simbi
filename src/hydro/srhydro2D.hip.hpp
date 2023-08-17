@@ -192,7 +192,7 @@ namespace simbi
             std::vector<std::string> boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            const std::string solver,
             bool quirk_smoothing,
             bool constant_sources,
             std::vector<std::vector<real>> boundary_sources,

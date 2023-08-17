@@ -803,16 +803,19 @@ void SRHD3D::advance(
             hR = prims2flux(zprimsR, 3);
 
             // Calc HLL Flux at i+1/2 interface
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
                 hrf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
-
-            } else {
+                break;
+            
+            default:
                 frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 grf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
                 hrf = calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
+                break;
             }
 
             // Set up the left and right state interfaces for i-1/2
@@ -871,17 +874,20 @@ void SRHD3D::advance(
             hR = prims2flux(zprimsR, 3);
 
             // Calc HLL Flux at i-1/2 interface
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
                 hlf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
-
-            } else {
+                break;
+            
+            default:
                 flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 glf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
                 hlf = calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
-            }   
+                break;
+            }
         } else{
             // Coordinate X
             Primitive xleft_most  = prim_buff[tza * xstride * ystride + tya * xstride + (txa - 2)];
@@ -958,14 +964,19 @@ void SRHD3D::advance(
             hL = prims2flux(zprimsL, 3);
             hR = prims2flux(zprimsR, 3);
 
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
                 hrf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
-            } else {
+                break;
+            
+            default:
                 frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 grf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
                 hrf = calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
+                break;
             }
 
             // Do the same thing, but for the left side interface [i - 1/2]
@@ -1019,14 +1030,19 @@ void SRHD3D::advance(
             hL = prims2flux(zprimsL, 3);
             hR = prims2flux(zprimsR, 3);
 
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
                 hlf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
-            } else {
+                break;
+            
+            default:
                 flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 glf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
                 hlf = calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3);
+                break;
             }
 
         }// end else 
@@ -1139,7 +1155,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace, 
-    bool hllc,
+    const std::string solver,
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources)
 {   
@@ -1162,7 +1178,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->engine_duration = engine_duration;
     this->total_zones     = nx * ny * nz;
     this->first_order     = first_order;
-    this->hllc            = hllc;
+    this->sim_solver      = helpers::solver_map.at(solver);
     this->dlogt           = dlogt;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;

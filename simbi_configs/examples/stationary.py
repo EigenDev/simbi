@@ -37,20 +37,20 @@ class StationaryWaveHLL(BaseConfig):
         return "classical"
     
     @simbi_property
-    def use_hllc_solver(self) -> bool:
-        return False 
+    def solver(self) -> str:
+        return 'hlle' 
     
     @simbi_property
     def data_directory(self) -> str:
-        return 'data/stationary/hll'
+        return 'data/stationary/hlle'
     
 class StationaryWaveHLLC(StationaryWaveHLL):
     """
     Stationary Wave Test Problems in 1D Newtonian Fluid using HLLC Toro et al. (1992) solver
     """
     @simbi_property
-    def use_hllc_solver(self) -> bool:
-        return True 
+    def solver(self) -> str:
+        return 'hllc' 
     
     @simbi_property
     def data_directory(self) -> str:

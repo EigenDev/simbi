@@ -43,7 +43,7 @@ cdef class PyState:
         vector[string] boundary_conditions,
         bool first_order,
         bool linspace,
-        bool hllc,
+        string solver,
         bool constant_sources,
         vector[vector[real]] boundary_sources):
 
@@ -60,7 +60,7 @@ cdef class PyState:
             boundary_conditions,
             first_order,
             linspace,
-            hllc,
+            solver,
             constant_sources,
             boundary_sources)
 
@@ -95,7 +95,7 @@ cdef class PyStateSR:
         vector[string] boundary_conditions,
         bool first_order, 
         bool linspace, 
-        bool hllc,
+        string solver,
         bool constant_sources,
         vector[vector[real]] boundary_sources,
         a,
@@ -125,7 +125,7 @@ cdef class PyStateSR:
                 boundary_conditions,
                 first_order, 
                 linspace, 
-                hllc,
+                solver,
                 constant_sources,
                 boundary_sources,
                 a_cpp,
@@ -148,7 +148,7 @@ cdef class PyStateSR:
                 boundary_conditions,
                 first_order, 
                 linspace, 
-                hllc,
+                solver,
                 constant_sources,
                 boundary_sources,
                 a_cpp,
@@ -186,7 +186,7 @@ cdef class PyState2D:
         vector[string] boundary_conditions,
         bool first_order,
         bool linspace, 
-        bool hllc,
+        string solver,
         bool constant_sources,
         vector[vector[real]] boundary_sources):
 
@@ -203,7 +203,7 @@ cdef class PyState2D:
             boundary_conditions, 
             first_order,
             linspace, 
-            hllc,
+            solver,
             constant_sources,
             boundary_sources)
             
@@ -249,7 +249,7 @@ cdef class PyStateSR2D:
         vector[string] boundary_conditions,
         bool first_order,
         bool linspace,
-        bool hllc,
+        string solver,
         bool quirk_smoothing,
         bool constant_sources,
         vector[vector[real]] boundary_sources,
@@ -284,7 +284,7 @@ cdef class PyStateSR2D:
                 boundary_conditions,
                 first_order,
                 linspace,
-                hllc,
+                solver,
                 quirk_smoothing,
                 constant_sources,
                 boundary_sources,
@@ -310,7 +310,7 @@ cdef class PyStateSR2D:
                 boundary_conditions,
                 first_order,
                 linspace,
-                hllc,
+                solver,
                 quirk_smoothing,
                 constant_sources,
                 boundary_sources,
@@ -361,7 +361,7 @@ cdef class PyStateSR3D:
         vector[string] boundary_conditions,
         bool first_order,
         bool linspace,
-        bool hllc,
+        string solver,
         bool constant_sources,
         vector[vector[real]] boundary_sources):
         
@@ -380,7 +380,7 @@ cdef class PyStateSR3D:
             boundary_conditions,
             first_order,
             linspace,
-            hllc,
+            solver,
             constant_sources,
             boundary_sources)
         result = np.asanyarray(result)

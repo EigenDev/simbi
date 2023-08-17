@@ -223,7 +223,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         type=float)
     overridable.add_argument(
         '--first-order',
-        help='Set flag if wanting first order accuracy in solution',
+        help='set flag if wanting first order accuracy in solution',
         default=None,
         action='store_true')
     overridable.add_argument(
@@ -232,10 +232,11 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         default=None,
         type=float)
     overridable.add_argument(
-        '--hllc',
-        help='flag for HLLC computation as opposed to HLLE',
+        '--solver',
+        help='flag for hydro solver',
         default=None,
-        action=argparse.BooleanOptionalAction)
+        choices=['hllc', 'hlle'],
+    )
     overridable.add_argument(
         '--chkpt-interval',
         help='checkpoint interval spacing in simulation time units',
@@ -434,7 +435,7 @@ def configure_state(
         kwargs[idx]['chkpt_interval'] = config.check_point_interval
         kwargs[idx]['tstart'] = config.default_start_time
         kwargs[idx]['tend'] = config.default_end_time
-        kwargs[idx]['hllc'] = config.use_hllc_solver
+        kwargs[idx]['solver'] = config.solver
         kwargs[idx]['boundary_conditions'] = config.boundary_conditions
         kwargs[idx]['plm_theta'] = config.plm_theta
         kwargs[idx]['dlogt'] = config.dlogt

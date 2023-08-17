@@ -476,7 +476,7 @@ class Hydro:
             sources: Optional[NDArray[Any]] = None,
             gsources: Optional[NDArray[Any]] = None,
             passive_scalars: Optional[Union[NDArray[Any], int]] = None,
-            hllc: bool = False,
+            solver: str = 'hllc',
             chkpt: Optional[str] = None,
             chkpt_interval: float = 0.1,
             data_directory: str = "data/",
@@ -505,7 +505,7 @@ class Hydro:
             cfl         (float):         The cfl number for min adaptive timestep
             sources     (array_like):    The source terms for the simulations
             passive_scalars  (array_like):    The array of passive passive_scalars
-            hllc        (boolean):       Tells the simulation whether to perform HLLC or HLLE
+            solver        (str):         Tells the simulation whether to perform HLLC or HLLE
             chkpt       (string):        The path to the checkpoint file to read into the simulation
             chkpt_interval (float):      The interval at which to save the checkpoints
             data_directory (string):     The directory at which to save the checkpoint files
@@ -588,6 +588,7 @@ class Hydro:
         cython_data_directory = os.path.join(
             data_directory, '').encode('utf-8')
         cython_coordinates = self.coord_system.encode('utf-8')
+        cython_solver = solver.encode('utf-8')
         cython_boundary_conditions: NDArray[numpy_string] = np.array(
             [bc.encode('utf-8') for bc in self.boundary_conditions])
 
@@ -732,7 +733,7 @@ class Hydro:
                     x3=self.x3,
                     coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
-                
+            
         self.solution = state.simulate(
             sources=sources,
             tstart=self.start_time,
@@ -746,7 +747,7 @@ class Hydro:
             boundary_conditions=cython_boundary_conditions,
             first_order=first_order,
             linspace=linspace,
-            hllc=hllc,
+            solver=cython_solver,
             constant_sources=constant_sources,
             boundary_sources=boundary_sources,
             **kwargs)

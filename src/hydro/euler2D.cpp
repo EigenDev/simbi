@@ -91,42 +91,47 @@ Eigenvals Newtonian2D::calc_eigenvals(
     const real rhoR = right_prims.rho;
     const real vR   = right_prims.vcomponent(ehat);
     const real pR   = right_prims.p;
-    if (hllc)
+    switch (sim_solver)
     {
-        const real csR = std::sqrt(gamma * pR/rhoR);
-        const real csL = std::sqrt(gamma * pL/rhoL);
+    case Solver::HLLC:
+        {
+            const real csR = std::sqrt(gamma * pR/rhoR);
+            const real csL = std::sqrt(gamma * pL/rhoL);
 
-        // Calculate the mean velocities of sound and fluid
-        // const real cbar   = 0.5*(csL + csR);
-        // const real rhoBar = 0.5*(rhoL + rhoR);
-        const real num       = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
-        const real denom     = csL * std::pow(pL, - hllc_z) + csR * std::pow(pR, - hllc_z);
-        const real p_term    = num/denom;
-        const real pStar     = std::pow(p_term, (1./hllc_z));
+            // Calculate the mean velocities of sound and fluid
+            // const real cbar   = 0.5*(csL + csR);
+            // const real rhoBar = 0.5*(rhoL + rhoR);
+            const real num       = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
+            const real denom     = csL * std::pow(pL, - hllc_z) + csR * std::pow(pR, - hllc_z);
+            const real p_term    = num/denom;
+            const real pStar     = std::pow(p_term, (1./hllc_z));
 
-        const real qL = 
-            (pStar <= pL) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pL - 1.));
+            const real qL = 
+                (pStar <= pL) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pL - 1.));
 
-        const real qR = 
-            (pStar <= pR) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pR- 1.));
+            const real qR = 
+                (pStar <= pR) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pR- 1.));
 
-        const real aL = vR - qL*csL;
-        const real aR = vR + qR*csR;
+            const real aL = vR - qL*csL;
+            const real aR = vR + qR*csR;
 
-        const real aStar = 
-            ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR) )/ 
-                (rhoL*(aL - vL) - rhoR*(aR - vR) ) );
+            const real aStar = 
+                ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR) )/ 
+                    (rhoL*(aL - vL) - rhoR*(aR - vR) ) );
 
-        return Eigenvals(aL, aR, csL, csR, aStar, pStar);
+            return Eigenvals(aL, aR, csL, csR, aStar, pStar);
+        }
 
-    } else {
-        const real csR  = std::sqrt(gamma * pR/rhoR);
-        const real csL  = std::sqrt(gamma * pL/rhoL);
+    default:
+        {
+            const real csR  = std::sqrt(gamma * pR/rhoR);
+            const real csL  = std::sqrt(gamma * pL/rhoL);
 
-        const real aL = helpers::my_min(vL - csL, vR - csR);
-        const real aR = helpers::my_max(vL + csL, vR + csR);
+            const real aL = helpers::my_min(vL - csL, vR - csR);
+            const real aR = helpers::my_max(vL + csL, vR + csR);
 
-        return Eigenvals(aL, aR);
+            return Eigenvals(aL, aR);
+        }
 
     }
 };
@@ -674,12 +679,17 @@ void Newtonian2D::advance(
             gR = prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i+1/2 interface
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
-            } else {
+                break;
+            
+            default:
                 frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 grf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
+                break;
             }
 
             xprimsL = prim_buff[helpers::mod(txa - 1, bx) * sy + (tya + 0) * sx];
@@ -701,15 +711,18 @@ void Newtonian2D::advance(
             gR = prims2flux(yprimsR, 2);
 
             // Calc HLL Flux at i-1/2 interface
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
-
-            } else {
+                break;
+            
+            default:
                 flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 glf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
-            }   
+                break;
+            } 
         }
         else 
         {
@@ -744,15 +757,17 @@ void Newtonian2D::advance(
             gL = prims2flux(yprimsL, 2);
             gR = prims2flux(yprimsR, 2);
 
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
-            }
-            else
-            {
+                break;
+            
+            default:
                 frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 grf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
+                break;
             }
 
             // Do the same thing, but for the left side interface [i,j - 1/2]
@@ -774,16 +789,18 @@ void Newtonian2D::advance(
             gR = prims2flux(yprimsR, 2);
 
             
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
-            }
-            else
-            {
+                break;
+            
+            default:
                 flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1);
                 glf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2);
-            }
+                break;
+            } 
         }
 
         //Advance depending on geometry
@@ -893,7 +910,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace, 
-    bool hllc,
+    const std::string solver,
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources)
 {    
@@ -910,7 +927,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->sourceM2        = sources[2];
     this->sourceE         = sources[3];
     this->first_order     = first_order;
-    this->hllc            = hllc;
+    this->sim_solver      = helpers::solver_map.at(solver);
     this->engine_duration = engine_duration;
     this->dlogt           = dlogt;
     this->linspace        = linspace;
