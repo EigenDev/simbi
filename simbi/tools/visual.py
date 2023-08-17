@@ -641,6 +641,8 @@ class Visualizer:
                     dV = calc_cell_volume1D(x1=mesh['x1'])
                 elif self.ndim == 2:
                     dV = calc_cell_volume2D(x1=mesh['x1'], x2=mesh['x2'])
+                    if mesh['x2'][-1] == 0.5 * np.pi:
+                        dV *= 2.0 
                 else:
                     dV = calc_cell_volume3D(
                         x1=mesh['x1'], x2=mesh['x2'], x3=mesh['x3'])
