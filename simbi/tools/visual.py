@@ -1083,12 +1083,17 @@ class Visualizer:
         else:
             nind_curves = len(self.files) // self.nplots
         colors     = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
-        linestyles = ['-', '--', ':', '-.']
-        # linestyles = [x[0] for x in zip(cycle(['-', '--', ':', '-.']), colors)]
-        default_cycler = (cycler(linestyle=linestyles) * 
-                          cycler(color=colors)
+        if len(self.fields) > 1:
+            linestyles = [x[0] for x in zip(cycle(['-', '--', ':', '-.']), colors)]
+            default_cycler = (cycler(linestyle=linestyles) +
+                          cycler(color=colors))
+        else:
+            linestyles = ['-', '--', ':', '-.']
+            default_cycler = (cycler(linestyle=linestyles) *
+                          cycler(color=colors))
+            
+        
                         
-        )
         plt.rc('axes', prop_cycle=default_cycler)
         if self.nplots == 1:
             if self.square_plot:
