@@ -927,8 +927,8 @@ namespace simbi{
                             cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)] = inflow_zones[4];
                             break;
                         case simbi::BoundaryCondition::PERIODIC:
-                            cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x2grid_size - 4) * sx * sy + (jj + 2) * sx + (ii + 2)];
-                            cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x2grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                            cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x3grid_size - 4) * sx * sy + (jj + 2) * sx + (ii + 2)];
+                            cons[1 * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[(x3grid_size - 3) * sx * sy + (jj + 2) * sx + (ii + 2)];
                             break;
                         default:
                             cons[0 * sx * sy + (jj + 2) * sx + (ii + 2)] = cons[2 * sx * sy + (jj + 2) * sx + (ii + 2)];

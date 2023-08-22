@@ -1160,7 +1160,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     std::vector<std::vector<real>> boundary_sources)
 {   
     anyDisplayProps();
-    define_periodic(boundary_conditions);
     this->t = tstart;
 
     // Define the source terms
@@ -1291,8 +1290,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     const luint xblockdim    = xphysical_grid > gpu_block_dimx ? gpu_block_dimx : xphysical_grid;
     const luint yblockdim    = yphysical_grid > gpu_block_dimy ? gpu_block_dimy : yphysical_grid;
     const luint zblockdim    = zphysical_grid > gpu_block_dimz ? gpu_block_dimz : zphysical_grid;
-    this->radius             = (periodic) ? 0 : (first_order) ? 1 : 2;
-    this->pseudo_radius      = (first_order) ? 1 : 2;
+    this->radius             = (first_order) ? 1 : 2;
     this->step               = (first_order) ? 1 : static_cast<real>(0.5);
     const luint xstride      = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
     const luint ystride      = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;

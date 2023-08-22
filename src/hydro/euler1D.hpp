@@ -94,9 +94,7 @@ namespace simbi {
             const hydro1d::Conserved &left_flux,
             const hydro1d::Conserved &right_flux);
 
-        void advance(
-            const ExecutionPolicy<> &p, 
-            const luint xstride);
+        void advance(const ExecutionPolicy<> &p);
 
         std::vector<std::vector<real> > simulate1D(
             std::vector<std::vector<real>> &sources,

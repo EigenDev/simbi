@@ -25,10 +25,10 @@ namespace simbi
         real dt, t, tend, t_interval, chkpt_interval, plm_theta, time_constant, hubble_param; 
         real x1min, x1max, x2min, x2max, x3min, x3max, step;
         real dlogx1, dx1, dx2, dx3, dlogt, tstart, engine_duration, invdx1, invdx2, invdx3;
-        bool first_order, periodic, linspace, mesh_motion, adaptive_mesh_motion, half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
+        bool first_order, linspace, mesh_motion, adaptive_mesh_motion, half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
         bool den_source_all_zeros, mom1_source_all_zeros, mom2_source_all_zeros, mom3_source_all_zeros, energy_source_all_zeros; 
         bool grav_source_all_zeros;
-        luint active_zones, idx_active, total_zones, n, init_chkpt_idx, radius, pseudo_radius;
+        luint active_zones, idx_active, total_zones, n, init_chkpt_idx, radius;
         luint xphysical_grid, yphysical_grid, zphysical_grid;
         simbi::Solver sim_solver;
         ndarray<simbi::BoundaryCondition> bcs;
@@ -69,20 +69,16 @@ namespace simbi
             init_chkpt_idx = chkpt_idx + (chkpt_idx > 0);
         }
 
-        void define_periodic(std::vector<std::string> boundary_conditions) {
-            this->periodic = std::all_of(boundary_conditions.begin(), boundary_conditions.end(), [](std::string s) {return s == "periodic";});
-        }
-
         void define_xphysical_grid(bool is_first_order) {
-            xphysical_grid =  this->periodic ? nx : (is_first_order) ? nx -2 : nx - 4;
+            xphysical_grid = (is_first_order) ? nx -2 : nx - 4;
         }
 
         void define_yphysical_grid(bool is_first_order) {
-            yphysical_grid =  this->periodic ? ny : (is_first_order) ? ny -2 : ny - 4;
+            yphysical_grid =  (is_first_order) ? ny -2 : ny - 4;
         }
 
         void define_zphysical_grid(bool is_first_order) {
-            zphysical_grid = this->periodic ? nz : (is_first_order) ? nz -2 : nz - 4;
+            zphysical_grid = (is_first_order) ? nz -2 : nz - 4;
         }
 
         void define_active_zones(){

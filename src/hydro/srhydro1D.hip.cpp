@@ -70,9 +70,7 @@ real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geome
 //=====================================================================
 //                          KERNEL CALLS
 //=====================================================================
-void SRHD::advance(
-    const ExecutionPolicy<> &p,
-    const luint xstride)
+void SRHD::advance(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
     const auto xextent          = p.get_xextent();
@@ -95,20 +93,20 @@ void SRHD::advance(
         Primitive primsL, primsR;
 
         lint ia  = ii + radius;
-        lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
+        lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + radius : ia;
         #if GPU_CODE
             luint txl = xextent;
             // Check if the active index exceeds the active zones
             // if it does, then this thread buffer will taken on the
             // ghost index at the very end and return
             prim_buff[txa] = prim_data[ia];
-            if (threadIdx.x < pseudo_radius)
+            if (threadIdx.x < radius)
             {
                 if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + threadIdx.x)) {
                     txl = nx - radius - ia + threadIdx.x;
                 }
-                prim_buff[txa - pseudo_radius] = prim_data[helpers::mod(ia - pseudo_radius, nx)];
-                prim_buff[txa + txl   ]        = prim_data[(ia + txl ) % nx];
+                prim_buff[txa - radius] = prim_data[ia - radius];
+                prim_buff[txa + txl]        = prim_data[ia + txl];
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -120,8 +118,8 @@ void SRHD::advance(
         if (first_order) [[unlikely]]
         {
             // Set up the left and right state interfaces for i+1/2
-            primsL = prim_buff[(txa + 0) % xstride];
-            primsR = prim_buff[(txa + 1) % xstride];
+            primsL = prim_buff[txa + 0];
+            primsR = prim_buff[txa + 1];
             uL     = prims2cons(primsL);
             uR     = prims2cons(primsR);
             fL     = prims2flux(primsL);
@@ -140,8 +138,8 @@ void SRHD::advance(
             }
 
             // Set up the left and right state interfaces for i-1/2
-            primsL = prim_buff[helpers::mod(txa - 1, xstride)];
-            primsR = prim_buff[(txa - 0) % xstride];
+            primsL = prim_buff[txa - 1];
+            primsR = prim_buff[txa - 0];
 
             uL = prims2cons(primsL);
             uR = prims2cons(primsR);
@@ -160,11 +158,11 @@ void SRHD::advance(
                 break;
             } 
         } else {
-            const Primitive left_most  = prim_buff[helpers::mod(txa - 2, xstride)];
-            const Primitive left_mid   = prim_buff[helpers::mod(txa - 1, xstride)];
-            const Primitive center     = prim_buff[(txa + 0) % xstride];
-            const Primitive right_mid  = prim_buff[(txa + 1) % xstride];
-            const Primitive right_most = prim_buff[(txa + 2) % xstride];
+            const Primitive left_most  = prim_buff[txa - 2];
+            const Primitive left_mid   = prim_buff[txa - 1];
+            const Primitive center     = prim_buff[txa + 0];
+            const Primitive right_mid  = prim_buff[txa + 1];
+            const Primitive right_most = prim_buff[txa + 2];
 
             // Compute the reconstructed primitives at the i+1/2 interface
             // Reconstructed left primitives vector
@@ -680,7 +678,6 @@ SRHD::simulate1D(
     std::function<double(double)> e_outer)
 {
     anyDisplayProps();
-    define_periodic(boundary_conditions);
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
@@ -697,8 +694,8 @@ SRHD::simulate1D(
     this->tend            = tend;
     this->dlogt           = dlogt;
     this->geometry        = helpers::geometry_map.at(coord_system);
-    this->idx_active      = (periodic) ? 0  : (first_order) ? 1 : 2;
-    this->active_zones    = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
+    this->idx_active      = (first_order) ? 1 : 2;
+    this->active_zones    = (first_order) ? nx - 2 : nx - 4;
     this->dlogx1          = std::log10(x1[active_zones - 1]/ x1[0]) / (active_zones - 1);
     this->dx1             = (x1[active_zones - 1] - x1[0]) / (active_zones - 1);
     this->invdx1          = 1.0 / this->dx1;
@@ -782,10 +779,9 @@ SRHD::simulate1D(
     troubled_cells.copyToGpu();
 
     const auto xblockdim      = nx > gpu_block_dimx ? gpu_block_dimx : nx;
-    this->radius              = (periodic) ? 0 : (first_order) ? 1 : 2;
-    this->pseudo_radius       = (first_order) ? 1 : 2;
+    this->radius              = (first_order) ? 1 : 2;
     this->step                = (first_order) ? 1 : static_cast<real>(0.5);
-    const luint shBlockSize   = gpu_block_dimx + 2 * pseudo_radius;
+    const luint shBlockSize   = gpu_block_dimx + 2 * radius;
     const luint shBlockBytes  = shBlockSize * sizeof(Primitive);
     const auto fullP          = simbi::ExecutionPolicy(nx, xblockdim);
     const auto activeP        = simbi::ExecutionPolicy(active_zones, xblockdim, shBlockBytes);
@@ -802,9 +798,7 @@ SRHD::simulate1D(
 
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
-        if (!periodic){
-            config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
-        }
+        config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
         write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
         if (dlogt != 0) {
             t_interval *= std::pow(10, dlogt);
@@ -814,16 +808,13 @@ SRHD::simulate1D(
     }
 
     // Simulate :)
-    const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
     simbi::detail::logger::with_logger(*this, tend, [&](){
         if (inFailureState){
             return;
         }
-        advance(activeP, xstride);
+        advance(activeP);
         cons2prim(fullP);
-        if (!periodic) {
-            config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
-        }
+        config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
 
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP.gridSize.x);

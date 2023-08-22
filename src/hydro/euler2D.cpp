@@ -624,8 +624,8 @@ void Newtonian2D::advance(
         const lint ja  = jj + radius;
         const lint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x: 0;
         const lint ty  = (BuildPlatform == Platform::GPU) ? threadIdx.y: 0;
-        const lint txa = (BuildPlatform == Platform::GPU) ? tx + pseudo_radius : ia;
-        const lint tya = (BuildPlatform == Platform::GPU) ? ty + pseudo_radius : ja;
+        const lint txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
+        const lint tya = (BuildPlatform == Platform::GPU) ? ty + radius : ja;
 
         Conserved uxL, uxR, uyL, uyR;
         Conserved fL, fR, gL, gR, frf, flf, grf, glf;
@@ -638,20 +638,20 @@ void Newtonian2D::advance(
             luint tyl = yextent;
             // Load Shared memory into buffer for active zones plus ghosts
             prim_buff[tya * sx + txa * sy] = prim_data[aid];
-            if (ty < pseudo_radius)
+            if (ty < radius)
             {
                 if (blockIdx.y == p.gridSize.y - 1 && (ja + yextent > ny - radius + ty)) {
                     tyl = ny - radius - ja + ty;
                 }
-                prim_buff[(tya - pseudo_radius) * sx + txa] = prim_data[helpers::mod(ja - pseudo_radius, ny) * nx + ia];
-                prim_buff[(tya + tyl) * sx + txa]           = prim_data[(ja + tyl) % ny * nx + ia]; 
+                prim_buff[(tya - radius) * sx + txa] = prim_data[(ja - radius) * nx + ia];
+                prim_buff[(tya + tyl) * sx + txa]    = prim_data[(ja + tyl)    * nx + ia]; 
             }
-            if (tx < pseudo_radius)
+            if (tx < radius)
             {   
                 if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + tx)) {
                     txl = nx - radius - ia + tx;
                 }
-                prim_buff[tya * sx + txa - pseudo_radius] =  prim_data[ja * nx + helpers::mod(ia - pseudo_radius, nx)];
+                prim_buff[tya * sx + txa - radius] =  prim_data[ja * nx + helpers::mod(ia - radius, nx)];
                 prim_buff[tya * sx + txa +    txl]        =  prim_data[ja * nx +    (ia + txl) % nx]; 
             }
             simbi::gpu::api::synchronize();
@@ -659,11 +659,12 @@ void Newtonian2D::advance(
 
         if (first_order) [[unlikely]]
         {
-            xprimsL = prim_buff[(txa + 0)      * sy + (tya + 0) * sx];
-            xprimsR = prim_buff[(txa + 1) % bx * sy + (tya + 0) * sx];
+            //i+1/2
+            xprimsL = prim_buff[(txa + 0) * sy + (tya + 0) * sx];
+            xprimsR = prim_buff[(txa + 1) * sy + (tya + 0) * sx];
             //j+1/2
-            yprimsL = prim_buff[(txa + 0) * sy + (tya + 0)      * sx];
-            yprimsR = prim_buff[(txa + 0) * sy + (tya + 1) % by * sx];
+            yprimsL = prim_buff[(txa + 0) * sy + (tya + 0) * sx];
+            yprimsR = prim_buff[(txa + 0) * sy + (tya + 1) * sx];
             
             // i+1/2
             uxL = prims2cons(xprimsL); 
@@ -692,11 +693,12 @@ void Newtonian2D::advance(
                 break;
             }
 
-            xprimsL = prim_buff[helpers::mod(txa - 1, bx) * sy + (tya + 0) * sx];
-            xprimsR = prim_buff[            (txa - 0)     * sy + (tya + 0) * sx];
-            //j+1/2
-            yprimsL = prim_buff[(txa - 0) * sy + helpers::mod(tya - 1, by) * sx]; 
-            yprimsR = prim_buff[(txa + 0) * sy +             (tya - 0)     * sx]; 
+            //i-1/2
+            xprimsL = prim_buff[(txa - 1) * sy + (tya + 0) * sx];
+            xprimsR = prim_buff[(txa - 0) * sy + (tya + 0) * sx];
+            //j-1/2
+            yprimsL = prim_buff[(txa - 0) * sy + (tya - 1) * sx]; 
+            yprimsR = prim_buff[(txa + 0) * sy + (tya - 0) * sx]; 
 
             // i+1/2
             uxL = prims2cons(xprimsL); 
@@ -727,17 +729,17 @@ void Newtonian2D::advance(
         else 
         {
             // Coordinate X
-            const Primitive xleft_most  = prim_buff[(helpers::mod(txa - 2, bx)    * sy + tya * sx)];
-            const Primitive xleft_mid   = prim_buff[(helpers::mod(txa - 1, bx)    * sy + tya * sx)];
-            const Primitive center      = prim_buff[(            (txa + 0)        * sy + tya * sx)];
-            const Primitive xright_mid  = prim_buff[(            (txa + 1) % bx   * sy + tya * sx)];
-            const Primitive xright_most = prim_buff[(            (txa + 2) % bx   * sy + tya * sx)];
+            const Primitive xleft_most  = prim_buff[(txa - 2) * sy + tya * sx];
+            const Primitive xleft_mid   = prim_buff[(txa - 1) * sy + tya * sx];
+            const Primitive center      = prim_buff[(txa + 0) * sy + tya * sx];
+            const Primitive xright_mid  = prim_buff[(txa + 1) * sy + tya * sx];
+            const Primitive xright_most = prim_buff[(txa + 2) * sy + tya * sx];
 
             // Coordinate Y
-            const Primitive yleft_most  = prim_buff[(txa * sy + helpers::mod(tya - 2, by)  * sx)];
-            const Primitive yleft_mid   = prim_buff[(txa * sy + helpers::mod(tya - 1, by)  * sx)];
-            const Primitive yright_mid  = prim_buff[(txa * sy +             (tya + 1) % by * sx)];
-            const Primitive yright_most = prim_buff[(txa * sy +             (tya + 2) % by * sx)];
+            const Primitive yleft_most  = prim_buff[txa * sy + (tya - 2) * sx];
+            const Primitive yleft_mid   = prim_buff[txa * sy + (tya - 1) * sx];
+            const Primitive yright_mid  = prim_buff[txa * sy + (tya + 1) * sx];
+            const Primitive yright_most = prim_buff[txa * sy + (tya + 2) * sx];
 
             // Reconstructed left X Primitive vector at the i+1/2 interface
             xprimsL  = center     + helpers::plm_gradient(center, xleft_mid, xright_mid, plm_theta)   * static_cast<real>(0.5); 
@@ -915,7 +917,6 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     std::vector<std::vector<real>> boundary_sources)
 {    
     anyDisplayProps();
-    define_periodic(boundary_conditions);
     this->t = tstart;
     // Define the simulation members
     this->chkpt_interval  = chkpt_interval;
@@ -932,9 +933,9 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->dlogt           = dlogt;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
-    this->xphysical_grid  = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
-    this->yphysical_grid  = (periodic) ? ny : (first_order) ? ny - 2 : ny - 4;
-    this->idx_active      = (periodic) ? 0 : (first_order) ? 1 : 2;
+    this->xphysical_grid  = (first_order) ? nx - 2 : nx - 4;
+    this->yphysical_grid  = (first_order) ? ny - 2 : ny - 4;
+    this->idx_active      = (first_order) ? 1 : 2;
     this->active_zones    = xphysical_grid * yphysical_grid;
     this->quirk_smoothing = quirk_smoothing;
     this->geometry        = helpers::geometry_map.at(coord_system);
@@ -1032,19 +1033,17 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     // Setup the system
     const luint xblockdim       = xphysical_grid > gpu_block_dimx ? gpu_block_dimx : xphysical_grid;
     const luint yblockdim       = yphysical_grid > gpu_block_dimy ? gpu_block_dimy : yphysical_grid;
-    this->radius                = (periodic) ? 0 : (first_order) ? 1 : 2;
-    this->pseudo_radius         = (first_order) ? 1 : 2;
+    this->radius                = (first_order) ? 1 : 2;
     this->step                  = (first_order) ? 1 : static_cast<real>(0.5);
-    const luint bx              = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * pseudo_radius: nx;
-    const luint by              = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * pseudo_radius: ny;
+    const luint bx              = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
+    const luint by              = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
     const luint shBlockSpace    = bx * by;
     const luint shBlockBytes    = shBlockSpace * sizeof(Primitive);
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim});
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
     if (t == 0) {
-        if (!periodic) 
-            config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
@@ -1071,10 +1070,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     simbi::detail::logger::with_logger(*this, tend, [&](){
         advance(activeP, bx, by);
         cons2prim(fullP);
-        if (!periodic) {
-            config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
-        }
-        
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
+
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP);
         } else {

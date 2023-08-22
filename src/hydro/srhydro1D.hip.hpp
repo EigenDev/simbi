@@ -45,8 +45,7 @@ namespace simbi
           ~SRHD(){};
 
           void advance(
-               const ExecutionPolicy<> &p,
-               const luint xstride);
+               const ExecutionPolicy<> &p);
 
           void cons2prim(const ExecutionPolicy<> &p);
 

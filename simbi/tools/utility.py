@@ -176,25 +176,15 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         v   = [(hf.get(f'v{dim}') or hf.get(f'v'))[:] for dim in range(1,ndim + 1)]
         p   = hf.get('p')[:]         
         chi = (hf.get('chi') or np.zeros_like(rho))[:]
-
-        if not (bcs := hf.get('boundary_conditions')):
-            try:
-                bcs = [ds.attrs['boundary_condition']]
-            except KeyError:
-                bcs = [b'outflow']
-                
-        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
-        if 'no_cut' in vars(args).keys() and args.no_cut:
-            full_periodic = True
                 
         setup['first_order']  = try_read(ds, key='first_order', fall_back=False)
         nx                    = ds.attrs['nx'] if 'nx' in ds.attrs.keys() else 1
         ny                    = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
         nz                    = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
         
-        setup['x1active']     = nx if full_periodic else nx - 2 * (1 + (setup['first_order']^1)) * (nx - 2 > 0)
-        setup['x2active']     = ny if full_periodic else ny - 2 * (1 + (setup['first_order']^1)) * (ny - 2 > 0)
-        setup['x3active']     = nz if full_periodic else nz - 2 * (1 + (setup['first_order']^1)) * (nz - 2 > 0)
+        setup['x1active']     = nx - 2 * (1 + (setup['first_order']^1)) * (nx - 2 > 0)
+        setup['x2active']     = ny - 2 * (1 + (setup['first_order']^1)) * (ny - 2 > 0)
+        setup['x3active']     = nz - 2 * (1 + (setup['first_order']^1)) * (nz - 2 > 0)
         setup['time']         = ds.attrs['current_time']
         setup['linspace']     = ds.attrs['linspace']
         setup['ad_gamma']     = ds.attrs['adiabatic_gamma']
@@ -218,12 +208,11 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         else:
             setup['dt'] = ds.attrs['time_step']
             
-        if not full_periodic:
-            npad = tuple(tuple(val) for val in [[((setup['first_order']^1) + 1), ((setup['first_order']^1) + 1)]] * ndim) 
-            rho  = unpad(rho, npad)
-            v    = np.asanyarray([unpad(vel, npad) for vel in v])
-            p    = unpad(p, npad)
-            chi  = unpad(chi, npad)
+        npad = tuple(tuple(val) for val in [[((setup['first_order']^1) + 1), ((setup['first_order']^1) + 1)]] * ndim) 
+        rho  = unpad(rho, npad)
+        v    = np.asanyarray([unpad(vel, npad) for vel in v])
+        p    = unpad(p, npad)
+        chi  = unpad(chi, npad)
         
         #-------------------------------
         # Load Fields

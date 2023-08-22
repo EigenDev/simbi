@@ -566,7 +566,6 @@ class Hydro:
                 'planar_cylindrical', 'axis_cylindrical']:
             self.coord_system = 'cylindrical'
 
-        periodic = all(bc == 'periodic' for bc in boundary_conditions)
         self.start_time = self.start_time or tstart
 
         #######################################################################
@@ -752,6 +751,5 @@ class Hydro:
             boundary_sources=boundary_sources,
             **kwargs)
 
-        if not periodic:
-            self._cleanup(first_order)
+        self._cleanup(first_order)
         return self.solution
