@@ -56,8 +56,7 @@ namespace simbi
         void define_tinterval(real t, real dlogt, real chkpt_interval, real chkpt_idx) {
             real round_place = 1 / chkpt_interval;
             t_interval = 
-               t == 0 ? 0
-               : dlogt !=0 ? tstart * std::pow(10, dlogt)
+                 dlogt != 0 ? tstart * std::pow(10, dlogt)
                : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
         }
 
