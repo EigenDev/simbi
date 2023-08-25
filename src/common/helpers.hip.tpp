@@ -21,7 +21,7 @@ namespace simbi{
                     break;
                 case simbi::BoundaryCondition::REFLECTING:
                     cons[0]   = cons[1];
-                    cons[0].m = - cons[1].m;
+                    cons[0].m *= -1;
                     break;
                 case simbi::BoundaryCondition::PERIODIC:
                     cons[0] = cons[grid_size - 2];
@@ -37,7 +37,7 @@ namespace simbi{
                     break;
                 case simbi::BoundaryCondition::REFLECTING:
                     cons[grid_size - 1]   =   cons[grid_size - 2];
-                    cons[grid_size - 1].m = - cons[grid_size - 2].m;
+                    cons[grid_size - 1].m *= -1;
                     break;
                 case simbi::BoundaryCondition::PERIODIC:
                     cons[grid_size - 1] = cons[1];
@@ -60,8 +60,8 @@ namespace simbi{
                 case simbi::BoundaryCondition::REFLECTING:
                     cons[0]   = cons[3];
                     cons[1]   = cons[2];
-                    cons[0].m = - cons[3].m;
-                    cons[1].m = - cons[2].m;
+                    cons[0].m *= -1;
+                    cons[1].m *= -1;
                     break;
                 case simbi::BoundaryCondition::PERIODIC:
                     cons[0] = cons[grid_size - 4];
@@ -81,8 +81,8 @@ namespace simbi{
                 case simbi::BoundaryCondition::REFLECTING:
                     cons[grid_size - 1]   = cons[grid_size - 4];
                     cons[grid_size - 2]   = cons[grid_size - 3];
-                    cons[grid_size - 1].m = - cons[grid_size - 4].m;
-                    cons[grid_size - 2].m = - cons[grid_size - 3].m;
+                    cons[grid_size - 1].m *= -1;
+                    cons[grid_size - 2].m *= -1;
                     break;
                 case simbi::BoundaryCondition::PERIODIC:
                     cons[grid_size - 1] = cons[3];
