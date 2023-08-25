@@ -336,7 +336,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         default=False,
     )
     global_args.add_argument(
-        '--log-dir',
+        '--log-directory',
         help='directory to place the log file',
         type=str,
         default=None
@@ -422,7 +422,7 @@ def configure_state(
 
         if args.log_output:
             static_config.log_output = True 
-            static_config.set_logdir(args.data_directory or config.data_directory)
+            static_config.set_logdir(args.log_directory or args.data_directory or config.data_directory)
                 
         if config.__doc__:
             state_docs += [f"{config.__doc__}"]
