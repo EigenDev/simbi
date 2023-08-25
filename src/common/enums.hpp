@@ -62,6 +62,7 @@ namespace simbi{
     enum class WaveSpeeds {
         SCHNEIDER_ET_AL_93,
         MIGNONE_AND_BODO_05,
+        HUBER_AND_KISSMANN_2021,
         NAIVE,
     };
     constexpr auto comp_wave_speed = WaveSpeeds::MIGNONE_AND_BODO_05;
