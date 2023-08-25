@@ -5,6 +5,7 @@ from libcpp cimport bool
 from libcpp.string cimport string 
 
 
+# adapted from: https://stackoverflow.com/a/39052204/13874039
 cdef extern from "util/pyobj_wrapper.hpp":
     cdef cppclass PyObjWrapper:
         PyObjWrapper()
