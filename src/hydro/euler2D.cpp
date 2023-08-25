@@ -1042,9 +1042,10 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim});
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
-    if (t == 0) {
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
+    if constexpr(BuildPlatform == Platform::GPU){
+        std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
     }
+
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
         adapt_dt(activeP);
@@ -1058,12 +1059,8 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
 
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
-        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-        if (dlogt != 0) {
-            t_interval *= std::pow(10, dlogt);
-        } else {
-            t_interval += chkpt_interval;
-        }
+        write2file(*this, setup, data_directory, t, 0, chkpt_interval, yphysical_grid);
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
     
     // Simulate :)

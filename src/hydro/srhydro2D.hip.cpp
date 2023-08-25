@@ -92,8 +92,10 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
             // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-            const real sL = csL*csL/(gamma*gamma*(1 - csL*csL));
-            const real sR = csR*csR/(gamma*gamma*(1 - csR*csR));
+            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
+            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
+            const real sL = csL*csL/(gammaL*gammaL*(1 - csL*csL));
+            const real sR = csR*csR/(gammaR*gammaR*(1 - csR*csR));
             // Define temporaries to save computational cycles
             const real qfL   = 1 / (1 + sL);
             const real qfR   = 1 / (1 + sR);
@@ -105,12 +107,31 @@ Eigenvals SRHD2D::calc_eigenvals(const Primitive &primsL,
             const real lamLp = (vL + sqrtL) * qfL;
             const real lamRp = (vR + sqrtR) * qfR;
 
+            const real aL = lamLm < lamRm ? lamLm : lamRm;
+            const real aR = lamLp > lamRp ? lamLp : lamRp;
+
+            return Eigenvals(aL, aR, csL, csR);
+        }
+    case simbi::WaveSpeeds::HUBER_AND_KISSMANN_2021:
+        {
+            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
+            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
+            const real uL = gammaL * vL;
+            const real uR = gammaR * vR;
+            const real sL = csL*csL/(1 - csL * csL);
+            const real sR = csR*csR/(1 - csR * csR);
+            const real sqrtR = std::sqrt(sR * (gammaR * gammaR - uR * uR + sR));
+            const real sqrtL = std::sqrt(sL * (gammaL * gammaL - uL * uL + sL));
+            const real qfL   = 1 / (gammaL * gammaL + sL);
+            const real qfR   = 1 / (gammaR * gammaR + sR);
+
+            const real lamLm = (gammaL * uL - sqrtL) * qfL;
+            const real lamRm = (gammaR * uR - sqrtR) * qfR;
+            const real lamLp = (gammaL * uL + sqrtL) * qfL;
+            const real lamRp = (gammaR * uR + sqrtR) * qfR;
+
             real aL = lamLm < lamRm ? lamLm : lamRm;
             real aR = lamLp > lamRp ? lamLp : lamRp;
-
-            // Smoothen for rarefaction fan
-            aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
-            aR = helpers::my_max(aR, (vR + csR) / (1 + vR * csR));
 
             return Eigenvals(aL, aR, csL, csR);
         }
@@ -521,7 +542,7 @@ Conserved SRHD2D::calc_hllc_flux(
     {
     case HLLCTYPE::FLEISCHMANN:
         {
-            constexpr real ma_lim = static_cast<real>(0.1);
+            constexpr real ma_lim = static_cast<real>(0.01);
 
             // --------------Compute the L Star State----------
             real pressure = left_prims.p;
@@ -557,12 +578,12 @@ Conserved SRHD2D::calc_hllc_flux(
             Estar                 = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
             tauStar               = Estar - Dstar;
             const auto starStateR = Conserved{Dstar, S1star, S2star, tauStar};
-            const real ma_left    = vL / cL; // * std::sqrt((1 - cL * cL) / (1 - vL * vL));
-            const real ma_right   = vR / cR; // * std::sqrt((1 - cR * cR) / (1 - vR * vR));
+            const real ma_left    = vL / cL * std::sqrt((1 - cL * cL) / (1 - vL * vL));
+            const real ma_right   = vR / cR * std::sqrt((1 - cR * cR) / (1 - vR * vR));
             const real ma_local   = helpers::my_max(std::abs(ma_left), std::abs(ma_right));
             const real phi        = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
-            const real aL_lm      = (phi - (phi == 0) * (phi - 1)) * aL;
-            const real aR_lm      = (phi - (phi == 0) * (phi - 1)) * aR;
+            const real aL_lm      = (phi != 0) ? phi * aL : aL;
+            const real aR_lm      = (phi != 0) ? phi * aR : aR;
 
             const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
             Conserved net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL_lm
@@ -805,16 +826,16 @@ void SRHD2D::advance(
                 if (blockIdx.y == p.gridSize.y - 1 && (ja + yextent > ny - radius + ty)) {
                     tyl = ny - radius - ja + ty;
                 }
-                prim_buff[(tya - radius) * sx + txa] = prim_data[helpers::mod(ja - radius, ny) * nx + ia];
-                prim_buff[(tya + tyl) * sx + txa]           = prim_data[(ja + tyl) % ny * nx + ia]; 
+                prim_buff[(tya - radius) * sx + txa] = prim_data[(ja - radius) * nx + ia];
+                prim_buff[(tya + tyl) * sx + txa]    = prim_data[(ja + tyl) * nx + ia]; 
             }
             if (tx < radius)
             {   
                 if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + tx)) {
                     txl = nx - radius - ia + tx;
                 }
-                prim_buff[tya * sx + txa - radius] =  prim_data[ja * nx + helpers::mod(ia - radius, nx)];
-                prim_buff[tya * sx + txa +    txl]        =  prim_data[ja * nx +    (ia + txl) % nx]; 
+                prim_buff[tya * sx + txa - radius] =  prim_data[ja * nx + (ia - radius)];
+                prim_buff[tya * sx + txa +    txl] =  prim_data[ja * nx + (ia + txl)]; 
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -1336,10 +1357,6 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     
     if constexpr(BuildPlatform == Platform::GPU){
         std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
-
-    }
-    if (t == 0) {
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
     
     if constexpr(BuildPlatform == Platform::GPU) {
@@ -1355,12 +1372,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
-        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, yphysical_grid);
-        if (dlogt != 0) {
-            t_interval *= std::pow(10, dlogt);
-        } else {
-            t_interval += chkpt_interval;
-        }
+        write2file(*this, setup, data_directory, t, 0, chkpt_interval, yphysical_grid);
+        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
     
     // Simulate :)

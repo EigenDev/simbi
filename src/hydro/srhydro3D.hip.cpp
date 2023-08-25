@@ -183,20 +183,44 @@ Eigenvals SRHD3D::calc_eigenvals(
     
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
-            //--------Calc the wave speeds based on Mignone and Bodo (2005)
-            const real sL = csL * csL * (1 / (gamma * gamma * (1 - csL * csL)));
-            const real sR = csR * csR * (1 / (gamma * gamma * (1 - csR * csR)));
-
+            // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
+            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
+            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
+            const real sL = csL*csL/(gammaL*gammaL*(1 - csL*csL));
+            const real sR = csR*csR/(gammaR*gammaR*(1 - csR*csR));
             // Define temporaries to save computational cycles
             const real qfL   = 1 / (1 + sL);
             const real qfR   = 1 / (1 + sR);
-            const real sqrtR = std::sqrt(sR * (1- vR * vR + sR));
-            const real sqrtL = std::sqrt(sL * (1- vL * vL + sL));
+            const real sqrtR = std::sqrt(sR * (1 - vR * vR + sR));
+            const real sqrtL = std::sqrt(sL * (1 - vL * vL + sL));
 
             const real lamLm = (vL - sqrtL) * qfL;
             const real lamRm = (vR - sqrtR) * qfR;
             const real lamLp = (vL + sqrtL) * qfL;
             const real lamRp = (vR + sqrtR) * qfR;
+
+            const real aL = lamLm < lamRm ? lamLm : lamRm;
+            const real aR = lamLp > lamRp ? lamLp : lamRp;
+
+            return Eigenvals(aL, aR, csL, csR);
+        }
+    case simbi::WaveSpeeds::HUBER_AND_KISSMANN_2021:
+        {
+            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
+            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
+            const real uL = gammaL * vL;
+            const real uR = gammaR * vR;
+            const real sL = csL*csL/(1 - csL * csL);
+            const real sR = csR*csR/(1 - csR * csR);
+            const real sqrtR = std::sqrt(sR * (gammaR * gammaR - uR * uR + sR));
+            const real sqrtL = std::sqrt(sL * (gammaL * gammaL - uL * uL + sL));
+            const real qfL   = 1 / (gammaL * gammaL + sL);
+            const real qfR   = 1 / (gammaR * gammaR + sR);
+
+            const real lamLm = (gammaL * uL - sqrtL) * qfL;
+            const real lamRm = (gammaR * uR - sqrtR) * qfR;
+            const real lamLp = (gammaL * uL + sqrtL) * qfL;
+            const real lamRp = (gammaR * uR + sqrtR) * qfR;
 
             const real aL = lamLm < lamRm ? lamLm : lamRm;
             const real aR = lamLp > lamRp ? lamLp : lamRp;
@@ -619,9 +643,8 @@ Conserved SRHD3D::calc_hllc_flux(
 //===================================================================================================================
 void SRHD3D::advance(
     const ExecutionPolicy<> &p,
-    const luint xstride,
-    const luint ystride,
-    const luint zstride)
+    const luint sx,
+    const luint sy)
 {
     const luint xpg = this->xphysical_grid;
     const luint ypg = this->yphysical_grid;
@@ -643,6 +666,7 @@ void SRHD3D::advance(
     auto* const mom3_source = sourceS3.data();
     auto* const erg_source  = sourceTau.data();
     auto* const object_data = object_pos.data();
+
     #if GPU_CODE
     const auto last_kindex  = nz - 1 - radius;
     const auto last_jindex  = ny - 1 - radius;
@@ -685,57 +709,61 @@ void SRHD3D::advance(
             const bool on_final_jelem = ja == last_jindex;
             const bool on_final_ielem = ia == last_iindex;
             // Load Shared memory into buffer for active zones plus ghosts
-            prim_buff[tza * xstride * ystride + tya * xstride + txa] = prim_data[aid];
+            prim_buff[tza * sx * sy + tya * sx + txa] = prim_data[aid];
             if (tz < radius)    
             {
-                if (blockIdx.z == p.gridSize.z - 1 && (ka + zextent > nz - radius + tz)) {
+                if ((blockIdx.z == p.gridSize.z - 1) && (ka + zextent > nz - radius + tz)) {
                     tzl = nz - radius - ka + tz;
                 }
-                if (!on_final_kelem) {
-                    prim_buff[(tza - radius) * xstride * ystride + tya * xstride + txa] = prim_data[(ka - radius) * nx * ny + ja * nx + ia];
-                    prim_buff[(tza + tzl   ) * xstride * ystride + tya * xstride + txa] = prim_data[(ka + tzl   ) * nx * ny + ja * nx + ia];
-                } else {
-                    for (int q = 0; q < radius; q++) 
-                    {
-                        prim_buff[(tza - q) * xstride * ystride + tya * xstride + txa] = prim_data[(ka - q) * nx * ny + ja * nx + ia];
-                        prim_buff[(tza + q) * xstride * ystride + tya * xstride + txa] = prim_data[(ka + q) * nx * ny + ja * nx + ia];
-                    } 
-                }
+                prim_buff[(tza - radius) * sx * sy + tya * sx + txa] = prim_data[(ka - radius) * nx * ny + ja * nx + ia];
+                prim_buff[(tza + tzl   ) * sx * sy + tya * sx + txa] = prim_data[(ka + tzl   ) * nx * ny + ja * nx + ia];
+                // if (!on_final_kelem) {
+                //     prim_buff[(tza - radius) * sx * sy + tya * sx + txa] = prim_data[(ka - radius) * nx * ny + ja * nx + ia];
+                //     prim_buff[(tza + tzl   ) * sx * sy + tya * sx + txa] = prim_data[(ka + tzl   ) * nx * ny + ja * nx + ia];
+                // } else {
+                //     for (int q = 0; q < radius; q++) 
+                //     {
+                //         prim_buff[(tza - q) * sx * sy + tya * sx + txa] = prim_data[(ka - q) * nx * ny + ja * nx + ia];
+                //         prim_buff[(tza + q) * sx * sy + tya * sx + txa] = prim_data[(ka + q) * nx * ny + ja * nx + ia];
+                //     } 
+                // }
             }
             if (ty < radius)    
             {
-                if (blockIdx.y == p.gridSize.y - 1 && (ja + yextent > ny - radius + ty)) {
+                if ((blockIdx.y == p.gridSize.y - 1) && (ja + yextent > ny - radius + ty)) {
                     tyl = ny - radius - ja + ty;
                 }
-                if (!on_final_jelem) {
-                    prim_buff[tza * xstride * ystride + (tya - radius) * xstride + txa] = prim_data[ka * nx * ny + (ja - radius) * nx + ia];
-                    prim_buff[tza * xstride * ystride + (tya + tyl   ) * xstride + txa] = prim_data[ka * nx * ny + (ja + tyl   ) * nx + ia];
-                } else {
-                    for (int q = 0; q < radius; q++) 
-                    {
-                        prim_buff[tza * xstride * ystride + (tya - q) * xstride + txa] = prim_data[ka * nx * ny + (ja - q) * nx + ia];
-                        prim_buff[tza * xstride * ystride + (tya + q) * xstride + txa] = prim_data[ka * nx * ny + (ja + q) * nx + ia];
-                    } 
-                }
-                
+                prim_buff[tza * sx * sy + (tya - radius) * sx + txa] = prim_data[ka * nx * ny + (ja - radius) * nx + ia];
+                prim_buff[tza * sx * sy + (tya + tyl   ) * sx + txa] = prim_data[ka * nx * ny + (ja + tyl   ) * nx + ia];
+                // if (!on_final_jelem) {
+                //     prim_buff[tza * sx * sy + (tya - radius) * sx + txa] = prim_data[ka * nx * ny + (ja - radius) * nx + ia];
+                //     prim_buff[tza * sx * sy + (tya + tyl   ) * sx + txa] = prim_data[ka * nx * ny + (ja + tyl   ) * nx + ia];
+                // } else {
+                //     for (int q = 0; q < radius; q++) 
+                //     {
+                //         prim_buff[tza * sx * sy + (tya - q) * sx + txa] = prim_data[ka * nx * ny + (ja - q) * nx + ia];
+                //         prim_buff[tza * sx * sy + (tya + q) * sx + txa] = prim_data[ka * nx * ny + (ja + q) * nx + ia];
+                //     } 
+                // }
             }
             if (tx < radius)
             {   
-                if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + tx)) {
+                if ((blockIdx.x == p.gridSize.x - 1) && (ia + xextent > nx - radius + tx)) {
                     txl = nx - radius - ia + tx;
                 }
-                if (!on_final_ielem) {
-                    prim_buff[tza * xstride * ystride + tya * xstride + txa - radius] =  prim_data[ka * nx * ny + ja * nx + ia - radius];
-                    prim_buff[tza * xstride * ystride + tya * xstride + txa +    txl] =  prim_data[ka * nx * ny + ja * nx + ia + txl]; 
-                } else {
-                    for (int q = 0; q < radius; q++)
-                    {
-                        prim_buff[tza * xstride * ystride + tya * xstride + txa - q] =  prim_data[ka * nx * ny + ja * nx + ia - q];
-                        prim_buff[tza * xstride * ystride + tya * xstride + txa + q] =  prim_data[ka * nx * ny + ja * nx + ia + q]; 
-                    }
+                prim_buff[tza * sx * sy + tya * sx + txa - radius] =  prim_data[ka * nx * ny + ja * nx + ia - radius];
+                prim_buff[tza * sx * sy + tya * sx + txa +    txl] =  prim_data[ka * nx * ny + ja * nx + ia + txl]; 
+                // if (!on_final_ielem) {
+                //     prim_buff[tza * sx * sy + tya * sx + txa - radius] =  prim_data[ka * nx * ny + ja * nx + ia - radius];
+                //     prim_buff[tza * sx * sy + tya * sx + txa +    txl] =  prim_data[ka * nx * ny + ja * nx + ia + txl]; 
+                // } else {
+                //     for (int q = 0; q < radius; q++)
+                //     {
+                //         prim_buff[tza * sx * sy + tya * sx + txa - q] =  prim_data[ka * nx * ny + ja * nx + ia - q];
+                //         prim_buff[tza * sx * sy + tya * sx + txa + q] =  prim_data[ka * nx * ny + ja * nx + ia + q]; 
+                //     }
                     
-                }
-                
+                // }
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -748,14 +776,14 @@ void SRHD3D::advance(
         const bool object_below_me    = object_data[helpers::my_max(static_cast<lint>(kk - 1), static_cast<lint>(0)) * xpg * ypg + jj * xpg +  ii];
 
         if (first_order) [[unlikely]] {
-            xprimsL = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 0)];
-            xprimsR = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 1)];
+            xprimsL = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
+            xprimsR = prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
             //j+1/2
-            yprimsL = prim_buff[tza * xstride * ystride + (tya + 0) * xstride + txa];
-            yprimsR = prim_buff[tza * xstride * ystride + (tya + 1) * xstride + txa];
+            yprimsL = prim_buff[tza * sx * sy + (tya + 0) * sx + txa];
+            yprimsR = prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
             //j+1/2
-            zprimsL = prim_buff[(tza + 0) * xstride * ystride + tya * xstride + txa];
-            zprimsR = prim_buff[(tza + 1) * xstride * ystride + tya * xstride + txa];
+            zprimsL = prim_buff[(tza + 0) * sx * sy + tya * sx + txa];
+            zprimsR = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
 
             if (object_to_my_right){
                 xprimsR.rho =  xprimsL.rho;
@@ -819,14 +847,14 @@ void SRHD3D::advance(
             }
 
             // Set up the left and right state interfaces for i-1/2
-            xprimsL = prim_buff[tza * xstride * ystride + tya * xstride + (txa - 1)];
-            xprimsR = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 0)];
+            xprimsL = prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
+            xprimsR = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
             //j+1/2
-            yprimsL = prim_buff[tza * xstride * ystride + (tya - 1) * xstride + txa]; 
-            yprimsR = prim_buff[tza * xstride * ystride + (tya + 0) * xstride + txa]; 
+            yprimsL = prim_buff[tza * sx * sy + (tya - 1) * sx + txa]; 
+            yprimsR = prim_buff[tza * sx * sy + (tya + 0) * sx + txa]; 
             //k+1/2
-            zprimsL = prim_buff[(tza - 1) * xstride * ystride + tya * xstride + txa]; 
-            zprimsR = prim_buff[(tza - 0) * xstride * ystride + tya * xstride + txa]; 
+            zprimsL = prim_buff[(tza - 1) * sx * sy + tya * sx + txa]; 
+            zprimsR = prim_buff[(tza - 0) * sx * sy + tya * sx + txa]; 
 
             if (object_to_my_left){
                 xprimsL.rho =  xprimsR.rho;
@@ -890,23 +918,23 @@ void SRHD3D::advance(
             }
         } else{
             // Coordinate X
-            Primitive xleft_most  = prim_buff[tza * xstride * ystride + tya * xstride + (txa - 2)];
-            Primitive xleft_mid   = prim_buff[tza * xstride * ystride + tya * xstride + (txa - 1)];
-            Primitive center      = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 0)];
-            Primitive xright_mid  = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 1)];
-            Primitive xright_most = prim_buff[tza * xstride * ystride + tya * xstride + (txa + 2)];
+            Primitive xleft_most  = prim_buff[tza * sx * sy + tya * sx + (txa - 2)];
+            Primitive xleft_mid   = prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
+            Primitive center      = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
+            Primitive xright_mid  = prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
+            Primitive xright_most = prim_buff[tza * sx * sy + tya * sx + (txa + 2)];
 
             // Coordinate Y
-            Primitive yleft_most  = prim_buff[tza * xstride * ystride + (tya - 2) * xstride + txa];
-            Primitive yleft_mid   = prim_buff[tza * xstride * ystride + (tya - 1) * xstride + txa];
-            Primitive yright_mid  = prim_buff[tza * xstride * ystride + (tya + 1) * xstride + txa];
-            Primitive yright_most = prim_buff[tza * xstride * ystride + (tya + 2) * xstride + txa];
+            Primitive yleft_most  = prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
+            Primitive yleft_mid   = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
+            Primitive yright_mid  = prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
+            Primitive yright_most = prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
 
             // Coordinate z
-            Primitive zleft_most  = prim_buff[(tza - 2) * xstride * ystride + tya * xstride + txa];
-            Primitive zleft_mid   = prim_buff[(tza - 1) * xstride * ystride + tya * xstride + txa];
-            Primitive zright_mid  = prim_buff[(tza + 1) * xstride * ystride + tya * xstride + txa];
-            Primitive zright_most = prim_buff[(tza + 2) * xstride * ystride + tya * xstride + txa];
+            Primitive zleft_most  = prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
+            Primitive zleft_mid   = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
+            Primitive zright_mid  = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
+            Primitive zright_most = prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
             
             // Reconstructed left X Primitive vector at the i+1/2 interface
             xprimsL  = center     + helpers::plm_gradient(center, xleft_mid, xright_mid, plm_theta)   * static_cast<real>(0.5); 
@@ -1083,11 +1111,11 @@ void SRHD3D::advance(
                     const real cot    = std::cos(thmean) / sint;
 
                     // Grab central primitives
-                    const real rhoc = prim_buff[txa + tya * xstride + tza * xstride * ystride].rho;
-                    const real uc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v1();
-                    const real vc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v2();
-                    const real wc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v3();
-                    const real pc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].p;
+                    const real rhoc = prim_buff[txa + tya * sx + tza * sx * sy].rho;
+                    const real uc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v1();
+                    const real vc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v2();
+                    const real wc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v3();
+                    const real pc   = prim_buff[txa + tya * sx + tza * sx * sy].p;
 
                     const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
                     const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
@@ -1121,11 +1149,11 @@ void SRHD3D::advance(
                     const real invdV        = 1/ dV;
 
                     // Grab central primitives
-                    const real rhoc = prim_buff[txa + tya * xstride + tza * xstride * ystride].rho;
-                    const real uc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v1();
-                    const real vc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v2();
-                    const real wc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].get_v3();
-                    const real pc   = prim_buff[txa + tya * xstride + tza * xstride * ystride].p;
+                    const real rhoc = prim_buff[txa + tya * sx + tza * sx * sy].rho;
+                    const real uc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v1();
+                    const real vc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v2();
+                    const real wc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v3();
+                    const real pc   = prim_buff[txa + tya * sx + tza * sx * sy].p;
 
                     const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
                     const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
@@ -1294,15 +1322,15 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->step               = (first_order) ? 1 : static_cast<real>(0.5);
     const luint xstride      = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
     const luint ystride      = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
-    const luint zstride      = (BuildPlatform == Platform::GPU) ? zblockdim + 2 * radius: nz;
     const luint shBlockSpace = (xblockdim + 2 * radius) * (yblockdim + 2 * radius) * (zblockdim + 2 * radius);
     const luint shBlockBytes = shBlockSpace * sizeof(Primitive);
     const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
-    if (t == 0) {
-        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(),inflow_zones.data(), half_sphere, geometry);
+    if constexpr(BuildPlatform == Platform::GPU){
+        std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
     }
+    
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP);
@@ -1314,12 +1342,8 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
-        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, zphysical_grid);
-        if (dlogt != 0) {
-            t_interval *= std::pow(10, dlogt);
-        } else {
-            t_interval += chkpt_interval;
-        }
+        write2file(*this, setup, data_directory, t, 0, chkpt_interval, zphysical_grid);
+        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(),inflow_zones.data(), half_sphere, geometry);
     }
     
     // Simulate :)
@@ -1327,7 +1351,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         if (inFailureState){
             return;
         }
-        advance(activeP, xstride, ystride, zstride);
+        advance(activeP, xstride, ystride);
         cons2prim(fullP);
         config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
         if constexpr(BuildPlatform == Platform::GPU) {

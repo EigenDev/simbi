@@ -583,6 +583,10 @@ void Newtonian1D::advance(const ExecutionPolicy<> &p)
     const auto fullP         = simbi::ExecutionPolicy(nx, xblockdim);
     const auto activeP       = simbi::ExecutionPolicy(active_zones, xblockdim, shBlockBytes);
     
+    if constexpr(BuildPlatform == Platform::GPU){
+        std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
+    }
+
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
         adapt_dt(activeP.gridSize.x);
@@ -595,12 +599,8 @@ void Newtonian1D::advance(const ExecutionPolicy<> &p)
 
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
-        write2file(*this, setup, data_directory, t, t_interval, this->chkpt_interval, active_zones);
-        if (dlogt != 0) {
-            t_interval *= std::pow(10, dlogt);
-        } else {
-            t_interval += chkpt_interval;
-        }
+        write2file(*this, setup, data_directory, t, 0, this->chkpt_interval, active_zones);
+        config_ghosts1D_t(fullP, cons, nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
     }
     
     simbi::detail::logger::with_logger(*this, tend, [&](){

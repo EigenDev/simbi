@@ -377,8 +377,10 @@ Eigenvals SRHD::calc_eigenvals(
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
             // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-            const real sL = csL*csL/(gamma*gamma*(1 - csL*csL));
-            const real sR = csR*csR/(gamma*gamma*(1 - csR*csR));
+            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
+            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
+            const real sL = csL*csL/(gammaL*gammaL*(1 - csL*csL));
+            const real sR = csR*csR/(gammaR*gammaR*(1 - csR*csR));
             // Define temporaries to save computational cycles
             const real qfL   = 1 / (1 + sL);
             const real qfR   = 1 / (1 + sR);
@@ -390,12 +392,31 @@ Eigenvals SRHD::calc_eigenvals(
             const real lamLp = (vL + sqrtL) * qfL;
             const real lamRp = (vR + sqrtR) * qfR;
 
-            real aL = lamLm < lamRm ? lamLm : lamRm;
-            real aR = lamLp > lamRp ? lamLp : lamRp;
+            const real aL = lamLm < lamRm ? lamLm : lamRm;
+            const real aR = lamLp > lamRp ? lamLp : lamRp;
+            
+            return Eigenvals(aL, aR);
+        }
+    case simbi::WaveSpeeds::HUBER_AND_KISSMANN_2021:
+        {
+            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
+            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
+            const real uL = gammaL * vL;
+            const real uR = gammaR * vR;
+            const real sL = csL*csL/(1 - csL * csL);
+            const real sR = csR*csR/(1 - csR * csR);
+            const real sqrtR = std::sqrt(sR * (gammaR * gammaR - uR * uR + sR));
+            const real sqrtL = std::sqrt(sL * (gammaL * gammaL - uL * uL + sL));
+            const real qfL   = 1 / (gammaL * gammaL + sL);
+            const real qfR   = 1 / (gammaR * gammaR + sR);
 
-            // Smoothen for rarefaction fan
-            aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
-            aR = helpers::my_max(aR, (vR + csR) / (1 + vR * csR));
+            const real lamLm = (gammaL * uL - sqrtL) * qfL;
+            const real lamRm = (gammaR * uR - sqrtR) * qfR;
+            const real lamLp = (gammaL * uL + sqrtL) * qfL;
+            const real lamRp = (gammaR * uR + sqrtR) * qfR;
+
+            const real aL = lamLm < lamRm ? lamLm : lamRm;
+            const real aR = lamLp > lamRp ? lamLp : lamRp;
 
             return Eigenvals(aL, aR);
         }
@@ -717,11 +738,6 @@ SRHD::simulate1D(
         this->inflow_zones[i] = Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
     }
     
-    // Write some info about the setup for writeup later
-    std::string filename, tnow, tchunk;
-    PrimData prods;
-    
-
     this->hubble_param       = adot(t) / a(t);
     this->mesh_motion        = (hubble_param != 0);
     this->all_outer_bounds   = (d_outer && s_outer && e_outer);
@@ -786,6 +802,10 @@ SRHD::simulate1D(
     const auto fullP          = simbi::ExecutionPolicy(nx, xblockdim);
     const auto activeP        = simbi::ExecutionPolicy(active_zones, xblockdim, shBlockBytes);
     
+    if constexpr(BuildPlatform == Platform::GPU){
+        std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
+    }
+
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP.gridSize.x);
@@ -798,13 +818,8 @@ SRHD::simulate1D(
 
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
+        write2file(*this, setup, data_directory, t, 0, chkpt_interval, active_zones);
         config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
-        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-        if (dlogt != 0) {
-            t_interval *= std::pow(10, dlogt);
-        } else {
-            t_interval += chkpt_interval;
-        }
     }
 
     // Simulate :)

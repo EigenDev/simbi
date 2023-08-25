@@ -48,8 +48,7 @@ namespace simbi
         void advance(
             const ExecutionPolicy<> &p,
             const luint xstride,
-            const luint ystride,
-            const luint zstride);
+            const luint ystride);
 
         GPU_CALLABLE_MEMBER
         sr3d::Eigenvals calc_eigenvals(
