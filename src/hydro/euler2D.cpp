@@ -1043,7 +1043,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
     if constexpr(BuildPlatform == Platform::GPU){
-        std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
+        writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
 
     if constexpr(BuildPlatform == Platform::GPU) {

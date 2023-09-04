@@ -584,7 +584,7 @@ void Newtonian1D::advance(const ExecutionPolicy<> &p)
     const auto activeP       = simbi::ExecutionPolicy(active_zones, xblockdim, shBlockBytes);
     
     if constexpr(BuildPlatform == Platform::GPU){
-        std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
+        writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
 
     if constexpr(BuildPlatform == Platform::GPU) {
