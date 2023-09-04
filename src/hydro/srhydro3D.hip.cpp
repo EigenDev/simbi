@@ -470,17 +470,17 @@ Conserved SRHD3D::calc_hllc_flux(
         return right_flux;
     }
 
-    const real aLminus = aL < 0 ? aL : 0;
-    const real aRplus  = aR > 0 ? aR : 0;
+    const real aLm = aL < 0 ? aL : 0;
+    const real aRp = aR > 0 ? aR : 0;
 
     //-------------------Calculate the HLL Intermediate State
     const auto hll_state = 
-        (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
+        (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
 
     //------------------Calculate the RHLLE Flux---------------
     const auto hll_flux 
-        = (left_flux * aRplus - right_flux * aLminus + (right_state - left_state) * aRplus * aLminus) 
-            / (aRplus - aLminus);
+        = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aRp * aLm) 
+            / (aRp - aLm);
 
     const real uhlld   = hll_state.d;
     const real uhlls1  = hll_state.s1;

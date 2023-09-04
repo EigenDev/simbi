@@ -602,7 +602,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         return right_flux - right_state * vface;
     }
     const Conserved hll_flux  = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
-    const Conserved hll_state = (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
+    const Conserved hll_state = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
 
     const real uhlld   = hll_state.d;
     const real uhlls   = hll_state.s;

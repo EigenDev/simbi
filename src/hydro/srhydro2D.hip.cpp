@@ -510,7 +510,7 @@ Conserved SRHD2D::calc_hllc_flux(
 
     //-------------------Calculate the HLL Intermediate State
     const auto hll_state = 
-        (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
+        (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
 
     //------------------Calculate the RHLLE Flux---------------
     const auto hll_flux = 
