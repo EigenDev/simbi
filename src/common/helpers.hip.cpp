@@ -649,7 +649,6 @@ namespace simbi{
             const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(gid, x1grid_size, x2grid_size, kk);
             const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(gid, x1grid_size, x2grid_size, kk);
 
-            
             if (first_order){
                 if(jj < x2grid_size - 2 && kk < x3grid_size - 2) {
                     
@@ -845,8 +844,8 @@ namespace simbi{
                         cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)];
                         cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)] = cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)];
                         if (half_sphere) {
-                            cons[(kk + 2) * sx * sy + (x2grid_size - 4) * sx + (ii + 2)].s2 *= - 1;
-                            cons[(kk + 2) * sx * sy + (x2grid_size - 3) * sx + (ii + 2)].s2 *= - 1;
+                            cons[(kk + 2) * sx * sy + (x2grid_size - 1) * sx + (ii + 2)].s2 *= - 1;
+                            cons[(kk + 2) * sx * sy + (x2grid_size - 2) * sx + (ii + 2)].s2 *= - 1;
                         }
                         break;
                     case simbi::Geometry::CYLINDRICAL:
@@ -958,11 +957,9 @@ namespace simbi{
                         }
                         break;
                     }
-                    
                 }
             }
         });
-        
     };
 
     void anyDisplayProps()
