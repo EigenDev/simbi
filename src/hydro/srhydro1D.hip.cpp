@@ -602,7 +602,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         return right_flux - right_state * vface;
     }
     const Conserved hll_flux  = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
-    const Conserved hll_state = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
+    const Conserved hll_state = (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
 
     const real uhlld   = hll_state.d;
     const real uhlls   = hll_state.s;
@@ -803,7 +803,7 @@ SRHD::simulate1D(
     const auto activeP        = simbi::ExecutionPolicy(active_zones, xblockdim, shBlockBytes);
     
     if constexpr(BuildPlatform == Platform::GPU){
-        std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
+        writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
 
     if constexpr(BuildPlatform == Platform::GPU) {

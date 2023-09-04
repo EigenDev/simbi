@@ -510,7 +510,7 @@ Conserved SRHD2D::calc_hllc_flux(
 
     //-------------------Calculate the HLL Intermediate State
     const auto hll_state = 
-        (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
+        (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
 
     //------------------Calculate the RHLLE Flux---------------
     const auto hll_flux = 
@@ -1356,7 +1356,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
     if constexpr(BuildPlatform == Platform::GPU){
-        std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
+        writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
     
     if constexpr(BuildPlatform == Platform::GPU) {
