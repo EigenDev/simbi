@@ -82,15 +82,23 @@ def calc_cell_volume1D(*, x1: generic_numpy_array, coord_system: str = 'spherica
     x1vertices = np.insert(x1vertices,  0, x1[0])
     x1vertices = np.insert(x1vertices, x1.shape, x1[-1])
     dx1 = x1vertices[1:] - x1vertices[:-1]
-    if coord_system in['spherical', 'cylindrical']:
+    if coord_system in ['spherical', 'cylindrical']:
         x1mean = calc_centroid(x1vertices, coord_system)
-        return np.asanyarray(x1mean * x1mean * dx1)
+        return np.asanyarray(4.0 * np.pi * x1mean * x1mean * dx1)
     elif coord_system == 'cartesian':
         return np.asanyarray(dx1 ** 3) 
     else:
         raise ValueError("The coordinate system given is not avaiable at this time")
 
-
+def calc_domega(*, x2: generic_numpy_array, x3: generic_numpy_array | None = None) -> generic_numpy_array:
+    x2v = calc_vertices(arr=x2, direction=1)    
+    dcos = np.cos(x2v[:-1]) - np.cos(x2v[1:])
+    if x3:
+        x3v = calc_vertices(arr=x3, direction=1)
+        return np.asanyarray(dcos * (x3v[1:] - x3v[:-1]))
+    
+    return np.asanyarray(2.0 * np.pi * dcos)
+    
 def calc_cell_volume2D(*, x1: generic_numpy_array, x2: generic_numpy_array, coord_system: str = 'spherical') -> generic_numpy_array:
     if x1.ndim == 1 and x2.ndim == 1:
         xx1, xx2 = np.meshgrid(x1, x2)
@@ -147,7 +155,7 @@ def calc_cell_volume3D(*, x1: generic_numpy_array, x2: generic_numpy_array, x3: 
     x3vertices = np.insert(x3vertices, x3vertices.shape[0], xx3[-1], axis=0)
     
     x2vertices = 0.5 * (xx2[:, 1:] + xx2[:, :-1])
-    x2vertices = np.insert(x2vertices, 0, xx2[0], axis=1)
+    x2vertices = np.insert(x2vertices, 0, xx2[:,0,:], axis=1)
     x2vertices = np.insert(x2vertices, x2vertices.shape[1], xx2[:, -1], axis=1)
     if coord_system == 'spherical':
         x1vertices = np.sqrt(xx1[...,  1:] * xx1[..., :-1])
@@ -248,8 +256,8 @@ def for_each(func: Callable[..., Any], x: Any) -> None:
     for i in x:
         func(i)
         
-def get_iterable(x: Any) -> Sequence[Any]:
-    if isinstance(x,  Sequence) and not isinstance(x, str):
-        return x
+def get_iterable(x: Any, func: Callable[..., Sequence[Any]] = list) -> Sequence[Any]:
+    if isinstance(x,  (Sequence, np.ndarray)) and not isinstance(x, str):
+        return func(x)
     else:
-        return (x,)
+        return func((x,))

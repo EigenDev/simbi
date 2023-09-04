@@ -26,7 +26,7 @@
     [ninja](https://github.com/ninja-build/ninja/wiki/Pre-built-Ninja-packages)
 5)  HDF5 libraries
 6)  [mypy](https://mypy-lang.org/), a static type checker
-7)  Python >= 3.9
+7)  Python >= 3.10
 
 ## For GPU capability
 
@@ -70,15 +70,14 @@ c) [rich](https://github.com/Textualize/rich) for pretty-printing console output
     ```
 
 3)  If `meson` detected `hip` or `cuda`, the install script will install
-    both the cpu and gpu extensions into your system site-packages or
-    `--user` site-packages depending on privileges.
+    both the cpu and gpu extensions into the `simbi/libs` directory.
 ## Important (!)
 When compiling on a GPU, you must provide your GPU's respective architecture identifier.
 That is to say, if I am compiling on an NVIDIA V100 device with compute capability 7.0, I would
 build with:
 ```bash
 # note the lack of a decimal
-$ python dev.py install --gpu-compilation --dev-arch 70 [options]
+$ CXX=<your_cpp_compiler> python dev.py install --gpu-compilation --dev-arch 70 [options]
 # or if manually installing
 $ CXX=<your_cpp_compiler> meson setup <build_dir> -Dgpu_arch=70 [options]
 ```
@@ -107,7 +106,7 @@ $ CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
     ```
 
     where `--mode` is a global command line option available for every
-    config script, and `--nzones` and `--gamma` are problem-specific options
+    config script, and `--nzones` and `--ad-gamma` are problem-specific options
     that are dynamically parsed based on whatever `DynamicArg` variables
     exist in the config script you create. Check out how to create one of
     these configuration scripts in the `simbi_configs/examples/` folder! When creating
@@ -136,13 +135,14 @@ $ CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
 7) Boundary conditions given as array of strings like so `[bc_x1min, bc_x1max, bc_x2min, bc_x2max, bc_x3min, bc_x3max]` where the supported boundary conditions are `periodic, reflecting, outflow, inflow`. If an inflow boundary condition is set, but no inflow boundary source terms are given, the code will switch to outflow boundary conditions to prevent crashes. 
 8) Can track a single passive scalar (implementing the `passive_scalars` property sets this)
 9) Can insert an immersed boundary (Peskin 2002). It is impermeable by default. (Implementing the `object_cells` property sets this)
+10) Gravity source terms (Implementing the `gravity_sources` property sets this)
 
 TODO: 
 <ol type="a">
   <li>Explore general IB in greater detail for sources and sinks!</li>
   <li>multi-gpu support</li>
   <li>MPI support</li>
-  <li>3D Newtonian</li>
+  <li>3D Newtonian (maybe)</li>
 </ol>
 
 

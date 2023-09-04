@@ -5,7 +5,6 @@ import astropy.units as units
 import numpy as np 
 import argparse 
 import matplotlib.pyplot as plt 
-import os
 from typing import Union, Any, Callable, Optional
 from numpy.typing import NDArray 
 from numpy import int64 as numpy_int, float64 as numpy_float, cast
@@ -25,10 +24,11 @@ R_0 = const.R_sun.cgs
 c   = const.c.cgs
 m   = const.M_sun.cgs
  
-rho_scale    = m / (4./3. * np.pi * R_0 ** 3) 
+rho_scale    = m / R_0 ** 3 
 e_scale      = m * c **2
-edens_scale  = e_scale / (4./3. * np.pi * R_0**3)
+edens_scale  = e_scale / R_0**3
 time_scale   = R_0 / c
+mass_scale   = m
 
 e_scale_bmk   = 1e53 * units.erg
 rho_scale_bmk = 1.0 * const.m_p.cgs / units.cm**3
@@ -84,7 +84,7 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
         elif field == 'chi_dens':
             field_str_list.append( r'$D \cdot \chi$')
         elif field == 'T_eV':
-            field_str_list.append("T [eV]" if args.units else "T")
+            field_str_list.append("T [eV]")
         elif field == 'temperature':
             field_str_list.append("T [K]" if args.units else "T")
         elif field == 'mach':
@@ -95,6 +95,8 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
             field_str_list.append('$v_2 / v_0$')
         elif field == 'v3':
             field_str_list.append('$v_3 / v_0$')
+        elif field == 'tau-s':
+            field_str_list.append(r'$\tau_s$')
         else:
             field_str_list.append(rf'${field}$')
 
@@ -174,25 +176,15 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         v   = [(hf.get(f'v{dim}') or hf.get(f'v'))[:] for dim in range(1,ndim + 1)]
         p   = hf.get('p')[:]         
         chi = (hf.get('chi') or np.zeros_like(rho))[:]
-
-        if not (bcs := hf.get('boundary_conditions')):
-            try:
-                bcs = [ds.attrs['boundary_condition']]
-            except KeyError:
-                bcs = [b'outflow']
-                
-        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
-        if 'no_cut' in vars(args).keys() and args.no_cut:
-            full_periodic = True
                 
         setup['first_order']  = try_read(ds, key='first_order', fall_back=False)
         nx                    = ds.attrs['nx'] if 'nx' in ds.attrs.keys() else 1
         ny                    = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
         nz                    = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
         
-        setup['x1active']     = nx if full_periodic else nx - 2 * (1 + (setup['first_order']^1)) * (nx - 2 > 0)
-        setup['x2active']     = ny if full_periodic else ny - 2 * (1 + (setup['first_order']^1)) * (ny - 2 > 0)
-        setup['x3active']     = nz if full_periodic else nz - 2 * (1 + (setup['first_order']^1)) * (nz - 2 > 0)
+        setup['x1active']     = nx - 2 * (1 + (setup['first_order']^1)) * (nx - 2 > 0)
+        setup['x2active']     = ny - 2 * (1 + (setup['first_order']^1)) * (ny - 2 > 0)
+        setup['x3active']     = nz - 2 * (1 + (setup['first_order']^1)) * (nz - 2 > 0)
         setup['time']         = ds.attrs['current_time']
         setup['linspace']     = ds.attrs['linspace']
         setup['ad_gamma']     = ds.attrs['adiabatic_gamma']
@@ -216,12 +208,11 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         else:
             setup['dt'] = ds.attrs['time_step']
             
-        if not full_periodic:
-            npad = tuple(tuple(val) for val in [[((setup['first_order']^1) + 1), ((setup['first_order']^1) + 1)]] * ndim) 
-            rho  = unpad(rho, npad)
-            v    = np.asanyarray([unpad(vel, npad) for vel in v])
-            p    = unpad(p, npad)
-            chi  = unpad(chi, npad)
+        npad = tuple(tuple(val) for val in [[((setup['first_order']^1) + 1), ((setup['first_order']^1) + 1)]] * ndim) 
+        rho  = unpad(rho, npad)
+        v    = np.asanyarray([unpad(vel, npad) for vel in v])
+        p    = unpad(p, npad)
+        chi  = unpad(chi, npad)
         
         #-------------------------------
         # Load Fields
@@ -244,7 +235,6 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
             W = 1
         fields['gamma_beta']   = np.sqrt(vsqr) * W 
         fields['W'] = W 
-        fields['W'] = W
 
         #------------------------
         # Generate Mesh
@@ -293,6 +283,7 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
         T_eV = (const.k_B.cgs * T).to(units.eV)
         return T_eV
     elif var == 'chi_dens':
+        fields['chi'][fields['chi'] == 0] = 1.e-10
         return fields['chi'] * fields['rho'] * W
     elif var == 'gamma_beta_1':
         return W * fields['v1']
@@ -315,6 +306,10 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
         return W * fields['v3']
     elif var == 'u':
         return fields['gamma_beta']
+    elif var == 'tau-s':
+        return (1 - 1/W**2)**(-0.5)
+    else:
+        raise NotImplementedError("derived variable {var} not implemented")
 
 def get_colors(interval: NDArray[numpy_float], cmap: plt.cm, vmin: Optional[float] = None, vmax: Optional[float] = None) -> plt.cm:
     """
@@ -334,37 +329,40 @@ def get_colors(interval: NDArray[numpy_float], cmap: plt.cm, vmin: Optional[floa
     plt.Normalize(vmin, vmax)
     return cmap(interval)
     
-def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constraint: float, color: float) -> None:
-    ind: int = find_nearest(y, constraint)[0]
+def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constraint: float, color: float, axis: str) -> None:
+    if axis == 'x':
+        ind: int = find_nearest(x, constraint)[0]
+    else:
+        ind = find_nearest(y, constraint)[0]
     plt.fill_between(x[ind:],y[ind:], color=color, alpha=0.1, interpolate=True)
     
-def get_file_list(inputs: str) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
+def get_file_list(inputs: str, sort: bool = False) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
+    from pathlib import Path
     files: list[str] = []
     file_dict: dict[int, list[str]] = {}
     dircount  = 0
     multidir = False
     isDirectory = False
     for idx, obj in enumerate(inputs):
+        fstring = Path(obj)
         #check if path is a directory
-        isDirectory = os.path.isdir(obj)
-        
-        if isDirectory:
-            file_path = os.path.join(obj, '')
+        if fstring.is_dir():
             if dircount == 0:
-                files += sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
+                files += sorted([str(f) for f in fstring.glob('*.h5') if f.is_file()])
             else:
                 multidir = True
                 if dircount == 1:
                     file_dict[idx - 1] = files
-                file_dict[idx]     = sorted([file_path + f for f in os.listdir(file_path) if os.path.isfile(os.path.join(file_path, f))])
-            dircount += 1
+                file_dict[idx] = sorted([str(f) for f in fstring.glob('*.h5') if f.is_file()])
+                dircount += 1
         else:
             files += [file for file in inputs]
             break
     
     if not multidir:
         # sort by length of strings now
-        files.sort(key=len, reverse=False)
+        if sort:
+            files.sort(key=len, reverse=False)
         return files, len(files)
     else:
         any(file_dict[key].sort(key=len, reverse=False) for key in file_dict.keys())

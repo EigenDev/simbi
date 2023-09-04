@@ -36,13 +36,7 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
         setup['coord_system'] = ds.attrs['geometry'].decode('utf-8')
         setup['mesh_motion']  = ds.attrs['mesh_motion']
         setup['linspace']     = ds.attrs['linspace']
-        if not (bcs := hf.get('boundary_conditions')):
-            try:
-                bcs = [ds.attrs['boundary_condition']]
-            except KeyError:
-                bcs = [b'outflow']
-                
-        full_periodic = all(bc.decode("utf-8") == 'periodic' for bc in bcs)
+        
         #------------------------
         # Generate Mesh
         #------------------------
@@ -127,12 +121,9 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
         model.chkpt_idx = ds.attrs['chkpt_idx']
         
 def initializeModel(model: Any, first_order: bool, volume_factor: Union[float, NDArray[Any]], passive_scalars: Union[npt.NDArray[Any], Any]) -> None:
-    full_periodic = all(bc == 'periodic' for bc in model.boundary_conditions)
-    if full_periodic:
-        return
-    
     if passive_scalars is not None:
-        model.u[-1,...] = passive_scalars
+        model.u[-1,...] = passive_scalars * model.u[0]
     
+    # npad is a tuple of (n_before, n_after) for each dimension
     npad = ((0,0),) + tuple(tuple(val) for val in [[((first_order^1) + 1),  ((first_order^1) + 1)]] * model.dimensionality) 
     model.u = np.pad(model.u  * volume_factor, npad, 'edge')

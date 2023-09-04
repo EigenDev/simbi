@@ -37,16 +37,15 @@ namespace simbi
           std::function<double(double)> nrg_outer;
           SRHD(){};
           SRHD(
-               std::vector<std::vector<real>> state, 
+               std::vector<std::vector<real>> &state, 
                real gamma, 
                real cfl,
-               std::vector<real> x1, 
+               std::vector<real> &x1, 
                std::string coord_system);
           ~SRHD(){};
 
           void advance(
-               const ExecutionPolicy<> &p,
-               const luint xstride);
+               const ExecutionPolicy<> &p);
 
           void cons2prim(const ExecutionPolicy<> &p);
 
@@ -89,6 +88,7 @@ namespace simbi
           std::vector<std::vector<real>>
           simulate1D(
                std::vector<std::vector<real>> &sources, 
+               std::vector<real> &gsource,
                real tstart,
                real tend, 
                real dlogt,
@@ -100,7 +100,7 @@ namespace simbi
                std::vector<std::string> boundary_conditions,
                bool first_order, 
                bool linspace, 
-               bool hllc,
+               const std::string solver,
                bool constant_sources,
                std::vector<std::vector<real>> boundary_sources,
                std::function<double(double)> a = nullptr,

@@ -28,7 +28,23 @@ class bcolors:
     LIGHT_GRAY    = '\033[0;37m'     
     WHITE         = '\033[1;37m'
     
-    
+
+class ParseKVAction(argparse.Action):
+    def __call__(self, parser: argparse.ArgumentParser, 
+                 namespace: argparse.Namespace, 
+                 values: Any, 
+                 option_string: str | None = None) -> None:
+        
+        setattr(namespace, self.dest, dict())
+        for each in values:
+            try:
+                key, value = each.split("=")
+                getattr(namespace, self.dest)[key] = value
+            except ValueError as ex:
+                message = "\nTraceback: {}".format(ex)
+                message += "\nError on '{}' || It should be 'key=value'".format(each)
+                raise argparse.ArgumentError(self, str(message))
+            
 def get_subparser(parser: argparse.ArgumentParser, idx: int) -> Any:
     subparser = [
         subparser 
@@ -52,4 +68,4 @@ def max_thread_count(param: Any) -> int:
     
     return val
 
-__all__ = ['bcolors', 'get_subparser', 'max_thread_count']
+__all__ = ['bcolors', 'get_subparser', 'max_thread_count', 'ParseKVAction']

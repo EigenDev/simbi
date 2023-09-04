@@ -31,10 +31,10 @@ constexpr auto write2file = helpers::write_to_file<hydro1d::PrimitiveSOA, 1, New
 
 // Overloaded Constructor
 Newtonian1D::Newtonian1D(
-    std::vector< std::vector<real> > state, 
+    std::vector< std::vector<real> > &state, 
     real gamma, 
     real cfl, 
-    std::vector<real> x1,
+    std::vector<real> &x1,
     std::string coord_system = "cartesian") 
     :
     HydroBase(
@@ -168,7 +168,7 @@ void Newtonian1D::adapt_dt(){
     }
 };
 
-void Newtonian1D::adapt_dt(luint blockSize, luint tblock)
+void Newtonian1D::adapt_dt(luint blockSize)
 {   
     #if GPU_CODE
         compute_dt<Primitive><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
@@ -299,9 +299,7 @@ Conserved Newtonian1D::calc_hllc_flux(
 //                                  UDOT CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 
-void Newtonian1D::advance(
-    const ExecutionPolicy<> &p,
-    const luint xstride)
+void Newtonian1D::advance(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
     const auto xextent      = p.get_xextent();
@@ -323,18 +321,18 @@ void Newtonian1D::advance(
         Primitive primsL, primsR;
 
         lint ia = ii + radius;
-        lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
+        lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + radius : ia;
         #if GPU_CODE
             luint txl = xextent;
             // Check if the active index exceeds the active zones
             // if it does, then this thread buffer will take on the
             // ghost index at the very end
             prim_buff[txa] = prim_data[ia];
-            if (threadIdx.x < pseudo_radius)
+            if (threadIdx.x < radius)
             {
                 if (ia + xextent > nx - 1) txl = nx - radius - ia + threadIdx.x;
-                prim_buff[txa - pseudo_radius] = prim_data[helpers::mod(ia - pseudo_radius, nx)];
-                prim_buff[txa + txl]           = prim_data[(ia + txl) % nx];
+                prim_buff[txa - radius] = prim_data[ia - radius];
+                prim_buff[txa + txl]    = prim_data[ia + txl];
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -345,8 +343,8 @@ void Newtonian1D::advance(
         const real vfaceR = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
         if (first_order) [[unlikely]]
         {
-            primsL = prim_buff[(txa + 0) % xstride];
-            primsR = prim_buff[(txa + 1) % xstride];
+            primsL = prim_buff[txa + 0];
+            primsR = prim_buff[txa + 1];
             
             uL = prims2cons(primsL);
             uR = prims2cons(primsR);
@@ -354,15 +352,20 @@ void Newtonian1D::advance(
             fR = prims2flux(primsR);
 
             // Calc HLL Flux at i+1/2 interface
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
-            } else {
+                break;
+            
+            default:
                 frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                break;
             }
 
             // Set up the left and right state interfaces for i-1/2
-            primsL = prim_buff[helpers::mod(txa - 1, xstride)];
-            primsR = prim_buff[(txa + 0) % xstride];
+            primsL = prim_buff[txa - 1];
+            primsR = prim_buff[txa + 0];
             
             uL = prims2cons(primsL);
             uR = prims2cons(primsR);
@@ -370,24 +373,26 @@ void Newtonian1D::advance(
             fR = prims2flux(primsR);
 
             // Calc HLL Flux at i-1/2 interface
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
-            }
-            else
-            {
+                break;
+            
+            default:
                 flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                break;
             }
         }
         else
         {
             Primitive left_most, right_most, left_mid, right_mid, center;
 
-            left_most   = prim_buff[helpers::mod(txa - 2, xstride)];
-            left_mid    = prim_buff[helpers::mod(txa - 1, xstride)];
-            center      = prim_buff[(txa + 0)  % xstride];
-            right_mid   = prim_buff[(txa + 1)  % xstride];
-            right_most  = prim_buff[(txa + 2)  % xstride];
+            left_most   = prim_buff[txa - 2];
+            left_mid    = prim_buff[txa - 1];
+            center      = prim_buff[txa + 0];
+            right_mid   = prim_buff[txa + 1];
+            right_most  = prim_buff[txa + 2];
 
             // Compute the reconstructed primitives at the i+1/2 interface
 
@@ -403,13 +408,15 @@ void Newtonian1D::advance(
             fL = prims2flux(primsL);
             fR = prims2flux(primsR);
 
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
-            }
-            else
-            {
+                break;
+            
+            default:
                 frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                break;
             }
 
             // Do the same thing, but for the right side interface [i - 1/2]
@@ -423,13 +430,15 @@ void Newtonian1D::advance(
             fL = prims2flux(primsL);
             fR = prims2flux(primsR);
 
-            if (hllc)
+            switch (sim_solver)
             {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR);
-            }
-            else
-            {
+                break;
+            
+            default:
                 flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR);
+                break;
             }
         }
         const auto d_source = den_source_all_zeros    ? 0.0 : dens_source[ii];
@@ -490,12 +499,11 @@ void Newtonian1D::advance(
     std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace,
-    bool hllc,
+    const std::string solver,
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources)
 {
     anyDisplayProps();
-    define_periodic(boundary_conditions);
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
@@ -505,13 +513,13 @@ void Newtonian1D::advance(
     this->sourceRho       = sources[0];
     this->sourceMom       = sources[1];
     this->sourceE         = sources[2];
-    this->hllc            = hllc;
+    this->sim_solver      = helpers::solver_map.at(solver);
     this->engine_duration = engine_duration;
     this->t               = tstart;
     this->dlogt           = dlogt;
     this->geometry        = helpers::geometry_map.at(coord_system);
-    this->idx_active      = (periodic) ? 0 : (first_order) ? 1 : 2;
-    this->active_zones    = (periodic) ? nx: (first_order) ? nx - 2 : nx - 4;
+    this->idx_active      = (first_order) ? 1 : 2;
+    this->active_zones    = (first_order) ? nx - 2 : nx - 4;
     this->dlogx1          = std::log10(x1[active_zones - 1]/ x1[0]) / (active_zones - 1);
     this->dx1             = (x1[active_zones - 1] - x1[0]) / (active_zones - 1);
     this->invdx1          = 1 / dx1;
@@ -527,11 +535,6 @@ void Newtonian1D::advance(
     define_chkpt_idx(chkpt_idx);
     // TODO: invoke mesh motion later
     this->mesh_motion = false;
-    if (hllc){
-        this->sim_solver = simbi::Solver::HLLC;
-    } else {
-        this->sim_solver = simbi::Solver::HLLE;
-    }
 
     inflow_zones.resize(2);
     for (size_t i = 0; i < 2; i++)
@@ -573,17 +576,20 @@ void Newtonian1D::advance(
     bcs.copyToGpu();
 
     const auto xblockdim     = nx > gpu_block_dimx ? gpu_block_dimx : nx;
-    this->radius             = (periodic) ? 0 : (first_order) ? 1 : 2;
-    this->pseudo_radius      = (first_order) ? 1 : 2;
+    this->radius             = (first_order) ? 1 : 2;
     this->step               = (first_order) ? 1 : static_cast<real>(0.5);
-    const luint shBlockSize  = gpu_block_dimx + 2 * pseudo_radius;
+    const luint shBlockSize  = gpu_block_dimx + 2 * radius;
     const luint shBlockBytes = shBlockSize * sizeof(Primitive);
     const auto fullP         = simbi::ExecutionPolicy(nx, xblockdim);
     const auto activeP       = simbi::ExecutionPolicy(active_zones, xblockdim, shBlockBytes);
     
+    if constexpr(BuildPlatform == Platform::GPU){
+        writeln("Requested shared memory: {} bytes", shBlockBytes);
+    }
+
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
-        adapt_dt(activeP.gridSize.x, xblockdim);
+        adapt_dt(activeP.gridSize.x);
     } else {
         cons2prim(fullP);
         adapt_dt();
@@ -593,24 +599,17 @@ void Newtonian1D::advance(
 
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
-        write2file(*this, setup, data_directory, t, t_interval, this->chkpt_interval, active_zones);
-        if (dlogt != 0) {
-            t_interval *= std::pow(10, dlogt);
-        } else {
-            t_interval += chkpt_interval;
-        }
+        write2file(*this, setup, data_directory, t, 0, this->chkpt_interval, active_zones);
+        config_ghosts1D_t(fullP, cons, nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
     }
-    const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
-
+    
     simbi::detail::logger::with_logger(*this, tend, [&](){
-        advance(activeP, xstride);
+        advance(activeP);
         cons2prim(fullP);
-        if (!periodic) {
-            config_ghosts1D_t(fullP, cons, nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
-        }   
+        config_ghosts1D_t(fullP, cons, nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
         
         if constexpr(BuildPlatform == Platform::GPU) {
-            adapt_dt(activeP.gridSize.x,xblockdim);
+            adapt_dt(activeP.gridSize.x);
         } else {
             adapt_dt();
         }

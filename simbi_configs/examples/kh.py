@@ -79,8 +79,8 @@ class KelvinHelmholtz(BaseConfig):
         return "periodic"
     
     @simbi_property
-    def use_hllc_solver(self) -> bool:
-        return True
+    def solver(self) -> str:
+        return 'hllc'
     
     @simbi_property 
     def data_directory(self) -> str:

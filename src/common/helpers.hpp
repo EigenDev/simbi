@@ -126,6 +126,11 @@ namespace simbi
         { "reflecting", simbi::BoundaryCondition::REFLECTING},
         { "periodic", simbi::BoundaryCondition::PERIODIC}
         };
+
+        const std::map<std::string, simbi::Solver> solver_map = {
+        { "hllc", simbi::Solver::HLLC},
+        { "hlle", simbi::Solver::HLLE}
+        };
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-TEMPLATES
         //---------------------------------------------------------------------------------------------------------
@@ -180,7 +185,6 @@ namespace simbi
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-METHODS
         //---------------------------------------------------------------------------------------------------------
-        void pause_program();
         //----------------Define Methods-------------------------
         std::string create_step_str(real t_interval, std::string &tnow);
         void write_hdf5(

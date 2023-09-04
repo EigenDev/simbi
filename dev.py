@@ -47,7 +47,7 @@ def read_from_cache() -> Optional[dict[str, str]]:
         return None 
     
 def check_minimal_dependencies() -> None:
-    MIN_PYTHON = (3, 9)
+    MIN_PYTHON = (3, 10)
     if sys.version_info < MIN_PYTHON:
         raise RuntimeError("Python {}.{} or later is required".format(*MIN_PYTHON))
     
@@ -59,12 +59,19 @@ def check_minimal_dependencies() -> None:
     try:
         import numpy 
     except ImportError:
-         subprocess.run([sys.executable, '-m', 'pip', 'install', 'numpy'], check=True)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'numpy'], check=True)
     
     try:
         import cython 
     except ImportError:
-         subprocess.run([sys.executable, '-m', 'pip', 'install', 'cython'], check=True)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'cython'], check=True)
+    
+    try:
+        import ninja 
+    except ImportError:
+        if not is_tool('make'):
+            subprocess.run([sys.executable, '-m', 'pip', 'install', 'ninja'], check=True)
+
         
 def write_to_cache(args: argparse.Namespace) -> None:
     details = vars(args)
@@ -85,7 +92,7 @@ def configure(args: argparse.Namespace,
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
     -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} -Dfour_velocity={args.four_velocity} \
-    -Dcpp_std={args.cpp_version} {reconfigure}'''.split()
+    -Dcpp_std={args.cpp_version} -Dbuildtype={args.build_type} {reconfigure}'''.split()
     return command
 
 def generate_home_locator(simbi_dir: str) -> None:
@@ -158,13 +165,16 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     compile_type = install_parser.add_mutually_exclusive_group()
     compile_type.add_argument('--gpu-compilation',  action='store_const', dest='gpu_compilation', const='enabled')
     compile_type.add_argument('--cpu-compilation',  action='store_const', dest='gpu_compilation', const='disabled')
+    build_type = install_parser.add_mutually_exclusive_group()
+    build_type.add_argument('--release',  action='store_const', dest='build_type', const='release')
+    build_type.add_argument('--debug',  action='store_const', dest='build_type', const='debug')
     precision = install_parser.add_mutually_exclusive_group()
     precision.add_argument('--double',  action='store_const', dest='float_precision', const=False)
     precision.add_argument('--float',   action='store_const', dest='float_precision', const=True)
     major = install_parser.add_mutually_exclusive_group()
     major.add_argument('--row-major',   action='store_const', dest='column_major', const=False)
     major.add_argument('--column-major',action='store_const', dest='column_major', const=True)
-    install_parser.set_defaults(float_precision=False, column_major=False, gpu_compilation='disabled')
+    install_parser.set_defaults(float_precision=False, column_major=False, gpu_compilation='disabled', build_type='release')
     
     return parser, parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
@@ -179,7 +189,7 @@ def install_simbi(args: argparse.Namespace) -> None:
     cli_args = sys.argv[1:]
     if cached_vars := read_from_cache():
         for arg in vars(args):
-            if arg in ['verbose', 'configure', 'func', 'extras', 'cpp_version']:
+            if arg in ['verbose', 'configure', 'func', 'extras', 'cpp_version', 'build_type']:
                 continue
             
             if getattr(args,arg) == default[arg]:
@@ -217,7 +227,7 @@ def install_simbi(args: argparse.Namespace) -> None:
         gpu_runtime_dir = get_output(['hipconfig', '--rocmpath'])
     
     
-    gpu_include=f"{gpu_runtime_dir}/include"
+    gpu_include=f"{gpu_runtime_dir.split()[0]}/include"
     h5cc_show = get_output(['h5cc', '-show']).split()
     hdf5_include = ' '.join([include_dir[2:] for include_dir in filter(lambda x: x.startswith('-I'), h5cc_show)])
     
@@ -226,7 +236,7 @@ def install_simbi(args: argparse.Namespace) -> None:
         hdf5_include = hdf5_libpath.parents[0].resolve() / 'include'
         
     config_command = configure(args, reconfigure_flag, hdf5_include, gpu_include)
-    subprocess.run(config_command, env=simbi_env)
+    subprocess.run(config_command, env=simbi_env, check=True)
     if not args.configure:
         extras = '' if not args.extras else '[extras]'
         install_mode = '.'+extras if args.install_mode == 'default' else '-e' + '.'+extras

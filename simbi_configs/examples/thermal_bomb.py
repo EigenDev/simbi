@@ -26,7 +26,7 @@ class thermalBomb(BaseConfig):
     rinit         = DynamicArg("rinit", 0.1,          help='intial grid radius', var_type=float)
     rend          = DynamicArg("rend", 1.0,           help='radial extent', var_type=float)
     k             = DynamicArg("k", 0.0,              help='density power law k', var_type=float) 
-    full_sphere   = DynamicArg("full_sphere", False,  help='flag for full_sphere computation',  var_type=bool, action='store_true') 
+    full_sphere   = DynamicArg("full-sphere", False,  help='flag for full_sphere computation',  var_type=bool, action='store_true') 
     zpd           = DynamicArg("zpd", 1024,            help='number of radial zones per decade', var_type=int)
     ad_gamma      = DynamicArg("ad-gamma", 4.0 / 3.0, help="Adiabtic gas index", var_type=float)
     
@@ -85,8 +85,8 @@ class thermalBomb(BaseConfig):
         return 1.0
     
     @simbi_property
-    def use_hllc_solver(self) -> bool:
-        return True
+    def solver(self) -> str:
+        return 'hllc'
     
     @simbi_property
     def boundary_conditions(self) -> Sequence[str]:

@@ -1,7 +1,7 @@
 project('simbi', 'c', 'cpp', 'cython',
     version : run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(), 
     license : 'MIT',
-    default_options : [ 'cpp_std=c++20' ],
+    default_options : [ 'cpp_std=c++20' , 'b_lto=true', 'cpp_args=-march=native'],
 )
 
 # BUILD CONFIG
@@ -53,8 +53,6 @@ incdir_numpy = run_command(py3,
   check : true
 ).stdout().strip()
 all_inc       = include_directories(incdir_numpy, 'src')
-linker_args   = []
-cpp_comp_args = ['-march=native', '-O3', '-fopenmp', '-flto=auto']
 depends       = [py3_dep, hdf5, omp]
 gpu_depends   = []
 gpu_linkers   = []
@@ -65,10 +63,18 @@ gpu_comp_args = []
 if get_option('gpu_compilation').enabled()
     hip  = dependency('HIP', cmake_module_path : '/opt/rocm', required: false)
     cuda = dependency('CUDA', required: false)
-    host_compiler    = meson.get_compiler('cpp').get_id()
+    host_compiler  = meson.get_compiler('cpp')
+    host_compiler_name = host_compiler.get_id()
+    host_compiler_version = host_compiler.version().split('.')[0]
+    if host_compiler_name == 'g++' or host_compiler_name == 'gcc'
+        if host_compiler_version.to_int() >= 13
+            error(f'The detected gcc version: gcc-@host_compiler_version@ is incompatible with cuda version')
+        endif
+    endif
+
     if hip.found()
         env = environment()
-        check_hip_config = run_command('/opt/rocm/hip/bin/hipconfig','--platform', check: true)
+        check_hip_config = run_command('hipconfig','--platform', check: true)
         hip_platform     = check_hip_config.stdout().strip()
         hip_platform_err = check_hip_config.stderr().strip()
         gpu_arch = get_option('gpu_arch')
@@ -80,8 +86,8 @@ if get_option('gpu_compilation').enabled()
             gpu_comp_args = [
                 '-DGPU_PLATFORM_NVIDIA=1',
                 '-std=c++17',
-                f'-arch=sm_@gpu_arch@', 
-                f'-ccbin=@host_compiler@',
+                f'-arch=sm_@gpu_arch@',
+                f'-ccbin=@host_compiler_name@',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
@@ -122,7 +128,7 @@ if get_option('gpu_compilation').enabled()
                 '-std=c++17',
                 '-DGPU_PLATFORM_NVIDIA=1',
                 f'-arch=sm_@gpu_arch@', 
-                f'-ccbin=@host_compiler@',
+                f'-ccbin=@host_compiler_name@',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
@@ -191,7 +197,7 @@ cpu_ext = py3.extension_module(
     'cpu_ext',
     ['src/cpu_ext.pyx', 'src/call_obj.pyx'] + sources + headers,
     include_directories: all_inc,
-    cpp_args: cpp_comp_args + ['-DGPU_CODE=0'],
+    cpp_args: ['-DGPU_CODE=0'],
     dependencies: depends,
     override_options: ['cython_language=cpp'],
     install: true,
@@ -205,6 +211,7 @@ if get_option('gpu_compilation').enabled()
         gpu_objs = []
         gpu_includes = ['-I'+meson.current_source_dir()+'/src', '-I.', '-I'+meson.current_build_dir()]
         gpu_includes += ['-I' + get_option('gpu_include_dir'), '-I' + get_option('hdf5_include_dir')]
+        gpu_link_trgs = []
         foreach source : sources
             gpu_trg = custom_target(
                 fs.name(source) + '_target',
@@ -266,7 +273,6 @@ py3.extension_module(
     'rad_hydro',
     ['simbi/afterglow/src/rad_hydro.pyx'] + rad_src,
     include_directories: include_directories('simbi/afterglow/src', incdir_numpy),
-    cpp_args: cpp_comp_args,
     dependencies: [py3_dep, omp],
     override_options: ['cython_language=cpp'],
     install: true,

@@ -318,6 +318,10 @@ class Hydro:
             if key != 'self':
                 if isinstance(param, (float, np.float64)):
                     val_str: Any = f"{param:.3f}"
+                elif key == 'sources' and param is not None:
+                    val_str = f'user-defined sources terms'
+                elif key == 'gsources' and param is not None:
+                    val_str = f'user-defined gravity sources'
                 elif callable(param):
                     val_str = f"user-defined {key} function"
                 elif isinstance(param, tuple):
@@ -470,8 +474,9 @@ class Hydro:
             linspace: bool = True,
             cfl: float = 0.4,
             sources: Optional[NDArray[Any]] = None,
+            gsources: Optional[NDArray[Any]] = None,
             passive_scalars: Optional[Union[NDArray[Any], int]] = None,
-            hllc: bool = False,
+            solver: str = 'hllc',
             chkpt: Optional[str] = None,
             chkpt_interval: float = 0.1,
             data_directory: str = "data/",
@@ -500,7 +505,7 @@ class Hydro:
             cfl         (float):         The cfl number for min adaptive timestep
             sources     (array_like):    The source terms for the simulations
             passive_scalars  (array_like):    The array of passive passive_scalars
-            hllc        (boolean):       Tells the simulation whether to perform HLLC or HLLE
+            solver        (str):         Tells the simulation whether to perform HLLC or HLLE
             chkpt       (string):        The path to the checkpoint file to read into the simulation
             chkpt_interval (float):      The interval at which to save the checkpoints
             data_directory (string):     The directory at which to save the checkpoint files
@@ -561,7 +566,6 @@ class Hydro:
                 'planar_cylindrical', 'axis_cylindrical']:
             self.coord_system = 'cylindrical'
 
-        periodic = all(bc == 'periodic' for bc in boundary_conditions)
         self.start_time = self.start_time or tstart
 
         #######################################################################
@@ -583,6 +587,7 @@ class Hydro:
         cython_data_directory = os.path.join(
             data_directory, '').encode('utf-8')
         cython_coordinates = self.coord_system.encode('utf-8')
+        cython_solver = solver.encode('utf-8')
         cython_boundary_conditions: NDArray[numpy_string] = np.array(
             [bc.encode('utf-8') for bc in self.boundary_conditions])
 
@@ -634,6 +639,7 @@ class Hydro:
         if self.dimensionality == 1:
             sources = np.zeros(3) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
+            gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
             
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "128"
@@ -652,7 +658,7 @@ class Hydro:
                     cfl,
                     x1=self.x1,
                     coord_system=cython_coordinates)
-                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative}
+                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'gravity_sources': gsources}
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] = dens_outer
                     kwargs['s_outer'] = mom_outer
@@ -662,7 +668,8 @@ class Hydro:
             # ignore the chi term
             sources = np.zeros(4) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
-
+            gsources = np.zeros(4) if gsources is None else np.asanyarray(gsources).flatten()
+            
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "16"
                 
@@ -682,7 +689,9 @@ class Hydro:
                     'a': scale_factor,
                     'adot': scale_factor_derivative,
                     'quirk_smoothing': quirk_smoothing,
-                    'object_cells': object_cells}
+                    'object_cells': object_cells,
+                    'gravity_sources': gsources,
+                }
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
                     momentum_components = cast(Sequence[Callable[..., float]], mom_outer)
                     kwargs['d_outer']   = dens_outer
@@ -723,7 +732,7 @@ class Hydro:
                     x3=self.x3,
                     coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
-
+            
         self.solution = state.simulate(
             sources=sources,
             tstart=self.start_time,
@@ -737,11 +746,10 @@ class Hydro:
             boundary_conditions=cython_boundary_conditions,
             first_order=first_order,
             linspace=linspace,
-            hllc=hllc,
+            solver=cython_solver,
             constant_sources=constant_sources,
             boundary_sources=boundary_sources,
             **kwargs)
 
-        if not periodic:
-            self._cleanup(first_order)
+        self._cleanup(first_order)
         return self.solution

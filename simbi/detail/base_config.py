@@ -176,8 +176,8 @@ class BaseConfig(metaclass=abc.ABCMeta):
        return 1.0
    
     @simbi_property
-    def use_hllc_solver(self) -> bool:
-       return True
+    def solver(self) -> str:
+       return 'hllc'
    
     @simbi_property
     def boundary_conditions(self) -> Union[Sequence[str], str, NDArray[numpy_string]]:
@@ -238,6 +238,10 @@ class BaseConfig(metaclass=abc.ABCMeta):
     @simbi_property
     def engine_duration(self) -> float:
         return 0.0
+    
+    @simbi_property
+    def gravity_sources(self) -> Optional[NDArray[Any]]:
+        return None
     
     @classmethod
     def _find_dynamic_args(cls) -> None:

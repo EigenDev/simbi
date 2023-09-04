@@ -29,10 +29,10 @@ namespace simbi {
         
         Newtonian1D() = default;
         Newtonian1D(
-            std::vector<std::vector<real>> state, 
+            std::vector<std::vector<real>> &state, 
             real gamma, 
             real cfl,
-            std::vector<real> x1, 
+            std::vector<real> &x1, 
             std::string coord_system);
         ~Newtonian1D() {};
 
@@ -42,7 +42,7 @@ namespace simbi {
 
         void cons2prim(const ExecutionPolicy<> &p);
         void adapt_dt();
-        void adapt_dt(luint blockSize, luint tblock);
+        void adapt_dt(luint blockSize);
         
         GPU_CALLABLE_MEMBER
         hydro1d::Conserved prims2cons(const hydro1d::Primitive &prims);
@@ -94,9 +94,7 @@ namespace simbi {
             const hydro1d::Conserved &left_flux,
             const hydro1d::Conserved &right_flux);
 
-        void advance(
-            const ExecutionPolicy<> &p, 
-            const luint xstride);
+        void advance(const ExecutionPolicy<> &p);
 
         std::vector<std::vector<real> > simulate1D(
             std::vector<std::vector<real>> &sources,
@@ -111,7 +109,7 @@ namespace simbi {
             std::vector<std::string> boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            const std::string solver,
             bool constant_sources,
             std::vector<std::vector<real>> boundary_sources);
     };

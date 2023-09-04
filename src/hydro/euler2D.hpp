@@ -29,12 +29,12 @@ namespace simbi {
         
         Newtonian2D();
         Newtonian2D(
-            std::vector<std::vector<real>> state, 
+            std::vector<std::vector<real>> &state, 
             luint nx, 
             luint ny,
             real gamma, 
-            std::vector<real> x1,
-            std::vector<real> x2, 
+            std::vector<real> &x1,
+            std::vector<real> &x2, 
             real cfl, 
             std::string coord_system);
 
@@ -77,8 +77,7 @@ namespace simbi {
 
         void adapt_dt();
         void adapt_dt(
-            const ExecutionPolicy<> &p, 
-            luint bytes);
+            const ExecutionPolicy<> &p);
 
         void advance(
                const ExecutionPolicy<> &p, 
@@ -98,7 +97,7 @@ namespace simbi {
             std::vector<std::string> boundary_conditions,
             bool first_order,
             bool linspace, 
-            bool hllc,
+            const std::string solver,
             bool constant_sources,
             std::vector<std::vector<real>> boundary_sources);
 

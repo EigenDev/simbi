@@ -28,10 +28,10 @@ using Eigenvals  =  sr1d::Eigenvals;
 
 // Overloaded Constructor
 SRHD::SRHD(
-    std::vector<std::vector<real>> state, 
+    std::vector<std::vector<real>> &state, 
     real gamma, 
     real cfl,
-    std::vector<real> x1, 
+    std::vector<real> &x1, 
     std::string coord_system = "cartesian") 
 :
     HydroBase(
@@ -70,9 +70,7 @@ real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geome
 //=====================================================================
 //                          KERNEL CALLS
 //=====================================================================
-void SRHD::advance(
-    const ExecutionPolicy<> &p,
-    const luint xstride)
+void SRHD::advance(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
     const auto xextent          = p.get_xextent();
@@ -82,6 +80,7 @@ void SRHD::advance(
     auto* const dens_source     = sourceD.data();
     auto* const mom_source      = sourceS.data();
     auto* const erg_source      = source0.data();
+    auto* const grav_source     = sourceG.data();
     simbi::parallel_for(p, (luint)0, active_zones, [CAPTURE_THIS]   GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
@@ -94,20 +93,20 @@ void SRHD::advance(
         Primitive primsL, primsR;
 
         lint ia  = ii + radius;
-        lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + pseudo_radius : ia;
+        lint txa = (BuildPlatform == Platform::GPU) ?  threadIdx.x + radius : ia;
         #if GPU_CODE
             luint txl = xextent;
             // Check if the active index exceeds the active zones
             // if it does, then this thread buffer will taken on the
             // ghost index at the very end and return
             prim_buff[txa] = prim_data[ia];
-            if (threadIdx.x < pseudo_radius)
+            if (threadIdx.x < radius)
             {
                 if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + threadIdx.x)) {
                     txl = nx - radius - ia + threadIdx.x;
                 }
-                prim_buff[txa - pseudo_radius] = prim_data[helpers::mod(ia - pseudo_radius, nx)];
-                prim_buff[txa + txl   ]        = prim_data[(ia + txl ) % nx];
+                prim_buff[txa - radius] = prim_data[ia - radius];
+                prim_buff[txa + txl]        = prim_data[ia + txl];
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -119,23 +118,28 @@ void SRHD::advance(
         if (first_order) [[unlikely]]
         {
             // Set up the left and right state interfaces for i+1/2
-            primsL = prim_buff[(txa + 0) % xstride];
-            primsR = prim_buff[(txa + 1) % xstride];
+            primsL = prim_buff[txa + 0];
+            primsR = prim_buff[txa + 1];
             uL     = prims2cons(primsL);
             uR     = prims2cons(primsR);
             fL     = prims2flux(primsL);
             fR     = prims2flux(primsR);
 
             // Calc HLL Flux at i+1/2 interface
-            if (hllc){
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
-            } else {
+                break;
+            
+            default:
                 frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
+                break;
             }
 
             // Set up the left and right state interfaces for i-1/2
-            primsL = prim_buff[helpers::mod(txa - 1, xstride)];
-            primsR = prim_buff[(txa - 0) % xstride];
+            primsL = prim_buff[txa - 1];
+            primsR = prim_buff[txa - 0];
 
             uL = prims2cons(primsL);
             uR = prims2cons(primsR);
@@ -143,17 +147,22 @@ void SRHD::advance(
             fR = prims2flux(primsR);
 
             // Calc HLL Flux at i-1/2 interface
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
-            } else {
+                break;
+            
+            default:
                 flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
-            }   
+                break;
+            } 
         } else {
-            const Primitive left_most  = prim_buff[helpers::mod(txa - 2, xstride)];
-            const Primitive left_mid   = prim_buff[helpers::mod(txa - 1, xstride)];
-            const Primitive center     = prim_buff[(txa + 0) % xstride];
-            const Primitive right_mid  = prim_buff[(txa + 1) % xstride];
-            const Primitive right_most = prim_buff[(txa + 2) % xstride];
+            const Primitive left_most  = prim_buff[txa - 2];
+            const Primitive left_mid   = prim_buff[txa - 1];
+            const Primitive center     = prim_buff[txa + 0];
+            const Primitive right_mid  = prim_buff[txa + 1];
+            const Primitive right_most = prim_buff[txa + 2];
 
             // Compute the reconstructed primitives at the i+1/2 interface
             // Reconstructed left primitives vector
@@ -166,10 +175,15 @@ void SRHD::advance(
             fL = prims2flux(primsL);
             fR = prims2flux(primsR);
 
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 frf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
-            } else {
+                break;
+            
+            default:
                 frf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceR);
+                break;
             }
             
             // Do the same thing, but for the right side interface [i - 1/2]
@@ -182,17 +196,25 @@ void SRHD::advance(
             fL = prims2flux(primsL);
             fR = prims2flux(primsR);
 
-            if (hllc) {
+            switch (sim_solver)
+            {
+            case Solver::HLLC:
                 flf = calc_hllc_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
-            } else {
+                break;
+            
+            default:
                 flf = calc_hll_flux(primsL, primsR, uL, uR, fL, fR, vfaceL);
-            }
+                break;
+            } 
         }
 
-        const auto d_source = den_source_all_zeros    ? 0.0 : dens_source[ii];
-        const auto s_source = mom1_source_all_zeros   ? 0.0 : mom_source[ii];
-        const auto e_source = energy_source_all_zeros ? 0.0 : erg_source[ii];
+        const auto d_source = den_source_all_zeros    ? 0.0 :  dens_source[ii];
+        const auto s_source = mom1_source_all_zeros   ? 0.0 :  mom_source[ii];
+        const auto e_source = energy_source_all_zeros ? 0.0 :  erg_source[ii];
+        const auto gs_source = grav_source_all_zeros  ? 0.0 :  cons_data[ia].d * grav_source[ii];
+        const auto ge_source = gs_source * prim_buff[txa].v;
         const auto sources = Conserved{d_source, s_source, e_source} * time_constant;
+        const auto gravity = Conserved{0, gs_source, ge_source};
         switch(geometry)
         {
             case simbi::Geometry::CARTESIAN:
@@ -213,7 +235,7 @@ void SRHD::advance(
                 const real invdV  = 1 / dV;
 
                 const auto geom_sources = Conserved{0.0, pc * (sR - sL) * invdV, 0.0};
-                cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources) * step * dt * factor;
+                cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources - gravity) * step * dt * factor;
                 break;
             }
         } // end switch
@@ -355,8 +377,10 @@ Eigenvals SRHD::calc_eigenvals(
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
             // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-            const real sL = csL*csL/(gamma*gamma*(1 - csL*csL));
-            const real sR = csR*csR/(gamma*gamma*(1 - csR*csR));
+            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
+            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
+            const real sL = csL*csL/(gammaL*gammaL*(1 - csL*csL));
+            const real sR = csR*csR/(gammaR*gammaR*(1 - csR*csR));
             // Define temporaries to save computational cycles
             const real qfL   = 1 / (1 + sL);
             const real qfR   = 1 / (1 + sR);
@@ -368,12 +392,31 @@ Eigenvals SRHD::calc_eigenvals(
             const real lamLp = (vL + sqrtL) * qfL;
             const real lamRp = (vR + sqrtR) * qfR;
 
-            real aL = lamLm < lamRm ? lamLm : lamRm;
-            real aR = lamLp > lamRp ? lamLp : lamRp;
+            const real aL = lamLm < lamRm ? lamLm : lamRm;
+            const real aR = lamLp > lamRp ? lamLp : lamRp;
+            
+            return Eigenvals(aL, aR);
+        }
+    case simbi::WaveSpeeds::HUBER_AND_KISSMANN_2021:
+        {
+            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
+            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
+            const real uL = gammaL * vL;
+            const real uR = gammaR * vR;
+            const real sL = csL*csL/(1 - csL * csL);
+            const real sR = csR*csR/(1 - csR * csR);
+            const real sqrtR = std::sqrt(sR * (gammaR * gammaR - uR * uR + sR));
+            const real sqrtL = std::sqrt(sL * (gammaL * gammaL - uL * uL + sL));
+            const real qfL   = 1 / (gammaL * gammaL + sL);
+            const real qfR   = 1 / (gammaR * gammaR + sR);
 
-            // Smoothen for rarefaction fan
-            aL = helpers::my_min(aL, (vL - csL) / (1 - vL * csL));
-            aR = helpers::my_max(aR, (vR + csR) / (1 + vR * csR));
+            const real lamLm = (gammaL * uL - sqrtL) * qfL;
+            const real lamRm = (gammaR * uR - sqrtR) * qfR;
+            const real lamLp = (gammaL * uL + sqrtL) * qfL;
+            const real lamRp = (gammaR * uR + sqrtR) * qfR;
+
+            const real aL = lamLm < lamRm ? lamLm : lamRm;
+            const real aR = lamLp > lamRp ? lamLp : lamRp;
 
             return Eigenvals(aL, aR);
         }
@@ -559,7 +602,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
         return right_flux - right_state * vface;
     }
     const Conserved hll_flux  = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
-    const Conserved hll_state = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
+    const Conserved hll_state = (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
 
     const real uhlld   = hll_state.d;
     const real uhlls   = hll_state.s;
@@ -634,6 +677,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
 std::vector<std::vector<real>>
 SRHD::simulate1D(
     std::vector<std::vector<real>> &sources,
+    std::vector<real> &gsource,
     real tstart,
     real tend,
     real dlogt,
@@ -645,7 +689,7 @@ SRHD::simulate1D(
     std::vector<std::string> boundary_conditions,
     bool first_order,
     bool linspace,
-    bool hllc,
+    const std::string solver,
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources,
     std::function<double(double)> a,
@@ -655,7 +699,6 @@ SRHD::simulate1D(
     std::function<double(double)> e_outer)
 {
     anyDisplayProps();
-    define_periodic(boundary_conditions);
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
@@ -665,14 +708,15 @@ SRHD::simulate1D(
     this->sourceD         = sources[0];
     this->sourceS         = sources[1];
     this->source0         = sources[2];
-    this->hllc            = hllc;
+    this->sourceG         = gsource;
+    this->sim_solver      = helpers::solver_map.at(solver);
     this->engine_duration = engine_duration;
     this->t               = tstart;
     this->tend            = tend;
     this->dlogt           = dlogt;
     this->geometry        = helpers::geometry_map.at(coord_system);
-    this->idx_active      = (periodic) ? 0  : (first_order) ? 1 : 2;
-    this->active_zones    = (periodic) ? nx : (first_order) ? nx - 2 : nx - 4;
+    this->idx_active      = (first_order) ? 1 : 2;
+    this->active_zones    = (first_order) ? nx - 2 : nx - 4;
     this->dlogx1          = std::log10(x1[active_zones - 1]/ x1[0]) / (active_zones - 1);
     this->dx1             = (x1[active_zones - 1] - x1[0]) / (active_zones - 1);
     this->invdx1          = 1.0 / this->dx1;
@@ -684,6 +728,7 @@ SRHD::simulate1D(
     this->den_source_all_zeros    = std::all_of(sourceD.begin(), sourceD.end(), [](real i) {return i==0;});
     this->mom1_source_all_zeros   = std::all_of(sourceS.begin(), sourceS.end(), [](real i) {return i==0;});
     this->energy_source_all_zeros = std::all_of(source0.begin(), source0.end(), [](real i) {return i==0;});
+    this->grav_source_all_zeros = std::all_of(sourceG.begin(), sourceG.end(), [](real i){return i==0;});
     define_tinterval(tstart, dlogt, chkpt_interval, chkpt_idx);
     define_chkpt_idx(chkpt_idx);
     inflow_zones.resize(2);
@@ -693,11 +738,6 @@ SRHD::simulate1D(
         this->inflow_zones[i] = Conserved{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
     }
     
-    // Write some info about the setup for writeup later
-    std::string filename, tnow, tchunk;
-    PrimData prods;
-    
-
     this->hubble_param       = adot(t) / a(t);
     this->mesh_motion        = (hubble_param != 0);
     this->all_outer_bounds   = (d_outer && s_outer && e_outer);
@@ -749,19 +789,23 @@ SRHD::simulate1D(
     sourceD.copyToGpu();
     sourceS.copyToGpu();
     source0.copyToGpu();
+    sourceG.copyToGpu();
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
     troubled_cells.copyToGpu();
 
     const auto xblockdim      = nx > gpu_block_dimx ? gpu_block_dimx : nx;
-    this->radius              = (periodic) ? 0 : (first_order) ? 1 : 2;
-    this->pseudo_radius       = (first_order) ? 1 : 2;
+    this->radius              = (first_order) ? 1 : 2;
     this->step                = (first_order) ? 1 : static_cast<real>(0.5);
-    const luint shBlockSize   = gpu_block_dimx + 2 * pseudo_radius;
+    const luint shBlockSize   = gpu_block_dimx + 2 * radius;
     const luint shBlockBytes  = shBlockSize * sizeof(Primitive);
     const auto fullP          = simbi::ExecutionPolicy(nx, xblockdim);
     const auto activeP        = simbi::ExecutionPolicy(active_zones, xblockdim, shBlockBytes);
     
+    if constexpr(BuildPlatform == Platform::GPU){
+        writeln("Requested shared memory: {} bytes", shBlockBytes);
+    }
+
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP.gridSize.x);
@@ -774,28 +818,18 @@ SRHD::simulate1D(
 
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
-        if (!periodic){
-            config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
-        }
-        write2file(*this, setup, data_directory, t, t_interval, chkpt_interval, active_zones);
-        if (dlogt != 0) {
-            t_interval *= std::pow(10, dlogt);
-        } else {
-            t_interval += chkpt_interval;
-        }
+        write2file(*this, setup, data_directory, t, 0, chkpt_interval, active_zones);
+        config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
     }
 
     // Simulate :)
-    const auto xstride = (BuildPlatform == Platform::GPU) ? shBlockSize : nx;
     simbi::detail::logger::with_logger(*this, tend, [&](){
         if (inFailureState){
             return;
         }
-        advance(activeP, xstride);
+        advance(activeP);
         cons2prim(fullP);
-        if (!periodic) {
-            config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
-        }
+        config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
 
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP.gridSize.x);

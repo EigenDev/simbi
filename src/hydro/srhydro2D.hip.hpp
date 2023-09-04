@@ -35,12 +35,12 @@ namespace simbi
         /* Methods */
         SRHD2D();
         SRHD2D(
-            std::vector<std::vector<real>> state2D, 
+            std::vector<std::vector<real>> &state2D, 
             luint nx, 
             luint ny, 
             real gamma, 
-            std::vector<real> x1,
-            std::vector<real> x2,
+            std::vector<real> &x1,
+            std::vector<real> &x2,
             real cfl, 
             std::string coord_system);
         ~SRHD2D();
@@ -84,7 +84,7 @@ namespace simbi
         void adapt_dt();
 
         template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
-        void adapt_dt(const ExecutionPolicy<> &p, luint bytes);
+        void adapt_dt(const ExecutionPolicy<> &p);
         
         void advance(
                const ExecutionPolicy<> &p, 
@@ -179,7 +179,8 @@ namespace simbi
 
         std::vector<std::vector<real>> simulate2D(
             std::vector<std::vector<real>> &sources,
-            std::vector<bool> &object_cells,
+            const std::vector<bool> &object_cells,
+            std::vector<real> &gsource,
             real tstart,
             real tend,
             real dlogt,
@@ -191,7 +192,7 @@ namespace simbi
             std::vector<std::string> boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            const std::string solver,
             bool quirk_smoothing,
             bool constant_sources,
             std::vector<std::vector<real>> boundary_sources,

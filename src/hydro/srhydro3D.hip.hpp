@@ -31,14 +31,14 @@ namespace simbi
         /* Methods */
         SRHD3D();
         SRHD3D(
-            std::vector<std::vector<real>> state3D, 
+            std::vector<std::vector<real>> &state3D, 
             luint nx, 
             luint ny,
             luint nz, 
             real gamma, 
-            std::vector<real> x1,
-            std::vector<real> x2, 
-            std::vector<real> x3,
+            std::vector<real> &x1,
+            std::vector<real> &x2, 
+            std::vector<real> &x3,
             real cfl, 
             std::string coord_system);
         ~SRHD3D();
@@ -48,8 +48,7 @@ namespace simbi
         void advance(
             const ExecutionPolicy<> &p,
             const luint xstride,
-            const luint ystride,
-            const luint zstride);
+            const luint ystride);
 
         GPU_CALLABLE_MEMBER
         sr3d::Eigenvals calc_eigenvals(
@@ -103,11 +102,11 @@ namespace simbi
         void adapt_dt();
 
         template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
-        void adapt_dt(const ExecutionPolicy<> &p, const luint bytes);
+        void adapt_dt(const ExecutionPolicy<> &p);
 
         std::vector<std::vector<real>> simulate3D(
             const std::vector<std::vector<real>> &sources,
-            std::vector<bool> &object_cells,
+            const std::vector<bool> &object_cells,
             real tstart, 
             real tend, 
             real dlogt, 
@@ -119,7 +118,7 @@ namespace simbi
             std::vector<std::string> boundary_conditions,
             bool first_order,
             bool linspace, 
-            bool hllc,
+            const std::string solver,
             bool constant_sources,
             std::vector<std::vector<real>> boundary_sources);
 

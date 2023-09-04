@@ -5,6 +5,7 @@ from libcpp cimport bool
 from libcpp.string cimport string 
 
 
+# adapted from: https://stackoverflow.com/a/39052204/13874039
 cdef extern from "util/pyobj_wrapper.hpp":
     cdef cppclass PyObjWrapper:
         PyObjWrapper()
@@ -35,7 +36,7 @@ cdef extern from "hydro/euler1D.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources) except +
 
@@ -61,7 +62,7 @@ cdef extern from "hydro/euler2D.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order,
             bool linspace, 
-            bool hllc,
+            string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources) except +
 
@@ -77,6 +78,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
         vector[vector[real]] state
         vector[vector [real]] simulate1D(
             vector[vector[real]] sources, 
+            vector[real] gsources,
             real tstart,
             real tend, 
             real dlogt, 
@@ -88,7 +90,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order, 
             bool linspace, 
-            bool hllc,
+            string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources,
             PyObjWrapper a,
@@ -96,6 +98,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             
         vector[vector [real]] simulate1D(
             vector[vector[real]] sources, 
+            vector[real] gsources,
             real tstart,
             real tend, 
             real dlogt, 
@@ -107,7 +110,7 @@ cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order, 
             bool linspace, 
-            bool hllc,
+            string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources,
             PyObjWrapper a,
@@ -129,6 +132,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
         vector[vector[real]] simulate2D(
             vector[vector[real]] sources,
             vector[bool] object_cells,
+            vector[real] gsources,
             real tstart,
             real tend,
             real dlogt,
@@ -140,7 +144,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            string solver,
             bool quirk_smoothing,
             bool constant_sources,
             vector[vector[real]] boundary_sources,
@@ -150,6 +154,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
         vector[vector[real]] simulate2D(
             vector[vector[real]] sources,
             vector[bool] object_cells,
+            vector[real] gsources,
             real tstart,
             real tend,
             real dlogt,
@@ -161,7 +166,7 @@ cdef extern from "hydro/srhydro2D.hip.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            string solver,
             bool quirk_smoothing,
             bool constant_sources,
             vector[vector[real]] boundary_sources,
@@ -205,6 +210,6 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
             vector[string] boundary_conditions,
             bool first_order,
             bool linspace,
-            bool hllc,
+            string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources)

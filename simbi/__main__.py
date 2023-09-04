@@ -223,7 +223,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         type=float)
     overridable.add_argument(
         '--first-order',
-        help='Set flag if wanting first order accuracy in solution',
+        help='set flag if wanting first order accuracy in solution',
         default=None,
         action='store_true')
     overridable.add_argument(
@@ -232,10 +232,11 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         default=None,
         type=float)
     overridable.add_argument(
-        '--hllc',
-        help='flag for HLLC computation as opposed to HLLE',
+        '--solver',
+        help='flag for hydro solver',
         default=None,
-        action=argparse.BooleanOptionalAction)
+        choices=['hllc', 'hlle'],
+    )
     overridable.add_argument(
         '--chkpt-interval',
         help='checkpoint interval spacing in simulation time units',
@@ -265,7 +266,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         '--quirk-smoothing',
         help='flag to activate Quirk (1994) smoothing at poles',
         default=None,
-        action='store_true')
+        action=argparse.BooleanOptionalAction)
     overridable.add_argument(
         '--constant-sources',
         help='flag to indicate source terms provided are constant',
@@ -335,7 +336,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         default=False,
     )
     global_args.add_argument(
-        '--log-dir',
+        '--log-directory',
         help='directory to place the log file',
         type=str,
         default=None
@@ -355,7 +356,7 @@ def type_check_input(file: str) -> None:
          file])
     
     if type_checker.returncode != 0:
-        raise TypeError("\nYour configuration script failed type safety checks." +
+        raise TypeError("\nYour configuration script failed type safety checks. " +
                         "Please fix them or run with --no-type-check option")
 
 def configure_state(
@@ -421,7 +422,7 @@ def configure_state(
 
         if args.log_output:
             static_config.log_output = True 
-            static_config.set_logdir(args.data_directory or config.data_directory)
+            static_config.set_logdir(args.log_directory or args.data_directory or config.data_directory)
                 
         if config.__doc__:
             state_docs += [f"{config.__doc__}"]
@@ -434,13 +435,14 @@ def configure_state(
         kwargs[idx]['chkpt_interval'] = config.check_point_interval
         kwargs[idx]['tstart'] = config.default_start_time
         kwargs[idx]['tend'] = config.default_end_time
-        kwargs[idx]['hllc'] = config.use_hllc_solver
+        kwargs[idx]['solver'] = config.solver
         kwargs[idx]['boundary_conditions'] = config.boundary_conditions
         kwargs[idx]['plm_theta'] = config.plm_theta
         kwargs[idx]['dlogt'] = config.dlogt
         kwargs[idx]['data_directory'] = config.data_directory
         kwargs[idx]['linspace'] = config.linspace
         kwargs[idx]['sources'] = config.sources
+        kwargs[idx]['gsources'] = config.gravity_sources
         kwargs[idx]['passive_scalars'] = config.passive_scalars
         kwargs[idx]['scale_factor'] = config.scale_factor
         kwargs[idx]['scale_factor_derivative'] = config.scale_factor_derivative
