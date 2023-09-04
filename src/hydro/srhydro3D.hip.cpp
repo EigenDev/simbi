@@ -357,8 +357,7 @@ void SRHD3D::adapt_dt()
         } // end kk
     } // end parallel region
     dt = cfl * min_dt;
-
-    };
+};
 
 template<TIMESTEP_TYPE dt_type>
 void SRHD3D::adapt_dt(const ExecutionPolicy<> &p)
@@ -476,7 +475,7 @@ Conserved SRHD3D::calc_hllc_flux(
 
     //-------------------Calculate the HLL Intermediate State
     const auto hll_state = 
-        (right_state * aRplus - left_state * aLminus - right_flux + left_flux) / (aRplus - aLminus);
+        (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
 
     //------------------Calculate the RHLLE Flux---------------
     const auto hll_flux 
@@ -651,13 +650,12 @@ void SRHD3D::advance(
     const luint zpg = this->zphysical_grid;
 
     #if GPU_CODE
-    const luint xextent             = p.blockSize.x;
-    const luint yextent             = p.blockSize.y;
-    const luint zextent             = p.blockSize.z;
+    const luint xextent = p.blockSize.x;
+    const luint yextent = p.blockSize.y;
+    const luint zextent = p.blockSize.z;
     #endif 
 
     const luint extent = p.get_full_extent();
-
     auto* const prim_data   = prims.data();
     auto* const cons_data   = cons.data();
     auto* const dens_source = sourceD.data();
@@ -667,12 +665,7 @@ void SRHD3D::advance(
     auto* const erg_source  = sourceTau.data();
     auto* const object_data = object_pos.data();
 
-    #if GPU_CODE
-    const auto last_kindex  = nz - 1 - radius;
-    const auto last_jindex  = ny - 1 - radius;
-    const auto last_iindex  = nx - 1 - radius;
-    #endif
-    simbi::parallel_for(p, (luint)0, extent, [CAPTURE_THIS]   GPU_LAMBDA (const luint idx){
+    simbi::parallel_for(p, (luint)0, extent, [CAPTURE_THIS] GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
         #else 
@@ -700,70 +693,45 @@ void SRHD3D::advance(
         Conserved fL, fR, gL, gR, hL, hR, frf, flf, grf, glf, hrf, hlf;
         Primitive xprimsL, xprimsR, yprimsL, yprimsR, zprimsL, zprimsR;
 
-        luint aid = ka * nx * ny + ja * nx + ia;
+        const luint aid = ka * nx * ny + ja * nx + ia;
         #if GPU_CODE
             luint txl = xextent;
             luint tyl = yextent;
             luint tzl = zextent;
-            const bool on_final_kelem = ka == last_kindex;
-            const bool on_final_jelem = ja == last_jindex;
-            const bool on_final_ielem = ia == last_iindex;
             // Load Shared memory into buffer for active zones plus ghosts
             prim_buff[tza * sx * sy + tya * sx + txa] = prim_data[aid];
-            if (tz < radius)    
+            if (tz == 0)    
             {
                 if ((blockIdx.z == p.gridSize.z - 1) && (ka + zextent > nz - radius + tz)) {
                     tzl = nz - radius - ka + tz;
                 }
-                prim_buff[(tza - radius) * sx * sy + tya * sx + txa] = prim_data[(ka - radius) * nx * ny + ja * nx + ia];
-                prim_buff[(tza + tzl   ) * sx * sy + tya * sx + txa] = prim_data[(ka + tzl   ) * nx * ny + ja * nx + ia];
-                // if (!on_final_kelem) {
-                //     prim_buff[(tza - radius) * sx * sy + tya * sx + txa] = prim_data[(ka - radius) * nx * ny + ja * nx + ia];
-                //     prim_buff[(tza + tzl   ) * sx * sy + tya * sx + txa] = prim_data[(ka + tzl   ) * nx * ny + ja * nx + ia];
-                // } else {
-                //     for (int q = 0; q < radius; q++) 
-                //     {
-                //         prim_buff[(tza - q) * sx * sy + tya * sx + txa] = prim_data[(ka - q) * nx * ny + ja * nx + ia];
-                //         prim_buff[(tza + q) * sx * sy + tya * sx + txa] = prim_data[(ka + q) * nx * ny + ja * nx + ia];
-                //     } 
-                // }
+                for (int q = 1; q < radius + 1; q++) {
+                    const auto re = tzl + q - 1;
+                    prim_buff[(tza - q) * sx * sy + tya * sx + txa]  = prim_data[(ka - q) * nx * ny + ja * nx + ia];
+                    prim_buff[(tza + re) * sx * sy + tya * sx + txa] = prim_data[(ka + re) * nx * ny + ja * nx + ia];
+                } 
             }
-            if (ty < radius)    
+            if (ty == 0)    
             {
                 if ((blockIdx.y == p.gridSize.y - 1) && (ja + yextent > ny - radius + ty)) {
                     tyl = ny - radius - ja + ty;
                 }
-                prim_buff[tza * sx * sy + (tya - radius) * sx + txa] = prim_data[ka * nx * ny + (ja - radius) * nx + ia];
-                prim_buff[tza * sx * sy + (tya + tyl   ) * sx + txa] = prim_data[ka * nx * ny + (ja + tyl   ) * nx + ia];
-                // if (!on_final_jelem) {
-                //     prim_buff[tza * sx * sy + (tya - radius) * sx + txa] = prim_data[ka * nx * ny + (ja - radius) * nx + ia];
-                //     prim_buff[tza * sx * sy + (tya + tyl   ) * sx + txa] = prim_data[ka * nx * ny + (ja + tyl   ) * nx + ia];
-                // } else {
-                //     for (int q = 0; q < radius; q++) 
-                //     {
-                //         prim_buff[tza * sx * sy + (tya - q) * sx + txa] = prim_data[ka * nx * ny + (ja - q) * nx + ia];
-                //         prim_buff[tza * sx * sy + (tya + q) * sx + txa] = prim_data[ka * nx * ny + (ja + q) * nx + ia];
-                //     } 
-                // }
+                for (int q = 1; q < radius + 1; q++) {
+                    const auto re = tyl + q - 1;
+                    prim_buff[tza * sx * sy + (tya - q) * sx + txa]  = prim_data[ka * nx * ny + (ja - q) * nx + ia];
+                    prim_buff[tza * sx * sy + (tya + re) * sx + txa] = prim_data[ka * nx * ny + (ja + re) * nx + ia];
+                } 
             }
-            if (tx < radius)
+            if (tx == 0)
             {   
                 if ((blockIdx.x == p.gridSize.x - 1) && (ia + xextent > nx - radius + tx)) {
                     txl = nx - radius - ia + tx;
                 }
-                prim_buff[tza * sx * sy + tya * sx + txa - radius] =  prim_data[ka * nx * ny + ja * nx + ia - radius];
-                prim_buff[tza * sx * sy + tya * sx + txa +    txl] =  prim_data[ka * nx * ny + ja * nx + ia + txl]; 
-                // if (!on_final_ielem) {
-                //     prim_buff[tza * sx * sy + tya * sx + txa - radius] =  prim_data[ka * nx * ny + ja * nx + ia - radius];
-                //     prim_buff[tza * sx * sy + tya * sx + txa +    txl] =  prim_data[ka * nx * ny + ja * nx + ia + txl]; 
-                // } else {
-                //     for (int q = 0; q < radius; q++)
-                //     {
-                //         prim_buff[tza * sx * sy + tya * sx + txa - q] =  prim_data[ka * nx * ny + ja * nx + ia - q];
-                //         prim_buff[tza * sx * sy + tya * sx + txa + q] =  prim_data[ka * nx * ny + ja * nx + ia + q]; 
-                //     }
-                    
-                // }
+                for (int q = 1; q < radius + 1; q++) {
+                    const auto re = txl + q - 1;
+                    prim_buff[tza * sx * sy + tya * sx + txa - q]  =  prim_data[ka * nx * ny + ja * nx + ia - q];
+                    prim_buff[tza * sx * sy + tya * sx + txa + re] =  prim_data[ka * nx * ny + ja * nx + ia + re]; 
+                }
             }
             simbi::gpu::api::synchronize();
         #endif
@@ -918,23 +886,23 @@ void SRHD3D::advance(
             }
         } else{
             // Coordinate X
-            Primitive xleft_most  = prim_buff[tza * sx * sy + tya * sx + (txa - 2)];
-            Primitive xleft_mid   = prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
-            Primitive center      = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
-            Primitive xright_mid  = prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
-            Primitive xright_most = prim_buff[tza * sx * sy + tya * sx + (txa + 2)];
+            const Primitive xleft_most  = prim_buff[tza * sx * sy + tya * sx + (txa - 2)];
+            const Primitive xleft_mid   = prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
+            const Primitive center      = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
+            const Primitive xright_mid  = prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
+            const Primitive xright_most = prim_buff[tza * sx * sy + tya * sx + (txa + 2)];
 
             // Coordinate Y
-            Primitive yleft_most  = prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
-            Primitive yleft_mid   = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
-            Primitive yright_mid  = prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
-            Primitive yright_most = prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
+            const Primitive yleft_most  = prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
+            const Primitive yleft_mid   = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
+            const Primitive yright_mid  = prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
+            const Primitive yright_most = prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
 
             // Coordinate z
-            Primitive zleft_most  = prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
-            Primitive zleft_mid   = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
-            Primitive zright_mid  = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
-            Primitive zright_most = prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
+            const Primitive zleft_most  = prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
+            const Primitive zleft_mid   = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
+            const Primitive zright_mid  = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
+            const Primitive zright_most = prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
             
             // Reconstructed left X Primitive vector at the i+1/2 interface
             xprimsL  = center     + helpers::plm_gradient(center, xleft_mid, xright_mid, plm_theta)   * static_cast<real>(0.5); 
@@ -985,10 +953,8 @@ void SRHD3D::advance(
 
             fL = prims2flux(xprimsL, 1);
             fR = prims2flux(xprimsR, 1);
-
             gL = prims2flux(yprimsL, 2);
             gR = prims2flux(yprimsR, 2);
-
             hL = prims2flux(zprimsL, 3);
             hR = prims2flux(zprimsR, 3);
 
@@ -1163,7 +1129,6 @@ void SRHD3D::advance(
                     break;
                 }
         } // end switch
-
     });
 }
 //===================================================================================================================
@@ -1188,7 +1153,6 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     std::vector<std::vector<real>> boundary_sources)
 {   
     anyDisplayProps();
-    this->t = tstart;
 
     // Define the source terms
     this->sourceD        = sources[0];
@@ -1198,6 +1162,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->sourceTau      = sources[4];
     
     // Define simulation params
+    this->t               = tstart;
     this->object_pos      = object_cells;
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
@@ -1328,7 +1293,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
     if constexpr(BuildPlatform == Platform::GPU){
-        std::cout << "  Requested shared memory:   " << shBlockBytes << std::endl;
+        writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
     
     if constexpr(BuildPlatform == Platform::GPU) {
@@ -1343,7 +1308,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
         write2file(*this, setup, data_directory, t, 0, chkpt_interval, zphysical_grid);
-        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(),inflow_zones.data(), half_sphere, geometry);
+        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
     }
     
     // Simulate :)
