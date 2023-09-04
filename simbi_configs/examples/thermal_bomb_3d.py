@@ -3,12 +3,13 @@ from simbi import (
     BaseConfig, 
     simbi_property, 
     DynamicArg, 
-    compute_num_polar_zones
+    compute_num_polar_zones,
 )
 from simbi.key_types import *
 
 RHO_AMB = 1.0
-P_AMB   = RHO_AMB * 1e-10
+T_AMB   = 1e-10
+P_AMB   = RHO_AMB * T_AMB
 NU      = 3.0 
 
 def find_nearest(arr: NDArray[numpy_float], val: float) -> Tuple[Any, Any]:
@@ -45,9 +46,9 @@ class thermalBomb(BaseConfig):
         p_zones = find_nearest(r, dr)[0]
         p_c     = (self.ad_gamma - 1.)*(3*self.e0/((NU + 1)*np.pi*dr ** NU))
         
-        self.rho            = np.ones((self.nphi, self.npolar , self.nr), dtype=float) * r ** (- self.k)
-        self.p              = P_AMB * self.rho 
-        self.p[..., :p_zones] = p_c
+        self.rho            = np.ones((self.nphi, self.npolar , self.nr), dtype=float) * self.rho0 * r ** (- self.k)
+        self.p              = self.rho * T_AMB 
+        self.p[...,:p_zones] = p_c
         self.v1             = np.zeros_like(self.p)
         self.v2             = self.v1.copy()
         self.v3             = self.v1.copy()
