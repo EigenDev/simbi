@@ -227,9 +227,9 @@ void SRHD::advance(const ExecutionPolicy<> &p)
                 const real rlf    = x1l + vfaceL * step * dt; 
                 const real rrf    = x1r + vfaceR * step * dt;
                 const real rmean  = static_cast<real>(0.75) * (rrf * rrf * rrf * rrf - rlf * rlf * rlf * rlf) / (rrf * rrf * rrf - rlf * rlf * rlf);
-                const real sR     = rrf * rrf; 
-                const real sL     = rlf * rlf; 
-                const real dV     = rmean * rmean * (rrf - rlf);    
+                const real sR     = 4.0 * M_PI * rrf * rrf; 
+                const real sL     = 4.0 * M_PI * rlf * rlf; 
+                const real dV     = 4.0 * M_PI * rmean * rmean * (rrf - rlf);    
                 const real factor = (mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
                 const real invdV  = 1 / dV;
@@ -268,7 +268,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 const real xl    = get_xface(idx, geometry, 0);
                 const real xr    = get_xface(idx, geometry, 1);
                 const real xmean = static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl);
-                invdV            = 1 / (xmean * xmean * (xr - xl));
+                invdV            = 1 / (4.0 * M_PI * xmean * xmean * (xr - xl));
             }
             peq            = press_data[ii];
             // pstar          = peq;
@@ -618,11 +618,11 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
     const real a     = fe;
     const real b     = - (e + fs);
     const real c     = s;
-    // const real disc  = std::sqrt(b*b - 4.0*a*c);
-    // const real quad  = -static_cast<real>(0.5)*(b + helpers::sgn(b)*disc);
-    // const real aStar = c/quad;
-    const real scrh  = 1.0 + std::sqrt(1.0 - 4.0*a*c/(b*b));
-    const real aStar = - 2.0*c/(b*scrh);
+    const real disc  = std::sqrt(b*b - static_cast<real>(4.0)*a*c);
+    const real quad  = -static_cast<real>(0.5)*(b + helpers::sgn(b)*disc);
+    const real aStar = c/quad;
+    // const real scrh  = 1.0 + std::sqrt(1.0 - 4.0*a*c/(b*b));
+    // const real aStar = - 2.0*c/(b*scrh);
     const real pStar = -fe * aStar + fs;
 
     
