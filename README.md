@@ -106,7 +106,7 @@ $ CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
     ```
 
     where `--mode` is a global command line option available for every
-    config script, and `--nzones` and `--gamma` are problem-specific options
+    config script, and `--nzones` and `--ad-gamma` are problem-specific options
     that are dynamically parsed based on whatever `DynamicArg` variables
     exist in the config script you create. Check out how to create one of
     these configuration scripts in the `simbi_configs/examples/` folder! When creating
