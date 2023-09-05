@@ -887,10 +887,10 @@ namespace simbi{
             if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid))
             {
                 real plus_v1 , plus_v2 , minus_v1, minus_v2;
-                real rho  = prim_buffer[aid].rho;
-                real p    = prim_buffer[aid].p;
-                real v1   = prim_buffer[aid].get_v1();
-                real v2   = prim_buffer[aid].get_v2();
+                const real rho  = prim_buffer[aid].rho;
+                const real p    = prim_buffer[aid].p;
+                const real v1   = prim_buffer[aid].get_v1();
+                const real v2   = prim_buffer[aid].get_v2();
 
                 if constexpr(is_relativistic<T>::value)
                 {
@@ -1008,15 +1008,16 @@ namespace simbi{
             if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid) && (kk < self->zphysical_grid))
             {
                 real plus_v1 , plus_v2 , minus_v1, minus_v2, plus_v3, minus_v3;
-                real rho  = prim_buffer[aid].rho;
-                real p    = prim_buffer[aid].p;
-                real v1   = prim_buffer[aid].get_v1();
-                real v2   = prim_buffer[aid].get_v2();
-                real v3   = prim_buffer[aid].get_v3();
 
                 if constexpr(is_relativistic<T>::value)
                 {
                     if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                        const real rho  = prim_buffer[aid].rho;
+                        const real p    = prim_buffer[aid].p;
+                        const real v1   = prim_buffer[aid].get_v1();
+                        const real v2   = prim_buffer[aid].get_v2();
+                        const real v3   = prim_buffer[aid].get_v3();
+
                         real h   = 1 + gamma * p / (rho * (gamma - 1));
                         real cs  = std::sqrt(gamma * p / (rho * h));
                         plus_v1  = (v1 + cs) / (1 + v1 * cs);
@@ -1034,6 +1035,12 @@ namespace simbi{
                         minus_v3 = 1;
                     }
                 } else {
+                    const real rho  = prim_buffer[aid].rho;
+                    const real p    = prim_buffer[aid].p;
+                    const real v1   = prim_buffer[aid].get_v1();
+                    const real v2   = prim_buffer[aid].get_v2();
+                    const real v3   = prim_buffer[aid].get_v3();
+                    
                     real cs  = std::sqrt(gamma * p / rho);
                     plus_v1  = (v1 + cs);
                     plus_v2  = (v2 + cs);
