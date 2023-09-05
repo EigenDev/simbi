@@ -1,7 +1,7 @@
 project('simbi', 'c', 'cpp', 'cython',
     version : run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(), 
     license : 'MIT',
-    default_options : [ 'cpp_std=c++20' , 'b_lto=true', 'cpp_args=-march=native'],
+    default_options : [ 'cpp_std=c++20' , 'b_lto=true', 'cpp_args=-march=native -fmax-errors=5'],
 )
 
 # BUILD CONFIG
@@ -132,7 +132,8 @@ if get_option('gpu_compilation').enabled()
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
-                '-fPIC', '-O3', '-x=cu'
+                '-fPIC', '-O3',
+                '-x=cu',
         ]
         message(f'GPU Platform -- nvidia')
         message(f'GPU Runtime  -- cuda')
@@ -147,7 +148,6 @@ sources = [
     # 'src/common/clattice1D.cpp',
     # 'src/common/clattice2D.cpp',
     # 'src/common/clattice3D.cpp',
-    'src/common/helpers.cpp',
     'src/common/helpers.hip.cpp',
 
     #######################
@@ -167,7 +167,6 @@ sources = [
 ]
 
 headers = [
-    'src/common/helpers.hpp',
     'src/common/helpers.hip.hpp',
     'src/common/enums.hpp',
     'src/common/hydro_structs.hpp',
