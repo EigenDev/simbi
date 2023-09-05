@@ -226,13 +226,17 @@ void SRHD::advance(const ExecutionPolicy<> &p)
             {
                 const real rlf    = x1l + vfaceL * step * dt; 
                 const real rrf    = x1r + vfaceR * step * dt;
-                const real rmean  = static_cast<real>(0.75) * (rrf * rrf * rrf * rrf - rlf * rlf * rlf * rlf) / (rrf * rrf * rrf - rlf * rlf * rlf);
+                const real rmean  = helpers::get_cell_centroid(rrf, rlf);
                 const real sR     = 4.0 * M_PI * rrf * rrf; 
                 const real sL     = 4.0 * M_PI * rlf * rlf; 
                 const real dV     = 4.0 * M_PI * rmean * rmean * (rrf - rlf);    
                 const real factor = (mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
                 const real invdV  = 1 / dV;
+
+                // #if !GPU_CODE
+                // std::cout << "ii: " << ii << " moving: " << rrf - rlf << ", stationary: " << x1r - x1l << "\n";
+                // #endif
 
                 const auto geom_sources = Conserved{0.0, pc * (sR - sL) * invdV, 0.0};
                 cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources - gravity) * step * dt * factor;
@@ -267,7 +271,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 const luint idx  = helpers::get_real_idx(ii, radius, active_zones);
                 const real xl    = get_xface(idx, geometry, 0);
                 const real xr    = get_xface(idx, geometry, 1);
-                const real xmean = static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl);
+                const real xmean = helpers::get_cell_centroid(xr, xl);
                 invdV            = 1 / (4.0 * M_PI * xmean * xmean * (xr - xl));
             }
             peq            = press_data[ii];
@@ -512,8 +516,8 @@ template<TIMESTEP_TYPE dt_type>
 void SRHD::adapt_dt(const luint blockSize)
 {   
     #if GPU_CODE
-        compute_dt<Primitive><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
-        deviceReduceWarpAtomicKernel<1><<<blockSize, gpu_block_dimx>>>(this, dt_min.data(), active_zones);
+        helpers::compute_dt<Primitive><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
+        helpers::deviceReduceWarpAtomicKernel<1><<<blockSize, gpu_block_dimx>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
     #endif
 };
@@ -698,7 +702,7 @@ SRHD::simulate1D(
     std::function<double(double)> s_outer,
     std::function<double(double)> e_outer)
 {
-    anyDisplayProps();
+    helpers::anyDisplayProps();
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
@@ -819,7 +823,7 @@ SRHD::simulate1D(
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
         write2file(*this, setup, data_directory, t, 0, chkpt_interval, active_zones);
-        config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
+        helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
     }
 
     // Simulate :)
@@ -829,7 +833,7 @@ SRHD::simulate1D(
         }
         advance(activeP);
         cons2prim(fullP);
-        config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
+        helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
 
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP.gridSize.x);

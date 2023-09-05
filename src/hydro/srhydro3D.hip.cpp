@@ -365,8 +365,8 @@ void SRHD3D::adapt_dt(const ExecutionPolicy<> &p)
     
     #if GPU_CODE
     {
-        compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
-        deviceReduceWarpAtomicKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
+        helpers::compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
+        helpers::deviceReduceWarpAtomicKernel<3><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
     }
     #endif
@@ -399,9 +399,9 @@ Conserved SRHD3D::prims2flux(const Primitive &prims, const luint nhat = 1)
 
     return Conserved{
         D  * vn, 
-        S1 * vn + kronecker(nhat, 1) * pressure, 
-        S2 * vn + kronecker(nhat, 2) * pressure, 
-        S3 * vn + kronecker(nhat, 3) * pressure,  
+        S1 * vn + helpers::kronecker(nhat, 1) * pressure, 
+        S2 * vn + helpers::kronecker(nhat, 2) * pressure, 
+        S3 * vn + helpers::kronecker(nhat, 3) * pressure,  
         Sj - D * vn, 
         D * vn * chi
     };
@@ -1152,7 +1152,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources)
 {   
-    anyDisplayProps();
+    helpers::anyDisplayProps();
 
     // Define the source terms
     this->sourceD        = sources[0];
@@ -1308,7 +1308,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
         write2file(*this, setup, data_directory, t, 0, chkpt_interval, zphysical_grid);
-        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
+        helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
     }
     
     // Simulate :)
@@ -1318,7 +1318,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
         }
         advance(activeP, xstride, ystride);
         cons2prim(fullP);
-        config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
+        helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP);
         } else {

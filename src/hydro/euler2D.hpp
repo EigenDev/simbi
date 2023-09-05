@@ -11,7 +11,7 @@
 #include "util/exec_policy.hpp"
 #include "common/hydro_structs.hpp"
 #include "common/enums.hpp"
-#include "common/helpers.hpp"
+#include "common/helpers.hip.hpp"
 #include "build_options.hpp"
 #include "base.hpp"
 namespace simbi {

@@ -171,8 +171,8 @@ void Newtonian1D::adapt_dt(){
 void Newtonian1D::adapt_dt(luint blockSize)
 {   
     #if GPU_CODE
-        compute_dt<Primitive><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
-        deviceReduceWarpAtomicKernel<1><<<blockSize, gpu_block_dimx>>>(this, dt_min.data(), active_zones);
+        helpers::compute_dt<Primitive><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
+        helpers::deviceReduceWarpAtomicKernel<1><<<blockSize, gpu_block_dimx>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
         // deviceReduceKernel<1><<<blockSize, gpu_block_dimx>>>(this, dt_min.data(), active_zones);
         // deviceReduceKernel<1><<<1,1024>>>(this, dt_min.data(), blockSize);
@@ -503,7 +503,7 @@ void Newtonian1D::advance(const ExecutionPolicy<> &p)
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources)
 {
-    anyDisplayProps();
+    helpers::anyDisplayProps();
     this->chkpt_interval  = chkpt_interval;
     this->data_directory  = data_directory;
     this->tstart          = tstart;
@@ -600,13 +600,13 @@ void Newtonian1D::advance(const ExecutionPolicy<> &p)
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
         write2file(*this, setup, data_directory, t, 0, this->chkpt_interval, active_zones);
-        config_ghosts1D_t(fullP, cons, nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
+        helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
     }
     
     simbi::detail::logger::with_logger(*this, tend, [&](){
         advance(activeP);
         cons2prim(fullP);
-        config_ghosts1D_t(fullP, cons, nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
+        helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
         
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP.gridSize.x);

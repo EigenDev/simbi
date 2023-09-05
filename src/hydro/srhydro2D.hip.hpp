@@ -8,7 +8,7 @@
 #define SRHYDRO2D_HIP_HPP
 
 #include <vector>
-#include "common/helpers.hpp"
+#include "common/helpers.hip.hpp"
 #include "common/hydro_structs.hpp"
 #include "util/exec_policy.hpp"
 #include "base.hpp"

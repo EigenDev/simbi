@@ -9,7 +9,7 @@
 #define SRHYDRO1D_HIP_HPP
 
 #include <vector>
-#include "common/helpers.hpp"
+#include "common/helpers.hip.hpp"
 #include "common/enums.hpp"
 #include "common/hydro_structs.hpp"
 #include "build_options.hpp"

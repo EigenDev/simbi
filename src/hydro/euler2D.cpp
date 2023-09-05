@@ -376,8 +376,8 @@ void Newtonian2D::adapt_dt(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
     {
-        compute_dt<Primitive><<<p.gridSize,p.blockSize>>>(this, prims.data(),dt_min.data(), geometry);
-        deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
+        helpers::compute_dt<Primitive><<<p.gridSize,p.blockSize>>>(this, prims.data(),dt_min.data(), geometry);
+        helpers::deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
     }
     gpu::api::deviceSynch();
     #endif
@@ -398,8 +398,8 @@ Conserved Newtonian2D::prims2flux(const Primitive &prims, const luint ehat)
     const auto et  = pre / (gamma - 1.0) + 0.5 * rho * (v1*v1 + v2*v2);
     
     const auto dens  = rho*vn;
-    const auto momx  = rho*v1*vn + pre * kronecker(1, ehat);
-    const auto momy  = rho*v2*vn + pre * kronecker(2, ehat);
+    const auto momx  = rho*v1*vn + pre * helpers::kronecker(1, ehat);
+    const auto momy  = rho*v2*vn + pre * helpers::kronecker(2, ehat);
     const auto edens = (et + pre)*vn;
 
     return Conserved{dens, momx, momy, edens};
@@ -467,7 +467,7 @@ Conserved Newtonian2D::calc_hllc_flux(
 
     const real vL           = left_prims.vcomponent(ehat);
     const real vR           = right_prims.vcomponent(ehat);
-    const auto kdelta       = kronecker(ehat, 1);
+    const auto kdelta       = helpers::kronecker(ehat, 1);
     // Left Star State in x-direction of coordinate lattice
     real rhostar            = cofactor * (aL - vL) * rho;
     real m1star             = cofactor * (m1 * (aL - vL) +  kdelta * (-pressure + pStar) );
@@ -916,7 +916,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources)
 {    
-    anyDisplayProps();
+    helpers::anyDisplayProps();
     this->t = tstart;
     // Define the simulation members
     this->chkpt_interval  = chkpt_interval;
@@ -1060,14 +1060,14 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
         write2file(*this, setup, data_directory, t, 0, chkpt_interval, yphysical_grid);
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
+        helpers::config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
     
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&](){
         advance(activeP, bx, by);
         cons2prim(fullP);
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
+        helpers::config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
 
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP);

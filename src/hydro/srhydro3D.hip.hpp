@@ -9,7 +9,7 @@
 
 #include <vector>
 #include "common/hydro_structs.hpp"
-#include "common/helpers.hpp"
+#include "common/helpers.hip.hpp"
 #include "base.hpp"
 
 namespace simbi

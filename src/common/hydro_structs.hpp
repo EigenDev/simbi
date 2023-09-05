@@ -107,6 +107,10 @@ namespace hydro1d {
             e_dens *= c;
             return *this;
         }
+
+        GPU_CALLABLE_INLINE_MEMBER constexpr real& momentum() {
+            return m;
+        }
     };
 
     struct PrimitiveSOA {
@@ -195,6 +199,10 @@ namespace sr1d {
             tau  *= c;
             return *this;
         }
+
+        GPU_CALLABLE_INLINE_MEMBER constexpr real& momentum() {
+            return s;
+        }
     };
 
     struct PrimitiveSOA {
@@ -253,13 +261,14 @@ namespace sr2d {
         GPU_CALLABLE_MEMBER Conserved & operator *=(const real c) {
             d    *= c;
             s1   *= c;
-            s1   *= c;
+            s2   *= c;
             tau  *= c;
             chi  *= c;
             return *this;
         }
 
         GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {return (nhat == 1 ? s1 : s2); }
+        GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat) {return (nhat == 1 ? s1 : s2); }
     };
 
     struct Primitive {
@@ -287,7 +296,7 @@ namespace sr2d {
         GPU_CALLABLE_MEMBER Primitive & operator *=(const real c) {
             rho  *= c;
             v1   *= c;
-            v1   *= c;
+            v2   *= c;
             p    *= c;
             chi  *= c;
             return *this;
@@ -376,12 +385,13 @@ namespace hydro2d {
         GPU_CALLABLE_MEMBER Conserved & operator *=(const real c) {
             rho     *= c;
             m1      *= c;
-            m1      *= c;
+            m2      *= c;
             e_dens  *= c;
             chi     *= c;
             return *this;
         }
         GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {return (nhat == 1 ? m1 : m2); }
+        GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat) {return (nhat == 1 ? m1 : m2 ); }
     };
 
     struct Primitive {
@@ -498,7 +508,8 @@ namespace sr3d {
             return *this;
         }
 
-        GPU_CALLABLE_MEMBER real momentum(const int nhat) const {return (nhat == 1 ? s1 : (nhat == 2) ? s2 : s3); }
+        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {return (nhat == 1 ? s1 : (nhat == 2) ? s2 : s3); }
+        GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat) {return (nhat == 1 ? s1 : (nhat == 2) ? s2 : s3); }
     };
 
     struct Primitive {
@@ -638,7 +649,8 @@ namespace hydro3d {
             return *this;
         }
 
-        GPU_CALLABLE_MEMBER real momentum(const int nhat) const {return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3); }
+        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3); }
+        GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat) {return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3); }
     };
 
     struct Primitive {

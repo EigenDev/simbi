@@ -397,13 +397,13 @@ void SRHD2D::adapt_dt(const ExecutionPolicy<> &p)
     
     #if GPU_CODE
     {
-        compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize>>>(
+        helpers::compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize>>>(
             this, 
             prims.data(),
             dt_min.data(),
             geometry
         );
-        deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
+        helpers::deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
     }
     #endif
     gpu::api::deviceSynch();
@@ -424,7 +424,7 @@ Conserved SRHD2D::prims2flux(const Primitive &prims, const luint nhat) const
     const real pressure        = prims.p;
     const real chi             = prims.chi;
     const real vn              = (nhat == 1) ? v1 : v2;
-    const auto kron            = kronecker(nhat, 1);
+    const auto kron            = helpers::kronecker(nhat, 1);
     const real lorentz_gamma   = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
 
     const real h   = 1 + gamma * pressure / (rho * (gamma - 1));
@@ -555,7 +555,7 @@ Conserved SRHD2D::calc_hllc_flux(
 
             const real vL           = left_prims.vcomponent(nhat);
             const real vR           = right_prims.vcomponent(nhat);
-            const auto kdelta       = kronecker(nhat, 1);
+            const auto kdelta       = helpers::kronecker(nhat, 1);
             // Left Star State in x-direction of coordinate lattice
             real Dstar              = cofactor * (aL - vL) * D;
             real S1star             = cofactor * (S1 * (aL - vL) +  kdelta * (-pressure + pStar) );
@@ -611,7 +611,7 @@ Conserved SRHD2D::calc_hllc_flux(
                 const real cofactor = 1 / (aL - aStar);
 
                 const real vL     =  left_prims.vcomponent(nhat);
-                const auto kdelta = kronecker(nhat, 1);
+                const auto kdelta = helpers::kronecker(nhat, 1);
                 // Left Star State in x-direction of coordinate lattice
                 const real Dstar         = cofactor * (aL - vL) * D;
                 const real chistar       = cofactor * (aL - vL) * chi;
@@ -641,7 +641,7 @@ Conserved SRHD2D::calc_hllc_flux(
                 const real cofactor = 1 / (aR - aStar);
 
                 const real vR         = right_prims.vcomponent(nhat);
-                const auto kdelta     = kronecker(nhat, 1);
+                const auto kdelta     = helpers::kronecker(nhat, 1);
                 const real Dstar      = cofactor * (aR - vR) * D;
                 const real chistar    = cofactor * (aR - vR) * chi;
                 const real S1star     = cofactor * (S1 * (aR - vR) +  kdelta * (-pressure + pStar) );
@@ -814,7 +814,7 @@ void SRHD2D::advance(
         Conserved fL, fR, gL, gR, frf, flf, grf, glf;
         Primitive xprimsL, xprimsR, yprimsL, yprimsR;
 
-        const lint aid = get_2d_idx(ia, ja, nx, ny); 
+        const lint aid = helpers::get_2d_idx(ia, ja, nx, ny); 
         // Load Shared memory into buffer for active zones plus ghosts
         #if GPU_CODE
             luint txl = xextent;
@@ -994,13 +994,13 @@ void SRHD2D::advance(
             case Solver::HLLC:
                 if(quirk_smoothing)
                 {
-                    if (quirk_strong_shock(xprimsL.p, xprimsR.p) ){
+                    if (helpers::quirk_strong_shock(xprimsL.p, xprimsR.p) ){
                         frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                     } else {
                         frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                     }
 
-                    if (quirk_strong_shock(yprimsL.p, yprimsR.p)){
+                    if (helpers::quirk_strong_shock(yprimsL.p, yprimsR.p)){
                         grf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
                     } else {
                         grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
@@ -1057,13 +1057,13 @@ void SRHD2D::advance(
             case Solver::HLLC:
                 if (quirk_smoothing)
                 {
-                    if (quirk_strong_shock(xprimsL.p, xprimsR.p) ){
+                    if (helpers::quirk_strong_shock(xprimsL.p, xprimsR.p) ){
                         flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
                     } else {
                         flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
                     }
                     
-                    if (quirk_strong_shock(yprimsL.p, yprimsR.p)){
+                    if (helpers::quirk_strong_shock(yprimsL.p, yprimsR.p)){
                         glf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
                     } else {
                         glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
@@ -1082,7 +1082,7 @@ void SRHD2D::advance(
         }
 
         //Advance depending on geometry
-        const luint real_loc = get_2d_idx(ii, jj, xpg, ypg);
+        const luint real_loc = helpers::get_2d_idx(ii, jj, xpg, ypg);
         const real d_source  = den_source_all_zeros    ? 0.0 : dens_source[real_loc];
         const real s1_source = mom1_source_all_zeros   ? 0.0 : mom1_source[real_loc];
         const real s2_source = mom2_source_all_zeros   ? 0.0 : mom2_source[real_loc];
@@ -1214,7 +1214,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     std::function<double(double, double)> s2_outer,
     std::function<double(double, double)> e_outer)
 {
-    anyDisplayProps();
+    helpers::anyDisplayProps();
     this->t = tstart;
     // Define the source terms
     this->object_pos      = object_cells;
@@ -1373,7 +1373,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
         write2file(*this, setup, data_directory, t, 0, chkpt_interval, yphysical_grid);
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
+        helpers::config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
     
     // Simulate :)
@@ -1386,7 +1386,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         
         advance(activeP, xstride, ystride);
         cons2prim(fullP);
-        config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
+        helpers::config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
         
         if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP);
