@@ -27,7 +27,7 @@ def calc_centroid(arr: generic_numpy_array, coord_system: str = 'spherical') -> 
     elif coord_system == 'cylindrical':
         return np.asanyarray((2.0 / 3.0) * (arr[...,1:]**3 - arr[...,:-1] ** 3) / (arr[...,1:]**2 - arr[...,:-1]**2))
     else:
-        return np.asanyarray(0.5 * (arr[...,1:] - arr[...,:-1]))
+        return np.asanyarray(0.5 * (arr[...,1:] + arr[...,:-1]))
     
 
 def calc_vertices(*, arr: generic_numpy_array, direction: int, cell_spacing: str = 'linear') -> Any:
