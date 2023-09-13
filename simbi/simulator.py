@@ -549,10 +549,13 @@ class Hydro:
         volume_factor: Union[float, NDArray[Any]] = 1.0
         if mesh_motion and self.coord_system != 'cartesian':
             if self.dimensionality == 1:
-                volume_factor = helpers.calc_cell_volume1D(x1=self.x1)
+                volume_factor = helpers.calc_cell_volume1D(
+                    x1=self.x1, coord_system=self.coord_system
+                )
             elif self.dimensionality == 2:
                 volume_factor = helpers.calc_cell_volume2D(
-                    x1=self.x1, x2=self.x2, coord_system=self.coord_system)
+                    x1=self.x1, x2=self.x2, coord_system=self.coord_system
+                )
 
         self._check_boundary_conditions(boundary_conditions)
         if not chkpt:
@@ -732,7 +735,7 @@ class Hydro:
                     x3=self.x3,
                     coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
-            
+        
         self.solution = state.simulate(
             sources=sources,
             tstart=self.start_time,
