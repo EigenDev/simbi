@@ -129,7 +129,7 @@ $ CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
 1) Special Relativistic Hydro up to 3D
 2) Newtonian Hydro up to 2D (set the `regime` property to `classical` or `relativistic`)
 3) Supports user-defined mesh expansion / contraction (`scale_factor` & `scale_factor_derivative` methods)
-4) Supports user-defined density, momentum, and energy density terms outside of grid (Implementing the `dens_outer`, `mom_outer`, AND, `edens_outer` methods sets this)
+4) Supports user-defined density, momentum, and energy density terms outside of grid (Implementing the `dens_outer`, `mom_outer`, AND `edens_outer` methods sets this)
 5) Supports source terms in the Euler equations (implementing the `sources` property sets this)
 6) Support source terms at the boundaries (implementing the `boundary_sources` property sets this)
 7) Boundary conditions given as array of strings like so `[bc_x1min, bc_x1max, bc_x2min, bc_x2max, bc_x3min, bc_x3max]` where the supported boundary conditions are `periodic, reflecting, outflow, inflow`. If an inflow boundary condition is set, but no inflow boundary source terms are given, the code will switch to outflow boundary conditions to prevent crashes. 
