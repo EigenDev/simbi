@@ -5,6 +5,7 @@
 import numpy as np
 import os
 import inspect
+from itertools import product, permutations
 from .detail import initial_condition as simbi_ic
 from .detail import helpers
 from .detail.slogger import logger
@@ -141,35 +142,15 @@ class Hydro:
                      geom_tuple[idx][0]) /
                     self.resolution[idx] for idx in range(
                         len(geom_tuple))]
-                pieces = [round(break_points[idx] / spacings[idx])
+                
+                pieces = [(None, round(break_points[idx] / spacings[idx]))
                           for idx in range(len(break_points))]
 
-                partition_inds: list[Any]
-                if len(break_points) == 1:
-                    partition_inds = [
-                        np.s_[
-                            ..., :pieces[0]], np.s_[
-                            ..., pieces[0]:]]
-                elif len(break_points) == 2:
-                    partition_inds = [
-                        np.s_[
-                            ..., :pieces[1], :pieces[0]], np.s_[
-                            ..., :pieces[1], pieces[0]:], np.s_[
-                            ..., pieces[1]:, :pieces[0]], np.s_[
-                            ..., pieces[1]:, pieces[0]:]]
-                else:
-                    partition_inds = [
-                        np.s_[
-                            ..., :pieces[2], :pieces[1], :pieces[0]], np.s_[
-                            ..., :pieces[2], :pieces[1], pieces[0]:], np.s_[
-                            ..., :pieces[2], pieces[1]:, :pieces[0]], np.s_[
-                            ..., :pieces[2], pieces[1]:, pieces[0]:], np.s_[
-                            ..., pieces[2]:, :pieces[1], :pieces[0]], np.s_[
-                            ..., pieces[2]:, :pieces[1], pieces[0]:], np.s_[
-                                ..., pieces[2]:, pieces[1]:, :pieces[0]], np.s_[
-                                    ..., pieces[2]:, pieces[1]:, pieces[0]:]]
-
-                partitions = [self.u[sector] for sector in partition_inds]
+                # partition the grid based on user-defined partition coordinates
+                partition_inds = list(product(*[permutations(x) for x in pieces]))
+                partition_inds = [tuple([slice(*y) for y in x]) for x in partition_inds]
+                partitions = [self.u[...,*sector] for sector in partition_inds]
+                
                 for idx, part in enumerate(partitions):
                     state = initial_state[idx]
                     rho, *velocity, pressure = state
@@ -549,7 +530,7 @@ class Hydro:
         volume_factor: Union[float, NDArray[Any]] = 1.0
         if mesh_motion and self.coord_system != 'cartesian':
             if self.dimensionality == 1:
-                volume_factor = helpers.calc_cell_volume1D(x1=self.x1)
+                volume_factor = helpers.calc_cell_volume1D(x1=self.x1, coord_system=self.coord_system)
             elif self.dimensionality == 2:
                 volume_factor = helpers.calc_cell_volume2D(
                     x1=self.x1, x2=self.x2, coord_system=self.coord_system)
