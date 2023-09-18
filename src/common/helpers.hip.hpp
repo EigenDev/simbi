@@ -244,11 +244,10 @@ namespace simbi
         GPU_CALLABLE_INLINE 
         constexpr lint get_real_idx(const lint idx, const lint offset, const lint active_zones) 
         {
-            lint real_idx = (idx - offset > 0) * (idx - offset);
-            if (idx > active_zones + 1) {
-                real_idx = active_zones - 1;
+            if (idx > active_zones - 1) {
+                return active_zones - 1;
             }
-            return real_idx;
+            return (idx - offset > 0) * (idx - offset);
         }
 
         inline double sigmoid(const double t, const double tduration, const double time_step, const bool constant_sources) {
