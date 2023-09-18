@@ -234,10 +234,6 @@ void SRHD::advance(const ExecutionPolicy<> &p)
                 const real pc     = prim_buff[txa].p;
                 const real invdV  = 1 / dV;
 
-                // #if !GPU_CODE
-                // std::cout << "ii: " << ii << " moving: " << rrf - rlf << ", stationary: " << x1r - x1l << "\n";
-                // #endif
-
                 const auto geom_sources = Conserved{0.0, pc * (sR - sL) * invdV, 0.0};
                 cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources - gravity) * step * dt * factor;
                 break;
@@ -269,10 +265,8 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
             if (mesh_motion && (geometry == simbi::Geometry::SPHERICAL))
             {
                 const luint idx  = helpers::get_real_idx(ii, radius, active_zones);
-                const real xl    = get_xface(idx, geometry, 0);
-                const real xr    = get_xface(idx, geometry, 1);
-                const real xmean = helpers::get_cell_centroid(xr, xl);
-                invdV            = 1 / (4.0 * M_PI * xmean * xmean * (xr - xl));
+                const real dV    = get_cell_volume(idx, geometry);
+                invdV            = 1 / dV;
             }
             peq            = press_data[ii];
             // pstar          = peq;
@@ -672,7 +666,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
 
         //---------Compute the R Star Flux  
         Conserved hllc_flux = right_flux + (star_stateR - right_state) * aRp;
-        return    hllc_flux -  star_stateR * vface;
+        return    hllc_flux - star_stateR * vface;
     }
 };
 //----------------------------------------------------------------------------------------------------------
@@ -771,7 +765,7 @@ SRHD::simulate1D(
     troubled_cells.resize(nx, 0);
     dt_min.resize(active_zones);
     if (mesh_motion && all_outer_bounds) {
-        outer_zones.resize(2);
+        outer_zones.resize(first_order ? 1 : 2);
         const real dV  = get_cell_volume(active_zones - 1, geometry);
         outer_zones[0] = conserved_t{
             dens_outer(x1max), 
@@ -809,7 +803,8 @@ SRHD::simulate1D(
     if constexpr(BuildPlatform == Platform::GPU){
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
-
+    
+    helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP.gridSize.x);
@@ -817,14 +812,13 @@ SRHD::simulate1D(
         cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>();
     }
-    // Using a sigmoid decay function to represent when the source terms turn off.
-    time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
 
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
-        write2file(*this, setup, data_directory, t, 0, chkpt_interval, active_zones);
-        helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
+        write2file(*this, setup, data_directory, t, 0, chkpt_interval, active_zones);  
     }
+    // Using a sigmoid decay function to represent when the source terms turn off.
+    time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
 
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&](){
