@@ -201,7 +201,7 @@ namespace simbi{
                         cons[grid_size - 1] = inflow_zones[1];
                         break;
                     case simbi::BoundaryCondition::REFLECTING:
-                        cons[grid_size - 1]   =   cons[grid_size - 2];
+                        cons[grid_size - 1]   = cons[grid_size - 2];
                         cons[grid_size - 1].momentum() *= -1;
                         break;
                     case simbi::BoundaryCondition::PERIODIC:
