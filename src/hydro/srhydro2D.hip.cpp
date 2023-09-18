@@ -394,19 +394,16 @@ void SRHD2D::adapt_dt()
 template<TIMESTEP_TYPE dt_type>
 void SRHD2D::adapt_dt(const ExecutionPolicy<> &p)
 {
-    
     #if GPU_CODE
-    {
-        helpers::compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize>>>(
-            this, 
-            prims.data(),
-            dt_min.data(),
-            geometry
-        );
-        helpers::deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
-    }
-    #endif
+    helpers::compute_dt<Primitive, dt_type><<<p.gridSize,p.blockSize>>>(
+        this, 
+        prims.data(),
+        dt_min.data(),
+        geometry
+    );
+    helpers::deviceReduceWarpAtomicKernel<2><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
     gpu::api::deviceSynch();
+    #endif
 }
 
 //===================================================================================================================
