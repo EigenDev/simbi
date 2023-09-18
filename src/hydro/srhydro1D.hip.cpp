@@ -233,7 +233,6 @@ void SRHD::advance(const ExecutionPolicy<> &p)
                 const real factor = (mesh_motion) ? dV : 1;         
                 const real pc     = prim_buff[txa].p;
                 const real invdV  = 1 / dV;
-
                 const auto geom_sources = Conserved{0.0, pc * (sR - sL) * invdV, 0.0};
                 cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources - gravity) * step * dt * factor;
                 break;
@@ -268,6 +267,10 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
                 const real dV    = get_cell_volume(idx, geometry);
                 invdV            = 1 / dV;
             }
+
+            #if !GPU_CODE
+
+            #endif 
             peq            = press_data[ii];
             // pstar          = peq;
             const real D   = cons_data[ii].d   * invdV;

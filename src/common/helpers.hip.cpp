@@ -1,5 +1,4 @@
 #include <thread>
-#include <atomic>
 #include "H5Cpp.h"
 #include "common/helpers.hip.hpp"
 #include "util/parallel_for.hpp"

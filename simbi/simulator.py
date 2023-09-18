@@ -5,6 +5,7 @@
 import numpy as np
 import os
 import inspect
+from itertools import product, permutations
 from .detail import initial_condition as simbi_ic
 from .detail import helpers
 from .detail.slogger import logger
@@ -141,7 +142,8 @@ class Hydro:
                      geom_tuple[idx][0]) /
                     self.resolution[idx] for idx in range(
                         len(geom_tuple))]
-                pieces = [round(break_points[idx] / spacings[idx])
+                
+                pieces = [(None, round(break_points[idx] / spacings[idx]))
                           for idx in range(len(break_points))]
 
                 partition_inds: list[Any]
@@ -552,6 +554,7 @@ class Hydro:
                 volume_factor = helpers.calc_cell_volume1D(
                     x1=self.x1, coord_system=self.coord_system
                 )
+                volume_factor = helpers.calc_cell_volume1D(x1=self.x1, coord_system=self.coord_system)
             elif self.dimensionality == 2:
                 volume_factor = helpers.calc_cell_volume2D(
                     x1=self.x1, x2=self.x2, coord_system=self.coord_system

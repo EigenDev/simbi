@@ -44,7 +44,7 @@ constexpr Velocity VelocityType = Velocity::Beta;
 inline std::string getEnvVar( std::string const & key )
 {
     char * val = std::getenv( key.c_str() );
-    return val == NULL ? std::string("16") : std::string(val);
+    return std::string(val);
 }
 const int MAX_ITER   = 1000;
 
