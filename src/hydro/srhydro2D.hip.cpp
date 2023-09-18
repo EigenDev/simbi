@@ -542,7 +542,7 @@ Conserved SRHD2D::calc_hllc_flux(
     {
     case HLLCTYPE::FLEISCHMANN:
         {
-            constexpr real ma_lim = static_cast<real>(0.01);
+            constexpr real ma_lim = static_cast<real>(0.1);
 
             // --------------Compute the L Star State----------
             real pressure = left_prims.p;
@@ -582,13 +582,18 @@ Conserved SRHD2D::calc_hllc_flux(
             const real ma_right   = vR / cR * std::sqrt((1 - cR * cR) / (1 - vR * vR));
             const real ma_local   = helpers::my_max(std::abs(ma_left), std::abs(ma_right));
             const real phi        = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
-            const real aL_lm      = (phi != 0) ? phi * aL : aL;
-            const real aR_lm      = (phi != 0) ? phi * aR : aR;
+            const real aL_lm      = phi == 0 ? aL : phi * aL;
+            const real aR_lm      = phi == 0 ? aR : phi * aR;
 
             const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
             Conserved net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL_lm
-                                + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm) * static_cast<real>(0.5) - face_starState * vface;
+                        + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm) * static_cast<real>(0.5) - face_starState * vface;
 
+            // #if !GPU_CODE
+            // if (net_flux.d != 0) {
+            //     std::cout << net_flux.d << "\n";
+            // }
+            // #endif
             // upwind the concentration flux 
             if (net_flux.d < 0)
                 net_flux.chi = right_prims.chi * net_flux.d;
@@ -1379,6 +1384,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     // Simulate :)
     const luint xstride = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
     const luint ystride = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
+    n = 0;
     simbi::detail::logger::with_logger(*this, tend, [&](){
         if (inFailureState){
             return;
