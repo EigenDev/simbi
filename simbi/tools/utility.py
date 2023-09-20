@@ -1,6 +1,7 @@
 # Utility functions for visualization scripts 
 import h5py 
 import astropy.constants as const 
+import matplotlib
 import astropy.units as units
 import numpy as np 
 import argparse 
@@ -311,7 +312,7 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
     else:
         raise NotImplementedError("derived variable {var} not implemented")
 
-def get_colors(interval: NDArray[numpy_float], cmap: plt.cm, vmin: Optional[float] = None, vmax: Optional[float] = None) -> plt.cm:
+def get_colors(interval: NDArray[numpy_float], cmap: matplotlib.colors.ListedColormap, vmin: Optional[float] = None, vmax: Optional[float] = None) -> matplotlib.colors.ListedColormap:
     """
     Return array of rgba colors for a given matplotlib colormap
     
@@ -326,7 +327,7 @@ def get_colors(interval: NDArray[numpy_float], cmap: plt.cm, vmin: Optional[floa
     -------------------------
     arr: the colormap array generate by the user conditions
     """
-    plt.Normalize(vmin, vmax)
+    matplotlib.colors.Normalize(vmin, vmax)
     return cmap(interval)
     
 def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constraint: float, color: float, axis: str) -> None:
