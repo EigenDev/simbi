@@ -312,14 +312,14 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
     else:
         raise NotImplementedError("derived variable {var} not implemented")
 
-def get_colors(interval: NDArray[numpy_float], cmap: matplotlib.colors.ListedColormap, vmin: Optional[float] = None, vmax: Optional[float] = None) -> matplotlib.colors.ListedColormap:
+def get_colors(interval: NDArray[numpy_float], cmap: matplotlib.colors.ListedColormap, vmin: Optional[float] = None, vmax: Optional[float] = None) -> NDArray[Any]:
     """
     Return array of rgba colors for a given matplotlib colormap
     
     Parameters
     -------------------------
     interval: interval range for colormarp min and max 
-    cmap: the matplotlib colormap instnace
+    cmap: the matplotlib colormap instance
     vmin: minimum for colormap 
     vmax: maximum for colormap 
     
