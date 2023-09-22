@@ -52,7 +52,7 @@ def read_from_cache() -> Optional[dict[str, str]]:
 
 
 def check_minimal_dependencies() -> None:
-    MIN_PYTHON = (3, 10)
+    MIN_PYTHON = (3, 11)
     if sys.version_info < MIN_PYTHON:
         raise RuntimeError("Python {}.{} or later is required".format(*MIN_PYTHON))
 
