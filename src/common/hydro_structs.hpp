@@ -44,7 +44,7 @@ struct DataWriteMembers
 namespace hydro1d {
     struct Primitive {
         real rho, v, p;
-        GPU_CALLABLE_MEMBER Primitive () {}
+        GPU_CALLABLE_MEMBER Primitive () : rho(0), v(0), p(0) {}
         GPU_CALLABLE_MEMBER ~Primitive () {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v, real p) : rho(rho), v(v), p(p) {}
         GPU_CALLABLE_MEMBER Primitive(const Primitive &prim) : rho(prim.rho), v(prim.v), p(prim.p) {}
@@ -80,7 +80,7 @@ namespace hydro1d {
 
     struct Conserved {
         real rho, m, e_dens;
-        GPU_CALLABLE_MEMBER Conserved() {}
+        GPU_CALLABLE_MEMBER Conserved() : rho(0), m(0), e_dens(0) {}
         GPU_CALLABLE_MEMBER ~Conserved() {};
         GPU_CALLABLE_MEMBER Conserved(real rho, real m, real e_dens) : rho(rho), m(m), e_dens(e_dens) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &cons) : rho(cons.rho), m(cons.m), e_dens(cons.e_dens) {}
@@ -111,6 +111,13 @@ namespace hydro1d {
         GPU_CALLABLE_INLINE_MEMBER constexpr real& momentum() {
             return m;
         }
+
+        GPU_CALLABLE_INLINE_MEMBER constexpr real momentum(const int nhat) const {
+            if (nhat == 1) {
+                return m;
+            }
+            return 0;
+        }
     };
 
     struct PrimitiveSOA {
@@ -132,7 +139,7 @@ namespace hydro1d {
 namespace sr1d {
     struct Primitive {
         real rho, v, p;
-        GPU_CALLABLE_MEMBER Primitive () {}
+        GPU_CALLABLE_MEMBER Primitive () : rho(0), v(0), p(0) {}
         GPU_CALLABLE_MEMBER ~Primitive () {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v, real p) : rho(rho), v(v), p(p) {}
         GPU_CALLABLE_MEMBER Primitive(const Primitive &prim) : rho(prim.rho), v(prim.v), p(prim.p) {}
@@ -168,11 +175,26 @@ namespace sr1d {
                 return v / std::sqrt(1 + v * v);
             }
         }
+
+        GPU_CALLABLE_MEMBER constexpr real get_lorentz_factor() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return 1 / std::sqrt(1 - v * v);
+            } else {
+                return std::sqrt(1 + v * v);
+            }
+        }
+
+        GPU_CALLABLE constexpr real vcomponent(const int nhat) {
+            if (nhat == 1) {
+                return get_v();
+            }
+            return 0;
+        }
     };
 
     struct Conserved {
         real d, s, tau;
-        GPU_CALLABLE_MEMBER Conserved() {}
+        GPU_CALLABLE_MEMBER Conserved() : d(0), s(0), tau(0) {}
         GPU_CALLABLE_MEMBER ~Conserved() {};
         GPU_CALLABLE_MEMBER Conserved(real d, real s, real tau) : d(d), s(s), tau(tau) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &cons) : d(cons.d), s(cons.s), tau(cons.tau) {}
@@ -203,6 +225,12 @@ namespace sr1d {
         GPU_CALLABLE_INLINE_MEMBER constexpr real& momentum() {
             return s;
         }
+        GPU_CALLABLE_INLINE_MEMBER constexpr real momentum(const int nhat) {
+            if (nhat == 1) {
+                return s;
+            }
+            return 0;
+        }
     };
 
     struct PrimitiveSOA {
@@ -228,10 +256,10 @@ namespace sr1d {
 namespace sr2d {
     struct Conserved
     {
-        GPU_CALLABLE_MEMBER Conserved() {}
-        GPU_CALLABLE_MEMBER ~Conserved() {}
         real d, s1, s2, tau, chi;
         
+        GPU_CALLABLE_MEMBER Conserved() : d(0), s1(0), s2(0), tau(0), chi(0) {}
+        GPU_CALLABLE_MEMBER ~Conserved() {}
         GPU_CALLABLE_MEMBER Conserved(real d, real s1, real s2, real tau) :  d(d), s1(s1), s2(s2), tau(tau), chi(0) {}
         GPU_CALLABLE_MEMBER Conserved(real d, real s1, real s2, real tau, real chi) :  d(d), s1(s1), s2(s2), tau(tau), chi(chi) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &u) : d(u.d), s1(u.s1), s2(u.s2), tau(u.tau), chi(u.chi) {}
@@ -267,15 +295,21 @@ namespace sr2d {
             return *this;
         }
 
-        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {return (nhat == 1 ? s1 : s2); }
-        GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat) {return (nhat == 1 ? s1 : s2); }
+        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {
+            if (nhat > 2) {
+                return 0;
+            }
+            return (nhat == 1 ? s1 : s2); 
+        }
+        GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat) {
+            return (nhat == 1 ? s1 : s2); 
+        }
     };
 
     struct Primitive {
-        GPU_CALLABLE_MEMBER Primitive() {}
-        GPU_CALLABLE_MEMBER ~Primitive() {}
         real rho, v1, v2, p, chi;
-
+        GPU_CALLABLE_MEMBER Primitive() : rho(0), v1(0), v2(0), p(0), chi(0) {}
+        GPU_CALLABLE_MEMBER ~Primitive() {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p) : rho(rho), v1(v1), v2(v2), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p, real chi) : rho(rho), v1(v1), v2(v2), p(p), chi(chi) {}
         GPU_CALLABLE_MEMBER Primitive(const Primitive &c) : rho(c.rho), v1(c.v1), v2(c.v2), p(c.p), chi(c.chi) {}
@@ -331,6 +365,14 @@ namespace sr2d {
             }
         } 
 
+        GPU_CALLABLE_MEMBER constexpr real get_lorentz_factor() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
+            } else {
+                return std::sqrt(1 + (v1 * v1 + v2 * v2));
+            }
+        }
+
     };
 
     struct PrimitiveSOA {
@@ -352,10 +394,9 @@ namespace sr2d {
 namespace hydro2d {
     struct Conserved
     {
-        GPU_CALLABLE_MEMBER Conserved() {}
-        GPU_CALLABLE_MEMBER ~Conserved() {}
         real rho, m1, m2, e_dens, chi;
-        
+        GPU_CALLABLE_MEMBER Conserved() : rho(0), m1(0), m2(0), e_dens(0), chi(0) {}
+        GPU_CALLABLE_MEMBER ~Conserved() {}
         GPU_CALLABLE_MEMBER Conserved(real rho, real m1, real m2, real e_dens) :  rho(rho), m1(m1), m2(m2), e_dens(e_dens), chi(0) {}
         GPU_CALLABLE_MEMBER Conserved(real rho, real m1, real m2, real e_dens, real chi) :  rho(rho), m1(m1), m2(m2), e_dens(e_dens), chi(chi) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &u) : rho(u.rho), m1(u.m1), m2(u.m2), e_dens(u.e_dens), chi(u.chi) {}
@@ -390,15 +431,19 @@ namespace hydro2d {
             chi     *= c;
             return *this;
         }
-        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {return (nhat == 1 ? m1 : m2); }
+        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {
+            if (nhat > 2) {
+                return 0;
+            }
+            return (nhat == 1 ? m1 : m2); 
+        }
         GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat) {return (nhat == 1 ? m1 : m2 ); }
     };
 
     struct Primitive {
-        GPU_CALLABLE_MEMBER Primitive() {}
-        GPU_CALLABLE_MEMBER ~Primitive() {}
         real rho, v1, v2, p, chi;
-
+        GPU_CALLABLE_MEMBER Primitive() : rho(0), v1(0), v2(0), p(0), chi(0) {}
+        GPU_CALLABLE_MEMBER ~Primitive() {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p) : rho(rho), v1(v1), v2(v2), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p, real chi) : rho(rho), v1(v1), v2(v2), p(p), chi(chi) {}
         GPU_CALLABLE_MEMBER Primitive(const Primitive &c) : rho(c.rho), v1(c.v1), v2(c.v2), p(c.p), chi(c.chi) {}
@@ -467,10 +512,9 @@ namespace hydro2d {
 namespace sr3d {
     struct Conserved
     {
-        GPU_CALLABLE_MEMBER Conserved() {}
-        GPU_CALLABLE_MEMBER ~Conserved() {}
         real d, s1, s2, s3, tau, chi;
-
+        GPU_CALLABLE_MEMBER Conserved() : d(0), s1(0), s2(0), s3(0), tau(0), chi(0) {}
+        GPU_CALLABLE_MEMBER ~Conserved() {}
         GPU_CALLABLE_MEMBER Conserved(real d, real s1, real s2, real s3, real tau) :  d(d), s1(s1), s2(s2), s3(s3), tau(tau), chi(0) {}
         GPU_CALLABLE_MEMBER Conserved(real d, real s1, real s2, real s3, real tau, real chi) :  d(d), s1(s1), s2(s2), s3(s3), tau(tau), chi(chi) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &u) : d(u.d), s1(u.s1), s2(u.s2), s3(u.s3), tau(u.tau), chi(u.chi) {}
@@ -513,10 +557,9 @@ namespace sr3d {
     };
 
     struct Primitive {
-        GPU_CALLABLE_MEMBER Primitive() {}
-        GPU_CALLABLE_MEMBER ~Primitive() {}
         real rho, v1, v2, v3, p, chi;
-
+        GPU_CALLABLE_MEMBER Primitive() : rho(0), v1(0), v2(0), v3(0), p(0), chi(0) {}
+        GPU_CALLABLE_MEMBER ~Primitive() {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real v3, real p) : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real v3, real p, real chi) : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(chi) {}
         GPU_CALLABLE_MEMBER Primitive(const Primitive &c) : rho(c.rho), v1(c.v1), v2(c.v2), v3(c.v3), p(c.p), chi(c.chi) {}
@@ -591,6 +634,15 @@ namespace sr3d {
                 return v3 / std::sqrt(1 + v1 * v1 + v2 * v2 + v3 * v3);
             }
         }
+
+
+        GPU_CALLABLE_MEMBER constexpr real get_lorentz_factor() const {
+            if constexpr(VelocityType == Velocity::Beta) {
+                return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
+            } else {
+                return std::sqrt(1 + (v1 * v1 + v2 * v2 + v3 * v3));
+            }
+        }
     };
 
     struct PrimitiveSOA {
@@ -612,10 +664,9 @@ namespace sr3d {
 namespace hydro3d {
     struct Conserved
     {
-        GPU_CALLABLE_MEMBER Conserved() {}
-        GPU_CALLABLE_MEMBER ~Conserved() {}
         real rho, m1, m2, m3, e_dens;
-
+        GPU_CALLABLE_MEMBER Conserved() : rho(0), m1(0), m2(0), m3(0), e_dens(0) {}
+        GPU_CALLABLE_MEMBER ~Conserved() {}
         GPU_CALLABLE_MEMBER Conserved(real rho, real m1, real m2, real m3, real e_dens) :  rho(rho), m1(m1), m2(m2), m3(m3), e_dens(e_dens) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &u) : rho(u.rho), m1(u.m1), m2(u.m2), e_dens(u.e_dens) {}
         GPU_CALLABLE_MEMBER Conserved operator + (const Conserved &p)  const { return Conserved(rho+p.rho, m1+p.m1, m2+p.m2, m3 + p.m3, e_dens+p.e_dens); }  
@@ -654,10 +705,9 @@ namespace hydro3d {
     };
 
     struct Primitive {
-        GPU_CALLABLE_MEMBER Primitive() {}
-        GPU_CALLABLE_MEMBER ~Primitive() {}
         real rho, v1, v2, v3, p, chi;
-
+        GPU_CALLABLE_MEMBER Primitive() : rho(0), v1(0), v2(0), v3(0), p(0), chi(0) {}
+        GPU_CALLABLE_MEMBER ~Primitive() {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real v3, real p) : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real v3, real p, real chi) : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(chi) {}
         GPU_CALLABLE_MEMBER Primitive(const Primitive &c) : rho(c.rho), v1(c.v1), v2(c.v2), p(c.p), chi(c.chi) {}

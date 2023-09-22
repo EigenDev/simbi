@@ -188,6 +188,8 @@ headers = [
     'src/util/parallel_for.hpp',
     'src/util/printb.hpp',
     'src/util/range.hpp',
+
+    'src/hydro/srhd.hpp',
 ]
 
 

@@ -68,9 +68,9 @@ cdef extern from "hydro/euler2D.hpp" namespace "simbi":
 
 
 cdef extern from "hydro/srhydro1D.hip.hpp" namespace "simbi":
-    cdef cppclass SRHD:
-        SRHD() except +
-        SRHD(vector[vector[real]], real, real, vector[real], string) except + 
+    cdef cppclass SRHD1D:
+        SRHD1D() except +
+        SRHD1D(vector[vector[real]], real, real, vector[real], string) except + 
         real theta, gamma, tend, dlogt, cfl
         bool first_order, linspace
         string coord_system
@@ -197,6 +197,44 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
         vector[vector[real]] state 
 
         vector[vector[real]] simulate3D(
+            vector[vector[real]] sources,
+            vector[bool] object_cells,
+            real tstart,
+            real tend,
+            real dlogt,
+            real plm_theta,
+            real engine_duration,
+            real chkpt_interval,
+            int  chkpt_idx,
+            string data_directory,
+            vector[string] boundary_conditions,
+            bool first_order,
+            bool linspace,
+            string solver,
+            bool constant_sources,
+            vector[vector[real]] boundary_sources)
+
+cdef extern from "hydro/srhd.hpp" namespace "simbi":
+    cdef cppclass SRHD[T]:
+        SRHD() except +
+        SRHD(
+            vector[vector[real]] state, 
+            int nx, 
+            int ny,
+            int nz,
+            real ad_gamma,
+            vector[real] x1, 
+            vector[real] x2,
+            vector[real] x3,
+            real cfl,
+            string coord_system) except +
+             
+        real theta, gamma
+        int nx, ny, nz
+        bool first_order
+        vector[vector[real]] state 
+
+        vector[vector[real]] simulate(
             vector[vector[real]] sources,
             vector[bool] object_cells,
             real tstart,

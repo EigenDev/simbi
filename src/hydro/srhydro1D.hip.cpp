@@ -18,7 +18,7 @@
 using namespace simbi;
 using namespace simbi::util;
 using namespace std::chrono;
-constexpr auto write2file = helpers::write_to_file<sr1d::PrimitiveSOA, 1, SRHD>;
+constexpr auto write2file = helpers::write_to_file<sr1d::PrimitiveSOA, 1, SRHD1D>;
 //================================================
 //              DATA STRUCTURES
 //================================================
@@ -27,7 +27,7 @@ using Primitive  =  sr1d::Primitive;
 using Eigenvals  =  sr1d::Eigenvals;
 
 // Overloaded Constructor
-SRHD::SRHD(
+SRHD1D::SRHD1D(
     std::vector<std::vector<real>> &state, 
     real gamma, 
     real cfl,
@@ -46,7 +46,7 @@ SRHD::SRHD(
 }
 
 GPU_CALLABLE_MEMBER
-real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side) const
+real SRHD1D::calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side) const
 {
     switch(geometry)
     {
@@ -70,7 +70,7 @@ real SRHD::calc_vface(const lint ii, const real hubble_const, const simbi::Geome
 //=====================================================================
 //                          KERNEL CALLS
 //=====================================================================
-void SRHD::advance(const ExecutionPolicy<> &p)
+void SRHD1D::advance(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
     const auto xextent          = p.get_xextent();
@@ -241,7 +241,7 @@ void SRHD::advance(const ExecutionPolicy<> &p)
     });	
 }
 
-void SRHD::cons2prim(const ExecutionPolicy<> &p)
+void SRHD1D::cons2prim(const ExecutionPolicy<> &p)
 {
     auto* const cons_data  = cons.data();
     auto* const prims_data = prims.data();
@@ -342,7 +342,7 @@ void SRHD::cons2prim(const ExecutionPolicy<> &p)
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 GPU_CALLABLE_MEMBER
-Eigenvals SRHD::calc_eigenvals(
+Eigenvals SRHD1D::calc_eigenvals(
     const Primitive &primsL,
     const Primitive &primsR) const
 {
@@ -433,7 +433,7 @@ Eigenvals SRHD::calc_eigenvals(
 
 // Adapt the cfl conditonal timestep
 template<TIMESTEP_TYPE dt_type>
-void SRHD::adapt_dt()
+void SRHD1D::adapt_dt()
 {   
     if (use_omp) {
         real min_dt = INFINITY;
@@ -510,7 +510,7 @@ void SRHD::adapt_dt()
 };
 
 template<TIMESTEP_TYPE dt_type>
-void SRHD::adapt_dt(const luint blockSize)
+void SRHD1D::adapt_dt(const luint blockSize)
 {   
     #if GPU_CODE
         helpers::compute_dt<Primitive><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
@@ -526,7 +526,7 @@ void SRHD::adapt_dt(const luint blockSize)
 // Get the (3,1) state array for computation. Used for Higher Order
 // Reconstruction
 GPU_CALLABLE_MEMBER
-Conserved SRHD::prims2cons(const Primitive &prim) const
+Conserved SRHD1D::prims2cons(const Primitive &prim) const
 {
     const real rho = prim.rho;
     const real v   = prim.get_v();
@@ -541,7 +541,7 @@ Conserved SRHD::prims2cons(const Primitive &prim) const
 //-----------------------------------------------------------------------------------------------------------
 // Get the 1D Flux array (3,1)
 GPU_CALLABLE_MEMBER
-Conserved SRHD::prims2flux(const Primitive &prim) const
+Conserved SRHD1D::prims2flux(const Primitive &prim) const
 {
     const real rho = prim.rho;
     const real v   = prim.get_v();
@@ -553,7 +553,7 @@ Conserved SRHD::prims2flux(const Primitive &prim) const
     return Conserved{D*v, S*v + pre, S - D*v};
 };
 
-GPU_CALLABLE_MEMBER Conserved SRHD::calc_hll_flux(
+GPU_CALLABLE_MEMBER Conserved SRHD1D::calc_hll_flux(
     const Primitive &left_prims, 
     const Primitive &right_prims,
     const Conserved &left_state, 
@@ -582,7 +582,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hll_flux(
     }
 };
 
-GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
+GPU_CALLABLE_MEMBER Conserved SRHD1D::calc_hllc_flux(
     const Primitive &left_prims, 
     const Primitive &right_prims,
     const Conserved &left_state, 
@@ -676,7 +676,7 @@ GPU_CALLABLE_MEMBER Conserved SRHD::calc_hllc_flux(
 //                                  UDOT CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 std::vector<std::vector<real>>
-SRHD::simulate1D(
+SRHD1D::simulate1D(
     std::vector<std::vector<real>> &sources,
     std::vector<real> &gsource,
     real tstart,

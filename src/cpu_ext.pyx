@@ -71,7 +71,7 @@ cdef class PyState:
 
 # Relativisitc 1D Class
 cdef class PyStateSR:
-    cdef SRHD *c_state             # hold a c++ instance that we're wrapping           
+    cdef SRHD1D *c_state             # hold a c++ instance that we're wrapping           
 
     def __cinit__(self, 
         np.ndarray[np.double_t, ndim=2] state, 
@@ -79,7 +79,7 @@ cdef class PyStateSR:
         real cfl=0.4,
         vector[real] x1 = [0], 
         string coord_system = "cartesian".encode('ascii')):
-        self.c_state = new SRHD(state, gamma,cfl, x1, coord_system)
+        self.c_state = new SRHD1D(state, gamma,cfl, x1, coord_system)
         
     def simulate(self,
         vector[vector[real]] sources,

@@ -19,7 +19,7 @@
 
 namespace simbi
 {
-     struct SRHD : public HydroBase
+     struct SRHD1D : public HydroBase
      {
           using conserved_t = sr1d::Conserved;
           using primitive_t = sr1d::Primitive;
@@ -35,14 +35,14 @@ namespace simbi
           std::function<double(double)> dens_outer;
           std::function<double(double)> mom_outer;
           std::function<double(double)> nrg_outer;
-          SRHD(){};
-          SRHD(
+          SRHD1D(){};
+          SRHD1D(
                std::vector<std::vector<real>> &state, 
                real gamma, 
                real cfl,
                std::vector<real> &x1, 
                std::string coord_system);
-          ~SRHD(){};
+          ~SRHD1D(){};
 
           void advance(
                const ExecutionPolicy<> &p);
@@ -184,7 +184,7 @@ namespace simbi
 } // namespace simbi
 
 template<>
-struct is_relativistic<simbi::SRHD>
+struct is_relativistic<simbi::SRHD1D>
 {
     static constexpr bool value = true;
 };
