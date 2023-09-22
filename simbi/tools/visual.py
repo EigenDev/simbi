@@ -984,18 +984,22 @@ class Visualizer:
                             if self.broken_ax:
                                 axins = self.axs[1].inset_axes([0.2, 0.15, 0.47, 0.87])
                             else:
-                                axins = ax.inset_axes([0.2, 0.15, 0.47, 0.47])
+                                axins = ax.inset_axes([0.12, 0.10, 0.47, 0.47])
                         axins.step(tbins, iso_var)
                         # subregion of the original image
                         axins.set_xlim(*ast.literal_eval(self.inset['xlims']))
                         axins.set_ylim(*ast.literal_eval(self.inset['ylims']))
+                        axins.set_yscale('log')
+                        axins.tick_params(labelsize=10)
+                        # print(ast.literal_eval(self.inset['ylims']))
+                        # zzz = input('')
                     
                     esn = np.sum(var[gb < 0.1])
                     print(f"Energy left for supernova: {esn:.2e}")
             
             
             if axidx == len(get_iterable(self.axs)) - 1: 
-                ax.set_xlabel(r'$\phi~\rm[deg]$')
+                ax.set_xlabel(r'$\theta~\rm[deg]$')
                 
             if self.norm:
                 # ylabel = r'$E_{k,\phi}(> \Gamma\beta) [\rm erg]$'
