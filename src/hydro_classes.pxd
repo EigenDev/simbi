@@ -11,13 +11,27 @@ cdef extern from "util/pyobj_wrapper.hpp":
         PyObjWrapper()
         PyObjWrapper(object) # define a constructor that takes a Python object
                              # note - doesn't match c++ signature - that's fine!
-        
+
 cdef extern from "build_options.hpp":
+    # a few cname hacks 
+    ctypedef int dim1 "1" 
+    ctypedef int dim2 "2"
+    ctypedef int dim3 "3"
     cdef bool col_maj "COLUMN_MAJOR"
 
 cdef extern from "common/enums.hpp":
     cdef int FLOAT_PRECISION "FLOAT_PRECISION"
     ctypedef double real 
+
+cdef extern from "common/hydro_structs.hpp":
+    cdef cppclass InitialConditions:
+        real tstart, chkpt_interval, dlogt, plm_theta, engine_duration, gamma, cfl
+        int nx, ny, nz
+        bool first_order, linspace
+        vector[vector[real]] sources, gsource
+        vector[bool] object_cells
+        string data_directory, coord_system, solver
+        vector[real] x1, x2, x3
 
 cdef extern from "hydro/euler1D.hpp" namespace "simbi":
     cdef cppclass Newtonian1D:
@@ -216,18 +230,9 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
 
 cdef extern from "hydro/srhd.hpp" namespace "simbi":
     cdef cppclass SRHD[T]:
-        SRHD() except +
         SRHD(
             vector[vector[real]] state, 
-            int nx, 
-            int ny,
-            int nz,
-            real ad_gamma,
-            vector[real] x1, 
-            vector[real] x2,
-            vector[real] x3,
-            real cfl,
-            string coord_system) except +
+            InitialConditions sim_cond) except +
              
         real theta, gamma
         int nx, ny, nz
@@ -235,19 +240,14 @@ cdef extern from "hydro/srhd.hpp" namespace "simbi":
         vector[vector[real]] state 
 
         vector[vector[real]] simulate(
-            vector[vector[real]] sources,
-            vector[bool] object_cells,
-            real tstart,
-            real tend,
-            real dlogt,
-            real plm_theta,
-            real engine_duration,
-            real chkpt_interval,
-            int  chkpt_idx,
-            string data_directory,
-            vector[string] boundary_conditions,
-            bool first_order,
-            bool linspace,
-            string solver,
-            bool constant_sources,
-            vector[vector[real]] boundary_sources)
+            PyObjWrapper a,
+            PyObjWrapper adot)
+
+        vector[vector[real]] simulate(
+            PyObjWrapper a,
+            PyObjWrapper adot,
+            PyObjWrapper d_outer,
+            PyObjWrapper s1_outer,
+            PyObjWrapper s2_outer,
+            PyObjWrapper s3_outer,
+            PyObjWrapper e_outer)

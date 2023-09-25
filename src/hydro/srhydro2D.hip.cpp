@@ -785,7 +785,7 @@ void SRHD2D::advance(
     auto* const mom2_source = sourceS2.data();
     auto* const erg_source  = sourceTau.data();
     auto* const object_data = object_pos.data();
-    auto* const grav_source = sourceG.data();
+    auto* const grav_source = sourceG1.data();
     simbi::parallel_for(p, (luint)0, extent, [CAPTURE_THIS]   GPU_LAMBDA (const luint idx) {
         #if GPU_CODE 
         extern __shared__ Primitive prim_buff[];
@@ -1224,7 +1224,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->sourceS1        = sources[1];
     this->sourceS2        = sources[2];
     this->sourceTau       = sources[3];
-    this->sourceG         = gsource;
+    this->sourceG1        = gsource;
     // Define sim state params
     this->engine_duration = engine_duration;
     this->chkpt_interval  = chkpt_interval;
@@ -1258,7 +1258,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->mom1_source_all_zeros   = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
     this->mom2_source_all_zeros   = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
     this->energy_source_all_zeros = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
-    this->grav_source_all_zeros   = std::all_of(sourceG.begin(), sourceG.end(), [](real i) {return i == 0;});
+    this->grav_source_all_zeros   = std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {return i == 0;});
     define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
     define_chkpt_idx(chkpt_idx);
     // Params moving mesh
@@ -1324,7 +1324,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
     troubled_cells.copyToGpu();
-    sourceG.copyToGpu();
+    sourceG1.copyToGpu();
 
     // Write some info about the setup for writeup later
     setup.x1max              = x1[xphysical_grid - 1];

@@ -60,18 +60,9 @@ namespace simbi
         bool scalar_all_zeros, quirk_smoothing;
 
         /* Methods */
-        SRHD();
         SRHD(
-            std::vector<std::vector<real>> &state3D, 
-            luint nx, 
-            luint ny,
-            luint nz, 
-            real gamma, 
-            std::vector<real> &x1,
-            std::vector<real> &x2, 
-            std::vector<real> &x3,
-            real cfl, 
-            std::string coord_system);
+            std::vector<std::vector<real>> &state,
+            InitialConditions &init_conditions);
         ~SRHD();
 
         void cons2prim(const ExecutionPolicy<> &p);
@@ -131,22 +122,14 @@ namespace simbi
         void adapt_dt(const ExecutionPolicy<> &p);
 
         std::vector<std::vector<real>> simulate(
-            const std::vector<std::vector<real>> &sources,
-            const std::vector<bool> &object_cells,
-            real tstart, 
-            real tend, 
-            real dlogt, 
-            real plm_theta,
-            real engine_duration, 
-            real chkpt_interval,
-            int  chkpt_idx,
-            std::string data_directory, 
-            std::vector<std::string> boundary_conditions,
-            bool first_order,
-            bool linspace, 
-            const std::string solver,
-            bool constant_sources,
-            std::vector<std::vector<real>> boundary_sources);
+            std::function<double(double)> a,
+            std::function<double(double)> adot,
+            std::function<double(double, double)> d_outer  = nullptr,
+            std::function<double(double, double)> s1_outer = nullptr,
+            std::function<double(double, double)> s2_outer = nullptr,
+            std::function<double(double, double)> s3_outer = nullptr,
+            std::function<double(double, double)> e_outer  = nullptr
+        );
 
         GPU_CALLABLE_INLINE
         constexpr real get_x1face(const lint ii, const int side) const
@@ -204,10 +187,10 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE
-        constexpr real get_x1_integrand(const lint ii) {
+        constexpr real get_x1_differential(const lint ii) {
             const real x1l   = get_x1face(ii, 0);
             const real x1r   = get_x1face(ii, 1);
-            const real xmean = helpers::get_cell_centroid(x1r, x1l);
+            const real xmean = helpers::get_cell_centroid(x1r, x1l, geometry);
             switch (geometry)
             {
             case Geometry::SPHERICAL:
@@ -218,7 +201,7 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE
-        constexpr real get_x2_integrand(const lint ii) {
+        constexpr real get_x2_differential(const lint ii) {
             if constexpr(dim == 1) {
                 switch (geometry)
                 {
@@ -237,7 +220,7 @@ namespace simbi
                         const real dcos = std::cos(x2l) - std::cos(x2r);
                         return dcos;  
                     }
-                    case default:
+                    default:
                     {
                         return dx2;
                     }
@@ -246,7 +229,7 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE
-        constexpr real get_x3_integrand(const lint ii) {
+        constexpr real get_x3_differential(const lint ii) {
             if constexpr(dim == 1) {
                 switch (geometry)
                 {
@@ -258,13 +241,14 @@ namespace simbi
             } else if constexpr(dim == 2) {
                 switch (geometry)
                 {
-                case geometry:
-                    /* code */
-                    break;
-                
-                default:
-                    break;
+                    case Geometry::PLANAR_CYLINDRICAL:
+                         return 1;
+                    default:
+                        return static_cast<real>(2 * M_PI);
+                        break;
                 }
+            } else {
+                return dx3;
             }
         }
 
@@ -272,68 +256,97 @@ namespace simbi
         GPU_CALLABLE_INLINE
         real get_cell_volume(const lint ii, const lint jj, const lint kk) const
         {
-            const real x1l  = get_x1face(ii, 0);
-            const real x1r  = get_x1face(ii, 1);
-            const real tl   = get_x2face(jj, 0);
-            const real tr   = get_x2face(jj, 1);
-            const real ql   = get_x3face(kk, 0);
-            const real qr   = get_x3face(kk, 1);
-            if constexpr(dim == 1){
-                switch (geometry)
-                {
-                    case Geometry::SPHERICAL:
-                    {
-                        const real rmean = helpers::get_cell_centroid(x1r, x1l);
-                        const real dV    = ( 4.0 * M_PI * rmean * rmean  * (x1r - x1l));
-                        return dV;
-                        break;
-                    }
-                    default:
-                    {
-                        const real rmean = helpers::get_cell_centroid(x1r, x1l);
-                        const real dV    = ( 2.0 * M_PI * rmean * (x1r - x1l));
-                        return dV;
-                        break;
-                    }
-                }
-            } else if constexpr(dim == 2) {
-                switch (geometry)
-                {
-                    case Geometry::SPHERICAL:
-                    {
-                        const real rmean = helpers::get_cell_centroid(x1r, x1l);
-                        const real dcos  = std::cos(tl) - std::cos(tr);
-                        const real dV    = ( 2.0 * M_PI * rmean * rmean  * (x1r - x1l) * dcos);
-                        return dV;
-                        break;
-                    }
-                    default:
-                    {
-                        const real rmean = helpers::get_cell_centroid(x1r, x1l);
-                        const real dV    = ( 2.0 * M_PI * rmean * (x1r - x1l));
-                        return dV;
-                        break;
-                    }
-                }
+            return get_x1_differential(ii) * get_x2_differential(jj) * get_x3_differential(kk);
+        }
 
-            } else {
-                switch (geometry)
-                {
-                case Geometry::SPHERICAL:
-                {
-                    const real dcos = std::cos(tl) - std::cos(tr);
-                    const real dq   = qr - ql;
-                    const real dV   = ( (1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) * dcos * dq);
-                    return dV;
-                    break;
-                }
-                
-                default:
-                    break;
-                }
+        // GPU_CALLABLE_INLINE
+        // conserved_t get_geometric_source_terms(const primitive_t &prim, const real dV) const {
+        //     // Grab central primitives
+        //     const real rhoc = prim.rho;
+        //     const real v1   = prim.v2omponent(1);
+        //     const real v2   = prim.v2omponent(2);
+        //     const real v3   = prim.v2omponent(3);
+        //     const real pc   = prim.p;
+        //     const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+        //     const real gam2 = 1/(1 - (v1 * v1 + v2 * v2 + v3 * v3));
 
-            }
+        //     switch (geometry)
+        //     {
+        //     case Geometry::SPHERICAL:
+        //         {
+        //             if constexpr(dim == 1) {
+        //                 return = conserved_t{
+        //                     0, 
+        //                     pc * (s1R - s1L) / dV,
+        //                     0
+        //                 };
+
+        //             } else if constexpr(dim == 2) {
+        //                 return = conserved_t{
+        //                     0, 
+        //                     (rhoc * hc * gam2 * (v2 * v2)) / rmean + pc * (s1R - s1L) / dV1,
+        //                     rhoc * hc * gam2 * (-v1 * v2) / rmean + pc * (s2R - s2L)/dV2,
+        //                     0
+        //                 };
+
+        //             } else {
+        //                 return = conserved_t{
+        //                     0, 
+        //                     (rhoc * hc * gam2 * (v2 * v2 + v3 * v3)) / rmean + pc * (s1R - s1L) / dV1,
+        //                     rhoc * hc * gam2 * (v3 * v3 * cot - v1 * v2) / rmean + pc * (s2R - s2L)/dV2 , 
+        //                     - rhoc * hc * gam2 * v3 * (v1 + v2 * cot) / rmean, 
+        //                     0
+        //                 };
+        //             }
+        //         }
             
+        //     case Geometry::AXIS_CYLINDRICAL:
+        //     {
+
+        //         return = conserved_t{
+        //             0, 
+        //             pc * (s1R - s1L) / dV,
+        //             0,
+        //             0
+        //         };
+        //     }
+        //     case Geometry::PLANAR_CYLINDRICAL:
+        //     {
+        //         return = conserved_t{
+        //             0, 
+        //             (rhoc * hc * gam2 * (v2 * v2)) / rmean + pc * (s1R - s1L) / dV,
+        //             rhoc * hc * gam2 * (-v1 * v2) / rmean + pc * (s2R - s2L) / dV,
+        //             0
+        //         };
+        //     }
+        //     case Geometry::CYLINDRICAL:
+        //     {
+        //         if constexpr(dim == 1) {
+        //             return = conserved_t{
+        //                 0, 
+        //                 pc * (s1R - s1L) / dV,
+        //                 0
+        //             };
+
+        //         } 
+        //         } else {
+        //             return = conserved_t{
+        //                 0, 
+        //                 (rhoc * hc * gam2 * (v2 * v2)) / rmean + pc * (s1R - s1L) / dV,
+        //                 - rhoc * hc * gam2 * (v1 * v2) / rmean, 
+        //                 0, 
+        //                 0
+        //             };
+        //         }
+        //     }
+        //     default:
+        //         return conserved_t;
+        //     }
+        // }
+
+        GPU_CALLABLE_INLINE
+        real get_x1r_face_area(const real x1l, const real x1r){
+
         }
 
         void emit_troubled_cells() {
@@ -351,8 +364,8 @@ namespace simbi
                     const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
                     const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
                     const lint kreal  = helpers::get_real_idx(kk, radius, zphysical_grid); 
-                    const real x1l    = get_x1face(ireal, geometry, 0);
-                    const real x1r    = get_x1face(ireal, geometry, 1);
+                    const real x1l    = get_x1face(ireal, 0);
+                    const real x1r    = get_x1face(ireal, 1);
                     const real x2l    = get_x2face(jreal, 0);
                     const real x2r    = get_x2face(jreal, 1);
                     const real x3l    = get_x3face(kreal, 0);
@@ -360,9 +373,11 @@ namespace simbi
                     const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
                     const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
                     const real x3mean = helpers::calc_any_mean(x3l, x3r, x3cell_spacing);
-
+                    const auto s1 = cons[gid].momentum(1);
+                    const auto s2 = cons[gid].momentum(2);
+                    const auto s3 = cons[gid].momentum(3);
                     const real et  = (cons[gid].d + cons[gid].tau + prims[gid].p);
-                    const real s   = std::sqrt(cons[gid].s1 * cons[gid].s1 + cons[gid].s2 * cons[gid].s2 + cons[gid].s3 * cons[gid].s3);
+                    const real s   = std::sqrt(s1 * s2 + s2 * s2 + s3 * s3);
                     const real v2  = (s * s) / (et * et);
                     const real w   = 1 / std::sqrt(1 - v2);
                     printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %d\n", 

@@ -235,7 +235,7 @@ namespace simbi
         plm_gradient(const T &a, const T &b, const T &c, const real plm_theta)
         {
             const real rho = minmod((a - b).rho * plm_theta, (c - b).rho * static_cast<real>(0.5), (c - a).rho * plm_theta);
-            const real v   = minmod((a - b).v   * plm_theta, (c - b).v   * static_cast<real>(0.5), (c - a).v   * plm_theta);
+            const real v   = minmod((a - b).v1  * plm_theta, (c - b).v1  * static_cast<real>(0.5), (c - a).v1  * plm_theta);
             const real pre = minmod((a - b).p   * plm_theta, (c - b).p   * static_cast<real>(0.5), (c - a).p   * plm_theta);
             // const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
             return T{rho, v, pre};
@@ -317,8 +317,14 @@ namespace simbi
         }
         
         GPU_CALLABLE_INLINE
-        auto get_cell_centroid(const real xr, const real xl) {
-            return static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl);
+        auto get_cell_centroid(const real xr, const real xl, const simbi::Geometry geometry) {
+            switch (geometry)
+            {
+            case Geometry::SPHERICAL:
+                return static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl);
+            default:
+                return static_cast<real>(2/3) * (xr * xr * xr - xl * xl * xl) / (xr * xr - xl * xl);
+            }
         }
 
 

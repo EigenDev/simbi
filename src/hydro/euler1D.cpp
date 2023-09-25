@@ -76,10 +76,10 @@ Eigenvals Newtonian1D::calc_eigenvals(const Primitive &left_prim, const Primitiv
 {
     // Separate the left and right state components
     const real rhoL    = left_prim.rho;
-    const real vL      = left_prim.v;
+    const real vL      = left_prim.v1;
     const real pL      = left_prim.p;
     const real rhoR   = right_prim.rho;
-    const real vR     = right_prim.v;
+    const real vR     = right_prim.v1;
     const real pR     = right_prim.p;
 
     const real csR = std::sqrt(gamma * pR/rhoR);
@@ -132,7 +132,7 @@ void Newtonian1D::adapt_dt(){
         for (luint ii = 0; ii < active_zones; ii++){
             const auto shift_i  = ii + idx_active;
             const real rho      = prims[shift_i].rho;
-            const real v        = prims[shift_i].v;
+            const real v        = prims[shift_i].v1;
             const real pre      = prims[shift_i].p;
             const real cs       = std::sqrt(gamma * pre/rho);
             const real vPLus    = v + cs;
@@ -151,7 +151,7 @@ void Newtonian1D::adapt_dt(){
         thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&](int ii) {
             const auto shift_i  = ii + idx_active;
             const real rho      = prims[shift_i].rho;
-            const real v        = prims[shift_i].v;
+            const real v        = prims[shift_i].v1;
             const real pre      = prims[shift_i].p;
             const real cs       = std::sqrt(gamma * pre/rho);
             const real vPLus    = v + cs;
@@ -188,7 +188,7 @@ GPU_CALLABLE_MEMBER
 Conserved Newtonian1D::prims2cons(const Primitive &prim)
 {
     const real rho = prim.rho;
-    const real v   = prim.v;
+    const real v   = prim.v1;
     const real pre = prim.p;
     real energy    = pre / (gamma - 1) + static_cast<real>(0.5) * rho * v * v;
     return Conserved{rho, rho * v, energy};
@@ -203,7 +203,7 @@ GPU_CALLABLE_MEMBER
 Conserved Newtonian1D::prims2flux(const Primitive &prim)
 {
     const real rho = prim.rho;
-    const real v   = prim.v;
+    const real v   = prim.v1;
     const real pre = prim.p;
     real energy    = pre / (gamma - 1) + static_cast<real>(0.5) * rho * v * v;
 
@@ -261,7 +261,7 @@ Conserved Newtonian1D::calc_hllc_flux(
     
     if (- aL <= (aStar - aL)){
         real pressure = left_prims.p;
-        real v        = left_prims.v;
+        real v        = left_prims.v1;
         real rho      = left_state.rho;
         real m        = left_state.m;
         real energy   = left_state.e_dens;
@@ -277,7 +277,7 @@ Conserved Newtonian1D::calc_hllc_flux(
         return left_flux + (star_state - left_state) * aL;
     } else {
         real pressure = right_prims.p;
-        real v        = right_prims.v;
+        real v        = right_prims.v1;
         real rho      = right_state.rho;
         real m        = right_state.m;
         real energy   = right_state.e_dens;
@@ -620,7 +620,7 @@ void Newtonian1D::advance(const ExecutionPolicy<> &p)
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
     for (luint ii = 0; ii < nx; ii++) {
         final_prims[0][ii] = prims[ii].rho;
-        final_prims[1][ii] = prims[ii].v;
+        final_prims[1][ii] = prims[ii].v1;
         final_prims[2][ii] = prims[ii].p;
     }
     

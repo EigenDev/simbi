@@ -150,7 +150,7 @@ namespace simbi
                     {         
                          const real rl     = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min);
                          const real rr     = helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
-                         const real rmean  = helpers::get_cell_centroid(rr, rl);
+                         const real rmean  = helpers::get_cell_centroid(rr, rl, geometry);
                          return 4.0 * M_PI * rmean * rmean * (rr - rl);
                     }
                     default:

@@ -105,7 +105,7 @@ namespace simbi{
             sprims.p.reserve(nzones);
             for (size_t i = 0; i < nzones; i++) {
                 sprims.rho.push_back(p[i].rho);
-                sprims.v.push_back(p[i].v);
+                sprims.v.push_back(p[i].v1);
                 sprims.p.push_back(p[i].p);
             }
             

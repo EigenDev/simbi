@@ -80,7 +80,7 @@ void SRHD1D::advance(const ExecutionPolicy<> &p)
     auto* const dens_source     = sourceD.data();
     auto* const mom_source      = sourceS.data();
     auto* const erg_source      = source0.data();
-    auto* const grav_source     = sourceG.data();
+    auto* const grav_source     = sourceG1.data();
     simbi::parallel_for(p, (luint)0, active_zones, [CAPTURE_THIS]   GPU_LAMBDA (luint ii) {
         #if GPU_CODE
         extern __shared__ Primitive prim_buff[];
@@ -212,7 +212,7 @@ void SRHD1D::advance(const ExecutionPolicy<> &p)
         const auto s_source = mom1_source_all_zeros   ? 0.0 :  mom_source[ii];
         const auto e_source = energy_source_all_zeros ? 0.0 :  erg_source[ii];
         const auto gs_source = grav_source_all_zeros  ? 0.0 :  cons_data[ia].d * grav_source[ii];
-        const auto ge_source = gs_source * prim_buff[txa].v;
+        const auto ge_source = gs_source * prim_buff[txa].v1;
         const auto sources = Conserved{d_source, s_source, e_source} * time_constant;
         const auto gravity = Conserved{0, gs_source, ge_source};
         switch(geometry)
@@ -226,7 +226,7 @@ void SRHD1D::advance(const ExecutionPolicy<> &p)
             {
                 const real rlf    = x1l + vfaceL * step * dt; 
                 const real rrf    = x1r + vfaceR * step * dt;
-                const real rmean  = helpers::get_cell_centroid(rrf, rlf);
+                const real rmean  = helpers::get_cell_centroid(rrf, rlf, geometry);
                 const real sR     = 4.0 * M_PI * rrf * rrf; 
                 const real sL     = 4.0 * M_PI * rlf * rlf; 
                 const real dV     = 4.0 * M_PI * rmean * rmean * (rrf - rlf);    
@@ -709,7 +709,7 @@ SRHD1D::simulate1D(
     this->sourceD         = sources[0];
     this->sourceS         = sources[1];
     this->source0         = sources[2];
-    this->sourceG         = gsource;
+    this->sourceG1        = gsource;
     this->sim_solver      = helpers::solver_map.at(solver);
     this->engine_duration = engine_duration;
     this->t               = tstart;
@@ -729,7 +729,7 @@ SRHD1D::simulate1D(
     this->den_source_all_zeros    = std::all_of(sourceD.begin(), sourceD.end(), [](real i) {return i==0;});
     this->mom1_source_all_zeros   = std::all_of(sourceS.begin(), sourceS.end(), [](real i) {return i==0;});
     this->energy_source_all_zeros = std::all_of(source0.begin(), source0.end(), [](real i) {return i==0;});
-    this->grav_source_all_zeros = std::all_of(sourceG.begin(), sourceG.end(), [](real i){return i==0;});
+    this->grav_source_all_zeros = std::all_of(sourceG1.begin(), sourceG1.end(), [](real i){return i==0;});
     define_tinterval(tstart, dlogt, chkpt_interval, chkpt_idx);
     define_chkpt_idx(chkpt_idx);
     inflow_zones.resize(2);
@@ -790,7 +790,7 @@ SRHD1D::simulate1D(
     sourceD.copyToGpu();
     sourceS.copyToGpu();
     source0.copyToGpu();
-    sourceG.copyToGpu();
+    sourceG1.copyToGpu();
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
     troubled_cells.copyToGpu();
@@ -856,7 +856,7 @@ SRHD1D::simulate1D(
     std::vector<std::vector<real>> final_prims(3, std::vector<real>(nx, 0));
     for (luint ii = 0; ii < nx; ii++) {
         final_prims[0][ii] = prims[ii].rho;
-        final_prims[1][ii] = prims[ii].v;
+        final_prims[1][ii] = prims[ii].v1;
         final_prims[2][ii] = prims[ii].p;
     }
 
