@@ -32,9 +32,9 @@ namespace simbi
           ndarray<primitive_t> prims;
           ndarray<real> sourceD, sourceS, source0, pressure_guess, dt_min;
           
-          std::function<double(double)> dens_outer;
-          std::function<double(double)> mom_outer;
-          std::function<double(double)> nrg_outer;
+          // std::function<double(double)> dens_outer;
+          // std::function<double(double)> mom_outer;
+          // std::function<double(double)> nrg_outer;
           SRHD1D(){};
           SRHD1D(
                std::vector<std::vector<real>> &state, 

@@ -1043,10 +1043,12 @@ void SRHD<dim>::advance(
             if (object_to_my_right){
                 xprimsR.rho =  xprimsL.rho;
                 xprimsR.v1  = -xprimsL.v1;
-                if constexpr(dim > 1)
+                if constexpr(dim > 1) {
                     xprimsR.v2  =  xprimsL.v2;
-                if constexpr(dim > 2)
+                }
+                if constexpr(dim > 2){
                     xprimsR.v3  =  xprimsL.v3;
+                }
                 xprimsR.p   =  xprimsL.p;
                 xprimsR.chi =  xprimsL.chi;
             }
@@ -1054,9 +1056,12 @@ void SRHD<dim>::advance(
             if (object_in_front){
                 yprimsR.rho =  yprimsL.rho;
                 yprimsR.v1  =  yprimsL.v1;
-                yprimsR.v2  = -yprimsL.v2;
-                if constexpr(dim > 2)
+                if constexpr(dim > 1) {
+                    yprimsR.v2  = -yprimsL.v2;
+                }
+                if constexpr(dim > 2){
                     yprimsR.v3  =  yprimsL.v3;
+                }
                 yprimsR.p   =  yprimsL.p;
                 yprimsR.chi =  yprimsL.chi;
             }
@@ -1135,10 +1140,12 @@ void SRHD<dim>::advance(
             if (object_to_my_left){
                 xprimsL.rho =  xprimsR.rho;
                 xprimsL.v1  = -xprimsR.v1;
-                if constexpr(dim > 1)
+                if constexpr(dim > 1){
                     xprimsL.v2  =  xprimsR.v2;
-                if constexpr(dim > 2)
+                }
+                if constexpr(dim > 2){
                     xprimsL.v3  =  xprimsR.v3;
+                }
                 xprimsL.p   =  xprimsR.p;
                 xprimsL.chi =  xprimsR.chi;
             }
@@ -1146,9 +1153,12 @@ void SRHD<dim>::advance(
             if (object_behind){
                 yprimsL.rho =  yprimsR.rho;
                 yprimsL.v1  =  yprimsR.v1;
-                yprimsL.v2  = -yprimsR.v2;
-                if constexpr(dim > 2)
+                if constexpr(dim > 1) {
+                    yprimsL.v2  = -yprimsR.v2;
+                }
+                if constexpr(dim > 2){
                     yprimsL.v3  =  yprimsR.v3;
+                }
                 yprimsL.p   =  yprimsR.p;
                 yprimsL.chi =  yprimsR.chi;
             }
@@ -1244,10 +1254,12 @@ void SRHD<dim>::advance(
             if (object_to_my_right){
                 xprimsR.rho =  xprimsL.rho;
                 xprimsR.v1  = -xprimsL.v1;
-                if constexpr(dim > 1)
+                if constexpr(dim > 1) {
                     xprimsR.v2  =  xprimsL.v2;
-                if constexpr(dim > 2)
+                }
+                if constexpr(dim > 2){
                     xprimsR.v3  =  xprimsL.v3;
+                }
                 xprimsR.p   =  xprimsL.p;
                 xprimsR.chi =  xprimsL.chi;
             }
@@ -1255,9 +1267,12 @@ void SRHD<dim>::advance(
             if (object_in_front){
                 yprimsR.rho =  yprimsL.rho;
                 yprimsR.v1  =  yprimsL.v1;
-                yprimsR.v2  = -yprimsL.v2;
-                if constexpr(dim > 2)
+                if constexpr(dim > 1) {
+                    yprimsR.v2  = -yprimsL.v2;
+                }
+                if constexpr(dim > 2) {
                     yprimsR.v3  =  yprimsL.v3;
+                }
                 yprimsR.p   =  yprimsL.p;
                 yprimsR.chi =  yprimsL.chi;
             }
@@ -1336,10 +1351,12 @@ void SRHD<dim>::advance(
             if (object_to_my_left){
                 xprimsL.rho =  xprimsR.rho;
                 xprimsL.v1  = -xprimsR.v1;
-                if constexpr(dim > 1)
+                if constexpr(dim > 1){
                     xprimsL.v2  =  xprimsR.v2;
-                if constexpr(dim > 2)
+                }
+                if constexpr(dim > 2){
                     xprimsL.v3  =  xprimsR.v3;
+                }
                 xprimsL.p   =  xprimsR.p;
                 xprimsL.chi =  xprimsR.chi;
             }
@@ -1347,9 +1364,12 @@ void SRHD<dim>::advance(
             if (object_behind){
                 yprimsL.rho =  yprimsR.rho;
                 yprimsL.v1  =  yprimsR.v1;
-                yprimsL.v2  = -yprimsR.v2;
-                if constexpr(dim > 2)
+                if constexpr(dim > 1) {
+                    yprimsL.v2  = -yprimsR.v2;
+                }
+                if constexpr(dim > 2){
                     yprimsL.v3  =  yprimsR.v3;
+                }
                 yprimsL.p   =  yprimsR.p;
                 yprimsL.chi =  yprimsR.chi;
             }
@@ -1465,7 +1485,7 @@ void SRHD<dim>::advance(
                     const real pc     = prim_buff[txa].p;
                     const real invdV  = 1 / dV;
                     const auto geom_sources = Conserved<1>{0.0, pc * (sR - sL) * invdV, 0.0};
-                    cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - sources - gravity) * step * dt * factor;
+                    cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - source_terms - gravity) * step * dt * factor;
                     break;
                 }
             } // end switch
@@ -1798,28 +1818,28 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
     }
     
     // Simulate :)
-    // simbi::detail::logger::with_logger(*this, tend, [&](){
-    //     if (inFailureState){
-    //         return;
-    //     }
-    //     advance(activeP, xstride, ystride);
-    //     cons2prim(fullP);
-    //     if constexpr(dim == 1) {
-    //         helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
-    //     } else if constexpr(dim == 2) {
-    //         helpers::config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
-    //     } else {
-    //         helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
-    //     }
+    simbi::detail::logger::with_logger(*this, tend, [&](){
+        if (inFailureState){
+            return;
+        }
+        advance(activeP, xstride, ystride);
+        cons2prim(fullP);
+        if constexpr(dim == 1) {
+            helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
+        } else if constexpr(dim == 2) {
+            helpers::config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
+        } else {
+            helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
+        }
 
-    //     if constexpr(BuildPlatform == Platform::GPU) {
-    //         adapt_dt(activeP);
-    //     } else {
-    //         adapt_dt();
-    //     }
-    //     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
-    //     t += step * dt;
-    // });
+        if constexpr(BuildPlatform == Platform::GPU) {
+            adapt_dt(activeP);
+        } else {
+            adapt_dt();
+        }
+        time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
+        t += step * dt;
+    });
 
     if (inFailureState){
         emit_troubled_cells();

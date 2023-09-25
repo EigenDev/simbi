@@ -45,11 +45,26 @@ namespace simbi
         std::vector<std::vector<real>> boundary_sources;
         ndarray<bool> object_pos;
 
-        std::function<double(double, double)> dens_outer;
+        // density functional
+        template<double ...args>
+        std::function<double(args...)> dens_outer;
+        
+        // momentum 1 component functional
+        std::function<double(double)> mom1_outer;
         std::function<double(double, double)> mom1_outer;
+        std::function<double(double, double, double)> mom1_outer;
+        // momentum 2 component functional
+        std::function<double(double)> mom2_outer;
         std::function<double(double, double)> mom2_outer;
+        std::function<double(double, double, double)> mom2_outer;
+        // momentum 3 component functional
+        std::function<double(double)> mom3_outer;
         std::function<double(double, double)> mom3_outer;
+        std::function<double(double, double, double)> mom3_outer;
+        // energy functional
+        std::function<double(double)> nrg_outer;
         std::function<double(double, double)> nrg_outer;
+        std::function<double(double, double, double)> nrg_outer;
         
         const auto get_xblock_dims() const {
             return static_cast<luint>(std::stoi(getEnvVar("GPUXBLOCK_SIZE")));
