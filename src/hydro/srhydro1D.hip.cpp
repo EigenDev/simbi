@@ -264,7 +264,7 @@ void SRHD1D::cons2prim(const ExecutionPolicy<> &p)
             if (mesh_motion && (geometry == simbi::Geometry::SPHERICAL))
             {
                 const luint idx  = helpers::get_real_idx(ii, radius, active_zones);
-                const real dV    = get_cell_volume(idx, geometry);
+                const real dV    = get_cell_volume(idx);
                 invdV            = 1 / dV;
             }
 
@@ -744,8 +744,8 @@ SRHD1D::simulate1D(
     this->all_outer_bounds   = (d_outer && s_outer && e_outer);
     if (all_outer_bounds){
         dens_outer = d_outer;
-        mom_outer  = s_outer;
-        nrg_outer  = e_outer;
+        mom1_outer = s_outer;
+        enrg_outer = e_outer;
     }
     
     setup.x1max              = x1[active_zones - 1];
@@ -769,11 +769,11 @@ SRHD1D::simulate1D(
     dt_min.resize(active_zones);
     if (mesh_motion && all_outer_bounds) {
         outer_zones.resize(first_order ? 1 : 2);
-        const real dV  = get_cell_volume(active_zones - 1, geometry);
+        const real dV  = get_cell_volume(active_zones - 1);
         outer_zones[0] = conserved_t{
             dens_outer(x1max), 
-            mom_outer(x1max), 
-            nrg_outer(x1max)} * dV;
+            mom1_outer(x1max), 
+            enrg_outer(x1max)} * dV;
         outer_zones.copyToGpu();
     }
 

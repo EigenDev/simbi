@@ -32,9 +32,9 @@ namespace simbi
           ndarray<primitive_t> prims;
           ndarray<real> sourceD, sourceS, source0, pressure_guess, dt_min;
           
-          // std::function<double(double)> dens_outer;
-          // std::function<double(double)> mom_outer;
-          // std::function<double(double)> nrg_outer;
+          std::function<double(double)> dens_outer;
+          std::function<double(double)> mom1_outer;
+          std::function<double(double)> enrg_outer;
           SRHD1D(){};
           SRHD1D(
                std::vector<std::vector<real>> &state, 
@@ -138,7 +138,7 @@ namespace simbi
           }
 
           GPU_CALLABLE_MEMBER
-          constexpr real get_cell_volume(lint ii, const simbi::Geometry geometry) const
+          constexpr real get_cell_volume(lint ii) const
           {
                if (!mesh_motion)
                {

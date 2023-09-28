@@ -441,8 +441,8 @@ Conserved Newtonian2D::calc_hllc_flux(
 
     const real aL    = lambda.aL;
     const real aR    = lambda.aR;
-    const real cL    = lambda.cL;
-    const real cR    = lambda.cR;
+    const real cL    = lambda.csL;
+    const real cR    = lambda.csR;
     const real aStar = lambda.aStar;
     const real pStar = lambda.pStar;
 

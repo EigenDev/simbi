@@ -116,11 +116,11 @@ namespace simbi
                         if constexpr(sim_state_t::dimensions == 1) {
                             // Fill outer zones if user-defined conservative functions provided
                             if (sim_state.all_outer_bounds && (sim_state.mesh_motion)) {
-                                const real dV  = sim_state.get_cell_volume(sim_state.active_zones - 1, sim_state.geometry);
+                                const real dV  = sim_state.get_cell_volume(sim_state.active_zones - 1);
                                 sim_state.outer_zones[0] = conserved_t{
                                     sim_state.dens_outer(sim_state.x1max), 
-                                    sim_state.mom_outer(sim_state.x1max), 
-                                    sim_state.nrg_outer(sim_state.x1max)} * dV;
+                                    sim_state.mom1_outer(sim_state.x1max), 
+                                    sim_state.enrg_outer(sim_state.x1max)} * dV;
                                 sim_state.outer_zones.copyToGpu();
                             }
                         } else if constexpr(sim_state_t::dimensions == 2) {
@@ -130,12 +130,12 @@ namespace simbi
                                 // #pragma omp parallel for 
                                 for (luint jj = 0; jj < sim_state.ny; jj++) {
                                     const auto jreal = helpers::get_real_idx(jj, sim_state.radius, sim_state.yphysical_grid);
-                                    const real dV    = sim_state.get_cell_volume(sim_state.xphysical_grid - 1, jreal, sim_state.geometry);
+                                    const real dV    = sim_state.get_cell_volume(sim_state.xphysical_grid - 1, jreal);
                                     sim_state.outer_zones[jj]  = conserved_t{
                                         sim_state.dens_outer(sim_state.x1max, sim_state.x2[jreal]), 
                                         sim_state.mom1_outer(sim_state.x1max, sim_state.x2[jreal]), 
                                         sim_state.mom2_outer(sim_state.x1max, sim_state.x2[jreal]), 
-                                        sim_state.nrg_outer(sim_state.x1max, sim_state.x2[jreal])} * dV;
+                                        sim_state.enrg_outer(sim_state.x1max, sim_state.x2[jreal])} * dV;
                                 }
                                 sim_state.outer_zones.copyToGpu();
                             }

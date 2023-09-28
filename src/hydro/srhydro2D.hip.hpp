@@ -28,10 +28,10 @@ namespace simbi
         ndarray<real> sourceD, sourceS1, sourceS2, sourceTau, pressure_guess, dt_min;
         ndarray<bool> object_pos;
                 
-        // std::function<double(double, double)> dens_outer;
-        // std::function<double(double, double)> mom1_outer;
-        // std::function<double(double, double)> mom2_outer;
-        // std::function<double(double, double)> nrg_outer;
+        std::function<double(double, double)> dens_outer;
+        std::function<double(double, double)> mom1_outer;
+        std::function<double(double, double)> mom2_outer;
+        std::function<double(double, double)> enrg_outer;
         /* Methods */
         SRHD2D();
         SRHD2D(
@@ -134,7 +134,7 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE
-        real get_cell_volume(const lint ii, const lint jj, const simbi::Geometry geometry)
+        real get_cell_volume(const lint ii, const lint jj)
         {
             switch (geometry)
             {

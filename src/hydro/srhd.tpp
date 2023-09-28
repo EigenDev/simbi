@@ -272,9 +272,9 @@ GPU_CALLABLE_MEMBER
 SRHD<dim>::conserved_t SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t &prims) const
 {
     const real rho      = prims.rho;
-    const real v1       = prims.get_v1();
-    const real v2       = prims.get_v2();
-    const real v3       = prims.get_v3();
+    const real v1       = prims.vcomponent(1);
+    const real v2       = prims.vcomponent(2);
+    const real v3       = prims.vcomponent(3);
     const real pressure = prims.p;
     const real lorentz_gamma = prims.get_lorentz_factor(); // 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
     const real h = 1 + gamma * pressure / (rho * (gamma - 1));
@@ -571,16 +571,16 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
     const real vface) const 
 {
     const Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
-    const real aL = lambda.aL;
-    const real aR = lambda.aR;
-    const real cL = lambda.cL;
-    const real cR = lambda.cR;
+    const real aL  = lambda.aL;
+    const real aR  = lambda.aR;
+    const real csL = lambda.csL;
+    const real csR = lambda.csR;
 
     //---- Check Wave Speeds before wasting computations
-    if (0 <= aL) {
+    if (vface <= aL) {
         return left_flux;
     }
-    else if (0 >= aR) {
+    else if (vface >= aR) {
         return right_flux;
     }
 
@@ -678,8 +678,8 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     return Conserved<3>{Dstar, S1star, S2star, S3star, tauStar};
                 }
             }();
-            const real ma_left    = vL / cL * std::sqrt((1 - cL * cL) / (1 - vL * vL));
-            const real ma_right   = vR / cR * std::sqrt((1 - cR * cR) / (1 - vR * vR));
+            const real ma_left    = vL / csL * std::sqrt((1 - csL * csL) / (1 - vL * vL));
+            const real ma_right   = vR / csR * std::sqrt((1 - csR * csR) / (1 - vR * vR));
             const real ma_local   = helpers::my_max(std::abs(ma_left), std::abs(ma_right));
             const real phi        = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
             const real aL_lm      = dim == 1 ? aL : phi == 0 ? aL : phi * aL;
@@ -1662,16 +1662,23 @@ void SRHD<dim>::advance(
 // //===================================================================================================================
 template<int dim>
 std::vector<std::vector<real>> SRHD<dim>::simulate(
-    std::function<double(double)> a,
-    std::function<double(double)> adot,
-    std::function<double(double, double)> d_outer,
-    std::function<double(double, double)> s1_outer,
-    std::function<double(double, double)> s2_outer,
-    std::function<double(double, double)> s3_outer,
-    std::function<double(double, double)> e_outer
+    std::function<real(real)> a,
+    std::function<real(real)> adot,
+    SRHD::function_t const &d_outer,
+    SRHD::function_t const &s1_outer,
+    SRHD::function_t const &s2_outer,
+    SRHD::function_t const &s3_outer,
+    SRHD::function_t const &e_outer
     )
 {   
     helpers::anyDisplayProps();
+
+    // set the primtive functionals
+    this->dens_outer = d_outer;
+    this->mom1_outer = s1_outer;
+    this->mom2_outer = s2_outer;
+    this->mom3_outer = s3_outer;
+    this->enrg_outer = e_outer;
 
     // Stuff for moving mesh 
     this->hubble_param = adot(t) / a(t);
@@ -1867,9 +1874,9 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
         std::vector<std::vector<real>> final_prims(5, std::vector<real>(nzones, 0));
         for (luint ii = 0; ii < nzones; ii++) {
             final_prims[0][ii] = prims[ii].rho;
-            final_prims[1][ii] = prims[ii].v1;
-            final_prims[2][ii] = prims[ii].v2;
-            final_prims[3][ii] = prims[ii].v3;
+            final_prims[1][ii] = prims[ii].vcomponent(1);
+            final_prims[2][ii] = prims[ii].vcomponent(2);
+            final_prims[3][ii] = prims[ii].vcomponent(3);
             final_prims[4][ii] = prims[ii].p;
         }
         return final_prims;

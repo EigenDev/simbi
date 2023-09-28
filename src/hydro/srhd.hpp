@@ -50,6 +50,22 @@ namespace simbi
         sr2d::Eigenvals,
         sr3d::Eigenvals>
         >;
+
+        using function_t = typename std::conditional_t<
+        dim == 1,
+        std::function<real(real)>,
+        std::conditional_t<
+        dim == 2,
+        std::function<real(real, real)>,
+        std::function<real(real, real, real)>>
+        >;
+
+        function_t dens_outer;
+        function_t mom1_outer;
+        function_t mom2_outer;
+        function_t mom3_outer;
+        function_t enrg_outer;
+
         const static int dimensions = dim;
 
         /* Shared Data Members */
@@ -122,13 +138,13 @@ namespace simbi
         void adapt_dt(const ExecutionPolicy<> &p);
 
         std::vector<std::vector<real>> simulate(
-            std::function<double(double)> a,
-            std::function<double(double)> adot,
-            std::function<double(double, double)> d_outer  = nullptr,
-            std::function<double(double, double)> s1_outer = nullptr,
-            std::function<double(double, double)> s2_outer = nullptr,
-            std::function<double(double, double)> s3_outer = nullptr,
-            std::function<double(double, double)> e_outer  = nullptr
+            std::function<real(real)> a,
+            std::function<real(real)> adot,
+            function_t const &d_outer  = nullptr,
+            function_t const &s1_outer = nullptr,
+            function_t const &s2_outer = nullptr,
+            function_t const &s3_outer = nullptr,
+            function_t const &e_outer  = nullptr
         );
 
         GPU_CALLABLE_INLINE
@@ -187,7 +203,7 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE
-        constexpr real get_x1_differential(const lint ii) {
+        constexpr real get_x1_differential(const lint ii) const {
             const real x1l   = get_x1face(ii, 0);
             const real x1r   = get_x1face(ii, 1);
             const real xmean = helpers::get_cell_centroid(x1r, x1l, geometry);
@@ -201,7 +217,7 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE
-        constexpr real get_x2_differential(const lint ii) {
+        constexpr real get_x2_differential(const lint ii) const {
             if constexpr(dim == 1) {
                 switch (geometry)
                 {
@@ -229,7 +245,7 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE
-        constexpr real get_x3_differential(const lint ii) {
+        constexpr real get_x3_differential(const lint ii) const {
             if constexpr(dim == 1) {
                 switch (geometry)
                 {
@@ -254,7 +270,7 @@ namespace simbi
 
 
         GPU_CALLABLE_INLINE
-        real get_cell_volume(const lint ii, const lint jj, const lint kk) const
+        real get_cell_volume(const lint ii, const lint jj = 0, const lint kk = 0) const
         {
             return get_x1_differential(ii) * get_x2_differential(jj) * get_x3_differential(kk);
         }

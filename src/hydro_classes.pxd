@@ -243,7 +243,7 @@ cdef extern from "hydro/srhd.hpp" namespace "simbi":
             PyObjWrapper a,
             PyObjWrapper adot)
 
-        vector[vector[real]] simulate(
+        vector[vector[real]] simulate (
             PyObjWrapper a,
             PyObjWrapper adot,
             PyObjWrapper d_outer,

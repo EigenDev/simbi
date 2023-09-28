@@ -201,7 +201,7 @@ namespace sr1d {
             }
         }
 
-        GPU_CALLABLE constexpr real vcomponent(const int nhat) {
+        GPU_CALLABLE constexpr real vcomponent(const int nhat) const {
             if (nhat == 1) {
                 return get_v();
             }
@@ -247,7 +247,7 @@ namespace sr1d {
         GPU_CALLABLE_INLINE_MEMBER constexpr real& momentum() {
             return s;
         }
-        GPU_CALLABLE_INLINE_MEMBER constexpr real momentum(const int nhat) {
+        GPU_CALLABLE_INLINE_MEMBER constexpr real momentum(const int nhat) const {
             if (nhat == 1) {
                 return s;
             }
@@ -267,10 +267,11 @@ namespace sr1d {
         std::vector<real> d, s, tau;
     };
     struct Eigenvals {
-        real aL, aR;
+        real aL, aR, csL, csR;
         GPU_CALLABLE_MEMBER Eigenvals() {}
         GPU_CALLABLE_MEMBER ~Eigenvals() {}
-        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
+        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR), csL(0), csR(0) {}
+        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR, real csL, real csR) : aL(aL), aR(aR), csL(csL), csR(csR) {}
     };
 
 }
@@ -523,9 +524,9 @@ namespace hydro2d {
     struct Eigenvals{
         GPU_CALLABLE_MEMBER Eigenvals() {}
         GPU_CALLABLE_MEMBER ~Eigenvals() {}
-        real aL, aR, cL, cR, aStar, pStar;
+        real aL, aR, csL, csR, aStar, pStar;
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
-        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR, real cL, real cR, real aStar, real pStar) : aL(aL), aR(aR), cL(cL), cR(cR), aStar(aStar), pStar(pStar) {}
+        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR, real csL, real csR, real aStar, real pStar) : aL(aL), aR(aR), csL(csL), csR(csR), aStar(aStar), pStar(pStar) {}
     };
 
 }
@@ -676,9 +677,9 @@ namespace sr3d {
     struct Eigenvals{
         GPU_CALLABLE_MEMBER Eigenvals() {}
         GPU_CALLABLE_MEMBER ~Eigenvals() {}
-        real aL, aR, cL, cR;
-        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR), cL(0), cR(0) {}
-        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR, real cL, real cR) : aL(aL), aR(aR), cL(cL), cR(cR) {}
+        real aL, aR, csL, csR;
+        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR), csL(0), csR(0) {}
+        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR, real csL, real csR) : aL(aL), aR(aR), csL(csL), csR(csR) {}
     };
 
 } // end sr3d 
