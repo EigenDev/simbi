@@ -973,45 +973,85 @@ void SRHD<dim>::advance(
 
         const luint aid = ka * nx * ny + ja * nx + ia;
         #if GPU_CODE
-            luint txl = xextent;
-            luint tyl = yextent;
-            luint tzl = zextent;
-            // Load Shared memory into buffer for active zones plus ghosts
-            prim_buff[tza * sx * sy + tya * sx + txa] = prim_data[aid];
-            if (tz == 0)    
-            {
-                if ((blockIdx.z == p.gridSize.z - 1) && (ka + zextent > nz - radius + tz)) {
-                    tzl = nz - radius - ka + tz;
+            if constexpr(dim == 1) {
+                luint txl = xextent;
+                // Check if the active index exceeds the active zones
+                // if it does, then this thread buffer will taken on the
+                // ghost index at the very end and return
+                prim_buff[txa] = prim_data[ia];
+                if (threadIdx.x < radius)
+                {
+                    if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + threadIdx.x)) {
+                        txl = nx - radius - ia + threadIdx.x;
+                    }
+                    prim_buff[txa - radius] = prim_data[ia - radius];
+                    prim_buff[txa + txl]        = prim_data[ia + txl];
                 }
-                for (int q = 1; q < radius + 1; q++) {
-                    const auto re = tzl + q - 1;
-                    prim_buff[(tza - q) * sx * sy + tya * sx + txa]  = prim_data[(ka - q) * nx * ny + ja * nx + ia];
-                    prim_buff[(tza + re) * sx * sy + tya * sx + txa] = prim_data[(ka + re) * nx * ny + ja * nx + ia];
-                } 
+                simbi::gpu::api::synchronize();
+            } else if constexpr(dim == 2) {
+                luint txl = xextent;
+                luint tyl = yextent;
+                // Load Shared memory into buffer for active zones plus ghosts
+                prim_buff[tya * sx + txa * sy] = prim_data[aid];
+                if (ty < radius)
+                {
+                    if (blockIdx.y == p.gridSize.y - 1 && (ja + yextent > ny - radius + ty)) {
+                        tyl = ny - radius - ja + ty;
+                    }
+                    prim_buff[(tya - radius) * sx + txa] = prim_data[(ja - radius) * nx + ia];
+                    prim_buff[(tya + tyl) * sx + txa]    = prim_data[(ja + tyl) * nx + ia]; 
+                }
+                if (tx < radius)
+                {   
+                    if (blockIdx.x == p.gridSize.x - 1 && (ia + xextent > nx - radius + tx)) {
+                        txl = nx - radius - ia + tx;
+                    }
+                    prim_buff[tya * sx + txa - radius] =  prim_data[ja * nx + (ia - radius)];
+                    prim_buff[tya * sx + txa +    txl] =  prim_data[ja * nx + (ia + txl)]; 
+                }
+                simbi::gpu::api::synchronize();
+
+            } else {
+                luint txl = xextent;
+                luint tyl = yextent;
+                luint tzl = zextent;
+                // Load Shared memory into buffer for active zones plus ghosts
+                prim_buff[tza * sx * sy + tya * sx + txa] = prim_data[aid];
+                if (tz == 0)    
+                {
+                    if ((blockIdx.z == p.gridSize.z - 1) && (ka + zextent > nz - radius + tz)) {
+                        tzl = nz - radius - ka + tz;
+                    }
+                    for (int q = 1; q < radius + 1; q++) {
+                        const auto re = tzl + q - 1;
+                        prim_buff[(tza - q) * sx * sy + tya * sx + txa]  = prim_data[(ka - q) * nx * ny + ja * nx + ia];
+                        prim_buff[(tza + re) * sx * sy + tya * sx + txa] = prim_data[(ka + re) * nx * ny + ja * nx + ia];
+                    } 
+                }
+                if (ty == 0)    
+                {
+                    if ((blockIdx.y == p.gridSize.y - 1) && (ja + yextent > ny - radius + ty)) {
+                        tyl = ny - radius - ja + ty;
+                    }
+                    for (int q = 1; q < radius + 1; q++) {
+                        const auto re = tyl + q - 1;
+                        prim_buff[tza * sx * sy + (tya - q) * sx + txa]  = prim_data[ka * nx * ny + (ja - q) * nx + ia];
+                        prim_buff[tza * sx * sy + (tya + re) * sx + txa] = prim_data[ka * nx * ny + (ja + re) * nx + ia];
+                    } 
+                }
+                if (tx == 0)
+                {   
+                    if ((blockIdx.x == p.gridSize.x - 1) && (ia + xextent > nx - radius + tx)) {
+                        txl = nx - radius - ia + tx;
+                    }
+                    for (int q = 1; q < radius + 1; q++) {
+                        const auto re = txl + q - 1;
+                        prim_buff[tza * sx * sy + tya * sx + txa - q]  =  prim_data[ka * nx * ny + ja * nx + ia - q];
+                        prim_buff[tza * sx * sy + tya * sx + txa + re] =  prim_data[ka * nx * ny + ja * nx + ia + re]; 
+                    }
+                }
+                simbi::gpu::api::synchronize();
             }
-            if (ty == 0)    
-            {
-                if ((blockIdx.y == p.gridSize.y - 1) && (ja + yextent > ny - radius + ty)) {
-                    tyl = ny - radius - ja + ty;
-                }
-                for (int q = 1; q < radius + 1; q++) {
-                    const auto re = tyl + q - 1;
-                    prim_buff[tza * sx * sy + (tya - q) * sx + txa]  = prim_data[ka * nx * ny + (ja - q) * nx + ia];
-                    prim_buff[tza * sx * sy + (tya + re) * sx + txa] = prim_data[ka * nx * ny + (ja + re) * nx + ia];
-                } 
-            }
-            if (tx == 0)
-            {   
-                if ((blockIdx.x == p.gridSize.x - 1) && (ia + xextent > nx - radius + tx)) {
-                    txl = nx - radius - ia + tx;
-                }
-                for (int q = 1; q < radius + 1; q++) {
-                    const auto re = txl + q - 1;
-                    prim_buff[tza * sx * sy + tya * sx + txa - q]  =  prim_data[ka * nx * ny + ja * nx + ia - q];
-                    prim_buff[tza * sx * sy + tya * sx + txa + re] =  prim_data[ka * nx * ny + ja * nx + ia + re]; 
-                }
-            }
-            simbi::gpu::api::synchronize();
         #endif
 
         const bool object_to_my_left  = object_data[kk * xpg * ypg + jj * xpg +  helpers::my_max(static_cast<lint>(ii - 1), static_cast<lint>(0))];
