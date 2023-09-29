@@ -31,6 +31,7 @@ cdef class PyState:
         self.c_state =  new Newtonian1D(state, gamma,cfl, x1, coord_system)
 
     def simulate(self, 
+        *,
         vector[vector[real]] sources,
         real tstart,
         real tend,
@@ -82,6 +83,7 @@ cdef class PyStateSR:
         self.c_state = new SRHD1D(state, gamma,cfl, x1, coord_system)
         
     def simulate(self,
+        *,
         vector[vector[real]] sources,
         vector[real] gravity_sources,
         real tstart,
@@ -174,6 +176,7 @@ cdef class PyState2D:
         self.c_state =  new Newtonian2D(state_contig, nx, ny, gamma, x1, x2, cfl, coord_system)
     
     def simulate(self, 
+        *,
         vector[vector[real]] sources,
         real tstart, 
         real tend, 
@@ -235,6 +238,7 @@ cdef class PyStateSR2D:
     
 
     def simulate(self, 
+        *,
         vector[vector[real]] sources,
         np.ndarray[bool, ndim=2] object_cells,
         vector[real] gravity_sources,
@@ -348,6 +352,7 @@ cdef class PyStateSR3D:
     
 
     def simulate(self, 
+        *,
         vector[vector[real]] sources,
         np.ndarray[bool, ndim=3] object_cells,
         real tstart,
@@ -413,17 +418,18 @@ cdef class PyStateSRHD3D:
         sim_cond.gsource         = sim_info['gsource']
         sim_cond.data_directory  = sim_info['data_directory']
         sim_cond.coord_system    = sim_info['coord_system']
-        sim_cond.solver          = sim_info['solvewr']
+        sim_cond.solver          = sim_info['solver']
         sim_cond.gamma           = sim_info['gamma']
-        sim_cond.x1              = sim_info['x1']
-        sim_cond.x2              = sim_info['x2']
-        sim_cond.x3              = sim_info['x3']
+        sim_cond.x1              = np.ascontiguousarray(sim_info['x1'])
+        sim_cond.x2              = np.ascontiguousarray(sim_info['x2'])
+        sim_cond.x3              = np.ascontiguousarray(sim_info['x3'])
         sim_cond.coord_system    = sim_info['coord_system']
 
         state_contig = state.reshape(state.shape[0], -1)
         self.c_state = new SRHD[dim3](state_contig, sim_cond)
 
     def simulate(self, 
+        *,
         a,
         adot,
         d_outer  = None,
@@ -486,7 +492,7 @@ cdef class PyStateSRHD2D:
         sim_cond.gsource         = sim_info['gsource']
         sim_cond.data_directory  = sim_info['data_directory']
         sim_cond.coord_system    = sim_info['coord_system']
-        sim_cond.solver          = sim_info['solvewr']
+        sim_cond.solver          = sim_info['solver']
         sim_cond.gamma           = sim_info['gamma']
         sim_cond.x1              = sim_info['x1']
         sim_cond.x2              = sim_info['x2']
@@ -497,12 +503,12 @@ cdef class PyStateSRHD2D:
         self.c_state = new SRHD[dim2](state_contig, sim_cond)
 
     def simulate(self, 
+        *,
         a,
         adot,
         d_outer  = None,
         s1_outer = None,
         s2_outer = None,
-        s3_outer = None,
         e_outer  = None):
         
         cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
@@ -510,7 +516,7 @@ cdef class PyStateSRHD2D:
         cdef PyObjWrapper d_cpp    = PyObjWrapper(d_outer)
         cdef PyObjWrapper s1_cpp   = PyObjWrapper(s1_outer)
         cdef PyObjWrapper s2_cpp   = PyObjWrapper(s2_outer)
-        cdef PyObjWrapper s3_cpp   = PyObjWrapper(s3_outer)
+        cdef PyObjWrapper s3_cpp   = PyObjWrapper(None)
         cdef PyObjWrapper e_cpp    = PyObjWrapper(e_outer)
 
         if d_outer and s1_outer and s2_outer and e_outer:
@@ -547,48 +553,49 @@ cdef class PyStateSRHD1D:
     def __cinit__(self,  
         np.ndarray[np.double_t, ndim=2] state, 
         dict sim_info):
-
         cdef InitialConditions sim_cond 
-        sim_cond.tstart          = sim_info['tstart']
-        sim_cond.chkpt_interval  = sim_info['chkpt_interval']
-        sim_cond.dlogt           = sim_info['dlogt']
-        sim_cond.plm_theta       = sim_info['plm_theta']
-        sim_cond.engine_duration = sim_info['engine_duration']
-        sim_cond.nx              = sim_info['nx']
-        sim_cond.ny              = sim_info['ny']
-        sim_cond.nz              = sim_info['nz']
-        sim_cond.first_order     = sim_info['first_order']
-        sim_cond.linspace        = sim_info['linspace']
-        sim_cond.object_cells    = sim_info['object_cells']
-        sim_cond.sources         = sim_info['sources']
-        sim_cond.gsource         = sim_info['gsource']
-        sim_cond.data_directory  = sim_info['data_directory']
-        sim_cond.coord_system    = sim_info['coord_system']
-        sim_cond.solver          = sim_info['solvewr']
-        sim_cond.gamma           = sim_info['gamma']
-        sim_cond.x1              = sim_info['x1']
-        sim_cond.x2              = sim_info['x2']
-        sim_cond.x3              = sim_info['x3']
-        sim_cond.coord_system    = sim_info['coord_system']
+        sim_cond.tend             = sim_info['tend']
+        sim_cond.tstart           = sim_info['tstart']
+        sim_cond.chkpt_interval   = sim_info['chkpt_interval']
+        sim_cond.dlogt            = sim_info['dlogt']
+        sim_cond.plm_theta        = sim_info['plm_theta']
+        sim_cond.engine_duration  = sim_info['engine_duration']
+        sim_cond.nx               = sim_info['nx']
+        sim_cond.ny               = sim_info['ny']
+        sim_cond.nz               = sim_info['nz']
+        sim_cond.first_order      = sim_info['first_order']
+        sim_cond.linspace         = sim_info['linspace']
+        sim_cond.object_cells     = sim_info['object_cells']
+        sim_cond.sources          = sim_info['sources']
+        sim_cond.gsource          = sim_info['gsource']
+        sim_cond.data_directory   = sim_info['data_directory']
+        sim_cond.coord_system     = sim_info['coord_system']
+        sim_cond.solver           = sim_info['solver']
+        sim_cond.gamma            = sim_info['gamma']
+        sim_cond.x1               = sim_info['x1']
+        sim_cond.coord_system     = sim_info['coord_system']
+        sim_cond.boundary_sources = sim_info['boundary_sources']
+        sim_cond.cfl              = sim_info['cfl']
+        sim_cond.boundary_conditions = sim_info['boundary_conditions']
+
 
         state_contig = state.reshape(state.shape[0], -1)
         self.c_state = new SRHD[dim1](state_contig, sim_cond)
 
     def simulate(self, 
+        *,
         a,
         adot,
         d_outer  = None,
         s1_outer = None,
-        s2_outer = None,
-        s3_outer = None,
         e_outer  = None):
         
         cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
         cdef PyObjWrapper d_cpp    = PyObjWrapper(d_outer)
         cdef PyObjWrapper s1_cpp   = PyObjWrapper(s1_outer)
-        cdef PyObjWrapper s2_cpp   = PyObjWrapper(s2_outer)
-        cdef PyObjWrapper s3_cpp   = PyObjWrapper(s3_outer)
+        cdef PyObjWrapper s2_cpp   = PyObjWrapper(None)
+        cdef PyObjWrapper s3_cpp   = PyObjWrapper(None)
         cdef PyObjWrapper e_cpp    = PyObjWrapper(e_outer)
 
         if d_outer and s1_outer and e_outer:

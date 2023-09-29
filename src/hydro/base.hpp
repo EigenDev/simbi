@@ -45,16 +45,26 @@ namespace simbi
         std::vector<std::vector<real>> boundary_sources;
         ndarray<bool> object_pos;
         
+        //=========================== GPU Threads Per Dimension
+        std::string readGpuEnvVar( std::string const & key ) const
+        {
+            char * val = std::getenv( key.c_str() );
+            if (val) {
+                return std::string(val);
+            } 
+            return std::string("1");
+        }
+
         const auto get_xblock_dims() const {
-            return static_cast<luint>(std::stoi(getEnvVar("GPUXBLOCK_SIZE")));
+            return static_cast<luint>(std::stoi(readGpuEnvVar("GPUXBLOCK_SIZE")));
         }
 
         const auto get_yblock_dims() const {
-            return static_cast<luint>(std::stoi(getEnvVar("GPUYBLOCK_SIZE")));
+            return static_cast<luint>(std::stoi(readGpuEnvVar("GPUYBLOCK_SIZE")));
         }
 
         const auto get_zblock_dims() const {
-            return static_cast<luint>(std::stoi(getEnvVar("GPUZBLOCK_SIZE")));
+            return static_cast<luint>(std::stoi(readGpuEnvVar("GPUZBLOCK_SIZE")));
         }
 
         void define_tinterval(real t, real dlogt, real chkpt_interval, real chkpt_idx) {
@@ -218,7 +228,6 @@ namespace simbi
             nx(init_conditions.nx),
             ny(init_conditions.ny),
             nz(init_conditions.nz),
-            nzones(state[0].size()),
             x1(init_conditions.x1),
             x2(init_conditions.x2),
             x3(init_conditions.x3),
@@ -240,55 +249,75 @@ namespace simbi
             // Define the source terms
             this->dens_source = init_conditions.sources[0];
             this->m1_source   = init_conditions.sources[1];
-            this->m2_source   = init_conditions.sources[2];
-            this->m3_source   = init_conditions.sources[3];
-            this->erg_source  = init_conditions.sources[4];
             this->sourceG1    = init_conditions.gsource[0];
-            this->sourceG2    = init_conditions.gsource[1];
-            this->sourceG3    = init_conditions.gsource[2];
-            
+
             // Define simulation params
+            this->tend                = init_conditions.tend;
             this->boundary_conditions = init_conditions.boundary_conditions;
-            this->quirk_smoothing  = init_conditions.quirk_smoothing;
-            this->t                = init_conditions.tstart;
-            this->object_pos       = init_conditions.object_cells;
-            this->chkpt_interval   = init_conditions.chkpt_interval;
-            this->data_directory   = init_conditions.data_directory;
-            this->tstart           = init_conditions.tstart;
-            this->engine_duration  = init_conditions.engine_duration;
-            this->total_zones      = nx * ny * nz;
-            this->first_order      = init_conditions.first_order;
-            this->sim_solver       = helpers::solver_map.at(init_conditions.solver);
-            this->dlogt            = init_conditions.dlogt;
-            this->linspace         = init_conditions.linspace;
-            this->plm_theta        = init_conditions.plm_theta;
-            this->geometry         = helpers::geometry_map.at(init_conditions.coord_system);
-            this->xphysical_grid   = (init_conditions.first_order) ? nx - 2: nx - 4;
-            this->yphysical_grid   = (ny == 1) ? 1 : (init_conditions.first_order) ? ny - 2: ny - 4;
-            this->zphysical_grid   = (nz == 1) ? 1 : (init_conditions.first_order) ? nz - 2: nz - 4;
-            this->idx_active       = (init_conditions.first_order) ? 1     : 2;
-            this->active_zones     = xphysical_grid * yphysical_grid * zphysical_grid;
-            this->x1cell_spacing   = (init_conditions.linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
-            this->x2cell_spacing   = simbi::Cellspacing::LINSPACE;
-            this->x3cell_spacing   = simbi::Cellspacing::LINSPACE;
-            this->dx3              = (x3[zphysical_grid - 1] - x3[0]) / (zphysical_grid - 1);
-            this->dx2              = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
-            this->dlogx1           = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
-            this->dx1              = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
-            this->invdx1           = 1 / dx1;
-            this->invdx2           = 1 / dx2;
-            this->invdx3           = 1 / dx3;
-            this->x1min            = x1[0];
-            this->x1max            = x1[xphysical_grid - 1];
-            this->x2min            = x2[0];
-            this->x2max            = x2[yphysical_grid - 1];
-            this->x3min            = x3[0];
-            this->x3max            = x3[zphysical_grid - 1];
-            this->den_source_all_zeros     = std::all_of(dens_source.begin(),   dens_source.end(),   [](real i) {return i == 0;});
-            this->mom1_source_all_zeros    = std::all_of(m1_source.begin(),  m1_source.end(),  [](real i) {return i == 0;});
-            this->mom2_source_all_zeros    = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
-            this->mom3_source_all_zeros    = std::all_of(m3_source.begin(),  m3_source.end(),  [](real i) {return i == 0;});
-            this->energy_source_all_zeros  = std::all_of(erg_source.begin(), erg_source.end(), [](real i) {return i == 0;});
+            this->boundary_sources    = init_conditions.boundary_sources;
+            this->quirk_smoothing     = init_conditions.quirk_smoothing;
+            this->t                   = init_conditions.tstart;
+            this->object_pos          = init_conditions.object_cells;
+            this->chkpt_interval      = init_conditions.chkpt_interval;
+            this->data_directory      = init_conditions.data_directory;
+            this->tstart              = init_conditions.tstart;
+            this->engine_duration     = init_conditions.engine_duration;
+            this->total_zones         = nx * ny * nz;
+            this->first_order         = init_conditions.first_order;
+            this->sim_solver          = helpers::solver_map.at(init_conditions.solver);
+            this->dlogt               = init_conditions.dlogt;
+            this->linspace            = init_conditions.linspace;
+            this->plm_theta           = init_conditions.plm_theta;
+            this->geometry            = helpers::geometry_map.at(init_conditions.coord_system);
+            this->xphysical_grid      = (init_conditions.first_order) ? nx - 2: nx - 4;
+            this->yphysical_grid      = (ny == 1) ? 1 : (init_conditions.first_order) ? ny - 2: ny - 4;
+            this->zphysical_grid      = (nz == 1) ? 1 : (init_conditions.first_order) ? nz - 2: nz - 4;
+            this->idx_active          = (init_conditions.first_order) ? 1 : 2;
+            this->active_zones        = xphysical_grid * yphysical_grid * zphysical_grid;
+            this->x1cell_spacing      = (init_conditions.linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
+            this->dlogx1              = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
+            this->dx1                 = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
+            this->invdx1              = 1 / dx1;
+            this->x1min               = x1[0];
+            this->x1max               = x1[xphysical_grid - 1];
+
+            if ((ny > 1) && (nz > 1)) { // 2D check
+                this->m2_source   = init_conditions.sources[2];
+                this->m3_source   = init_conditions.sources[3];
+                this->erg_source  = init_conditions.sources[4];
+                this->sourceG2    = init_conditions.gsource[1];
+                this->sourceG3    = init_conditions.gsource[2];
+                this->x2min            = x2[0];
+                this->x2max            = x2[yphysical_grid - 1];
+                this->x3min            = x3[0];
+                this->x3max            = x3[zphysical_grid - 1];
+
+                this->dx3              = (x3[zphysical_grid - 1] - x3[0]) / (zphysical_grid - 1);
+                this->dx2              = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
+                this->invdx2           = 1 / dx2;
+                this->invdx3           = 1 / dx3;
+                this->x3cell_spacing   = simbi::Cellspacing::LINSPACE;
+                this->x2cell_spacing   = simbi::Cellspacing::LINSPACE;
+                this->mom2_source_all_zeros    = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
+                this->mom3_source_all_zeros    = std::all_of(m3_source.begin(),  m3_source.end(),  [](real i) {return i == 0;});
+            } else if ((ny > 1) && (nz == 1)) { // 2D Check
+                this->m2_source   = init_conditions.sources[2];
+                this->erg_source  = init_conditions.sources[3];
+                this->sourceG2    = init_conditions.gsource[1];
+
+                this->x2min            = x2[0];
+                this->x2max            = x2[yphysical_grid - 1];
+                this->x3cell_spacing   = simbi::Cellspacing::LINSPACE;
+                this->dx2    = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
+                this->invdx2 = 1 / dx2;
+                this->mom2_source_all_zeros    = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
+            } else { // 1D
+                this->erg_source  = init_conditions.sources[2];
+            }
+
+            this->den_source_all_zeros     = std::all_of(dens_source.begin(), dens_source.end(),   [](real i) {return i == 0;});
+            this->mom1_source_all_zeros    = std::all_of(m1_source.begin(),   m1_source.end(),  [](real i) {return i == 0;});
+            this->energy_source_all_zeros  = std::all_of(erg_source.begin(),  erg_source.end(), [](real i) {return i == 0;});
 
             if (nz > 1) {
                 this->checkpoint_zones = zphysical_grid;

@@ -25,12 +25,14 @@ cdef extern from "common/enums.hpp":
 
 cdef extern from "common/hydro_structs.hpp":
     cdef cppclass InitialConditions:
-        real tstart, chkpt_interval, dlogt, plm_theta, engine_duration, gamma, cfl
+        real tstart, chkpt_interval, dlogt, plm_theta, engine_duration, gamma, cfl, tend
         int nx, ny, nz
         bool first_order, linspace
         vector[vector[real]] sources, gsource
         vector[bool] object_cells
         string data_directory, coord_system, solver
+        vector[string] boundary_conditions
+        vector[vector[real]] boundary_sources
         vector[real] x1, x2, x3
 
 cdef extern from "hydro/euler1D.hpp" namespace "simbi":

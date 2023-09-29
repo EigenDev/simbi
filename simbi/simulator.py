@@ -512,9 +512,11 @@ class Hydro:
         self.chkpt_idx: int = 0
         if compute_mode in ['cpu', 'omp']:
             from .libs.cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
+            from .libs.cpu_ext import PyStateSRHD1D, PyStateSRHD2D, PyStateSRHD3D
         else:
             try:
                 from .libs.gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
+                from .libs.gpu_ext import PyStateSRHD1D, PyStateSRHD2D, PyStateSRHD3D
             except ImportError as e:
                 logger.warning(
                     "Error in loading GPU extension. Loading CPU instead...")
@@ -625,6 +627,7 @@ class Hydro:
             sources = np.zeros(3) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
             gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
+            gsources = gsources.reshape(gsources.shape[0], -1)
             
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "128"
@@ -653,7 +656,8 @@ class Hydro:
             # ignore the chi term
             sources = np.zeros(4) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
-            gsources = np.zeros(4) if gsources is None else np.asanyarray(gsources).flatten()
+            gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
+            gsources = gsources.reshape(gsources.shape[0], -1)
             
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "16"
@@ -694,7 +698,9 @@ class Hydro:
         else:
             sources = np.zeros(5) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
-
+            gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
+            gsources = gsources.reshape(gsources.shape[0], -1)
+            
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "4"
                 
@@ -718,6 +724,54 @@ class Hydro:
                     coord_system=cython_coordinates)
                 kwargs = {'object_cells': object_cells}
         
+        if len(self.resolution) == 1:
+            self.nx = self.u[0].shape[0]
+            self.ny = 1
+            self.nz = 1
+        elif len(self.resolution) == 2:
+            self.nx, self.ny = self.u[0].shape
+            self.nz = 1
+        else:
+            self.nx, self.ny, self.nz = self.u[0].shape
+            
+        init_conditions = {
+            'gamma': self.gamma,
+            'sources': sources,
+            'tstart': self.start_time,
+            'tend': tend,
+            'cfl': cfl,
+            'dlogt': dlogt,
+            'plm_theta': plm_theta,
+            'engine_duration': engine_duration,
+            'chkpt_interval': chkpt_interval,
+            'chkpt_idx': self.chkpt_idx,
+            'data_directory': cython_data_directory,
+            'boundary_conditions': cython_boundary_conditions,
+            'first_order': first_order,
+            'linspace': linspace,
+            'solver': cython_solver,
+            'constant_sources': constant_sources,
+            'boundary_sources': boundary_sources,
+            'coord_system': cython_coordinates,
+            'quirk_smoothing': quirk_smoothing,
+            'x1': self.x1,
+            'x2': self.x2,
+            'x3': self.x3,
+            'gsource': gsources,
+            'nx': self.nx,
+            'ny': self.ny,
+            'nz': self.nz,
+            'object_cells': object_cells
+        }
+        
+        # if self.dimensionality == 1:
+        #     state = PyStateSRHD1D(
+        #         self.u,
+        #         init_conditions
+        #     )
+            
+        #     self.solution = state.simulate(**kwargs)
+            
         self.solution = state.simulate(
             sources=sources,
             tstart=self.start_time,

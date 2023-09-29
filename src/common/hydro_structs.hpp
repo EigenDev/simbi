@@ -43,7 +43,7 @@ struct DataWriteMembers
 
 struct InitialConditions {
     // Define the source terms
-    real tstart, chkpt_interval, dlogt, plm_theta, engine_duration, gamma, cfl;
+    real tstart, chkpt_interval, dlogt, plm_theta, engine_duration, gamma, cfl, tend;
     luint nx, ny, nz, chkpt_idx;
     bool first_order, linspace, quirk_smoothing, constant_sources;
     std::vector<std::vector<real>> sources, gsource;

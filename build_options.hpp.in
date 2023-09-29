@@ -39,13 +39,6 @@ constexpr Velocity VelocityType = Velocity::FourVelocity;
 constexpr Velocity VelocityType = Velocity::Beta;
 #endif
 
-
-//=========================== GPU Threads Per Dimension
-inline std::string getEnvVar( std::string const & key )
-{
-    char * val = std::getenv( key.c_str() );
-    return std::string(val);
-}
 const int MAX_ITER   = 1000;
 
 //========================= FLOAT PRECISION CHECK
