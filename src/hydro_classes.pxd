@@ -232,6 +232,7 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
 
 cdef extern from "hydro/srhd.hpp" namespace "simbi":
     cdef cppclass SRHD[T]:
+        SRHD() except +
         SRHD(
             vector[vector[real]] state, 
             InitialConditions sim_cond) except +
