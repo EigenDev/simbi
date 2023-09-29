@@ -76,6 +76,7 @@ namespace simbi
         bool scalar_all_zeros, quirk_smoothing;
 
         /* Methods */
+        SRHD();
         SRHD(
             std::vector<std::vector<real>> &state,
             InitialConditions &init_conditions);

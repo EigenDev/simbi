@@ -35,6 +35,10 @@ template<int dim>
 constexpr auto write2file = helpers::write_to_file<typename SRHD<dim>::primitive_soa_t, dim, SRHD<dim>>;
 
 // Default Constructor
+template<int dim>
+SRHD<dim>::SRHD() {
+    
+}
 
 // Overloaded Constructor
 template<int dim>
@@ -1761,107 +1765,112 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
 {   
     helpers::anyDisplayProps();
     // set the primtive functionals
-    this->dens_outer = d_outer;
-    this->mom1_outer = s1_outer;
-    this->mom2_outer = s2_outer;
-    this->mom3_outer = s3_outer;
-    this->enrg_outer = e_outer;
+    // this->dens_outer = d_outer;
+    // this->mom1_outer = s1_outer;
+    // this->mom2_outer = s2_outer;
+    // this->mom3_outer = s3_outer;
+    // this->enrg_outer = e_outer;
 
-    // Stuff for moving mesh 
-    this->hubble_param = adot(t) / a(t);
-    this->mesh_motion  = (hubble_param != 0);
+    // // Stuff for moving mesh 
+    // this->hubble_param = adot(t) / a(t);
+    // this->mesh_motion  = (hubble_param != 0);
 
-    if (x2max == 0.5 * M_PI){
-        this->half_sphere = true;
-    }
+    // if (x2max == 0.5 * M_PI){
+    //     this->half_sphere = true;
+    // }
 
-    inflow_zones.resize(dim * 2);
-    for (int i = 0; i < 2 * dim; i++) {
-        this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
-        if constexpr(dim == 1) {
-            this->inflow_zones[i] = Conserved<1>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
-        } else if constexpr(dim == 2) {
-            this->inflow_zones[i] = Conserved<2>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]};
-        } else {
-            this->inflow_zones[i] = Conserved<3>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]};
-        }
-    }
+    // inflow_zones.resize(dim * 2);
+    // for (int i = 0; i < 2 * dim; i++) {
+    //     this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
+    //     if constexpr(dim == 1) {
+    //         this->inflow_zones[i] = Conserved<1>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
+    //     } else if constexpr(dim == 2) {
+    //         this->inflow_zones[i] = Conserved<2>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]};
+    //     } else {
+    //         this->inflow_zones[i] = Conserved<3>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]};
+    //     }
+    // }
 
-    // Write some info about the setup for writeup later
-    setup.x1max = x1[xphysical_grid - 1];
-    setup.x1min = x1[0];
-    setup.x1    = x1;
-    if constexpr(dim > 1) {
-        setup.x2max = x2[yphysical_grid - 1];
-        setup.x2min = x2[0];
-        setup.x2    = x2;
-    }
-    if constexpr(dim > 2) {
-        setup.x3max = x3[zphysical_grid - 1];
-        setup.x3min = x3[0];
-        setup.x3    = x3;
-    }
+    // // Write some info about the setup for writeup later
+    // setup.x1max = x1[xphysical_grid - 1];
+    // setup.x1min = x1[0];
+    // setup.x1    = x1;
+    // if constexpr(dim > 1) {
+    //     setup.x2max = x2[yphysical_grid - 1];
+    //     setup.x2min = x2[0];
+    //     setup.x2    = x2;
+    // }
+    // if constexpr(dim > 2) {
+    //     setup.x3max = x3[zphysical_grid - 1];
+    //     setup.x3min = x3[0];
+    //     setup.x3    = x3;
+    // }
 
-    setup.nx                  = nx;
-    setup.ny                  = ny;
-    setup.nz                  = nz;
-    setup.xactive_zones       = xphysical_grid;
-    setup.yactive_zones       = yphysical_grid;
-    setup.zactive_zones       = zphysical_grid;
-    setup.linspace            = linspace;
-    setup.ad_gamma            = gamma;
-    setup.first_order         = first_order;
-    setup.coord_system        = coord_system;
-    setup.using_fourvelocity  = (VelocityType == Velocity::FourVelocity);
-    setup.regime              = "relativistic";
-    setup.mesh_motion         = mesh_motion;
-    setup.boundary_conditions = boundary_conditions;
-    setup.dimensions          = dim;
+    // setup.nx                  = nx;
+    // setup.ny                  = ny;
+    // setup.nz                  = nz;
+    // setup.xactive_zones       = xphysical_grid;
+    // setup.yactive_zones       = yphysical_grid;
+    // setup.zactive_zones       = zphysical_grid;
+    // setup.linspace            = linspace;
+    // setup.ad_gamma            = gamma;
+    // setup.first_order         = first_order;
+    // setup.coord_system        = coord_system;
+    // setup.using_fourvelocity  = (VelocityType == Velocity::FourVelocity);
+    // setup.regime              = "relativistic";
+    // setup.mesh_motion         = mesh_motion;
+    // setup.boundary_conditions = boundary_conditions;
+    // setup.dimensions          = dim;
 
-    cons.resize(total_zones);
-    prims.resize(total_zones);
+    // cons.resize(total_zones);
+    // prims.resize(total_zones);
     troubled_cells.resize(total_zones, 0);
-    dt_min.resize(active_zones);
-    pressure_guess.resize(total_zones);
+    for (auto &&i : troubled_cells)
+    {
+        std::cout << i << "\n";
+    }
+    
+    // dt_min.resize(active_zones);
+    // pressure_guess.resize(total_zones);
 
     // Copy the state array into real & profile variables
-    for (size_t i = 0; i < total_zones; i++)
-    {
-        auto D  = state[0][i];
-        auto S1 = state[1][i];
-        auto S2 = [&]{
-            if constexpr(dim < 2) {
-                return static_cast<real>(0.0);
-            }
-            return state[2][i];
-        }();
-        auto S3 = [&]{
-            if constexpr(dim < 3) {
-                return static_cast<real>(0.0);
-            }
-            return state[3][i];
-        }();
-        auto E = [&] {
-            if constexpr(dim == 1) {
-                return state[2][i];
-            } else if constexpr(dim == 2) {
-                return state[3][i];
-            } else {
-                return state[4][i];
-            }
-        }(); 
-        auto S = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
-        if constexpr(dim == 1) {
-            cons[i] = Conserved<1>{D, S1, E};
-        } else if constexpr(dim == 2) {
-            cons[i] = Conserved<2>{D, S1, S2, E};
-        } else {
-            cons[i] = Conserved<3>{D, S1, S2, S3, E};
-        }
-        pressure_guess[i] = std::abs(S - D - E);
-    }
+    // for (size_t i = 0; i < total_zones; i++)
+    // {
+    //     auto D  = state[0][i];
+    //     auto S1 = state[1][i];
+    //     auto S2 = [&]{
+    //         if constexpr(dim < 2) {
+    //             return static_cast<real>(0.0);
+    //         }
+    //         return state[2][i];
+    //     }();
+    //     auto S3 = [&]{
+    //         if constexpr(dim < 3) {
+    //             return static_cast<real>(0.0);
+    //         }
+    //         return state[3][i];
+    //     }();
+    //     auto E = [&] {
+    //         if constexpr(dim == 1) {
+    //             return state[2][i];
+    //         } else if constexpr(dim == 2) {
+    //             return state[3][i];
+    //         } else {
+    //             return state[4][i];
+    //         }
+    //     }(); 
+    //     auto S = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
+    //     if constexpr(dim == 1) {
+    //         cons[i] = Conserved<1>{D, S1, E};
+    //     } else if constexpr(dim == 2) {
+    //         cons[i] = Conserved<2>{D, S1, S2, E};
+    //     } else {
+    //         cons[i] = Conserved<3>{D, S1, S2, S3, E};
+    //     }
+    //     pressure_guess[i] = std::abs(S - D - E);
+    // }
 
-    cons.copyToGpu();
+    // cons.copyToGpu();
     // prims.copyToGpu();
     // pressure_guess.copyToGpu();
     // dt_min.copyToGpu();
@@ -1873,7 +1882,7 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
     // if constexpr(dim > 1) object_pos.copyToGpu();
     // inflow_zones.copyToGpu();
     // bcs.copyToGpu();
-    // troubled_cells.copyToGpu();
+    troubled_cells.copyToGpu();
     std::cout << "hmmm" << "\n";
     std::cin.get();
 
