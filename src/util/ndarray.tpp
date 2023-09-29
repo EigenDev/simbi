@@ -363,9 +363,9 @@ template<typename DT>
 void simbi::ndarray<DT>::copyToGpu() {
     if (arr) {
         if (!dev_arr) {
-            dev_arr.reset((DT*)myGpuMalloc(sz * sizeof(DT)));
+            dev_arr.reset((DT*)myGpuMalloc(nd_capacity));
         }
-        gpu::api::copyHostToDevice(dev_arr.get(), arr.get(), sz * sizeof(DT));
+        gpu::api::copyHostToDevice(dev_arr.get(), arr.get(), nd_capacity);
     }
 }
 

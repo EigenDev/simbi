@@ -512,11 +512,11 @@ class Hydro:
         self.chkpt_idx: int = 0
         if compute_mode in ['cpu', 'omp']:
             from .libs.cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-            from .libs.cpu_ext import PyStateSRHD1D, PyStateSRHD2D, PyStateSRHD3D
+            from .libs.cpu_ext import PyStateSRHD1D
         else:
             try:
                 from .libs.gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-                from .libs.gpu_ext import PyStateSRHD1D, PyStateSRHD2D, PyStateSRHD3D
+                from .libs.gpu_ext import PyStateSRHD1D
             except ImportError as e:
                 logger.warning(
                     "Error in loading GPU extension. Loading CPU instead...")
@@ -646,7 +646,11 @@ class Hydro:
                     cfl,
                     x1=self.x1,
                     coord_system=cython_coordinates)
-                kwargs = {'a': scale_factor, 'adot': scale_factor_derivative, 'gravity_sources': gsources}
+                kwargs = {
+                    'a': scale_factor, 
+                    'adot': scale_factor_derivative,
+                #   'gravity_sources': gsources
+                    }
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] = dens_outer
                     kwargs['s_outer'] = mom_outer
@@ -764,31 +768,30 @@ class Hydro:
             'object_cells': object_cells
         }
         
-        # if self.dimensionality == 1:
-        #     state = PyStateSRHD1D(
-        #         self.u,
-        #         init_conditions
-        #     )
+        if self.dimensionality == 1:
+            state = PyStateSRHD1D(
+                self.u,
+                init_conditions
+            )
+            self.solution = state.simulate(**kwargs)
             
-        #     self.solution = state.simulate(**kwargs)
-            
-        self.solution = state.simulate(
-            sources=sources,
-            tstart=self.start_time,
-            tend=tend,
-            dlogt=dlogt,
-            plm_theta=plm_theta,
-            engine_duration=engine_duration,
-            chkpt_interval=chkpt_interval,
-            chkpt_idx=self.chkpt_idx,
-            data_directory=cython_data_directory,
-            boundary_conditions=cython_boundary_conditions,
-            first_order=first_order,
-            linspace=linspace,
-            solver=cython_solver,
-            constant_sources=constant_sources,
-            boundary_sources=boundary_sources,
-            **kwargs)
+        # self.solution = state.simulate(
+        #     sources=sources,
+        #     tstart=self.start_time,
+        #     tend=tend,
+        #     dlogt=dlogt,
+        #     plm_theta=plm_theta,
+        #     engine_duration=engine_duration,
+        #     chkpt_interval=chkpt_interval,
+        #     chkpt_idx=self.chkpt_idx,
+        #     data_directory=cython_data_directory,
+        #     boundary_conditions=cython_boundary_conditions,
+        #     first_order=first_order,
+        #     linspace=linspace,
+        #     solver=cython_solver,
+        #     constant_sources=constant_sources,
+        #     boundary_sources=boundary_sources,
+        #     **kwargs)
 
         self._cleanup(first_order)
         return self.solution

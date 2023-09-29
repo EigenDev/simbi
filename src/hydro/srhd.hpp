@@ -14,7 +14,7 @@
 
 namespace simbi
 {
-    template<int dim>
+    template<int dim, Platform build_mode = BuildPlatform>
     struct SRHD : public HydroBase
     {
         // set the primitive and conservative types at compile time

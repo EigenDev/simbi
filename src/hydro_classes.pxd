@@ -17,6 +17,8 @@ cdef extern from "build_options.hpp":
     ctypedef int dim1 "1" 
     ctypedef int dim2 "2"
     ctypedef int dim3 "3"
+    ctypedef int build_mode "BuildPlatform"
+    
     cdef bool col_maj "COLUMN_MAJOR"
 
 cdef extern from "common/enums.hpp":
@@ -231,7 +233,7 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
             vector[vector[real]] boundary_sources)
 
 cdef extern from "hydro/srhd.hpp" namespace "simbi":
-    cdef cppclass SRHD[T]:
+    cdef cppclass SRHD[T,build_mode]:
         SRHD() except +
         SRHD(
             vector[vector[real]] state, 

@@ -20,29 +20,29 @@ using namespace std::chrono;
 
 // Primitive<dim> template alias
 template<int dim>
-using Primitive = typename SRHD<dim>::primitive_t;
+using Primitive = typename SRHD<dim,BuildPlatform>::primitive_t;
 
 // Conservative template alias
 template<int dim>
-using Conserved = typename SRHD<dim>::conserved_t;
+using Conserved = typename SRHD<dim,BuildPlatform>::conserved_t;
 
 // Eigenvalue template alias
 template<int dim>
-using Eigenvals = typename SRHD<dim>::eigenvals_t;
+using Eigenvals = typename SRHD<dim,BuildPlatform>::eigenvals_t;
 
 // file writer template alias
 template<int dim>
-constexpr auto write2file = helpers::write_to_file<typename SRHD<dim>::primitive_soa_t, dim, SRHD<dim>>;
+constexpr auto write2file = helpers::write_to_file<typename SRHD<dim,BuildPlatform>::primitive_soa_t, dim, SRHD<dim,BuildPlatform>>;
 
 // Default Constructor
-template<int dim>
-SRHD<dim>::SRHD() {
+template<int dim, Platform build_mode>
+SRHD<dim, build_mode>::SRHD() {
     
 }
 
 // Overloaded Constructor
-template<int dim>
-SRHD<dim>::SRHD(
+template<int dim, Platform build_mode>
+SRHD<dim,build_mode>::SRHD(
     std::vector<std::vector<real>> &state, 
     InitialConditions &init_conditions)
 :
@@ -55,8 +55,8 @@ SRHD<dim>::SRHD(
 }
 
 // Destructor
-template<int dim>
-SRHD<dim>::~SRHD() {}
+template<int dim, Platform build_mode>
+SRHD<dim,build_mode>::~SRHD() {}
 //-----------------------------------------------------------------------------------------
 //                          GET THE Primitive
 //-----------------------------------------------------------------------------------------
@@ -67,8 +67,8 @@ SRHD<dim>::~SRHD() {}
  * @param  p executation policy class  
  * @return none
  */
-template<int dim>
-void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
+template<int dim, Platform build_mode>
+void SRHD<dim,build_mode>::cons2prim(const ExecutionPolicy<> &p)
 {
     auto* const prim_data  = prims.data();
     auto* const cons_data  = cons.data();
@@ -172,11 +172,11 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
-template<int dim>
+template<int dim, Platform build_mode>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
-    const SRHD<dim>::primitive_t &primsL,
-    const SRHD<dim>::primitive_t &primsR,
+SRHD<dim,build_mode>::eigenvals_t SRHD<dim,build_mode>::calc_eigenvals(
+    const SRHD<dim,build_mode>::primitive_t &primsL,
+    const SRHD<dim,build_mode>::primitive_t &primsR,
     const luint nhat) const
 {
     // Separate the left and right Primitive
@@ -271,9 +271,9 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
 //-----------------------------------------------------------------------------------------
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
-template<int dim>
+template<int dim, Platform build_mode>
 GPU_CALLABLE_MEMBER 
-SRHD<dim>::conserved_t SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t &prims) const
+SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::prims2cons(const SRHD<dim,build_mode>::primitive_t &prims) const
 {
     const real rho      = prims.rho;
     const real v1       = prims.vcomponent(1);
@@ -307,9 +307,9 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t &prims
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
 // Adapt the cfl conditonal timestep
-template<int dim>
+template<int dim, Platform build_mode>
 template<TIMESTEP_TYPE dt_type>
-void SRHD<dim>::adapt_dt()
+void SRHD<dim,build_mode>::adapt_dt()
 {
     real min_dt = INFINITY;
     #pragma omp parallel 
@@ -462,9 +462,9 @@ void SRHD<dim>::adapt_dt()
     dt = cfl * min_dt;
 };
 
-template<int dim>
+template<int dim, Platform build_mode>
 template<TIMESTEP_TYPE dt_type>
-void SRHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
+void SRHD<dim,build_mode>::adapt_dt(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
     {
@@ -480,9 +480,9 @@ void SRHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
 
 // Get the 2D Flux array (4,1). Either return F or G depending on directional
 // flag
-template<int dim>
+template<int dim, Platform build_mode>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims, const luint nhat) const
+SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::prims2flux(const SRHD<dim,build_mode>::primitive_t &prims, const luint nhat) const
 {
     const real rho      = prims.rho;
     const real v1       = prims.vcomponent(1);
@@ -527,15 +527,15 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims
     }
 };
 
-template<int dim>
+template<int dim, Platform build_mode>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
-    const SRHD<dim>::conserved_t &left_state, 
-    const SRHD<dim>::conserved_t &right_state,
-    const SRHD<dim>::conserved_t &left_flux, 
-    const SRHD<dim>::conserved_t &right_flux,
-    const SRHD<dim>::primitive_t &left_prims, 
-    const SRHD<dim>::primitive_t &right_prims,
+SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::calc_hll_flux(
+    const SRHD<dim,build_mode>::conserved_t &left_state, 
+    const SRHD<dim,build_mode>::conserved_t &right_state,
+    const SRHD<dim,build_mode>::conserved_t &left_flux, 
+    const SRHD<dim,build_mode>::conserved_t &right_flux,
+    const SRHD<dim,build_mode>::primitive_t &left_prims, 
+    const SRHD<dim,build_mode>::primitive_t &right_prims,
     const luint nhat,
     const real vface) const
 {
@@ -569,15 +569,15 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
     return net_flux;
 };
 
-template<int dim>
+template<int dim, Platform build_mode>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
-    const SRHD<dim>::conserved_t &left_state,
-    const SRHD<dim>::conserved_t &right_state,
-    const SRHD<dim>::conserved_t &left_flux,
-    const SRHD<dim>::conserved_t &right_flux,
-    const SRHD<dim>::primitive_t &left_prims,
-    const SRHD<dim>::primitive_t &right_prims,
+SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::calc_hllc_flux(
+    const SRHD<dim,build_mode>::conserved_t &left_state,
+    const SRHD<dim,build_mode>::conserved_t &right_state,
+    const SRHD<dim,build_mode>::conserved_t &left_flux,
+    const SRHD<dim,build_mode>::conserved_t &right_flux,
+    const SRHD<dim,build_mode>::primitive_t &left_prims,
+    const SRHD<dim,build_mode>::primitive_t &right_prims,
     const luint nhat,
     const real vface) const 
 {
@@ -966,8 +966,8 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
 //===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
-template<int dim>
-void SRHD<dim>::advance(
+template<int dim, Platform build_mode>
+void SRHD<dim,build_mode>::advance(
     const ExecutionPolicy<> &p,
     const luint sx,
     const luint sy)
@@ -1752,8 +1752,8 @@ void SRHD<dim>::advance(
 // //===================================================================================================================
 // //                                            SIMULATE
 // //===================================================================================================================
-template<int dim>
-std::vector<std::vector<real>> SRHD<dim>::simulate(
+template<int dim, Platform build_mode>
+std::vector<std::vector<real>> SRHD<dim,build_mode>::simulate(
     std::function<real(real)> a,
     std::function<real(real)> adot,
     SRHD::function_t const &d_outer,
@@ -1765,126 +1765,125 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
 {   
     helpers::anyDisplayProps();
     // set the primtive functionals
-    // this->dens_outer = d_outer;
-    // this->mom1_outer = s1_outer;
-    // this->mom2_outer = s2_outer;
-    // this->mom3_outer = s3_outer;
-    // this->enrg_outer = e_outer;
+    this->dens_outer = d_outer;
+    this->mom1_outer = s1_outer;
+    this->mom2_outer = s2_outer;
+    this->mom3_outer = s3_outer;
+    this->enrg_outer = e_outer;
 
-    // // Stuff for moving mesh 
-    // this->hubble_param = adot(t) / a(t);
-    // this->mesh_motion  = (hubble_param != 0);
+    // Stuff for moving mesh 
+    this->hubble_param = adot(t) / a(t);
+    this->mesh_motion  = (hubble_param != 0);
 
-    // if (x2max == 0.5 * M_PI){
-    //     this->half_sphere = true;
-    // }
-
-    // inflow_zones.resize(dim * 2);
-    // for (int i = 0; i < 2 * dim; i++) {
-    //     this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
-    //     if constexpr(dim == 1) {
-    //         this->inflow_zones[i] = Conserved<1>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
-    //     } else if constexpr(dim == 2) {
-    //         this->inflow_zones[i] = Conserved<2>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]};
-    //     } else {
-    //         this->inflow_zones[i] = Conserved<3>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]};
-    //     }
-    // }
-
-    // // Write some info about the setup for writeup later
-    // setup.x1max = x1[xphysical_grid - 1];
-    // setup.x1min = x1[0];
-    // setup.x1    = x1;
-    // if constexpr(dim > 1) {
-    //     setup.x2max = x2[yphysical_grid - 1];
-    //     setup.x2min = x2[0];
-    //     setup.x2    = x2;
-    // }
-    // if constexpr(dim > 2) {
-    //     setup.x3max = x3[zphysical_grid - 1];
-    //     setup.x3min = x3[0];
-    //     setup.x3    = x3;
-    // }
-
-    // setup.nx                  = nx;
-    // setup.ny                  = ny;
-    // setup.nz                  = nz;
-    // setup.xactive_zones       = xphysical_grid;
-    // setup.yactive_zones       = yphysical_grid;
-    // setup.zactive_zones       = zphysical_grid;
-    // setup.linspace            = linspace;
-    // setup.ad_gamma            = gamma;
-    // setup.first_order         = first_order;
-    // setup.coord_system        = coord_system;
-    // setup.using_fourvelocity  = (VelocityType == Velocity::FourVelocity);
-    // setup.regime              = "relativistic";
-    // setup.mesh_motion         = mesh_motion;
-    // setup.boundary_conditions = boundary_conditions;
-    // setup.dimensions          = dim;
-
-    // cons.resize(total_zones);
-    // prims.resize(total_zones);
-    troubled_cells.resize(total_zones, 0);
-    for (auto &&i : troubled_cells)
-    {
-        std::cout << i << "\n";
+    if (x2max == 0.5 * M_PI){
+        this->half_sphere = true;
     }
-    
-    // dt_min.resize(active_zones);
-    // pressure_guess.resize(total_zones);
+
+    inflow_zones.resize(dim * 2);
+    for (int i = 0; i < 2 * dim; i++) {
+        this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
+        if constexpr(dim == 1) {
+            this->inflow_zones[i] = Conserved<1>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
+        } else if constexpr(dim == 2) {
+            this->inflow_zones[i] = Conserved<2>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]};
+        } else {
+            this->inflow_zones[i] = Conserved<3>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]};
+        }
+    }
+
+    // Write some info about the setup for writeup later
+    setup.x1max = x1[xphysical_grid - 1];
+    setup.x1min = x1[0];
+    setup.x1    = x1;
+    if constexpr(dim > 1) {
+        setup.x2max = x2[yphysical_grid - 1];
+        setup.x2min = x2[0];
+        setup.x2    = x2;
+    }
+    if constexpr(dim > 2) {
+        setup.x3max = x3[zphysical_grid - 1];
+        setup.x3min = x3[0];
+        setup.x3    = x3;
+    }
+
+    setup.nx                  = nx;
+    setup.ny                  = ny;
+    setup.nz                  = nz;
+    setup.xactive_zones       = xphysical_grid;
+    setup.yactive_zones       = yphysical_grid;
+    setup.zactive_zones       = zphysical_grid;
+    setup.linspace            = linspace;
+    setup.ad_gamma            = gamma;
+    setup.first_order         = first_order;
+    setup.coord_system        = coord_system;
+    setup.using_fourvelocity  = (VelocityType == Velocity::FourVelocity);
+    setup.regime              = "relativistic";
+    setup.mesh_motion         = mesh_motion;
+    setup.boundary_conditions = boundary_conditions;
+    setup.dimensions          = dim;
+
+    cons.resize(total_zones);
+    prims.resize(total_zones);
+    troubled_cells.resize(total_zones, 0);
+    dt_min.resize(active_zones);
+    pressure_guess.resize(total_zones);
 
     // Copy the state array into real & profile variables
-    // for (size_t i = 0; i < total_zones; i++)
-    // {
-    //     auto D  = state[0][i];
-    //     auto S1 = state[1][i];
-    //     auto S2 = [&]{
-    //         if constexpr(dim < 2) {
-    //             return static_cast<real>(0.0);
-    //         }
-    //         return state[2][i];
-    //     }();
-    //     auto S3 = [&]{
-    //         if constexpr(dim < 3) {
-    //             return static_cast<real>(0.0);
-    //         }
-    //         return state[3][i];
-    //     }();
-    //     auto E = [&] {
-    //         if constexpr(dim == 1) {
-    //             return state[2][i];
-    //         } else if constexpr(dim == 2) {
-    //             return state[3][i];
-    //         } else {
-    //             return state[4][i];
-    //         }
-    //     }(); 
-    //     auto S = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
-    //     if constexpr(dim == 1) {
-    //         cons[i] = Conserved<1>{D, S1, E};
-    //     } else if constexpr(dim == 2) {
-    //         cons[i] = Conserved<2>{D, S1, S2, E};
-    //     } else {
-    //         cons[i] = Conserved<3>{D, S1, S2, S3, E};
-    //     }
-    //     pressure_guess[i] = std::abs(S - D - E);
-    // }
+    for (size_t i = 0; i < total_zones; i++)
+    {
+        auto D  = state[0][i];
+        auto S1 = state[1][i];
+        auto S2 = [&]{
+            if constexpr(dim < 2) {
+                return static_cast<real>(0.0);
+            }
+            return state[2][i];
+        }();
+        auto S3 = [&]{
+            if constexpr(dim < 3) {
+                return static_cast<real>(0.0);
+            }
+            return state[3][i];
+        }();
+        auto E = [&] {
+            if constexpr(dim == 1) {
+                return state[2][i];
+            } else if constexpr(dim == 2) {
+                return state[3][i];
+            } else {
+                return state[4][i];
+            }
+        }(); 
+        auto S = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
+        if constexpr(dim == 1) {
+            cons[i] = Conserved<1>{D, S1, E};
+        } else if constexpr(dim == 2) {
+            cons[i] = Conserved<2>{D, S1, S2, E};
+        } else {
+            cons[i] = Conserved<3>{D, S1, S2, S3, E};
+        }
+        pressure_guess[i] = std::abs(S - D - E);
+    }
 
-    // cons.copyToGpu();
-    // prims.copyToGpu();
-    // pressure_guess.copyToGpu();
-    // dt_min.copyToGpu();
-    // dens_source.copyToGpu();
-    // m1_source.copyToGpu();
-    // if constexpr(dim > 1) m2_source.copyToGpu();
-    // if constexpr(dim > 2) m3_source.copyToGpu();
-    // erg_source.copyToGpu();
-    // if constexpr(dim > 1) object_pos.copyToGpu();
-    // inflow_zones.copyToGpu();
-    // bcs.copyToGpu();
-    troubled_cells.copyToGpu();
-    std::cout << "hmmm" << "\n";
+    if constexpr(build_mode == Platform::GPU) {
+        std::cout << "I have built on the gpu bruv" << "\n";
+    }
+
+    std::cout << "break" << "\n";
     std::cin.get();
+    cons.copyToGpu();
+    prims.copyToGpu();
+    pressure_guess.copyToGpu();
+    dt_min.copyToGpu();
+    dens_source.copyToGpu();
+    m1_source.copyToGpu();
+    if constexpr(dim > 1) m2_source.copyToGpu();
+    if constexpr(dim > 2) m3_source.copyToGpu();
+    erg_source.copyToGpu();
+    if constexpr(dim > 1) object_pos.copyToGpu();
+    inflow_zones.copyToGpu();
+    bcs.copyToGpu();
+    troubled_cells.copyToGpu();
 
     // Setup the system
     const luint xblockdim    = xphysical_grid > gpu_block_dimx ? gpu_block_dimx : xphysical_grid;
@@ -1902,11 +1901,11 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
     const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
-    if constexpr(BuildPlatform == Platform::GPU){
+    if constexpr(build_mode == Platform::GPU){
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
     
-    if constexpr(BuildPlatform == Platform::GPU) {
+    if constexpr(build_mode == Platform::GPU) {
         cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP);
     } else {
@@ -1943,7 +1942,7 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
             helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
         }
 
-        if constexpr(BuildPlatform == Platform::GPU) {
+        if constexpr(build_mode == Platform::GPU) {
             adapt_dt(activeP);
         } else {
             adapt_dt();
