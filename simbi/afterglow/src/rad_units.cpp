@@ -485,7 +485,8 @@ namespace sogbo_rad
         double dx3     = 2.0 * M_PI;
         // Check whether to do 3D (off-axis) or not
         std::vector<double> x3;
-        double x3max, x3min;
+        double x3max = 0.0;
+        double x3min = 0.0;
         if (!at_pole)
         {
             x3     = mesh[2];
