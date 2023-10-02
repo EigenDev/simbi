@@ -548,7 +548,7 @@ cdef class PyStateSR3D:
 #         del self.c_state
 
 cdef class PyStateSRHD1D:
-    cdef SRHD[dim1,build_mode] *cpp_state         
+    cdef SRHD[dim1] *cpp_state         
 
     def __cinit__(self,  
         np.ndarray[np.double_t, ndim=2] state, 
@@ -579,7 +579,7 @@ cdef class PyStateSRHD1D:
         sim_cond.boundary_conditions = sim_info['boundary_conditions']
 
         state_contig = state.reshape(state.shape[0], -1)
-        self.cpp_state = new SRHD[dim1,build_mode](state_contig, sim_cond)
+        self.cpp_state = new SRHD[dim1](state_contig, sim_cond)
 
     def simulate(self, 
         *,

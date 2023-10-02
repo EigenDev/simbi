@@ -20,29 +20,29 @@ using namespace std::chrono;
 
 // Primitive<dim> template alias
 template<int dim>
-using Primitive = typename SRHD<dim,BuildPlatform>::primitive_t;
+using Primitive = typename SRHD<dim>::primitive_t;
 
 // Conservative template alias
 template<int dim>
-using Conserved = typename SRHD<dim,BuildPlatform>::conserved_t;
+using Conserved = typename SRHD<dim>::conserved_t;
 
 // Eigenvalue template alias
 template<int dim>
-using Eigenvals = typename SRHD<dim,BuildPlatform>::eigenvals_t;
+using Eigenvals = typename SRHD<dim>::eigenvals_t;
 
 // file writer template alias
 template<int dim>
-constexpr auto write2file = helpers::write_to_file<typename SRHD<dim,BuildPlatform>::primitive_soa_t, dim, SRHD<dim,BuildPlatform>>;
+constexpr auto write2file = helpers::write_to_file<typename SRHD<dim>::primitive_soa_t, dim, SRHD<dim>>;
 
 // Default Constructor
-template<int dim, Platform build_mode>
-SRHD<dim, build_mode>::SRHD() {
+template<int dim>
+SRHD<dim>::SRHD() {
     
 }
 
 // Overloaded Constructor
-template<int dim, Platform build_mode>
-SRHD<dim,build_mode>::SRHD(
+template<int dim>
+SRHD<dim>::SRHD(
     std::vector<std::vector<real>> &state, 
     InitialConditions &init_conditions)
 :
@@ -55,8 +55,8 @@ SRHD<dim,build_mode>::SRHD(
 }
 
 // Destructor
-template<int dim, Platform build_mode>
-SRHD<dim,build_mode>::~SRHD() {}
+template<int dim>
+SRHD<dim>::~SRHD() {}
 //-----------------------------------------------------------------------------------------
 //                          GET THE Primitive
 //-----------------------------------------------------------------------------------------
@@ -67,14 +67,20 @@ SRHD<dim,build_mode>::~SRHD() {}
  * @param  p executation policy class  
  * @return none
  */
-template<int dim, Platform build_mode>
-void SRHD<dim,build_mode>::cons2prim(const ExecutionPolicy<> &p)
+template<int dim>
+void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 {
     auto* const prim_data  = prims.data();
     auto* const cons_data  = cons.data();
     auto* const press_data = pressure_guess.data(); 
     auto* const troubled_data = troubled_cells.data();
-    simbi::parallel_for(p, (luint)0, total_zones, [CAPTURE_THIS]   GPU_LAMBDA (luint gid){
+    simbi::parallel_for(p, (luint)0, total_zones, [
+        prim_data,
+        cons_data,
+        press_data,
+        troubled_data,
+        this
+    ] GPU_LAMBDA (luint gid){
         real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;
@@ -172,11 +178,11 @@ void SRHD<dim,build_mode>::cons2prim(const ExecutionPolicy<> &p)
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
-template<int dim, Platform build_mode>
+template<int dim>
 GPU_CALLABLE_MEMBER
-SRHD<dim,build_mode>::eigenvals_t SRHD<dim,build_mode>::calc_eigenvals(
-    const SRHD<dim,build_mode>::primitive_t &primsL,
-    const SRHD<dim,build_mode>::primitive_t &primsR,
+SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
+    const SRHD<dim>::primitive_t &primsL,
+    const SRHD<dim>::primitive_t &primsR,
     const luint nhat) const
 {
     // Separate the left and right Primitive
@@ -271,9 +277,9 @@ SRHD<dim,build_mode>::eigenvals_t SRHD<dim,build_mode>::calc_eigenvals(
 //-----------------------------------------------------------------------------------------
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
-template<int dim, Platform build_mode>
+template<int dim>
 GPU_CALLABLE_MEMBER 
-SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::prims2cons(const SRHD<dim,build_mode>::primitive_t &prims) const
+SRHD<dim>::conserved_t SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t &prims) const
 {
     const real rho      = prims.rho;
     const real v1       = prims.vcomponent(1);
@@ -307,9 +313,9 @@ SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::prims2cons(const SRHD<di
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
 // Adapt the cfl conditonal timestep
-template<int dim, Platform build_mode>
+template<int dim>
 template<TIMESTEP_TYPE dt_type>
-void SRHD<dim,build_mode>::adapt_dt()
+void SRHD<dim>::adapt_dt()
 {
     real min_dt = INFINITY;
     #pragma omp parallel 
@@ -462,9 +468,9 @@ void SRHD<dim,build_mode>::adapt_dt()
     dt = cfl * min_dt;
 };
 
-template<int dim, Platform build_mode>
+template<int dim>
 template<TIMESTEP_TYPE dt_type>
-void SRHD<dim,build_mode>::adapt_dt(const ExecutionPolicy<> &p)
+void SRHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
     {
@@ -480,9 +486,9 @@ void SRHD<dim,build_mode>::adapt_dt(const ExecutionPolicy<> &p)
 
 // Get the 2D Flux array (4,1). Either return F or G depending on directional
 // flag
-template<int dim, Platform build_mode>
+template<int dim>
 GPU_CALLABLE_MEMBER
-SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::prims2flux(const SRHD<dim,build_mode>::primitive_t &prims, const luint nhat) const
+SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims, const luint nhat) const
 {
     const real rho      = prims.rho;
     const real v1       = prims.vcomponent(1);
@@ -527,15 +533,15 @@ SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::prims2flux(const SRHD<di
     }
 };
 
-template<int dim, Platform build_mode>
+template<int dim>
 GPU_CALLABLE_MEMBER
-SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::calc_hll_flux(
-    const SRHD<dim,build_mode>::conserved_t &left_state, 
-    const SRHD<dim,build_mode>::conserved_t &right_state,
-    const SRHD<dim,build_mode>::conserved_t &left_flux, 
-    const SRHD<dim,build_mode>::conserved_t &right_flux,
-    const SRHD<dim,build_mode>::primitive_t &left_prims, 
-    const SRHD<dim,build_mode>::primitive_t &right_prims,
+SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
+    const SRHD<dim>::conserved_t &left_state, 
+    const SRHD<dim>::conserved_t &right_state,
+    const SRHD<dim>::conserved_t &left_flux, 
+    const SRHD<dim>::conserved_t &right_flux,
+    const SRHD<dim>::primitive_t &left_prims, 
+    const SRHD<dim>::primitive_t &right_prims,
     const luint nhat,
     const real vface) const
 {
@@ -569,15 +575,15 @@ SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::calc_hll_flux(
     return net_flux;
 };
 
-template<int dim, Platform build_mode>
+template<int dim>
 GPU_CALLABLE_MEMBER
-SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::calc_hllc_flux(
-    const SRHD<dim,build_mode>::conserved_t &left_state,
-    const SRHD<dim,build_mode>::conserved_t &right_state,
-    const SRHD<dim,build_mode>::conserved_t &left_flux,
-    const SRHD<dim,build_mode>::conserved_t &right_flux,
-    const SRHD<dim,build_mode>::primitive_t &left_prims,
-    const SRHD<dim,build_mode>::primitive_t &right_prims,
+SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
+    const SRHD<dim>::conserved_t &left_state,
+    const SRHD<dim>::conserved_t &right_state,
+    const SRHD<dim>::conserved_t &left_flux,
+    const SRHD<dim>::conserved_t &right_flux,
+    const SRHD<dim>::primitive_t &left_prims,
+    const SRHD<dim>::primitive_t &right_prims,
     const luint nhat,
     const real vface) const 
 {
@@ -966,8 +972,8 @@ SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::calc_hllc_flux(
 //===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
-template<int dim, Platform build_mode>
-void SRHD<dim,build_mode>::advance(
+template<int dim>
+void SRHD<dim>::advance(
     const ExecutionPolicy<> &p,
     const luint sx,
     const luint sy)
@@ -993,7 +999,29 @@ void SRHD<dim,build_mode>::advance(
     auto* const object_data = object_pos.data();
     auto* const grav_source = sourceG1.data();
 
-    simbi::parallel_for(p, (luint)0, extent, [CAPTURE_THIS] GPU_LAMBDA (const luint idx){
+    simbi::parallel_for(p, (luint)0, extent, [
+        sx,
+        sy,
+        p,
+        #if GPU_CODE
+        xextent,
+        yextent,
+        zextent,
+        #endif
+        prim_data,
+        cons_data,
+        dens_source,
+        mom1_source,
+        mom2_source,
+        mom3_source,
+        erg_source,
+        object_data,
+        grav_source,
+        xpg,
+        ypg,
+        zpg,
+        this
+    ] GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
         extern __shared__ Primitive<dim> prim_buff[];
         #else 
@@ -1527,7 +1555,15 @@ void SRHD<dim,build_mode>::advance(
         const real s1_source = mom1_source_all_zeros    ? 0.0 : mom1_source[real_loc];
         const real e_source  = energy_source_all_zeros  ? 0.0 : erg_source[real_loc];
         
-        const auto source_terms = [=]{
+        const auto source_terms = [
+            d_source,
+            s1_source,
+            e_source,
+            mom2_source,
+            mom3_source,
+            real_loc,
+            this
+        ]{
             if constexpr(dim == 1) {
                 return Conserved<1>{d_source, s1_source, e_source} * time_constant;
             } else if constexpr(dim == 2) {
@@ -1752,8 +1788,8 @@ void SRHD<dim,build_mode>::advance(
 // //===================================================================================================================
 // //                                            SIMULATE
 // //===================================================================================================================
-template<int dim, Platform build_mode>
-std::vector<std::vector<real>> SRHD<dim,build_mode>::simulate(
+template<int dim>
+std::vector<std::vector<real>> SRHD<dim>::simulate(
     std::function<real(real)> a,
     std::function<real(real)> adot,
     SRHD::function_t const &d_outer,
@@ -1805,7 +1841,6 @@ std::vector<std::vector<real>> SRHD<dim,build_mode>::simulate(
         setup.x3min = x3[0];
         setup.x3    = x3;
     }
-
     setup.nx                  = nx;
     setup.ny                  = ny;
     setup.nz                  = nz;
@@ -1831,21 +1866,21 @@ std::vector<std::vector<real>> SRHD<dim,build_mode>::simulate(
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++)
     {
-        auto D  = state[0][i];
-        auto S1 = state[1][i];
-        auto S2 = [&]{
+        const auto D  = state[0][i];
+        const auto S1 = state[1][i];
+        const auto S2 = [&]{
             if constexpr(dim < 2) {
                 return static_cast<real>(0.0);
             }
             return state[2][i];
         }();
-        auto S3 = [&]{
+        const auto S3 = [&]{
             if constexpr(dim < 3) {
                 return static_cast<real>(0.0);
             }
             return state[3][i];
         }();
-        auto E = [&] {
+        const auto E = [&] {
             if constexpr(dim == 1) {
                 return state[2][i];
             } else if constexpr(dim == 2) {
@@ -1854,7 +1889,7 @@ std::vector<std::vector<real>> SRHD<dim,build_mode>::simulate(
                 return state[4][i];
             }
         }(); 
-        auto S = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
+        const auto S = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
         if constexpr(dim == 1) {
             cons[i] = Conserved<1>{D, S1, E};
         } else if constexpr(dim == 2) {
@@ -1865,11 +1900,14 @@ std::vector<std::vector<real>> SRHD<dim,build_mode>::simulate(
         pressure_guess[i] = std::abs(S - D - E);
     }
 
-    if constexpr(build_mode == Platform::GPU) {
+    if constexpr(BuildPlatform == Platform::GPU) {
         std::cout << "I have built on the gpu bruv" << "\n";
     }
+    #if GPU_CODE
+    std::cout << "caught preprocessor" << "\n";
+    #endif 
 
-    std::cout << "break" << "\n";
+    std::cout << "break the beat" << "\n";
     std::cin.get();
     cons.copyToGpu();
     prims.copyToGpu();
@@ -1901,11 +1939,11 @@ std::vector<std::vector<real>> SRHD<dim,build_mode>::simulate(
     const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
-    if constexpr(build_mode == Platform::GPU){
+    if constexpr(BuildPlatform == Platform::GPU){
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
     
-    if constexpr(build_mode == Platform::GPU) {
+    if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP);
     } else {
@@ -1917,7 +1955,7 @@ std::vector<std::vector<real>> SRHD<dim,build_mode>::simulate(
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
     if (t == 0 || init_chkpt_idx == 0) { 
-        write2file<dim>(*this, setup, data_directory, t, 0, chkpt_interval, checkpoint_zones);
+        // write2file<dim>(*this, setup, data_directory, t, 0, chkpt_interval, checkpoint_zones);
         if constexpr(dim == 1) {
             helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
         } else if constexpr(dim == 2) {
@@ -1942,7 +1980,7 @@ std::vector<std::vector<real>> SRHD<dim,build_mode>::simulate(
             helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
         }
 
-        if constexpr(build_mode == Platform::GPU) {
+        if constexpr(BuildPlatform == Platform::GPU) {
             adapt_dt(activeP);
         } else {
             adapt_dt();

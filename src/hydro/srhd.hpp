@@ -1,8 +1,5 @@
 /* 
-* Interface between python construction of the 2D SR state 
-* and cpp. This is where the heavy lifting will occur when 
-* computing the HLL derivative of the state vector
-* given the state itself.
+* Single header for 1, 2, and 3D SRHD Calculations
 */
 #ifndef SRHD_HPP
 #define SRHD_HPP
@@ -14,7 +11,7 @@
 
 namespace simbi
 {
-    template<int dim, Platform build_mode = BuildPlatform>
+    template<int dim>
     struct SRHD : public HydroBase
     {
         // set the primitive and conservative types at compile time
@@ -360,11 +357,6 @@ namespace simbi
         //         return conserved_t;
         //     }
         // }
-
-        GPU_CALLABLE_INLINE
-        real get_x1r_face_area(const real x1l, const real x1r){
-
-        }
 
         void emit_troubled_cells() {
             troubled_cells.copyFromGpu();

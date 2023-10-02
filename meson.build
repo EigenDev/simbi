@@ -158,8 +158,8 @@ sources = [
     'src/hydro/srhydro1D.hip.cpp',
     'src/hydro/srhydro2D.hip.cpp',
     'src/hydro/srhydro3D.hip.cpp',
+    'src/hydro/srhd.cpp',
     
-
     #######################
     #### UTIL IMPLEMENTATIONS
     #######################
