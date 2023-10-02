@@ -242,7 +242,7 @@ void Newtonian2D::adapt_dt()
                                 cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
                                 break;
                             }
-                        case simbi::Geometry::AXIS_CYLINDRICAL:
+                        default:
                             {
                                 const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
                                 const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
@@ -261,8 +261,6 @@ void Newtonian2D::adapt_dt()
                                 cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
                                 break;
                             }
-                        default:
-                            break;
                     } // end switch
                     min_dt = std::min(min_dt, cfl_dt);
                 } // end ii
@@ -344,7 +342,7 @@ void Newtonian2D::adapt_dt()
                         cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  rmean * dtheta / (helpers::my_max(v2p, v2m)));
                         break;
                     }
-                case simbi::Geometry::AXIS_CYLINDRICAL:
+                default:
                     {
                         const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
                         const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
@@ -363,8 +361,6 @@ void Newtonian2D::adapt_dt()
                         cfl_dt = helpers::my_min(dr / (helpers::my_max(v1p, v1m)),  dz / (helpers::my_max(v2p, v2m)));
                         break;
                     }
-                default:
-                    break;
             } // end switch
             pooling::update_minimum(min_dt, cfl_dt);
         });
