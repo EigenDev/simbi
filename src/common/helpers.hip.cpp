@@ -133,10 +133,10 @@ namespace simbi{
             {
                 case 1:
                 {
-                    auto rho = std::unique_ptr<real>(new real[size]);
-                    auto v   = std::unique_ptr<real>(new real[size]);
-                    auto p   = std::unique_ptr<real>(new real[size]);
-                    auto x1  = std::unique_ptr<real>(new real[setup.x1.size()]);
+                    auto rho = std::make_unique<real[]>(size);
+                    auto v   = std::make_unique<real[]>(size);
+                    auto p   = std::make_unique<real[]>(size);
+                    auto x1  = std::make_unique<real[]>(setup.x1.size());
 
                     std::copy(prims.rho.begin(), prims.rho.begin() + size, rho.get());
                     std::copy(prims.v.begin(), prims.v.begin() + size, v.get());
@@ -164,13 +164,13 @@ namespace simbi{
                 case 2:
                     {
                     // Write the Primitives 
-                    auto rho = std::unique_ptr<real>(new real[size]);
-                    auto v1  = std::unique_ptr<real>(new real[size]);
-                    auto v2  = std::unique_ptr<real>(new real[size]);
-                    auto p   = std::unique_ptr<real>(new real[size]);
-                    auto chi = std::unique_ptr<real>(new real[size]);
-                    auto x1  = std::unique_ptr<real>(new real[setup.x1.size()]);
-                    auto x2  = std::unique_ptr<real>(new real[setup.x2.size()]);
+                    auto rho = std::make_unique<real[]>(size);
+                    auto v1  = std::make_unique<real[]>(size);
+                    auto v2  = std::make_unique<real[]>(size);
+                    auto p   = std::make_unique<real[]>(size);
+                    auto chi = std::make_unique<real[]>(size);
+                    auto x1  = std::make_unique<real[]>(setup.x1.size());
+                    auto x2  = std::make_unique<real[]>(setup.x2.size());
 
                     std::copy(prims.rho.begin(),  prims.rho.begin() + size, rho.get());
                     std::copy(prims.v1.begin(),   prims.v1.begin()  + size, v1.get());
@@ -213,15 +213,15 @@ namespace simbi{
                 case 3:
                     {
                     // Write the Primitives 
-                    auto rho = std::unique_ptr<real>(new real[size]);
-                    auto v1  = std::unique_ptr<real>(new real[size]);
-                    auto v2  = std::unique_ptr<real>(new real[size]);
-                    auto v3  = std::unique_ptr<real>(new real[size]);
-                    auto p   = std::unique_ptr<real>(new real[size]);
-                    auto chi = std::unique_ptr<real>(new real[size]);
-                    auto x1  = std::unique_ptr<real>(new real[setup.x1.size()]);
-                    auto x2  = std::unique_ptr<real>(new real[setup.x2.size()]);
-                    auto x3  = std::unique_ptr<real>(new real[setup.x3.size()]);
+                    auto rho = std::make_unique<real[]>(size);
+                    auto v1  = std::make_unique<real[]>(size);
+                    auto v2  = std::make_unique<real[]>(size);
+                    auto v3  = std::make_unique<real[]>(size);
+                    auto p   = std::make_unique<real[]>(size);
+                    auto chi = std::make_unique<real[]>(size);
+                    auto x1  = std::make_unique<real[]>(setup.x1.size());
+                    auto x2  = std::make_unique<real[]>(setup.x2.size());
+                    auto x3  = std::make_unique<real[]>(setup.x3.size());
 
                     std::copy(prims.rho.begin(), prims.rho.begin() + size, rho.get());
                     std::copy(prims.v1.begin(), prims.v1.begin() + size, v1.get());
