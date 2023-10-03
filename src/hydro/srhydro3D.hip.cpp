@@ -316,8 +316,8 @@ void SRHD3D::adapt_dt()
                         v3m = 1;
                     }
 
-                    const auto x1l     = get_x1face(ii, geometry, 0);
-                    const auto x1r     = get_x1face(ii, geometry, 1);
+                    const auto x1l     = get_x1face(ii, 0);
+                    const auto x1r     = get_x1face(ii, 1);
                     const auto dx1     = x1r - x1l; 
                     switch (geometry)
                     {

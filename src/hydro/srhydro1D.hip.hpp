@@ -110,10 +110,10 @@ namespace simbi
                std::function<double(double)> e_outer = nullptr);
 
           GPU_CALLABLE_MEMBER
-          real calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side) const;
+          real calc_vface(const lint ii, const real hubble_const, const int side) const;
           
           GPU_CALLABLE_INLINE
-          constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side) const
+          constexpr real get_x1face(const lint ii, const int side) const
           {
                switch (geometry)
                {
@@ -170,8 +170,8 @@ namespace simbi
                          const real v     = cons[ii].s / (cons[ii].tau + cons[ii].d + prims[ii].p);
                          const real W     = 1 / std::sqrt(1 - v * v);
                          const luint idx  = helpers::get_real_idx(ii, radius, active_zones);
-                         const real xl    = get_xface(idx, geometry, 0);
-                         const real xr    = get_xface(idx, geometry, 1);
+                         const real xl    = get_x1face(idx, 0);
+                         const real xr    = get_x1face(idx, 1);
                          const real xmean = helpers::calc_any_mean(xl, xr, x1cell_spacing);
                          printf("\nCons2Prim cannot converge: \ndensity: %.3e, pressure: %.3e, v: %.3e, coord: %.2e, iter: %d\n", 
                          cons[ii].d / W, prims[ii].p, v, xmean, troubled_cells[ii]);

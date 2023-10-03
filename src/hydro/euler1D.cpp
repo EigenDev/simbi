@@ -137,8 +137,8 @@ void Newtonian1D::adapt_dt(){
             const real cs       = std::sqrt(gamma * pre/rho);
             const real vPLus    = v + cs;
             const real vMinus   = v - cs;
-            const real x1l      = get_xface(ii, geometry, 0);
-            const real x1r      = get_xface(ii, geometry, 1);
+            const real x1l      = get_x1face(ii, 0);
+            const real x1r      = get_x1face(ii, 1);
             const real dx1      = x1r - x1l;
             const real vfaceL   = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
             const real vfaceR   = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
@@ -156,8 +156,8 @@ void Newtonian1D::adapt_dt(){
             const real cs       = std::sqrt(gamma * pre/rho);
             const real vPLus    = v + cs;
             const real vMinus   = v - cs;
-            const real x1l      = get_xface(ii, geometry, 0);
-            const real x1r      = get_xface(ii, geometry, 1);
+            const real x1l      = get_x1face(ii, 0);
+            const real x1r      = get_x1face(ii, 1);
             const real dx1      = x1r - x1l;
             const real vfaceL   = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
             const real vfaceR   = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
@@ -337,8 +337,8 @@ void Newtonian1D::advance(const ExecutionPolicy<> &p)
             simbi::gpu::api::synchronize();
         #endif
 
-        const real x1l    = get_xface(ii, geometry, 0);
-        const real x1r    = get_xface(ii, geometry, 1);
+        const real x1l    = get_x1face(ii, 0);
+        const real x1r    = get_x1face(ii, 1);
         const real vfaceL = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
         const real vfaceR = 0.0; // (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
         if (first_order) [[unlikely]]

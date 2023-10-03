@@ -858,8 +858,8 @@ namespace simbi{
                     vPlus         = (v + cs);
                     vMinus        = (v - cs);
                 }
-                const real x1l    = self->get_xface(ii, self->geometry, 0);
-                const real x1r    = self->get_xface(ii, self->geometry, 1);
+                const real x1l    = self->get_x1face(ii, 0);
+                const real x1r    = self->get_x1face(ii, 1);
                 const real dx1    = x1r - x1l;
                 const real vfaceL = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1l * self->hubble_param;
                 const real vfaceR = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1r * self->hubble_param;
@@ -878,7 +878,6 @@ namespace simbi{
         {
             #if GPU_CODE
             real cfl_dt, v1p, v1m, v2p, v2m;
-            const real gamma = self->gamma;
             const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint ia  = ii + self->idx_active;
@@ -895,8 +894,8 @@ namespace simbi{
                 if constexpr(is_relativistic<T>::value)
                 {
                     if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        real h   = 1 + gamma * p / (rho * (gamma - 1));
-                        real cs  = std::sqrt(gamma * p / (rho * h));
+                        real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
+                        real cs  = std::sqrt(self->gamma * p / (rho * h));
                         plus_v1  = (v1 + cs) / (1 + v1 * cs);
                         plus_v2  = (v2 + cs) / (1 + v2 * cs);
                         minus_v1 = (v1 - cs) / (1 - v1 * cs);
@@ -908,7 +907,7 @@ namespace simbi{
                         minus_v2 = 1;
                     }
                 } else {
-                    real cs  = std::sqrt(gamma * p / rho);
+                    real cs  = std::sqrt(self->gamma * p / rho);
                     plus_v1  = (v1 + cs);
                     plus_v2  = (v2 + cs);
                     minus_v1 = (v1 - cs);
@@ -929,8 +928,8 @@ namespace simbi{
                     case simbi::Geometry::SPHERICAL:
                     {
                         // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                        const real rl           = self->get_x1face(ii, geometry, 0);
-                        const real rr           = self->get_x1face(ii, geometry, 1);
+                        const real rl           = self->get_x1face(ii, 0);
+                        const real rr           = self->get_x1face(ii, 1);
                         const real tl           = self->get_x2face(jj, 0);  
                         const real tr           = self->get_x2face(jj, 1); 
                         if (self->mesh_motion)
@@ -948,8 +947,8 @@ namespace simbi{
                     case simbi::Geometry::PLANAR_CYLINDRICAL:
                     {
                         // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
-                        const real rl           = self->get_x1face(ii, geometry, 0);
-                        const real rr           = self->get_x1face(ii, geometry, 1);
+                        const real rl           = self->get_x1face(ii, 0);
+                        const real rr           = self->get_x1face(ii, 1);
                         const real tl           = self->get_x2face(jj, 0);  
                         const real tr           = self->get_x2face(jj, 1); 
                         if (self->mesh_motion)
@@ -966,8 +965,8 @@ namespace simbi{
                     }
                     case simbi::Geometry::AXIS_CYLINDRICAL:
                     {
-                        const real rl           = self->get_x1face(ii, geometry, 0);
-                        const real rr           = self->get_x1face(ii, geometry, 1);
+                        const real rl           = self->get_x1face(ii, 0);
+                        const real rr           = self->get_x1face(ii, 1);
                         const real zl           = self->get_x2face(jj, 0);  
                         const real zr           = self->get_x2face(jj, 1); 
                         if (self->mesh_motion)
@@ -997,7 +996,6 @@ namespace simbi{
         {
             #if GPU_CODE
             real cfl_dt;
-            const real gamma = self->gamma;
             const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
@@ -1018,8 +1016,8 @@ namespace simbi{
                         const real v2   = prim_buffer[aid].get_v2();
                         const real v3   = prim_buffer[aid].get_v3();
 
-                        real h   = 1 + gamma * p / (rho * (gamma - 1));
-                        real cs  = std::sqrt(gamma * p / (rho * h));
+                        real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
+                        real cs  = std::sqrt(self->gamma * p / (rho * h));
                         plus_v1  = (v1 + cs) / (1 + v1 * cs);
                         plus_v2  = (v2 + cs) / (1 + v2 * cs);
                         plus_v3  = (v3 + cs) / (1 + v3 * cs);
@@ -1041,7 +1039,7 @@ namespace simbi{
                     const real v2   = prim_buffer[aid].get_v2();
                     const real v3   = prim_buffer[aid].get_v3();
                     
-                    real cs  = std::sqrt(gamma * p / rho);
+                    real cs  = std::sqrt(self->gamma * p / rho);
                     plus_v1  = (v1 + cs);
                     plus_v2  = (v2 + cs);
                     plus_v3  = (v3 + cs);
@@ -1050,8 +1048,8 @@ namespace simbi{
                     minus_v3 = (v3 - cs);
                 }
 
-                const auto x1l = self->get_x1face(ii, geometry, 0);
-                const auto x1r = self->get_x1face(ii, geometry, 1);
+                const auto x1l = self->get_x1face(ii, 0);
+                const auto x1r = self->get_x1face(ii, 1);
                 const auto dx1 = x1r - x1l; 
                 const auto x2l = self->get_x2face(jj, 0);
                 const auto x2r = self->get_x2face(jj, 1);

@@ -46,7 +46,7 @@ SRHD1D::SRHD1D(
 }
 
 GPU_CALLABLE_MEMBER
-real SRHD1D::calc_vface(const lint ii, const real hubble_const, const simbi::Geometry geometry, const int side) const
+real SRHD1D::calc_vface(const lint ii, const real hubble_const, const int side) const
 {
     switch(geometry)
     {
@@ -111,8 +111,8 @@ void SRHD1D::advance(const ExecutionPolicy<> &p)
             simbi::gpu::api::synchronize();
         #endif
 
-        const real x1l    = get_xface(ii, geometry, 0);
-        const real x1r    = get_xface(ii, geometry, 1);
+        const real x1l    = get_x1face(ii, 0);
+        const real x1r    = get_x1face(ii, 1);
         const real vfaceL = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
         const real vfaceR = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
         if (first_order) [[unlikely]]
@@ -462,8 +462,8 @@ void SRHD1D::adapt_dt()
                 }
             })();
 
-            const real x1l      = get_xface(ii, geometry, 0);
-            const real x1r      = get_xface(ii, geometry, 1);
+            const real x1l      = get_x1face(ii, 0);
+            const real x1r      = get_x1face(ii, 1);
             const real dx1      = x1r - x1l;
             const real vfaceL   = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
             const real vfaceR   = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
@@ -497,8 +497,8 @@ void SRHD1D::adapt_dt()
                 }
             })();
 
-            const real x1l      = get_xface(ii, geometry, 0);
-            const real x1r      = get_xface(ii, geometry, 1);
+            const real x1l      = get_x1face(ii, 0);
+            const real x1r      = get_x1face(ii, 1);
             const real dx1      = x1r - x1l;
             const real vfaceL   = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1l * hubble_param;
             const real vfaceR   = (geometry == simbi::Geometry::CARTESIAN) ? hubble_param : x1r * hubble_param;
@@ -513,7 +513,7 @@ template<TIMESTEP_TYPE dt_type>
 void SRHD1D::adapt_dt(const luint blockSize)
 {   
     #if GPU_CODE
-        helpers::compute_dt<Primitive><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
+        helpers::compute_dt<Primitive, dt_type><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
         helpers::deviceReduceWarpAtomicKernel<1><<<blockSize, gpu_block_dimx>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
     #endif

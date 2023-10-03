@@ -123,7 +123,7 @@ namespace simbi
             std::vector<std::vector<real>> boundary_sources);
 
         GPU_CALLABLE_INLINE
-        constexpr real get_x1face(const lint ii, const simbi::Geometry geometry, const int side)
+        constexpr real get_x1face(const lint ii, const int side)
         {
             switch (geometry)
             {
@@ -178,10 +178,10 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE
-        real get_cell_volume(const lint ii, const lint jj, const simbi::Geometry geometry, const real step)
+        real get_cell_volume(const lint ii, const lint jj, const real step)
         {
-            const real x1l     = get_x1face(ii, geometry, 0);
-            const real x1r     = get_x1face(ii, geometry, 1);
+            const real x1l     = get_x1face(ii, 0);
+            const real x1r     = get_x1face(ii, 1);
             // const real x1lf    = x1l * (1.0 + step * dt * hubble_param);
             // const real x1rf    = x1r * (1.0 + step * dt * hubble_param);
             const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
@@ -207,8 +207,8 @@ namespace simbi
                     const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
                     const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
                     const lint kreal  = helpers::get_real_idx(kk, radius, zphysical_grid); 
-                    const real x1l    = get_x1face(ireal, geometry, 0);
-                    const real x1r    = get_x1face(ireal, geometry, 1);
+                    const real x1l    = get_x1face(ireal, 0);
+                    const real x1r    = get_x1face(ireal, 1);
                     const real x2l    = get_x2face(jreal, 0);
                     const real x2r    = get_x2face(jreal, 1);
                     const real x3l    = get_x3face(kreal, 0);

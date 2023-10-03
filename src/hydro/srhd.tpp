@@ -12,7 +12,6 @@
 #include "util/printb.hpp"
 #include "common/helpers.hip.hpp"
 #include "util/logger.hpp"
-#include "srhd.hpp"
 
 using namespace simbi;
 using namespace simbi::util;
@@ -474,7 +473,11 @@ void SRHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
     {
-        helpers::compute_dt<Primitive<dim>, dt_type><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
+        if constexpr(dim == 1) {
+            helpers::compute_dt<Primitive<1>, dt_type><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
+        } else {
+            helpers::compute_dt<Primitive<dim>, dt_type><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
+        }
         helpers::deviceReduceWarpAtomicKernel<dim><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
         gpu::api::deviceSynch();
     }
@@ -590,8 +593,6 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
     const Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL  = lambda.aL;
     const real aR  = lambda.aR;
-    const real csL = lambda.csL;
-    const real csR = lambda.csR;
 
     //---- Check Wave Speeds before wasting computations
     if (vface <= aL) {
@@ -686,6 +687,8 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
         {
         case HLLCTYPE::FLEISCHMANN:
             {
+                const real csL = lambda.csL;
+                const real csR = lambda.csR;
                 constexpr real ma_lim = static_cast<real>(0.1);
 
                 // --------------Compute the L Star State----------

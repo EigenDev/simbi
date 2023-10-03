@@ -208,8 +208,8 @@ void Newtonian2D::adapt_dt()
                                 const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
                                 const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                                 const real dtheta = tr - tl;
-                                const real x1l    = get_x1face(ii, geometry, 0);
-                                const real x1r    = get_x1face(ii, geometry, 1);
+                                const real x1l    = get_x1face(ii, 0);
+                                const real x1r    = get_x1face(ii, 1);
                                 const real dr     = x1r - x1l;
                                 const real rmean  = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
                                 if (mesh_motion)
@@ -228,8 +228,8 @@ void Newtonian2D::adapt_dt()
                                 const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
                                 const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                                 const real dtheta = tr - tl;
-                                const real x1l    = get_x1face(ii, geometry, 0);
-                                const real x1r    = get_x1face(ii, geometry, 1);
+                                const real x1l    = get_x1face(ii, 0);
+                                const real x1r    = get_x1face(ii, 1);
                                 const real dr     = x1r - x1l;
                                 const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
                                 if (mesh_motion)
@@ -247,8 +247,8 @@ void Newtonian2D::adapt_dt()
                                 const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
                                 const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                                 const real dz     = zr - zl;
-                                const real x1l    = get_x1face(ii, geometry, 0);
-                                const real x1r    = get_x1face(ii, geometry, 1);
+                                const real x1l    = get_x1face(ii, 0);
+                                const real x1r    = get_x1face(ii, 1);
                                 const real dr     = x1r - x1l;
                                 // const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
                                 if (mesh_motion)
@@ -308,8 +308,8 @@ void Newtonian2D::adapt_dt()
                         const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
                         const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dtheta = tr - tl;
-                        const real x1l    = get_x1face(ii, geometry, 0);
-                        const real x1r    = get_x1face(ii, geometry, 1);
+                        const real x1l    = get_x1face(ii, 0);
+                        const real x1r    = get_x1face(ii, 1);
                         const real dr     = x1r - x1l;
                         const real rmean  = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l * x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
                         if (mesh_motion)
@@ -328,8 +328,8 @@ void Newtonian2D::adapt_dt()
                         const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
                         const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dtheta = tr - tl;
-                        const real x1l    = get_x1face(ii, geometry, 0);
-                        const real x1r    = get_x1face(ii, geometry, 1);
+                        const real x1l    = get_x1face(ii, 0);
+                        const real x1r    = get_x1face(ii, 1);
                         const real dr     = x1r - x1l;
                         const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
                         if (mesh_motion)
@@ -347,8 +347,8 @@ void Newtonian2D::adapt_dt()
                         const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
                         const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dz     = zr - zl;
-                        const real x1l    = get_x1face(ii, geometry, 0);
-                        const real x1r    = get_x1face(ii, geometry, 1);
+                        const real x1l    = get_x1face(ii, 0);
+                        const real x1r    = get_x1face(ii, 1);
                         const real dr     = x1r - x1l;
                         // const real rmean  = (2.0 / 3.0)* (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
                         if (mesh_motion)
@@ -818,8 +818,8 @@ void Newtonian2D::advance(
             
             case simbi::Geometry::SPHERICAL:
                 {
-                const real rl           = get_x1face(ii, geometry, 0); 
-                const real rr           = get_x1face(ii, geometry, 1);
+                const real rl           = get_x1face(ii, 0); 
+                const real rr           = get_x1face(ii, 1);
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
                 const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
                 const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
@@ -843,8 +843,8 @@ void Newtonian2D::advance(
                 }
             case simbi::Geometry::PLANAR_CYLINDRICAL:
                 {
-                const real rl           = get_x1face(ii, geometry, 0); 
-                const real rr           = get_x1face(ii, geometry, 1);
+                const real rl           = get_x1face(ii, 0); 
+                const real rr           = get_x1face(ii, 1);
                 const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                 // const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
                 // const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
@@ -867,8 +867,8 @@ void Newtonian2D::advance(
                 }
             case simbi::Geometry::AXIS_CYLINDRICAL:
                 {
-                const real rl           = get_x1face(ii, geometry, 0); 
-                const real rr           = get_x1face(ii, geometry, 1);
+                const real rl           = get_x1face(ii, 0); 
+                const real rr           = get_x1face(ii, 1);
                 const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                 const real dVtot        = rmean * (rr - rl) * dx2;
                 const real invdV        = 1.0 / dVtot;

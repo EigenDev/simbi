@@ -94,7 +94,7 @@ namespace simbi
         void cons2prim(const ExecutionPolicy<> &p);
 
         GPU_CALLABLE_INLINE
-        constexpr real get_x1face(const lint ii, const simbi::Geometry geometry, const int side)
+        constexpr real get_x1face(const lint ii, const int side)
         {
             switch (geometry)
             {
@@ -140,8 +140,8 @@ namespace simbi
             {
             case simbi::Geometry::SPHERICAL:
             {
-                const real xl     = get_x1face(ii, geometry, 0);
-                const real xr     = get_x1face(ii, geometry, 1);
+                const real xl     = get_x1face(ii, 0);
+                const real xr     = get_x1face(ii, 1);
                 const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                 const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dcos   = std::cos(tl) - std::cos(tr);
@@ -150,8 +150,8 @@ namespace simbi
             }
             case simbi::Geometry::PLANAR_CYLINDRICAL:
             {
-                const real xl     = get_x1face(ii, geometry, 0);
-                const real xr     = get_x1face(ii, geometry, 1);
+                const real xl     = get_x1face(ii, 0);
+                const real xr     = get_x1face(ii, 1);
                 const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                 const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dx2    = tr - tl;
@@ -161,8 +161,8 @@ namespace simbi
 
             case simbi::Geometry::AXIS_CYLINDRICAL:
             {
-                const real rl     = get_x1face(ii, geometry, 0);
-                const real rr     = get_x1face(ii, geometry, 1);
+                const real rl     = get_x1face(ii, 0);
+                const real rr     = get_x1face(ii, 1);
                 const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                 const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dx2    = zr - zl;
@@ -216,8 +216,8 @@ namespace simbi
                     const auto jj     = gid / nx;
                     const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
                     const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
-                    const real x1l    = get_x1face(ireal, geometry, 0);
-                    const real x1r    = get_x1face(ireal, geometry, 1);
+                    const real x1l    = get_x1face(ireal, 0);
+                    const real x1r    = get_x1face(ireal, 1);
                     const real x2l    = get_x2face(jreal, 0);
                     const real x2r    = get_x2face(jreal, 1);
                     const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);

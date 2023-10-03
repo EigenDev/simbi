@@ -51,7 +51,7 @@ namespace simbi {
         hydro1d::Conserved prims2flux(const hydro1d::Primitive &prims);
 
         GPU_CALLABLE_INLINE
-        constexpr real get_xface(const lint ii, const simbi::Geometry geometry, const int side) const
+        constexpr real get_x1face(const lint ii, const int side) const
         {
             switch (geometry)
             {

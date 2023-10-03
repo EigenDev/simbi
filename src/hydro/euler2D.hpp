@@ -103,7 +103,7 @@ namespace simbi {
 
 
         GPU_CALLABLE_INLINE
-        constexpr real get_x1face(const lint ii, const simbi::Geometry geometry, const int side)
+        constexpr real get_x1face(const lint ii, const int side)
         {
             switch (geometry)
             {
@@ -147,8 +147,8 @@ namespace simbi {
             {
             case simbi::Geometry::SPHERICAL:
             {
-                const real xl     = get_x1face(ii, geometry, 0);
-                const real xr     = get_x1face(ii, geometry, 1);
+                const real xl     = get_x1face(ii, 0);
+                const real xr     = get_x1face(ii, 1);
                 const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                 const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dcos   = std::cos(tl) - std::cos(tr);
@@ -157,8 +157,8 @@ namespace simbi {
             }
             case simbi::Geometry::PLANAR_CYLINDRICAL:
             {
-                const real xl     = get_x1face(ii, geometry, 0);
-                const real xr     = get_x1face(ii, geometry, 1);
+                const real xl     = get_x1face(ii, 0);
+                const real xr     = get_x1face(ii, 1);
                 const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                 const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dx2    = tr - tl;
@@ -168,8 +168,8 @@ namespace simbi {
 
             case simbi::Geometry::AXIS_CYLINDRICAL:
             {
-                const real xl     = get_x1face(ii, geometry, 0);
-                const real xr     = get_x1face(ii, geometry, 1);
+                const real xl     = get_x1face(ii, 0);
+                const real xr     = get_x1face(ii, 1);
                 const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
                 const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dx2    = zr - zl;

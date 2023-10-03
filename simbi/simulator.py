@@ -512,11 +512,11 @@ class Hydro:
         self.chkpt_idx: int = 0
         if compute_mode in ['cpu', 'omp']:
             from .libs.cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-            from .libs.cpu_ext import PyStateSRHD1D
+            from .libs.cpu_ext import Buddy
         else:
             try:
                 from .libs.gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-                from .libs.gpu_ext import PyStateSRHD1D
+                from .libs.gpu_ext import Buddy
             except ImportError as e:
                 logger.warning(
                     "Error in loading GPU extension. Loading CPU instead...")
@@ -649,7 +649,7 @@ class Hydro:
                 kwargs = {
                     'a': scale_factor, 
                     'adot': scale_factor_derivative,
-                #   'gravity_sources': gsources
+                    # 'gravity_sources': gsources
                     }
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] = dens_outer
@@ -769,11 +769,13 @@ class Hydro:
         }
         
         if self.dimensionality == 1:
-            state = PyStateSRHD1D(
+            bud = Buddy()
+            res = bud.run(
                 self.u,
+                1,
+                "relativistic".encode('utf-8'),
                 init_conditions
             )
-            self.solution = state.simulate(**kwargs)
             
         # self.solution = state.simulate(
         #     sources=sources,
