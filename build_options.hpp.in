@@ -72,7 +72,7 @@ constexpr bool col_maj = false;
 #endif 
 
 //======================== Managed Memory Check
-#ifdef MANAGED
+#if MANAGED_MEMORY
 constexpr bool managed_memory = true;
 #else 
 constexpr bool managed_memory = false;

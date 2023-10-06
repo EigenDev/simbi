@@ -35,7 +35,7 @@ namespace simbi
         ndarray<simbi::BoundaryCondition> bcs;
         ndarray<int> troubled_cells;
         ndarray<real> sourceG1, sourceG2, sourceG3;
-        ndarray<real> dens_source, m1_source, m2_source, m3_source, erg_source;
+        ndarray<real> density_source, m1_source, m2_source, m3_source, energy_source;
         simbi::Geometry geometry;
         simbi::Cellspacing x1cell_spacing, x2cell_spacing, x3cell_spacing;
         luint blockSize, checkpoint_zones;
@@ -246,15 +246,9 @@ namespace simbi
         }
 
         void initialize(const InitialConditions &init_conditions) {
-            // Define the source terms
-            this->dens_source = init_conditions.sources[0];
-            this->m1_source   = init_conditions.sources[1];
-            this->sourceG1    = init_conditions.gsource[0];
 
             // Define simulation params
             this->tend                = init_conditions.tend;
-            this->boundary_conditions = init_conditions.boundary_conditions;
-            this->boundary_sources    = init_conditions.boundary_sources;
             this->quirk_smoothing     = init_conditions.quirk_smoothing;
             this->t                   = init_conditions.tstart;
             this->object_pos          = init_conditions.object_cells;
@@ -281,17 +275,11 @@ namespace simbi
             this->x1min               = x1[0];
             this->x1max               = x1[xphysical_grid - 1];
 
-            if ((ny > 1) && (nz > 1)) { // 2D check
-                this->m2_source   = init_conditions.sources[2];
-                this->m3_source   = init_conditions.sources[3];
-                this->erg_source  = init_conditions.sources[4];
-                this->sourceG2    = init_conditions.gsource[1];
-                this->sourceG3    = init_conditions.gsource[2];
+            if ((ny > 1) && (nz > 1)) { // 3D check
                 this->x2min            = x2[0];
                 this->x2max            = x2[yphysical_grid - 1];
                 this->x3min            = x3[0];
                 this->x3max            = x3[zphysical_grid - 1];
-
                 this->dx3              = (x3[zphysical_grid - 1] - x3[0]) / (zphysical_grid - 1);
                 this->dx2              = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
                 this->invdx2           = 1 / dx2;
@@ -301,23 +289,17 @@ namespace simbi
                 this->mom2_source_all_zeros    = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
                 this->mom3_source_all_zeros    = std::all_of(m3_source.begin(),  m3_source.end(),  [](real i) {return i == 0;});
             } else if ((ny > 1) && (nz == 1)) { // 2D Check
-                this->m2_source   = init_conditions.sources[2];
-                this->erg_source  = init_conditions.sources[3];
-                this->sourceG2    = init_conditions.gsource[1];
-
                 this->x2min            = x2[0];
                 this->x2max            = x2[yphysical_grid - 1];
                 this->x3cell_spacing   = simbi::Cellspacing::LINSPACE;
                 this->dx2    = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
                 this->invdx2 = 1 / dx2;
                 this->mom2_source_all_zeros    = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
-            } else { // 1D
-                this->erg_source  = init_conditions.sources[2];
             }
 
-            this->den_source_all_zeros     = std::all_of(dens_source.begin(), dens_source.end(),   [](real i) {return i == 0;});
+            this->den_source_all_zeros     = std::all_of(density_source.begin(), density_source.end(),   [](real i) {return i == 0;});
             this->mom1_source_all_zeros    = std::all_of(m1_source.begin(),   m1_source.end(),  [](real i) {return i == 0;});
-            this->energy_source_all_zeros  = std::all_of(erg_source.begin(),  erg_source.end(), [](real i) {return i == 0;});
+            this->energy_source_all_zeros  = std::all_of(energy_source.begin(),  energy_source.end(), [](real i) {return i == 0;});
 
             if (nz > 1) {
                 this->checkpoint_zones = zphysical_grid;
@@ -326,7 +308,7 @@ namespace simbi
             } else {
                 this->checkpoint_zones = xphysical_grid;
             }
-            
+
             define_tinterval(t, dlogt, chkpt_interval, init_conditions.chkpt_idx);
             define_chkpt_idx(init_conditions.chkpt_idx);
         }

@@ -20,7 +20,7 @@ from libcpp cimport bool
 from libcpp.string cimport string 
 
 # Creating the cython wrapper class
-cdef class PyState:
+cdef class PyState1D:
     cdef Newtonian1D *c_state             # hold a c++ instance that we're wrapping           
     def __init__(self, 
         np.ndarray[np.double_t, ndim=2] state, 
@@ -46,7 +46,8 @@ cdef class PyState:
         bool linspace,
         string solver,
         bool constant_sources,
-        vector[vector[real]] boundary_sources):
+        vector[vector[real]] boundary_sources,
+        **kwargs):
 
         result = self.c_state.simulate1D(
             sources,
@@ -71,7 +72,7 @@ cdef class PyState:
         del self.c_state
 
 # Relativisitc 1D Class
-cdef class PyStateSR:
+cdef class PyStateSR1D:
     cdef SRHD1D *c_state             # hold a c++ instance that we're wrapping           
 
     def __cinit__(self, 
@@ -104,7 +105,8 @@ cdef class PyStateSR:
         adot,
         d_outer = None,
         s_outer = None,
-        e_outer = None):
+        e_outer = None,
+        **kwargs):
 
         cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
@@ -191,7 +193,8 @@ cdef class PyState2D:
         bool linspace, 
         string solver,
         bool constant_sources,
-        vector[vector[real]] boundary_sources):
+        vector[vector[real]] boundary_sources,
+        **kwargs):
 
         result = self.c_state.simulate2D(
             sources,
@@ -262,7 +265,8 @@ cdef class PyStateSR2D:
         d_outer  = None,
         s1_outer = None,
         s2_outer = None,
-        e_outer  = None):
+        e_outer  = None,
+        **kwargs):
         
         cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
@@ -368,7 +372,8 @@ cdef class PyStateSR3D:
         bool linspace,
         string solver,
         bool constant_sources,
-        vector[vector[real]] boundary_sources):
+        vector[vector[real]] boundary_sources,
+        **kwargs):
         
         object_contig = object_cells.flatten()
         result = self.c_state.simulate3D(
@@ -547,58 +552,19 @@ cdef class PyStateSR3D:
 #     def __dealloc__(self):
 #         del self.c_state
 
-cdef class Buddy:
-    cdef Driver driver_state
+# cdef class Buddy:
+#     cdef Driver driver_state
 
-    def __cinit__(self):
-        self.driver_state =  Driver()
+#     def __cinit__(self):
+#         self.driver_state =  Driver()
 
-    def run(
-        self,
-        np.ndarray[np.double_t, ndim=2] state,
-        int dim,
-        string regime,
-        dict sim_info
-    ):
-        cdef InitialConditions sim_cond 
-        sim_cond.tend             = sim_info['tend']
-        sim_cond.tstart           = sim_info['tstart']
-        sim_cond.chkpt_interval   = sim_info['chkpt_interval']
-        sim_cond.dlogt            = sim_info['dlogt']
-        sim_cond.plm_theta        = sim_info['plm_theta']
-        sim_cond.engine_duration  = sim_info['engine_duration']
-        sim_cond.nx               = sim_info['nx']
-        sim_cond.ny               = sim_info['ny']
-        sim_cond.nz               = sim_info['nz']
-        sim_cond.first_order      = sim_info['first_order']
-        sim_cond.linspace         = sim_info['linspace']
-        sim_cond.object_cells     = sim_info['object_cells']
-        sim_cond.sources          = sim_info['sources']
-        sim_cond.gsource          = sim_info['gsource']
-        sim_cond.data_directory   = sim_info['data_directory']
-        sim_cond.coord_system     = sim_info['coord_system']
-        sim_cond.solver           = sim_info['solver']
-        sim_cond.gamma            = sim_info['gamma']
-        sim_cond.x1               = sim_info['x1']
-        sim_cond.coord_system     = sim_info['coord_system']
-        sim_cond.boundary_sources = sim_info['boundary_sources']
-        sim_cond.cfl              = sim_info['cfl']
-        sim_cond.boundary_conditions = sim_info['boundary_conditions']
-
-        state_contig = state.reshape(state.shape[0], -1)
-        res = self.driver_state.run(state_contig, dim, regime, sim_cond)
-        if dim == 1:
-            res = np.asanyarray(res)
-        
-        return res
-
-    
-# cdef class PyStateSRHD1D:
-#     cdef SRHD[dim1] *cpp_state         
-
-#     def __cinit__(self,  
-#         np.ndarray[np.double_t, ndim=2] state, 
-#         dict sim_info):
+#     def run(
+#         self,
+#         np.ndarray[np.double_t, ndim=2] state,
+#         int dim,
+#         string regime,
+#         dict sim_info
+#     ):
 #         cdef InitialConditions sim_cond 
 #         sim_cond.tend             = sim_info['tend']
 #         sim_cond.tstart           = sim_info['tstart']
@@ -625,41 +591,81 @@ cdef class Buddy:
 #         sim_cond.boundary_conditions = sim_info['boundary_conditions']
 
 #         state_contig = state.reshape(state.shape[0], -1)
-#         self.cpp_state = new SRHD[dim1](state_contig, sim_cond)
-
-#     def simulate(self, 
-#         *,
-#         a,
-#         adot,
-#         d_outer  = None,
-#         s1_outer = None,
-#         e_outer  = None):
+#         res = self.driver_state.run(state_contig, dim, regime, sim_cond)
+#         if dim == 1:
+#             res = np.asanyarray(res)
         
-#         cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
-#         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
-#         cdef PyObjWrapper d_cpp    = PyObjWrapper(d_outer)
-#         cdef PyObjWrapper s1_cpp   = PyObjWrapper(s1_outer)
-#         cdef PyObjWrapper s2_cpp   = PyObjWrapper(None)
-#         cdef PyObjWrapper s3_cpp   = PyObjWrapper(None)
-#         cdef PyObjWrapper e_cpp    = PyObjWrapper(e_outer)
+#         return res
 
-#         if d_outer and s1_outer and e_outer:
-#             result = self.cpp_state.simulate(
-#                 a_cpp,
-#                 adot_cpp,
-#                 d_cpp,
-#                 s1_cpp,
-#                 s2_cpp,
-#                 s3_cpp,
-#                 e_cpp
-#             )
-#         else:
-#             result = self.cpp_state.simulate(
-#                 a_cpp,
-#                 adot_cpp
-#             )
+    
+cdef class PyStateSRHD1D:
+    cdef SRHD[dim1, build_mode] *cpp_state         
 
-#         return np.asanyarray(result)
+    def __cinit__(self,  
+        np.ndarray[np.double_t, ndim=2] state, 
+        dict sim_info):
+        cdef InitialConditions sim_cond 
+        sim_cond.tend             = sim_info['tend']
+        sim_cond.tstart           = sim_info['tstart']
+        sim_cond.chkpt_interval   = sim_info['chkpt_interval']
+        sim_cond.dlogt            = sim_info['dlogt']
+        sim_cond.plm_theta        = sim_info['plm_theta']
+        sim_cond.engine_duration  = sim_info['engine_duration']
+        sim_cond.nx               = sim_info['nx']
+        sim_cond.ny               = sim_info['ny']
+        sim_cond.nz               = sim_info['nz']
+        sim_cond.first_order      = sim_info['first_order']
+        sim_cond.linspace         = sim_info['linspace']
+        sim_cond.object_cells     = sim_info['object_cells']
+        sim_cond.sources          = sim_info['sources']
+        sim_cond.gsource          = sim_info['gsource']
+        sim_cond.data_directory   = sim_info['data_directory']
+        sim_cond.coord_system     = sim_info['coord_system']
+        sim_cond.solver           = sim_info['solver']
+        sim_cond.gamma            = sim_info['gamma']
+        sim_cond.x1               = sim_info['x1']
+        sim_cond.coord_system     = sim_info['coord_system']
+        sim_cond.boundary_sources = sim_info['boundary_sources']
+        sim_cond.cfl              = sim_info['cfl']
+        sim_cond.boundary_conditions = sim_info['boundary_conditions']
 
-#     def __dealloc__(self):
-#         del self.cpp_state
+        state_contig = state.reshape(state.shape[0], -1)
+        self.cpp_state = new SRHD[dim1,build_mode](state_contig, sim_cond)
+
+    def simulate(self, 
+        *,
+        a,
+        adot,
+        d_outer  = None,
+        s1_outer = None,
+        e_outer  = None,
+        **kwargs):
+        
+        cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
+        cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
+        cdef PyObjWrapper d_cpp    = PyObjWrapper(d_outer)
+        cdef PyObjWrapper s1_cpp   = PyObjWrapper(s1_outer)
+        cdef PyObjWrapper s2_cpp   = PyObjWrapper(None)
+        cdef PyObjWrapper s3_cpp   = PyObjWrapper(None)
+        cdef PyObjWrapper e_cpp    = PyObjWrapper(e_outer)
+
+        if d_outer and s1_outer and e_outer:
+            result = self.cpp_state.simulate(
+                a_cpp,
+                adot_cpp,
+                d_cpp,
+                s1_cpp,
+                s2_cpp,
+                s3_cpp,
+                e_cpp
+            )
+        else:
+            result = self.cpp_state.simulate(
+                a_cpp,
+                adot_cpp
+            )
+
+        return np.asanyarray(result)
+
+    def __dealloc__(self):
+        del self.cpp_state

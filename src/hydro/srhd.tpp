@@ -34,14 +34,14 @@ template<int dim>
 constexpr auto write2file = helpers::write_to_file<typename SRHD<dim>::primitive_soa_t, dim, SRHD<dim>>;
 
 // Default Constructor
-template<int dim>
-SRHD<dim>::SRHD() {
+template<int dim, Platform build_mode>
+SRHD<dim,build_mode>::SRHD() {
     
 }
 
 // Overloaded Constructor
-template<int dim>
-SRHD<dim>::SRHD(
+template<int dim, Platform build_mode>
+SRHD<dim,build_mode>::SRHD(
     std::vector<std::vector<real>> &state, 
     InitialConditions &init_conditions)
 :
@@ -50,12 +50,219 @@ SRHD<dim>::SRHD(
         init_conditions
     )
 {
+    // CPU / GPU arrays need to live within the simulation state
+    // instead of the base state because of the template-dependent 
+    // build_mode of the ndarray class 
 
+    this->boundary_conditions = init_conditions.boundary_conditions;
+    this->boundary_sources    = init_conditions.boundary_sources;
+    // Define the source terms
+    this->density_source = init_conditions.sources[0];
+    this->m1_source      = init_conditions.sources[1];
+    this->sourceG1       = init_conditions.gsource[0];
+    if ((ny > 1) && (nz > 1)) { // 3D check
+        this->m2_source   = init_conditions.sources[2];
+        this->m3_source   = init_conditions.sources[3];
+        this->energy_source  = init_conditions.sources[4];
+        this->sourceG2    = init_conditions.gsource[1];
+        this->sourceG3    = init_conditions.gsource[2];
+    } else if ((ny > 1) && (nz == 1)) { // 2D check
+        this->m2_source   = init_conditions.sources[2];
+        this->energy_source  = init_conditions.sources[3];
+        this->sourceG2    = init_conditions.gsource[1];
+    } else { // 1D check
+        this->energy_source = init_conditions.sources[2];
+    }
 }
 
 // Destructor
-template<int dim>
-SRHD<dim>::~SRHD() {}
+template<int dim, Platform build_mode>
+SRHD<dim,build_mode>::~SRHD() {}
+
+
+// Helpers
+template<int dim, Platform build_mode>
+GPU_CALLABLE_INLINE
+constexpr real SRHD<dim,build_mode>::get_x1face(const lint ii, const int side) const
+{
+    switch (geometry)
+    {
+    case simbi::Geometry::CARTESIAN:
+        {
+            const real x1l = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+            if (side == 0) {
+                return x1l;
+            }
+            return helpers::my_min(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+        }
+    case simbi::Geometry::SPHERICAL:
+        {
+            const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+            if (side == 0) {
+                return rl;
+            }
+            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+        }
+    default:
+        {
+            const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+            if (side == 0) {
+                return rl;
+            }
+            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+        }
+        break;
+    }
+}
+
+
+template<int dim, Platform build_mode>
+GPU_CALLABLE_INLINE
+constexpr real SRHD<dim,build_mode>::get_x2face(const lint ii, const int side) const
+{
+    const real x2l = helpers::my_max(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
+    if (side == 0) {
+        return x2l;
+    } 
+    return helpers::my_min(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+}
+
+template<int dim, Platform build_mode>
+GPU_CALLABLE_INLINE
+constexpr real SRHD<dim,build_mode>::get_x3face(const lint ii, const int side) const
+{
+
+    const real x3l = helpers::my_max(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
+    if (side == 0) {
+        return x3l;
+    } 
+    return helpers::my_min(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
+}
+
+template<int dim, Platform build_mode>
+GPU_CALLABLE_INLINE
+constexpr real SRHD<dim,build_mode>::get_x1_differential(const lint ii) const {
+    const real x1l   = get_x1face(ii, 0);
+    const real x1r   = get_x1face(ii, 1);
+    const real xmean = helpers::get_cell_centroid(x1r, x1l, geometry);
+    switch (geometry)
+    {
+    case Geometry::SPHERICAL:
+        return xmean * xmean * (x1r - x1l);
+    default:
+        return xmean * (x1r - x1l);
+    }
+}
+
+template<int dim, Platform build_mode>
+GPU_CALLABLE_INLINE
+constexpr real SRHD<dim,build_mode>::get_x2_differential(const lint ii) const {
+    if constexpr(dim == 1) {
+        switch (geometry)
+        {
+        case Geometry::SPHERICAL:
+            return 2;
+        default:
+            return static_cast<real>(2 * M_PI);
+        }
+    } else {
+        switch (geometry)
+        {
+            case Geometry::SPHERICAL:
+            {
+                const real x2l = get_x2face(ii, 0);
+                const real x2r = get_x2face(ii, 1);
+                const real dcos = std::cos(x2l) - std::cos(x2r);
+                return dcos;  
+            }
+            default:
+            {
+                return dx2;
+            }
+        }
+    }
+}
+
+template<int dim, Platform build_mode>
+GPU_CALLABLE_INLINE
+constexpr real SRHD<dim,build_mode>::get_x3_differential(const lint ii) const {
+    if constexpr(dim == 1) {
+        switch (geometry)
+        {
+        case Geometry::SPHERICAL:
+            return static_cast<real>(2 * M_PI);
+        default:
+            return 1;
+        }
+    } else if constexpr(dim == 2) {
+        switch (geometry)
+        {
+            case Geometry::PLANAR_CYLINDRICAL:
+                    return 1;
+            default:
+                return static_cast<real>(2 * M_PI);
+                break;
+        }
+    } else {
+        return dx3;
+    }
+}
+
+template<int dim, Platform build_mode>
+GPU_CALLABLE_INLINE
+real SRHD<dim,build_mode>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
+{
+    return get_x1_differential(ii) * get_x2_differential(jj) * get_x3_differential(kk);
+}
+
+template<int dim, Platform build_mode>
+void SRHD<dim,build_mode>::emit_troubled_cells() {
+    troubled_cells.copyFromGpu();
+    cons.copyFromGpu();
+    prims.copyFromGpu();
+    for (luint gid = 0; gid < total_zones; gid++)
+    {
+        if (troubled_cells[gid] != 0) {
+            const luint xpg   = xphysical_grid;
+            const luint ypg   = yphysical_grid;
+            const luint kk    = detail::get_height(gid, xpg, ypg);
+            const luint jj    = detail::get_row(gid, xpg, ypg, kk);
+            const luint ii    = detail::get_column(gid, xpg, ypg, kk);
+            const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
+            const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
+            const lint kreal  = helpers::get_real_idx(kk, radius, zphysical_grid); 
+            const real x1l    = get_x1face(ireal, 0);
+            const real x1r    = get_x1face(ireal, 1);
+            const real x2l    = get_x2face(jreal, 0);
+            const real x2r    = get_x2face(jreal, 1);
+            const real x3l    = get_x3face(kreal, 0);
+            const real x3r    = get_x3face(kreal, 1);
+            const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
+            const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
+            const real x3mean = helpers::calc_any_mean(x3l, x3r, x3cell_spacing);
+            const auto s1 = cons[gid].momentum(1);
+            const auto s2 = cons[gid].momentum(2);
+            const auto s3 = cons[gid].momentum(3);
+            const real et  = (cons[gid].d + cons[gid].tau + prims[gid].p);
+            const real s   = std::sqrt(s1 * s2 + s2 * s2 + s3 * s3);
+            const real v2  = (s * s) / (et * et);
+            const real w   = 1 / std::sqrt(1 - v2);
+            if constexpr(dim == 1) {
+                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, iter: %d\n", 
+                        cons[gid].d / w, prims[gid].p, v2, x1mean, troubled_cells[gid]
+                );
+            } else if constexpr(dim == 2) {
+                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %d\n", 
+                        cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, troubled_cells[gid]
+                );
+            } else {
+                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %d\n", 
+                        cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, x3mean, troubled_cells[gid]
+                );
+            }
+        }
+    }
+}
 //-----------------------------------------------------------------------------------------
 //                          GET THE Primitive
 //-----------------------------------------------------------------------------------------
@@ -66,8 +273,8 @@ SRHD<dim>::~SRHD() {}
  * @param  p executation policy class  
  * @return none
  */
-template<int dim>
-void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
+template<int dim, Platform build_mode>
+void SRHD<dim,build_mode>::cons2prim(const ExecutionPolicy<> &p)
 {
     auto* const prim_data  = prims.data();
     auto* const cons_data  = cons.data();
@@ -177,11 +384,11 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
-template<int dim>
+template<int dim, Platform build_mode>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
-    const SRHD<dim>::primitive_t &primsL,
-    const SRHD<dim>::primitive_t &primsR,
+SRHD<dim,build_mode>::eigenvals_t SRHD<dim,build_mode>::calc_eigenvals(
+    const SRHD<dim,build_mode>::primitive_t &primsL,
+    const SRHD<dim,build_mode>::primitive_t &primsR,
     const luint nhat) const
 {
     // Separate the left and right Primitive
@@ -276,9 +483,9 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
 //-----------------------------------------------------------------------------------------
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
-template<int dim>
+template<int dim, Platform build_mode>
 GPU_CALLABLE_MEMBER 
-SRHD<dim>::conserved_t SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t &prims) const
+SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::prims2cons(const SRHD<dim,build_mode>::primitive_t &prims) const
 {
     const real rho      = prims.rho;
     const real v1       = prims.vcomponent(1);
@@ -312,9 +519,9 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t &prims
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
 // Adapt the cfl conditonal timestep
-template<int dim>
+template<int dim, Platform build_mode>
 template<TIMESTEP_TYPE dt_type>
-void SRHD<dim>::adapt_dt()
+void SRHD<dim,build_mode>::adapt_dt()
 {
     real min_dt = INFINITY;
     #pragma omp parallel 
@@ -467,21 +674,19 @@ void SRHD<dim>::adapt_dt()
     dt = cfl * min_dt;
 };
 
-template<int dim>
+template<int dim, Platform build_mode>
 template<TIMESTEP_TYPE dt_type>
-void SRHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
+void SRHD<dim,build_mode>::adapt_dt(const ExecutionPolicy<> &p)
 {
-    #if GPU_CODE
-    {
-        if constexpr(dim == 1) {
-            helpers::compute_dt<Primitive<1>, dt_type><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
-        } else {
-            helpers::compute_dt<Primitive<dim>, dt_type><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
-        }
-        helpers::deviceReduceWarpAtomicKernel<dim><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
-        gpu::api::deviceSynch();
-    }
-    #endif
+    // if constexpr(build_mode == Platform::GPU) {
+    //     if constexpr(dim == 1) {
+    //         helpers::compute_dt<Primitive<1>, dt_type><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
+    //     } else {
+    //         helpers::compute_dt<Primitive<dim>, dt_type><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
+    //     }
+    //     helpers::deviceReduceWarpAtomicKernel<dim><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
+    //     gpu::api::deviceSynch();
+    // }
 }
 //===================================================================================================================
 //                                            FLUX CALCULATIONS
@@ -489,9 +694,9 @@ void SRHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
 
 // Get the 2D Flux array (4,1). Either return F or G depending on directional
 // flag
-template<int dim>
+template<int dim, Platform build_mode>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims, const luint nhat) const
+SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::prims2flux(const SRHD<dim,build_mode>::primitive_t &prims, const luint nhat) const
 {
     const real rho      = prims.rho;
     const real v1       = prims.vcomponent(1);
@@ -536,15 +741,15 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims
     }
 };
 
-template<int dim>
+template<int dim, Platform build_mode>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
-    const SRHD<dim>::conserved_t &left_state, 
-    const SRHD<dim>::conserved_t &right_state,
-    const SRHD<dim>::conserved_t &left_flux, 
-    const SRHD<dim>::conserved_t &right_flux,
-    const SRHD<dim>::primitive_t &left_prims, 
-    const SRHD<dim>::primitive_t &right_prims,
+SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::calc_hll_flux(
+    const SRHD<dim,build_mode>::conserved_t &left_state, 
+    const SRHD<dim,build_mode>::conserved_t &right_state,
+    const SRHD<dim,build_mode>::conserved_t &left_flux, 
+    const SRHD<dim,build_mode>::conserved_t &right_flux,
+    const SRHD<dim,build_mode>::primitive_t &left_prims, 
+    const SRHD<dim,build_mode>::primitive_t &right_prims,
     const luint nhat,
     const real vface) const
 {
@@ -578,15 +783,15 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
     return net_flux;
 };
 
-template<int dim>
+template<int dim, Platform build_mode>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
-    const SRHD<dim>::conserved_t &left_state,
-    const SRHD<dim>::conserved_t &right_state,
-    const SRHD<dim>::conserved_t &left_flux,
-    const SRHD<dim>::conserved_t &right_flux,
-    const SRHD<dim>::primitive_t &left_prims,
-    const SRHD<dim>::primitive_t &right_prims,
+SRHD<dim,build_mode>::conserved_t SRHD<dim,build_mode>::calc_hllc_flux(
+    const SRHD<dim,build_mode>::conserved_t &left_state,
+    const SRHD<dim,build_mode>::conserved_t &right_state,
+    const SRHD<dim,build_mode>::conserved_t &left_flux,
+    const SRHD<dim,build_mode>::conserved_t &right_flux,
+    const SRHD<dim,build_mode>::primitive_t &left_prims,
+    const SRHD<dim,build_mode>::primitive_t &right_prims,
     const luint nhat,
     const real vface) const 
 {
@@ -975,8 +1180,8 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
 //===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
-template<int dim>
-void SRHD<dim>::advance(
+template<int dim, Platform build_mode>
+void SRHD<dim,build_mode>::advance(
     const ExecutionPolicy<> &p,
     const luint sx,
     const luint sy)
@@ -985,20 +1190,14 @@ void SRHD<dim>::advance(
     const luint ypg = this->yphysical_grid;
     const luint zpg = this->zphysical_grid;
 
-    #if GPU_CODE
-    const luint xextent = p.blockSize.x;
-    const luint yextent = p.blockSize.y;
-    const luint zextent = p.blockSize.z;
-    #endif 
-
     const luint extent      = p.get_full_extent();
     auto* const prim_data   = prims.data();
     auto* const cons_data   = cons.data();
-    auto* const dens_source = sourceD.data();
-    auto* const mom1_source = sourceS1.data();
-    auto* const mom2_source = sourceS2.data();
-    auto* const mom3_source = sourceS3.data();
-    auto* const erg_source  = sourceTau.data();
+    auto* const dens_source = density_source.data();
+    auto* const mom1_source = m1_source.data();
+    auto* const mom2_source = m2_source.data();
+    auto* const mom3_source = m3_source.data();
+    auto* const erg_source  = energy_source.data();
     auto* const object_data = object_pos.data();
     auto* const grav_source = sourceG1.data();
 
@@ -1006,11 +1205,6 @@ void SRHD<dim>::advance(
         sx,
         sy,
         p,
-        #if GPU_CODE
-        xextent,
-        yextent,
-        zextent,
-        #endif
         prim_data,
         cons_data,
         dens_source,
@@ -1031,9 +1225,9 @@ void SRHD<dim>::advance(
         auto *const prim_buff = prim_data;
         #endif 
 
-        const luint kk  = dim < 3 ? 0 : (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(idx, xpg, ypg);
-        const luint jj  = dim < 2 ? 0 : (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(idx, xpg, ypg, kk);
-        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(idx, xpg, ypg, kk);
+        const luint kk  = dim < 3 ? 0 : (build_mode == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(idx, xpg, ypg);
+        const luint jj  = dim < 2 ? 0 : (build_mode == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(idx, xpg, ypg, kk);
+        const luint ii  = (build_mode == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(idx, xpg, ypg, kk);
         #if GPU_CODE
         if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg)) return;
         #endif 
@@ -1041,12 +1235,12 @@ void SRHD<dim>::advance(
         const luint ia  = ii + radius;
         const luint ja  = dim < 2 ? 0 : jj + radius;
         const luint ka  = dim < 3 ? 0 : kk + radius;
-        const luint tx  = (BuildPlatform == Platform::GPU) ? threadIdx.x : 0;
-        const luint ty  = dim < 2 ? 0 : (BuildPlatform == Platform::GPU) ? threadIdx.y : 0;
-        const luint tz  = dim < 3 ? 0 : (BuildPlatform == Platform::GPU) ? threadIdx.z : 0;
-        const luint txa = (BuildPlatform == Platform::GPU) ? tx + radius : ia;
-        const luint tya = dim < 2 ? 0 : (BuildPlatform == Platform::GPU) ? ty + radius : ja;
-        const luint tza = dim < 3 ? 0 : (BuildPlatform == Platform::GPU) ? tz + radius : ka;
+        const luint tx  = (build_mode == Platform::GPU) ? threadIdx.x : 0;
+        const luint ty  = dim < 2 ? 0 : (build_mode == Platform::GPU) ? threadIdx.y : 0;
+        const luint tz  = dim < 3 ? 0 : (build_mode == Platform::GPU) ? threadIdx.z : 0;
+        const luint txa = (build_mode == Platform::GPU) ? tx + radius : ia;
+        const luint tya = dim < 2 ? 0 : (build_mode == Platform::GPU) ? ty + radius : ja;
+        const luint tza = dim < 3 ? 0 : (build_mode == Platform::GPU) ? tz + radius : ka;
 
         Conserved<dim> uxL, uxR, uyL, uyR, uzL, uzR;
         Conserved<dim> fL, fR, gL, gR, hL, hR, frf, flf, grf, glf, hrf, hlf;
@@ -1055,7 +1249,7 @@ void SRHD<dim>::advance(
         const luint aid = ka * nx * ny + ja * nx + ia;
         #if GPU_CODE
             if constexpr(dim == 1) {
-                luint txl = xextent;
+                luint txl = p.blockSize.x;
                 // Check if the active index exceeds the active zones
                 // if it does, then this thread buffer will taken on the
                 // ghost index at the very end and return
@@ -1070,8 +1264,8 @@ void SRHD<dim>::advance(
                 }
                 simbi::gpu::api::synchronize();
             } else if constexpr(dim == 2) {
-                luint txl = xextent;
-                luint tyl = yextent;
+                luint txl = p.blockSize.x;
+                luint tyl = p.blockSize.y;
                 // Load Shared memory into buffer for active zones plus ghosts
                 prim_buff[tya * sx + txa * sy] = prim_data[aid];
                 if (ty < radius)
@@ -1093,9 +1287,9 @@ void SRHD<dim>::advance(
                 simbi::gpu::api::synchronize();
 
             } else {
-                luint txl = xextent;
-                luint tyl = yextent;
-                luint tzl = zextent;
+                luint txl = p.blockSize.x;
+                luint tyl = p.blockSize.y;
+                luint tzl = p.blockSize.z;
                 // Load Shared memory into buffer for active zones plus ghosts
                 prim_buff[tza * sx * sy + tya * sx + txa] = prim_data[aid];
                 if (tz == 0)    
@@ -1791,8 +1985,8 @@ void SRHD<dim>::advance(
 // //===================================================================================================================
 // //                                            SIMULATE
 // //===================================================================================================================
-template<int dim>
-std::vector<std::vector<real>> SRHD<dim>::simulate(
+template<int dim, Platform build_mode>
+std::vector<std::vector<real>> SRHD<dim,build_mode>::simulate(
     std::function<real(real)> a,
     std::function<real(real)> adot,
     SRHD::function_t const &d_outer,
@@ -1903,7 +2097,7 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
         pressure_guess[i] = std::abs(S - D - E);
     }
 
-    if constexpr(BuildPlatform == Platform::GPU) {
+    if constexpr(build_mode == Platform::GPU) {
         std::cout << "I have built on the gpu bruv" << "\n";
     }
     #if GPU_CODE
@@ -1916,11 +2110,11 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
     prims.copyToGpu();
     pressure_guess.copyToGpu();
     dt_min.copyToGpu();
-    dens_source.copyToGpu();
+    density_source.copyToGpu();
     m1_source.copyToGpu();
     if constexpr(dim > 1) m2_source.copyToGpu();
     if constexpr(dim > 2) m3_source.copyToGpu();
-    erg_source.copyToGpu();
+    energy_source.copyToGpu();
     if constexpr(dim > 1) object_pos.copyToGpu();
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
@@ -1932,8 +2126,8 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
     const luint zblockdim    = zphysical_grid > gpu_block_dimz ? gpu_block_dimz : zphysical_grid;
     this->radius             = (first_order) ? 1 : 2;
     this->step               = (first_order) ? 1 : static_cast<real>(0.5);
-    const luint xstride      = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
-    const luint ystride      = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
+    const luint xstride      = (build_mode == Platform::GPU) ? xblockdim + 2 * radius: nx;
+    const luint ystride      = (build_mode == Platform::GPU) ? yblockdim + 2 * radius: ny;
     const auto  xblockspace  =  xblockdim + 2 * radius;
     const auto  yblockspace  = (dim < 2) ? 1 : yblockdim + 2 * radius;
     const auto  zblockspace  = (dim < 3) ? 1 : zblockdim + 2 * radius;
@@ -1942,11 +2136,11 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
     const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
-    if constexpr(BuildPlatform == Platform::GPU){
+    if constexpr(build_mode == Platform::GPU){
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
     
-    if constexpr(BuildPlatform == Platform::GPU) {
+    if constexpr(build_mode == Platform::GPU) {
         cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP);
     } else {
@@ -1983,7 +2177,7 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
             helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
         }
 
-        if constexpr(BuildPlatform == Platform::GPU) {
+        if constexpr(build_mode == Platform::GPU) {
             adapt_dt(activeP);
         } else {
             adapt_dt();

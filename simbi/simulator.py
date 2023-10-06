@@ -5,6 +5,7 @@
 import numpy as np
 import os
 import inspect
+import importlib
 from itertools import product, permutations
 from .detail import initial_condition as simbi_ic
 from .detail import helpers
@@ -506,23 +507,14 @@ class Hydro:
         Returns:
             solution (array): The hydro solution containing the primitive variables
         """
+        from pathlib import Path
         self._print_params(inspect.currentframe())
         self.u = np.asanyarray(self.u)
         self.start_time: float = 0.0
         self.chkpt_idx: int = 0
-        if compute_mode in ['cpu', 'omp']:
-            from .libs.cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-            from .libs.cpu_ext import Buddy
-        else:
-            try:
-                from .libs.gpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
-                from .libs.gpu_ext import Buddy
-            except ImportError as e:
-                logger.warning(
-                    "Error in loading GPU extension. Loading CPU instead...")
-                logger.warning(
-                    f"For reference, the gpu_ext had the follow error: {e}")
-                from .libs.cpu_ext import PyState, PyState2D, PyStateSR, PyStateSR3D, PyStateSR2D
+        lib_mode  = 'cpu' if compute_mode in ['cpu', 'omp'] else 'gpu'
+        state_reg = 'SRHD' if self.regime == 'relativistic' else ''
+        sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), f'PyState{state_reg}{self.dimensionality}D')
 
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
@@ -631,25 +623,17 @@ class Hydro:
             
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "128"
-            
-            if self.regime == "classical":
-                state = PyState(
-                    self.u,
-                    self.gamma,
-                    cfl,
-                    x1=self.x1,
-                    coord_system=cython_coordinates)
-            else:
-                state = PyStateSR(
-                    self.u,
-                    self.gamma,
-                    cfl,
-                    x1=self.x1,
-                    coord_system=cython_coordinates)
+
+                # state = sim_state(
+                #     self.u,
+                #     self.gamma,
+                #     cfl,
+                #     x1=self.x1,
+                #     coord_system=cython_coordinates)
                 kwargs = {
                     'a': scale_factor, 
                     'adot': scale_factor_derivative,
-                    # 'gravity_sources': gsources
+                    'gravity_sources': gsources
                     }
                 if mesh_motion and dens_outer and mom_outer and edens_outer:
                     kwargs['d_outer'] = dens_outer
@@ -669,36 +653,26 @@ class Hydro:
             if 'GPUYBLOCK_SIZE' not in os.environ:
                 os.environ['GPUYBLOCK_SIZE'] = "16" 
                 
-            if self.regime == "classical":
-                state = PyState2D(
-                    self.u,
-                    self.gamma,
-                    cfl=cfl,
-                    x1=self.x1,
-                    x2=self.x2,
-                    coord_system=cython_coordinates)
-            else:
-                kwargs = {
-                    'a': scale_factor,
-                    'adot': scale_factor_derivative,
-                    'quirk_smoothing': quirk_smoothing,
-                    'object_cells': object_cells,
-                    'gravity_sources': gsources,
-                }
-                if mesh_motion and dens_outer and mom_outer and edens_outer:
-                    momentum_components = cast(Sequence[Callable[..., float]], mom_outer)
-                    kwargs['d_outer']   = dens_outer
-                    kwargs['s1_outer']  = momentum_components[0]
-                    kwargs['s2_outer']  = momentum_components[1]
-                    kwargs['e_outer']   = edens_outer
-
-                state = PyStateSR2D(
-                    self.u,
-                    self.gamma,
-                    cfl=cfl,
-                    x1=self.x1,
-                    x2=self.x2,
-                    coord_system=cython_coordinates)
+            state = sim_state(
+                self.u,
+                self.gamma,
+                cfl=cfl,
+                x1=self.x1,
+                x2=self.x2,
+                coord_system=cython_coordinates)
+            kwargs = {
+                'a': scale_factor,
+                'adot': scale_factor_derivative,
+                'quirk_smoothing': quirk_smoothing,
+                'object_cells': object_cells,
+                'gravity_sources': gsources,
+            }
+            if mesh_motion and dens_outer and mom_outer and edens_outer:
+                momentum_components = cast(Sequence[Callable[..., float]], mom_outer)
+                kwargs['d_outer']   = dens_outer
+                kwargs['s1_outer']  = momentum_components[0]
+                kwargs['s2_outer']  = momentum_components[1]
+                kwargs['e_outer']   = edens_outer
         else:
             sources = np.zeros(5) if sources is None else np.asanyarray(sources)
             sources = sources.reshape(sources.shape[0], -1)
@@ -714,19 +688,15 @@ class Hydro:
             if 'GPUZBLOCK_SIZE' not in os.environ:
                 os.environ['GPUZBLOCK_SIZE'] = "4"
                 
-            if self.regime == "classical":
-                raise NotImplementedError("3D Newtonian Fluids not implemented yet")
-                # TODO: Implement Newtonian 3D
-            else:
-                state = PyStateSR3D(
-                    self.u,
-                    self.gamma,
-                    cfl=cfl,
-                    x1=self.x1,
-                    x2=self.x2,
-                    x3=self.x3,
-                    coord_system=cython_coordinates)
-                kwargs = {'object_cells': object_cells}
+            state = sim_state(
+                self.u,
+                self.gamma,
+                cfl=cfl,
+                x1=self.x1,
+                x2=self.x2,
+                x3=self.x3,
+                coord_system=cython_coordinates)
+            kwargs = {'object_cells': object_cells}
         
         if len(self.resolution) == 1:
             self.nx = self.u[0].shape[0]
@@ -769,13 +739,8 @@ class Hydro:
         }
         
         if self.dimensionality == 1:
-            bud = Buddy()
-            res = bud.run(
-                self.u,
-                1,
-                "relativistic".encode('utf-8'),
-                init_conditions
-            )
+            state = sim_state(self.u, init_conditions)
+            self.solution = state.simulate(**kwargs)
             
         # self.solution = state.simulate(
         #     sources=sources,
