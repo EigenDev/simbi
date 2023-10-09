@@ -39,7 +39,7 @@ constexpr Velocity VelocityType = Velocity::FourVelocity;
 constexpr Velocity VelocityType = Velocity::Beta;
 #endif
 
-const int MAX_ITER   = 1000;
+const int MAX_ITER = 1000;
 
 //========================= FLOAT PRECISION CHECK
 #if FLOAT_PRECISION
@@ -72,7 +72,7 @@ constexpr bool col_maj = false;
 #endif 
 
 //======================== Managed Memory Check
-#if MANAGED_MEMORY
+#ifdef MANAGED_MEMORY
 constexpr bool managed_memory = true;
 #else 
 constexpr bool managed_memory = false;
@@ -80,6 +80,9 @@ constexpr bool managed_memory = false;
 
 //=========================== RUNTIME CHECK
 #if GPU_CODE
+
+#define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...) \
+        kernel_name<<<((gridsize), (blocksize)) >>> (__VA_ARGS__);
 constexpr Platform BuildPlatform = Platform::GPU;
 #define GPU_DEV                        __device__
 #define GPU_DEV_INLINE                 __device__ inline
@@ -166,6 +169,9 @@ using anyGpuEvent_t                         = hipEvent_t;
 using simbiStream_t                         = hipStream_t;
 #endif
 #else
+#define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...) \
+        kernel_name(__VA_ARGS__);
+
 constexpr Platform BuildPlatform = Platform::CPU;
 constexpr auto ComputeRuntime = Runtime::CPU;
 constexpr int WARP_SIZE = 32;

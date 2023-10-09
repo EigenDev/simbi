@@ -15,12 +15,11 @@ cdef extern from "util/pyobj_wrapper.hpp":
 
 cdef extern from "build_options.hpp":
     cdef bool col_maj "COLUMN_MAJOR"
-    cdef bool managed "MANAGED_MEMORY"
+    
     # a few cname hacks 
     ctypedef int dim1 "1" 
     ctypedef int dim2 "2"
     ctypedef int dim3 "3"
-    ctypedef int build_mode "Platform::CPU"
 
 
 cdef extern from "common/enums.hpp":
@@ -234,37 +233,37 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
             bool constant_sources,
             vector[vector[real]] boundary_sources)
 
-cdef extern from "hydro/srhd.hpp" namespace "simbi":
-    cdef cppclass SRHD[T,B]:
-        SRHD() except +
-        SRHD(
-            vector[vector[real]] state, 
-            InitialConditions sim_cond
-        ) except +
-
-        vector[vector[real]] simulate(
-            PyObjWrapper a,
-            PyObjWrapper adot
-        )
-
-        vector[vector[real]] simulate (
-            PyObjWrapper a,
-            PyObjWrapper adot,
-            PyObjWrapper d_outer,
-            PyObjWrapper s1_outer,
-            PyObjWrapper s2_outer,
-            PyObjWrapper s3_outer,
-            PyObjWrapper e_outer
-        )
-
-# cdef extern from "hydro/driver.hpp" namespace "simbi":
-#     cdef cppclass Driver:
-#         Driver() except +
-
-#         vector[vector[real]] run(
-#             vector[vector[real]] state,
-#             int dim, 
-#             string regime, 
+# cdef extern from "hydro/srhd.hpp" namespace "simbi":
+#     cdef cppclass SRHD[T]:
+#         SRHD() except +
+#         SRHD(
+#             vector[vector[real]] state, 
 #             InitialConditions sim_cond
+#         ) except +
+
+#         vector[vector[real]] simulate(
+#             PyObjWrapper a,
+#             PyObjWrapper adot
 #         )
+
+#         vector[vector[real]] simulate (
+#             PyObjWrapper a,
+#             PyObjWrapper adot,
+#             PyObjWrapper d_outer,
+#             PyObjWrapper s1_outer,
+#             PyObjWrapper s2_outer,
+#             PyObjWrapper s3_outer,
+#             PyObjWrapper e_outer
+#         )
+
+cdef extern from "hydro/driver.hpp" namespace "simbi":
+    cdef cppclass Driver:
+        Driver() except +
+
+        vector[vector[real]] run(
+            vector[vector[real]] state,
+            int dim, 
+            string regime, 
+            InitialConditions sim_cond
+        )
         

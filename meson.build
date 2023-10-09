@@ -159,7 +159,7 @@ sources = [
     'src/hydro/srhydro1D.hip.cpp',
     'src/hydro/srhydro2D.hip.cpp',
     'src/hydro/srhydro3D.hip.cpp',
-    # 'src/hydro/driver.cpp',
+    'src/hydro/driver.cpp',
     
     #######################
     #### UTIL IMPLEMENTATIONS
@@ -199,7 +199,7 @@ cpu_ext = py3.extension_module(
     'cpu_ext',
     ['src/cpu_ext.pyx', 'src/call_obj.pyx'] + sources + headers,
     include_directories: all_inc,
-    cpp_args: ['-DGPU_CODE=0', '-DMANAGED_MEMORY=1'],
+    cpp_args: ['-DGPU_CODE=0'],
     dependencies: depends,
     override_options: ['cython_language=cpp'],
     install: true,
@@ -254,7 +254,7 @@ if get_option('gpu_compilation').enabled()
             link_with: [gpu_lib],
             include_directories: all_inc,
             dependencies: depends + gpu_depends,
-            cpp_args: ['-DMANAGED_MEMORY=1'],
+            cpp_args: ['-DMANAGED_MEMORY'],
             override_options: ['cython_language=cpp'],
             install: true,
             install_dir: meson.current_source_dir() + '/simbi/libs',

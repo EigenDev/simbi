@@ -18,11 +18,10 @@ std::vector<std::vector<real>> Driver::run(
     std::string regime,
     InitialConditions &init_cond
 ) {
-
     auto self = new SRHD<1>(state, init_cond);
-    auto res = self->simulate([](real i){ return 0;}, [](real i){return 1;});
+    // auto res = self->simulate([](real i){ return 0;}, [](real i){return 1;});
     delete self;
-    return res;
+    // return res;
 
     // if (regime == "relativistic") {
     //     if (dim == 1) {

@@ -11,7 +11,7 @@
 
 namespace simbi
 {
-    template<int dim, Platform build_mode = BuildPlatform>
+    template<int dim>
     struct SRHD : public HydroBase
     {
         // set the primitive and conservative types at compile time
@@ -66,14 +66,14 @@ namespace simbi
         const static int dimensions = dim;
 
         /* Shared Data Members */
-        ndarray<primitive_t, build_mode> prims;
-        ndarray<conserved_t, build_mode> cons, outer_zones, inflow_zones;
-        ndarray<simbi::BoundaryCondition, build_mode> bcs;
-        ndarray<int, build_mode> troubled_cells;
-        ndarray<real, build_mode> sourceG1, sourceG2, sourceG3;
-        ndarray<real, build_mode> density_source, m1_source, m2_source, m3_source, energy_source;
-        ndarray<real, build_mode> pressure_guess, dt_min;
-        ndarray<bool, build_mode> object_pos;
+        ndarray<primitive_t> prims;
+        ndarray<conserved_t> cons, outer_zones, inflow_zones;
+        // ndarray<simbi::BoundaryCondition, build_mode> bcs;
+        // ndarray<int, build_mode> troubled_cells;
+        // ndarray<real, build_mode> sourceG1, sourceG2, sourceG3;
+        // ndarray<real, build_mode> density_source, m1_source, m2_source, m3_source, energy_source;
+        ndarray<real> pressure_guess, dt_min;
+        // ndarray<bool, build_mode> object_pos;
         
         bool scalar_all_zeros;
 

@@ -514,7 +514,8 @@ class Hydro:
         self.chkpt_idx: int = 0
         lib_mode  = 'cpu' if compute_mode in ['cpu', 'omp'] else 'gpu'
         state_reg = 'SRHD' if self.regime == 'relativistic' else ''
-        sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), f'PyState{state_reg}{self.dimensionality}D')
+        # sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), f'PyState{state_reg}{self.dimensionality}D')
+        sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), 'Buddy')
 
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
@@ -739,8 +740,15 @@ class Hydro:
         }
         
         if self.dimensionality == 1:
-            state = sim_state(self.u, init_conditions)
-            self.solution = state.simulate(**kwargs)
+            # state = sim_state(self.u, init_conditions)
+            # self.solution = state.simulate(**kwargs)
+            state = sim_state()
+            self.solution = state.run(
+                self.u, 
+                self.dimensionality,
+                self.regime.encode('utf-8'),
+                init_conditions
+            )
             
         # self.solution = state.simulate(
         #     sources=sources,

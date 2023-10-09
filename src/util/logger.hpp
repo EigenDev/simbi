@@ -121,6 +121,7 @@ namespace simbi
                                     sim_state.dens_outer(sim_state.x1max), 
                                     sim_state.mom1_outer(sim_state.x1max), 
                                     sim_state.enrg_outer(sim_state.x1max)} * dV;
+                                
                                 sim_state.outer_zones.copyToGpu();
                             }
                         } else if constexpr(sim_state_t::dimensions == 2) {
