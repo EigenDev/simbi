@@ -226,6 +226,7 @@ if get_option('gpu_compilation').enabled()
                     '-o',
                     '@OUTPUT@',
                     '-DGPU_CODE=1',
+                    '-DMANAGED_MEMORY',
                 ],
                 input : source,
                 output : '@BASENAME@.o',

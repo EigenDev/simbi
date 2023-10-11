@@ -105,7 +105,7 @@ constexpr void simbi::ndarray<DT,build_mode>::push_back(const DT& data)
 {
     if (sz == nd_capacity) {
         auto old = arr.get();
-        arr.reset(new DT[nd_capacity = nd_capacity * 2]);
+        arr.reset(new DT[nd_capacity = nd_capacity + sizeof(DT)]);
         std::copy(old, old + sz, arr.get());
     } else {
         nd_capacity += sizeof(DT);

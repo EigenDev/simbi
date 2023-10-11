@@ -681,7 +681,7 @@ void SRHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
     #if GPU_CODE
         if constexpr(dim == 1) {
             // LAUNCH_ASYNC((helpers::compute_dt<Primitive<1>,dt_type>), p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
-            helpers::compute_dt<Primitive<1>, dt_type><<<dim3(blockSize), dim3(gpu_block_dimx)>>>(this, prims.data(), dt_min.data());
+            helpers::compute_dt<Primitive<1>, dt_type><<<p.gridSize, p.blockSize>>>(this, prims.data(), dt_min.data());
         } else {
             // LAUNCH_ASYNC((helpers::compute_dt<Primitive<dim>,dt_type>), p.gridSize, p.blockSize, this, prims.data(), dt_min.data(), geometry);
             helpers::compute_dt<Primitive<dim>, dt_type><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
@@ -1797,12 +1797,6 @@ void SRHD<dim>::advance(
             {
                 case simbi::Geometry::CARTESIAN:
                 {
-                    #if !GPU_CODE
-                    if (ii == active_zones / 2) {
-                        writeln("({}) frf: {:.2e}, flf: {:.2e}, dx1: {:.2e}, dt: {:.2e}, step: {}\n", ii, frf.d, flf.d, invdx1, dt, step);
-                        writeln("({}) primR: {:.2e}, primL: {:.2e}, dx1: {:.2e}, dt: {:.2e}, step: {}\n", ii, prim_buff[ia - 1].rho, prim_buff[ia + 1].rho, invdx1, dt, step);
-                    }
-                    #endif
                     cons_data[ia] -= ((frf - flf) * invdx1) * dt * step;
                     break;
                 }
@@ -2113,28 +2107,25 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
         pressure_guess[i] = std::abs(S - D - E);
     }
 
-    if constexpr(BuildPlatform == Platform::GPU) {
-        std::cout << "I have built on the gpu bruv" << "\n";
-    }
-    #if GPU_CODE
-    std::cout << "caught preprocessor" << "\n";
-    #endif 
-
     cons.copyToGpu();
     prims.copyToGpu();
     pressure_guess.copyToGpu();
     dt_min.copyToGpu();
     density_source.copyToGpu();
     m1_source.copyToGpu();
-    if constexpr(dim > 1) m2_source.copyToGpu();
-    if constexpr(dim > 2) m3_source.copyToGpu();
+    if constexpr(dim > 1) {
+        m2_source.copyToGpu();
+    }
+    if constexpr(dim > 2) {
+        m3_source.copyToGpu();
+    }
+    if constexpr(dim > 1) {
+        object_pos.copyToGpu();
+    }
     energy_source.copyToGpu();
-    if constexpr(dim > 1) object_pos.copyToGpu();
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
     troubled_cells.copyToGpu();
-    std::cout << "break the beat" << "\n";
-    std::cin.get();
 
     // Setup the system
     const luint xblockdim    = xphysical_grid > gpu_block_dimx ? gpu_block_dimx : xphysical_grid;
@@ -2164,8 +2155,6 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
         adapt_dt<TIMESTEP_TYPE::MINIMUM>();
     }
 
-    std::cout << "cons2prim done" << "\n";
-    std::cin.get();
     // Using a sigmoid decay function to represent when the source terms turn off.
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
@@ -2202,7 +2191,6 @@ std::vector<std::vector<real>> SRHD<dim>::simulate(
         }
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
-        std::cin.get();
     });
 
     if (inFailureState){

@@ -12,9 +12,9 @@ namespace simbi
 
         std::vector<std::vector<real>> run(
             std::vector<std::vector<real>> state,
-            int dim, 
-            std::string regime, 
-            InitialConditions &init_cond
+            const int dim, 
+            const std::string regime, 
+            const InitialConditions &init_cond
         );
     };
 

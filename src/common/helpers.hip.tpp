@@ -835,7 +835,7 @@ namespace simbi{
             #if GPU_CODE
             real vPlus, vMinus;
             int ii   = blockDim.x * blockIdx.x + threadIdx.x;
-            int aid  = ii + self->idx_active;
+            int aid  = ii + self->radius;
             if (ii < self->active_zones)
             {
                 const real rho = prim_buffer[aid].rho;
@@ -863,7 +863,7 @@ namespace simbi{
                 const real dx1    = x1r - x1l;
                 const real vfaceL = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1l * self->hubble_param;
                 const real vfaceR = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1r * self->hubble_param;
-                const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPlus - vfaceR), std::abs(vMinus - vfaceL)));
+                const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPlus + vfaceR), std::abs(vMinus + vfaceL)));
                 dt_min[ii]        = self->cfl * cfl_dt;
             }
             #endif
