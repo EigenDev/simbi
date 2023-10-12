@@ -211,7 +211,7 @@ void SRHD1D::advance(const ExecutionPolicy<> &p)
         const auto d_source = den_source_all_zeros    ? 0.0 :  dens_source[ii];
         const auto s_source = mom1_source_all_zeros   ? 0.0 :  mom_source[ii];
         const auto e_source = energy_source_all_zeros ? 0.0 :  erg_source[ii];
-        const auto gs_source = grav_source_all_zeros  ? 0.0 :  cons_data[ia].d * grav_source[ii];
+        const auto gs_source = zero_gravity1  ? 0.0 :  cons_data[ia].d * grav_source[ii];
         const auto ge_source = gs_source * prim_buff[txa].v1;
         const auto sources = Conserved{d_source, s_source, e_source} * time_constant;
         const auto gravity = Conserved{0, gs_source, ge_source};
@@ -729,7 +729,7 @@ SRHD1D::simulate1D(
     this->den_source_all_zeros    = std::all_of(sourceD.begin(), sourceD.end(), [](real i) {return i==0;});
     this->mom1_source_all_zeros   = std::all_of(sourceS.begin(), sourceS.end(), [](real i) {return i==0;});
     this->energy_source_all_zeros = std::all_of(source0.begin(), source0.end(), [](real i) {return i==0;});
-    this->grav_source_all_zeros = std::all_of(sourceG1.begin(), sourceG1.end(), [](real i){return i==0;});
+    this->zero_gravity1 = std::all_of(sourceG1.begin(), sourceG1.end(), [](real i){return i==0;});
     define_tinterval(tstart, dlogt, chkpt_interval, chkpt_idx);
     define_chkpt_idx(chkpt_idx);
     inflow_zones.resize(2);

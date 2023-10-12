@@ -27,7 +27,7 @@ namespace simbi
         real dlogx1, dx1, dx2, dx3, dlogt, tstart, engine_duration, invdx1, invdx2, invdx3;
         bool first_order, linspace, mesh_motion, adaptive_mesh_motion, half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
         bool den_source_all_zeros, mom1_source_all_zeros, mom2_source_all_zeros, mom3_source_all_zeros, energy_source_all_zeros; 
-        bool grav_source_all_zeros;
+        bool zero_gravity1, zero_gravity2, zero_gravity3;
         luint active_zones, idx_active, total_zones, n, init_chkpt_idx, radius;
         luint xphysical_grid, yphysical_grid, zphysical_grid;
         std::vector<std::string> boundary_conditions;
@@ -233,7 +233,23 @@ namespace simbi
             x3(init_conditions.x3),
             gpu_block_dimx(get_xblock_dims()),
             gpu_block_dimy(get_yblock_dims()),
-            gpu_block_dimz(get_zblock_dims())
+            gpu_block_dimz(get_zblock_dims()),
+            t(init_conditions.tstart),
+            tend(init_conditions.tend),
+            chkpt_interval(init_conditions.chkpt_interval),
+            plm_theta(init_conditions.plm_theta),
+            dlogt(init_conditions.dlogt),
+            tstart(init_conditions.tstart),
+            engine_duration(init_conditions.engine_duration),
+            first_order(init_conditions.first_order),
+            linspace(init_conditions.linspace),
+            quirk_smoothing(init_conditions.quirk_smoothing),
+            constant_sources(init_conditions.constant_sources),
+            total_zones(nx * ny  * nz),
+            boundary_conditions(init_conditions.boundary_conditions),
+            data_directory(init_conditions.data_directory),
+            boundary_sources(init_conditions.boundary_sources),
+            object_pos(init_conditions.object_cells)
         {
             initialize(init_conditions);
             if (std::getenv("USE_OMP")) {
@@ -248,20 +264,7 @@ namespace simbi
         void initialize(const InitialConditions &init_conditions) {
 
             // Define simulation params
-            this->tend                = init_conditions.tend;
-            this->quirk_smoothing     = init_conditions.quirk_smoothing;
-            this->t                   = init_conditions.tstart;
-            this->object_pos          = init_conditions.object_cells;
-            this->chkpt_interval      = init_conditions.chkpt_interval;
-            this->data_directory      = init_conditions.data_directory;
-            this->tstart              = init_conditions.tstart;
-            this->engine_duration     = init_conditions.engine_duration;
-            this->total_zones         = nx * ny * nz;
-            this->first_order         = init_conditions.first_order;
             this->sim_solver          = helpers::solver_map.at(init_conditions.solver);
-            this->dlogt               = init_conditions.dlogt;
-            this->linspace            = init_conditions.linspace;
-            this->plm_theta           = init_conditions.plm_theta;
             this->geometry            = helpers::geometry_map.at(init_conditions.coord_system);
             this->xphysical_grid      = (init_conditions.first_order) ? nx - 2: nx - 4;
             this->yphysical_grid      = (ny == 1) ? 1 : (init_conditions.first_order) ? ny - 2: ny - 4;
@@ -274,7 +277,10 @@ namespace simbi
             this->invdx1              = 1 / dx1;
             this->x1min               = x1[0];
             this->x1max               = x1[xphysical_grid - 1];
-
+            // Define the source terms
+            this->density_source = init_conditions.sources[0];
+            this->m1_source      = init_conditions.sources[1];
+            this->sourceG1       = init_conditions.gsource[0];
             if ((ny > 1) && (nz > 1)) { // 3D check
                 this->x2min            = x2[0];
                 this->x2max            = x2[yphysical_grid - 1];
@@ -286,6 +292,11 @@ namespace simbi
                 this->invdx3           = 1 / dx3;
                 this->x3cell_spacing   = simbi::Cellspacing::LINSPACE;
                 this->x2cell_spacing   = simbi::Cellspacing::LINSPACE;
+                this->m2_source   = init_conditions.sources[2];
+                this->m3_source   = init_conditions.sources[3];
+                this->energy_source  = init_conditions.sources[4];
+                this->sourceG2    = init_conditions.gsource[1];
+                this->sourceG3    = init_conditions.gsource[2];
                 this->mom2_source_all_zeros    = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
                 this->mom3_source_all_zeros    = std::all_of(m3_source.begin(),  m3_source.end(),  [](real i) {return i == 0;});
             } else if ((ny > 1) && (nz == 1)) { // 2D Check
@@ -294,9 +305,16 @@ namespace simbi
                 this->x2cell_spacing   = simbi::Cellspacing::LINSPACE;
                 this->dx2    = (x2max - x2min) / (yphysical_grid - 1);
                 this->invdx2 = 1 / dx2;
+                this->m2_source   = init_conditions.sources[2];
+                this->energy_source  = init_conditions.sources[3];
+                this->sourceG2    = init_conditions.gsource[1];
                 this->mom2_source_all_zeros = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
+            } else {
+                this->energy_source = init_conditions.sources[2];
             }
-
+            this->zero_gravity1            = std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {return i == 0;});
+            this->zero_gravity2            = std::all_of(sourceG2.begin(), sourceG2.end(), [](real i) {return i == 0;});
+            this->zero_gravity3            = std::all_of(sourceG3.begin(), sourceG3.end(), [](real i) {return i == 0;});
             this->den_source_all_zeros     = std::all_of(density_source.begin(), density_source.end(),   [](real i) {return i == 0;});
             this->mom1_source_all_zeros    = std::all_of(m1_source.begin(),   m1_source.end(),  [](real i) {return i == 0;});
             this->energy_source_all_zeros  = std::all_of(energy_source.begin(),  energy_source.end(), [](real i) {return i == 0;});

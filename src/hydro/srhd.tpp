@@ -50,29 +50,6 @@ SRHD<dim>::SRHD(
         init_conditions
     )
 {
-    // CPU / GPU arrays need to live within the simulation state
-    // instead of the base state because of the template-dependent 
-    // BuildPlatform of the ndarray class 
-
-    this->boundary_conditions = init_conditions.boundary_conditions;
-    this->boundary_sources    = init_conditions.boundary_sources;
-    // Define the source terms
-    this->density_source = init_conditions.sources[0];
-    this->m1_source      = init_conditions.sources[1];
-    this->sourceG1       = init_conditions.gsource[0];
-    if ((ny > 1) && (nz > 1)) { // 3D check
-        this->m2_source   = init_conditions.sources[2];
-        this->m3_source   = init_conditions.sources[3];
-        this->energy_source  = init_conditions.sources[4];
-        this->sourceG2    = init_conditions.gsource[1];
-        this->sourceG3    = init_conditions.gsource[2];
-    } else if ((ny > 1) && (nz == 1)) { // 2D check
-        this->m2_source   = init_conditions.sources[2];
-        this->energy_source  = init_conditions.sources[3];
-        this->sourceG2    = init_conditions.gsource[1];
-    } else { // 1D check
-        this->energy_source = init_conditions.sources[2];
-    }
 }
 
 // Destructor
@@ -85,23 +62,15 @@ template<int dim>
 GPU_CALLABLE_INLINE
 constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
 {
-    switch (geometry)
+    switch (x1cell_spacing)
     {
-    case simbi::Geometry::CARTESIAN:
+    case simbi::Cellspacing::LINSPACE:
         {
             const real x1l = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
             if (side == 0) {
                 return x1l;
             }
             return helpers::my_min(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
-        }
-    case simbi::Geometry::SPHERICAL:
-        {
-            const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
-            if (side == 0) {
-                return rl;
-            }
-            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
         }
     default:
         {
@@ -111,7 +80,6 @@ constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
             }
             return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
         }
-        break;
     }
 }
 
@@ -276,8 +244,8 @@ void SRHD<dim>::emit_troubled_cells() {
 template<int dim>
 void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 {
+    const auto* const cons_data  = cons.data();
     auto* const prim_data  = prims.data();
-    auto* const cons_data  = cons.data();
     auto* const press_data = pressure_guess.data(); 
     auto* const troubled_data = troubled_cells.data();
     simbi::parallel_for(p, (luint)0, total_zones, [
@@ -354,6 +322,9 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
                 if constexpr(dim == 1) {
                     prim_data[gid] = Primitive<1>{D/ W, v1, peq, Dchi / D};
                 } else if constexpr(dim == 2) {
+                    // #if !GPU_CODE
+                    //     writeln("({}), D: {}, S1: {}, S2: {}, S3: {}, tau: {}, peq: {}\n", gid, D, S1, S2, S3, tau, peq);
+                    // #endif
                     prim_data[gid] = Primitive<2>{D/ W, v1, v2, peq, Dchi / D};
                 } else {
                     prim_data[gid] = Primitive<3>{D/ W, v1, v2, v3, peq, Dchi / D};
@@ -766,6 +737,7 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
         const Conserved<dim> u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
         net_flux = f_hll - u_hll * vface;
     }
+
     // Upwind the scalar concentration flux
     if (net_flux.d < 0)
         net_flux.chi = right_prims.chi * net_flux.d;
@@ -967,24 +939,24 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     const real S2       = left_state.momentum(2);
                     const real S3       = left_state.momentum(3);
                     const real tau      = left_state.tau;
-                    // const real chi      = left_state.chi;
+                    const real chi      = left_state.chi;
                     const real E        = tau + D;
                     const real cofactor = 1 / (aL - aStar);
 
                     const real vL     = left_prims.vcomponent(nhat);
                     // Left Star State in x-direction of coordinate lattice
                     const real Dstar      = cofactor * (aL - vL) * D;
-                    // const real chistar    = cofactor * (aL - vL) * chi;
-                    const real S1star     = cofactor * (S1 * (aR - vL) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
-                    const real S2star     = cofactor * (S2 * (aR - vL) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
-                    const real S3star     = cofactor * (S3 * (aR - vL) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
+                    const real chistar    = cofactor * (aL - vL) * chi;
+                    const real S1star     = cofactor * (S1 * (aL - vL) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
+                    const real S2star     = cofactor * (S2 * (aL - vL) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
+                    const real S3star     = cofactor * (S3 * (aL - vL) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
                     const real Estar      = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
                     const real tauStar    = Estar - Dstar;
                     const auto starStateL = [=] {
                         if constexpr(dim == 2) {
-                            return Conserved<2>{Dstar, S1star, S2star, tauStar};
+                            return Conserved<2>{Dstar, S1star, S2star, tauStar, chistar};
                         } else {
-                            return Conserved<3>{Dstar, S1star, S2star, S3star, tauStar};
+                            return Conserved<3>{Dstar, S1star, S2star, S3star, tauStar, chistar};
                         }
                     }();
 
@@ -1004,13 +976,13 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     const real S2       = right_state.momentum(2);
                     const real S3       = right_state.momentum(3);
                     const real tau      = right_state.tau;
-                    // const real chi      = right_state.chi;
+                    const real chi      = right_state.chi;
                     const real E        = tau + D;
                     const real cofactor = 1 / (aR - aStar);
 
                     const real vR         = right_prims.vcomponent(nhat);
                     const real Dstar      = cofactor * (aR - vR) * D;
-                    // const real chistar    = cofactor * (aR - vR) * chi;
+                    const real chistar    = cofactor * (aR - vR) * chi;
                     const real S1star     = cofactor * (S1 * (aR - vR) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
                     const real S2star     = cofactor * (S2 * (aR - vR) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
                     const real S3star     = cofactor * (S3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
@@ -1018,9 +990,9 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     const real tauStar    = Estar - Dstar;
                     const auto starStateR = [=] {
                         if constexpr(dim == 2) {
-                            return Conserved<2>{Dstar, S1star, S2star, tauStar};
+                            return Conserved<2>{Dstar, S1star, S2star, tauStar, chistar};
                         } else {
-                            return Conserved<3>{Dstar, S1star, S2star, S3star, tauStar};
+                            return Conserved<3>{Dstar, S1star, S2star, S3star, tauStar, chistar};
                         }
                     }();
 
@@ -1037,137 +1009,6 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
             }
         } // end switch 
     }
-
-    // if (-aL <= (aStar - aL))
-    // {
-    //     const real pressure = left_prims.p;
-    //     const real D   = left_state.d;
-    //     const real S1  = left_state.momentum(1);
-    //     const real S2  = left_state.momentum(2);
-    //     const real S3  = left_state.momentum(3);
-    //     const real tau = left_state.tau;
-    //     const real E   = tau + D;
-    //     const real cofactor = 1 / (aL - aStar);
-    //     //--------------Compute the L Star State----------
-    //     switch (nhat)
-    //     {
-    //         case 1:
-    //         {
-    //             const real v1 = left_prims.get_v1();
-    //             // Left Star State in x-direction of coordinate lattice
-    //             const real Dstar    = cofactor * (aL - v1) * D;
-    //             const real S1star   = cofactor * (S1 * (aL - v1) - pressure + pStar);
-    //             const real S2star   = cofactor * (aL - v1) * S2;
-    //             const real S3star   = cofactor * (aL - v1) * S3;
-    //             const real Estar    = cofactor * (E * (aL - v1) + pStar * aStar - pressure * v1);
-    //             const real tauStar  = Estar - Dstar;
-
-    //             const auto interstate_left = Conserved(Dstar, S1star, S2star, S3star, tauStar);
-
-    //             //---------Compute the L Star Flux
-    //             return left_flux + (interstate_left - left_state) * aL;
-    //         }
-
-    //         case 2:
-    //         {
-    //             const real v2 = left_prims.get_v2();
-    //             // Start States in y-direction in the coordinate lattice
-    //             const real Dstar   = cofactor * (aL - v2) * D;
-    //             const real S1star  = cofactor * (aL - v2) * S1;
-    //             const real S2star  = cofactor * (S2 * (aL - v2) - pressure + pStar);
-    //             const real S3star  = cofactor * (aL - v2) * S3;
-    //             const real Estar   = cofactor * (E * (aL - v2) + pStar * aStar - pressure * v2);
-    //             const real tauStar = Estar - Dstar;
-
-    //             const auto interstate_left = Conserved(Dstar, S1star, S2star, S3star, tauStar);
-
-    //             //---------Compute the L Star Flux
-    //             return left_flux + (interstate_left - left_state) * aL;
-    //         }
-
-    //         default: // nhat == 3
-    //         {
-    //             const real v3 = left_prims.get_v3();
-    //             // Start States in y-direction in the coordinate lattice
-    //             const real Dstar   = cofactor * (aL - v3) * D;
-    //             const real S1star  = cofactor * (aL - v3) * S1;
-    //             const real S2star  = cofactor * (aL - v3) * S2;
-    //             const real S3star  = cofactor * (S3 * (aL - v3) - pressure + pStar);
-    //             const real Estar   = cofactor * (E * (aL - v3) + pStar * aStar - pressure * v3);
-    //             const real tauStar = Estar - Dstar;
-
-    //             const auto interstate_left = Conserved(Dstar, S1star, S2star, S3star, tauStar);
-
-    //             //---------Compute the L Star Flux
-    //             return left_flux + (interstate_left - left_state) * aL;
-    //         }
-            
-    //     } // end switch
-    // } else {
-    //     const real pressure = right_prims.p;
-    //     const real D   = right_state.d;
-    //     const real S1  = right_state.s1;
-    //     const real S2  = right_state.s2;
-    //     const real S3  = right_state.s3;
-    //     const real tau = right_state.tau;
-    //     const real E   = tau + D;
-    //     const real cofactor = 1 / (aR - aStar);
-
-    //     /* Compute the L/R Star State */
-    //     switch (nhat)
-    //     {
-    //         case 1:
-    //         {
-    //             const real v1 = right_prims.get_v1();
-    //             // Left Star State in x-direction of coordinate lattice
-    //             const real Dstar    = cofactor * (aR - v1) * D;
-    //             const real S1star   = cofactor * (S1 * (aR - v1) - pressure + pStar);
-    //             const real S2star   = cofactor * (aR - v1) * S2;
-    //             const real S3star   = cofactor * (aR - v1) * S3;
-    //             const real Estar    = cofactor * (E * (aR - v1) + pStar * aStar - pressure * v1);
-    //             const real tauStar  = Estar - Dstar;
-
-    //             const auto interstate_right = Conserved(Dstar, S1star, S2star, S3star, tauStar);
-
-    //             //---------Compute the L Star Flux
-    //             return right_flux + (interstate_right - right_state) * aR;
-    //         }
-
-    //         case 2:
-    //         {
-    //             const real v2 = right_prims.get_v2();
-    //             // Start States in y-direction in the coordinate lattice
-    //             const real Dstar   = cofactor * (aR - v2) * D;
-    //             const real S1star  = cofactor * (aR - v2) * S1;
-    //             const real S2star  = cofactor * (S2 * (aR - v2) - pressure + pStar);
-    //             const real S3star  = cofactor * (aR - v2) * S3;
-    //             const real Estar   = cofactor * (E * (aR - v2) + pStar * aStar - pressure * v2);
-    //             const real tauStar = Estar - Dstar;
-
-    //             const auto interstate_right = Conserved(Dstar, S1star, S2star, S3star, tauStar);
-
-    //             //---------Compute the L Star Flux
-    //             return right_flux + (interstate_right - right_state) * aR;
-    //         }
-
-    //         default: //nhat == 3
-    //         {
-    //             const real v3 = right_prims.get_v3();
-    //             // Start States in y-direction in the coordinate lattice
-    //             const real Dstar   = cofactor * (aR - v3) * D;
-    //             const real S1star  = cofactor * (aR - v3) * S1;
-    //             const real S2star  = cofactor * (aR - v3) * S2;
-    //             const real S3star  = cofactor * (S3 * (aR - v3) - pressure + pStar);
-    //             const real Estar   = cofactor * (E * (aR - v3) + pStar * aStar - pressure * v3);
-    //             const real tauStar = Estar - Dstar;
-
-    //             const auto interstate_right = Conserved(Dstar, S1star, S2star, S3star, tauStar);
-
-    //             //---------Compute the L Star Flux
-    //             return right_flux + (interstate_right - right_state) * aR;
-    //         }
-    //     } // end switch
-    // }
 };
 
 //===================================================================================================================
@@ -1184,15 +1025,17 @@ void SRHD<dim>::advance(
     const luint zpg = this->zphysical_grid;
 
     const luint extent      = p.get_full_extent();
-    auto* const prim_data   = prims.data();
     auto* const cons_data   = cons.data();
-    auto* const dens_source = density_source.data();
-    auto* const mom1_source = m1_source.data();
-    auto* const mom2_source = m2_source.data();
-    auto* const mom3_source = m3_source.data();
-    auto* const erg_source  = energy_source.data();
-    auto* const object_data = object_pos.data();
-    auto* const grav_source = sourceG1.data();
+    const auto* const prim_data   = prims.data();
+    const auto* const dens_source = density_source.data();
+    const auto* const mom1_source = m1_source.data();
+    const auto* const mom2_source = m2_source.data();
+    const auto* const mom3_source = m3_source.data();
+    const auto* const erg_source  = energy_source.data();
+    const auto* const object_data = object_pos.data();
+    const auto* const grav1_source = sourceG1.data();
+    const auto* const grav2_source = sourceG2.data();
+    const auto* const grav3_source = sourceG3.data();
 
     simbi::parallel_for(p, (luint)0, extent, [
         sx,
@@ -1206,7 +1049,9 @@ void SRHD<dim>::advance(
         mom3_source,
         erg_source,
         object_data,
-        grav_source,
+        grav1_source,
+        grav2_source,
+        grav3_source,
         xpg,
         ypg,
         zpg,
@@ -1407,7 +1252,6 @@ void SRHD<dim>::advance(
                 hL = prims2flux(zprimsL, 3);
                 hR = prims2flux(zprimsR, 3);
             }
-
             // Calc HLL Flux at i+1/2 interface
             switch (sim_solver)
             {
@@ -1758,29 +1602,48 @@ void SRHD<dim>::advance(
             if constexpr(dim == 1) {
                 return Conserved<1>{d_source, s1_source, e_source} * time_constant;
             } else if constexpr(dim == 2) {
-                const real s2_source = mom2_source_all_zeros    ? 0.0 : mom2_source[real_loc];
+                const real s2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
+                // #if !GPU_CODE
+                // printf("dsource: %.2e, s1_source: %.2e, s2_source: %.2e, e_source: %.2e\n",
+                // d_source,
+                // s1_source,
+                // s2_source,
+                // e_source
+                // );
+                // #endif
                 return Conserved<2>{d_source, s1_source, s2_source, e_source} * time_constant;
             } else {
-                const real s2_source = mom2_source_all_zeros    ? 0.0 : mom2_source[real_loc];
-                const real s3_source = mom3_source_all_zeros    ? 0.0 : mom3_source[real_loc];
+                const real s2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
+                const real s3_source = mom3_source_all_zeros ? 0.0 : mom3_source[real_loc];
                 return Conserved<3>{d_source, s1_source, s2_source, s3_source, e_source} * time_constant;
             }
         }();
 
         // Gravity
-        const auto gs1_source = 0; //g_source * cons_data[aid].d;
-        const auto gravity = [=]{
+        const auto gs1_source = zero_gravity1 ? 0 : grav1_source[real_loc] * cons_data[aid].d;
+        const auto tid = tza * sx * sy + tya * sx + txa;
+        const auto gravity = [
+            tid,
+            aid,
+            real_loc,
+            gs1_source, 
+            prim_buff, 
+            grav2_source,
+            grav3_source,
+            cons_data,
+            this
+            ]{
             if constexpr(dim == 1) {
-                const auto ge_source  = 0; //gs1_source * prim_buff[txa].v1;
+                const auto ge_source  = gs1_source * prim_buff[tid].v1;
                 return Conserved<1>{0, gs1_source, ge_source};
             } else if constexpr(dim == 2) {
-                const auto gs2_source = 0; //
-                const auto ge_source  = 0; //gs1_source * prim_buff[tya * sx + txa].v1 + gs2_source * prim_buff[tya * sx + txa].v2;
+                const auto gs2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].d;
+                const auto ge_source  = gs1_source * prim_buff[tid].v1 + gs2_source * prim_buff[tid].v2;
                 return Conserved<2>{0, gs1_source, gs2_source, ge_source};
             } else {
-                const auto gs2_source = 0; //
-                const auto gs3_source = 0; //
-                const auto ge_source  = 0; //gs1_source * prim_buff[tza * sx * sy + tya * sx + txa].v1 + gs2_source * prim_buff[tza * sx * sy + tya * sx + txa].v2 + gs3_source * prim_buff[tza * sx * sy + tya * sx + txa].v3;
+                const auto gs2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].d;
+                const auto gs3_source = zero_gravity3 ? 0 : grav3_source[real_loc] * cons_data[aid].d;
+                const auto ge_source  = gs1_source * prim_buff[tid].v1 + gs2_source * prim_buff[tid].v2 + gs3_source * prim_buff[tid].v3;
 
                 return Conserved<3>{0, gs1_source, gs2_source, gs3_source, ge_source};
             }
@@ -1791,7 +1654,7 @@ void SRHD<dim>::advance(
             {
                 case simbi::Geometry::CARTESIAN:
                 {
-                    cons_data[ia] -= ((frf - flf) * invdx1) * dt * step;
+                    cons_data[ia] -= ((frf - flf) * invdx1 - source_terms - gravity) * dt * step;
                     break;
                 }
                 default:
@@ -1815,108 +1678,111 @@ void SRHD<dim>::advance(
             {
                 case simbi::Geometry::CARTESIAN:
                 {
-                    cons_data[aid] -= ( (frf - flf) * invdx1 + (grf - glf) * invdx2 - source_terms) * step * dt;
+                    cons_data[aid] -= ( (frf - flf) * invdx1 + (grf - glf) * invdx2 - source_terms - gravity) * step * dt;
                     break;
                 }
                 
                 case simbi::Geometry::SPHERICAL:
                     {
-                    const real rl           = x1l + vfaceL * step * dt; 
-                    const real rr           = x1r + vfaceR * step * dt;
-                    const real rmean        = helpers::get_cell_centroid(rr, rl, geometry);
-                    const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
-                    const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                    const real dcos         = std::cos(tl) - std::cos(tr);
-                    const real dV           = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
-                    const real invdV        = 1.0 / dV;
-                    const real s1R          = 2.0 * M_PI * rr * rr * dcos; 
-                    const real s1L          = 2.0 * M_PI * rl * rl * dcos; 
-                    const real s2R          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tr);
-                    const real s2L          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tl);
-                    const real factor       = (mesh_motion) ? dV : 1;  
+                        const real rl           = x1l + vfaceL * step * dt; 
+                        const real rr           = x1r + vfaceR * step * dt;
+                        const real rmean        = helpers::get_cell_centroid(rr, rl, geometry);
+                        const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                        const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real dcos         = std::cos(tl) - std::cos(tr);
+                        const real dV           = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
+                        const real invdV        = 1.0 / dV;
+                        const real s1R          = 2.0 * M_PI * rr * rr * dcos; 
+                        const real s1L          = 2.0 * M_PI * rl * rl * dcos; 
+                        const real s2R          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tr);
+                        const real s2L          = 2.0 * M_PI * 0.5 * (rr * rr - rl * rl) * std::sin(tl);
+                        const real factor       = (mesh_motion) ? dV : 1;  
 
-                    // Grab central primitives
-                    const real rhoc = prim_buff[txa * sy + tya * sx].rho;
-                    const real uc   = prim_buff[txa * sy + tya * sx].get_v1();
-                    const real vc   = prim_buff[txa * sy + tya * sx].get_v2();
-                    const real pc   = prim_buff[txa * sy + tya * sx].p;
-                    const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
-                    const real gam2 = 1/(1 - (uc * uc + vc * vc));
+                        // Grab central primitives
+                        const real rhoc = prim_buff[tid].rho;
+                        const real uc   = prim_buff[tid].get_v1();
+                        const real vc   = prim_buff[tid].get_v2();
+                        const real pc   = prim_buff[tid].p;
+                        const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+                        const real gam2 = 1/(1 - (uc * uc + vc * vc));
 
-                    const Conserved<2> geom_source  = {
-                        0, 
-                        (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
-                        - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L) * invdV, 
-                        0
-                    };
+                        const Conserved<2> geom_source  = {
+                            0, 
+                            (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L) * invdV, 
+                            0
+                        };
 
-                    #if !GPU_CODE
-                    if (frf.d != 0 || flf.d != 0 || grf.d != 0 || glf.d != 0 ) {
-                        printf("frf: %.2e, flf: %.2e, grf: %.2e, glf: %.2e, geo: %.2e, step: %.2e, factor: %.2e\n",
-                            frf.d,
-                            flf.d,
-                            grf.d,
-                            glf.d,
-                            geom_source.d,
-                            step,
-                            factor
-                        );
-                    }
-                    #endif
-                    cons_data[aid] -= ( 
-                        (frf * s1R - flf * s1L) * invdV 
-                        + (grf * s2R - glf * s2L) * invdV 
-                        - geom_source 
-                        - source_terms 
-                        - gravity
-                    ) * dt * step * factor;
-                    break;
+                        cons_data[aid] -= ( 
+                            (frf * s1R - flf * s1L) * invdV 
+                            + (grf * s2R - glf * s2L) * invdV 
+                            - geom_source 
+                            - source_terms
+                            - gravity
+                        ) * dt * step * factor;
+                        break;
                     }
                 case simbi::Geometry::PLANAR_CYLINDRICAL:
                     {
-                    const real rl           = x1l + vfaceL * step * dt; 
-                    const real rr           = x1r + vfaceR * step * dt;
-                    const real rmean        = helpers::get_cell_centroid(rr, rl, simbi::Geometry::PLANAR_CYLINDRICAL);
-                    // const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
-                    // const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                    const real dVtot        = rmean * (rr - rl) * dx2;
-                    const real invdV        = 1.0 / dVtot;
-                    const real s1R          = rr * dx2; 
-                    const real s1L          = rl * dx2; 
-                    const real s2R          = (rr - rl); 
-                    const real s2L          = (rr - rl); 
+                        const real rl    = x1l + vfaceL * step * dt; 
+                        const real rr    = x1r + vfaceR * step * dt;
+                        const real rmean = helpers::get_cell_centroid(rr, rl, simbi::Geometry::PLANAR_CYLINDRICAL);
+                        // const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                        // const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real dV        = rmean * (rr - rl) * dx2;
+                        const real invdV        = 1.0 / dV;
+                        const real s1R          = rr * dx2; 
+                        const real s1L          = rl * dx2; 
+                        const real s2R          = (rr - rl); 
+                        const real s2L          = (rr - rl); 
 
-                    // Grab central primitives
-                    const real rhoc = prim_buff[tya * sx + txa].rho;
-                    const real uc   = prim_buff[tya * sx + txa].get_v1();
-                    const real vc   = prim_buff[tya * sx + txa].get_v2();
-                    const real pc   = prim_buff[tya * sx + txa].p;
-                    
-                    const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
-                    const real gam2 = 1/(1 - (uc * uc + vc * vc));
+                        // Grab central primitives
+                        const real rhoc = prim_buff[tid].rho;
+                        const real uc   = prim_buff[tid].get_v1();
+                        const real vc   = prim_buff[tid].get_v2();
+                        const real pc   = prim_buff[tid].p;
+                        
+                        const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+                        const real gam2 = 1/(1 - (uc * uc + vc * vc));
 
-                    const Conserved<2> geom_source  = {0, (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean, 0};
-                    cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step;
-                    break;
+                        const Conserved<2> geom_source  = {
+                            0, 
+                            (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * hc * gam2 * uc * vc) / rmean, 
+                            0
+                        };
+                        cons_data[aid] -= ( 
+                            (frf * s1R - flf * s1L) * invdV 
+                            + (grf * s2R - glf * s2L) * invdV 
+                            - geom_source 
+                            - source_terms 
+                            - gravity
+                        ) * dt * step;
+                        break;
                     }
                 default:
                     {
-                    const real rl           = x1l + vfaceL * step * dt; 
-                    const real rr           = x1r + vfaceR * step * dt;
-                    const real rmean        = helpers::get_cell_centroid(rr, rl, simbi::Geometry::AXIS_CYLINDRICAL);
-                    const real dVtot        = rmean * (rr - rl) * dx2;
-                    const real invdV        = 1.0 / dVtot;
-                    const real s1R          = rr * dx2; 
-                    const real s1L          = rl * dx2; 
-                    const real s2R          = rmean * (rr - rl); 
-                    const real s2L          = rmean * (rr - rl); 
-                    const real factor       = (mesh_motion) ? dVtot : 1;  
+                        const real rl           = x1l + vfaceL * step * dt; 
+                        const real rr           = x1r + vfaceR * step * dt;
+                        const real rmean        = helpers::get_cell_centroid(rr, rl, simbi::Geometry::AXIS_CYLINDRICAL);
+                        const real dV           = rmean * (rr - rl) * dx2;
+                        const real invdV        = 1.0 / dV;
+                        const real s1R          = rr * dx2; 
+                        const real s1L          = rl * dx2; 
+                        const real s2R          = rmean * (rr - rl); 
+                        const real s2L          = rmean * (rr - rl);  
 
-                    // Grab central primitives
-                    const real pc   = prim_buff[tya * sx + txa].p;
-                    const auto geom_source  = Conserved<2>{0, pc * (s1R - s1L) * invdV, 0, 0};
-                    cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV - geom_source - source_terms) * dt * step * factor;
-                    break;
+                        // Grab central primitives
+                        const real pc   = prim_buff[tid].p;
+                        const auto geom_source  = Conserved<2>{0, pc * (s1R - s1L) * invdV, 0, 0};
+                        cons_data[aid] -= ( 
+                              (frf * s1R - flf * s1L) * invdV 
+                            + (grf * s2R - glf * s2L) * invdV 
+                            - geom_source 
+                            - source_terms
+                            - gravity
+                        ) * dt * step;
+                        break;
                     }
             } // end switch
         } else {
@@ -1924,17 +1790,17 @@ void SRHD<dim>::advance(
             {
                 case simbi::Geometry::CARTESIAN:
                     {
-                        cons_data[aid] -= ( (frf  - flf ) * invdx1 + (grf - glf) * invdx2 + (hrf - hlf) * invdx3 - source_terms) * dt * step;
+                        cons_data[aid] -= ( (frf  - flf ) * invdx1 + (grf - glf) * invdx2 + (hrf - hlf) * invdx3 - source_terms - gravity) * dt * step;
                         break;
                     }
                 case simbi::Geometry::SPHERICAL:
                     {
-                        const real rl     = (ii > 0 ) ? x1min * std::pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
-                        const real rr     = (ii < xpg - 1) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
-                        const real tl     = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
-                        const real tr     = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
-                        const real ql     = (kk > 0 ) ? x3min + (kk - static_cast<real>(0.5)) * dx3 :  x3min;
-                        const real qr     = (kk < zpg - 1) ? ql + dx3 * (kk == 0 ? 0.5 : 1.0) :  x3max; 
+                        const real rl     = x1l + vfaceL * step * dt; 
+                        const real rr     = x1r + vfaceR * step * dt;
+                        const real tl     = get_x2face(jj, 0);
+                        const real tr     = get_x2face(jj, 1); 
+                        const real ql     = get_x3face(kk, 0);
+                        const real qr     = get_x3face(kk, 1); 
                         const real rmean  = helpers::get_cell_centroid(rr, rl, simbi::Geometry::SPHERICAL);
                         const real s1R    = rr * rr; 
                         const real s1L    = rl * rl; 
@@ -1948,11 +1814,11 @@ void SRHD<dim>::advance(
                         const real cot    = std::cos(thmean) / sint;
 
                         // Grab central primitives
-                        const real rhoc = prim_buff[txa + tya * sx + tza * sx * sy].rho;
-                        const real uc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v1();
-                        const real vc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v2();
-                        const real wc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v3();
-                        const real pc   = prim_buff[txa + tya * sx + tza * sx * sy].p;
+                        const real rhoc = prim_buff[tid].rho;
+                        const real uc   = prim_buff[tid].get_v1();
+                        const real vc   = prim_buff[tid].get_v2();
+                        const real wc   = prim_buff[tid].get_v3();
+                        const real pc   = prim_buff[tid].p;
 
                         const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
                         const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
@@ -1963,34 +1829,41 @@ void SRHD<dim>::advance(
                             - rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean, 
                             0
                         };
-                        cons_data[aid] -= ( (frf * s1R - flf * s1L) / dV1 + (grf * s2R - glf * s2L) / dV2 + (hrf - hlf) / dV3 - geom_source - source_terms) * dt * step;
+                        cons_data[aid] -= ( 
+                            (frf * s1R - flf * s1L) / dV1 
+                            + (grf * s2R - glf * s2L) / dV2 
+                            + (hrf - hlf) / dV3 
+                            - geom_source 
+                            - source_terms
+                            - gravity
+                        ) * dt * step;
                         break;
                     }
                 default:
                     {
-                        const real rl           = (ii > 0 ) ? x1min * std::pow(10, (ii -static_cast<real>(0.5)) * dlogx1) :  x1min;
-                        const real rr           = (ii < xpg - 1) ? rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)) : x1max;
-                        const real tl           = (jj > 0 ) ? x2min + (jj - static_cast<real>(0.5)) * dx2 :  x2min;
-                        const real tr           = (jj < ypg - 1) ? tl + dx2 * (jj == 0 ? 0.5 : 1.0) :  x2max; 
-                        const real zl           = (kk > 0 ) ? x3min + (kk - static_cast<real>(0.5)) * dx3 :  x3min;
-                        const real zr           = (kk < zpg - 1) ? zl + dx3 * (kk == 0 ? 0.5 : 1.0) :  x3max; 
-                        const real rmean        = helpers::get_cell_centroid(rr, rl, simbi::Geometry::CYLINDRICAL);
-                        const real s1R          = rr * (zr - zl) * (tr - tl); 
-                        const real s1L          = rl * (zr - zl) * (tr - tl); 
-                        const real s2R          = (rr - rl) * (zr - rl);
-                        const real s2L          = (rr - rl) * (zr - rl);
+                        const real rl     = x1l + vfaceL * step * dt; 
+                        const real rr     = x1r + vfaceR * step * dt;
+                        const real ql     = get_x2face(jj, 0);
+                        const real qr     = get_x2face(jj, 1); 
+                        const real zl     = get_x3face(kk, 0);
+                        const real zr     = get_x3face(kk, 1); 
+                        const real rmean  = helpers::get_cell_centroid(rr, rl, simbi::Geometry::CYLINDRICAL);
+                        const real s1R    = rr * (zr - zl) * (qr - ql); 
+                        const real s1L    = rl * (zr - zl) * (qr - ql); 
+                        const real s2R    = (rr - rl) * (zr - rl);
+                        const real s2L    = (rr - rl) * (zr - rl);
                         // const real s3L          = rmean * (rr - rl) * (tr - tl);
                         // const real s3R          = s3L;
                         // const real thmean       = static_cast<real>(0.5) * (tl + tr);
-                        const real dV           = rmean  * (rr - rl) * (zr - zl) * (tr - tl);
-                        const real invdV        = 1/ dV;
+                        const real dV    = rmean  * (rr - rl) * (zr - zl) * (qr - ql);
+                        const real invdV = 1/ dV;
 
                         // Grab central primitives
-                        const real rhoc = prim_buff[txa + tya * sx + tza * sx * sy].rho;
-                        const real uc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v1();
-                        const real vc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v2();
-                        const real wc   = prim_buff[txa + tya * sx + tza * sx * sy].get_v3();
-                        const real pc   = prim_buff[txa + tya * sx + tza * sx * sy].p;
+                        const real rhoc = prim_buff[tid].rho;
+                        const real uc   = prim_buff[tid].get_v1();
+                        const real vc   = prim_buff[tid].get_v2();
+                        const real wc   = prim_buff[tid].get_v3();
+                        const real pc   = prim_buff[tid].p;
 
                         const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
                         const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
@@ -2026,11 +1899,11 @@ void SRHD<dim>::simulate(
     this->enrg_outer = e_outer;
 
     if constexpr(dim == 1) {
-        this->all_outer_bounds   = (dens_outer && mom1_outer && enrg_outer);
+        this->all_outer_bounds = (dens_outer && mom1_outer && enrg_outer);
     } else if constexpr(dim == 2) {
-        this->all_outer_bounds   = (dens_outer && mom1_outer && mom2_outer && enrg_outer);
+        this->all_outer_bounds = (dens_outer && mom1_outer && mom2_outer && enrg_outer);
     } else {
-        this->all_outer_bounds   = (dens_outer && mom1_outer && mom2_outer && mom3_outer && enrg_outer);
+        this->all_outer_bounds = (dens_outer && mom1_outer && mom2_outer && mom3_outer && enrg_outer);
     }
 
     // Stuff for moving mesh 
@@ -2153,7 +2026,7 @@ void SRHD<dim>::simulate(
     this->radius             = (first_order) ? 1 : 2;
     this->step               = (first_order) ? 1 : static_cast<real>(0.5);
     const luint xstride      = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
-    const luint ystride      = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
+    const luint ystride      = (dim < 3) ? 1 : (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
     const auto  xblockspace  =  xblockdim + 2 * radius;
     const auto  yblockspace  = (dim < 2) ? 1 : yblockdim + 2 * radius;
     const auto  zblockspace  = (dim < 3) ? 1 : zblockdim + 2 * radius;
@@ -2174,8 +2047,6 @@ void SRHD<dim>::simulate(
         adapt_dt<TIMESTEP_TYPE::MINIMUM>();
     }
 
-    std::cout << dt << "\n";
-    std::cin.get();
     // Using a sigmoid decay function to represent when the source terms turn off.
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
@@ -2196,7 +2067,6 @@ void SRHD<dim>::simulate(
             return;
         }
         advance(activeP, xstride, ystride);
-        std::cin.get();
         cons2prim(fullP);
         if constexpr(dim == 1) {
             helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());

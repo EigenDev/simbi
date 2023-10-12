@@ -323,7 +323,7 @@ namespace simbi
             case Geometry::SPHERICAL:
                 return static_cast<real>(0.75) * (xr * xr * xr * xr - xl * xl * xl * xl) / (xr * xr * xr - xl * xl * xl);
             default:
-                return static_cast<real>(2/3) * (xr * xr * xr - xl * xl * xl) / (xr * xr - xl * xl);
+                return static_cast<real>(2.0/3.0) * (xr * xr * xr - xl * xl * xl) / (xr * xr - xl * xl);
             }
         }
 

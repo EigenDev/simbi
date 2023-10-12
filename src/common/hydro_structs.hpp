@@ -361,6 +361,9 @@ namespace sr2d {
         
         inline GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {
+            if (nhat > 2) {
+                return 0;
+            }
             return (nhat == 1 ? get_v1() : get_v2()); 
         }
 
@@ -511,7 +514,12 @@ namespace hydro2d {
         }
         
         inline GPU_CALLABLE_MEMBER
-        constexpr real vcomponent(const unsigned nhat) const {return (nhat == 1 ? v1 : v2); }
+        constexpr real vcomponent(const unsigned nhat) const {
+            if (nhat > 2) {
+                return 0;
+            }
+            return (nhat == 1 ? v1 : v2); 
+        }
 
     };
 

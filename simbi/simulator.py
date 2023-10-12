@@ -513,7 +513,7 @@ class Hydro:
         self.start_time: float = 0.0
         self.chkpt_idx: int = 0
         lib_mode  = 'cpu' if compute_mode in ['cpu', 'omp'] else 'gpu'
-        state_reg = 'SRHD' if self.regime == 'relativistic' else ''
+        state_reg = 'SR' if self.regime == 'relativistic' else ''
         # sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), f'PyState{state_reg}{self.dimensionality}D')
         sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), 'Buddy')
 
@@ -541,7 +541,6 @@ class Hydro:
         else:
             simbi_ic.load_checkpoint(
                 self, chkpt, self.dimensionality, mesh_motion)
-
         if self.dimensionality == 1 and self.coord_system in [
                 'planar_cylindrical', 'axis_cylindrical']:
             self.coord_system = 'cylindrical'
@@ -615,13 +614,12 @@ class Hydro:
         logger.info( 
             f"Computing {'First' if first_order else 'Second'} Order Solution...") 
         kwargs: dict[str, Any] = {}
-            
+        
+        sources = np.zeros(self.dimensionality + 2) if sources is None else np.asanyarray(sources)
+        sources = sources.reshape(sources.shape[0], -1)
+        gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
+        gsources = gsources.reshape(gsources.shape[0], -1)
         if self.dimensionality == 1:
-            sources = np.zeros(3) if sources is None else np.asanyarray(sources)
-            sources = sources.reshape(sources.shape[0], -1)
-            gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
-            gsources = gsources.reshape(gsources.shape[0], -1)
-            
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "128"
 
@@ -631,22 +629,22 @@ class Hydro:
                 #     cfl,
                 #     x1=self.x1,
                 #     coord_system=cython_coordinates)
-                kwargs = {
-                    'a': scale_factor, 
-                    'adot': scale_factor_derivative,
-                    'gravity_sources': gsources
-                    }
-                if mesh_motion and dens_outer and mom_outer and edens_outer:
-                    kwargs['d_outer'] = dens_outer
-                    kwargs['s_outer'] = mom_outer
-                    kwargs['e_outer'] = edens_outer
+                # kwargs = {
+                #     'a': scale_factor, 
+                #     'adot': scale_factor_derivative,
+                #     'gravity_sources': gsources
+                #     }
+                # if mesh_motion and dens_outer and mom_outer and edens_outer:
+                #     kwargs['d_outer'] = dens_outer
+                #     kwargs['s_outer'] = mom_outer
+                #     kwargs['e_outer'] = edens_outer
 
         elif self.dimensionality == 2:
             # ignore the chi term
-            sources = np.zeros(4) if sources is None else np.asanyarray(sources)
-            sources = sources.reshape(sources.shape[0], -1)
-            gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
-            gsources = gsources.reshape(gsources.shape[0], -1)
+            # sources = np.zeros(4) if sources is None else np.asanyarray(sources)
+            # sources = sources.reshape(sources.shape[0], -1)
+            # gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
+            # gsources = gsources.reshape(gsources.shape[0], -1)
             
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "16"
@@ -654,32 +652,31 @@ class Hydro:
             if 'GPUYBLOCK_SIZE' not in os.environ:
                 os.environ['GPUYBLOCK_SIZE'] = "16" 
                 
-            state = sim_state(
-                self.u,
-                self.gamma,
-                cfl=cfl,
-                x1=self.x1,
-                x2=self.x2,
-                coord_system=cython_coordinates)
-            kwargs = {
-                'a': scale_factor,
-                'adot': scale_factor_derivative,
-                'quirk_smoothing': quirk_smoothing,
-                'object_cells': object_cells,
-                'gravity_sources': gsources,
-            }
-            if mesh_motion and dens_outer and mom_outer and edens_outer:
-                momentum_components = cast(Sequence[Callable[..., float]], mom_outer)
-                kwargs['d_outer']   = dens_outer
-                kwargs['s1_outer']  = momentum_components[0]
-                kwargs['s2_outer']  = momentum_components[1]
-                kwargs['e_outer']   = edens_outer
+            # state = sim_state(
+            #     self.u,
+            #     self.gamma,
+            #     cfl=cfl,
+            #     x1=self.x1,
+            #     x2=self.x2,
+            #     coord_system=cython_coordinates)
+            # kwargs = {
+            #     'a': scale_factor,
+            #     'adot': scale_factor_derivative,
+            #     'quirk_smoothing': quirk_smoothing,
+            #     'object_cells': object_cells,
+            #     'gravity_sources': gsources,
+            # }
+            # if mesh_motion and dens_outer and mom_outer and edens_outer:
+            #     momentum_components = cast(Sequence[Callable[..., float]], mom_outer)
+            #     kwargs['d_outer']   = dens_outer
+            #     kwargs['s1_outer']  = momentum_components[0]
+            #     kwargs['s2_outer']  = momentum_components[1]
+            #     kwargs['e_outer']   = edens_outer
         else:
-            sources = np.zeros(5) if sources is None else np.asanyarray(sources)
-            sources = sources.reshape(sources.shape[0], -1)
-            gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
-            gsources = gsources.reshape(gsources.shape[0], -1)
-            
+            # sources = np.zeros(5) if sources is None else np.asanyarray(sources)
+            # sources = sources.reshape(sources.shape[0], -1)
+            # gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
+            # gsources = gsources.reshape(gsources.shape[0], -1)
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "4"
                 
@@ -689,15 +686,15 @@ class Hydro:
             if 'GPUZBLOCK_SIZE' not in os.environ:
                 os.environ['GPUZBLOCK_SIZE'] = "4"
                 
-            state = sim_state(
-                self.u,
-                self.gamma,
-                cfl=cfl,
-                x1=self.x1,
-                x2=self.x2,
-                x3=self.x3,
-                coord_system=cython_coordinates)
-            kwargs = {'object_cells': object_cells}
+            # state = sim_state(
+            #     self.u,
+            #     self.gamma,
+            #     cfl=cfl,
+            #     x1=self.x1,
+            #     x2=self.x2,
+            #     x3=self.x3,
+            #     coord_system=cython_coordinates)
+            # kwargs = {'object_cells': object_cells}
         
         if len(self.resolution) == 1:
             self.nx = self.u[0].shape[0]

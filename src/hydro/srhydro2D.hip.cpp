@@ -702,8 +702,6 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
             const real Dchi = cons_data[gid].chi * invdV; 
             const real S    = std::sqrt(S1 * S1 + S2 * S2);
             
-            
-            
             real peq = press_data[gid];
             luint iter  = 0;
             const real tol = D * tol_scale;
@@ -742,6 +740,9 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
             #if FOUR_VELOCITY
                 prim_data[gid] = Primitive{D/ W, v1 * W, v2 * W, peq, Dchi / D};
             #else
+                #if !GPU_CODE
+                    writeln("({}), D: {}, S1: {}, S2: {}, tau: {}, peq: {}\n", gid, D, S1, S2, tau, peq);
+                #endif
                 prim_data[gid] = Primitive{D/ W, v1, v2, peq, Dchi / D};
             #endif
             workLeftToDo = false;
@@ -1088,7 +1089,7 @@ void SRHD2D::advance(
         const real s2_source = mom2_source_all_zeros   ? 0.0 : mom2_source[real_loc];
         const real e_source  = energy_source_all_zeros ? 0.0 : erg_source[real_loc];
         // Gravity
-        const auto g_source   = grav_source_all_zeros  ? 0.0 :  grav_source[ii];
+        const auto g_source   = zero_gravity1  ? 0.0 :  grav_source[ii];
         const auto gs1_source = g_source * cons_data[aid].d;
         const auto gs2_source = 0; 
         const auto ge_source  = gs1_source * prim_buff[txa].v1;
@@ -1256,7 +1257,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->mom1_source_all_zeros   = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
     this->mom2_source_all_zeros   = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
     this->energy_source_all_zeros = std::all_of(sourceTau.begin(), sourceTau.end(), [](real i) {return i == 0;});
-    this->grav_source_all_zeros   = std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {return i == 0;});
+    this->zero_gravity1   = std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {return i == 0;});
     define_tinterval(t, dlogt, chkpt_interval, chkpt_idx);
     define_chkpt_idx(chkpt_idx);
     // Params moving mesh
@@ -1375,7 +1376,7 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
         write2file(*this, setup, data_directory, t, 0, chkpt_interval, yphysical_grid);
         helpers::config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
-    
+
     // Simulate :)
     const luint xstride = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
     const luint ystride = (BuildPlatform == Platform::GPU) ? yblockdim + 2 * radius: ny;
