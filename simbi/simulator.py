@@ -473,7 +473,7 @@ class Hydro:
             mom_outer: Optional[Union[Callable[..., float], Sequence[Callable[..., float]]]] = None,
             edens_outer: Optional[Callable[..., float]] = None,
             object_positions: Optional[Union[Sequence[Any], NDArray[Any]]] = None,
-            boundary_sources: Optional[Union[Sequence[Any], NDArray[Any]]] = None) -> NDArray[Any]:
+            boundary_sources: Optional[Union[Sequence[Any], NDArray[Any]]] = None) -> None:
         """
         Simulate the Hydro Setup
 
@@ -704,10 +704,10 @@ class Hydro:
             self.ny = 1
             self.nz = 1
         elif len(self.resolution) == 2:
-            self.nx, self.ny = self.u[0].shape
+            self.ny, self.nx = self.u[0].shape
             self.nz = 1
         else:
-            self.nx, self.ny, self.nz = self.u[0].shape
+            self.nz, self.ny, self.nx = self.u[0].shape
             
         init_conditions = {
             'gamma': self.gamma,
@@ -736,19 +736,17 @@ class Hydro:
             'nx': self.nx,
             'ny': self.ny,
             'nz': self.nz,
-            'object_cells': object_cells
+            'object_cells': object_cells.flatten()
         }
         
-        if self.dimensionality == 1:
-            # state = sim_state(self.u, init_conditions)
-            # self.solution = state.simulate(**kwargs)
-            state = sim_state()
-            self.solution = state.run(
-                self.u, 
-                self.dimensionality,
-                self.regime.encode('utf-8'),
-                init_conditions
-            )
+        state_contig = self.u.reshape(self.u.shape[0], -1)
+        state = sim_state()
+        state.run(
+            state_contig, 
+            self.dimensionality,
+            self.regime.encode('utf-8'),
+            init_conditions
+        )
             
         # self.solution = state.simulate(
         #     sources=sources,
@@ -767,6 +765,3 @@ class Hydro:
         #     constant_sources=constant_sources,
         #     boundary_sources=boundary_sources,
         #     **kwargs)
-
-        self._cleanup(first_order)
-        return self.solution

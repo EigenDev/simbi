@@ -10,7 +10,7 @@ namespace simbi
         Driver();
         ~Driver();
 
-        std::vector<std::vector<real>> run(
+        void run(
             std::vector<std::vector<real>> state,
             const int dim, 
             const std::string regime, 

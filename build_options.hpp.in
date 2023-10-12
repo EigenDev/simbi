@@ -80,6 +80,13 @@ constexpr bool managed_memory = false;
 
 //=========================== RUNTIME CHECK
 #if GPU_CODE
+template <typename T>
+__device__ T* shared_memory_proxy()
+{
+    // do we need an __align__() here? I don't think so...
+    extern __shared__ unsigned char memory[];
+    return reinterpret_cast<T*>(memory);
+}
 
 #define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...) \
         kernel_name<<<((gridsize), (blocksize)) >>> (__VA_ARGS__);

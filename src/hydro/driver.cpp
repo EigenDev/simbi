@@ -12,32 +12,24 @@ Driver::~Driver(){
 }
 
 
-std::vector<std::vector<real>> Driver::run(
+void Driver::run(
     std::vector<std::vector<real>> state,
     const int dim,
     const std::string regime,
     const InitialConditions &init_cond
 ) {
-
     if (regime == "relativistic") {
         if (dim == 1) {
             auto self = std::make_unique<SRHD<1>>(state, init_cond);
-            // auto self = new SRHD<1>(state, init_cond);
-            auto res = self->simulate([](real i){ return 0;}, [](real i){return 1;});
-            return res;
+            self->simulate([](real i){ return 1;}, [](real i){return 0;});
         } else if (dim == 2) {
-            // auto self = new SRHD<2>(state, init_cond);
-            // auto res = self.simulate([](real i){ return 0;}, [](real i){return 1;});
-            // delete self;
-            // return res;
+            auto self = std::make_unique<SRHD<2>>(state, init_cond);
+            self->simulate([](real i){ return 1;}, [](real i){return 0;});
         } else {
-            // auto self = new SRHD<3>(state, init_cond);
-            // auto res = self.simulate([](real i){ return 0;}, [](real i){return 1;});
-            // delete self;
-            // return res;
+            auto self = std::make_unique<SRHD<3>>(state, init_cond);
+            self->simulate([](real i){ return 1;}, [](real i){return 0;});
+
         }
     }
-
-    return std::vector<std::vector<real>> {{1, 1, 1}, {1,1,1}};
 }
 

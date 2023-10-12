@@ -217,7 +217,7 @@ namespace simbi
 
         HydroBase(
             std::vector<std::vector<real>> state,
-            InitialConditions &init_conditions)
+            const InitialConditions &init_conditions)
         :
             state(state),
             gamma(init_conditions.gamma),
@@ -280,8 +280,8 @@ namespace simbi
                 this->x2max            = x2[yphysical_grid - 1];
                 this->x3min            = x3[0];
                 this->x3max            = x3[zphysical_grid - 1];
-                this->dx3              = (x3[zphysical_grid - 1] - x3[0]) / (zphysical_grid - 1);
-                this->dx2              = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
+                this->dx3              = (x3max - x3min) / (zphysical_grid - 1);
+                this->dx2              = (x2max - x2min) / (yphysical_grid - 1);
                 this->invdx2           = 1 / dx2;
                 this->invdx3           = 1 / dx3;
                 this->x3cell_spacing   = simbi::Cellspacing::LINSPACE;
@@ -291,10 +291,10 @@ namespace simbi
             } else if ((ny > 1) && (nz == 1)) { // 2D Check
                 this->x2min            = x2[0];
                 this->x2max            = x2[yphysical_grid - 1];
-                this->x3cell_spacing   = simbi::Cellspacing::LINSPACE;
-                this->dx2    = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
+                this->x2cell_spacing   = simbi::Cellspacing::LINSPACE;
+                this->dx2    = (x2max - x2min) / (yphysical_grid - 1);
                 this->invdx2 = 1 / dx2;
-                this->mom2_source_all_zeros    = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
+                this->mom2_source_all_zeros = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
             }
 
             this->den_source_all_zeros     = std::all_of(density_source.begin(), density_source.end(),   [](real i) {return i == 0;});

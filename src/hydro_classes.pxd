@@ -15,7 +15,7 @@ cdef extern from "util/pyobj_wrapper.hpp":
 
 cdef extern from "build_options.hpp":
     cdef bool col_maj "COLUMN_MAJOR"
-    
+    ctypedef double real 
     # a few cname hacks 
     ctypedef int dim1 "1" 
     ctypedef int dim2 "2"
@@ -24,7 +24,6 @@ cdef extern from "build_options.hpp":
 
 cdef extern from "common/enums.hpp":
     cdef int FLOAT_PRECISION "FLOAT_PRECISION"
-    ctypedef double real 
 
 cdef extern from "common/hydro_structs.hpp":
     cdef cppclass InitialConditions:

@@ -81,7 +81,7 @@ namespace simbi
         SRHD();
         SRHD(
             std::vector<std::vector<real>> &state,
-            InitialConditions &init_conditions);
+            const InitialConditions &init_conditions);
         ~SRHD();
 
         void cons2prim(const ExecutionPolicy<> &p);
@@ -140,7 +140,7 @@ namespace simbi
         template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt(const ExecutionPolicy<> &p);
 
-        std::vector<std::vector<real>> simulate(
+        void simulate(
             std::function<real(real)> a,
             std::function<real(real)> adot,
             function_t const &d_outer  = nullptr,
