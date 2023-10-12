@@ -611,6 +611,7 @@ class Visualizer:
                     # ax.set_thetamax(np.rad2deg(xextent[1]))
             else:
                 ax.set_ylim(*self.ylims)
+                ax.set_aspect('equal')
                 
             if self.xmax:
                 ax.set_rmax(self.xmax)
