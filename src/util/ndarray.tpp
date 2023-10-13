@@ -59,7 +59,7 @@ dimensions(rhs.dimensions)
 template <typename DT, Platform build_mode>
 simbi::ndarray<DT,build_mode>::ndarray(const std::vector<DT>& rhs) : 
 sz(rhs.size()),
-nd_capacity(rhs.capacity()),
+nd_capacity(rhs.capacity() * sizeof(DT)),
 dimensions(1),
 arr(new DT[rhs.size()])
 {

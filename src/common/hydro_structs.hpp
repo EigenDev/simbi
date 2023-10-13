@@ -56,61 +56,75 @@ struct InitialConditions {
 
 namespace hydro1d {
     struct Primitive {
-        real rho, v1, p;
-        GPU_CALLABLE_MEMBER Primitive () : rho(0), v1(0), p(0) {}
+        real rho, v1, p, chi;
+        GPU_CALLABLE_MEMBER Primitive () : rho(0), v1(0), p(0), chi(0) {}
         GPU_CALLABLE_MEMBER ~Primitive () {}
-        GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real p) : rho(rho), v1(v1), p(p) {}
-        GPU_CALLABLE_MEMBER Primitive(const Primitive &prim) : rho(prim.rho), v1(prim.v1), p(prim.p) {}
-        GPU_CALLABLE_MEMBER Primitive operator +(const Primitive &prim) const {return Primitive(rho + prim.rho, v1 + prim.v1, p + prim.p); }
-        GPU_CALLABLE_MEMBER Primitive operator -(const Primitive &prim) const {return Primitive(rho - prim.rho, v1 - prim.v1, p - prim.p); }
-        GPU_CALLABLE_MEMBER Primitive operator /(const real c) const {return Primitive(rho/c, v1/c, p/c); }
-        GPU_CALLABLE_MEMBER Primitive operator *(const real c) const {return Primitive(rho*c, v1*c, p*c); }
+        GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real p) : rho(rho), v1(v1), p(p), chi(0) {}
+        GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real p, real chi) : rho(rho), v1(v1), p(p), chi(chi) {}
+        GPU_CALLABLE_MEMBER Primitive(const Primitive &prim) : rho(prim.rho), v1(prim.v1), p(prim.p), chi(prim.chi) {}
+        GPU_CALLABLE_MEMBER Primitive operator +(const Primitive &prim) const {return Primitive(rho + prim.rho, v1 + prim.v1, p + prim.p, chi + prim.chi); }
+        GPU_CALLABLE_MEMBER Primitive operator -(const Primitive &prim) const {return Primitive(rho - prim.rho, v1 - prim.v1, p - prim.p, chi - prim.chi); }
+        GPU_CALLABLE_MEMBER Primitive operator /(const real c) const {return Primitive(rho/c, v1/c, p/c, chi/c); }
+        GPU_CALLABLE_MEMBER Primitive operator *(const real c) const {return Primitive(rho*c, v1*c, p*c, chi*c); }
         GPU_CALLABLE_MEMBER Primitive & operator +=(const Primitive &prims) {
             rho    += prims.rho;
             v1     += prims.v1;
             p      += prims.p;
+            chi    += prims.chi;
             return *this;
         }
 
         GPU_CALLABLE_MEMBER Primitive & operator -=(const Primitive &prims) {
-            rho    -= prims.rho;
-            v1     -= prims.v1;
-            p      -= prims.p;
+            rho -= prims.rho;
+            v1  -= prims.v1;
+            p   -= prims.p;
+            chi -= prims.chi;
             return *this;
         }
 
         GPU_CALLABLE_MEMBER Primitive & operator *=(const real c) {
-            rho    *= c;
-            v1     *= c;
-            p      *= c;
+            rho *= c;
+            v1  *= c;
+            p   *= c;
+            chi *= c;
             return *this;
         }
 
         inline GPU_CALLABLE_MEMBER constexpr real get_v() const {
             return v1;
         }
+
+        GPU_CALLABLE_MEMBER constexpr real vcomponent(const int nhat) const {
+            if (nhat > 1) {
+                return 0;
+            }
+            return v1;
+        }
     };
 
     struct Conserved {
-        real rho, m, e_dens;
-        GPU_CALLABLE_MEMBER Conserved() : rho(0), m(0), e_dens(0) {}
+        real rho, m, e_dens, chi;
+        GPU_CALLABLE_MEMBER Conserved() : rho(0), m(0), e_dens(0), chi(0) {}
         GPU_CALLABLE_MEMBER ~Conserved() {};
-        GPU_CALLABLE_MEMBER Conserved(real rho, real m, real e_dens) : rho(rho), m(m), e_dens(e_dens) {}
-        GPU_CALLABLE_MEMBER Conserved(const Conserved &cons) : rho(cons.rho), m(cons.m), e_dens(cons.e_dens) {}
-        GPU_CALLABLE_MEMBER Conserved operator +(const Conserved &cons) const {return Conserved(rho + cons.rho, m + cons.m, e_dens + cons.e_dens); }
-        GPU_CALLABLE_MEMBER Conserved operator -(const Conserved &cons) const {return Conserved(rho - cons.rho, m - cons.m, e_dens - cons.e_dens); }
-        GPU_CALLABLE_MEMBER Conserved operator /(const real c) const {return Conserved(rho/c, m/c, e_dens/c); }
-        GPU_CALLABLE_MEMBER Conserved operator *(const real c) const {return Conserved(rho*c, m*c, e_dens*c); }
+        GPU_CALLABLE_MEMBER Conserved(real rho, real m, real e_dens) : rho(rho), m(m), e_dens(e_dens), chi(0) {}
+        GPU_CALLABLE_MEMBER Conserved(real rho, real m, real e_dens, real chi) : rho(rho), m(m), e_dens(e_dens), chi(chi) {}
+        GPU_CALLABLE_MEMBER Conserved(const Conserved &cons) : rho(cons.rho), m(cons.m), e_dens(cons.e_dens), chi(cons.chi) {}
+        GPU_CALLABLE_MEMBER Conserved operator +(const Conserved &cons) const {return Conserved(rho + cons.rho, m + cons.m, e_dens + cons.e_dens, chi + cons.chi); }
+        GPU_CALLABLE_MEMBER Conserved operator -(const Conserved &cons) const {return Conserved(rho - cons.rho, m - cons.m, e_dens - cons.e_dens, chi - cons.chi); }
+        GPU_CALLABLE_MEMBER Conserved operator /(const real c) const {return Conserved(rho/c, m/c, e_dens/c, chi/c); }
+        GPU_CALLABLE_MEMBER Conserved operator *(const real c) const {return Conserved(rho*c, m*c, e_dens*c, chi*c); }
         GPU_CALLABLE_MEMBER Conserved & operator +=(const Conserved &cons) {
-            rho       += cons.rho;
-            m         += cons.m;
-            e_dens    += cons.e_dens;
+            rho    += cons.rho;
+            m      += cons.m;
+            e_dens += cons.e_dens;
+            chi    += cons.chi;
             return *this;
         }
         GPU_CALLABLE_MEMBER Conserved & operator -=(const Conserved &cons) {
             rho    -= cons.rho;
             m      -= cons.m;
             e_dens -= cons.e_dens;
+            chi    -= cons.chi;
             return *this;
         }
 
@@ -118,6 +132,7 @@ namespace hydro1d {
             rho    *= c;
             m      *= c;
             e_dens *= c;
+            chi    *= c;
             return *this;
         }
 
@@ -695,15 +710,16 @@ namespace sr3d {
 namespace hydro3d {
     struct Conserved
     {
-        real rho, m1, m2, m3, e_dens;
-        GPU_CALLABLE_MEMBER Conserved() : rho(0), m1(0), m2(0), m3(0), e_dens(0) {}
+        real rho, m1, m2, m3, e_dens, chi;
+        GPU_CALLABLE_MEMBER Conserved() : rho(0), m1(0), m2(0), m3(0), e_dens(0), chi(0) {}
         GPU_CALLABLE_MEMBER ~Conserved() {}
-        GPU_CALLABLE_MEMBER Conserved(real rho, real m1, real m2, real m3, real e_dens) :  rho(rho), m1(m1), m2(m2), m3(m3), e_dens(e_dens) {}
-        GPU_CALLABLE_MEMBER Conserved(const Conserved &u) : rho(u.rho), m1(u.m1), m2(u.m2), e_dens(u.e_dens) {}
-        GPU_CALLABLE_MEMBER Conserved operator + (const Conserved &p)  const { return Conserved(rho+p.rho, m1+p.m1, m2+p.m2, m3 + p.m3, e_dens+p.e_dens); }  
-        GPU_CALLABLE_MEMBER Conserved operator - (const Conserved &p)  const { return Conserved(rho-p.rho, m1-p.m1, m2-p.m2, m3 - p.m3, e_dens-p.e_dens); }  
-        GPU_CALLABLE_MEMBER Conserved operator * (const real c)      const { return Conserved(rho*c, m1*c, m2*c, m3 * c, e_dens*c ); }
-        GPU_CALLABLE_MEMBER Conserved operator / (const real c)      const { return Conserved(rho/c, m1/c, m2/c, m3 / c, e_dens/c ); }
+        GPU_CALLABLE_MEMBER Conserved(real rho, real m1, real m2, real m3, real e_dens) :  rho(rho), m1(m1), m2(m2), m3(m3), e_dens(e_dens), chi(0) {}
+        GPU_CALLABLE_MEMBER Conserved(real rho, real m1, real m2, real m3, real e_dens, real chi) :  rho(rho), m1(m1), m2(m2), m3(m3), e_dens(e_dens), chi(chi) {}
+        GPU_CALLABLE_MEMBER Conserved(const Conserved &u) : rho(u.rho), m1(u.m1), m2(u.m2), e_dens(u.e_dens), chi(u.chi) {}
+        GPU_CALLABLE_MEMBER Conserved operator + (const Conserved &p)  const { return Conserved(rho+p.rho, m1+p.m1, m2+p.m2, m3 + p.m3, e_dens+p.e_dens, chi+p.chi); }  
+        GPU_CALLABLE_MEMBER Conserved operator - (const Conserved &p)  const { return Conserved(rho-p.rho, m1-p.m1, m2-p.m2, m3 - p.m3, e_dens-p.e_dens, chi-p.chi); }  
+        GPU_CALLABLE_MEMBER Conserved operator * (const real c)      const { return Conserved(rho*c, m1*c, m2*c, m3 * c, e_dens*c, chi*c); }
+        GPU_CALLABLE_MEMBER Conserved operator / (const real c)      const { return Conserved(rho/c, m1/c, m2/c, m3 / c, e_dens/c, chi/c); }
 
         GPU_CALLABLE_MEMBER Conserved & operator +=(const Conserved &cons) {
             rho       += cons.rho;
@@ -711,6 +727,7 @@ namespace hydro3d {
             m2        += cons.m2;
             m3        += cons.m3;
             e_dens    += cons.e_dens;
+            chi       += cons.chi;
             return *this;
         }
         GPU_CALLABLE_MEMBER Conserved & operator -=(const Conserved &cons) {
@@ -719,6 +736,7 @@ namespace hydro3d {
             m2        -= cons.m2;
             m3        -= cons.m3;
             e_dens    -= cons.e_dens;
+            chi       -= cons.chi;
             return *this;
         }
 
@@ -728,6 +746,7 @@ namespace hydro3d {
             m2     -= c;
             m3     -= c;
             e_dens -= c;
+            chi    -= c;
             return *this;
         }
 
@@ -788,6 +807,11 @@ namespace hydro3d {
         inline GPU_CALLABLE_MEMBER constexpr real get_v3() const {
             return v3;
         }
+
+        inline GPU_CALLABLE_MEMBER
+        constexpr real vcomponent(const unsigned nhat) const {
+            return (nhat == 1 ? v1 : (nhat == 2) ? v2 : v3); 
+        }
     };
 
     struct PrimitiveSOA {
@@ -799,8 +823,9 @@ namespace hydro3d {
     struct Eigenvals{
         GPU_CALLABLE_MEMBER Eigenvals() {}
         GPU_CALLABLE_MEMBER ~Eigenvals() {}
-        real aL, aR;
+        real aL, aR, csL, csR, aStar, pStar;
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
+        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR, real csL, real csR, real aStar, real pStar) : aL(aL), aR(aR), csL(csL), csR(csR), aStar(aStar), pStar(pStar) {}
     };
 
 } // end hydro3d

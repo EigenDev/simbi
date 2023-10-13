@@ -306,9 +306,9 @@ namespace simbi
                 this->dx2    = (x2max - x2min) / (yphysical_grid - 1);
                 this->invdx2 = 1 / dx2;
                 this->m2_source   = init_conditions.sources[2];
-                this->energy_source  = init_conditions.sources[3];
-                this->sourceG2    = init_conditions.gsource[1];
-                this->mom2_source_all_zeros = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
+                this->energy_source         = init_conditions.sources[3];
+                this->sourceG2              = init_conditions.gsource[1];
+                this->mom2_source_all_zeros = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});              
             } else {
                 this->energy_source = init_conditions.sources[2];
             }

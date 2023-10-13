@@ -585,10 +585,12 @@ cdef class Buddy:
         sim_cond.solver           = sim_info['solver']
         sim_cond.gamma            = sim_info['gamma']
         sim_cond.x1               = sim_info['x1']
-        sim_cond.coord_system     = sim_info['coord_system']
         sim_cond.boundary_sources = sim_info['boundary_sources']
         sim_cond.cfl              = sim_info['cfl']
         sim_cond.boundary_conditions = sim_info['boundary_conditions']
+        sim_cond.chkpt_idx           = sim_info['chkpt_idx']
+        sim_cond.constant_sources    = sim_info['constant_sources']
+        sim_cond.quirk_smoothing     = sim_info['quirk_smoothing']
 
         if dim > 1:
             sim_cond.x2 = sim_info['x2']

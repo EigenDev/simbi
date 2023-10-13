@@ -1,5 +1,5 @@
 /*
- * C++ Source to perform SRHD Calculations
+ * C++ Source to perform Newtonian Calculations
  * Marcus DuPont
  * New York University
  * 07/15/2020
@@ -19,29 +19,29 @@ using namespace std::chrono;
 
 // Primitive<dim> template alias
 template<int dim>
-using Primitive = typename SRHD<dim>::primitive_t;
+using Primitive = typename Newtonian<dim>::primitive_t;
 
 // Conservative template alias
 template<int dim>
-using Conserved = typename SRHD<dim>::conserved_t;
+using Conserved = typename Newtonian<dim>::conserved_t;
 
 // Eigenvalue template alias
 template<int dim>
-using Eigenvals = typename SRHD<dim>::eigenvals_t;
+using Eigenvals = typename Newtonian<dim>::eigenvals_t;
 
 // file writer template alias
 template<int dim>
-constexpr auto write2file = helpers::write_to_file<typename SRHD<dim>::primitive_soa_t, dim, SRHD<dim>>;
+constexpr auto write2file = helpers::write_to_file<typename Newtonian<dim>::primitive_soa_t, dim, Newtonian<dim>>;
 
 // Default Constructor
 template<int dim>
-SRHD<dim>::SRHD() {
+Newtonian<dim>::Newtonian() {
     
 }
 
 // Overloaded Constructor
 template<int dim>
-SRHD<dim>::SRHD(
+Newtonian<dim>::Newtonian(
     std::vector<std::vector<real>> &state, 
     const InitialConditions &init_conditions)
 :
@@ -54,13 +54,13 @@ SRHD<dim>::SRHD(
 
 // Destructor
 template<int dim>
-SRHD<dim>::~SRHD() {}
+Newtonian<dim>::~Newtonian() {}
 
 
 // Helpers
 template<int dim>
 GPU_CALLABLE_INLINE
-constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
+constexpr real Newtonian<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1cell_spacing)
     {
@@ -86,7 +86,7 @@ constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
 
 template<int dim>
 GPU_CALLABLE_INLINE
-constexpr real SRHD<dim>::get_x2face(const lint ii, const int side) const
+constexpr real Newtonian<dim>::get_x2face(const lint ii, const int side) const
 {
     const real x2l = helpers::my_max(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
     if (side == 0) {
@@ -97,7 +97,7 @@ constexpr real SRHD<dim>::get_x2face(const lint ii, const int side) const
 
 template<int dim>
 GPU_CALLABLE_INLINE
-constexpr real SRHD<dim>::get_x3face(const lint ii, const int side) const
+constexpr real Newtonian<dim>::get_x3face(const lint ii, const int side) const
 {
 
     const real x3l = helpers::my_max(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
@@ -109,7 +109,7 @@ constexpr real SRHD<dim>::get_x3face(const lint ii, const int side) const
 
 template<int dim>
 GPU_CALLABLE_INLINE
-constexpr real SRHD<dim>::get_x1_differential(const lint ii) const {
+constexpr real Newtonian<dim>::get_x1_differential(const lint ii) const {
     const real x1l   = get_x1face(ii, 0);
     const real x1r   = get_x1face(ii, 1);
     const real xmean = helpers::get_cell_centroid(x1r, x1l, geometry);
@@ -124,7 +124,7 @@ constexpr real SRHD<dim>::get_x1_differential(const lint ii) const {
 
 template<int dim>
 GPU_CALLABLE_INLINE
-constexpr real SRHD<dim>::get_x2_differential(const lint ii) const {
+constexpr real Newtonian<dim>::get_x2_differential(const lint ii) const {
     if constexpr(dim == 1) {
         switch (geometry)
         {
@@ -153,7 +153,7 @@ constexpr real SRHD<dim>::get_x2_differential(const lint ii) const {
 
 template<int dim>
 GPU_CALLABLE_INLINE
-constexpr real SRHD<dim>::get_x3_differential(const lint ii) const {
+constexpr real Newtonian<dim>::get_x3_differential(const lint ii) const {
     if constexpr(dim == 1) {
         switch (geometry)
         {
@@ -178,13 +178,13 @@ constexpr real SRHD<dim>::get_x3_differential(const lint ii) const {
 
 template<int dim>
 GPU_CALLABLE_INLINE
-real SRHD<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
+real Newtonian<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
 {
     return get_x1_differential(ii) * get_x2_differential(jj) * get_x3_differential(kk);
 }
 
 template<int dim>
-void SRHD<dim>::emit_troubled_cells() {
+void Newtonian<dim>::emit_troubled_cells() {
     troubled_cells.copyFromGpu();
     cons.copyFromGpu();
     prims.copyFromGpu();
@@ -208,24 +208,23 @@ void SRHD<dim>::emit_troubled_cells() {
             const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
             const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
             const real x3mean = helpers::calc_any_mean(x3l, x3r, x3cell_spacing);
-            const auto s1 = cons[gid].momentum(1);
-            const auto s2 = cons[gid].momentum(2);
-            const auto s3 = cons[gid].momentum(3);
-            const real et  = (cons[gid].d + cons[gid].tau + prims[gid].p);
-            const real s   = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
+            const auto m1 = cons[gid].momentum(1);
+            const auto m2 = cons[gid].momentum(2);
+            const auto m3 = cons[gid].momentum(3);
+            const real et  = (cons[gid].rho + cons[gid].e_dens + prims[gid].p);
+            const real s   = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
             const real v2  = (s * s) / (et * et);
-            const real w   = 1 / std::sqrt(1 - v2);
             if constexpr(dim == 1) {
                 printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, iter: %d\n", 
-                        cons[gid].d / w, prims[gid].p, v2, x1mean, troubled_cells[gid]
+                        cons[gid].rho, prims[gid].p, v2, x1mean, troubled_cells[gid]
                 );
             } else if constexpr(dim == 2) {
                 printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %d\n", 
-                        cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, troubled_cells[gid]
+                        cons[gid].rho, prims[gid].p, v2, x1mean, x2mean, troubled_cells[gid]
                 );
             } else {
                 printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %d\n", 
-                        cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, x3mean, troubled_cells[gid]
+                        cons[gid].rho, prims[gid].p, v2, x1mean, x2mean, x3mean, troubled_cells[gid]
                 );
             }
         }
@@ -242,20 +241,17 @@ void SRHD<dim>::emit_troubled_cells() {
  * @return none
  */
 template<int dim>
-void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
+void Newtonian<dim>::cons2prim(const ExecutionPolicy<> &p)
 {
-    const auto* const cons_data  = cons.data();
-    auto* const prim_data  = prims.data();
-    auto* const press_data = pressure_guess.data(); 
+    const auto* const cons_data = cons.data();
+    auto* const prim_data = prims.data();
     auto* const troubled_data = troubled_cells.data();
     simbi::parallel_for(p, (luint)0, total_zones, [
-        prim_data,
         cons_data,
-        press_data,
+        prim_data,
         troubled_data,
         this
-    ] GPU_LAMBDA (luint gid){
-        real eps, pre, v2, et, c2, h, g, f, W, rho;
+    ]   GPU_LAMBDA (const luint gid) {
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;
 
@@ -263,77 +259,25 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
         if (tid == 0) 
             found_failure = inFailureState;
         simbi::gpu::api::synchronize();
-
         while (!found_failure && workLeftToDo)
-        {
-            const real D    = cons_data[gid].d;
-            const real S1   = cons_data[gid].momentum(1);
-            const real S2   = cons_data[gid].momentum(2);
-            const real S3   = cons_data[gid].momentum(3);
-            const real tau  = cons_data[gid].tau;
-            const real Dchi = cons_data[gid].chi; 
-            const real S    = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
-
-            real peq = press_data[gid];
-            luint iter  = 0;
-            const real tol = D * tol_scale;
-            do
-            {
-                pre = peq;
-                et  = tau + D + pre;
-                v2  = S * S / (et * et);
-                W   = 1 / std::sqrt(1 - v2);
-                rho = D / W;
-                eps = (tau + (1 - W) * D + (1 - W * W) * pre) / (D * W);
-
-                h  = 1 + eps + pre / rho;
-                c2 = gamma * pre / (h * rho);
-
-                g = c2 * v2 - 1;
-                f = (gamma - 1) * rho * eps - pre;
-
-                peq = pre - f / g;
-                iter++;
-                if (iter >= MAX_ITER || std::isnan(peq))
-                {
-                    troubled_data[gid] = iter;
-                    found_failure  = true;
-                    inFailureState = true;
-                    dt             = INFINITY;
-                    break;
-                }
-
-            } while (std::abs(peq - pre) >= tol);
-
-            const real inv_et = 1 / (tau + D + peq); 
-            const real v1 = S1 * inv_et;
-            const real v2 = S2 * inv_et;
-            const real v3 = S3 * inv_et;
-            press_data[gid] = peq;
-            #if FOUR_VELOCITY
-                if constexpr(dim == 1) {
-                    prim_data[gid] = Primitive<1>{D/ W, v1 * W, peq, Dchi / D};
-                } else if constexpr(dim == 2) {
-                    prim_data[gid] = Primitive<2>{D/ W, v1 * W, v2 * W, peq, Dchi / D};
-                } else {
-                    prim_data[gid] = Primitive<3>{D/ W, v1 * W, v2 * W, v3 * W, peq, Dchi / D};
-                }
-            #else
-                if constexpr(dim == 1) {
-                    prim_data[gid] = Primitive<1>{D/ W, v1, peq, Dchi / D};
-                } else if constexpr(dim == 2) {
-                    // #if !GPU_CODE
-                    //     writeln("({}), D: {}, S1: {}, S2: {}, S3: {}, tau: {}, peq: {}\n", gid, D, S1, S2, S3, tau, peq);
-                    // #endif
-                    prim_data[gid] = Primitive<2>{D/ W, v1, v2, peq, Dchi / D};
-                } else {
-                    prim_data[gid] = Primitive<3>{D/ W, v1, v2, v3, peq, Dchi / D};
-                }
-            #endif
+        {   
+            const real rho     = cons_data[gid].rho;
+            const real v1      = cons_data[gid].momentum(1) / rho;
+            const real v2      = cons_data[gid].momentum(2) / rho;
+            const real v3      = cons_data[gid].momentum(3) / rho;
+            const real rho_chi = cons_data[gid].chi;
+            const real pre     = (gamma - 1)*(cons_data[gid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2 + v3 * v3));
+            if constexpr(dim == 1) {
+                prim_data[gid] = Primitive<1>{rho, v1, pre, rho_chi / rho};
+            } else if constexpr(dim == 2) {
+                prim_data[gid] = Primitive<2>{rho, v1, v2, pre, rho_chi / rho};
+            } else {
+                prim_data[gid] = Primitive<3>{rho, v1, v2, v3, pre, rho_chi / rho};
+            }
             workLeftToDo = false;
 
-            if (peq < 0) {
-                troubled_data[gid] = iter;
+            if (pre < 0) {
+                troubled_data[gid] = 1;
                 inFailureState = true;
                 found_failure  = true;
                 dt = INFINITY;
@@ -347,97 +291,63 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 //----------------------------------------------------------------------------------------------------------
 template<int dim>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
-    const SRHD<dim>::primitive_t &primsL,
-    const SRHD<dim>::primitive_t &primsR,
+Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
+    const Newtonian<dim>::primitive_t &primsL,
+    const Newtonian<dim>::primitive_t &primsR,
     const luint nhat) const
 {
-    // Separate the left and right Primitive
     const real rhoL = primsL.rho;
     const real vL   = primsL.vcomponent(nhat);
     const real pL   = primsL.p;
-    const real hL   = 1 + gamma * pL / (rhoL * (gamma - 1));
-
-    const real rhoR  = primsR.rho;
-    const real vR    = primsR.vcomponent(nhat);
-    const real pR    = primsR.p;
-    const real hR    = 1 + gamma * pR  / (rhoR * (gamma - 1));
-
-    const real csR = std::sqrt(gamma * pR / (hR * rhoR));
-    const real csL = std::sqrt(gamma * pL / (hL * rhoL));
-
-    //-----------Calculate wave speeds based on Shneider et al. 1992
-    switch (comp_wave_speed)
-    {
-    case simbi::WaveSpeeds::SCHNEIDER_ET_AL_93:
-        {
-            const real vbar  = static_cast<real>(0.5) * (vL + vR);
-            const real cbar  = static_cast<real>(0.5) * (csL + csR);
-            const real bl    = (vbar - cbar)/(1 - cbar*vbar);
-            const real br    = (vbar + cbar)/(1 + cbar*vbar);
-            const real aL    = helpers::my_min(bl, (vL - csL)/(1 - vL*csL));
-            const real aR    = helpers::my_max(br, (vR + csR)/(1 + vR*csR));
-
-            return Eigenvals<dim>(aL, aR, csL, csR);
-        }
     
-    case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
+    const real rhoR = primsR.rho;
+    const real vR   = primsR.vcomponent(nhat);
+    const real pR   = primsR.p;
+    switch (sim_solver)
+    {
+    case Solver::HLLC:
         {
-            // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
-            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
-            const real sL = csL*csL/(gammaL*gammaL*(1 - csL*csL));
-            const real sR = csR*csR/(gammaR*gammaR*(1 - csR*csR));
-            // Define temporaries to save computational cycles
-            const real qfL   = 1 / (1 + sL);
-            const real qfR   = 1 / (1 + sR);
-            const real sqrtR = std::sqrt(sR * (1 - vR * vR + sR));
-            const real sqrtL = std::sqrt(sL * (1 - vL * vL + sL));
+            const real csR = std::sqrt(gamma * pR/rhoR);
+            const real csL = std::sqrt(gamma * pL/rhoL);
 
-            const real lamLm = (vL - sqrtL) * qfL;
-            const real lamRm = (vR - sqrtR) * qfR;
-            const real lamLp = (vL + sqrtL) * qfL;
-            const real lamRp = (vR + sqrtR) * qfR;
+            // Calculate the mean velocities of sound and fluid
+            // const real cbar   = 0.5*(csL + csR);
+            // const real rhoBar = 0.5*(rhoL + rhoR);
+            const real num       = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
+            const real denom     = csL * std::pow(pL, - hllc_z) + csR * std::pow(pR, - hllc_z);
+            const real p_term    = num/denom;
+            const real pStar     = std::pow(p_term, (1./hllc_z));
 
-            const real aL = lamLm < lamRm ? lamLm : lamRm;
-            const real aR = lamLp > lamRp ? lamLp : lamRp;
+            const real qL = 
+                (pStar <= pL) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pL - 1.));
 
-            return Eigenvals<dim>(aL, aR, csL, csR);
+            const real qR = 
+                (pStar <= pR) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pR- 1.));
+
+            const real aL = vR - qL*csL;
+            const real aR = vR + qR*csR;
+
+            const real aStar = 
+                ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR) )/ 
+                    (rhoL*(aL - vL) - rhoR*(aR - vR) ) );
+            if constexpr(dim == 1) {
+                return Eigenvals<dim>(aL, aR, aStar, pStar);
+            } else {
+                return Eigenvals<dim>(aL, aR, csL, csR, aStar, pStar);
+            }
         }
-    case simbi::WaveSpeeds::HUBER_AND_KISSMANN_2021:
+
+    default:
         {
-            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
-            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
-            const real uL = gammaL * vL;
-            const real uR = gammaR * vR;
-            const real sL = csL*csL/(1 - csL * csL);
-            const real sR = csR*csR/(1 - csR * csR);
-            const real sqrtR = std::sqrt(sR * (gammaR * gammaR - uR * uR + sR));
-            const real sqrtL = std::sqrt(sL * (gammaL * gammaL - uL * uL + sL));
-            const real qfL   = 1 / (gammaL * gammaL + sL);
-            const real qfR   = 1 / (gammaR * gammaR + sR);
+            const real csR  = std::sqrt(gamma * pR/rhoR);
+            const real csL  = std::sqrt(gamma * pL/rhoL);
 
-            const real lamLm = (gammaL * uL - sqrtL) * qfL;
-            const real lamRm = (gammaR * uR - sqrtR) * qfR;
-            const real lamLp = (gammaL * uL + sqrtL) * qfL;
-            const real lamRp = (gammaR * uR + sqrtR) * qfR;
+            const real aL = helpers::my_min(vL - csL, vR - csR);
+            const real aR = helpers::my_max(vL + csL, vR + csR);
 
-            const real aL = lamLm < lamRm ? lamLm : lamRm;
-            const real aR = lamLp > lamRp ? lamLp : lamRp;
-
-            return Eigenvals<dim>(aL, aR, csL, csR);
+            return Eigenvals<dim>(aL, aR);
         }
-    default: // NAIVE wave speeds
-        {
-            const real aLm = (vL - csL) / (1 - vL * csL);
-            const real aLp = (vL + csL) / (1 + vL * csL);
-            const real aRm = (vR - csR) / (1 - vR * csR);
-            const real aRp = (vR + csR) / (1 + vR * csR);
 
-            const real aL = helpers::my_min(aLm, aRm);
-            const real aR = helpers::my_max(aLp, aRp);
-            return Eigenvals<dim>(aL, aR, csL, csR);
-        }
     }
 };
 
@@ -446,34 +356,33 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
 //-----------------------------------------------------------------------------------------
 template<int dim>
 GPU_CALLABLE_MEMBER 
-SRHD<dim>::conserved_t SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t &prims) const
+Newtonian<dim>::conserved_t Newtonian<dim>::prims2cons(const Newtonian<dim>::primitive_t &prims) const
 {
     const real rho      = prims.rho;
     const real v1       = prims.vcomponent(1);
     const real v2       = prims.vcomponent(2);
     const real v3       = prims.vcomponent(3);
     const real pressure = prims.p;
-    const real lorentz_gamma = prims.get_lorentz_factor(); // 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
-    const real h = 1 + gamma * pressure / (rho * (gamma - 1));
-    if constexpr(dim == 1) {
+    const real et       = pressure / (gamma - 1) + static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2 + v3 * v3);
+    if constexpr(dim == 1) { 
         return Conserved<1>{
-            rho * lorentz_gamma, 
-            rho * h * lorentz_gamma * lorentz_gamma * v1,
-            rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma};
+            rho, 
+            rho * v1,
+            rho - pressure - rho};
     } else if constexpr(dim == 2) {
         return Conserved<2>{
-            rho * lorentz_gamma, 
-            rho * h * lorentz_gamma * lorentz_gamma * v1,
-            rho * h * lorentz_gamma * lorentz_gamma * v2,
-            rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma};
+            rho, 
+            rho * v1,
+            rho * v2,
+            et};
 
     } else {
         return Conserved<3>{
-            rho * lorentz_gamma, 
-            rho * h * lorentz_gamma * lorentz_gamma * v1,
-            rho * h * lorentz_gamma * lorentz_gamma * v2,
-            rho * h * lorentz_gamma * lorentz_gamma * v3,
-            rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma};
+            rho, 
+            rho * v1,
+            rho * v2,
+            rho * v3,
+            et};
     }
 };
 //---------------------------------------------------------------------
@@ -481,8 +390,7 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t &prims
 //---------------------------------------------------------------------
 // Adapt the cfl conditonal timestep
 template<int dim>
-template<TIMESTEP_TYPE dt_type>
-void SRHD<dim>::adapt_dt()
+void Newtonian<dim>::adapt_dt()
 {
     std::atomic<real> min_dt = INFINITY;
     thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&](luint aid) {
@@ -491,36 +399,22 @@ void SRHD<dim>::adapt_dt()
         const luint jj = dim < 2 ? 0 : simbi::detail::get_row(aid, xphysical_grid, yphysical_grid, kk);
         const luint ii = simbi::detail::get_column(aid, xphysical_grid, yphysical_grid, kk);
         // Left/Right wave speeds
-        if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-            const auto rho = prims[aid].rho;
-            const auto v1  = prims[aid].vcomponent(1);
-            const auto v2  = prims[aid].vcomponent(2);
-            const auto v3  = prims[aid].vcomponent(3);
-            const auto pre = prims[aid].p;
-            const real h   = 1 + pre * gamma / (rho * (gamma - 1));
-            const real cs  = std::sqrt(gamma * pre / (rho * h));
-            v1p = std::abs(v1 + cs) / (1 + v1 * cs);
-            v1m = std::abs(v1 - cs) / (1 - v1 * cs);
-            if constexpr(dim > 1) {
-                v2p = std::abs(v2 + cs) / (1 + v2 * cs);
-                v2m = std::abs(v2 - cs) / (1 - v2 * cs);
-            }
-            if constexpr(dim > 2) {
-                v3p = std::abs(v3 + cs) / (1 + v3 * cs);
-                v3m = std::abs(v3 - cs) / (1 - v3 * cs);
-            }                        
-        } else {
-            v1p = 1;
-            v1m = 1;
-            if constexpr(dim > 1) {
-                v2p = 1;
-                v2m = 1;
-            }
-            if constexpr(dim > 2) {
-                v3p = 1; 
-                v3m = 1; 
-            }
+        const auto rho = prims[aid].rho;
+        const auto v1  = prims[aid].vcomponent(1);
+        const auto v2  = prims[aid].vcomponent(2);
+        const auto v3  = prims[aid].vcomponent(3);
+        const auto pre = prims[aid].p;
+        const real cs  = std::sqrt(gamma * pre / rho);
+        v1p = std::abs(v1 + cs);
+        v1m = std::abs(v1 - cs);
+        if constexpr(dim > 1) {
+            v2p = std::abs(v2 + cs);
+            v2m = std::abs(v2 - cs);
         }
+        if constexpr(dim > 2) {
+            v3p = std::abs(v3 + cs);
+            v3m = std::abs(v3 - cs);
+        }                        
 
         const auto x1l = get_x1face(ii, 0);
         const auto x1r = get_x1face(ii, 1);
@@ -618,16 +512,15 @@ void SRHD<dim>::adapt_dt()
 };
 
 template<int dim>
-template<TIMESTEP_TYPE dt_type>
-void SRHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
+void Newtonian<dim>::adapt_dt(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
         if constexpr(dim == 1) {
             // LAUNCH_ASYNC((helpers::compute_dt<Primitive<1>,dt_type>), p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
-            helpers::compute_dt<Primitive<1>, dt_type><<<p.gridSize, p.blockSize>>>(this, prims.data(), dt_min.data());
+            helpers::compute_dt<Primitive<1>><<<p.gridSize, p.blockSize>>>(this, prims.data(), dt_min.data());
         } else {
             // LAUNCH_ASYNC((helpers::compute_dt<Primitive<dim>,dt_type>), p.gridSize, p.blockSize, this, prims.data(), dt_min.data(), geometry);
-            helpers::compute_dt<Primitive<dim>, dt_type><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
+            helpers::compute_dt<Primitive<dim>><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
         }
         // LAUNCH_ASYNC((helpers::deviceReduceWarpAtomicKernel<dim>), p.gridSize, p.blockSize, this, dt_min.data(), active_zones);
         helpers::deviceReduceWarpAtomicKernel<dim><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
@@ -642,7 +535,7 @@ void SRHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
 // flag
 template<int dim>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims, const luint nhat) const
+Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::primitive_t &prims, const luint nhat) const
 {
     const real rho      = prims.rho;
     const real v1       = prims.vcomponent(1);
@@ -651,51 +544,47 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims
     const real chi      = prims.chi;
     const real vn       = prims.vcomponent(nhat);
     const real pressure = prims.p;
-    const real lorentz_gamma = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
+    const auto et       = pressure / (gamma - 1.0) + 0.5 * rho * (v1*v1 + v2*v2 + v3*v3);
 
-    const real h  = 1 + gamma * pressure / (rho * (gamma - 1));
-    const real D  = rho * lorentz_gamma;
-    const real S1 = rho * lorentz_gamma * lorentz_gamma * h * v1;
-    const real S2 = rho * lorentz_gamma * lorentz_gamma * h * v2;
-    const real S3 = rho * lorentz_gamma * lorentz_gamma * h * v3;
-    const real Sj = (nhat == 1) ? S1 : (nhat == 2) ? S2 : S3;
-    // const real tau = rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma;
+    const real m1 = rho * v1;
+    const real m2 = rho * v2;
+    const real m3 = rho * v3;
     if constexpr(dim == 1) {
         return Conserved<1>{
-            D  * vn, 
-            S1 * vn + helpers::kronecker(nhat, 1) * pressure, 
-            Sj - D * vn, 
-            D  * vn * chi
+            rho  * vn, 
+            m1   * vn + helpers::kronecker(nhat, 1) * pressure, 
+            (et + pressure) * vn, 
+            rho  * vn * chi
         };
     } else if constexpr(dim == 2) {
         return Conserved<2>{
-            D  * vn, 
-            S1 * vn + helpers::kronecker(nhat, 1) * pressure, 
-            S2 * vn + helpers::kronecker(nhat, 2) * pressure, 
-            Sj - D * vn, 
-            D * vn * chi
+            rho * vn, 
+            m1  * vn + helpers::kronecker(nhat, 1) * pressure, 
+            m2  * vn + helpers::kronecker(nhat, 2) * pressure, 
+            (et + pressure) * vn, 
+            rho * vn * chi
         };
     } else {
         return Conserved<3>{
-            D  * vn, 
-            S1 * vn + helpers::kronecker(nhat, 1) * pressure, 
-            S2 * vn + helpers::kronecker(nhat, 2) * pressure, 
-            S3 * vn + helpers::kronecker(nhat, 3) * pressure,  
-            Sj - D * vn, 
-            D * vn * chi
+            rho * vn, 
+            m1  * vn + helpers::kronecker(nhat, 1) * pressure, 
+            m2  * vn + helpers::kronecker(nhat, 2) * pressure, 
+            m3  * vn + helpers::kronecker(nhat, 3) * pressure,
+            (et + pressure) * vn, 
+            rho * vn * chi
         };
     }
 };
 
 template<int dim>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
-    const SRHD<dim>::conserved_t &left_state, 
-    const SRHD<dim>::conserved_t &right_state,
-    const SRHD<dim>::conserved_t &left_flux, 
-    const SRHD<dim>::conserved_t &right_flux,
-    const SRHD<dim>::primitive_t &left_prims, 
-    const SRHD<dim>::primitive_t &right_prims,
+Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
+    const Newtonian<dim>::conserved_t &left_state, 
+    const Newtonian<dim>::conserved_t &right_state,
+    const Newtonian<dim>::conserved_t &left_flux, 
+    const Newtonian<dim>::conserved_t &right_flux,
+    const Newtonian<dim>::primitive_t &left_prims, 
+    const Newtonian<dim>::primitive_t &right_prims,
     const luint nhat,
     const real vface) const
 {
@@ -721,10 +610,10 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
     }
 
     // Upwind the scalar concentration flux
-    if (net_flux.d < 0)
-        net_flux.chi = right_prims.chi * net_flux.d;
+    if (net_flux.rho < 0)
+        net_flux.chi = right_prims.chi * net_flux.rho;
     else
-        net_flux.chi = left_prims.chi  * net_flux.d;
+        net_flux.chi = left_prims.chi  * net_flux.rho;
 
     // Compute the HLL Flux component-wise
     return net_flux;
@@ -732,264 +621,139 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
 
 template<int dim>
 GPU_CALLABLE_MEMBER
-SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
-    const SRHD<dim>::conserved_t &left_state,
-    const SRHD<dim>::conserved_t &right_state,
-    const SRHD<dim>::conserved_t &left_flux,
-    const SRHD<dim>::conserved_t &right_flux,
-    const SRHD<dim>::primitive_t &left_prims,
-    const SRHD<dim>::primitive_t &right_prims,
+Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
+    const Newtonian<dim>::conserved_t &left_state,
+    const Newtonian<dim>::conserved_t &right_state,
+    const Newtonian<dim>::conserved_t &left_flux,
+    const Newtonian<dim>::conserved_t &right_flux,
+    const Newtonian<dim>::primitive_t &left_prims,
+    const Newtonian<dim>::primitive_t &right_prims,
     const luint nhat,
     const real vface) const 
 {
     const Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
-    const real aL  = lambda.aL;
-    const real aR  = lambda.aR;
+    const real aL    = lambda.aL;
+    const real aR    = lambda.aR;
 
-    //---- Check Wave Speeds before wasting computations
-    if (vface <= aL) {
+    // Quick checks before moving on with rest of computation
+    if (vface <= aL){
         return left_flux;
-    }
-    else if (vface >= aR) {
+    } else if (vface >= aR){
         return right_flux;
     }
 
-    const real aLm = aL < 0 ? aL : 0;
-    const real aRp = aR > 0 ? aR : 0;
-
-    //-------------------Calculate the HLL Intermediate State
-    const auto hll_state = 
-        (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
-
-    //------------------Calculate the RHLLE Flux---------------
-    const auto hll_flux 
-        = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aRp * aLm) 
-            / (aRp - aLm);
-
-    const real uhlld   = hll_state.d;
-    const real uhlls1  = hll_state.momentum(1);
-    const real uhlls2  = hll_state.momentum(2);
-    const real uhlls3  = hll_state.momentum(3);
-    const real uhlltau = hll_state.tau;
-    const real fhlld   = hll_flux.d;
-    const real fhlls1  = hll_flux.momentum(1);
-    const real fhlls2  = hll_flux.momentum(2);
-    const real fhlls3  = hll_flux.momentum(3);
-    const real fhlltau = hll_flux.tau;
-    const real e  = uhlltau + uhlld;
-    const real s  = (nhat == 1) ? uhlls1 : (nhat == 2) ? uhlls2 : uhlls3;
-    const real fe = fhlltau + fhlld;
-    const real fs = (nhat == 1) ? fhlls1 : (nhat == 2) ? fhlls2 : fhlls3;
-
-    //------Calculate the contact wave velocity and pressure
-    const real a = fe;
-    const real b = -(e + fs);
-    const real c = s;
-    const real quad  = -static_cast<real>(0.5) * (b + helpers::sgn(b) * std::sqrt(b * b - 4.0 * a * c));
-    const real aStar = c * (1 / quad);
-    const real pStar = -aStar * fe + fs;
-
     if constexpr(dim == 1) {
-        if (vface <= aStar) {
-            const real v        = left_prims.get_v();
-            const real pressure = left_prims.p;
-            const real D        = left_state.d;
-            const real S        = left_state.s;
-            const real tau      = left_state.tau;
-            const real E        = tau + D;
-            const real cofactor = 1 / (aLm - aStar);
+        const real aStar = lambda.aStar;
+        const real pStar = lambda.pStar;
+        const real ap  = helpers::my_max(static_cast<real>(0.0), aR);
+        const real am  = helpers::my_min(static_cast<real>(0.0), aL);
+        auto hll_flux  = (left_flux * ap + right_flux * am - (right_state - left_state) * am * ap)  / (am + ap) ;
+        auto hll_state = (right_state * aR - left_state * aL - right_flux + left_flux)/(aR - aL);
+        
+        if (vface <= aStar){
+            real pressure = left_prims.p;
+            real v        = left_prims.v1;
+            real rho      = left_state.rho;
+            real m        = left_state.m;
+            real energy   = left_state.e_dens;
+            real cofac    = 1./(aL - aStar);
 
-            //--------------Compute the L Star State----------
-            // Left Star State in x-direction of coordinate lattice
-            const real Dstar    = cofactor * (aLm - v) * D;
-            const real Sstar    = cofactor * (S * (aLm - v) - pressure + pStar);
-            const real Estar    = cofactor * (E * (aLm - v) + pStar * aStar - pressure * v);
-            const real tauStar  = Estar - Dstar;
+            real rhoStar = cofac * (aL - v)*rho;
+            real mstar   = cofac * (m*(aL - v) - pressure + pStar);
+            real eStar   = cofac * (energy*(aL - v) + pStar*aStar - pressure*v);
 
-            const auto star_stateL = Conserved<1>{Dstar, Sstar, tauStar};
+            auto star_state = Conserved<1>{rhoStar, mstar, eStar};
 
-            //---------Compute the L Star Flux
-            // Compute the HLL Flux component-wise
-            auto hllc_flux = left_flux + (star_stateL - left_state) * aLm;
-            return    hllc_flux - star_stateL * vface;
+            // Compute the luintermediate left flux
+            return left_flux + (star_state - left_state) * aL - star_state * vface;
         } else {
-            const real v         = right_prims.get_v();
-            const real pressure  = right_prims.p;
-            const real D         = right_state.d;
-            const real S         = right_state.s;
-            const real tau       = right_state.tau;
-            const real E         = tau + D;
-            const real cofactor  = 1 / (aRp - aStar);
+            real pressure = right_prims.p;
+            real v        = right_prims.v1;
+            real rho      = right_state.rho;
+            real m        = right_state.m;
+            real energy   = right_state.e_dens;
+            real cofac    = 1./(aR - aStar);
 
-            //--------------Compute the R Star State----------
-            // Left Star State in x-direction of coordinate lattice
-            const real Dstar    = cofactor * (aRp - v) * D;
-            const real Sstar    = cofactor * (S * (aRp - v) - pressure + pStar);
-            const real Estar    = cofactor * (E * (aRp - v) + pStar * aStar - pressure * v);
-            const real tauStar  = Estar - Dstar;
+            real rhoStar = cofac * (aR - v)*rho;
+            real mstar   = cofac * (m*(aR - v) - pressure + pStar);
+            real eStar   = cofac * (energy*(aR - v) + pStar*aStar - pressure*v);
 
-            const auto star_stateR = Conserved<1>{Dstar, Sstar, tauStar};
+            auto star_state = Conserved<1>{rhoStar, mstar, eStar};
 
-            //---------Compute the R Star Flux  
-            auto hllc_flux = right_flux + (star_stateR - right_state) * aRp;
-            return    hllc_flux - star_stateR * vface;
+            // Compute the luintermediate right flux
+            return right_flux + (star_state - right_state) * aR - star_state * vface;
         }
     } else {
-        switch (comp_hllc_type)
-        {
-        case HLLCTYPE::FLEISCHMANN:
-            {
-                const real csL = lambda.csL;
-                const real csR = lambda.csR;
-                constexpr real ma_lim = static_cast<real>(0.1);
+        const real cL = lambda.csL;
+        const real cR = lambda.csR;
+        const real aStar = lambda.aStar;
+        const real pStar = lambda.pStar;
+        // Apply the low-Mach HLLC fix found in Fleichman et al 2020: 
+        // https://www.sciencedirect.com/science/article/pii/S0021999120305362
+        constexpr real ma_lim   = static_cast<real>(0.10);
 
-                // --------------Compute the L Star State----------
-                real pressure = left_prims.p;
-                real D        = left_state.d;
-                real S1       = left_state.momentum(1);
-                real S2       = left_state.momentum(2);
-                real S3       = left_state.momentum(3);
-                real tau      = left_state.tau;
-                real E        = tau + D;
-                real cofactor = 1 / (aL - aStar);
+        // --------------Compute the L Star State----------
+        real pressure = left_prims.p;
+        real rho      = left_state.rho;
+        real m1       = left_state.momentum(1);
+        real m2       = left_state.momentum(2);
+        real m3       = left_state.momentum(3);
+        real edens    = left_state.e_dens;
+        real cofactor = 1 / (aL - aStar);
 
-                const real vL           = left_prims.vcomponent(nhat);
-                const real vR           = right_prims.vcomponent(nhat);
-                // Left Star State in x-direction of coordinate lattice
-                real Dstar              = cofactor * (aL - vL) * D;
-                real S1star             = cofactor * (S1 * (aL - vL) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
-                real S2star             = cofactor * (S2 * (aL - vL) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
-                real S3star             = cofactor * (S3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                real Estar              = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
-                real tauStar            = Estar - Dstar;
-                const auto starStateL = [=] {
-                    if constexpr(dim == 2) {
-                        return Conserved<2>{Dstar, S1star, S2star, tauStar};
-                    } else {
-                        return Conserved<3>{Dstar, S1star, S2star, S3star, tauStar};
-                    }
-                }();
+        const real vL           = left_prims.vcomponent(nhat);
+        const real vR           = right_prims.vcomponent(nhat);
 
-                pressure = right_prims.p;
-                D        = right_state.d;
-                S1       = right_state.momentum(1);
-                S2       = right_state.momentum(2);
-                S3       = right_state.momentum(3);
-                tau      = right_state.tau;
-                E        = tau + D;
-                cofactor = 1 / (aR - aStar);
+        // Left Star State in x-direction of coordinate lattice
+        real rhostar            = cofactor * (aL - vL) * rho;
+        real m1star             = cofactor * (m1 * (aL - vL) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
+        real m2star             = cofactor * (m2 * (aL - vL) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
+        real m3star             = cofactor * (m3 * (aL - vL) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
+        real estar              = cofactor * (edens  * (aL - vL) + pStar * aStar - pressure * vL);
+        const auto starStateL = [=] {
+            if constexpr(dim == 2) {
+                return Conserved<2>{rhostar, m1star, m2star, estar};
+            } else {
+                return Conserved<3>{rhostar, m1star, m2star, m3star, estar};
+            }
+        }();
 
-                Dstar                 = cofactor * (aR - vR) * D;
-                S1star                = cofactor * (S1 * (aR - vR) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
-                S2star                = cofactor * (S2 * (aR - vR) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
-                S3star                = cofactor * (S3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                Estar                 = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
-                tauStar               = Estar - Dstar;
-                const auto starStateR = [=] {
-                    if constexpr(dim == 2) {
-                        return Conserved<2>{Dstar, S1star, S2star, tauStar};
-                    } else {
-                        return Conserved<3>{Dstar, S1star, S2star, S3star, tauStar};
-                    }
-                }();
-                const real ma_left    = vL / csL * std::sqrt((1 - csL * csL) / (1 - vL * vL));
-                const real ma_right   = vR / csR * std::sqrt((1 - csR * csR) / (1 - vR * vR));
-                const real ma_local   = helpers::my_max(std::abs(ma_left), std::abs(ma_right));
-                const real phi        = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
-                const real aL_lm      = phi == 0 ? aL : phi * aL;
-                const real aR_lm      = phi == 0 ? aR : phi * aR;
+        pressure = right_prims.p;
+        rho      = right_state.rho;
+        m1       = right_state.m1;
+        m2       = right_state.m2;
+        edens    = right_state.e_dens;
+        cofactor = 1 / (aR - aStar);
 
-                const auto face_starState = (aStar <= 0) ? starStateR : starStateL;
-                auto net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL_lm
+        rhostar               = cofactor * (aR - vR) * rho;
+        m1star                = cofactor * (m1 * (aR - vR) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
+        m2star                = cofactor * (m2 * (aR - vR) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
+        m3star                = cofactor * (m3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
+        estar                 = cofactor * (edens  * (aR - vR) + pStar * aStar - pressure * vR);
+        const auto starStateR = [=] {
+            if constexpr(dim == 2) {
+                return Conserved<2>{rhostar, m1star, m2star, estar};
+            } else {
+                return Conserved<3>{rhostar, m1star, m2star, m3star, estar};
+            }
+        }();
+
+        const real ma_local = helpers::my_max(std::abs(vL / cL), std::abs(vR / cR));
+        const real phi      = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
+        const real aL_lm    = phi * aL;
+        const real aR_lm    = phi * aR;
+        const auto face_starState = (aStar <= 0) ? starStateR : starStateL;
+        // const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
+        auto net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL_lm
                             + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm) * static_cast<real>(0.5) - face_starState * vface;
 
-                // upwind the concentration flux 
-                if (net_flux.d < 0)
-                    net_flux.chi = right_prims.chi * net_flux.d;
-                else
-                    net_flux.chi = left_prims.chi  * net_flux.d;
-                return net_flux;
-            }
-        
-        default:
-            {
-                if (vface <= aStar)
-                {
-                    const real pressure = left_prims.p;
-                    const real D        = left_state.d;
-                    const real S1       = left_state.momentum(1);
-                    const real S2       = left_state.momentum(2);
-                    const real S3       = left_state.momentum(3);
-                    const real tau      = left_state.tau;
-                    const real chi      = left_state.chi;
-                    const real E        = tau + D;
-                    const real cofactor = 1 / (aL - aStar);
+        // upwind the concentration flux 
+        if (net_flux.rho < 0)
+            net_flux.chi = right_prims.chi * net_flux.rho;
+        else
+            net_flux.chi = left_prims.chi  * net_flux.rho;
 
-                    const real vL     = left_prims.vcomponent(nhat);
-                    // Left Star State in x-direction of coordinate lattice
-                    const real Dstar      = cofactor * (aL - vL) * D;
-                    const real chistar    = cofactor * (aL - vL) * chi;
-                    const real S1star     = cofactor * (S1 * (aL - vL) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
-                    const real S2star     = cofactor * (S2 * (aL - vL) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
-                    const real S3star     = cofactor * (S3 * (aL - vL) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                    const real Estar      = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
-                    const real tauStar    = Estar - Dstar;
-                    const auto starStateL = [=] {
-                        if constexpr(dim == 2) {
-                            return Conserved<2>{Dstar, S1star, S2star, tauStar, chistar};
-                        } else {
-                            return Conserved<3>{Dstar, S1star, S2star, S3star, tauStar, chistar};
-                        }
-                    }();
-
-                    auto hllc_flux = left_flux + (starStateL - left_state) * aL - starStateL * vface;
-
-                    // upwind the concentration flux 
-                    if (hllc_flux.d < 0)
-                        hllc_flux.chi = right_prims.chi * hllc_flux.d;
-                    else
-                        hllc_flux.chi = left_prims.chi  * hllc_flux.d;
-
-                    return hllc_flux;
-                } else {
-                    const real pressure = right_prims.p;
-                    const real D        = right_state.d;
-                    const real S1       = right_state.momentum(1);
-                    const real S2       = right_state.momentum(2);
-                    const real S3       = right_state.momentum(3);
-                    const real tau      = right_state.tau;
-                    const real chi      = right_state.chi;
-                    const real E        = tau + D;
-                    const real cofactor = 1 / (aR - aStar);
-
-                    const real vR         = right_prims.vcomponent(nhat);
-                    const real Dstar      = cofactor * (aR - vR) * D;
-                    const real chistar    = cofactor * (aR - vR) * chi;
-                    const real S1star     = cofactor * (S1 * (aR - vR) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
-                    const real S2star     = cofactor * (S2 * (aR - vR) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
-                    const real S3star     = cofactor * (S3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                    const real Estar      = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
-                    const real tauStar    = Estar - Dstar;
-                    const auto starStateR = [=] {
-                        if constexpr(dim == 2) {
-                            return Conserved<2>{Dstar, S1star, S2star, tauStar, chistar};
-                        } else {
-                            return Conserved<3>{Dstar, S1star, S2star, S3star, tauStar, chistar};
-                        }
-                    }();
-
-                    auto hllc_flux = right_flux + (starStateR - right_state) * aR - starStateR * vface;
-
-                    // upwind the concentration flux 
-                    if (hllc_flux.d < 0)
-                        hllc_flux.chi = right_prims.chi * hllc_flux.d;
-                    else
-                        hllc_flux.chi = left_prims.chi  * hllc_flux.d;
-
-                    return hllc_flux;
-                }
-            }
-        } // end switch 
+        return net_flux;
     }
 };
 
@@ -997,7 +761,7 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 template<int dim>
-void SRHD<dim>::advance(
+void Newtonian<dim>::advance(
     const ExecutionPolicy<> &p,
     const luint sx,
     const luint sy)
@@ -1569,12 +1333,12 @@ void SRHD<dim>::advance(
         //Advance depending on geometry
         const luint real_loc = kk * xpg * ypg + jj * xpg + ii;
         const real d_source  = den_source_all_zeros     ? 0.0 : dens_source[real_loc];
-        const real s1_source = mom1_source_all_zeros    ? 0.0 : mom1_source[real_loc];
+        const real m1_source = mom1_source_all_zeros    ? 0.0 : mom1_source[real_loc];
         const real e_source  = energy_source_all_zeros  ? 0.0 : erg_source[real_loc];
         
         const auto source_terms = [
             d_source,
-            s1_source,
+            m1_source,
             e_source,
             mom2_source,
             mom3_source,
@@ -1582,25 +1346,25 @@ void SRHD<dim>::advance(
             this
         ]{
             if constexpr(dim == 1) {
-                return Conserved<1>{d_source, s1_source, e_source} * time_constant;
+                return Conserved<1>{d_source, m1_source, e_source} * time_constant;
             } else if constexpr(dim == 2) {
-                const real s2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
-                return Conserved<2>{d_source, s1_source, s2_source, e_source} * time_constant;
+                const real m2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
+                return Conserved<2>{d_source, m1_source, m2_source, e_source} * time_constant;
             } else {
-                const real s2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
-                const real s3_source = mom3_source_all_zeros ? 0.0 : mom3_source[real_loc];
-                return Conserved<3>{d_source, s1_source, s2_source, s3_source, e_source} * time_constant;
+                const real m2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
+                const real m3_source = mom3_source_all_zeros ? 0.0 : mom3_source[real_loc];
+                return Conserved<3>{d_source, m1_source, m2_source, m3_source, e_source} * time_constant;
             }
         }();
 
         // Gravity
-        const auto gs1_source = zero_gravity1 ? 0 : grav1_source[real_loc] * cons_data[aid].d;
+        const auto gm1_source = zero_gravity1 ? 0 : grav1_source[real_loc] * cons_data[aid].rho;
         const auto tid = tza * sx * sy + tya * sx + txa;
         const auto gravity = [
             tid,
             aid,
             real_loc,
-            gs1_source, 
+            gm1_source, 
             prim_buff, 
             grav2_source,
             grav3_source,
@@ -1608,18 +1372,17 @@ void SRHD<dim>::advance(
             this
             ]{
             if constexpr(dim == 1) {
-                const auto ge_source  = gs1_source * prim_buff[tid].v1;
-                return Conserved<1>{0, gs1_source, ge_source};
+                const auto ge_source  = gm1_source * prim_buff[tid].v1;
+                return Conserved<1>{0, gm1_source, ge_source};
             } else if constexpr(dim == 2) {
-                const auto gs2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].d;
-                const auto ge_source  = gs1_source * prim_buff[tid].v1 + gs2_source * prim_buff[tid].v2;
-                return Conserved<2>{0, gs1_source, gs2_source, ge_source};
+                const auto gm2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].rho;
+                const auto ge_source  = gm1_source * prim_buff[tid].v1 + gm2_source * prim_buff[tid].v2;
+                return Conserved<2>{0, gm1_source, gm2_source, ge_source};
             } else {
-                const auto gs2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].d;
-                const auto gs3_source = zero_gravity3 ? 0 : grav3_source[real_loc] * cons_data[aid].d;
-                const auto ge_source  = gs1_source * prim_buff[tid].v1 + gs2_source * prim_buff[tid].v2 + gs3_source * prim_buff[tid].v3;
-
-                return Conserved<3>{0, gs1_source, gs2_source, gs3_source, ge_source};
+                const auto gm2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].rho;
+                const auto gm3_source = zero_gravity3 ? 0 : grav3_source[real_loc] * cons_data[aid].rho;
+                const auto ge_source  = gm1_source * prim_buff[tid].v1 + gm2_source * prim_buff[tid].v2 + gm3_source * prim_buff[tid].v3;
+                return Conserved<3>{0, gm1_source, gm2_source, gm3_source, ge_source};
             }
         }();
 
@@ -1674,16 +1437,14 @@ void SRHD<dim>::advance(
 
                         // Grab central primitives
                         const real rhoc = prim_buff[tid].rho;
-                        const real uc   = prim_buff[tid].get_v1();
-                        const real vc   = prim_buff[tid].get_v2();
+                        const real uc   = prim_buff[tid].v1;
+                        const real vc   = prim_buff[tid].v2;
                         const real pc   = prim_buff[tid].p;
-                        const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
-                        const real gam2 = 1/(1 - (uc * uc + vc * vc));
 
                         const Conserved<2> geom_source  = {
                             0, 
-                            (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
-                            - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L) * invdV, 
+                              (rhoc * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * uc * vc) / rmean + pc * (s2R - s2L) * invdV, 
                             0
                         };
 
@@ -1712,17 +1473,14 @@ void SRHD<dim>::advance(
 
                         // Grab central primitives
                         const real rhoc = prim_buff[tid].rho;
-                        const real uc   = prim_buff[tid].get_v1();
-                        const real vc   = prim_buff[tid].get_v2();
+                        const real uc   = prim_buff[tid].v1;
+                        const real vc   = prim_buff[tid].v2;
                         const real pc   = prim_buff[tid].p;
-                        
-                        const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
-                        const real gam2 = 1/(1 - (uc * uc + vc * vc));
 
                         const Conserved<2> geom_source  = {
                             0, 
-                            (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
-                            - (rhoc * hc * gam2 * uc * vc) / rmean, 
+                              (rhoc * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * uc * vc) / rmean, 
                             0
                         };
                         cons_data[aid] -= ( 
@@ -1789,18 +1547,15 @@ void SRHD<dim>::advance(
 
                         // Grab central primitives
                         const real rhoc = prim_buff[tid].rho;
-                        const real uc   = prim_buff[tid].get_v1();
-                        const real vc   = prim_buff[tid].get_v2();
-                        const real wc   = prim_buff[tid].get_v3();
+                        const real uc   = prim_buff[tid].v1;
+                        const real vc   = prim_buff[tid].v2;
+                        const real wc   = prim_buff[tid].v3;
                         const real pc   = prim_buff[tid].p;
 
-                        const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
-                        const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
-
                         const auto geom_source  = Conserved<3>{0, 
-                            (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1,
-                            rhoc * hc * gam2 * (wc * wc * cot - uc * vc) / rmean + pc * (s2R - s2L)/dV2 , 
-                            - rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean, 
+                            ( rhoc * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1,
+                              rhoc * (wc * wc * cot - uc * vc) / rmean + pc * (s2R - s2L)/dV2 , 
+                            - rhoc * wc * (uc + vc * cot) / rmean, 
                             0
                         };
                         cons_data[aid] -= ( 
@@ -1834,16 +1589,25 @@ void SRHD<dim>::advance(
 
                         // Grab central primitives
                         const real rhoc = prim_buff[tid].rho;
-                        const real uc   = prim_buff[tid].get_v1();
-                        const real vc   = prim_buff[tid].get_v2();
-                        const real wc   = prim_buff[tid].get_v3();
+                        const real uc   = prim_buff[tid].v1;
+                        const real vc   = prim_buff[tid].v2;
+                        const real wc   = prim_buff[tid].v3;
                         const real pc   = prim_buff[tid].p;
 
-                        const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
-                        const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
-
-                        const auto geom_source  = Conserved<3>{0, (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean , 0, 0};
-                        cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV + (hrf - hlf) * invdV - geom_source - source_terms) * dt * step;
+                        const auto geom_source  = Conserved<3>{
+                            0, 
+                            (rhoc * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * uc * vc) / rmean , 
+                            0, 
+                            0
+                        };
+                        cons_data[aid] -= ( 
+                              (frf * s1R - flf * s1L) * invdV 
+                            + (grf * s2R - glf * s2L) * invdV 
+                            + (hrf - hlf) * invdV 
+                            - geom_source 
+                            - source_terms
+                        ) * dt * step;
                         break;
                     }
             } // end switch
@@ -1854,22 +1618,22 @@ void SRHD<dim>::advance(
 // //                                            SIMULATE
 // //===================================================================================================================
 template<int dim>
-void SRHD<dim>::simulate(
+void Newtonian<dim>::simulate(
     std::function<real(real)> a,
     std::function<real(real)> adot,
-    SRHD::function_t const &d_outer,
-    SRHD::function_t const &s1_outer,
-    SRHD::function_t const &s2_outer,
-    SRHD::function_t const &s3_outer,
-    SRHD::function_t const &e_outer
+    Newtonian::function_t const &d_outer,
+    Newtonian::function_t const &m1_outer,
+    Newtonian::function_t const &m2_outer,
+    Newtonian::function_t const &m3_outer,
+    Newtonian::function_t const &e_outer
     )
 {   
     helpers::anyDisplayProps();
     // set the primtive functionals
     this->dens_outer = d_outer;
-    this->mom1_outer = s1_outer;
-    this->mom2_outer = s2_outer;
-    this->mom3_outer = s3_outer;
+    this->mom1_outer = m1_outer;
+    this->mom2_outer = m2_outer;
+    this->mom3_outer = m3_outer;
     this->enrg_outer = e_outer;
 
     if constexpr(dim == 1) {
@@ -1934,20 +1698,19 @@ void SRHD<dim>::simulate(
     prims.resize(total_zones);
     troubled_cells.resize(total_zones, 0);
     dt_min.resize(active_zones);
-    pressure_guess.resize(total_zones);
 
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++)
     {
-        const auto D  = state[0][i];
-        const auto S1 = state[1][i];
-        const auto S2 = [&]{
+        const auto rho  = state[0][i];
+        const auto m1 = state[1][i];
+        const auto m2 = [&]{
             if constexpr(dim < 2) {
                 return static_cast<real>(0.0);
             }
             return state[2][i];
         }();
-        const auto S3 = [&]{
+        const auto m3 = [&]{
             if constexpr(dim < 3) {
                 return static_cast<real>(0.0);
             }
@@ -1962,20 +1725,17 @@ void SRHD<dim>::simulate(
                 return state[4][i];
             }
         }(); 
-        const auto S = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
         if constexpr(dim == 1) {
-            cons[i] = Conserved<1>{D, S1, E};
+            cons[i] = Conserved<1>{rho, m1, E};
         } else if constexpr(dim == 2) {
-            cons[i] = Conserved<2>{D, S1, S2, E};
+            cons[i] = Conserved<2>{rho, m1, m2, E};
         } else {
-            cons[i] = Conserved<3>{D, S1, S2, S3, E};
+            cons[i] = Conserved<3>{rho, m1, m2, m3, E};
         }
-        pressure_guess[i] = std::abs(S - D - E);
     }
 
     cons.copyToGpu();
     prims.copyToGpu();
-    pressure_guess.copyToGpu();
     dt_min.copyToGpu();
     density_source.copyToGpu();
     m1_source.copyToGpu();
@@ -2015,10 +1775,10 @@ void SRHD<dim>::simulate(
     
     if constexpr(BuildPlatform == Platform::GPU) {
         cons2prim(fullP);
-        adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP);
+        adapt_dt(activeP);
     } else {
         cons2prim(fullP);
-        adapt_dt<TIMESTEP_TYPE::MINIMUM>();
+        adapt_dt();
     }
 
     // Using a sigmoid decay function to represent when the source terms turn off.

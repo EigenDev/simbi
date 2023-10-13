@@ -28,8 +28,8 @@ cdef extern from "common/enums.hpp":
 cdef extern from "common/hydro_structs.hpp":
     cdef cppclass InitialConditions:
         real tstart, chkpt_interval, dlogt, plm_theta, engine_duration, gamma, cfl, tend
-        int nx, ny, nz
-        bool first_order, linspace
+        int nx, ny, nz, chkpt_idx
+        bool first_order, linspace, quirk_smoothing, constant_sources
         vector[vector[real]] sources, gsource
         vector[bool] object_cells
         string data_directory, coord_system, solver
@@ -231,29 +231,6 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
             string solver,
             bool constant_sources,
             vector[vector[real]] boundary_sources)
-
-# cdef extern from "hydro/srhd.hpp" namespace "simbi":
-#     cdef cppclass SRHD[T]:
-#         SRHD() except +
-#         SRHD(
-#             vector[vector[real]] state, 
-#             InitialConditions sim_cond
-#         ) except +
-
-#         vector[vector[real]] simulate(
-#             PyObjWrapper a,
-#             PyObjWrapper adot
-#         )
-
-#         vector[vector[real]] simulate (
-#             PyObjWrapper a,
-#             PyObjWrapper adot,
-#             PyObjWrapper d_outer,
-#             PyObjWrapper s1_outer,
-#             PyObjWrapper s2_outer,
-#             PyObjWrapper s3_outer,
-#             PyObjWrapper e_outer
-#         )
 
 cdef extern from "hydro/driver.hpp" namespace "simbi":
     cdef cppclass Driver:

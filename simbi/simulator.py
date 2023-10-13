@@ -738,6 +738,8 @@ class Hydro:
         
         state_contig = self.u.reshape(self.u.shape[0], -1)
         state = sim_state()
+        print(self.u[0])
+        zzz = input('')
         state.run(
             state_contig, 
             self.dimensionality,

@@ -1,8 +1,5 @@
-/* 
-* Single header for 1, 2, and 3D SRHD Calculations
-*/
-#ifndef SRHD_HPP
-#define SRHD_HPP
+#ifndef NEWTONIAN_HPP
+#define NEWTONIAN_HPP
 
 #include <vector>
 #include "common/hydro_structs.hpp"
@@ -12,40 +9,40 @@
 namespace simbi
 {
     template<int dim>
-    struct SRHD : public HydroBase
+    struct Newtonian : public HydroBase
     {
         // set the primitive and conservative types at compile time
         using primitive_t = typename std::conditional_t<
         dim == 1,
-        sr1d::Primitive,
+        hydro1d::Primitive,
         std::conditional_t<
         dim == 2,
-        sr2d::Primitive,
-        sr3d::Primitive>
+        hydro2d::Primitive,
+        hydro3d::Primitive>
         >;
         using conserved_t = typename std::conditional_t<
         dim == 1,
-        sr1d::Conserved,
+        hydro1d::Conserved,
         std::conditional_t<
         dim == 2,
-        sr2d::Conserved,
-        sr3d::Conserved>
+        hydro2d::Conserved,
+        hydro3d::Conserved>
         >;
         using primitive_soa_t = typename std::conditional_t<
         dim == 1,
-        sr1d::PrimitiveSOA,
+        hydro1d::PrimitiveSOA,
         std::conditional_t<
         dim == 2,
-        sr2d::PrimitiveSOA,
-        sr3d::PrimitiveSOA>
+        hydro2d::PrimitiveSOA,
+        hydro3d::PrimitiveSOA>
         >;
         using eigenvals_t = typename std::conditional_t<
         dim == 1,
-        sr1d::Eigenvals,
+        hydro1d::Eigenvals,
         std::conditional_t<
         dim == 2,
-        sr2d::Eigenvals,
-        sr3d::Eigenvals>
+        hydro2d::Eigenvals,
+        hydro3d::Eigenvals>
         >;
 
         using function_t = typename std::conditional_t<
@@ -68,15 +65,15 @@ namespace simbi
         /* Shared Data Members */
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons, outer_zones, inflow_zones;
-        ndarray<real> pressure_guess, dt_min;
+        ndarray<real> dt_min;
         bool scalar_all_zeros;
 
         /* Methods */
-        SRHD();
-        SRHD(
+        Newtonian();
+        Newtonian(
             std::vector<std::vector<real>> &state,
             const InitialConditions &init_conditions);
-        ~SRHD();
+        ~Newtonian();
 
         void cons2prim(const ExecutionPolicy<> &p);
 
@@ -128,19 +125,16 @@ namespace simbi
             const luint nhat,
             const real vface) const;  
 
-        template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt();
-
-        template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt(const ExecutionPolicy<> &p);
 
         void simulate(
             std::function<real(real)> a,
             std::function<real(real)> adot,
             function_t const &d_outer  = nullptr,
-            function_t const &s1_outer = nullptr,
-            function_t const &s2_outer = nullptr,
-            function_t const &s3_outer = nullptr,
+            function_t const &m1_outer = nullptr,
+            function_t const &m2_outer = nullptr,
+            function_t const &m3_outer = nullptr,
             function_t const &e_outer  = nullptr
         );
 
@@ -170,20 +164,20 @@ namespace simbi
 }
 
 template<>
-struct is_relativistic<simbi::SRHD<1>>
+struct is_relativistic<simbi::Newtonian<1>>
 {
-    static constexpr bool value = true;
+    static constexpr bool value = false;
 };
 template<>
-struct is_relativistic<simbi::SRHD<2>>
+struct is_relativistic<simbi::Newtonian<2>>
 {
-    static constexpr bool value = true;
+    static constexpr bool value = false;
 };
 template<>
-struct is_relativistic<simbi::SRHD<3>>
+struct is_relativistic<simbi::Newtonian<3>>
 {
-    static constexpr bool value = true;
+    static constexpr bool value = false;
 };
 
-#include "srhd.tpp"
+#include "newtonian.tpp"
 #endif
