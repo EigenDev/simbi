@@ -623,21 +623,21 @@ class Hydro:
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "128"
 
-                # state = sim_state(
-                #     self.u,
-                #     self.gamma,
-                #     cfl,
-                #     x1=self.x1,
-                #     coord_system=cython_coordinates)
-                # kwargs = {
-                #     'a': scale_factor, 
-                #     'adot': scale_factor_derivative,
-                #     'gravity_sources': gsources
-                #     }
-                # if mesh_motion and dens_outer and mom_outer and edens_outer:
-                #     kwargs['d_outer'] = dens_outer
-                #     kwargs['s_outer'] = mom_outer
-                #     kwargs['e_outer'] = edens_outer
+            # state = sim_state(
+            #     self.u,
+            #     self.gamma,
+            #     cfl,
+            #     x1=self.x1,
+            #     coord_system=cython_coordinates)
+            # kwargs = {
+            #     'a': scale_factor, 
+            #     'adot': scale_factor_derivative,
+            #     'gravity_sources': gsources
+            #     }
+            # if mesh_motion and dens_outer and mom_outer and edens_outer:
+            #     kwargs['d_outer'] = dens_outer
+            #     kwargs['s_outer'] = mom_outer
+            #     kwargs['e_outer'] = edens_outer
 
         elif self.dimensionality == 2:
             # ignore the chi term
