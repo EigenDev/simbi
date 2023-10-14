@@ -38,12 +38,14 @@ Newtonian<dim>::Newtonian(
 
 // Destructor
 template<int dim>
-Newtonian<dim>::~Newtonian() {}
+Newtonian<dim>::~Newtonian() {
+    
+}
 
 
 // Helpers
 template<int dim>
-GPU_CALLABLE_INLINE
+GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1cell_spacing)
@@ -69,7 +71,7 @@ constexpr real Newtonian<dim>::get_x1face(const lint ii, const int side) const
 
 
 template<int dim>
-GPU_CALLABLE_INLINE
+GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x2face(const lint ii, const int side) const
 {
     const real x2l = helpers::my_max(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
@@ -80,7 +82,7 @@ constexpr real Newtonian<dim>::get_x2face(const lint ii, const int side) const
 }
 
 template<int dim>
-GPU_CALLABLE_INLINE
+GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x3face(const lint ii, const int side) const
 {
 
@@ -92,7 +94,7 @@ constexpr real Newtonian<dim>::get_x3face(const lint ii, const int side) const
 }
 
 template<int dim>
-GPU_CALLABLE_INLINE
+GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x1_differential(const lint ii) const {
     const real x1l   = get_x1face(ii, 0);
     const real x1r   = get_x1face(ii, 1);
@@ -107,7 +109,7 @@ constexpr real Newtonian<dim>::get_x1_differential(const lint ii) const {
 }
 
 template<int dim>
-GPU_CALLABLE_INLINE
+GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x2_differential(const lint ii) const {
     if constexpr(dim == 1) {
         switch (geometry)
@@ -136,7 +138,7 @@ constexpr real Newtonian<dim>::get_x2_differential(const lint ii) const {
 }
 
 template<int dim>
-GPU_CALLABLE_INLINE
+GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x3_differential(const lint ii) const {
     if constexpr(dim == 1) {
         switch (geometry)
@@ -161,7 +163,7 @@ constexpr real Newtonian<dim>::get_x3_differential(const lint ii) const {
 }
 
 template<int dim>
-GPU_CALLABLE_INLINE
+GPU_CALLABLE_MEMBER
 real Newtonian<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
 {
     return get_x1_differential(ii) * get_x2_differential(jj) * get_x3_differential(kk);

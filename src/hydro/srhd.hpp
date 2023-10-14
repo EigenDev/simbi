@@ -144,25 +144,25 @@ namespace simbi
             function_t const &e_outer  = nullptr
         );
 
-        GPU_CALLABLE_INLINE
+        GPU_CALLABLE_MEMBER
         constexpr real get_x1face(const lint ii, const int side) const;
 
-        GPU_CALLABLE_INLINE
+        GPU_CALLABLE_MEMBER
         constexpr real get_x2face(const lint ii, const int side) const;
 
-        GPU_CALLABLE_INLINE
+        GPU_CALLABLE_MEMBER
         constexpr real get_x3face(const lint ii, const int side) const;
 
-        GPU_CALLABLE_INLINE
+        GPU_CALLABLE_MEMBER
         constexpr real get_x1_differential(const lint ii) const;
 
-        GPU_CALLABLE_INLINE
+        GPU_CALLABLE_MEMBER
         constexpr real get_x2_differential(const lint ii) const;
 
-        GPU_CALLABLE_INLINE
+        GPU_CALLABLE_MEMBER
         constexpr real get_x3_differential(const lint ii) const;
 
-        GPU_CALLABLE_INLINE
+        GPU_CALLABLE_MEMBER
         real get_cell_volume(const lint ii, const lint jj = 0, const lint kk = 0) const;
 
         void emit_troubled_cells();
@@ -184,7 +184,7 @@ namespace simbi
 
         // file writer template alias
         template<int dim>
-        static auto write2file = helpers::write_to_file<typename SRHD<dim>::primitive_soa_t, dim, SRHD<dim>>;
+        constexpr auto write2file = helpers::write_to_file<typename SRHD<dim>::primitive_soa_t, dim, SRHD<dim>>;
             
     } // namespace srhd
 }
