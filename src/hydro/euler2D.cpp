@@ -101,7 +101,7 @@ Eigenvals Newtonian2D::calc_eigenvals(
             // Calculate the mean velocities of sound and fluid
             // const real cbar   = 0.5*(csL + csR);
             // const real rhoBar = 0.5*(rhoL + rhoR);
-            const real num       = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
+            const real num       = csL + csR- (gamma - 1.) * 0.5 *(vR- vL);
             const real denom     = csL * std::pow(pL, - hllc_z) + csR * std::pow(pR, - hllc_z);
             const real p_term    = num/denom;
             const real pStar     = std::pow(p_term, (1./hllc_z));
