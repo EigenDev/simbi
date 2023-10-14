@@ -584,11 +584,6 @@ Conserved SRHD2D::calc_hllc_flux(
             Conserved net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL_lm
                         + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm) * static_cast<real>(0.5) - face_starState * vface;
 
-            // #if !GPU_CODE
-            // if (net_flux.d != 0) {
-            //     std::cout << net_flux.d << "\n";
-            // }
-            // #endif
             // upwind the concentration flux 
             if (net_flux.d < 0)
                 net_flux.chi = right_prims.chi * net_flux.d;
@@ -740,9 +735,6 @@ void SRHD2D::cons2prim(const ExecutionPolicy<> &p)
             #if FOUR_VELOCITY
                 prim_data[gid] = Primitive{D/ W, v1 * W, v2 * W, peq, Dchi / D};
             #else
-                #if !GPU_CODE
-                    writeln("({}), D: {}, S1: {}, S2: {}, tau: {}, peq: {}\n", gid, D, S1, S2, tau, peq);
-                #endif
                 prim_data[gid] = Primitive{D/ W, v1, v2, peq, Dchi / D};
             #endif
             workLeftToDo = false;
