@@ -1,5 +1,8 @@
-#ifndef NEWTONIAN_HPP
-#define NEWTONIAN_HPP
+/* 
+* Single header for 1, 2, and 3D Newtonian Calculations
+*/
+#ifndef NEWT_HPP
+#define NEWT_HPP
 
 #include <vector>
 #include "common/hydro_structs.hpp"
@@ -161,6 +164,26 @@ namespace simbi
 
         void emit_troubled_cells();
     };
+    
+    namespace nt
+    {
+        // Primitive<dim> template alias
+        template<int dim>
+        using Primitive = typename Newtonian<dim>::primitive_t;
+
+        // Conservative template alias
+        template<int dim>
+        using Conserved = typename Newtonian<dim>::conserved_t;
+
+        // Eigenvalue template alias
+        template<int dim>
+        using Eigenvals = typename Newtonian<dim>::eigenvals_t;
+
+        // file writer template alias
+        template<int dim>
+        constexpr auto write2file = helpers::write_to_file<typename Newtonian<dim>::primitive_soa_t, dim, Newtonian<dim>>;
+
+    } // namespace newtonian_alias
 }
 
 template<>
@@ -179,5 +202,5 @@ struct is_relativistic<simbi::Newtonian<3>>
     static constexpr bool value = false;
 };
 
-#include "newtonian.tpp"
+#include "newt.tpp"
 #endif

@@ -167,6 +167,26 @@ namespace simbi
 
         void emit_troubled_cells();
     };
+
+    namespace sr
+    {
+        // Primitive<dim> template alias
+        template<int dim>
+        using Primitive = typename SRHD<dim>::primitive_t;
+
+        // Conservative template alias
+        template<int dim>
+        using Conserved = typename SRHD<dim>::conserved_t;
+
+        // Eigenvalue template alias
+        template<int dim>
+        using Eigenvals = typename SRHD<dim>::eigenvals_t;
+
+        // file writer template alias
+        template<int dim>
+        static auto write2file = helpers::write_to_file<typename SRHD<dim>::primitive_soa_t, dim, SRHD<dim>>;
+            
+    } // namespace srhd
 }
 
 template<>

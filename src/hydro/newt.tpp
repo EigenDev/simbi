@@ -17,22 +17,6 @@ using namespace simbi;
 using namespace simbi::util;
 using namespace std::chrono;
 
-// Primitive<dim> template alias
-template<int dim>
-using Primitive = typename Newtonian<dim>::primitive_t;
-
-// Conservative template alias
-template<int dim>
-using Conserved = typename Newtonian<dim>::conserved_t;
-
-// Eigenvalue template alias
-template<int dim>
-using Eigenvals = typename Newtonian<dim>::eigenvals_t;
-
-// file writer template alias
-template<int dim>
-constexpr auto write2file = helpers::write_to_file<typename Newtonian<dim>::primitive_soa_t, dim, Newtonian<dim>>;
-
 // Default Constructor
 template<int dim>
 Newtonian<dim>::Newtonian() {
@@ -231,7 +215,7 @@ void Newtonian<dim>::emit_troubled_cells() {
     }
 }
 //-----------------------------------------------------------------------------------------
-//                          GET THE Primitive
+//                          GET THE nt::Primitive
 //-----------------------------------------------------------------------------------------
 /**
  * Return the primitive
@@ -265,19 +249,22 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<> &p)
             const real v1      = cons_data[gid].momentum(1) / rho;
             const real v2      = cons_data[gid].momentum(2) / rho;
             const real v3      = cons_data[gid].momentum(3) / rho;
+            // if (v2 !=0 || v3 != 0) {
+            //     printf("v1: %.2e, v2: %.2e, v3: %.2e\n", v1, v2, v3);
+            // }
             const real rho_chi = cons_data[gid].chi;
             const real pre     = (gamma - 1)*(cons_data[gid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2 + v3 * v3));
             if constexpr(dim == 1) {
-                prim_data[gid] = Primitive<1>{rho, v1, pre, rho_chi / rho};
+                prim_data[gid] = nt::Primitive<1>{rho, v1, pre, rho_chi / rho};
             } else if constexpr(dim == 2) {
-                prim_data[gid] = Primitive<2>{rho, v1, v2, pre, rho_chi / rho};
+                prim_data[gid] = nt::Primitive<2>{rho, v1, v2, pre, rho_chi / rho};
             } else {
-                prim_data[gid] = Primitive<3>{rho, v1, v2, v3, pre, rho_chi / rho};
+                prim_data[gid] = nt::Primitive<3>{rho, v1, v2, v3, pre, rho_chi / rho};
             }
             workLeftToDo = false;
 
             if (pre < 0) {
-                troubled_data[gid] = 1;
+                troubled_data[gid] = n;
                 inFailureState = true;
                 found_failure  = true;
                 dt = INFINITY;
@@ -303,49 +290,47 @@ Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     const real rhoR = primsR.rho;
     const real vR   = primsR.vcomponent(nhat);
     const real pR   = primsR.p;
+
+    const real csR = std::sqrt(gamma * pR/rhoR);
+    const real csL = std::sqrt(gamma * pL/rhoL);
     switch (sim_solver)
     {
     case Solver::HLLC:
         {
-            const real csR = std::sqrt(gamma * pR/rhoR);
-            const real csL = std::sqrt(gamma * pL/rhoL);
+            // real cbar   = static_cast<real>(0.5)*(csL + csR);
+            // real rhoBar = static_cast<real>(0.5)*(rhoL + rhoR);
+            // real pStar  = static_cast<real>(0.5)*(pL + pR) + static_cast<real>(0.5)*(vL - vR)*cbar*rhoBar;
 
-            // Calculate the mean velocities of sound and fluid
-            // const real cbar   = 0.5*(csL + csR);
-            // const real rhoBar = 0.5*(rhoL + rhoR);
-            const real num       = csL + csR- (gamma - 1.) * 0.5 *(vR- vR);
-            const real denom     = csL * std::pow(pL, - hllc_z) + csR * std::pow(pR, - hllc_z);
-            const real p_term    = num/denom;
-            const real pStar     = std::pow(p_term, (1./hllc_z));
+            // Steps to Compute HLLC as described in Toro et al. 2019
+            const real num    = csL + csR- ( gamma-1.) * static_cast<real>(0.5) * (vR- vL);
+            const real denom  = csL * std::pow(pL, -hllc_z) + csR * std::pow(pR, -hllc_z);
+            const real p_term = num/denom;
+            const real pStar  = std::pow(p_term, (1/hllc_z));
 
             const real qL = 
-                (pStar <= pL) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pL - 1.));
+                (pStar <= pL) ? 1 : std::sqrt(1. + ( (gamma + 1)/(2*gamma))*(pStar/pL - 1));
 
             const real qR = 
-                (pStar <= pR) ? 1. : std::sqrt(1. + ( (gamma + 1.)/(2.*gamma))*(pStar/pR- 1.));
+                (pStar <= pR) ? 1 : std::sqrt(1. + ( (gamma + 1)/(2*gamma))*(pStar/pR- 1));
 
-            const real aL = vR - qL*csL;
+            const real aL = vL - qL*csL;
             const real aR = vR + qR*csR;
 
-            const real aStar = 
-                ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR) )/ 
-                    (rhoL*(aL - vL) - rhoR*(aR - vR) ) );
+            const real aStar = ( (pR- pL + rhoL*vL*(aL - vL) - rhoR*vR*(aR - vR))/
+                            (rhoL*(aL - vL) - rhoR*(aR - vR) ) );
+
             if constexpr(dim == 1) {
-                return Eigenvals<dim>(aL, aR, aStar, pStar);
+                return nt::Eigenvals<dim>(aL, aR, aStar, pStar);
             } else {
-                return Eigenvals<dim>(aL, aR, csL, csR, aStar, pStar);
+                return nt::Eigenvals<dim>(aL, aR, csL, csR, aStar, pStar);
             }
         }
 
     default:
         {
-            const real csR  = std::sqrt(gamma * pR/rhoR);
-            const real csL  = std::sqrt(gamma * pL/rhoL);
-
-            const real aL = helpers::my_min(vL - csL, vR - csR);
-            const real aR = helpers::my_max(vL + csL, vR + csR);
-
-            return Eigenvals<dim>(aL, aR);
+            const real aR = helpers::my_max(helpers::my_max(vL + csL, vR + csR), static_cast<real>(0.0)); 
+            const real aL = helpers::my_min(helpers::my_min(vL - csL, vR - csR), static_cast<real>(0.0));
+            return nt::Eigenvals<dim>{aL, aR};
         }
 
     }
@@ -365,19 +350,19 @@ Newtonian<dim>::conserved_t Newtonian<dim>::prims2cons(const Newtonian<dim>::pri
     const real pressure = prims.p;
     const real et       = pressure / (gamma - 1) + static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2 + v3 * v3);
     if constexpr(dim == 1) { 
-        return Conserved<1>{
+        return nt::Conserved<1>{
             rho, 
             rho * v1,
-            rho - pressure - rho};
+            et};
     } else if constexpr(dim == 2) {
-        return Conserved<2>{
+        return nt::Conserved<2>{
             rho, 
             rho * v1,
             rho * v2,
             et};
 
     } else {
-        return Conserved<3>{
+        return nt::Conserved<3>{
             rho, 
             rho * v1,
             rho * v2,
@@ -516,11 +501,11 @@ void Newtonian<dim>::adapt_dt(const ExecutionPolicy<> &p)
 {
     #if GPU_CODE
         if constexpr(dim == 1) {
-            // LAUNCH_ASYNC((helpers::compute_dt<Primitive<1>,dt_type>), p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
-            helpers::compute_dt<Primitive<1>><<<p.gridSize, p.blockSize>>>(this, prims.data(), dt_min.data());
+            // LAUNCH_ASYNC((helpers::compute_dt<nt::Primitive<1>,dt_type>), p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
+            helpers::compute_dt<nt::Primitive<1>><<<p.gridSize, p.blockSize>>>(this, prims.data(), dt_min.data());
         } else {
-            // LAUNCH_ASYNC((helpers::compute_dt<Primitive<dim>,dt_type>), p.gridSize, p.blockSize, this, prims.data(), dt_min.data(), geometry);
-            helpers::compute_dt<Primitive<dim>><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
+            // LAUNCH_ASYNC((helpers::compute_dt<nt::Primitive<dim>,dt_type>), p.gridSize, p.blockSize, this, prims.data(), dt_min.data(), geometry);
+            helpers::compute_dt<nt::Primitive<dim>><<<p.gridSize,p.blockSize>>>(this, prims.data(), dt_min.data(), geometry);
         }
         // LAUNCH_ASYNC((helpers::deviceReduceWarpAtomicKernel<dim>), p.gridSize, p.blockSize, this, dt_min.data(), active_zones);
         helpers::deviceReduceWarpAtomicKernel<dim><<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
@@ -550,14 +535,14 @@ Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::pri
     const real m2 = rho * v2;
     const real m3 = rho * v3;
     if constexpr(dim == 1) {
-        return Conserved<1>{
+        return nt::Conserved<1>{
             rho  * vn, 
             m1   * vn + helpers::kronecker(nhat, 1) * pressure, 
             (et + pressure) * vn, 
             rho  * vn * chi
         };
     } else if constexpr(dim == 2) {
-        return Conserved<2>{
+        return nt::Conserved<2>{
             rho * vn, 
             m1  * vn + helpers::kronecker(nhat, 1) * pressure, 
             m2  * vn + helpers::kronecker(nhat, 2) * pressure, 
@@ -565,7 +550,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::pri
             rho * vn * chi
         };
     } else {
-        return Conserved<3>{
+        return nt::Conserved<3>{
             rho * vn, 
             m1  * vn + helpers::kronecker(nhat, 1) * pressure, 
             m2  * vn + helpers::kronecker(nhat, 2) * pressure, 
@@ -588,24 +573,21 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
     const luint nhat,
     const real vface) const
 {
-    const Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const nt::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL = lambda.aL;
     const real aR = lambda.aR;
 
-    // Calculate plus/minus alphas
-    const real aLm = aL < 0 ? aL : 0;
-    const real aRp = aR > 0 ? aR : 0;
-    Conserved<dim> net_flux;
+    nt::Conserved<dim> net_flux;
     // Compute the HLL Flux component-wise
-    if (vface < aLm) {
+    if (vface < aL) {
         net_flux = left_flux - left_state * vface;
     }
-    else if (vface > aRp) {
+    else if (vface > aR) {
         net_flux = right_flux - right_state * vface;
     }
     else {    
-        Conserved<dim> f_hll       = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aRp * aLm) / (aRp - aLm);
-        const Conserved<dim> u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
+        nt::Conserved<dim> f_hll       = (left_flux * aR - right_flux * aL + (right_state - left_state) * aR * aL) / (aR - aL);
+        const nt::Conserved<dim> u_hll = (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
         net_flux = f_hll - u_hll * vface;
     }
 
@@ -631,7 +613,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     const luint nhat,
     const real vface) const 
 {
-    const Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const nt::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL    = lambda.aL;
     const real aR    = lambda.aR;
 
@@ -662,7 +644,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             real mstar   = cofac * (m*(aL - v) - pressure + pStar);
             real eStar   = cofac * (energy*(aL - v) + pStar*aStar - pressure*v);
 
-            auto star_state = Conserved<1>{rhoStar, mstar, eStar};
+            auto star_state = nt::Conserved<1>{rhoStar, mstar, eStar};
 
             // Compute the luintermediate left flux
             return left_flux + (star_state - left_state) * aL - star_state * vface;
@@ -678,7 +660,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             real mstar   = cofac * (m*(aR - v) - pressure + pStar);
             real eStar   = cofac * (energy*(aR - v) + pStar*aStar - pressure*v);
 
-            auto star_state = Conserved<1>{rhoStar, mstar, eStar};
+            auto star_state = nt::Conserved<1>{rhoStar, mstar, eStar};
 
             // Compute the luintermediate right flux
             return right_flux + (star_state - right_state) * aR - star_state * vface;
@@ -712,9 +694,9 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         real estar              = cofactor * (edens  * (aL - vL) + pStar * aStar - pressure * vL);
         const auto starStateL = [=] {
             if constexpr(dim == 2) {
-                return Conserved<2>{rhostar, m1star, m2star, estar};
+                return nt::Conserved<2>{rhostar, m1star, m2star, estar};
             } else {
-                return Conserved<3>{rhostar, m1star, m2star, m3star, estar};
+                return nt::Conserved<3>{rhostar, m1star, m2star, m3star, estar};
             }
         }();
 
@@ -732,9 +714,9 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         estar                 = cofactor * (edens  * (aR - vR) + pStar * aStar - pressure * vR);
         const auto starStateR = [=] {
             if constexpr(dim == 2) {
-                return Conserved<2>{rhostar, m1star, m2star, estar};
+                return nt::Conserved<2>{rhostar, m1star, m2star, estar};
             } else {
-                return Conserved<3>{rhostar, m1star, m2star, m3star, estar};
+                return nt::Conserved<3>{rhostar, m1star, m2star, m3star, estar};
             }
         }();
 
@@ -743,7 +725,6 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         const real aL_lm    = phi * aL;
         const real aR_lm    = phi * aR;
         const auto face_starState = (aStar <= 0) ? starStateR : starStateL;
-        // const Conserved face_starState = (aStar <= 0) ? starStateR : starStateL;
         auto net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL_lm
                             + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm) * static_cast<real>(0.5) - face_starState * vface;
 
@@ -804,8 +785,7 @@ void Newtonian<dim>::advance(
         this
     ] GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
-        auto prim_buff = shared_memory_proxy<Primitive<dim>>();
-        // extern __shared__ Primitive<dim> prim_buff[];
+        auto prim_buff = shared_memory_proxy<nt::Primitive<dim>>();
         #else 
         auto *const prim_buff = prim_data;
         #endif 
@@ -827,9 +807,9 @@ void Newtonian<dim>::advance(
         const luint tya = dim < 2 ? 0 : (BuildPlatform == Platform::GPU) ? ty + radius : ja;
         const luint tza = dim < 3 ? 0 : (BuildPlatform == Platform::GPU) ? tz + radius : ka;
 
-        Conserved<dim> uxL, uxR, uyL, uyR, uzL, uzR;
-        Conserved<dim> fL, fR, gL, gR, hL, hR, frf, flf, grf, glf, hrf, hlf;
-        Primitive<dim> xprimsL, xprimsR, yprimsL, yprimsR, zprimsL, zprimsR;
+        nt::Conserved<dim> uxL, uxR, uyL, uyR, uzL, uzR;
+        nt::Conserved<dim> fL, fR, gL, gR, hL, hR, frf, flf, grf, glf, hrf, hlf;
+        nt::Primitive<dim> xprimsL, xprimsR, yprimsL, yprimsR, zprimsL, zprimsR;
 
         const luint aid = ka * nx * ny + ja * nx + ia;
         #if GPU_CODE
@@ -1119,14 +1099,14 @@ void Newtonian<dim>::advance(
             }
         } else{
             // Coordinate X
-            const Primitive<dim> xleft_most  = prim_buff[tza * sx * sy + tya * sx + (txa - 2)];
-            const Primitive<dim> xleft_mid   = prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
-            const Primitive<dim> center      = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
-            const Primitive<dim> xright_mid  = prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
-            const Primitive<dim> xright_most = prim_buff[tza * sx * sy + tya * sx + (txa + 2)];
-            Primitive<dim> yleft_most, yleft_mid, yright_mid, yright_most;
-            Primitive<dim> zleft_most, zleft_mid, zright_mid, zright_most;
-            // Reconstructed left X Primitive<dim> vector at the i+1/2 interface
+            const nt::Primitive<dim> xleft_most  = prim_buff[tza * sx * sy + tya * sx + (txa - 2)];
+            const nt::Primitive<dim> xleft_mid   = prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
+            const nt::Primitive<dim> center      = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
+            const nt::Primitive<dim> xright_mid  = prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
+            const nt::Primitive<dim> xright_most = prim_buff[tza * sx * sy + tya * sx + (txa + 2)];
+            nt::Primitive<dim> yleft_most, yleft_mid, yright_mid, yright_most;
+            nt::Primitive<dim> zleft_most, zleft_mid, zright_mid, zright_most;
+            // Reconstructed left X nt::Primitive<dim> vector at the i+1/2 interface
             xprimsL  = center     + helpers::plm_gradient(center, xleft_mid, xright_mid, plm_theta)   * static_cast<real>(0.5); 
             xprimsR  = xright_mid - helpers::plm_gradient(xright_mid, center, xright_most, plm_theta) * static_cast<real>(0.5);
 
@@ -1188,7 +1168,7 @@ void Newtonian<dim>::advance(
             }
 
             // Calculate the left and right states using the reconstructed PLM
-            // Primitive
+            // nt::Primitive
             uxL = prims2cons(xprimsL);
             uxR = prims2cons(xprimsR);
             if constexpr(dim > 1) {
@@ -1284,7 +1264,7 @@ void Newtonian<dim>::advance(
                 zprimsL.chi =  zprimsR.chi;
             }
 
-            // Calculate the left and right states using the reconstructed PLM Primitive
+            // Calculate the left and right states using the reconstructed PLM nt::Primitive
             uxL = prims2cons(xprimsL);
             uxR = prims2cons(xprimsR);
             if constexpr(dim > 1) {
@@ -1346,14 +1326,14 @@ void Newtonian<dim>::advance(
             this
         ]{
             if constexpr(dim == 1) {
-                return Conserved<1>{d_source, m1_source, e_source} * time_constant;
+                return nt::Conserved<1>{d_source, m1_source, e_source} * time_constant;
             } else if constexpr(dim == 2) {
                 const real m2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
-                return Conserved<2>{d_source, m1_source, m2_source, e_source} * time_constant;
+                return nt::Conserved<2>{d_source, m1_source, m2_source, e_source} * time_constant;
             } else {
                 const real m2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
                 const real m3_source = mom3_source_all_zeros ? 0.0 : mom3_source[real_loc];
-                return Conserved<3>{d_source, m1_source, m2_source, m3_source, e_source} * time_constant;
+                return nt::Conserved<3>{d_source, m1_source, m2_source, m3_source, e_source} * time_constant;
             }
         }();
 
@@ -1373,16 +1353,16 @@ void Newtonian<dim>::advance(
             ]{
             if constexpr(dim == 1) {
                 const auto ge_source  = gm1_source * prim_buff[tid].v1;
-                return Conserved<1>{0, gm1_source, ge_source};
+                return nt::Conserved<1>{0, gm1_source, ge_source};
             } else if constexpr(dim == 2) {
                 const auto gm2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].rho;
                 const auto ge_source  = gm1_source * prim_buff[tid].v1 + gm2_source * prim_buff[tid].v2;
-                return Conserved<2>{0, gm1_source, gm2_source, ge_source};
+                return nt::Conserved<2>{0, gm1_source, gm2_source, ge_source};
             } else {
                 const auto gm2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].rho;
                 const auto gm3_source = zero_gravity3 ? 0 : grav3_source[real_loc] * cons_data[aid].rho;
                 const auto ge_source  = gm1_source * prim_buff[tid].v1 + gm2_source * prim_buff[tid].v2 + gm3_source * prim_buff[tid].v3;
-                return Conserved<3>{0, gm1_source, gm2_source, gm3_source, ge_source};
+                return nt::Conserved<3>{0, gm1_source, gm2_source, gm3_source, ge_source};
             }
         }();
 
@@ -1405,7 +1385,7 @@ void Newtonian<dim>::advance(
                     const real factor = (mesh_motion) ? dV : 1;         
                     const real pc     = prim_buff[txa].p;
                     const real invdV  = 1 / dV;
-                    const auto geom_sources = Conserved<1>{0.0, pc * (sR - sL) * invdV, 0.0};
+                    const auto geom_sources = nt::Conserved<1>{0.0, pc * (sR - sL) * invdV, 0.0};
                     cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - source_terms - gravity) * step * dt * factor;
                     break;
                 }
@@ -1441,7 +1421,7 @@ void Newtonian<dim>::advance(
                         const real vc   = prim_buff[tid].v2;
                         const real pc   = prim_buff[tid].p;
 
-                        const Conserved<2> geom_source  = {
+                        const nt::Conserved<2> geom_source  = {
                             0, 
                               (rhoc * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
                             - (rhoc * uc * vc) / rmean + pc * (s2R - s2L) * invdV, 
@@ -1464,12 +1444,12 @@ void Newtonian<dim>::advance(
                         const real rmean = helpers::get_cell_centroid(rr, rl, simbi::Geometry::PLANAR_CYLINDRICAL);
                         // const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
                         // const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
-                        const real dV        = rmean * (rr - rl) * dx2;
-                        const real invdV        = 1.0 / dV;
-                        const real s1R          = rr * dx2; 
-                        const real s1L          = rl * dx2; 
-                        const real s2R          = (rr - rl); 
-                        const real s2L          = (rr - rl); 
+                        const real dV    = rmean * (rr - rl) * dx2;
+                        const real invdV = 1.0 / dV;
+                        const real s1R   = rr * dx2; 
+                        const real s1L   = rl * dx2; 
+                        const real s2R   = (rr - rl); 
+                        const real s2L   = (rr - rl); 
 
                         // Grab central primitives
                         const real rhoc = prim_buff[tid].rho;
@@ -1477,7 +1457,7 @@ void Newtonian<dim>::advance(
                         const real vc   = prim_buff[tid].v2;
                         const real pc   = prim_buff[tid].p;
 
-                        const Conserved<2> geom_source  = {
+                        const nt::Conserved<2> geom_source  = {
                             0, 
                               (rhoc * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
                             - (rhoc * uc * vc) / rmean, 
@@ -1494,19 +1474,19 @@ void Newtonian<dim>::advance(
                     }
                 default:
                     {
-                        const real rl           = x1l + vfaceL * step * dt; 
-                        const real rr           = x1r + vfaceR * step * dt;
-                        const real rmean        = helpers::get_cell_centroid(rr, rl, simbi::Geometry::AXIS_CYLINDRICAL);
-                        const real dV           = rmean * (rr - rl) * dx2;
-                        const real invdV        = 1.0 / dV;
-                        const real s1R          = rr * dx2; 
-                        const real s1L          = rl * dx2; 
-                        const real s2R          = rmean * (rr - rl); 
-                        const real s2L          = rmean * (rr - rl);  
+                        const real rl    = x1l + vfaceL * step * dt; 
+                        const real rr    = x1r + vfaceR * step * dt;
+                        const real rmean = helpers::get_cell_centroid(rr, rl, simbi::Geometry::AXIS_CYLINDRICAL);
+                        const real dV    = rmean * (rr - rl) * dx2;
+                        const real invdV = 1.0 / dV;
+                        const real s1R   = rr * dx2; 
+                        const real s1L   = rl * dx2; 
+                        const real s2R   = rmean * (rr - rl); 
+                        const real s2L   = rmean * (rr - rl);  
 
                         // Grab central primitives
                         const real pc   = prim_buff[tid].p;
-                        const auto geom_source  = Conserved<2>{0, pc * (s1R - s1L) * invdV, 0, 0};
+                        const auto geom_source  = nt::Conserved<2>{0, pc * (s1R - s1L) * invdV, 0, 0};
                         cons_data[aid] -= ( 
                               (frf * s1R - flf * s1L) * invdV 
                             + (grf * s2R - glf * s2L) * invdV 
@@ -1552,7 +1532,7 @@ void Newtonian<dim>::advance(
                         const real wc   = prim_buff[tid].v3;
                         const real pc   = prim_buff[tid].p;
 
-                        const auto geom_source  = Conserved<3>{0, 
+                        const auto geom_source  = nt::Conserved<3>{0, 
                             ( rhoc * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1,
                               rhoc * (wc * wc * cot - uc * vc) / rmean + pc * (s2R - s2L)/dV2 , 
                             - rhoc * wc * (uc + vc * cot) / rmean, 
@@ -1594,7 +1574,7 @@ void Newtonian<dim>::advance(
                         const real wc   = prim_buff[tid].v3;
                         const real pc   = prim_buff[tid].p;
 
-                        const auto geom_source  = Conserved<3>{
+                        const auto geom_source  = nt::Conserved<3>{
                             0, 
                             (rhoc * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) * invdV, 
                             - (rhoc * uc * vc) / rmean , 
@@ -1614,9 +1594,9 @@ void Newtonian<dim>::advance(
         }
     });
 }
-// //===================================================================================================================
-// //                                            SIMULATE
-// //===================================================================================================================
+//===================================================================================================================
+//                                            SIMULATE
+//===================================================================================================================
 template<int dim>
 void Newtonian<dim>::simulate(
     std::function<real(real)> a,
@@ -1656,11 +1636,11 @@ void Newtonian<dim>::simulate(
     for (int i = 0; i < 2 * dim; i++) {
         this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
         if constexpr(dim == 1) {
-            this->inflow_zones[i] = Conserved<1>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
+            this->inflow_zones[i] = nt::Conserved<1>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
         } else if constexpr(dim == 2) {
-            this->inflow_zones[i] = Conserved<2>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]};
+            this->inflow_zones[i] = nt::Conserved<2>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]};
         } else {
-            this->inflow_zones[i] = Conserved<3>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]};
+            this->inflow_zones[i] = nt::Conserved<3>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]};
         }
     }
 
@@ -1688,8 +1668,8 @@ void Newtonian<dim>::simulate(
     setup.ad_gamma            = gamma;
     setup.first_order         = first_order;
     setup.coord_system        = coord_system;
-    setup.using_fourvelocity  = (VelocityType == Velocity::FourVelocity);
-    setup.regime              = "relativistic";
+    setup.using_fourvelocity  = false;
+    setup.regime              = "classical";
     setup.mesh_motion         = mesh_motion;
     setup.boundary_conditions = boundary_conditions;
     setup.dimensions          = dim;
@@ -1726,11 +1706,11 @@ void Newtonian<dim>::simulate(
             }
         }(); 
         if constexpr(dim == 1) {
-            cons[i] = Conserved<1>{rho, m1, E};
+            cons[i] = nt::Conserved<1>{rho, m1, E};
         } else if constexpr(dim == 2) {
-            cons[i] = Conserved<2>{rho, m1, m2, E};
+            cons[i] = nt::Conserved<2>{rho, m1, m2, E};
         } else {
-            cons[i] = Conserved<3>{rho, m1, m2, m3, E};
+            cons[i] = nt::Conserved<3>{rho, m1, m2, m3, E};
         }
     }
 
@@ -1765,7 +1745,7 @@ void Newtonian<dim>::simulate(
     const auto  yblockspace  = (dim < 2) ? 1 : yblockdim + 2 * radius;
     const auto  zblockspace  = (dim < 3) ? 1 : zblockdim + 2 * radius;
     const luint shBlockSpace = xblockspace * yblockspace * zblockspace;
-    const luint shBlockBytes = shBlockSpace * sizeof(Primitive<dim>);
+    const luint shBlockBytes = shBlockSpace * sizeof(nt::Primitive<dim>);
     const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
     const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
@@ -1785,7 +1765,7 @@ void Newtonian<dim>::simulate(
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
     if (t == 0 || init_chkpt_idx == 0) { 
-        write2file<dim>(*this, setup, data_directory, t, 0, chkpt_interval, checkpoint_zones);
+        nt::write2file<dim>(*this, setup, data_directory, t, 0, chkpt_interval, checkpoint_zones);
         if constexpr(dim == 1) {
             helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
         } else if constexpr(dim == 2) {

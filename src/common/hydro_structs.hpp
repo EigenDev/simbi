@@ -760,7 +760,7 @@ namespace hydro3d {
         GPU_CALLABLE_MEMBER ~Primitive() {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real v3, real p) : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real v3, real p, real chi) : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(chi) {}
-        GPU_CALLABLE_MEMBER Primitive(const Primitive &c) : rho(c.rho), v1(c.v1), v2(c.v2), p(c.p), chi(c.chi) {}
+        GPU_CALLABLE_MEMBER Primitive(const Primitive &c) : rho(c.rho), v1(c.v1), v2(c.v2), v3(c.v3), p(c.p), chi(c.chi) {}
         GPU_CALLABLE_MEMBER Primitive operator + (const Primitive &e)  const { return Primitive(rho+e.rho, v1+e.v1, v2+e.v2,v3+e.v3, p+e.p, chi+e.chi); }  
         GPU_CALLABLE_MEMBER Primitive operator - (const Primitive &e)  const { return Primitive(rho-e.rho, v1-e.v1, v2-e.v2,v3-e.v3, p-e.p, chi-e.chi); }  
         GPU_CALLABLE_MEMBER Primitive operator * (const real c)      const { return Primitive(rho*c, v1*c, v2*c,v3*c, p*c, chi*c ); }
