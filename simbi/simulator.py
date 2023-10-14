@@ -515,7 +515,6 @@ class Hydro:
         lib_mode  = 'cpu' if compute_mode in ['cpu', 'omp'] else 'gpu'
         state_reg = 'SR' if self.regime == 'relativistic' else ''
         # sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), f'PyState{state_reg}{self.dimensionality}D')
-        sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), 'Buddy')
 
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
@@ -735,11 +734,10 @@ class Hydro:
             'nz': self.nz,
             'object_cells': object_cells.flatten()
         }
-        
+
+        sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), 'Buddy')
         state_contig = self.u.reshape(self.u.shape[0], -1)
         state = sim_state()
-        print(self.u[0])
-        zzz = input('')
         state.run(
             state_contig, 
             self.dimensionality,
