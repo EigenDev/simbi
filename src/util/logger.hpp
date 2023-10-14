@@ -1,3 +1,5 @@
+#ifndef LOGGER_HPP
+#define LOGGER_HPP
 #include "build_options.hpp"
 #include "common/helpers.hip.hpp"
 #include "printb.hpp"
@@ -198,3 +200,4 @@ namespace simbi
     } // namespace detail
     
 } // namespace simbi
+#endif
