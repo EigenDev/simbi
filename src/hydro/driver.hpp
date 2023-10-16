@@ -8,19 +8,11 @@ using namespace std::placeholders;
 namespace simbi
 {
     struct Driver
-    {
-        // using func_t = std::variant<
-        //     std::function<real(real)>,
-        //     std::function<real(real, real)>,
-        //     std::function<real(real, real, real)>,
-        //     std::nullptr_t
-        // >;
-
-        using func_t = std::function<real(real)>;
-        
+    {    
         Driver();
         ~Driver();
-        
+
+        template<typename Func>
         void run(
             std::vector<std::vector<real>> state,
             const int dim, 
@@ -28,14 +20,15 @@ namespace simbi
             const InitialConditions &init_cond,
             std::function<real(real)> const &scale_factor,
             std::function<real(real)> const &scale_factor_derivative,
-            func_t const &density_lambda = nullptr,
-            func_t const &mom1_lambda = nullptr,
-            func_t const &mom2_lambda = nullptr,
-            func_t const &mom3_lambda = nullptr,
-            func_t const &enrg_lambda = nullptr
+            Func const &density_lambda = nullptr,
+            Func const &mom1_lambda = nullptr,
+            Func const &mom2_lambda = nullptr,
+            Func const &mom3_lambda = nullptr,
+            Func const &enrg_lambda = nullptr
         );
     };
 
 } // namespace simbi
 
+#include "driver.tpp"
 #endif

@@ -38,7 +38,7 @@ public:
         return *this;
     }
 
-    double operator()(double x) {
+    double operator()(double x) const {
         if (held) { // nullptr check 
             const auto res = call_obj(held, x); 
             return res;
@@ -46,7 +46,7 @@ public:
         return 0.0;
     }
 
-    double operator()(double x, double y){
+    double operator()(double x, double y) const {
         if (held) { // nullptr check 
             const auto res = call_obj2(held, x, y);
             return res;  
@@ -54,12 +54,16 @@ public:
         return 0.0;
     }
 
-    double operator()(double x, double y, double z){
+    double operator()(double x, double y, double z) const {
         if (held) { // nullptr check 
            const auto res = call_obj3(held, x, y, z);
            return res;
         }
         return 0.0;
+    }
+
+    operator bool() const {
+        return held;
     }
 
 private:

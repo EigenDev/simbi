@@ -607,11 +607,11 @@ cdef class SimState:
         # convert python lambdas to cpp lambdas
         cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
-        cdef PyObjWrapper d_cpp    = PyObjWrapper(pydens_lambda) # if pydens_lambda else PyObjWrapper()
-        cdef PyObjWrapper m1_cpp   = PyObjWrapper(pymom1_lambda) # if pymom1_lambda else NULL
-        cdef PyObjWrapper m2_cpp   = PyObjWrapper(pymom2_lambda) # if pymom2_lambda else NULL
-        cdef PyObjWrapper m3_cpp   = PyObjWrapper(pymom3_lambda) # if pymom3_lambda else NULL
-        cdef PyObjWrapper e_cpp    = PyObjWrapper(pyenrg_lambda) # if pyenrg_lambda else NULL
+        cdef PyObjWrapper d_cpp    = PyObjWrapper(pydens_lambda) if pydens_lambda else PyObjWrapper()
+        cdef PyObjWrapper m1_cpp   = PyObjWrapper(pymom1_lambda) if pymom1_lambda else PyObjWrapper()
+        cdef PyObjWrapper m2_cpp   = PyObjWrapper(pymom2_lambda) if pymom2_lambda else PyObjWrapper()
+        cdef PyObjWrapper m3_cpp   = PyObjWrapper(pymom3_lambda) if pymom3_lambda else PyObjWrapper()
+        cdef PyObjWrapper e_cpp    = PyObjWrapper(pyenrg_lambda) if pyenrg_lambda else PyObjWrapper()
 
         self.driver_state.run(
             state, 
@@ -620,9 +620,9 @@ cdef class SimState:
             sim_cond,
             a_cpp,
             adot_cpp,
-            d_cpp
-            # m1_cpp,
-            # m2_cpp,
-            # m3_cpp,
-            # e_cpp
+            d_cpp,
+            m1_cpp,
+            m2_cpp,
+            m3_cpp,
+            e_cpp
         )

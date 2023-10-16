@@ -98,8 +98,17 @@ namespace simbi
                 }
             }
 
-            template <typename sim_state_t, typename F>
-            void with_logger(sim_state_t &sim_state, real end_time, F &&f) {
+            template <typename sim_state_t, typename F, typename G = std::function<void()>>
+            void with_logger(
+                sim_state_t &sim_state, 
+                real end_time, 
+                F &&f, 
+                G && dens_outer = nullptr, 
+                G && mom1_outer = nullptr,
+                G && enrg_outer = nullptr,
+                G && mom2_outer = nullptr,
+                G && mom3_outer = nullptr) 
+            {
                 auto timer  = Timer();
                 auto logger = Logger();
                 using conserved_t = typename sim_state_t::conserved_t;

@@ -248,10 +248,10 @@ cdef extern from "hydro/driver.hpp" namespace "simbi":
             InitialConditions sim_cond,
             PyObjWrapper a,
             PyObjWrapper adot,
-            PyObjWrapper dens_lambda
-            # PyObjWrapper mom1_lambda,
-            # PyObjWrapper mom2_lambda,
-            # PyObjWrapper mom3_lambda,
-            # PyObjWrapper enrg_lambda
+            PyObjWrapper dens_lambda,
+            PyObjWrapper mom1_lambda,
+            PyObjWrapper mom2_lambda,
+            PyObjWrapper mom3_lambda,
+            PyObjWrapper enrg_lambda
         ) except +
         

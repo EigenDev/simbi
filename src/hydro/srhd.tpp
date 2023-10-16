@@ -1838,29 +1838,30 @@ void SRHD<dim>::advance(
 // //                                            SIMULATE
 // //===================================================================================================================
 template<int dim>
+template<typename Func>
 void SRHD<dim>::simulate(
     std::function<real(real)> const &a,
     std::function<real(real)> const &adot,
-    SRHD::function_t const &d_outer,
-    SRHD::function_t const &e_outer,
-    SRHD::function_t const &s1_outer,
-    SRHD::function_t const &s2_outer,
-    SRHD::function_t const &s3_outer)
+    Func const &d_outer,
+    Func const &s1_outer,
+    Func const &s2_outer,
+    Func const &s3_outer,
+    Func const &e_outer)
 {   
     helpers::anyDisplayProps();
     // set the primtive functionals
-    this->dens_outer = d_outer;
-    this->mom1_outer = s1_outer;
-    this->mom2_outer = s2_outer;
-    this->mom3_outer = s3_outer;
-    this->enrg_outer = e_outer;
+    // this->dens_outer = d_outer;
+    // this->mom1_outer = s1_outer;
+    // this->mom2_outer = s2_outer;
+    // this->mom3_outer = s3_outer;
+    // this->enrg_outer = e_outer;
 
     if constexpr(dim == 1) {
-        this->all_outer_bounds = (dens_outer && mom1_outer && enrg_outer);
+        this->all_outer_bounds = (d_outer && s1_outer && e_outer);
     } else if constexpr(dim == 2) {
-        this->all_outer_bounds = (dens_outer && mom1_outer && mom2_outer && enrg_outer);
+        this->all_outer_bounds = (d_outer && s1_outer && s2_outer && e_outer);
     } else {
-        this->all_outer_bounds = (dens_outer && mom1_outer && mom2_outer && mom3_outer && enrg_outer);
+        this->all_outer_bounds = (d_outer && s1_outer && s2_outer && s3_outer && e_outer);
     }
 
     // Stuff for moving mesh 
@@ -2040,7 +2041,7 @@ void SRHD<dim>::simulate(
         }
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
-    });
+    }, d_outer, s1_outer, e_outer, s2_outer, s3_outer);
 
     if (inFailureState){
         emit_troubled_cells();

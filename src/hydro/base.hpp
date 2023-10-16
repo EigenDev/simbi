@@ -5,6 +5,8 @@
 #include "util/managed.hpp"
 #include "build_options.hpp"
 #include "util/ndarray.hpp"
+#include "common/helpers.hip.hpp"
+
 namespace simbi
 {
     struct HydroBase : public Managed<managed_memory>
@@ -44,37 +46,6 @@ namespace simbi
         std::string data_directory;
         std::vector<std::vector<real>> boundary_sources;
         ndarray<bool> object_pos;
-
-        // virtual void simulate(
-        //     std::function<real(real)> const &scale_factor,
-        //     std::function<real(real)> const &scale_factor_derivative,
-        //     std::function<real(real)> const &density_lambda = nullptr,
-        //     std::function<real(real)> const &enrg_lambda = nullptr,
-        //     std::function<real(real)> const &mom1_lambda = nullptr,
-        //     std::function<real(real)> const &mom2_lambda = nullptr,
-        //     std::function<real(real)> const &mom3_lambda = nullptr
-        // ) = 0;
-
-        // virtual void simulate(
-        //     std::function<real(real)> const &scale_factor,
-        //     std::function<real(real)> const &scale_factor_derivative,
-        //     std::function<real(real, real)> const &density_lambda = nullptr,
-        //     std::function<real(real, real)> const &enrg_lambda = nullptr,
-        //     std::function<real(real, real)> const &mom1_lambda = nullptr,
-        //     std::function<real(real, real)> const &mom2_lambda = nullptr,
-        //     std::function<real(real, real)> const &mom3_lambda = nullptr
-        // ) = 0;
-
-        // virtual void simulate(
-        //     std::function<real(real)> const &scale_factor,
-        //     std::function<real(real)> const &scale_factor_derivative,
-        //     std::function<real(real, real, real)> const &density_lambda = nullptr,
-        //     std::function<real(real, real, real)> const &enrg_lambda = nullptr,
-        //     std::function<real(real, real, real)> const &mom1_lambda = nullptr,
-        //     std::function<real(real, real, real)> const &mom2_lambda = nullptr,
-        //     std::function<real(real, real, real)> const &mom3_lambda = nullptr
-        // ) = 0;
-
         
         //=========================== GPU Threads Per Dimension
         std::string readGpuEnvVar( std::string const & key ) const
@@ -129,9 +100,10 @@ namespace simbi
             this->active_zones = xphysical_grid * yphysical_grid * zphysical_grid;
         }
 
+        virtual ~HydroBase(){};
         protected:
         HydroBase(){}
-        ~HydroBase(){}
+        // ~HydroBase(){}
 
         HydroBase(
             std::vector<std::vector<real>> state, 

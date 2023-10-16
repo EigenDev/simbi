@@ -1600,30 +1600,31 @@ void Newtonian<dim>::advance(
 //                                            SIMULATE
 //===================================================================================================================
 template<int dim>
+template<typename Func>
 void Newtonian<dim>::simulate(
     std::function<real(real)> const &a,
     std::function<real(real)> const &adot,
-    Newtonian::function_t const &d_outer,
-    Newtonian::function_t const &e_outer,
-    Newtonian::function_t const &m1_outer,
-    Newtonian::function_t const &m2_outer,
-    Newtonian::function_t const &m3_outer
+    Func const &d_outer,
+    Func const &m1_outer,
+    Func const &m2_outer,
+    Func const &m3_outer,
+    Func const &e_outer
     )
 {   
     helpers::anyDisplayProps();
     // set the primtive functionals
-    this->dens_outer = d_outer;
-    this->mom1_outer = m1_outer;
-    this->mom2_outer = m2_outer;
-    this->mom3_outer = m3_outer;
-    this->enrg_outer = e_outer;
+    // this->dens_outer = d_outer;
+    // this->mom1_outer = m1_outer;
+    // this->mom2_outer = m2_outer;
+    // this->mom3_outer = m3_outer;
+    // this->enrg_outer = e_outer;
 
     if constexpr(dim == 1) {
-        this->all_outer_bounds = (dens_outer && mom1_outer && enrg_outer);
+        this->all_outer_bounds = (d_outer && m1_outer && e_outer);
     } else if constexpr(dim == 2) {
-        this->all_outer_bounds = (dens_outer && mom1_outer && mom2_outer && enrg_outer);
+        this->all_outer_bounds = (d_outer && m1_outer && m2_outer && e_outer);
     } else {
-        this->all_outer_bounds = (dens_outer && mom1_outer && mom2_outer && mom3_outer && enrg_outer);
+        this->all_outer_bounds = (d_outer && m1_outer && m2_outer && mom3_outer && e_outer);
     }
 
     // Stuff for moving mesh 
@@ -1799,7 +1800,7 @@ void Newtonian<dim>::simulate(
         }
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
-    });
+    }, d_outer, m1_outer, e_outer, m2_outer, m3_outer);
 
     if (inFailureState){
         emit_troubled_cells();

@@ -134,14 +134,15 @@ namespace simbi
         template<TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt(const ExecutionPolicy<> &p);
 
+        template<typename Func>
         void simulate(
             std::function<real(real)> const &a,
             std::function<real(real)> const &adot,
-            function_t const &d_outer  = nullptr,
-            function_t const &e_outer  = nullptr,
-            function_t const &s1_outer = nullptr,
-            function_t const &s2_outer = nullptr,
-            function_t const &s3_outer = nullptr
+            Func const &d_outer  = nullptr,
+            Func const &s1_outer = nullptr,
+            Func const &s2_outer = nullptr,
+            Func const &s3_outer = nullptr,
+            Func const &e_outer  = nullptr
         );
 
         GPU_CALLABLE_MEMBER

@@ -159,7 +159,8 @@ sources = [
     'src/hydro/srhydro1D.hip.cpp',
     'src/hydro/srhydro2D.hip.cpp',
     'src/hydro/srhydro3D.hip.cpp',
-    'src/hydro/driver.cpp',
+    'src/hydro/state.cpp',
+    # 'src/hydro/driver.cpp',
     
     #######################
     #### UTIL IMPLEMENTATIONS
