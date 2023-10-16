@@ -32,7 +32,7 @@ if py3_purelib.endswith('site-packages')
 elif py3env_prefix.endswith('site-packages')
     py3_install_dir = py3env_prefix
 else
-    py3_install_dir = py3.get_installation_dir()
+    py3_install_dir = py3.get_install_dir()
 endif
 
 install_dir_permission = run_command(py3,
@@ -208,7 +208,7 @@ cpu_ext = py3.extension_module(
 
 if get_option('gpu_compilation').enabled()
     if hip.found() or cuda.found()
-        gpu_cc =  hip.found() ? 'hipcc' : 'nvcc'
+        gpu_cc = hip.found() ? 'hipcc' : 'nvcc'
         gpu_compiler = find_program(f'@gpu_cc@')
         gpu_objs = []
         gpu_includes = ['-I'+meson.current_source_dir()+'/src', '-I.', '-I'+meson.current_build_dir()]

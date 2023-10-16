@@ -132,13 +132,13 @@ namespace simbi
         void adapt_dt(const ExecutionPolicy<> &p);
 
         void simulate(
-            std::function<real(real)> a,
-            std::function<real(real)> adot,
+            std::function<real(real)> const &a,
+            std::function<real(real)> const &adot,
             function_t const &d_outer  = nullptr,
+            function_t const &e_outer  = nullptr,
             function_t const &m1_outer = nullptr,
             function_t const &m2_outer = nullptr,
-            function_t const &m3_outer = nullptr,
-            function_t const &e_outer  = nullptr
+            function_t const &m3_outer = nullptr
         );
 
         GPU_CALLABLE_MEMBER

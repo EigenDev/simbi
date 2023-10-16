@@ -233,6 +233,11 @@ cdef extern from "hydro/srhydro3D.hip.hpp" namespace "simbi":
             vector[vector[real]] boundary_sources)
 
 cdef extern from "hydro/driver.hpp" namespace "simbi":
+    ctypedef void* void_ptr
+    ctypedef fused null_or_lambda:
+        PyObjWrapper
+        void_ptr
+
     cdef cppclass Driver:
         Driver() except +
 
@@ -240,6 +245,13 @@ cdef extern from "hydro/driver.hpp" namespace "simbi":
             vector[vector[real]] state,
             int dim, 
             string regime, 
-            InitialConditions sim_cond
-        )
+            InitialConditions sim_cond,
+            PyObjWrapper a,
+            PyObjWrapper adot,
+            PyObjWrapper dens_lambda
+            # PyObjWrapper mom1_lambda,
+            # PyObjWrapper mom2_lambda,
+            # PyObjWrapper mom3_lambda,
+            # PyObjWrapper enrg_lambda
+        ) except +
         

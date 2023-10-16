@@ -44,6 +44,37 @@ namespace simbi
         std::string data_directory;
         std::vector<std::vector<real>> boundary_sources;
         ndarray<bool> object_pos;
+
+        // virtual void simulate(
+        //     std::function<real(real)> const &scale_factor,
+        //     std::function<real(real)> const &scale_factor_derivative,
+        //     std::function<real(real)> const &density_lambda = nullptr,
+        //     std::function<real(real)> const &enrg_lambda = nullptr,
+        //     std::function<real(real)> const &mom1_lambda = nullptr,
+        //     std::function<real(real)> const &mom2_lambda = nullptr,
+        //     std::function<real(real)> const &mom3_lambda = nullptr
+        // ) = 0;
+
+        // virtual void simulate(
+        //     std::function<real(real)> const &scale_factor,
+        //     std::function<real(real)> const &scale_factor_derivative,
+        //     std::function<real(real, real)> const &density_lambda = nullptr,
+        //     std::function<real(real, real)> const &enrg_lambda = nullptr,
+        //     std::function<real(real, real)> const &mom1_lambda = nullptr,
+        //     std::function<real(real, real)> const &mom2_lambda = nullptr,
+        //     std::function<real(real, real)> const &mom3_lambda = nullptr
+        // ) = 0;
+
+        // virtual void simulate(
+        //     std::function<real(real)> const &scale_factor,
+        //     std::function<real(real)> const &scale_factor_derivative,
+        //     std::function<real(real, real, real)> const &density_lambda = nullptr,
+        //     std::function<real(real, real, real)> const &enrg_lambda = nullptr,
+        //     std::function<real(real, real, real)> const &mom1_lambda = nullptr,
+        //     std::function<real(real, real, real)> const &mom2_lambda = nullptr,
+        //     std::function<real(real, real, real)> const &mom3_lambda = nullptr
+        // ) = 0;
+
         
         //=========================== GPU Threads Per Dimension
         std::string readGpuEnvVar( std::string const & key ) const

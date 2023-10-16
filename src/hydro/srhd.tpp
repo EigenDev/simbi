@@ -1839,14 +1839,13 @@ void SRHD<dim>::advance(
 // //===================================================================================================================
 template<int dim>
 void SRHD<dim>::simulate(
-    std::function<real(real)> a,
-    std::function<real(real)> adot,
+    std::function<real(real)> const &a,
+    std::function<real(real)> const &adot,
     SRHD::function_t const &d_outer,
+    SRHD::function_t const &e_outer,
     SRHD::function_t const &s1_outer,
     SRHD::function_t const &s2_outer,
-    SRHD::function_t const &s3_outer,
-    SRHD::function_t const &e_outer
-    )
+    SRHD::function_t const &s3_outer)
 {   
     helpers::anyDisplayProps();
     // set the primtive functionals

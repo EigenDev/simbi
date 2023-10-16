@@ -237,14 +237,14 @@ namespace simbi
             const real rho = minmod((a - b).rho * plm_theta, (c - b).rho * static_cast<real>(0.5), (c - a).rho * plm_theta);
             const real v   = minmod((a - b).v1  * plm_theta, (c - b).v1  * static_cast<real>(0.5), (c - a).v1  * plm_theta);
             const real pre = minmod((a - b).p   * plm_theta, (c - b).p   * static_cast<real>(0.5), (c - a).p   * plm_theta);
-            // const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
-            return T{rho, v, pre};
+            const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
+            return T{rho, v, pre, chi};
         }
 
         GPU_CALLABLE_INLINE 
         constexpr lint get_real_idx(const lint idx, const lint offset, const lint active_zones) 
         {
-            if (idx > active_zones - 1) {
+            if (idx > active_zones - 1 + offset) {
                 return active_zones - 1;
             }
             return (idx - offset > 0) * (idx - offset);

@@ -1601,13 +1601,13 @@ void Newtonian<dim>::advance(
 //===================================================================================================================
 template<int dim>
 void Newtonian<dim>::simulate(
-    std::function<real(real)> a,
-    std::function<real(real)> adot,
+    std::function<real(real)> const &a,
+    std::function<real(real)> const &adot,
     Newtonian::function_t const &d_outer,
+    Newtonian::function_t const &e_outer,
     Newtonian::function_t const &m1_outer,
     Newtonian::function_t const &m2_outer,
-    Newtonian::function_t const &m3_outer,
-    Newtonian::function_t const &e_outer
+    Newtonian::function_t const &m3_outer
     )
 {   
     helpers::anyDisplayProps();

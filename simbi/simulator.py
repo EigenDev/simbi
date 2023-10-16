@@ -735,14 +735,16 @@ class Hydro:
             'object_cells': object_cells.flatten()
         }
 
-        sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), 'Buddy')
+        sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), 'SimState')
         state_contig = self.u.reshape(self.u.shape[0], -1)
         state = sim_state()
         state.run(
             state_contig, 
             self.dimensionality,
             self.regime.encode('utf-8'),
-            init_conditions
+            init_conditions,
+            scale_factor,
+            scale_factor_derivative
         )
             
         # self.solution = state.simulate(

@@ -552,7 +552,7 @@ cdef class PyStateSR3D:
 #     def __dealloc__(self):
 #         del self.c_state
 
-cdef class Buddy:
+cdef class SimState:
     cdef Driver driver_state
 
     def __cinit__(self):
@@ -563,7 +563,14 @@ cdef class Buddy:
         np.ndarray[np.double_t, ndim=2] state,
         int dim,
         string regime,
-        dict sim_info
+        dict sim_info,
+        a,
+        adot,
+        pydens_lambda = None,
+        pymom1_lambda = None,
+        pymom2_lambda = None,
+        pymom3_lambda = None,
+        pyenrg_lambda = None,
     ):
         cdef InitialConditions sim_cond 
         sim_cond.tend             = sim_info['tend']
@@ -597,4 +604,25 @@ cdef class Buddy:
         if dim > 2:
             sim_cond.x3 = sim_info['x3']
 
-        self.driver_state.run(state, dim, regime, sim_cond)
+        # convert python lambdas to cpp lambdas
+        cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
+        cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
+        cdef PyObjWrapper d_cpp    = PyObjWrapper(pydens_lambda) # if pydens_lambda else PyObjWrapper()
+        cdef PyObjWrapper m1_cpp   = PyObjWrapper(pymom1_lambda) # if pymom1_lambda else NULL
+        cdef PyObjWrapper m2_cpp   = PyObjWrapper(pymom2_lambda) # if pymom2_lambda else NULL
+        cdef PyObjWrapper m3_cpp   = PyObjWrapper(pymom3_lambda) # if pymom3_lambda else NULL
+        cdef PyObjWrapper e_cpp    = PyObjWrapper(pyenrg_lambda) # if pyenrg_lambda else NULL
+
+        self.driver_state.run(
+            state, 
+            dim, 
+            regime, 
+            sim_cond,
+            a_cpp,
+            adot_cpp,
+            d_cpp
+            # m1_cpp,
+            # m2_cpp,
+            # m3_cpp,
+            # e_cpp
+        )
