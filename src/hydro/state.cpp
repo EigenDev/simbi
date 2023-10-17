@@ -5,7 +5,7 @@ namespace simbi
 {
     namespace hydrostate
     {
-        std::unique_ptr<HydroBase> create(
+        hydro_t create(
             std::vector<std::vector<real>> &state,
             const std::string regime, 
             const int dim,
