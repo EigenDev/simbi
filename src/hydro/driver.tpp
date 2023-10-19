@@ -28,18 +28,18 @@ void Driver::run(
         std::cout << "nullptr not working!" << "\n";
         std::cin.get();
     }
-    auto self = hydrostate::create(state, regime, dim, init_cond);
-    std::visit([=](auto &&arg){
-        arg->simulate(
-            scale_factor, 
-            scale_factor_derivative,
-            density_lambda,
-            mom1_lambda,
-            mom2_lambda,
-            mom3_lambda,
-            enrg_lambda
-        );
-    }, self);
+    auto self = hydrostate::create<HydroRegime::NEWTONIAN,1>(state, regime, dim, init_cond);
+    // std::visit([=](auto &&arg){
+    //     arg->simulate(
+    //         scale_factor, 
+    //         scale_factor_derivative,
+    //         density_lambda,
+    //         mom1_lambda,
+    //         mom2_lambda,
+    //         mom3_lambda,
+    //         enrg_lambda
+    //     );
+    // }, self);
     // std::cout << self->gamma << "\n";
     // self->simulate(scale_factor, scale_factor_derivative);
 

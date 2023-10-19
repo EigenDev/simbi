@@ -9,6 +9,7 @@
 
 namespace simbi
 {
+    template <typename Derived>
     struct HydroBase : public Managed<managed_memory>
     {
         // Initializer members
@@ -46,6 +47,18 @@ namespace simbi
         std::string data_directory;
         std::vector<std::vector<real>> boundary_sources;
         ndarray<bool> object_pos;
+
+        // CRTP described here: https://en.cppreference.com/w/cpp/language/crtp
+        template<typename Func>
+        void simulate(
+            std::function<real(real)> const &a,
+            std::function<real(real)> const &adot,
+            Func const &d_outer  = nullptr,
+            Func const &s1_outer = nullptr,
+            Func const &s2_outer = nullptr,
+            Func const &s3_outer = nullptr,
+            Func const &e_outer  = nullptr
+        );
         
         //=========================== GPU Threads Per Dimension
         std::string readGpuEnvVar( std::string const & key ) const
