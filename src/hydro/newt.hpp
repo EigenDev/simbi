@@ -4,6 +4,7 @@
 #ifndef NEWT_HPP
 #define NEWT_HPP
 
+#include <optional>
 #include <vector>
 #include "common/hydro_structs.hpp"
 #include "common/helpers.hip.hpp"
@@ -131,15 +132,14 @@ namespace simbi
         void adapt_dt();
         void adapt_dt(const ExecutionPolicy<> &p);
         
-        template<typename Func>
         void simulate(
             std::function<real(real)> const &a,
             std::function<real(real)> const &adot,
-            Func const &d_outer  = nullptr,
-            Func const &m1_outer = nullptr,
-            Func const &m2_outer = nullptr,
-            Func const &m3_outer = nullptr,
-            Func const &e_outer  = nullptr
+            std::optional<function_t> const &d_outer  = nullptr,
+            std::optional<function_t> const &m1_outer = nullptr,
+            std::optional<function_t> const &m2_outer = nullptr,
+            std::optional<function_t> const &m3_outer = nullptr,
+            std::optional<function_t> const &e_outer  = nullptr
         );
 
         GPU_CALLABLE_MEMBER

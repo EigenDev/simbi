@@ -150,10 +150,9 @@ constexpr real SRHD<dim>::get_x3_differential(const lint ii) const {
         switch (geometry)
         {
             case Geometry::PLANAR_CYLINDRICAL:
-                    return 1;
+                return 1;
             default:
                 return static_cast<real>(2 * M_PI);
-                break;
         }
     } else {
         return dx3;
@@ -164,6 +163,10 @@ template<int dim>
 GPU_CALLABLE_MEMBER
 real SRHD<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
 {
+    // the volume in cartesian coordinates is only nominal
+    if (geometry == Geometry::CARTESIAN) {
+        return 1;
+    }
     return get_x1_differential(ii) * get_x2_differential(jj) * get_x3_differential(kk);
 }
 
@@ -684,23 +687,21 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
     const real vface) const
 {
     const sr::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
-    const real aL = lambda.aL;
-    const real aR = lambda.aR;
-
-    // Calculate plus/minus alphas
+    // Grab the necessary wave speeds
+    const real aL  = lambda.aL;
+    const real aR  = lambda.aR;
     const real aLm = aL < 0 ? aL : 0;
     const real aRp = aR > 0 ? aR : 0;
+    
     sr::Conserved<dim> net_flux;
     // Compute the HLL Flux component-wise
     if (vface < aLm) {
         net_flux = left_flux - left_state * vface;
-    }
-    else if (vface > aRp) {
+    } else if (vface > aRp) {
         net_flux = right_flux - right_state * vface;
-    }
-    else {    
-        sr::Conserved<dim> f_hll       = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aRp * aLm) / (aRp - aLm);
-        const sr::Conserved<dim> u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
+    } else {    
+        const auto f_hll = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
+        const auto u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
         net_flux = f_hll - u_hll * vface;
     }
 
@@ -729,17 +730,15 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
     const sr::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL  = lambda.aL;
     const real aR  = lambda.aR;
-
-    //---- Check Wave Speeds before wasting computations
-    if (vface <= aL) {
-        return left_flux;
-    }
-    else if (vface >= aR) {
-        return right_flux;
-    }
-
     const real aLm = aL < 0 ? aL : 0;
     const real aRp = aR > 0 ? aR : 0;
+
+    //---- Check Wave Speeds before wasting computations
+    if (vface <= aLm) {
+        return left_flux - left_state * vface;
+    } else if (vface >= aRp) {
+        return right_flux - right_state * vface;
+    }
 
     //-------------------Calculate the HLL Intermediate State
     const auto hll_state = 
@@ -1838,35 +1837,90 @@ void SRHD<dim>::advance(
 // //                                            SIMULATE
 // //===================================================================================================================
 template<int dim>
-template<typename Func>
 void SRHD<dim>::simulate(
     std::function<real(real)> const &a,
     std::function<real(real)> const &adot,
-    Func const &d_outer,
-    Func const &s1_outer,
-    Func const &s2_outer,
-    Func const &s3_outer,
-    Func const &e_outer)
+    std::optional<SRHD<dim>::function_t> const &d_outer,
+    std::optional<SRHD<dim>::function_t> const &s1_outer,
+    std::optional<SRHD<dim>::function_t> const &s2_outer,
+    std::optional<SRHD<dim>::function_t> const &s3_outer,
+    std::optional<SRHD<dim>::function_t> const &e_outer)
 {   
     helpers::anyDisplayProps();
     // set the primtive functionals
-    // this->dens_outer = d_outer;
-    // this->mom1_outer = s1_outer;
-    // this->mom2_outer = s2_outer;
-    // this->mom3_outer = s3_outer;
-    // this->enrg_outer = e_outer;
+    this->dens_outer = d_outer.value_or(nullptr);
+    this->mom1_outer = s1_outer.value_or(nullptr);
+    this->mom2_outer = s2_outer.value_or(nullptr);
+    this->mom3_outer = s3_outer.value_or(nullptr);
+    this->enrg_outer = e_outer.value_or(nullptr);
 
     if constexpr(dim == 1) {
-        this->all_outer_bounds = (d_outer && s1_outer && e_outer);
+        this->all_outer_bounds = (
+            d_outer.has_value()
+            && s1_outer.has_value() 
+            && e_outer.has_value()
+         );
     } else if constexpr(dim == 2) {
-        this->all_outer_bounds = (d_outer && s1_outer && s2_outer && e_outer);
+        this->all_outer_bounds = (
+            d_outer.has_value()
+            && s1_outer.has_value() 
+            && s2_outer.has_value() 
+            && e_outer.has_value()
+        );
     } else {
-        this->all_outer_bounds = (d_outer && s1_outer && s2_outer && s3_outer && e_outer);
+        this->all_outer_bounds = (
+            d_outer.has_value()
+            && s1_outer.has_value() 
+            && s2_outer.has_value() 
+            && s3_outer.has_value() 
+            && e_outer.has_value()
+        );
     }
 
     // Stuff for moving mesh 
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
+
+    if (mesh_motion && all_outer_bounds) {
+        if constexpr(dim == 1) {
+            outer_zones.resize(first_order ? 1 : 2);
+            const real dV  = get_cell_volume(active_zones - 1);
+            outer_zones[0] = conserved_t{
+                dens_outer(x1max), 
+                mom1_outer(x1max), 
+                enrg_outer(x1max)} * dV;
+            outer_zones.copyToGpu();
+        } else if constexpr(dim == 2) {
+            outer_zones.resize(ny);
+            for (luint jj = 0; jj < ny; jj++) {
+                const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
+                const real dV    = get_cell_volume(xphysical_grid - 1, jreal);
+                outer_zones[jj]  = conserved_t{
+                    dens_outer(x1max, x2[jreal]), 
+                    mom1_outer(x1max, x2[jreal]), 
+                    mom2_outer(x1max, x2[jreal]), 
+                    enrg_outer(x1max, x2[jreal])} * dV;
+            }
+            outer_zones.copyToGpu();
+        } else {
+            outer_zones.resize(ny * nz);
+            for (luint kk = 0; kk < nz; kk++)
+            {       
+                const auto kreal = helpers::get_real_idx(kk, radius, zphysical_grid);    
+                for (luint jj = 0; jj < ny; jj++) {
+                    const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
+                    const real dV    = get_cell_volume(xphysical_grid - 1, jreal, kreal);
+                    outer_zones[kk * ny + jj]  = conserved_t{
+                        dens_outer(x1max, x2[jreal], x3[kreal]), 
+                        mom1_outer(x1max, x2[jreal], x3[kreal]), 
+                        mom2_outer(x1max, x2[jreal], x3[kreal]),
+                        mom3_outer(x1max, x2[jreal], x3[kreal]), 
+                        enrg_outer(x1max, x2[jreal], x3[kreal])} * dV;
+                }
+                outer_zones.copyToGpu();
+            }
+        }
+    }
 
     if (x2max == 0.5 * M_PI){
         this->half_sphere = true;
@@ -2041,7 +2095,15 @@ void SRHD<dim>::simulate(
         }
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
-    }, d_outer, s1_outer, e_outer, s2_outer, s3_outer);
+        if (mesh_motion){
+            // update x1 endpoints  
+            const real vmin = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
+            const real vmax = (geometry == simbi::Geometry::SPHERICAL) ? x1max * hubble_param : hubble_param;
+            x1max += step * dt * vmax;
+            x1min += step * dt * vmin;
+            hubble_param = adot(t) / a(t);
+        }
+    });
 
     if (inFailureState){
         emit_troubled_cells();

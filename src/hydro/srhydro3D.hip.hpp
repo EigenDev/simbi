@@ -28,6 +28,11 @@ namespace simbi
         ndarray<bool> object_pos;
         bool scalar_all_zeros, quirk_smoothing;
 
+        std::function<double(double, double, double)> dens_outer;
+        std::function<double(double, double, double)> mom1_outer;
+        std::function<double(double, double, double)> mom2_outer;
+        std::function<double(double, double, double)> mom3_outer;
+        std::function<double(double, double, double)> enrg_outer;
         /* Methods */
         SRHD3D();
         SRHD3D(

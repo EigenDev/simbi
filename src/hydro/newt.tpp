@@ -1600,36 +1600,91 @@ void Newtonian<dim>::advance(
 //                                            SIMULATE
 //===================================================================================================================
 template<int dim>
-template<typename Func>
 void Newtonian<dim>::simulate(
     std::function<real(real)> const &a,
     std::function<real(real)> const &adot,
-    Func const &d_outer,
-    Func const &m1_outer,
-    Func const &m2_outer,
-    Func const &m3_outer,
-    Func const &e_outer
-    )
+    std::optional<Newtonian<dim>::function_t> const &d_outer,
+    std::optional<Newtonian<dim>::function_t> const &m1_outer,
+    std::optional<Newtonian<dim>::function_t> const &m2_outer,
+    std::optional<Newtonian<dim>::function_t> const &m3_outer,
+    std::optional<Newtonian<dim>::function_t> const &e_outer
+)
 {   
     helpers::anyDisplayProps();
     // set the primtive functionals
-    // this->dens_outer = d_outer;
-    // this->mom1_outer = m1_outer;
-    // this->mom2_outer = m2_outer;
-    // this->mom3_outer = m3_outer;
-    // this->enrg_outer = e_outer;
+    this->dens_outer = d_outer.value_or(nullptr);
+    this->mom1_outer = m1_outer.value_or(nullptr);
+    this->mom2_outer = m2_outer.value_or(nullptr);
+    this->mom3_outer = m3_outer.value_or(nullptr);
+    this->enrg_outer = e_outer.value_or(nullptr);
 
     if constexpr(dim == 1) {
-        this->all_outer_bounds = (d_outer && m1_outer && e_outer);
+        this->all_outer_bounds = (
+            d_outer.has_value() 
+            && m1_outer.has_value()
+            && enrg_outer
+        );
     } else if constexpr(dim == 2) {
-        this->all_outer_bounds = (d_outer && m1_outer && m2_outer && e_outer);
+        this->all_outer_bounds = (
+            d_outer.has_value() 
+            && m1_outer.has_value()
+            && m2_outer.has_value() 
+            && e_outer.has_value()
+        );
     } else {
-        this->all_outer_bounds = (d_outer && m1_outer && m2_outer && mom3_outer && e_outer);
+        this->all_outer_bounds = (
+            d_outer.has_value() 
+            && m1_outer.has_value()
+            && m2_outer.has_value() 
+            && m3_outer.has_value()
+            && e_outer.has_value()
+        );
     }
 
     // Stuff for moving mesh 
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
+
+    if (mesh_motion && all_outer_bounds) {
+        if constexpr(dim == 1) {
+            outer_zones.resize(first_order ? 1 : 2);
+            const real dV  = get_cell_volume(active_zones - 1);
+            outer_zones[0] = conserved_t{
+                dens_outer(x1max), 
+                mom1_outer(x1max), 
+                enrg_outer(x1max)} * dV;
+            outer_zones.copyToGpu();
+        } else if constexpr(dim == 2) {
+            outer_zones.resize(ny);
+            for (luint jj = 0; jj < ny; jj++) {
+                const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
+                const real dV    = get_cell_volume(xphysical_grid - 1, jreal);
+                outer_zones[jj]  = conserved_t{
+                    dens_outer(x1max, x2[jreal]), 
+                    mom1_outer(x1max, x2[jreal]), 
+                    mom2_outer(x1max, x2[jreal]), 
+                    enrg_outer(x1max, x2[jreal])} * dV;
+            }
+            outer_zones.copyToGpu();
+        } else {
+            outer_zones.resize(ny * nz);
+            for (luint kk = 0; kk < nz; kk++)
+            {       
+                const auto kreal = helpers::get_real_idx(kk, radius, zphysical_grid);    
+                for (luint jj = 0; jj < ny; jj++) {
+                    const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
+                    const real dV    = get_cell_volume(xphysical_grid - 1, jreal, kreal);
+                    outer_zones[kk * ny + jj]  = conserved_t{
+                        dens_outer(x1max, x2[jreal], x3[kreal]), 
+                        mom1_outer(x1max, x2[jreal], x3[kreal]), 
+                        mom2_outer(x1max, x2[jreal], x3[kreal]),
+                        mom3_outer(x1max, x2[jreal], x3[kreal]), 
+                        enrg_outer(x1max, x2[jreal], x3[kreal])} * dV;
+                }
+                outer_zones.copyToGpu();
+            }
+        }
+    }
 
     if (x2max == 0.5 * M_PI){
         this->half_sphere = true;
@@ -1800,7 +1855,7 @@ void Newtonian<dim>::simulate(
         }
         time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
-    }, d_outer, m1_outer, e_outer, m2_outer, m3_outer);
+    });
 
     if (inFailureState){
         emit_troubled_cells();

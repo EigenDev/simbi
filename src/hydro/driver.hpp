@@ -1,9 +1,6 @@
 #ifndef DRIVER_HPP
 #define DRIVER_HPP
-#include <variant>
 #include "common/hydro_structs.hpp"
-
-using namespace std::placeholders;
 
 namespace simbi
 {

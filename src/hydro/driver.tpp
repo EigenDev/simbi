@@ -1,6 +1,14 @@
 #include "state.hpp"
-
 using namespace simbi;
+
+
+template<typename F>
+std::optional<F> otional_wrapper(F func){
+    if (func){
+        return func;
+    }
+    return {};
+}
 
 Driver::Driver(){
 
@@ -24,31 +32,42 @@ void Driver::run(
     Func const &mom3_lambda,
     Func const &enrg_lambda
 ) {
-    if (density_lambda) {
-        std::cout << "nullptr not working!" << "\n";
-        std::cin.get();
+    if (dim == 1) {
+        hydrostate::simulate<1>(
+            state, 
+            init_cond, 
+            regime,scale_factor, 
+            scale_factor_derivative,
+            otional_wrapper(density_lambda),
+            otional_wrapper(mom1_lambda),
+            std::nullopt,
+            std::nullopt,
+            otional_wrapper(enrg_lambda)
+        );
+    } else if (dim == 2) {
+        hydrostate::simulate<2>(
+            state, 
+            init_cond, 
+            regime,scale_factor, 
+            scale_factor_derivative,
+            otional_wrapper(density_lambda),
+            otional_wrapper(mom1_lambda),
+            otional_wrapper(mom2_lambda),
+            std::nullopt,
+            otional_wrapper(enrg_lambda)
+        );
+    } else {
+        hydrostate::simulate<3>(
+            state, 
+            init_cond, 
+            regime,scale_factor, 
+            scale_factor_derivative,
+            otional_wrapper(density_lambda),
+            otional_wrapper(mom1_lambda),
+            otional_wrapper(mom2_lambda),
+            otional_wrapper(mom3_lambda),
+            otional_wrapper(enrg_lambda)
+        );
     }
-
-    auto self = hydrostate::create(state, init_cond, regime, dim);
-    self->simulate(
-        scale_factor, 
-        scale_factor_derivative,
-        density_lambda,
-        mom1_lambda,
-        mom2_lambda,
-        mom3_lambda,
-        enrg_lambda
-    );
-    // std::visit([=](auto &&arg){
-    //     arg->simulate(
-    //         scale_factor, 
-    //         scale_factor_derivative,
-    //         density_lambda,
-    //         mom1_lambda,
-    //         mom2_lambda,
-    //         mom3_lambda,
-    //         enrg_lambda
-    //     );
-    // }, self);
 }
 

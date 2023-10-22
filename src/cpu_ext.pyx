@@ -560,17 +560,18 @@ cdef class SimState:
 
     def run(
         self,
+        *,
         np.ndarray[np.double_t, ndim=2] state,
         int dim,
         string regime,
         dict sim_info,
         a,
         adot,
-        pydens_lambda = None,
-        pymom1_lambda = None,
-        pymom2_lambda = None,
-        pymom3_lambda = None,
-        pyenrg_lambda = None,
+        dens_lambda = None,
+        mom1_lambda = None,
+        mom2_lambda = None,
+        mom3_lambda = None,
+        enrg_lambda = None,
     ):
         cdef InitialConditions sim_cond 
         sim_cond.tend             = sim_info['tend']
@@ -607,11 +608,11 @@ cdef class SimState:
         # convert python lambdas to cpp lambdas
         cdef PyObjWrapper a_cpp    = PyObjWrapper(a)
         cdef PyObjWrapper adot_cpp = PyObjWrapper(adot)
-        cdef PyObjWrapper d_cpp    = PyObjWrapper(pydens_lambda) if pydens_lambda else PyObjWrapper()
-        cdef PyObjWrapper m1_cpp   = PyObjWrapper(pymom1_lambda) if pymom1_lambda else PyObjWrapper()
-        cdef PyObjWrapper m2_cpp   = PyObjWrapper(pymom2_lambda) if pymom2_lambda else PyObjWrapper()
-        cdef PyObjWrapper m3_cpp   = PyObjWrapper(pymom3_lambda) if pymom3_lambda else PyObjWrapper()
-        cdef PyObjWrapper e_cpp    = PyObjWrapper(pyenrg_lambda) if pyenrg_lambda else PyObjWrapper()
+        cdef PyObjWrapper d_cpp    = PyObjWrapper(dens_lambda) if dens_lambda else PyObjWrapper()
+        cdef PyObjWrapper m1_cpp   = PyObjWrapper(mom1_lambda) if mom1_lambda else PyObjWrapper()
+        cdef PyObjWrapper m2_cpp   = PyObjWrapper(mom2_lambda) if mom2_lambda else PyObjWrapper()
+        cdef PyObjWrapper m3_cpp   = PyObjWrapper(mom3_lambda) if mom3_lambda else PyObjWrapper()
+        cdef PyObjWrapper e_cpp    = PyObjWrapper(enrg_lambda) if enrg_lambda else PyObjWrapper()
 
         self.driver_state.run(
             state, 

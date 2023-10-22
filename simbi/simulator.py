@@ -507,7 +507,6 @@ class Hydro:
         Returns:
             solution (array): The hydro solution containing the primitive variables
         """
-        from pathlib import Path
         self._print_params(inspect.currentframe())
         self.u = np.asanyarray(self.u)
         self.start_time: float = 0.0
@@ -639,12 +638,6 @@ class Hydro:
             #     kwargs['e_outer'] = edens_outer
 
         elif self.dimensionality == 2:
-            # ignore the chi term
-            # sources = np.zeros(4) if sources is None else np.asanyarray(sources)
-            # sources = sources.reshape(sources.shape[0], -1)
-            # gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
-            # gsources = gsources.reshape(gsources.shape[0], -1)
-            
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "16"
                 
@@ -672,10 +665,6 @@ class Hydro:
             #     kwargs['s2_outer']  = momentum_components[1]
             #     kwargs['e_outer']   = edens_outer
         else:
-            # sources = np.zeros(5) if sources is None else np.asanyarray(sources)
-            # sources = sources.reshape(sources.shape[0], -1)
-            # gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
-            # gsources = gsources.reshape(gsources.shape[0], -1)
             if 'GPUXBLOCK_SIZE' not in os.environ:
                 os.environ['GPUXBLOCK_SIZE'] = "4"
                 
@@ -734,17 +723,38 @@ class Hydro:
             'nz': self.nz,
             'object_cells': object_cells.flatten()
         }
+        
+        lambdas: dict[str, Optional[Callable[...,float]]] = {
+            'dens_lambda': None,
+            'mom1_lambda': None,
+            'mom2_lambda': None,
+            'mom3_lambda': None,
+            'enrg_lambda': None
+        }
+        if mesh_motion and dens_outer and mom_outer and edens_outer:
+            momentum_components = cast(Sequence[Callable[..., float]], mom_outer)
+            lambdas['dens_lambda'] = dens_outer
+            lambdas['enrg_lambda'] = edens_outer
+            if self.dimensionality == 1:
+                mom_outer = cast(Callable[..., float], mom_outer)
+                lambdas['mom1_lambda'] = mom_outer
+            else:
+                lambdas['mom1_lambda'] = momentum_components[0]
+                lambdas['mom2_lambda'] = momentum_components[1]
+                if self.dimensionality == 3:
+                    lambdas['mom3_lambda'] = momentum_components[2]
 
         sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), 'SimState')
         state_contig = self.u.reshape(self.u.shape[0], -1)
         state = sim_state()
         state.run(
-            state_contig, 
-            self.dimensionality,
-            self.regime.encode('utf-8'),
-            init_conditions,
-            scale_factor,
-            scale_factor_derivative
+            state = state_contig, 
+            dim = self.dimensionality,
+            regime = self.regime.encode('utf-8'),
+            sim_info = init_conditions,
+            a = scale_factor,
+            adot = scale_factor_derivative,
+            **lambdas
         )
             
         # self.solution = state.simulate(
