@@ -1,3 +1,8 @@
+/**
+ * the srhd and newtonian headers can only be included here since
+ * they are templated and cython cannot switch to the gpu compiler
+ * when externing from state.hpp
+*/
 #include <variant>
 #include "state.hpp"
 #include "srhd.hpp"
