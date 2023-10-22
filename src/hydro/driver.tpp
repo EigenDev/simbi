@@ -3,7 +3,7 @@ using namespace simbi;
 
 
 template<typename F>
-std::optional<F> otional_wrapper(F func){
+std::optional<F> optional_wrapper(F func){
     if (func){
         return func;
     }
@@ -38,11 +38,11 @@ void Driver::run(
             init_cond, 
             regime,scale_factor, 
             scale_factor_derivative,
-            otional_wrapper(density_lambda),
-            otional_wrapper(mom1_lambda),
+            optional_wrapper(density_lambda),
+            optional_wrapper(mom1_lambda),
             std::nullopt,
             std::nullopt,
-            otional_wrapper(enrg_lambda)
+            optional_wrapper(enrg_lambda)
         );
     } else if (dim == 2) {
         hydrostate::simulate<2>(
@@ -50,11 +50,11 @@ void Driver::run(
             init_cond, 
             regime,scale_factor, 
             scale_factor_derivative,
-            otional_wrapper(density_lambda),
-            otional_wrapper(mom1_lambda),
-            otional_wrapper(mom2_lambda),
+            optional_wrapper(density_lambda),
+            optional_wrapper(mom1_lambda),
+            optional_wrapper(mom2_lambda),
             std::nullopt,
-            otional_wrapper(enrg_lambda)
+            optional_wrapper(enrg_lambda)
         );
     } else {
         hydrostate::simulate<3>(
@@ -62,11 +62,11 @@ void Driver::run(
             init_cond, 
             regime,scale_factor, 
             scale_factor_derivative,
-            otional_wrapper(density_lambda),
-            otional_wrapper(mom1_lambda),
-            otional_wrapper(mom2_lambda),
-            otional_wrapper(mom3_lambda),
-            otional_wrapper(enrg_lambda)
+            optional_wrapper(density_lambda),
+            optional_wrapper(mom1_lambda),
+            optional_wrapper(mom2_lambda),
+            optional_wrapper(mom3_lambda),
+            optional_wrapper(enrg_lambda)
         );
     }
 }
