@@ -175,6 +175,8 @@ headers = [
     'src/hydro/srhydro1D.hip.hpp',
     'src/hydro/srhydro2D.hip.hpp',
     'src/hydro/srhydro3D.hip.hpp',
+    'src/hydro/srhd.hpp',
+    'src/hydro/newt.hpp',
 
     'src/util/device_api.hpp',
     'src/util/exec_policy.hpp',
@@ -186,8 +188,6 @@ headers = [
     'src/util/parallel_for.hpp',
     'src/util/printb.hpp',
     'src/util/range.hpp',
-
-    'src/hydro/srhd.hpp',
 ]
 
 
