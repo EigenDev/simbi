@@ -5,7 +5,6 @@
  * 07/15/2020
  * Compressible Hydro Simulation
  */
-#include <chrono>
 #include <cmath>
 #include "util/device_api.hpp"
 #include "util/parallel_for.hpp"
@@ -15,7 +14,6 @@
 
 using namespace simbi;
 using namespace simbi::util;
-using namespace std::chrono;
 
 // Default Constructor
 template<int dim>
