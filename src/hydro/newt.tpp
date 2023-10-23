@@ -150,10 +150,9 @@ constexpr real Newtonian<dim>::get_x3_differential(const lint ii) const {
         switch (geometry)
         {
             case Geometry::PLANAR_CYLINDRICAL:
-                    return 1;
+                return 1;
             default:
                 return static_cast<real>(2 * M_PI);
-                break;
         }
     } else {
         return dx3;
@@ -164,6 +163,9 @@ template<int dim>
 GPU_CALLABLE_MEMBER
 real Newtonian<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
 {
+    if (geometry == Geometry::CARTESIAN){
+        return 1;
+    }
     return get_x1_differential(ii) * get_x2_differential(jj) * get_x3_differential(kk);
 }
 
