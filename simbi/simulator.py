@@ -150,7 +150,7 @@ class Hydro:
                 # partition the grid based on user-defined partition coordinates
                 partition_inds = list(product(*[permutations(x) for x in pieces]))
                 partition_inds = [tuple([slice(*y) for y in x]) for x in partition_inds]
-                partitions = [self.u[...,*sector] for sector in partition_inds]
+                partitions = [self.u[(slice(None), *sector)] for sector in partition_inds]
                 
                 for idx, part in enumerate(partitions):
                     state = initial_state[idx]

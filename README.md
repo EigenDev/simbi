@@ -26,7 +26,7 @@
     [ninja](https://github.com/ninja-build/ninja/wiki/Pre-built-Ninja-packages)
 5)  HDF5 libraries
 6)  [mypy](https://mypy-lang.org/), a static type checker
-7)  Python >= 3.11
+7)  Python >= 3.10
 
 ## For GPU capability
 
