@@ -29,7 +29,6 @@ inline bool use_omp = false;
 using luint = uint64_t;
 using lint  = int64_t;
 
-
 enum class Platform: int {CPU = 0, GPU = 1};
 enum class Runtime:  int {CUDA = 0, ROCM = 1, CPU = 2};
 enum class Velocity: int {Beta = 0, FourVelocity = 1};
@@ -103,8 +102,7 @@ constexpr Platform BuildPlatform = Platform::GPU;
 #if GPU_PLATFORM_NVIDIA
 #include <cuda_runtime.h>
 #define CUDA_CODE 1
-constexpr int WARP_SIZE                     = 32;
-constexpr auto ComputeRuntime               = Runtime::CUDA;
+constexpr int WARP_SIZE = 32;
 template<typename T>
 constexpr auto anyGpuMalloc(T **devPtr, size_t size) {
     return cudaMalloc(devPtr, size);
@@ -140,8 +138,7 @@ using simbiStream_t                         = cudaStream_t;
 #elif GPU_PLATFORM_AMD
 #include "hip/hip_runtime.h"
 #define HIP_CODE 1
-constexpr int WARP_SIZE                     = 64;
-constexpr auto ComputeRuntime               = Runtime::ROCM;
+constexpr int WARP_SIZE = 64;
 template<typename T>
 constexpr auto anyGpuMalloc(T **devPtr, size_t size) {
     return hipMalloc(devPtr, size);
@@ -180,7 +177,6 @@ using simbiStream_t                         = hipStream_t;
         kernel_name(__VA_ARGS__);
 
 constexpr Platform BuildPlatform = Platform::CPU;
-constexpr auto ComputeRuntime = Runtime::CPU;
 constexpr int WARP_SIZE = 32;
 #define CUDA_CODE 0
 #define HIP_CODE 0
