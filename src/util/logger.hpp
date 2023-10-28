@@ -196,7 +196,7 @@ namespace simbi
                             zu_avg += speed;
 
                             if constexpr(BuildPlatform == Platform::GPU) {
-                            const real gpu_emperical_bw = helpers::getFlops<conserved_t, primitive_t>(sim_state.radius, sim_state.total_zones, sim_state.active_zones, delta_t);
+                            const real gpu_emperical_bw = helpers::getFlops<conserved_t, primitive_t>(sim_state_t::dimensions, sim_state.radius, sim_state.total_zones, sim_state.active_zones, delta_t);
                             util::writefl<Color::LIGHT_MAGENTA>("iteration:{:>06}  dt: {:>08.2e}  time: {:>08.2e}  zones/sec: {:>08.2e}  ebw(%): {:>04.2f} ", 
                             n, sim_state.dt, sim_state.t, speed, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
                             } else {
