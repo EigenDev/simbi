@@ -1,8 +1,7 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
-#include <bits/std_abs.h>        // for abs
-#include <stdlib.h>              // for abs, size_t
+#include <cstdlib>               // for abs, size_t
 #include <cmath>                 // for sqrt, exp, INFINITY
 #include <exception>             // for exception
 #include <map>                   // for map
