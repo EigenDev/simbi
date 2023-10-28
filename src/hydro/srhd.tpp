@@ -374,9 +374,9 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
     const real csR = std::sqrt(gamma * pR / (hR * rhoR));
     const real csL = std::sqrt(gamma * pL / (hL * rhoL));
 
-    //-----------Calculate wave speeds based on Shneider et al. 1992
     switch (comp_wave_speed)
     {
+    //-----------Calculate wave speeds based on Shneider et al. 1992
     case simbi::WaveSpeeds::SCHNEIDER_ET_AL_93:
         {
             const real vbar  = static_cast<real>(0.5) * (vL + vR);
@@ -388,7 +388,7 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
 
             return sr::Eigenvals<dim>(aL, aR, csL, csR);
         }
-    
+    //-----------Calculate wave speeds based on Mignone & Bodo 2005
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
             // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
@@ -412,6 +412,7 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
 
             return sr::Eigenvals<dim>(aL, aR, csL, csR);
         }
+    //-----------Calculate wave speeds based on Huber & Kissmann 2021
     case simbi::WaveSpeeds::HUBER_AND_KISSMANN_2021:
         {
             const real gammaL = 1 / std::sqrt(1 - (vL * vL));
