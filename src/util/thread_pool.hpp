@@ -1,11 +1,19 @@
 #ifndef THREAD_POOL_HPP
 #define THREAD_POOL_HPP
 
-#include <thread>
-#include <condition_variable>
-#include <queue>
-#include <future>
-#include <iostream>
+#include <algorithm>           // for copy
+#include <atomic>              // for atomic
+#include <cmath>               // for ceil
+#include <condition_variable>  // for condition_variable
+#include <cstdlib>             // for getenv
+#include <functional>          // for function
+#include <mutex>               // for mutex, unique_lock
+#include <queue>               // for queue
+#include <string>              // for allocator, stoul, string
+#include <thread>              // for jthread
+#include <utility>             // for move, swap
+#include <vector>              // for vector
+
 
 namespace simbi {
     namespace pooling {

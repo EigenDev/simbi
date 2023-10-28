@@ -1,6 +1,7 @@
+#include <optional>
 #include "state.hpp"
-using namespace simbi;
 
+using namespace simbi;
 
 template<typename F>
 std::optional<F> optional_wrapper(F func){

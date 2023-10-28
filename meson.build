@@ -68,7 +68,7 @@ if get_option('gpu_compilation').enabled()
     host_compiler_version = host_compiler.version().split('.')[0]
     if host_compiler_name == 'g++' or host_compiler_name == 'gcc'
         if host_compiler_version.to_int() >= 13
-            warning(f'The detected gcc version: gcc-@host_compiler_version@ might not incompatible with cuda version')
+            warning(f'The detected gcc version: gcc-@host_compiler_version@ might not be compatible with cuda version')
         endif
     endif
 

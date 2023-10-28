@@ -1,16 +1,18 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
-#include <vector>
-#include <iostream>
-#include <cmath>
-#include <map>
-#include <memory>
-#include "build_options.hpp"
-#include "common/enums.hpp"
-#include "common/traits.hpp"
-#include "util/exec_policy.hpp"
-
+#include <bits/std_abs.h>        // for abs
+#include <stdlib.h>              // for abs, size_t
+#include <cmath>                 // for sqrt, exp, INFINITY
+#include <exception>             // for exception
+#include <map>                   // for map
+#include <string>                // for string, operator<=>
+#include <type_traits>           // for enable_if
+#include "build_options.hpp"     // for real, GPU_CALLABLE_INLINE, luint, lint
+#include "common/enums.hpp"      // for Geometry, BoundaryCondition, Solver
+#include "common/traits.hpp"     // for is_1D_primitive, is_2D_primitive
+#include "util/exec_policy.hpp"  // for ExecutionPolicy
+#include "common/hydro_structs.hpp"
 
 // Some useful global constants
 constexpr real QUIRK_THRESHOLD = 1e-4;
@@ -22,7 +24,28 @@ namespace simbi
 {
     namespace helpers
     {
+        template<typename index_type, typename T>
+        GPU_CALLABLE_INLINE
+        index_type get_column(index_type idx, T width, T length = 1, index_type k = 0)
+        {
+            idx -= (k * width * length);
+            return idx % width;
+        }
 
+        template<typename index_type, typename T>
+        GPU_CALLABLE_INLINE
+        index_type get_row(index_type idx, T width, T length = 1, index_type k = 0)
+        {
+            idx -= (k * width * length);
+            return idx / width;
+        }
+
+        template<typename index_type, typename T>
+        GPU_CALLABLE_INLINE
+        index_type get_height(index_type idx, T width, T length)
+        {
+            return idx / width / length;
+        }
         class InterruptException : public std::exception
         {
             public:

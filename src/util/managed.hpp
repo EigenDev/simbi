@@ -1,7 +1,10 @@
 #ifndef MANAGED_HPP
 #define MANAGED_HPP
 
-#include "device_api.hpp"
+#include <cstddef>            // for size_t
+#include "build_options.hpp"  // for managed_memory
+#include "device_api.hpp"     // for deviceSynch, gpuFree, gpuMallocManaged
+
 namespace simbi
 {
     template<bool gpu_managed = managed_memory>

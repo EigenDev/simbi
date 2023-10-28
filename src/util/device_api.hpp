@@ -1,38 +1,15 @@
 #ifndef DEVICE_API_HPP
 #define DEVICE_API_HPP
 
-#include "build_options.hpp"
-#include <stdexcept>
-#include <thread>
+#include <omp.h>              // for omp_get_thread_num
+#include <stddef.h>           // for size_t
+#include <stdexcept>          // for runtime_error
+#include <string>             // for allocator, operator+, char_traits, to_s...
+#include <thread>             // for get_id, hash, thread
+#include "build_options.hpp"  // for blockDim, threadIdx, GPU_CALLABLE_INLINE
 
 namespace simbi
 {   
-    namespace detail
-    {
-        template<typename index_type, typename T>
-        GPU_CALLABLE_INLINE
-        index_type get_column(index_type idx, T width, T length = 1, index_type k = 0)
-        {
-            idx -= (k * width * length);
-            return idx % width;
-        }
-
-        template<typename index_type, typename T>
-        GPU_CALLABLE_INLINE
-        index_type get_row(index_type idx, T width, T length = 1, index_type k = 0)
-        {
-            idx -= (k * width * length);
-            return idx / width;
-        }
-
-        template<typename index_type, typename T>
-        GPU_CALLABLE_INLINE
-        index_type get_height(index_type idx, T width, T length)
-        {
-            return idx / width / length;
-        }
-    } // namespace detail
-
     namespace gpu
     {
         //===============================

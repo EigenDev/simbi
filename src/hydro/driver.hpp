@@ -1,6 +1,11 @@
 #ifndef DRIVER_HPP
 #define DRIVER_HPP
-#include "common/hydro_structs.hpp"
+
+#include <functional>         // for function
+#include <string>             // for string
+#include <vector>             // for vector
+#include "build_options.hpp"  // for real
+#include "common/hydro_structs.hpp" // for InitialConditions
 
 namespace simbi
 {

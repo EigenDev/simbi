@@ -1,11 +1,11 @@
 #ifndef PRINTB_HPP
 #define PRINTB_HPP
 
-#include <sstream>
-#include <iostream>
-#include <stdexcept>
-#include <iomanip>
-#include <map>
+#include <map>      // for allocator, map
+#include <sstream>  // for operator>>, ws, basic_istream, basic_istringstream
+#include <string>   // for string
+#include <iomanip>  // for scientific, precision
+#include <iostream> // for operator <<
 
 enum class Color {
     DEFAULT, 

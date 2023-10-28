@@ -1,7 +1,7 @@
 #include <thread>
 #include "H5Cpp.h"
 #include "common/helpers.hip.hpp"
-#include "util/parallel_for.hpp"
+
 //==================================
 //              GPU HELPERS
 //==================================
@@ -40,7 +40,8 @@ namespace simbi{
 
         const char* SimulationFailureException::what() const noexcept {
             const auto err_ms = "Simulation failed\n reason: " + reason + "\n details: " + details;
-            return err_ms.c_str();
+            const auto err_char = err_ms.c_str();
+            return err_char;
         }
 
         //====================================================================================================

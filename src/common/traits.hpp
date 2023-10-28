@@ -5,7 +5,16 @@
 #ifndef TRAITS_HPP
 #define TRAITS_HPP
 
-#include "hydro_structs.hpp"
+namespace hydro1d { struct Primitive; }
+namespace hydro2d { struct Primitive; }
+namespace hydro3d { struct Primitive; }
+namespace sr1d { struct Conserved; }
+namespace sr1d { struct Primitive; }
+namespace sr2d { struct Conserved; }
+namespace sr2d { struct Primitive; }
+namespace sr3d { struct Conserved; }
+namespace sr3d { struct Primitive; }
+
 //==========================================================================
 //                  PRIMTIIVE TYPE TRAITS
 //==========================================================================

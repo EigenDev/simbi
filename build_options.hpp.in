@@ -11,16 +11,10 @@
 #define CAPTURE_THIS =
 #endif 
 
-#include <functional>    // std::function
-#include <chrono>        // high_resolution_clock
-#include <csignal>       // SIGACTION
-#include <exception>     // std::exception
-#include <cmath>         // std::sqrt, std::log10, etc/
-#include <string>        // std::string 
-#include <stdint.h>      // int_type, uint64_t, int64_t
-#include <cstdlib>       // std::getenv
-#include <atomic>
-#include <omp.h>
+#include <chrono>         // for high_resolution_clock
+#include <cstdint>        // for uint32_t, int64_t, uint64_t
+#include <csignal>        // for size_t
+#include <string>         // for allocator, string
 
 
 // Flag that detects whether program is run using openmp

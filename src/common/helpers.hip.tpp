@@ -511,9 +511,9 @@ namespace simbi{
             const int sx = x1grid_size;
             const int sy = x2grid_size;
             simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
-                const int kk = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(gid, x1grid_size, x2grid_size);
-                const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(gid, x1grid_size, x2grid_size, kk);
-                const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(gid, x1grid_size, x2grid_size, kk);
+                const int kk = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::helpers::get_height(gid, x1grid_size, x2grid_size);
+                const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::helpers::get_row(gid, x1grid_size, x2grid_size, kk);
+                const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::helpers::get_column(gid, x1grid_size, x2grid_size, kk);
 
                 if (first_order){
                     if(jj < x2grid_size - 2 && kk < x3grid_size - 2) {

@@ -4,11 +4,17 @@
 #ifndef SRHD_HPP
 #define SRHD_HPP
 
-#include <optional>
-#include <vector>
-#include "common/hydro_structs.hpp"
-#include "common/helpers.hip.hpp"
-#include "base.hpp"
+#include "base.hpp"                 // for HydroBase
+#include <optional>                 // for optional
+#include <vector>                   // for vector
+#include <functional>               // for function
+#include <type_traits>              // for conditional_t
+#include "build_options.hpp"        // for real, GPU_CALLABLE_MEMBER, lint, luint
+#include "common/enums.hpp"         // for TIMESTEP_TYPE
+#include "util/exec_policy.hpp"     // for ExecutionPolicy
+#include "util/ndarray.hpp"         // for ndarray
+#include "common/hydro_structs.hpp" // for Conserved, Primitive
+#include "common/helpers.hip.hpp"   // for my_min, my_max, ...
 
 namespace simbi
 {

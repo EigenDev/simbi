@@ -1,4 +1,4 @@
-#include "kernel.hpp"
+#include "kernel.hpp" // for Kernel
 namespace simbi {
 
     //
@@ -17,17 +17,12 @@ namespace simbi {
     {
 
         #if GPU_CODE
-        if constexpr(BuildPlatform == Platform::GPU)
-        {
             Kernel<<<policy.gridSize, 
                      policy.blockSize, 
                      policy.sharedMemBytes, 
                      policy.stream>>>(f, args...);
-        }
         #else 
-        {
             f(args...);
-        }
         #endif
     }
 

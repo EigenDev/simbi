@@ -1,8 +1,10 @@
 #ifndef RANGE_HPP
 #define RANGE_HPP
 
-#include "build_options.hpp"
-#include "device_api.hpp"
+#include <iterator>           // for input_iterator_tag
+#include "build_options.hpp"  // for GPU_CALLABLE, GPU_CALLABLE_INLINE
+#include "device_api.hpp"     // for globalThreadIdx
+
 template <typename T>
 struct range_t
 {

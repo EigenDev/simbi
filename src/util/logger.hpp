@@ -1,8 +1,16 @@
 #ifndef LOGGER_HPP
 #define LOGGER_HPP
-#include "build_options.hpp"
-#include "common/helpers.hip.hpp"
-#include "printb.hpp"
+
+#include <chrono>                  // for time_point, high_resolution_clock
+#include <cmath>                   // for INFINITY, pow
+#include <iostream>                // for operator<<, char_traits, basic_ost...
+#include <memory>                  // for allocator
+#include <type_traits>             // for conditional_t
+#include "build_options.hpp"       // for real, Platform, BuildPlatform, luint
+#include "common/helpers.hip.hpp"  // for get_real_idx, catch_signals, Inter...
+#include "common/traits.hpp"       // for is_relativistic
+#include "device_api.hpp"          // for gpuEventCreate, gpuEventDestroy
+#include "printb.hpp"              // for writeln, writefl
 
 namespace simbi
 {

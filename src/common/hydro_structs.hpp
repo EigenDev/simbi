@@ -7,6 +7,7 @@
 #ifndef HYDRO_STRUCTS_HPP
 #define HYDRO_STRUCTS_HPP 
 
+#include <cmath>
 #include <vector>
 #include "enums.hpp"
 #include "build_options.hpp"

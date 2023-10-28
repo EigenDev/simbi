@@ -5,12 +5,11 @@
  * 07/15/2020
  * Compressible Hydro Simulation
  */
-#include <cmath>
-#include "util/device_api.hpp"
-#include "util/parallel_for.hpp"
-#include "util/printb.hpp"
-#include "common/helpers.hip.hpp"
-#include "util/logger.hpp"
+#include <cmath>                  // for max, min
+#include "util/device_api.hpp"    // for syncrohonize, devSynch, ...
+#include "util/parallel_for.hpp"  // for parallel_for
+#include "util/printb.hpp"        // for writeln
+#include "util/logger.hpp"        // for logger
 
 using namespace simbi;
 using namespace simbi::util;
@@ -179,9 +178,9 @@ void Newtonian<dim>::emit_troubled_cells() {
         if (troubled_cells[gid] != 0) {
             const luint xpg   = xactive_grid;
             const luint ypg   = yactive_grid;
-            const luint kk    = detail::get_height(gid, xpg, ypg);
-            const luint jj    = detail::get_row(gid, xpg, ypg, kk);
-            const luint ii    = detail::get_column(gid, xpg, ypg, kk);
+            const luint kk    = helpers::get_height(gid, xpg, ypg);
+            const luint jj    = helpers::get_row(gid, xpg, ypg, kk);
+            const luint ii    = helpers::get_column(gid, xpg, ypg, kk);
             const lint ireal  = helpers::get_real_idx(ii, radius, xactive_grid);
             const lint jreal  = helpers::get_real_idx(jj, radius, yactive_grid); 
             const lint kreal  = helpers::get_real_idx(kk, radius, zactive_grid); 
@@ -263,9 +262,9 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<> &p)
                     const real dV    = get_cell_volume(ireal, jreal);
                     invdV = 1.0 / dV;
                 } else {
-                    const luint kk  = simbi::detail::get_height(gid, xactive_grid, yactive_grid);
-                    const luint jj  = simbi::detail::get_row(gid, xactive_grid, yactive_grid, kk);
-                    const luint ii  = simbi::detail::get_column(gid, xactive_grid, yactive_grid, kk);
+                    const luint kk  = simbi::helpers::get_height(gid, xactive_grid, yactive_grid);
+                    const luint jj  = simbi::helpers::get_row(gid, xactive_grid, yactive_grid, kk);
+                    const luint ii  = simbi::helpers::get_column(gid, xactive_grid, yactive_grid, kk);
                     const auto ireal = helpers::get_real_idx(ii, radius, xactive_grid);
                     const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid); 
                     const auto kreal = helpers::get_real_idx(kk, radius, zactive_grid); 
@@ -408,9 +407,9 @@ void Newtonian<dim>::adapt_dt()
     std::atomic<real> min_dt = INFINITY;
     thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&](luint aid) {
         real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
-        const luint kk = dim < 3 ? 0 : simbi::detail::get_height(aid, xactive_grid, yactive_grid);
-        const luint jj = dim < 2 ? 0 : simbi::detail::get_row(aid, xactive_grid, yactive_grid, kk);
-        const luint ii = simbi::detail::get_column(aid, xactive_grid, yactive_grid, kk);
+        const luint kk = dim < 3 ? 0 : simbi::helpers::get_height(aid, xactive_grid, yactive_grid);
+        const luint jj = dim < 2 ? 0 : simbi::helpers::get_row(aid, xactive_grid, yactive_grid, kk);
+        const luint ii = simbi::helpers::get_column(aid, xactive_grid, yactive_grid, kk);
         // Left/Right wave speeds
         const auto rho = prims[aid].rho;
         const auto v1  = prims[aid].vcomponent(1);
@@ -818,9 +817,9 @@ void Newtonian<dim>::advance(
         auto *const prim_buff = prim_data;
         #endif 
 
-        const luint kk  = dim < 3 ? 0 : (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::detail::get_height(idx, xpg, ypg);
-        const luint jj  = dim < 2 ? 0 : (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::detail::get_row(idx, xpg, ypg, kk);
-        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::detail::get_column(idx, xpg, ypg, kk);
+        const luint kk  = dim < 3 ? 0 : (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::helpers::get_height(idx, xpg, ypg);
+        const luint jj  = dim < 2 ? 0 : (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::helpers::get_row(idx, xpg, ypg, kk);
+        const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::helpers::get_column(idx, xpg, ypg, kk);
         #if GPU_CODE
         if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg)) return;
         #endif 

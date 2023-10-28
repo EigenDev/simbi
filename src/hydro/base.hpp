@@ -1,11 +1,21 @@
 #ifndef BASE_HPP
 #define BASE_HPP
 
-#include "common/hydro_structs.hpp"
-#include "util/managed.hpp"
-#include "build_options.hpp"
-#include "util/ndarray.hpp"
-#include "common/helpers.hip.hpp"
+#include <omp.h>                     // for omp_set_num_threads
+#include <algorithm>                 // for all_of
+#include <cmath>                     // for log10, floor, pow
+#include <cstdlib>                   // for getenv
+#include <map>                       // for map
+#include <memory>                    // for allocator, swap
+#include <string>                    // for stoi, string, operator<=>
+#include <utility>                   // for swap
+#include <vector>                    // for vector
+#include "build_options.hpp"         // for real, luint, managed_memory, use...
+#include "common/enums.hpp"          // for Cellspacing, BoundaryCondition (...
+#include "common/helpers.hip.hpp"    // for geometry_map, solver_map
+#include "common/hydro_structs.hpp"  // for InitialConditions, DataWriteMembers
+#include "util/managed.hpp"          // for Managed
+#include "util/ndarray.hpp"          // for ndarray
 
 namespace simbi
 {

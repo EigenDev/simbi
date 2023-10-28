@@ -1,10 +1,13 @@
 #ifndef PARALLEL_FOR_HPP
 #define PARALLEL_FOR_HPP
 
-#include "util/launch.hpp"
-#include "util/range.hpp"
-#include "device_api.hpp"
-#include "thread_pool.hpp"
+#include "build_options.hpp"     // for BuildPlatform, GPU_LAMBDA, Platform ...
+#include "thread_pool.hpp"       // for (anonymous), ThreadPool, get_nthreads
+#include "util/exec_policy.hpp"  // for ExecutionPolicy
+#include "util/launch.hpp"       // for launch
+#if GPU_CODE
+#include "util/range.hpp"        // for range
+#endif
 
 namespace simbi 
 {
@@ -29,9 +32,7 @@ namespace simbi
 					thread_pool.parallel_for(first, last, function);
 				}
 			#endif
-			
 		});
-			
 	}
 }
 

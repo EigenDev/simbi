@@ -1,9 +1,13 @@
 #ifndef STATE_HPP
 #define STATE_HPP
 
-#include <optional>
-#include "base.hpp"
+#include <functional>         // for function
+#include <optional>           // for optional
+#include <string>             // for string
+#include <vector>             // for vector
+#include "build_options.hpp"  // for real
 
+struct InitialConditions;
 namespace simbi
 {
     namespace hydrostate

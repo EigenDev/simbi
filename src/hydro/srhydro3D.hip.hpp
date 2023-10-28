@@ -206,9 +206,9 @@ namespace simbi
                 if (troubled_cells[gid] != 0) {
                     const luint xpg   = xactive_grid;
                     const luint ypg   = yactive_grid;
-                    const luint kk    = detail::get_height(gid, xpg, ypg);
-                    const luint jj    = detail::get_row(gid, xpg, ypg, kk);
-                    const luint ii    = detail::get_column(gid, xpg, ypg, kk);
+                    const luint kk    = helpers::get_height(gid, xpg, ypg);
+                    const luint jj    = helpers::get_row(gid, xpg, ypg, kk);
+                    const luint ii    = helpers::get_column(gid, xpg, ypg, kk);
                     const lint ireal  = helpers::get_real_idx(ii, radius, xactive_grid);
                     const lint jreal  = helpers::get_real_idx(jj, radius, yactive_grid); 
                     const lint kreal  = helpers::get_real_idx(kk, radius, zactive_grid); 

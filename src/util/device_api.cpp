@@ -1,4 +1,5 @@
 #include "device_api.hpp"
+#include <memory>        // for allocator
 
 namespace simbi
 {

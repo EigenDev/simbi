@@ -1,16 +1,17 @@
-// C++ program to implement Custom array
-// class
+// Header to implement custom cpu / gpu array class
 #ifndef NDARRAY_HPP
 #define NDARRAY_HPP
-#include <iostream>
-#include <algorithm> // for copy
-#include <iterator>  // for ostream_iterator
-#include <memory>
-#include <vector>
-#include "build_options.hpp"
-#include "device_api.hpp"
 
-using size_type = size_t;
+#include <cstddef>            // for size_t
+#include <initializer_list>   // for initializer_list
+#include <iterator>           // for forward_iterator_tag
+#include <memory>             // for unique_ptr
+#include <vector>             // for vector
+#include "build_options.hpp"  // for Platform, BuildPlatform
+#include "device_api.hpp"     // for gpuFree, gpuMalloc, gpuMallocManaged
+
+
+using size_type = std::size_t;
 namespace simbi
 {
 	// Template class to create array of

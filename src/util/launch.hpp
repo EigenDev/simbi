@@ -1,7 +1,8 @@
 #ifndef LAUNCH_HPP
 #define LAUNCH_HPP
 
-#include "exec_policy.hpp"
+#include "exec_policy.hpp" // for ExecutionPolicy
+
 namespace simbi 
 {
     // Launch function object with no configuration

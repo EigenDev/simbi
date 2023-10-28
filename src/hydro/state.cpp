@@ -3,10 +3,11 @@
  * they are templated and cython cannot switch to the gpu compiler
  * when externing from state.hpp
 */
-#include <variant>
 #include "state.hpp"
-#include "srhd.hpp"
-#include "newt.hpp"
+#include <memory>                  // for make_unique, unique_ptr
+#include <variant>                 // for visit, variant
+#include "newt.hpp"                // for Newtonian
+#include "srhd.hpp"                // for SRHD
 
 namespace simbi
 {

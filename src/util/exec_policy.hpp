@@ -1,9 +1,10 @@
 #ifndef EXEC_POLICY_HPP
 #define EXEC_POLICY_HPP
 
-#include "build_options.hpp"
-#include <vector>
-#include <iostream>
+#include <exception>          // for exception
+#include <iostream>           // for operator<<, char_traits, basic_ostream
+#include <vector>             // for vector
+#include "build_options.hpp"  // for dim3, luint, col_maj, simbiStream_t
 
 struct ExecutionException : public std::exception {
    const char * what () const throw () {
