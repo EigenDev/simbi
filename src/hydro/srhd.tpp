@@ -176,14 +176,14 @@ void SRHD<dim>::emit_troubled_cells() {
     for (luint gid = 0; gid < total_zones; gid++)
     {
         if (troubled_cells[gid] != 0) {
-            const luint xpg   = xphysical_grid;
-            const luint ypg   = yphysical_grid;
+            const luint xpg   = xactive_grid;
+            const luint ypg   = yactive_grid;
             const luint kk    = detail::get_height(gid, xpg, ypg);
             const luint jj    = detail::get_row(gid, xpg, ypg, kk);
             const luint ii    = detail::get_column(gid, xpg, ypg, kk);
-            const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
-            const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
-            const lint kreal  = helpers::get_real_idx(kk, radius, zphysical_grid); 
+            const lint ireal  = helpers::get_real_idx(ii, radius, xactive_grid);
+            const lint jreal  = helpers::get_real_idx(jj, radius, yactive_grid); 
+            const lint kreal  = helpers::get_real_idx(kk, radius, zactive_grid); 
             const real x1l    = get_x1face(ireal, 0);
             const real x1r    = get_x1face(ireal, 1);
             const real x2l    = get_x2face(jreal, 0);
@@ -249,14 +249,40 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             found_failure = inFailureState;
         simbi::gpu::api::synchronize();
 
+        real invdV = 1.0;
         while (!found_failure && workLeftToDo)
         {
-            const real D    = cons_data[gid].d;
-            const real S1   = cons_data[gid].momentum(1);
-            const real S2   = cons_data[gid].momentum(2);
-            const real S3   = cons_data[gid].momentum(3);
-            const real tau  = cons_data[gid].tau;
-            const real Dchi = cons_data[gid].chi; 
+            if (mesh_motion &&  (geometry != simbi::Geometry::CARTESIAN))
+            {
+                if constexpr(dim == 1) {
+                    const auto idx = helpers::get_real_idx(gid, radius, active_zones);
+                    const real dV  = get_cell_volume(idx);
+                    invdV          = 1 / dV;
+                } else if constexpr(dim == 2) {
+                    const luint ii   = gid % nx;
+                    const luint jj   = gid / nx;
+                    const auto ireal = helpers::get_real_idx(ii, radius, xactive_grid);
+                    const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid); 
+                    const real dV    = get_cell_volume(ireal, jreal);
+                    invdV = 1.0 / dV;
+                } else {
+                    const luint kk  = simbi::detail::get_height(gid, xactive_grid, yactive_grid);
+                    const luint jj  = simbi::detail::get_row(gid, xactive_grid, yactive_grid, kk);
+                    const luint ii  = simbi::detail::get_column(gid, xactive_grid, yactive_grid, kk);
+                    const auto ireal = helpers::get_real_idx(ii, radius, xactive_grid);
+                    const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid); 
+                    const auto kreal = helpers::get_real_idx(kk, radius, zactive_grid); 
+                    const real dV    = get_cell_volume(ireal, jreal, kreal);
+                    invdV = 1.0 / dV;
+                }
+            }
+            
+            const real D    = cons_data[gid].d * invdV;
+            const real S1   = cons_data[gid].momentum(1) * invdV;
+            const real S2   = cons_data[gid].momentum(2) * invdV;
+            const real S3   = cons_data[gid].momentum(3) * invdV;
+            const real tau  = cons_data[gid].tau * invdV;
+            const real Dchi = cons_data[gid].chi * invdV; 
             const real S    = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
 
             real peq = press_data[gid];
@@ -307,9 +333,6 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
                 if constexpr(dim == 1) {
                     prim_data[gid] = sr::Primitive<1>{D/ W, v1, peq, Dchi / D};
                 } else if constexpr(dim == 2) {
-                    // #if !GPU_CODE
-                    //     writeln("({}), D: {}, S1: {}, S2: {}, S3: {}, tau: {}, peq: {}\n", gid, D, S1, S2, S3, tau, peq);
-                    // #endif
                     prim_data[gid] = sr::Primitive<2>{D/ W, v1, v2, peq, Dchi / D};
                 } else {
                     prim_data[gid] = sr::Primitive<3>{D/ W, v1, v2, v3, peq, Dchi / D};
@@ -341,12 +364,12 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
     const real rhoL = primsL.rho;
     const real vL   = primsL.vcomponent(nhat);
     const real pL   = primsL.p;
-    const real hL   = 1 + gamma * pL / (rhoL * (gamma - 1));
+    const real hL   = primsL.get_enthalpy(gamma);
 
     const real rhoR  = primsR.rho;
     const real vR    = primsR.vcomponent(nhat);
     const real pR    = primsR.p;
-    const real hR    = 1 + gamma * pR  / (rhoR * (gamma - 1));
+    const real hR    = primsR.get_enthalpy(gamma);
 
     const real csR = std::sqrt(gamma * pR / (hR * rhoR));
     const real csL = std::sqrt(gamma * pL / (hL * rhoL));
@@ -438,8 +461,8 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t &prims
     const real v2       = prims.vcomponent(2);
     const real v3       = prims.vcomponent(3);
     const real pressure = prims.p;
-    const real lorentz_gamma = prims.get_lorentz_factor(); // 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
-    const real h = 1 + gamma * pressure / (rho * (gamma - 1));
+    const real lorentz_gamma = prims.get_lorentz_factor();
+    const real h = prims.get_enthalpy(gamma);
     if constexpr(dim == 1) {
         return sr::Conserved<1>{
             rho * lorentz_gamma, 
@@ -469,12 +492,14 @@ template<int dim>
 template<TIMESTEP_TYPE dt_type>
 void SRHD<dim>::adapt_dt()
 {
+    // singleton instance of thread pool. lazy-evaluated
+    static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
     std::atomic<real> min_dt = INFINITY;
     thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&](luint aid) {
         real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
-        const luint kk = dim < 3 ? 0 : simbi::detail::get_height(aid, xphysical_grid, yphysical_grid);
-        const luint jj = dim < 2 ? 0 : simbi::detail::get_row(aid, xphysical_grid, yphysical_grid, kk);
-        const luint ii = simbi::detail::get_column(aid, xphysical_grid, yphysical_grid, kk);
+        const luint kk = dim < 3 ? 0 : simbi::detail::get_height(aid, xactive_grid, yactive_grid);
+        const luint jj = dim < 2 ? 0 : simbi::detail::get_row(aid, xactive_grid, yactive_grid, kk);
+        const luint ii = simbi::detail::get_column(aid, xactive_grid, yactive_grid, kk);
         // Left/Right wave speeds
         if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
             const auto rho = prims[aid].rho;
@@ -482,7 +507,7 @@ void SRHD<dim>::adapt_dt()
             const auto v2  = prims[aid].vcomponent(2);
             const auto v3  = prims[aid].vcomponent(3);
             const auto pre = prims[aid].p;
-            const real h   = 1 + pre * gamma / (rho * (gamma - 1));
+            const real h   = prims[aid].get_enthalpy(gamma);
             const real cs  = std::sqrt(gamma * pre / (rho * h));
             v1p = std::abs(v1 + cs) / (1 + v1 * cs);
             v1m = std::abs(v1 - cs) / (1 - v1 * cs);
@@ -636,15 +661,14 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims
     const real chi      = prims.chi;
     const real vn       = prims.vcomponent(nhat);
     const real pressure = prims.p;
-    const real lorentz_gamma = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
+    const real lorentz_gamma = prims.get_lorentz_factor();
 
-    const real h  = 1 + gamma * pressure / (rho * (gamma - 1));
+    const real h  = prims.get_enthalpy(gamma);
     const real D  = rho * lorentz_gamma;
     const real S1 = rho * lorentz_gamma * lorentz_gamma * h * v1;
     const real S2 = rho * lorentz_gamma * lorentz_gamma * h * v2;
     const real S3 = rho * lorentz_gamma * lorentz_gamma * h * v3;
     const real Sj = (nhat == 1) ? S1 : (nhat == 2) ? S2 : S3;
-    // const real tau = rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma;
     if constexpr(dim == 1) {
         return sr::Conserved<1>{
             D  * vn, 
@@ -983,9 +1007,9 @@ void SRHD<dim>::advance(
     const luint sx,
     const luint sy)
 {
-    const luint xpg = this->xphysical_grid;
-    const luint ypg = this->yphysical_grid;
-    const luint zpg = this->zphysical_grid;
+    const luint xpg = this->xactive_grid;
+    const luint ypg = this->yactive_grid;
+    const luint zpg = this->zactive_grid;
 
     const luint extent      = p.get_full_extent();
     auto* const cons_data   = cons.data();
@@ -1624,6 +1648,12 @@ void SRHD<dim>::advance(
                     const real pc     = prim_buff[txa].p;
                     const real invdV  = 1 / dV;
                     const auto geom_sources = sr::Conserved<1>{0.0, pc * (sR - sL) * invdV, 0.0};
+
+                    // #if !GPU_CODE
+                    //     if (frf.d != 0 || flf.d != 0) {
+                    //         printf("ia: %lu, dR: %.2e, dL: %.2e\n", ia, frf.d, flf.d);
+                    //     }
+                    // #endif
                     cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - source_terms - gravity) * step * dt * factor;
                     break;
                 }
@@ -1658,7 +1688,7 @@ void SRHD<dim>::advance(
                         const real uc   = prim_buff[tid].get_v1();
                         const real vc   = prim_buff[tid].get_v2();
                         const real pc   = prim_buff[tid].p;
-                        const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+                        const real hc   = prim_buff[tid].get_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc));
 
                         const sr::Conserved<2> geom_source  = {
@@ -1697,7 +1727,7 @@ void SRHD<dim>::advance(
                         const real vc   = prim_buff[tid].get_v2();
                         const real pc   = prim_buff[tid].p;
                         
-                        const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+                        const real hc   = prim_buff[tid].get_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc));
 
                         const sr::Conserved<2> geom_source  = {
@@ -1775,7 +1805,7 @@ void SRHD<dim>::advance(
                         const real wc   = prim_buff[tid].get_v3();
                         const real pc   = prim_buff[tid].p;
 
-                        const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+                        const real hc   = prim_buff[tid].get_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
 
                         const auto geom_source  = sr::Conserved<3>{0, 
@@ -1820,7 +1850,7 @@ void SRHD<dim>::advance(
                         const real wc   = prim_buff[tid].get_v3();
                         const real pc   = prim_buff[tid].p;
 
-                        const real hc   = 1 + gamma * pc/(rhoc * (gamma - 1));
+                        const real hc   = prim_buff[tid].get_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
 
                         const auto geom_source  = sr::Conserved<3>{0, (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean , 0, 0};
@@ -1891,8 +1921,8 @@ void SRHD<dim>::simulate(
         } else if constexpr(dim == 2) {
             outer_zones.resize(ny);
             for (luint jj = 0; jj < ny; jj++) {
-                const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
-                const real dV    = get_cell_volume(xphysical_grid - 1, jreal);
+                const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid);
+                const real dV    = get_cell_volume(xactive_grid - 1, jreal);
                 outer_zones[jj]  = conserved_t{
                     dens_outer(x1max, x2[jreal]), 
                     mom1_outer(x1max, x2[jreal]), 
@@ -1904,10 +1934,10 @@ void SRHD<dim>::simulate(
             outer_zones.resize(ny * nz);
             for (luint kk = 0; kk < nz; kk++)
             {       
-                const auto kreal = helpers::get_real_idx(kk, radius, zphysical_grid);    
+                const auto kreal = helpers::get_real_idx(kk, radius, zactive_grid);    
                 for (luint jj = 0; jj < ny; jj++) {
-                    const auto jreal = helpers::get_real_idx(jj, radius, yphysical_grid);
-                    const real dV    = get_cell_volume(xphysical_grid - 1, jreal, kreal);
+                    const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid);
+                    const real dV    = get_cell_volume(xactive_grid - 1, jreal, kreal);
                     outer_zones[kk * ny + jj]  = conserved_t{
                         dens_outer(x1max, x2[jreal], x3[kreal]), 
                         mom1_outer(x1max, x2[jreal], x3[kreal]), 
@@ -1937,25 +1967,25 @@ void SRHD<dim>::simulate(
     }
 
     // Write some info about the setup for writeup later
-    setup.x1max = x1[xphysical_grid - 1];
+    setup.x1max = x1[xactive_grid - 1];
     setup.x1min = x1[0];
     setup.x1    = x1;
     if constexpr(dim > 1) {
-        setup.x2max = x2[yphysical_grid - 1];
+        setup.x2max = x2[yactive_grid - 1];
         setup.x2min = x2[0];
         setup.x2    = x2;
     }
     if constexpr(dim > 2) {
-        setup.x3max = x3[zphysical_grid - 1];
+        setup.x3max = x3[zactive_grid - 1];
         setup.x3min = x3[0];
         setup.x3    = x3;
     }
     setup.nx                  = nx;
     setup.ny                  = ny;
     setup.nz                  = nz;
-    setup.xactive_zones       = xphysical_grid;
-    setup.yactive_zones       = yphysical_grid;
-    setup.zactive_zones       = zphysical_grid;
+    setup.xactive_zones       = xactive_grid;
+    setup.yactive_zones       = yactive_grid;
+    setup.zactive_zones       = zactive_grid;
     setup.linspace            = linspace;
     setup.ad_gamma            = gamma;
     setup.first_order         = first_order;
@@ -2030,9 +2060,9 @@ void SRHD<dim>::simulate(
     troubled_cells.copyToGpu();
 
     // Setup the system
-    const luint xblockdim    = xphysical_grid > gpu_block_dimx ? gpu_block_dimx : xphysical_grid;
-    const luint yblockdim    = yphysical_grid > gpu_block_dimy ? gpu_block_dimy : yphysical_grid;
-    const luint zblockdim    = zphysical_grid > gpu_block_dimz ? gpu_block_dimz : zphysical_grid;
+    const luint xblockdim    = xactive_grid > gpu_block_dimx ? gpu_block_dimx : xactive_grid;
+    const luint yblockdim    = yactive_grid > gpu_block_dimy ? gpu_block_dimy : yactive_grid;
+    const luint zblockdim    = zactive_grid > gpu_block_dimz ? gpu_block_dimz : zactive_grid;
     this->radius             = (first_order) ? 1 : 2;
     this->step               = (first_order) ? 1 : static_cast<real>(0.5);
     const luint xstride      = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
@@ -2043,7 +2073,7 @@ void SRHD<dim>::simulate(
     const luint shBlockSpace = xblockspace * yblockspace * zblockspace;
     const luint shBlockBytes = shBlockSpace * sizeof(sr::Primitive<dim>);
     const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
-    const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
+    const auto activeP       = simbi::ExecutionPolicy({xactive_grid, yactive_grid, zactive_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
     if constexpr(BuildPlatform == Platform::GPU){
         writeln("Requested shared memory: {} bytes", shBlockBytes);
