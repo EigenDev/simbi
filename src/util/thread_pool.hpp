@@ -166,7 +166,7 @@ namespace simbi {
 				unsigned int nthreads;
 				bool should_terminate;                   // Tells threads to stop looking for jobs
 				std::mutex queue_mutex;                  // Prevents data races to the job queue
-				std::condition_variable cv_task; // Allows threads to wait on new jobs or termination 
+				std::condition_variable cv_task;         // Allows threads to wait on new jobs or termination 
 				std::condition_variable cv_finished;
 				std::vector<std_thread> threads;
 				std::queue<std::function<void()>> jobs;
