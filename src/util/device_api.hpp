@@ -2,7 +2,7 @@
 #define DEVICE_API_HPP
 
 #include <omp.h>              // for omp_get_thread_num
-#include <stddef.h>           // for size_t
+#include <cstddef>            // for size_t
 #include <stdexcept>          // for runtime_error
 #include <string>             // for allocator, operator+, char_traits, to_s...
 #include <thread>             // for get_id, hash, thread
