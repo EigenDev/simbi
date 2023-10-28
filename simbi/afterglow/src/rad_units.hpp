@@ -146,7 +146,7 @@ namespace sogbo_rad
      *  Calculate the peak emissivity per frequency per equation (A3) in
         https://iopscience.iop.org/article/10.1088/0004-637X/749/1/44/pdf
     */ 
-    constexpr units::emissivity calc_emissivity(const units::mag_field bfield, const units::ndens n, const double p);
+    const units::emissivity calc_emissivity(const units::mag_field bfield, const units::ndens n, const double p);
 
     /*
         Calculate the minimum lorentz factor of electrons in the distribution
