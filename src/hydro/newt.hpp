@@ -99,15 +99,6 @@ namespace simbi
 
         GPU_CALLABLE_MEMBER
         conserved_t prims2cons(const primitive_t &prims) const;
-        
-        conserved_t calc_hll_state(
-            const conserved_t &left_state,
-            const conserved_t &right_state,
-            const conserved_t &left_flux,
-            const conserved_t &right_flux,
-            const primitive_t &left_prims,
-            const primitive_t &right_prims,
-            const luint nhat) const;
 
         GPU_CALLABLE_MEMBER
         conserved_t calc_hllc_flux(
