@@ -375,7 +375,7 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
 
     switch (comp_wave_speed)
     {
-    //-----------Calculate wave speeds based on Shneider et al. 1992
+    //-----------Calculate wave speeds based on Shneider et al. 1993
     case simbi::WaveSpeeds::SCHNEIDER_ET_AL_93:
         {
             const real vbar  = static_cast<real>(0.5) * (vL + vR);
