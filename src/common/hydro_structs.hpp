@@ -90,7 +90,7 @@ namespace hydro1d {
             return *this;
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v() const {
             return v1;
         }
 
@@ -99,6 +99,11 @@ namespace hydro1d {
                 return 0;
             }
             return v1;
+        }
+
+        GPU_CALLABLE_MEMBER
+        real get_energy_density(real gamma) const {
+            return p / (gamma - 1) + static_cast<real>(0.5) * (rho * v1 * v1);
         }
     };
 
@@ -136,11 +141,11 @@ namespace hydro1d {
             return *this;
         }
 
-        GPU_CALLABLE_INLINE_MEMBER constexpr real& momentum() {
+        GPU_CALLABLE_MEMBER constexpr real& momentum() {
             return m;
         }
 
-        GPU_CALLABLE_INLINE_MEMBER constexpr real momentum(const int nhat) const {
+        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {
             if (nhat == 1) {
                 return m;
             }
@@ -200,7 +205,7 @@ namespace sr1d {
             return *this;
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v1;
             } else {
@@ -216,13 +221,17 @@ namespace sr1d {
             }
         }
 
-        GPU_CALLABLE constexpr real vcomponent(const int nhat) const {
+        GPU_CALLABLE_MEMBER constexpr real vcomponent(const int nhat) const {
             if (nhat == 1) {
                 return get_v();
             }
             return 0;
         }
-        
+
+        GPU_CALLABLE_MEMBER
+        real get_enthalpy(real gamma) const {
+            return 1 + gamma * p /(rho * (gamma - 1));
+        }
     };
 
     struct Conserved {
@@ -259,10 +268,10 @@ namespace sr1d {
             return *this;
         }
 
-        GPU_CALLABLE_INLINE_MEMBER constexpr real& momentum() {
+        GPU_CALLABLE_MEMBER constexpr real& momentum() {
             return s;
         }
-        GPU_CALLABLE_INLINE_MEMBER constexpr real momentum(const int nhat) const {
+        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {
             if (nhat == 1) {
                 return s;
             }
@@ -374,7 +383,7 @@ namespace sr2d {
             return *this;
         }
         
-        inline GPU_CALLABLE_MEMBER
+        GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {
             if (nhat > 2) {
                 return 0;
@@ -382,7 +391,7 @@ namespace sr2d {
             return (nhat == 1 ? get_v1() : get_v2()); 
         }
 
-        GPU_CALLABLE_MEMBER inline real calc_lorentz_gamma() const {
+        GPU_CALLABLE_MEMBER real calc_lorentz_gamma() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
             } else {
@@ -390,7 +399,7 @@ namespace sr2d {
             }
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v1() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v1() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v1;
             } else {
@@ -398,7 +407,7 @@ namespace sr2d {
             }
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v2;
             } else {
@@ -412,6 +421,11 @@ namespace sr2d {
             } else {
                 return std::sqrt(1 + (v1 * v1 + v2 * v2));
             }
+        }
+
+        GPU_CALLABLE_MEMBER
+        real get_enthalpy(real gamma) const {
+            return 1 + gamma * p /(rho * (gamma - 1));
         }
 
     };
@@ -479,6 +493,7 @@ namespace hydro2d {
             return (nhat == 1 ? m1 : m2); 
         }
         GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat) {return (nhat == 1 ? m1 : m2 ); }
+
     };
 
     struct Primitive {
@@ -520,15 +535,15 @@ namespace hydro2d {
             return *this;
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v1() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v1() const {
             return v1;
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
             return v2;
         }
         
-        inline GPU_CALLABLE_MEMBER
+        GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {
             if (nhat > 2) {
                 return 0;
@@ -536,6 +551,10 @@ namespace hydro2d {
             return (nhat == 1 ? v1 : v2); 
         }
 
+        GPU_CALLABLE_MEMBER
+        real get_energy_density(real gamma) const {
+            return p / (gamma - 1) + static_cast<real>(0.5) * (rho * (v1 * v1 + v2 * v2));
+        }
     };
 
     struct PrimitiveSOA {
@@ -644,12 +663,12 @@ namespace sr3d {
             return *this;
         }
 
-        inline GPU_CALLABLE_MEMBER
+        GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
         }
 
-        GPU_CALLABLE_MEMBER inline real calc_lorentz_gamma() const {
+        GPU_CALLABLE_MEMBER real calc_lorentz_gamma() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
             } else {
@@ -657,7 +676,7 @@ namespace sr3d {
             }
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v1() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v1() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v1;
             } else {
@@ -665,7 +684,7 @@ namespace sr3d {
             }
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v2;
             } else {
@@ -673,7 +692,7 @@ namespace sr3d {
             }
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v3() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v3() const {
             if constexpr(VelocityType == Velocity::Beta) {
                 return v3;
             } else {
@@ -688,6 +707,11 @@ namespace sr3d {
             } else {
                 return std::sqrt(1 + (v1 * v1 + v2 * v2 + v3 * v3));
             }
+        }
+
+        GPU_CALLABLE_MEMBER
+        real get_enthalpy(real gamma) const {
+            return 1 + gamma * p /(rho * (gamma - 1));
         }
     };
 
@@ -796,21 +820,26 @@ namespace hydro3d {
             return *this;
         }
 
-        inline GPU_CALLABLE_MEMBER  constexpr real get_v1() const {
+        GPU_CALLABLE_MEMBER  constexpr real get_v1() const {
             return v1;
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v2() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v2() const {
             return v2;
         }
 
-        inline GPU_CALLABLE_MEMBER constexpr real get_v3() const {
+        GPU_CALLABLE_MEMBER constexpr real get_v3() const {
             return v3;
         }
 
-        inline GPU_CALLABLE_MEMBER
+        GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const unsigned nhat) const {
             return (nhat == 1 ? v1 : (nhat == 2) ? v2 : v3); 
+        }
+
+        GPU_CALLABLE_MEMBER
+        real get_energy_density(real gamma) const {
+            return p / (gamma - 1) + static_cast<real>(0.5) * (rho * (v1 * v1 + v2 * v2 + v3 * v3));
         }
     };
 
