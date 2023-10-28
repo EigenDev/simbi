@@ -646,9 +646,9 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 
     // Quick checks before moving on with rest of computation
     if (vface <= aL){
-        return left_flux;
+        return left_flux - left_state * vface;
     } else if (vface >= aR){
-        return right_flux;
+        return right_flux - right_state * vface;
     }
 
     if constexpr(dim == 1) {
