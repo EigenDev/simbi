@@ -147,6 +147,7 @@ void Newtonian1D::adapt_dt(){
         }
         dt = cfl * min_dt;
     } else {
+        static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
         std::atomic<real> min_dt = INFINITY;
         thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&](int ii) {
             const auto shift_i  = ii + idx_active;

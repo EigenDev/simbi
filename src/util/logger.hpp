@@ -137,8 +137,8 @@ namespace simbi
                             {
                                 // #pragma omp parallel for 
                                 for (luint jj = 0; jj < sim_state.ny; jj++) {
-                                    const auto jreal = helpers::get_real_idx(jj, sim_state.radius, sim_state.yphysical_grid);
-                                    const real dV    = sim_state.get_cell_volume(sim_state.xphysical_grid - 1, jreal);
+                                    const auto jreal = helpers::get_real_idx(jj, sim_state.radius, sim_state.yactive_grid);
+                                    const real dV    = sim_state.get_cell_volume(sim_state.xactive_grid - 1, jreal);
                                     sim_state.outer_zones[jj]  = conserved_t{
                                         sim_state.dens_outer(sim_state.x1max, sim_state.x2[jreal]), 
                                         sim_state.mom1_outer(sim_state.x1max, sim_state.x2[jreal]), 
@@ -151,10 +151,10 @@ namespace simbi
                             if (sim_state.all_outer_bounds && sim_state.mesh_motion) {
                                 for (luint kk = 0; kk < sim_state.nz; kk++)
                                 {       
-                                    const auto kreal = helpers::get_real_idx(kk, sim_state.radius, sim_state.zphysical_grid);    
+                                    const auto kreal = helpers::get_real_idx(kk, sim_state.radius, sim_state.zactive_grid);    
                                     for (luint jj = 0; jj < sim_state.ny; jj++) {
-                                        const auto jreal = helpers::get_real_idx(jj, sim_state.radius, sim_state.yphysical_grid);
-                                        const real dV    = sim_state.get_cell_volume(sim_state.xphysical_grid - 1, jreal, kreal);
+                                        const auto jreal = helpers::get_real_idx(jj, sim_state.radius, sim_state.yactive_grid);
+                                        const real dV    = sim_state.get_cell_volume(sim_state.xactive_grid - 1, jreal, kreal);
                                         sim_state.outer_zones[kk * sim_state.ny + jj]  = conserved_t{
                                             sim_state.dens_outer(sim_state.x1max, sim_state.x2[jreal], sim_state.x3[kreal]), 
                                             sim_state.mom1_outer(sim_state.x1max, sim_state.x2[jreal], sim_state.x3[kreal]), 

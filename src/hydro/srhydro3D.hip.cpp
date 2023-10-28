@@ -274,20 +274,20 @@ void SRHD3D::adapt_dt()
     {
         real cfl_dt, v1p, v1m, v2p, v2m, v3p, v3m;
         // Compute the minimum timestep given cfl
-        for (luint kk = 0; kk < zphysical_grid; kk++)
+        for (luint kk = 0; kk < zactive_grid; kk++)
         {
             const auto x3l     = get_x3face(kk, 0);
             const auto x3r     = get_x3face(kk, 1);
             const auto dx3     = x3r - x3l; 
             const auto shift_k = kk + idx_active;
-            for (luint jj = 0; jj < yphysical_grid; jj++)
+            for (luint jj = 0; jj < yactive_grid; jj++)
             {
                 const auto x2l     = get_x2face(jj, 0);
                 const auto x2r     = get_x2face(jj, 1);
                 const auto dx2     = x2r - x2l; 
                 const auto shift_j = jj + idx_active;
                 #pragma omp for nowait schedule(static) reduction(min:min_dt)
-                for (luint ii = 0; ii < xphysical_grid; ii++)
+                for (luint ii = 0; ii < xactive_grid; ii++)
                 {
                     const auto shift_i  = ii + idx_active;
                     const auto aid      = shift_k * nx * ny + shift_j * nx + shift_i;
@@ -645,9 +645,9 @@ void SRHD3D::advance(
     const luint sx,
     const luint sy)
 {
-    const luint xpg = this->xphysical_grid;
-    const luint ypg = this->yphysical_grid;
-    const luint zpg = this->zphysical_grid;
+    const luint xpg = this->xactive_grid;
+    const luint ypg = this->yactive_grid;
+    const luint zpg = this->zactive_grid;
 
     #if GPU_CODE
     const luint xextent = p.blockSize.x;
@@ -1175,28 +1175,28 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
     this->geometry        = helpers::geometry_map.at(coord_system);
-    this->xphysical_grid  = (first_order) ? nx - 2: nx - 4;
-    this->yphysical_grid  = (first_order) ? ny - 2: ny - 4;
-    this->zphysical_grid  = (first_order) ? nz - 2: nz - 4;
+    this->xactive_grid  = (first_order) ? nx - 2: nx - 4;
+    this->yactive_grid  = (first_order) ? ny - 2: ny - 4;
+    this->zactive_grid  = (first_order) ? nz - 2: nz - 4;
     this->idx_active      = (first_order) ? 1     : 2;
-    this->active_zones    = xphysical_grid * yphysical_grid * zphysical_grid;
+    this->active_zones    = xactive_grid * yactive_grid * zactive_grid;
     this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
     this->x2cell_spacing  = simbi::Cellspacing::LINSPACE;
     this->x3cell_spacing  = simbi::Cellspacing::LINSPACE;
-    this->dx3             = (x3[zphysical_grid - 1] - x3[0]) / (zphysical_grid - 1);
-    this->dx2             = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
-    this->dlogx1          = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
-    this->dx1             = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
+    this->dx3             = (x3[zactive_grid - 1] - x3[0]) / (zactive_grid - 1);
+    this->dx2             = (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
+    this->dlogx1          = std::log10(x1[xactive_grid - 1]/ x1[0]) / (xactive_grid - 1);
+    this->dx1             = (x1[xactive_grid - 1] - x1[0]) / (xactive_grid - 1);
     this->invdx1          = 1 / dx1;
     this->invdx2          = 1 / dx2;
     this->invdx3          = 1 / dx3;
     this->x1min           = x1[0];
-    this->x1max           = x1[xphysical_grid - 1];
+    this->x1max           = x1[xactive_grid - 1];
     this->x2min           = x2[0];
-    this->x2max           = x2[yphysical_grid - 1];
+    this->x2max           = x2[yactive_grid - 1];
     this->x3min           = x3[0];
-    this->x3max           = x3[zphysical_grid - 1];
-    this->checkpoint_zones= zphysical_grid;
+    this->x3max           = x3[zactive_grid - 1];
+    this->checkpoint_zones= zactive_grid;
     this->den_source_all_zeros     = std::all_of(sourceD.begin(),   sourceD.end(),   [](real i) {return i == 0;});
     this->mom1_source_all_zeros    = std::all_of(sourceS1.begin(),  sourceS1.end(),  [](real i) {return i == 0;});
     this->mom2_source_all_zeros    = std::all_of(sourceS2.begin(),  sourceS2.end(),  [](real i) {return i == 0;});
@@ -1221,18 +1221,18 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     }
 
     // Write some info about the setup for writeup later
-    setup.x1max              = x1[xphysical_grid - 1];
+    setup.x1max              = x1[xactive_grid - 1];
     setup.x1min              = x1[0];
-    setup.x2max              = x2[yphysical_grid - 1];
+    setup.x2max              = x2[yactive_grid - 1];
     setup.x2min              = x2[0];
-    setup.x3max              = x3[zphysical_grid - 1];
+    setup.x3max              = x3[zactive_grid - 1];
     setup.x3min              = x3[0];
     setup.nx                 = nx;
     setup.ny                 = ny;
     setup.nz                 = nz;
-    setup.xactive_zones      = xphysical_grid;
-    setup.yactive_zones      = yphysical_grid;
-    setup.zactive_zones      = zphysical_grid;
+    setup.xactive_zones      = xactive_grid;
+    setup.yactive_zones      = yactive_grid;
+    setup.zactive_zones      = zactive_grid;
     setup.linspace           = linspace;
     setup.ad_gamma           = gamma;
     setup.first_order        = first_order;
@@ -1280,9 +1280,9 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     troubled_cells.copyToGpu();
 
     // Setup the system
-    const luint xblockdim    = xphysical_grid > gpu_block_dimx ? gpu_block_dimx : xphysical_grid;
-    const luint yblockdim    = yphysical_grid > gpu_block_dimy ? gpu_block_dimy : yphysical_grid;
-    const luint zblockdim    = zphysical_grid > gpu_block_dimz ? gpu_block_dimz : zphysical_grid;
+    const luint xblockdim    = xactive_grid > gpu_block_dimx ? gpu_block_dimx : xactive_grid;
+    const luint yblockdim    = yactive_grid > gpu_block_dimy ? gpu_block_dimy : yactive_grid;
+    const luint zblockdim    = zactive_grid > gpu_block_dimz ? gpu_block_dimz : zactive_grid;
     this->radius             = (first_order) ? 1 : 2;
     this->step               = (first_order) ? 1 : static_cast<real>(0.5);
     const luint xstride      = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
@@ -1290,7 +1290,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     const luint shBlockSpace = (xblockdim + 2 * radius) * (yblockdim + 2 * radius) * (zblockdim + 2 * radius);
     const luint shBlockBytes = shBlockSpace * sizeof(Primitive);
     const auto fullP         = simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
-    const auto activeP       = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid, zphysical_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
+    const auto activeP       = simbi::ExecutionPolicy({xactive_grid, yactive_grid, zactive_grid}, {xblockdim, yblockdim, zblockdim}, shBlockBytes);
     
     if constexpr(BuildPlatform == Platform::GPU){
         writeln("Requested shared memory: {} bytes", shBlockBytes);
@@ -1307,7 +1307,7 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
-        write2file(*this, setup, data_directory, t, 0, chkpt_interval, zphysical_grid);
+        write2file(*this, setup, data_directory, t, 0, chkpt_interval, zactive_grid);
         helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
     }
     

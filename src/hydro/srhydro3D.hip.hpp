@@ -204,14 +204,14 @@ namespace simbi
             for (luint gid = 0; gid < total_zones; gid++)
             {
                 if (troubled_cells[gid] != 0) {
-                    const luint xpg   = xphysical_grid;
-                    const luint ypg   = yphysical_grid;
+                    const luint xpg   = xactive_grid;
+                    const luint ypg   = yactive_grid;
                     const luint kk    = detail::get_height(gid, xpg, ypg);
                     const luint jj    = detail::get_row(gid, xpg, ypg, kk);
                     const luint ii    = detail::get_column(gid, xpg, ypg, kk);
-                    const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
-                    const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
-                    const lint kreal  = helpers::get_real_idx(kk, radius, zphysical_grid); 
+                    const lint ireal  = helpers::get_real_idx(ii, radius, xactive_grid);
+                    const lint jreal  = helpers::get_real_idx(jj, radius, yactive_grid); 
+                    const lint kreal  = helpers::get_real_idx(kk, radius, zactive_grid); 
                     const real x1l    = get_x1face(ireal, 0);
                     const real x1r    = get_x1face(ireal, 1);
                     const real x2l    = get_x2face(jreal, 0);

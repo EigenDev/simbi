@@ -883,7 +883,7 @@ namespace simbi{
             const luint ia  = ii + self->idx_active;
             const luint ja  = jj + self->idx_active;
             const luint aid = (col_maj) ? ia * self-> ny + ja : ja * self->nx + ia;
-            if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid))
+            if ((ii < self->xactive_grid) && (jj < self->yactive_grid))
             {
                 real plus_v1 , plus_v2 , minus_v1, minus_v2;
                 const real rho  = prim_buffer[aid].rho;
@@ -982,7 +982,7 @@ namespace simbi{
                     }
                     // TODO: Implement
                 } // end switch
-                dt_min[jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
+                dt_min[jj * self->xactive_grid + ii] = self->cfl * cfl_dt;
             }
             #endif
         }
@@ -1003,7 +1003,7 @@ namespace simbi{
             const luint ja  = jj + self->idx_active;
             const luint ka  = kk + self->idx_active;
             const luint aid = (col_maj) ? ia * self-> ny + ja : ka * self->nx * self->ny + ja * self->nx + ia;
-            if ((ii < self->xphysical_grid) && (jj < self->yphysical_grid) && (kk < self->zphysical_grid))
+            if ((ii < self->xactive_grid) && (jj < self->yactive_grid) && (kk < self->zactive_grid))
             {
                 real plus_v1 , plus_v2 , minus_v1, minus_v2, plus_v3, minus_v3;
 
@@ -1087,7 +1087,7 @@ namespace simbi{
                     }
                 } // end switch
                 
-                dt_min[kk * self->xphysical_grid * self->yphysical_grid + jj * self->xphysical_grid + ii] = self->cfl * cfl_dt;
+                dt_min[kk * self->xactive_grid * self->yactive_grid + jj * self->xactive_grid + ii] = self->cfl * cfl_dt;
             }
             #endif
         }
@@ -1106,9 +1106,9 @@ namespace simbi{
             if constexpr(dim == 1) {
                 gid = ii;
             } else if constexpr(dim == 2) {
-                gid  = self->xphysical_grid * jj + ii;
+                gid  = self->xactive_grid * jj + ii;
             } else if constexpr(dim == 3) {
-                gid  = self->yphysical_grid * self->xphysical_grid * kk + self->xphysical_grid * jj + ii;
+                gid  = self->yactive_grid * self->xactive_grid * kk + self->xactive_grid * jj + ii;
             }
             // reduce multiple elements per thread
             for (luint i = gid; i < nmax; i += nt) {
@@ -1135,11 +1135,11 @@ namespace simbi{
                 gid = ii;
             } else if constexpr(dim == 2) {
                 luint jj   = blockIdx.y * blockDim.y + threadIdx.y;
-                gid  = self->xphysical_grid * jj + ii;
+                gid  = self->xactive_grid * jj + ii;
             } else if constexpr(dim == 3) {
                 luint jj   = blockIdx.y * blockDim.y + threadIdx.y;
                 luint kk   = blockIdx.z * blockDim.z + threadIdx.z;
-                gid  = self->yphysical_grid * self->xphysical_grid * kk + self->xphysical_grid * jj + ii;
+                gid  = self->yactive_grid * self->xactive_grid * kk + self->xactive_grid * jj + ii;
             }
             // reduce multiple elements per thread
             for(auto i = gid; i < nmax; i += nt) {

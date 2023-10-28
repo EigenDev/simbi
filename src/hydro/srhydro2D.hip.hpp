@@ -214,8 +214,8 @@ namespace simbi
                 if (troubled_cells[gid] != 0) {
                     const auto ii     = gid % nx;
                     const auto jj     = gid / nx;
-                    const lint ireal  = helpers::get_real_idx(ii, radius, xphysical_grid);
-                    const lint jreal  = helpers::get_real_idx(jj, radius, yphysical_grid); 
+                    const lint ireal  = helpers::get_real_idx(ii, radius, xactive_grid);
+                    const lint jreal  = helpers::get_real_idx(jj, radius, yactive_grid); 
                     const real x1l    = get_x1face(ireal, 0);
                     const real x1r    = get_x1face(ireal, 1);
                     const real x2l    = get_x2face(jreal, 0);

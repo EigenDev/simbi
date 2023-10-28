@@ -168,11 +168,11 @@ void Newtonian2D::adapt_dt()
         #pragma omp parallel
         {
             real cfl_dt;
-            for (luint jj = 0; jj < yphysical_grid; jj++)
+            for (luint jj = 0; jj < yactive_grid; jj++)
             {
                 const auto shift_j = jj + idx_active;
                 #pragma omp for schedule(static) reduction(min:min_dt)
-                for (luint ii = 0; ii < xphysical_grid; ii++)
+                for (luint ii = 0; ii < xactive_grid; ii++)
                 {
                     const auto shift_i  = ii + idx_active;
                     const auto aid      = shift_j * nx + shift_i;
@@ -268,12 +268,13 @@ void Newtonian2D::adapt_dt()
         }// end parallel region
         dt = cfl * min_dt;
     } else {
+        static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
         std::atomic<real> min_dt = INFINITY;
         thread_pool.parallel_for(static_cast<luint>(0), active_zones, [&] (luint gid) {
             real cfl_dt;
 
-            const auto ii       = gid % xphysical_grid;
-            const auto jj       = gid / xphysical_grid;
+            const auto ii       = gid % xactive_grid;
+            const auto jj       = gid / xactive_grid;
             const auto aid      = (jj + radius) * nx + (ii + radius);
             const auto rho      = prims[aid].rho;
             const auto v1       = prims[aid].v1;
@@ -585,8 +586,8 @@ void Newtonian2D::advance(
     const luint bx,
     const luint by)
 {
-    const luint xpg                   = this->xphysical_grid;
-    const luint ypg                   = this->yphysical_grid;
+    const luint xpg                   = this->xactive_grid;
+    const luint ypg                   = this->yactive_grid;
     const luint extent                = p.get_full_extent();
     #if GPU_CODE
     const luint xextent            = p.blockSize.x;
@@ -929,20 +930,20 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     this->dlogt           = dlogt;
     this->linspace        = linspace;
     this->plm_theta       = plm_theta;
-    this->xphysical_grid  = (first_order) ? nx - 2 : nx - 4;
-    this->yphysical_grid  = (first_order) ? ny - 2 : ny - 4;
+    this->xactive_grid  = (first_order) ? nx - 2 : nx - 4;
+    this->yactive_grid  = (first_order) ? ny - 2 : ny - 4;
     this->idx_active      = (first_order) ? 1 : 2;
-    this->active_zones    = xphysical_grid * yphysical_grid;
+    this->active_zones    = xactive_grid * yactive_grid;
     this->quirk_smoothing = quirk_smoothing;
     this->geometry        = helpers::geometry_map.at(coord_system);
-    this->checkpoint_zones= yphysical_grid;
-    this->dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
-    this->dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
-    this->dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
+    this->checkpoint_zones= yactive_grid;
+    this->dx2     = (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
+    this->dlogx1  = std::log10(x1[xactive_grid - 1]/ x1[0]) / (xactive_grid - 1);
+    this->dx1     = (x1[xactive_grid - 1] - x1[0]) / (xactive_grid - 1);
     this->x1min   = x1[0];
-    this->x1max   = x1[xphysical_grid - 1];
+    this->x1max   = x1[xactive_grid - 1];
     this->x2min   = x2[0];
-    this->x2max   = x2[yphysical_grid - 1];
+    this->x2max   = x2[yactive_grid - 1];
 
     this->den_source_all_zeros    = std::all_of(sourceRho.begin(), sourceRho.end(),   [](real i) {return i == 0;});
     this->mom1_source_all_zeros   = std::all_of(sourceM1.begin(),  sourceM1.end(),  [](real i) {return i == 0;});
@@ -965,14 +966,14 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     }
     
     // Write some info about the setup for writeup later
-    setup.x1max          = x1[xphysical_grid - 1];
+    setup.x1max          = x1[xactive_grid - 1];
     setup.x1min          = x1[0];
-    setup.x2max          = x2[yphysical_grid - 1];
+    setup.x2max          = x2[yactive_grid - 1];
     setup.x2min          = x2[0];
     setup.nx             = nx;
     setup.ny             = ny;
-    setup.xactive_zones  = xphysical_grid;
-    setup.yactive_zones  = yphysical_grid;
+    setup.xactive_zones  = xactive_grid;
+    setup.yactive_zones  = yactive_grid;
     setup.linspace       = linspace;
     setup.ad_gamma       = gamma;
     setup.first_order    = first_order;
@@ -1015,20 +1016,20 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
 
 
    
-    dx2     = (x2[yphysical_grid - 1] - x2[0]) / (yphysical_grid - 1);
-    dlogx1  = std::log10(x1[xphysical_grid - 1]/ x1[0]) / (xphysical_grid - 1);
-    dx1     = (x1[xphysical_grid - 1] - x1[0]) / (xphysical_grid - 1);
+    dx2     = (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
+    dlogx1  = std::log10(x1[xactive_grid - 1]/ x1[0]) / (xactive_grid - 1);
+    dx1     = (x1[xactive_grid - 1] - x1[0]) / (xactive_grid - 1);
     invdx1  = 1 / dx1;
     invdx2  = 1 / dx2;
     x1min   = x1[0];
-    x1max   = x1[xphysical_grid - 1];
+    x1max   = x1[xactive_grid - 1];
     x2min   = x2[0];
-    x2max   = x2[yphysical_grid - 1];
+    x2max   = x2[yactive_grid - 1];
 
 
     // Setup the system
-    const luint xblockdim       = xphysical_grid > gpu_block_dimx ? gpu_block_dimx : xphysical_grid;
-    const luint yblockdim       = yphysical_grid > gpu_block_dimy ? gpu_block_dimy : yphysical_grid;
+    const luint xblockdim       = xactive_grid > gpu_block_dimx ? gpu_block_dimx : xactive_grid;
+    const luint yblockdim       = yactive_grid > gpu_block_dimy ? gpu_block_dimy : yactive_grid;
     this->radius                = (first_order) ? 1 : 2;
     this->step                  = (first_order) ? 1 : static_cast<real>(0.5);
     const luint bx              = (BuildPlatform == Platform::GPU) ? xblockdim + 2 * radius: nx;
@@ -1036,7 +1037,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
     const luint shBlockSpace    = bx * by;
     const luint shBlockBytes    = shBlockSpace * sizeof(Primitive);
     const auto fullP            = simbi::ExecutionPolicy({nx, ny}, {xblockdim, yblockdim});
-    const auto activeP          = simbi::ExecutionPolicy({xphysical_grid, yphysical_grid}, {xblockdim, yblockdim}, shBlockBytes);
+    const auto activeP          = simbi::ExecutionPolicy({xactive_grid, yactive_grid}, {xblockdim, yblockdim}, shBlockBytes);
     
     if constexpr(BuildPlatform == Platform::GPU){
         writeln("Requested shared memory: {} bytes", shBlockBytes);
@@ -1055,7 +1056,7 @@ std::vector<std::vector<real> > Newtonian2D::simulate2D(
 
     // Save initial condition
     if (t == 0 || chkpt_idx == 0) {
-        write2file(*this, setup, data_directory, t, 0, chkpt_interval, yphysical_grid);
+        write2file(*this, setup, data_directory, t, 0, chkpt_interval, yactive_grid);
         helpers::config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
     }
     

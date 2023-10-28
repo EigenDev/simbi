@@ -192,7 +192,7 @@ namespace simbi
             if (use_omp) {
                 return omp_get_thread_num();
             } else {
-                return 1; //std::hash<std::thread::id>{}(std::this_thread::get_id());
+                return std::hash<std::thread::id>{}(std::this_thread::get_id());
             }
         #endif
     }
