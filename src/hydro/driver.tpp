@@ -37,7 +37,8 @@ void Driver::run(
         hydrostate::simulate<1>(
             state, 
             init_cond, 
-            regime,scale_factor, 
+            regime,
+            scale_factor, 
             scale_factor_derivative,
             optional_wrapper(density_lambda),
             optional_wrapper(mom1_lambda),
@@ -49,7 +50,8 @@ void Driver::run(
         hydrostate::simulate<2>(
             state, 
             init_cond, 
-            regime,scale_factor, 
+            regime,
+            scale_factor, 
             scale_factor_derivative,
             optional_wrapper(density_lambda),
             optional_wrapper(mom1_lambda),
@@ -61,7 +63,8 @@ void Driver::run(
         hydrostate::simulate<3>(
             state, 
             init_cond, 
-            regime,scale_factor, 
+            regime,
+            scale_factor, 
             scale_factor_derivative,
             optional_wrapper(density_lambda),
             optional_wrapper(mom1_lambda),
