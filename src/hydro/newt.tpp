@@ -665,7 +665,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             real rho      = left_state.rho;
             real m        = left_state.m;
             real energy   = left_state.e_dens;
-            real cofac    = 1./(aL - aStar);
+            real cofac    = 1/(aL - aStar);
 
             real rhoStar = cofac * (aL - v)*rho;
             real mstar   = cofac * (m*(aL - v) - pressure + pStar);
