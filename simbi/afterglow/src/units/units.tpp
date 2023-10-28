@@ -757,7 +757,7 @@ namespace units
                     {
                         const auto cf = Coulomb(StatCoulomb(1.0)).value;
                         newvalue *= std::pow(cf, powq);
-                    } else if (uTransform.qType = Charge_t::Coulomb)  {
+                    } else if (uTransform.qType == Charge_t::Coulomb)  {
                         const auto cf = StatCoulomb(Coulomb(1.0)).value;
                         newvalue *= std::pow(cf, powq);
                     }
@@ -770,7 +770,7 @@ namespace units
                     {
                         const auto cf = Degree(Radian(1.0)).value;
                         newvalue *= std::pow(cf, powa);
-                    } else if (uTransform.aType = Angle_t::Degree)  {
+                    } else if (uTransform.aType == Angle_t::Degree)  {
                         const auto cf = Radian(Degree(1.0)).value;
                         newvalue *= std::pow(cf, powa);
                     }
