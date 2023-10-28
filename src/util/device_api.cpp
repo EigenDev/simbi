@@ -10,19 +10,19 @@ namespace simbi
             void copyHostToDevice(void *to, const void *from, size_t bytes)
             {
                 auto status = simbi::gpu::error::status_t(anyGpuMemcpy(to, from, bytes, anyGpuMemcpyHostToDevice));
-                simbi::gpu::error::check_err(status, "Synchronous copy to dev failed");
+                simbi::gpu::error::check_err(status, "Synchronous copy from host to dev failed");
             }
 
             void copyDevToHost(void *to, const void *from, size_t bytes)
             {
                 auto status = simbi::gpu::error::status_t(anyGpuMemcpy(to, from, bytes, anyGpuMemcpyDeviceToHost));
-                simbi::gpu::error::check_err(status, "Synchronous copy to host failed");
+                simbi::gpu::error::check_err(status, "Synchronous copy from dev to host failed");
             }
 
             void copyDevToDev(void *to, const void *from, size_t bytes)
             {
                 auto status = simbi::gpu::error::status_t(anyGpuMemcpy(to, from, bytes, anyGpuMemcpyDeviceToDevice));
-                simbi::gpu::error::check_err(status, "Synchronous copy to dev2dev failed");
+                simbi::gpu::error::check_err(status, "Synchronous copy from dev to dev failed");
             }
 
             void gpuMalloc(void *obj, size_t elements)
@@ -63,7 +63,7 @@ namespace simbi
             void gpuEventDestroy(anyGpuEvent_t a)
             {
                 auto status = simbi::gpu::error::status_t(anyGpuEventDestroy(a));
-                simbi::gpu::error::check_err(status, "Failed to create event");
+                simbi::gpu::error::check_err(status, "Failed to destroy event");
             };
 
             void gpuEventRecord(anyGpuEvent_t a)
