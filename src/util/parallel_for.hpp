@@ -24,6 +24,8 @@ namespace simbi
 					#pragma omp parallel for schedule(static) 
 					for(auto idx = first; idx < last; idx++) function(idx);
 				} else {
+					// singleton instance of thread pool. lazy-evaluated
+    				static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
 					thread_pool.parallel_for(first, last, function);
 				}
 			#endif

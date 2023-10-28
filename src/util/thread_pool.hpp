@@ -192,6 +192,4 @@ namespace simbi {
 		}
 	}// namespace pooling
 } // namespace simbi
-
-static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
 #endif 
