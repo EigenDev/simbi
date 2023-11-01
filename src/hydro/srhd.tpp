@@ -1927,8 +1927,8 @@ void SRHD<dim>::simulate(
                         mom3_outer(x1max, x2[jreal], x3[kreal]), 
                         enrg_outer(x1max, x2[jreal], x3[kreal])} * dV;
                 }
-                outer_zones.copyToGpu();
             }
+            outer_zones.copyToGpu();
         }
     }
 
