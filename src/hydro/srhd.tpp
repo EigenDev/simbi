@@ -2061,11 +2061,10 @@ void SRHD<dim>::simulate(
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
     
+    cons2prim(fullP);
     if constexpr(BuildPlatform == Platform::GPU) {
-        cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP);
     } else {
-        cons2prim(fullP);
         adapt_dt<TIMESTEP_TYPE::MINIMUM>();
     }
 

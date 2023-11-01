@@ -1818,11 +1818,10 @@ void Newtonian<dim>::simulate(
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
     
+    cons2prim(fullP);
     if constexpr(BuildPlatform == Platform::GPU) {
-        cons2prim(fullP);
         adapt_dt(activeP);
     } else {
-        cons2prim(fullP);
         adapt_dt();
     }
 
