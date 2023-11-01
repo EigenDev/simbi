@@ -61,15 +61,6 @@ simbi = ["gitrepo_home.txt", "mypy.ini", "tools/*.py", "libs/*.so"]
 [tool.setuptools.dynamic]
 readme = {file = ["README.md"]}
 
-# [tool.pyright]
-# reportMissingImports = true
-# reportMissingTypeStubs = false
-# strictListInference = true
-# verboseOutput = false 
-# enableTypeIgnoreComments=true
-# reportUntypedFunctionDecorator="error"
-# strict = ['simbi_configs']
-
 [tool.mypy]
 ignore_missing_imports = true
 warn_unused_configs = true
