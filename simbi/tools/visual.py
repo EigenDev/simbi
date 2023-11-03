@@ -1100,14 +1100,9 @@ class Visualizer:
         else:
             nind_curves = len(self.files) // self.nplots
         colors     = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
-        if len(self.fields) > 1:
-            linestyles = [x[0] for x in zip(cycle(['-', '--', ':', '-.']), colors)]
-            default_cycler = (cycler(linestyle=linestyles) +
-                          cycler(color=colors))
-        else:
-            linestyles = ['-', '--', ':', '-.']
-            default_cycler = (cycler(linestyle=linestyles) *
-                          cycler(color=colors))
+        linestyles = [x[0] for x in zip(cycle(['-', '--', ':', '-.']), range(len(self.fields)))]
+        default_cycler = cycler(color=colors) * (cycler(linestyle=linestyles) )
+                          
             
         
                         
