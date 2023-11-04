@@ -149,8 +149,7 @@ Conserved Newtonian2D::prims2cons(const Primitive &prims)
     const real rho = prims.rho;
     const real v1  = prims.v1;
     const real v2  = prims.v2;
-    const real pre = prims.p;
-    const real et  = pre/(gamma - 1.0) + 0.5 * rho * (v1*v1 + v2*v2);
+    const real et  = prims.get_energy_density(gamma);
 
     return Conserved{rho, rho*v1, rho*v2, et};
 }
@@ -205,8 +204,8 @@ void Newtonian2D::adapt_dt()
                             }
                         case simbi::Geometry::SPHERICAL:
                             {
-                                const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                                const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                                const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                                const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                                 const real dtheta = tr - tl;
                                 const real x1l    = get_x1face(ii, 0);
                                 const real x1r    = get_x1face(ii, 1);
@@ -225,8 +224,8 @@ void Newtonian2D::adapt_dt()
 
                         case simbi::Geometry::PLANAR_CYLINDRICAL:
                             {
-                                const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                                const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                                const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                                const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                                 const real dtheta = tr - tl;
                                 const real x1l    = get_x1face(ii, 0);
                                 const real x1r    = get_x1face(ii, 1);
@@ -244,8 +243,8 @@ void Newtonian2D::adapt_dt()
                             }
                         default:
                             {
-                                const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                                const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                                const real zl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                                const real zr     = helpers::my_min<real>(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                                 const real dz     = zr - zl;
                                 const real x1l    = get_x1face(ii, 0);
                                 const real x1r    = get_x1face(ii, 1);
@@ -306,8 +305,8 @@ void Newtonian2D::adapt_dt()
                     }
                 case simbi::Geometry::SPHERICAL:
                     {
-                        const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                        const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                        const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dtheta = tr - tl;
                         const real x1l    = get_x1face(ii, 0);
                         const real x1r    = get_x1face(ii, 1);
@@ -326,8 +325,8 @@ void Newtonian2D::adapt_dt()
 
                 case simbi::Geometry::PLANAR_CYLINDRICAL:
                     {
-                        const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                        const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                        const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dtheta = tr - tl;
                         const real x1l    = get_x1face(ii, 0);
                         const real x1r    = get_x1face(ii, 1);
@@ -345,8 +344,8 @@ void Newtonian2D::adapt_dt()
                     }
                 default:
                     {
-                        const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                        const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real zl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                        const real zr     = helpers::my_min<real>(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dz     = zr - zl;
                         const real x1l    = get_x1face(ii, 0);
                         const real x1r    = get_x1face(ii, 1);
@@ -392,7 +391,7 @@ Conserved Newtonian2D::prims2flux(const Primitive &prims, const luint ehat)
     const auto v1  = prims.v1;
     const auto v2  = prims.v2;
     const auto pre = prims.p;
-    const auto et  = pre / (gamma - 1.0) + 0.5 * rho * (v1*v1 + v2*v2);
+    const auto et  = prims.get_energy_density(gamma);
     
     const auto dens  = rho*vn;
     const auto momx  = rho*v1*vn + pre * helpers::kronecker(1, ehat);
@@ -822,8 +821,8 @@ void Newtonian2D::advance(
                 const real rl           = get_x1face(ii, 0); 
                 const real rr           = get_x1face(ii, 1);
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
-                const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
-                const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real tl           = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                const real tr           = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dcos         = std::cos(tl) - std::cos(tr);
                 const real dVtot        = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
                 const real invdV        = 1.0 / dVtot;

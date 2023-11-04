@@ -203,7 +203,7 @@ constexpr DT simbi::ndarray<DT,build_mode>::operator[](IndexType index) const
 }
 
 template <typename DT, Platform build_mode>
-constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator*(const double scale_factor) {
+constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator*(const real scale_factor) {
     for (size_t i = 0; i < sz; i++)
     {
         arr[i] *= scale_factor;
@@ -212,7 +212,7 @@ constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator
 };
 
 template <typename DT, Platform build_mode>
-constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator*=(const double scale_factor) {
+constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator*=(const real scale_factor) {
     for (size_t i = 0; i < sz; i++)
     {
         arr[i] *= scale_factor;
@@ -221,7 +221,7 @@ constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator
 };
 
 template <typename DT, Platform build_mode>
-constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator/(const double scale_factor) {
+constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator/(const real scale_factor) {
     for (size_t i = 0; i < sz; i++)
     {
         arr[i] /= scale_factor;
@@ -230,7 +230,7 @@ constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator
 };
 
 template <typename DT, Platform build_mode>
-constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator/=(const double scale_factor) {
+constexpr simbi::ndarray<DT,build_mode>& simbi::ndarray<DT,build_mode>::operator/=(const real scale_factor) {
     for (size_t i = 0; i < sz; i++)
     {
         arr[i] /= scale_factor;

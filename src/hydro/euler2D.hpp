@@ -110,20 +110,20 @@ namespace simbi {
             case simbi::Geometry::AXIS_CYLINDRICAL:
             case simbi::Geometry::CARTESIAN:
                 {
-                        const real xl = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+                        const real xl = helpers::my_max<real>(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
                         if (side == 0) {
                             return xl;
                         } else {
-                            return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+                            return helpers::my_min<real>(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                         }
                 }
             default:
                 {
-                        const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                        const real rl = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                         if (side == 0) {
                             return rl;
                         } else {
-                            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                            return helpers::my_min<real>(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                         }
                 }
             }
@@ -137,7 +137,7 @@ namespace simbi {
             if (side == 0) {
                 return yl;
             } 
-            return helpers::my_min(yl + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+            return helpers::my_min<real>(yl + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
         }
 
         GPU_CALLABLE_INLINE
@@ -149,8 +149,8 @@ namespace simbi {
             {
                 const real xl     = get_x1face(ii, 0);
                 const real xr     = get_x1face(ii, 1);
-                const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dcos   = std::cos(tl) - std::cos(tr);
                 const real dV     = (2.0 * M_PI * (1.0 / 3.0) * (xr * xr * xr - xl * xl * xl) * dcos);
                 return dV;
@@ -159,8 +159,8 @@ namespace simbi {
             {
                 const real xl     = get_x1face(ii, 0);
                 const real xr     = get_x1face(ii, 1);
-                const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dx2    = tr - tl;
                 const real dV     = (1.0 / 2.0) * (xr * xr - xl * xl) * dx2;
                 return dV;
@@ -170,8 +170,8 @@ namespace simbi {
             {
                 const real xl     = get_x1face(ii, 0);
                 const real xr     = get_x1face(ii, 1);
-                const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real zl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                const real zr     = helpers::my_min<real>(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dx2    = zr - zl;
                 const real dV     = (1.0 / 2.0) * (xr * xr - xl * xl) * dx2;
                 return dV;

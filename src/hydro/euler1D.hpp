@@ -57,20 +57,20 @@ namespace simbi {
             {
             case simbi::Geometry::CARTESIAN:
                 {
-                        const real xl = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+                        const real xl = helpers::my_max<real>(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
                         if (side == 0) {
                             return xl;
                         } else {
-                            return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+                            return helpers::my_min<real>(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                         }
                 }
             default:
                 {
-                        const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                        const real rl = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                         if (side == 0) {
                             return rl;
                         } else {
-                            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                            return helpers::my_min<real>(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                         }
                 }
             }

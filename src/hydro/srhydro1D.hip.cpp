@@ -57,11 +57,11 @@ real SRHD1D::calc_vface(const lint ii, const real hubble_const, const int side) 
         }
         default:
         {
-            const real xl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min); 
+            const real xl = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min); 
             if (side == 0) {
                 return xl;
             } else {
-                const real xr = helpers::my_min(xl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)),  x1max);
+                const real xr = helpers::my_min<real>(xl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)),  x1max);
                 return xr;
             }
         }
@@ -208,10 +208,10 @@ void SRHD1D::advance(const ExecutionPolicy<> &p)
             } 
         }
 
-        const auto d_source = den_source_all_zeros    ? 0.0 :  dens_source[ii];
-        const auto s_source = mom1_source_all_zeros   ? 0.0 :  mom_source[ii];
-        const auto e_source = energy_source_all_zeros ? 0.0 :  erg_source[ii];
-        const auto gs_source = zero_gravity1  ? 0.0 :  cons_data[ia].d * grav_source[ii];
+        const auto d_source = den_source_all_zeros    ? 0 :  dens_source[ii];
+        const auto s_source = mom1_source_all_zeros   ? 0 :  mom_source[ii];
+        const auto e_source = energy_source_all_zeros ? 0 :  erg_source[ii];
+        const auto gs_source = zero_gravity1  ? 0 :  cons_data[ia].d * grav_source[ii];
         const auto ge_source = gs_source * prim_buff[txa].v1;
         const auto sources = Conserved{d_source, s_source, e_source} * time_constant;
         const auto gravity = Conserved{0, gs_source, ge_source};
@@ -694,11 +694,11 @@ SRHD1D::simulate1D(
     const std::string solver,
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources,
-    std::function<double(double)> a,
-    std::function<double(double)> adot,
-    std::function<double(double)> d_outer,
-    std::function<double(double)> s_outer,
-    std::function<double(double)> e_outer)
+    std::function<real(real)> a,
+    std::function<real(real)> adot,
+    std::function<real(real)> d_outer,
+    std::function<real(real)> s_outer,
+    std::function<real(real)> e_outer)
 {
     helpers::anyDisplayProps();
     this->chkpt_interval  = chkpt_interval;

@@ -32,9 +32,9 @@ namespace simbi
           ndarray<primitive_t> prims;
           ndarray<real> sourceD, sourceS, source0, pressure_guess, dt_min;
           
-          std::function<double(double)> dens_outer;
-          std::function<double(double)> mom1_outer;
-          std::function<double(double)> enrg_outer;
+          std::function<real(real)> dens_outer;
+          std::function<real(real)> mom1_outer;
+          std::function<real(real)> enrg_outer;
           SRHD1D(){};
           SRHD1D(
                std::vector<std::vector<real>> &state, 
@@ -103,11 +103,11 @@ namespace simbi
                const std::string solver,
                bool constant_sources,
                std::vector<std::vector<real>> boundary_sources,
-               std::function<double(double)> a = nullptr,
-               std::function<double(double)> adot = nullptr,
-               std::function<double(double)> d_outer = nullptr,
-               std::function<double(double)> s_souter = nullptr,
-               std::function<double(double)> e_outer = nullptr);
+               std::function<real(real)> a = nullptr,
+               std::function<real(real)> adot = nullptr,
+               std::function<real(real)> d_outer = nullptr,
+               std::function<real(real)> s_souter = nullptr,
+               std::function<real(real)> e_outer = nullptr);
 
           GPU_CALLABLE_MEMBER
           real calc_vface(const lint ii, const real hubble_const, const int side) const;
@@ -119,19 +119,19 @@ namespace simbi
                {
                case simbi::Geometry::CARTESIAN:
                     {
-                         const real xl = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+                         const real xl = helpers::my_max<real>(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
                          if (side == 0) {
                               return xl;
                          }
-                         return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+                         return helpers::my_min<real>(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                     }
                default:
                     {
-                         const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                         const real rl = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                          if (side == 0) {
                               return rl;
                          } 
-                         return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                         return helpers::my_min<real>(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                          
                     }
                }
@@ -148,8 +148,8 @@ namespace simbi
                     {
                     case simbi::Geometry::SPHERICAL:
                     {         
-                         const real rl     = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min);
-                         const real rr     = helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                         const real rl     = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1), x1min);
+                         const real rr     = helpers::my_min<real>(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                          const real rmean  = helpers::get_cell_centroid(rr, rl, geometry);
                          return 4.0 * M_PI * rmean * rmean * (rr - rl);
                     }

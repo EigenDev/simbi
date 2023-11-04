@@ -108,10 +108,10 @@ namespace simbi
 		constexpr DT operator[](IndexType) const ;
 
 		// Some math operator overloads
-		constexpr ndarray& operator*(double);
-		constexpr ndarray& operator*=(double);
-		constexpr ndarray& operator/(double);
-		constexpr ndarray& operator/=(double);
+		constexpr ndarray& operator*(real);
+		constexpr ndarray& operator*=(real);
+		constexpr ndarray& operator/(real);
+		constexpr ndarray& operator/=(real);
 		constexpr ndarray& operator+=(const ndarray& rhs);
 
 

@@ -49,19 +49,19 @@ constexpr real Newtonian<dim>::get_x1face(const lint ii, const int side) const
     {
     case simbi::Cellspacing::LINSPACE:
         {
-            const real x1l = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+            const real x1l = helpers::my_max<real>(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
             if (side == 0) {
                 return x1l;
             }
-            return helpers::my_min(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+            return helpers::my_min<real>(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
         }
     default:
         {
-            const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+            const real rl = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
             if (side == 0) {
                 return rl;
             }
-            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+            return helpers::my_min<real>(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
         }
     }
 }
@@ -71,11 +71,11 @@ template<int dim>
 GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x2face(const lint ii, const int side) const
 {
-    const real x2l = helpers::my_max(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
+    const real x2l = helpers::my_max<real>(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
     if (side == 0) {
         return x2l;
     } 
-    return helpers::my_min(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+    return helpers::my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
 }
 
 template<int dim>
@@ -83,11 +83,11 @@ GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x3face(const lint ii, const int side) const
 {
 
-    const real x3l = helpers::my_max(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
+    const real x3l = helpers::my_max<real>(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
     if (side == 0) {
         return x3l;
     } 
-    return helpers::my_min(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
+    return helpers::my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
 }
 
 template<int dim>
@@ -354,8 +354,8 @@ Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
 
     default:
         {
-            const real aR = helpers::my_max(helpers::my_max(vL + csL, vR + csR), static_cast<real>(0.0)); 
-            const real aL = helpers::my_min(helpers::my_min(vL - csL, vR - csR), static_cast<real>(0.0));
+            const real aR = helpers::my_max<real>(helpers::my_max<real>(vL + csL, vR + csR), static_cast<real>(0.0)); 
+            const real aL = helpers::my_min<real>(helpers::my_min<real>(vL - csL, vR - csR), static_cast<real>(0.0));
             return nt::Eigenvals<dim>{aL, aR};
         }
 
@@ -654,8 +654,8 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     if constexpr(dim == 1) {
         const real aStar = lambda.aStar;
         const real pStar = lambda.pStar;
-        const real ap  = helpers::my_max(static_cast<real>(0.0), aR);
-        const real am  = helpers::my_min(static_cast<real>(0.0), aL);
+        const real ap  = helpers::my_max<real>(0, aR);
+        const real am  = helpers::my_min<real>(0, aL);
         auto hll_flux  = (left_flux * ap + right_flux * am - (right_state - left_state) * am * ap)  / (am + ap) ;
         auto hll_state = (right_state * aR - left_state * aL - right_flux + left_flux)/(aR - aL);
         
@@ -1413,8 +1413,8 @@ void Newtonian<dim>::advance(
                         const real rl           = x1l + vfaceL * step * dt; 
                         const real rr           = x1r + vfaceR * step * dt;
                         const real rmean        = helpers::get_cell_centroid(rr, rl, geometry);
-                        const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
-                        const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real tl           = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                        const real tr           = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dcos         = std::cos(tl) - std::cos(tr);
                         const real dV           = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
                         const real invdV        = 1.0 / dV;

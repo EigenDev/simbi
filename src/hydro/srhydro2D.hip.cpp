@@ -226,8 +226,8 @@ void SRHD2D::adapt_dt()
                             }
                         case simbi::Geometry::SPHERICAL:
                             {
-                                const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                                const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                                const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                                const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                                 const real dtheta = tr - tl;
                                 const real x1l    = get_x1face(ii, 0);
                                 const real x1r    = get_x1face(ii, 1);
@@ -246,8 +246,8 @@ void SRHD2D::adapt_dt()
 
                         case simbi::Geometry::PLANAR_CYLINDRICAL:
                             {
-                                const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                                const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                                const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                                const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                                 const real dtheta = tr - tl;
                                 const real x1l    = get_x1face(ii, 0);
                                 const real x1r    = get_x1face(ii, 1);
@@ -265,8 +265,8 @@ void SRHD2D::adapt_dt()
                             }
                         default:
                             {
-                                const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                                const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                                const real zl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                                const real zr     = helpers::my_min<real>(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                                 const real dz     = zr - zl;
                                 const real x1l    = get_x1face(ii, 0);
                                 const real x1r    = get_x1face(ii, 1);
@@ -328,8 +328,8 @@ void SRHD2D::adapt_dt()
                     }
                 case simbi::Geometry::SPHERICAL:
                     {
-                        const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                        const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                        const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dtheta = tr - tl;
                         const real x1l    = get_x1face(ii, 0);
                         const real x1r    = get_x1face(ii, 1);
@@ -348,8 +348,8 @@ void SRHD2D::adapt_dt()
 
                 case simbi::Geometry::PLANAR_CYLINDRICAL:
                     {
-                        const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                        const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                        const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dtheta = tr - tl;
                         const real x1l    = get_x1face(ii, 0);
                         const real x1r    = get_x1face(ii, 1);
@@ -367,8 +367,8 @@ void SRHD2D::adapt_dt()
                     }
                 default:
                     {
-                        const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
-                        const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real zl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2,  x2min);
+                        const real zr     = helpers::my_min<real>(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dz     = zr - zl;
                         const real x1l    = get_x1face(ii, 0);
                         const real x1r    = get_x1face(ii, 1);
@@ -1077,12 +1077,12 @@ void SRHD2D::advance(
 
         //Advance depending on geometry
         const luint real_loc = helpers::get_2d_idx(ii, jj, xpg, ypg);
-        const real d_source  = den_source_all_zeros    ? 0.0 : dens_source[real_loc];
-        const real s1_source = mom1_source_all_zeros   ? 0.0 : mom1_source[real_loc];
-        const real s2_source = mom2_source_all_zeros   ? 0.0 : mom2_source[real_loc];
-        const real e_source  = energy_source_all_zeros ? 0.0 : erg_source[real_loc];
+        const real d_source  = den_source_all_zeros    ? 0 : dens_source[real_loc];
+        const real s1_source = mom1_source_all_zeros   ? 0 : mom1_source[real_loc];
+        const real s2_source = mom2_source_all_zeros   ? 0 : mom2_source[real_loc];
+        const real e_source  = energy_source_all_zeros ? 0 : erg_source[real_loc];
         // Gravity
-        const auto g_source   = zero_gravity1  ? 0.0 :  grav_source[ii];
+        const auto g_source   = zero_gravity1  ? 0 :  grav_source[ii];
         const auto gs1_source = g_source * cons_data[aid].d;
         const auto gs2_source = 0; 
         const auto ge_source  = gs1_source * prim_buff[txa].v1;
@@ -1101,8 +1101,8 @@ void SRHD2D::advance(
                 const real rl           = x1l + vfaceL * step * dt; 
                 const real rr           = x1r + vfaceR * step * dt;
                 const real rmean        = static_cast<real>(0.75) * (rr * rr * rr * rr - rl * rl * rl * rl) / (rr * rr * rr - rl * rl * rl);
-                const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
-                const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real tl           = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                const real tr           = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dcos         = std::cos(tl) - std::cos(tr);
                 const real dVtot        = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
                 const real invdV        = 1.0 / dVtot;
@@ -1201,12 +1201,12 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     bool quirk_smoothing,
     bool constant_sources,
     std::vector<std::vector<real>> boundary_sources,
-    std::function<double(double)> a,
-    std::function<double(double)> adot,
-    std::function<double(double, double)> d_outer,
-    std::function<double(double, double)> s1_outer,
-    std::function<double(double, double)> s2_outer,
-    std::function<double(double, double)> e_outer)
+    std::function<real(real)> a,
+    std::function<real(real)> adot,
+    std::function<real(real, real)> d_outer,
+    std::function<real(real, real)> s1_outer,
+    std::function<real(real, real)> s2_outer,
+    std::function<real(real, real)> e_outer)
 {
     helpers::anyDisplayProps();
     this->t = tstart;

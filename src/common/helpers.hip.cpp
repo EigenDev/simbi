@@ -101,7 +101,6 @@ namespace simbi{
             H5::DataSpace dataspacex1(rank, dimsf1);
             H5::DataSpace dataspacex2(rank, dimsf2);
             H5::DataSpace dataspacex3(rank, dimsf3);
-            H5::DataType  datatype(H5::PredType::NATIVE_DOUBLE);
             
             hid_t dtype_str = H5Tcopy(H5T_C_S1);
             size_t size_str = 100;                    
@@ -143,21 +142,21 @@ namespace simbi{
                     std::copy(prims.v.begin(), prims.v.begin() + size, v.get());
                     std::copy(prims.p.begin(), prims.p.begin() + size, p.get());
                     std::copy(setup.x1.begin(),  setup.x1.begin() + setup.x1.size(), x1.get());
-                    H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
+                    H5::DataSet dataset = file.createDataSet("rho", real_type, dataspace);
 
                     // Write the Primitives 
                     dataset.write(rho.get(), real_type);
                     dataset.close();
                     
-                    dataset = file.createDataSet("v1", datatype, dataspace);
+                    dataset = file.createDataSet("v1", real_type, dataspace);
                     dataset.write(v.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("p", datatype, dataspace);
+                    dataset = file.createDataSet("p", real_type, dataspace);
                     dataset.write(p.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("x1", datatype, dataspacex1);
+                    dataset = file.createDataSet("x1", real_type, dataspacex1);
                     dataset.write(x1.get(), real_type);
                     dataset.close();
                     break;
@@ -180,33 +179,33 @@ namespace simbi{
                     std::copy(prims.chi.begin(),  prims.chi.begin() + size, chi.get());
                     std::copy(setup.x1.begin(),  setup.x1.begin() + setup.x1.size(), x1.get());
                     std::copy(setup.x2.begin(),  setup.x2.begin() + setup.x2.size(), x2.get());
-                    H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
+                    H5::DataSet dataset = file.createDataSet("rho", real_type, dataspace);
 
                     // Write the Primitives 
                     dataset.write(rho.get(), real_type);
                     dataset.close();
                     
-                    dataset = file.createDataSet("v1", datatype, dataspace);
+                    dataset = file.createDataSet("v1", real_type, dataspace);
                     dataset.write(v1.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("v2", datatype, dataspace);
+                    dataset = file.createDataSet("v2", real_type, dataspace);
                     dataset.write(v2.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("p", datatype, dataspace);
+                    dataset = file.createDataSet("p", real_type, dataspace);
                     dataset.write(p.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("chi", datatype, dataspace);
+                    dataset = file.createDataSet("chi", real_type, dataspace);
                     dataset.write(chi.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("x1", datatype, dataspacex1);
+                    dataset = file.createDataSet("x1", real_type, dataspacex1);
                     dataset.write(x1.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("x2", datatype, dataspacex2);
+                    dataset = file.createDataSet("x2", real_type, dataspacex2);
                     dataset.write(x2.get(), real_type);
                     dataset.close();
                 break;
@@ -234,41 +233,41 @@ namespace simbi{
                     std::copy(setup.x2.begin(),  setup.x2.begin() + setup.x2.size(), x2.get());
                     std::copy(setup.x3.begin(),  setup.x3.begin() + setup.x3.size(), x3.get());
 
-                    H5::DataSet dataset = file.createDataSet("rho", datatype, dataspace);
+                    H5::DataSet dataset = file.createDataSet("rho", real_type, dataspace);
 
                     // Write the Primitives 
                     dataset.write(rho.get(), real_type);
                     dataset.close();
                     
-                    dataset = file.createDataSet("v1", datatype, dataspace);
+                    dataset = file.createDataSet("v1", real_type, dataspace);
                     dataset.write(v1.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("v2", datatype, dataspace);
+                    dataset = file.createDataSet("v2", real_type, dataspace);
                     dataset.write(v2.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("v3", datatype, dataspace);
+                    dataset = file.createDataSet("v3", real_type, dataspace);
                     dataset.write(v3.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("p", datatype, dataspace);
+                    dataset = file.createDataSet("p", real_type, dataspace);
                     dataset.write(p.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("chi", datatype, dataspace);
+                    dataset = file.createDataSet("chi", real_type, dataspace);
                     dataset.write(chi.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("x1", datatype, dataspacex1);
+                    dataset = file.createDataSet("x1", real_type, dataspacex1);
                     dataset.write(x1.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("x2", datatype, dataspacex2);
+                    dataset = file.createDataSet("x2", real_type, dataspacex2);
                     dataset.write(x2.get(), real_type);
                     dataset.close();
 
-                    dataset = file.createDataSet("x3", datatype, dataspacex3);
+                    dataset = file.createDataSet("x3", real_type, dataspacex3);
                     dataset.write(x3.get(), real_type);
                     dataset.close();
                 break;

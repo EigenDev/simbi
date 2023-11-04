@@ -47,19 +47,19 @@ constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
     {
     case simbi::Cellspacing::LINSPACE:
         {
-            const real x1l = helpers::my_max(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
+            const real x1l = helpers::my_max<real>(x1min  + (ii - static_cast<real>(0.5)) * dx1,  x1min);
             if (side == 0) {
                 return x1l;
             }
-            return helpers::my_min(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+            return helpers::my_min<real>(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
         }
     default:
         {
-            const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+            const real rl = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
             if (side == 0) {
                 return rl;
             }
-            return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+            return helpers::my_min<real>(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
         }
     }
 }
@@ -69,11 +69,11 @@ template<int dim>
 GPU_CALLABLE_MEMBER
 constexpr real SRHD<dim>::get_x2face(const lint ii, const int side) const
 {
-    const real x2l = helpers::my_max(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
+    const real x2l = helpers::my_max<real>(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
     if (side == 0) {
         return x2l;
     } 
-    return helpers::my_min(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+    return helpers::my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
 }
 
 template<int dim>
@@ -81,11 +81,11 @@ GPU_CALLABLE_MEMBER
 constexpr real SRHD<dim>::get_x3face(const lint ii, const int side) const
 {
 
-    const real x3l = helpers::my_max(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
+    const real x3l = helpers::my_max<real>(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
     if (side == 0) {
         return x3l;
     } 
-    return helpers::my_min(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
+    return helpers::my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
 }
 
 template<int dim>
@@ -1654,8 +1654,8 @@ void SRHD<dim>::advance(
                         const real rl           = x1l + vfaceL * step * dt; 
                         const real rr           = x1r + vfaceR * step * dt;
                         const real rmean        = helpers::get_cell_centroid(rr, rl, geometry);
-                        const real tl           = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
-                        const real tr           = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                        const real tl           = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2 , x2min);
+                        const real tr           = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                         const real dcos         = std::cos(tl) - std::cos(tr);
                         const real dV           = 2.0 * M_PI * (1.0 / 3.0) * (rr * rr * rr - rl * rl * rl) * dcos;
                         const real invdV        = 1.0 / dV;

@@ -272,7 +272,7 @@ namespace simbi
             return (idx - offset > 0) * (idx - offset);
         }
 
-        inline double sigmoid(const double t, const double tduration, const double time_step, const bool constant_sources) {
+        inline real sigmoid(const real t, const real tduration, const real time_step, const bool constant_sources) {
             if (constant_sources) {
                 return 1 / time_step;
             }

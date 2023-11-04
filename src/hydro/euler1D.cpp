@@ -442,9 +442,9 @@ void Newtonian1D::advance(const ExecutionPolicy<> &p)
                 break;
             }
         }
-        const auto d_source = den_source_all_zeros    ? 0.0 : dens_source[ii];
-        const auto m_source = mom1_source_all_zeros   ? 0.0 : mom_source[ii];
-        const auto e_source = energy_source_all_zeros ? 0.0 : erg_source[ii];
+        const auto d_source = den_source_all_zeros    ? 0 : dens_source[ii];
+        const auto m_source = mom1_source_all_zeros   ? 0 : mom_source[ii];
+        const auto e_source = energy_source_all_zeros ? 0 : erg_source[ii];
         const auto sources = Conserved{d_source, m_source, e_source} * time_constant;
         switch (geometry)
         {

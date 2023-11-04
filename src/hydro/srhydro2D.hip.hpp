@@ -28,10 +28,10 @@ namespace simbi
         ndarray<real> sourceD, sourceS1, sourceS2, sourceTau, pressure_guess, dt_min;
         ndarray<bool> object_pos;
                 
-        std::function<double(double, double)> dens_outer;
-        std::function<double(double, double)> mom1_outer;
-        std::function<double(double, double)> mom2_outer;
-        std::function<double(double, double)> enrg_outer;
+        std::function<real(real, real)> dens_outer;
+        std::function<real(real, real)> mom1_outer;
+        std::function<real(real, real)> mom2_outer;
+        std::function<real(real, real)> enrg_outer;
         /* Methods */
         SRHD2D();
         SRHD2D(
@@ -105,16 +105,16 @@ namespace simbi
                     if (side == 0) {
                         return xl;
                     } 
-                    return helpers::my_min(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
+                    return helpers::my_min<real>(xl + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
                 }
             case simbi::Geometry::PLANAR_CYLINDRICAL:
             case simbi::Geometry::SPHERICAL:
                 {
-                    const real rl = helpers::my_max(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+                    const real rl = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
                     if (side == 0) {
                         return rl;
                     } 
-                    return helpers::my_min(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+                    return helpers::my_min<real>(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
                 }
 
             default:
@@ -126,11 +126,11 @@ namespace simbi
         GPU_CALLABLE_INLINE
         constexpr real get_x2face(const lint ii, const int side)
         {
-            const real yl = helpers::my_max(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
+            const real yl = helpers::my_max<real>(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
             if (side == 0) {
                 return yl;
             } 
-            return helpers::my_min(yl + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+            return helpers::my_min<real>(yl + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
         }
 
         GPU_CALLABLE_INLINE
@@ -142,8 +142,8 @@ namespace simbi
             {
                 const real xl     = get_x1face(ii, 0);
                 const real xr     = get_x1face(ii, 1);
-                const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dcos   = std::cos(tl) - std::cos(tr);
                 const real dV     = (2.0 * M_PI * (1.0 / 3.0) * (xr * xr * xr - xl * xl * xl) * dcos);
                 return dV;
@@ -152,8 +152,8 @@ namespace simbi
             {
                 const real xl     = get_x1face(ii, 0);
                 const real xr     = get_x1face(ii, 1);
-                const real tl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                const real tr     = helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real tl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                const real tr     = helpers::my_min<real>(tl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dx2    = tr - tl;
                 const real dV     = (1.0 / 2.0) * (xr * xr - xl * xl) * dx2;
                 return dV;
@@ -163,8 +163,8 @@ namespace simbi
             {
                 const real rl     = get_x1face(ii, 0);
                 const real rr     = get_x1face(ii, 1);
-                const real zl     = helpers::my_max(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
-                const real zr     = helpers::my_min(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
+                const real zl     = helpers::my_max<real>(x2min + (jj - static_cast<real>(0.5)) * dx2, x2min);
+                const real zr     = helpers::my_min<real>(zl + dx2 * (jj == 0 ? 0.5 : 1.0), x2max); 
                 const real dx2    = zr - zl;
                 const real rmean  = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
                 const real dV     = rmean * (rr - rl) * dx2;
@@ -196,12 +196,12 @@ namespace simbi
             bool quirk_smoothing,
             bool constant_sources,
             std::vector<std::vector<real>> boundary_sources,
-            std::function<double(double)> a = nullptr,
-            std::function<double(double)> adot = nullptr,
-            std::function<double(double, double)> d_outer = nullptr,
-            std::function<double(double, double)> s1_outer = nullptr,
-            std::function<double(double, double)> s2_outer = nullptr,
-            std::function<double(double, double)> e_outer = nullptr);
+            std::function<real(real)> a = nullptr,
+            std::function<real(real)> adot = nullptr,
+            std::function<real(real, real)> d_outer = nullptr,
+            std::function<real(real, real)> s1_outer = nullptr,
+            std::function<real(real, real)> s2_outer = nullptr,
+            std::function<real(real, real)> e_outer = nullptr);
 
 
         
