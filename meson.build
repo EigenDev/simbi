@@ -1,7 +1,7 @@
 project('simbi', 'c', 'cpp', 'cython',
     version : run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(), 
     license : 'MIT',
-    default_options : [ 'cpp_std=c++20', 'cpp_args=-march=native -fmax-errors=5'],
+    default_options : [ 'cpp_std=c++20', 'cpp_args=-march=native'],
 )
 
 # BUILD CONFIG
@@ -57,14 +57,22 @@ depends       = [py3_dep, hdf5, omp]
 gpu_depends   = []
 gpu_linkers   = []
 gpu_comp_args = []
+host_compiler  = meson.get_compiler('cpp')
+host_compiler_name = host_compiler.get_id()
+if host_compiler_name == 'g++' or host_compiler_name == 'gcc'
+max_errors = '-fmax-errors=5'
+add_project_arguments([max_errors], language: 'cpp')
+elif host_compiler_name == 'clang++' or host_compiler_name == 'clang'
+max_errors = '-ferror-limit=5'
+add_project_arguments([max_errors], language: 'cpp')
+endif
+
 ##################################################################
 # GPU CHECK
 ##################################################################
 if get_option('gpu_compilation').enabled()
     hip  = dependency('HIP', cmake_module_path : '/opt/rocm', required: false)
     cuda = dependency('CUDA', required: false)
-    host_compiler  = meson.get_compiler('cpp')
-    host_compiler_name = host_compiler.get_id()
     host_compiler_version = host_compiler.version().split('.')[0]
     if host_compiler_name == 'g++' or host_compiler_name == 'gcc'
         if host_compiler_version.to_int() >= 13
@@ -91,7 +99,7 @@ if get_option('gpu_compilation').enabled()
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
-                '-fPIC', '-O3', '-x=cu'
+                f'-fPIC,@max_errors@', '-O3', '-x=cu'
             ]
         elif hip_platform == 'amd' 
             hip_runtime  = 'rocm'
@@ -100,7 +108,8 @@ if get_option('gpu_compilation').enabled()
             gpu_comp_args = [
                 '-DGPU_PLATFORM_AMD=1',
                 '-std=c++17',
-                '-fPIC', 
+                '-fPIC',
+                f'@max_errors@', 
                 '-O3', 
                 f'--offload-arch=gfx@gpu_arch@',
                 '-march=native',
@@ -133,7 +142,7 @@ if get_option('gpu_compilation').enabled()
                 '-lineinfo',
                 '--extended-lambda',
                 '--compiler-options', 
-                '-fPIC', '-O3',
+                f'-fPIC,@max_errors@', '-O3',
                 '-x=cu',
         ]
         message(f'GPU Platform -- nvidia')
