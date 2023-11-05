@@ -7,11 +7,6 @@
 // Adapted from: https://stackoverflow.com/questions/39044063/pass-a-closure-from-cython-to-c
 class PyObjWrapper {
 public:
-    #if FLOAT_PRECISION
-    using real = float;
-    #else
-    using real = double;
-    #endif
     // constructors and destructors mostly do reference counting
     PyObjWrapper(PyObject* o): held(o) {
         Py_XINCREF(o);
@@ -43,28 +38,28 @@ public:
         return *this;
     }
 
-    real operator()(real x) const {
+    double operator()(double x) const {
         if (held) { // nullptr check 
             const auto res = call_obj(held, x); 
             return res;
         }
-        return 0.0;
+        return 0;
     }
 
-    real operator()(real x, real y) const {
+    double operator()(double x, double y) const {
         if (held) { // nullptr check 
             const auto res = call_obj2(held, x, y);
             return res;  
         }
-        return 0.0;
+        return 0;
     }
 
-    real operator()(real x, real y, real z) const {
+    double operator()(double x, double y, double z) const {
         if (held) { // nullptr check 
            const auto res = call_obj3(held, x, y, z);
            return res;
         }
-        return 0.0;
+        return 0;
     }
 
     operator bool() const {
