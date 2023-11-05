@@ -117,7 +117,7 @@ $ CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
     $ simbi plot data/1000.chkpt.000_100.h5 "Marti \& Muller Problem 1" --field rho v p --tex
     ```
 
-    The usual formula for plotting a checkpoint files is like so:
+    The usual formula for plotting a checkpoint file is like so:
     ``` bash
     $ simbi plot <checkpoint_file> "<name_of_physics_setup>" --field <field_string> [options]
     ```
