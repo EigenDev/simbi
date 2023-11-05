@@ -16,7 +16,7 @@ class MartiMuller3D(BaseConfig):
     def geometry(self) -> Sequence[Sequence[float]]:
         return ((0.0, 1.0, 0.5),
                 (0.0, 1.0),
-                (0.0,1.0))
+                (0.0, 1.0))
 
     @simbi_property
     def linspace(self) -> bool:
