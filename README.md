@@ -96,7 +96,7 @@ $ CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std=c++17 [options]
     scripts provided. For example:
 
     ``` bash
-    $ simbi run simbi/configs/marti_muller.py --mode gpu --nzones 100 --ad-gamma 1.4 
+    $ simbi run simbi_configs/examples/marti_muller.py --mode gpu --nzones 100 --ad-gamma 1.4 
     # or one could do 
     $ simbi run marti_muller --mode gpu --nzones 100 --ad-gamma 1.4
     # or 
