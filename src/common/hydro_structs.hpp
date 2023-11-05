@@ -58,7 +58,7 @@ struct InitialConditions {
 namespace hydro1d {
     struct Primitive {
         real rho, v1, p, chi;
-        GPU_CALLABLE_MEMBER Primitive () : rho(0), v1(0), p(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Primitive () {}
         GPU_CALLABLE_MEMBER ~Primitive () {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real p) : rho(rho), v1(v1), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real p, real chi) : rho(rho), v1(v1), p(p), chi(chi) {}
@@ -110,7 +110,7 @@ namespace hydro1d {
 
     struct Conserved {
         real rho, m, e_dens, chi;
-        GPU_CALLABLE_MEMBER Conserved() : rho(0), m(0), e_dens(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Conserved() {}
         GPU_CALLABLE_MEMBER ~Conserved() {};
         GPU_CALLABLE_MEMBER Conserved(real rho, real m, real e_dens) : rho(rho), m(m), e_dens(e_dens), chi(0) {}
         GPU_CALLABLE_MEMBER Conserved(real rho, real m, real e_dens, real chi) : rho(rho), m(m), e_dens(e_dens), chi(chi) {}
@@ -173,7 +173,7 @@ namespace hydro1d {
 namespace sr1d {
     struct Primitive {
         real rho, v1, p, chi;
-        GPU_CALLABLE_MEMBER Primitive () : rho(0), v1(0), p(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Primitive () {}
         GPU_CALLABLE_MEMBER ~Primitive () {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v, real p) : rho(rho), v1(v), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v, real p, real chi) : rho(rho), v1(v), p(p), chi(chi) {}
@@ -238,7 +238,7 @@ namespace sr1d {
     struct Conserved {
         real d, s, tau, chi;
         GPU_CALLABLE_MEMBER ~Conserved() {};
-        GPU_CALLABLE_MEMBER Conserved() : d(0), s(0), tau(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Conserved() {}
         GPU_CALLABLE_MEMBER Conserved(real d, real s, real tau) : d(d), s(s), tau(tau), chi(0) {}
         GPU_CALLABLE_MEMBER Conserved(real d, real s, real tau, real chi) : d(d), s(s), tau(tau), chi(chi) {}
         GPU_CALLABLE_MEMBER Conserved(const Conserved &cons) : d(cons.d), s(cons.s), tau(cons.tau), chi(cons.chi) {}
@@ -306,7 +306,7 @@ namespace sr2d {
     {
         real d, s1, s2, tau, chi;
         
-        GPU_CALLABLE_MEMBER Conserved() : d(0), s1(0), s2(0), tau(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Conserved() {}
         GPU_CALLABLE_MEMBER ~Conserved() {}
         GPU_CALLABLE_MEMBER Conserved(real d, real s1, real s2, real tau) :  d(d), s1(s1), s2(s2), tau(tau), chi(0) {}
         GPU_CALLABLE_MEMBER Conserved(real d, real s1, real s2, real tau, real chi) :  d(d), s1(s1), s2(s2), tau(tau), chi(chi) {}
@@ -356,7 +356,7 @@ namespace sr2d {
 
     struct Primitive {
         real rho, v1, v2, p, chi;
-        GPU_CALLABLE_MEMBER Primitive() : rho(0), v1(0), v2(0), p(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Primitive() {}
         GPU_CALLABLE_MEMBER ~Primitive() {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p) : rho(rho), v1(v1), v2(v2), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p, real chi) : rho(rho), v1(v1), v2(v2), p(p), chi(chi) {}
@@ -451,7 +451,7 @@ namespace hydro2d {
     struct Conserved
     {
         real rho, m1, m2, e_dens, chi;
-        GPU_CALLABLE_MEMBER Conserved() : rho(0), m1(0), m2(0), e_dens(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Conserved() {}
         GPU_CALLABLE_MEMBER ~Conserved() {}
         GPU_CALLABLE_MEMBER Conserved(real rho, real m1, real m2, real e_dens) :  rho(rho), m1(m1), m2(m2), e_dens(e_dens), chi(0) {}
         GPU_CALLABLE_MEMBER Conserved(real rho, real m1, real m2, real e_dens, real chi) :  rho(rho), m1(m1), m2(m2), e_dens(e_dens), chi(chi) {}
@@ -499,7 +499,7 @@ namespace hydro2d {
 
     struct Primitive {
         real rho, v1, v2, p, chi;
-        GPU_CALLABLE_MEMBER Primitive() : rho(0), v1(0), v2(0), p(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Primitive() {}
         GPU_CALLABLE_MEMBER ~Primitive() {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p) : rho(rho), v1(v1), v2(v2), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real p, real chi) : rho(rho), v1(v1), v2(v2), p(p), chi(chi) {}
@@ -579,7 +579,7 @@ namespace sr3d {
     struct Conserved
     {
         real d, s1, s2, s3, tau, chi;
-        GPU_CALLABLE_MEMBER Conserved() : d(0), s1(0), s2(0), s3(0), tau(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Conserved() {}
         GPU_CALLABLE_MEMBER ~Conserved() {}
         GPU_CALLABLE_MEMBER Conserved(real d, real s1, real s2, real s3, real tau) :  d(d), s1(s1), s2(s2), s3(s3), tau(tau), chi(0) {}
         GPU_CALLABLE_MEMBER Conserved(real d, real s1, real s2, real s3, real tau, real chi) :  d(d), s1(s1), s2(s2), s3(s3), tau(tau), chi(chi) {}
@@ -624,7 +624,7 @@ namespace sr3d {
 
     struct Primitive {
         real rho, v1, v2, v3, p, chi;
-        GPU_CALLABLE_MEMBER Primitive() : rho(0), v1(0), v2(0), v3(0), p(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Primitive() {}
         GPU_CALLABLE_MEMBER ~Primitive() {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real v3, real p) : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real v3, real p, real chi) : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(chi) {}
@@ -736,7 +736,7 @@ namespace hydro3d {
     struct Conserved
     {
         real rho, m1, m2, m3, e_dens, chi;
-        GPU_CALLABLE_MEMBER Conserved() : rho(0), m1(0), m2(0), m3(0), e_dens(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Conserved() {}
         GPU_CALLABLE_MEMBER ~Conserved() {}
         GPU_CALLABLE_MEMBER Conserved(real rho, real m1, real m2, real m3, real e_dens) :  rho(rho), m1(m1), m2(m2), m3(m3), e_dens(e_dens), chi(0) {}
         GPU_CALLABLE_MEMBER Conserved(real rho, real m1, real m2, real m3, real e_dens, real chi) :  rho(rho), m1(m1), m2(m2), m3(m3), e_dens(e_dens), chi(chi) {}
@@ -781,7 +781,7 @@ namespace hydro3d {
 
     struct Primitive {
         real rho, v1, v2, v3, p, chi;
-        GPU_CALLABLE_MEMBER Primitive() : rho(0), v1(0), v2(0), v3(0), p(0), chi(0) {}
+        GPU_CALLABLE_MEMBER Primitive() {}
         GPU_CALLABLE_MEMBER ~Primitive() {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real v3, real p) : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(0) {}
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real v2, real v3, real p, real chi) : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(chi) {}
