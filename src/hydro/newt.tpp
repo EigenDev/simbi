@@ -200,16 +200,16 @@ void Newtonian<dim>::emit_troubled_cells() {
             const real s   = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
             const real v2  = (s * s) / (et * et);
             if constexpr(dim == 1) {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, iter: %d\n", 
-                        cons[gid].rho, prims[gid].p, v2, x1mean, troubled_cells[gid]
+                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e\n", 
+                        cons[gid].rho, prims[gid].p, v2, x1mean
                 );
             } else if constexpr(dim == 2) {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %d\n", 
-                        cons[gid].rho, prims[gid].p, v2, x1mean, x2mean, troubled_cells[gid]
+                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e\n", 
+                        cons[gid].rho, prims[gid].p, v2, x1mean, x2mean
                 );
             } else {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %d\n", 
-                        cons[gid].rho, prims[gid].p, v2, x1mean, x2mean, x3mean, troubled_cells[gid]
+                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e\n", 
+                        cons[gid].rho, prims[gid].p, v2, x1mean, x2mean, x3mean
                 );
             }
         }
@@ -237,65 +237,52 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<> &p)
         troubled_data,
         this
     ]   GPU_LAMBDA (const luint gid) {
-        bool workLeftToDo = true;
-        volatile  __shared__ bool found_failure;
-
-        auto tid = get_threadId();
-        if (tid == 0) 
-            found_failure = inFailureState;
-        simbi::gpu::api::synchronize();
 
         real invdV = 1.0;
-        while (!found_failure && workLeftToDo)
-        {   
-            if (mesh_motion &&  (geometry != simbi::Geometry::CARTESIAN))
-            {
-                if constexpr(dim == 1) {
-                    const auto idx  = helpers::get_real_idx(gid, radius, active_zones);
-                    const real dV    = get_cell_volume(idx);
-                    invdV            = 1 / dV;
-                } else if constexpr(dim == 2) {
-                    const luint ii   = gid % nx;
-                    const luint jj   = gid / nx;
-                    const auto ireal = helpers::get_real_idx(ii, radius, xactive_grid);
-                    const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid); 
-                    const real dV    = get_cell_volume(ireal, jreal);
-                    invdV = 1.0 / dV;
-                } else {
-                    const luint kk  = simbi::helpers::get_height(gid, xactive_grid, yactive_grid);
-                    const luint jj  = simbi::helpers::get_row(gid, xactive_grid, yactive_grid, kk);
-                    const luint ii  = simbi::helpers::get_column(gid, xactive_grid, yactive_grid, kk);
-                    const auto ireal = helpers::get_real_idx(ii, radius, xactive_grid);
-                    const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid); 
-                    const auto kreal = helpers::get_real_idx(kk, radius, zactive_grid); 
-                    const real dV    = get_cell_volume(ireal, jreal, kreal);
-                    invdV = 1.0 / dV;
-                }
-            }
-            const real rho     = cons_data[gid].rho * invdV;
-            const real v1      = (cons_data[gid].momentum(1) / rho) * invdV;
-            const real v2      = (cons_data[gid].momentum(2) / rho) * invdV;
-            const real v3      = (cons_data[gid].momentum(3) / rho) * invdV;
-            const real rho_chi = cons_data[gid].chi * invdV;
-            const real pre     = (gamma - 1)*(
-                cons_data[gid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2 + v3 * v3)
-            );
+        if (mesh_motion && geometry != Geometry::CARTESIAN)
+        {
             if constexpr(dim == 1) {
-                prim_data[gid] = nt::Primitive<1>{rho, v1, pre, rho_chi / rho};
+                const auto idx  = helpers::get_real_idx(gid, radius, active_zones);
+                const real dV    = get_cell_volume(idx);
+                invdV            = 1 / dV;
             } else if constexpr(dim == 2) {
-                prim_data[gid] = nt::Primitive<2>{rho, v1, v2, pre, rho_chi / rho};
+                const luint ii   = gid % nx;
+                const luint jj   = gid / nx;
+                const auto ireal = helpers::get_real_idx(ii, radius, xactive_grid);
+                const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid); 
+                const real dV    = get_cell_volume(ireal, jreal);
+                invdV = 1.0 / dV;
             } else {
-                prim_data[gid] = nt::Primitive<3>{rho, v1, v2, v3, pre, rho_chi / rho};
+                const luint kk  = simbi::helpers::get_height(gid, xactive_grid, yactive_grid);
+                const luint jj  = simbi::helpers::get_row(gid, xactive_grid, yactive_grid, kk);
+                const luint ii  = simbi::helpers::get_column(gid, xactive_grid, yactive_grid, kk);
+                const auto ireal = helpers::get_real_idx(ii, radius, xactive_grid);
+                const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid); 
+                const auto kreal = helpers::get_real_idx(kk, radius, zactive_grid); 
+                const real dV    = get_cell_volume(ireal, jreal, kreal);
+                invdV = 1.0 / dV;
             }
-            workLeftToDo = false;
+        }
+        const real rho     = cons_data[gid].rho * invdV;
+        const real v1      = (cons_data[gid].momentum(1) / rho) * invdV;
+        const real v2      = (cons_data[gid].momentum(2) / rho) * invdV;
+        const real v3      = (cons_data[gid].momentum(3) / rho) * invdV;
+        const real rho_chi = cons_data[gid].chi * invdV;
+        const real pre     = (gamma - 1)*(
+            cons_data[gid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2 + v3 * v3)
+        );
+        if constexpr(dim == 1) {
+            prim_data[gid] = nt::Primitive<1>{rho, v1, pre, rho_chi / rho};
+        } else if constexpr(dim == 2) {
+            prim_data[gid] = nt::Primitive<2>{rho, v1, v2, pre, rho_chi / rho};
+        } else {
+            prim_data[gid] = nt::Primitive<3>{rho, v1, v2, v3, pre, rho_chi / rho};
+        }
 
-            if (pre < 0) {
-                troubled_data[gid] = n;
-                inFailureState = true;
-                found_failure  = true;
-                dt = INFINITY;
-            }
-            simbi::gpu::api::synchronize();
+        if (pre < 0 || std::isnan(pre)) {
+            troubled_data[gid] = 1;
+            inFailureState = true;
+            dt = INFINITY;
         }
     });
 }
@@ -1651,7 +1638,6 @@ void Newtonian<dim>::simulate(
     // Stuff for moving mesh 
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
-
     if (mesh_motion && all_outer_bounds) {
         if constexpr(dim == 1) {
             outer_zones.resize(first_order ? 1 : 2);
