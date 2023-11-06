@@ -130,12 +130,12 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     files = list(filter(bool, files))
     for file in files:
         with h5py.File(file, 'r') as hf:
-            ds  = hf.get('sim_info')
+            ds  = hf.get('sim_info').attrs
             try:
-                ndim = ds.attrs['dimensions']
+                ndim = ds['dimensions']
             except KeyError:
-                ny   = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
-                nz   = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1  
+                ny   = ds['ny'] if 'ny' in ds.keys() else 1
+                nz   = ds['nz'] if 'nz' in ds.keys() else 1  
                 ndim = 1 + (ny > 1) + (nz > 1)
             dims += [ndim]
             if not all_equal(dims):
@@ -158,37 +158,35 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
                 res = fall_back
         else:
             try:
-                res = dset.attrs[key]
+                res = dset[key]
             except KeyError:
                 try:
-                    res = dset.attrs[fall_back_key]
+                    res = dset[fall_back_key]
                 except KeyError:
                     res = fall_back
-        
-        if isinstance(res, bytes):
-            res = res.decode('utf-8')
         
         return res 
     
     setup = {}
     with h5py.File(filename, 'r') as hf: 
-        ds  = hf.get('sim_info')
+        ds  = dict(hf.get('sim_info').attrs)
+        ds.update({k: v.decode('utf-8') for k,v in ds.items() if type(v) == np.bytes_} )
         rho = hf.get('rho')[:]
         v   = [(hf.get(f'v{dim}') or hf.get(f'v'))[:] for dim in range(1,ndim + 1)]
         p   = hf.get('p')[:]         
         chi = (hf.get('chi') or np.zeros_like(rho))[:]
                 
         setup['first_order']  = try_read(ds, key='first_order', fall_back=False)
-        nx                    = ds.attrs['nx'] if 'nx' in ds.attrs.keys() else 1
-        ny                    = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
-        nz                    = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
+        nx                    = ds['nx'] if 'nx' in ds.keys() else 1
+        ny                    = ds['ny'] if 'ny' in ds.keys() else 1
+        nz                    = ds['nz'] if 'nz' in ds.keys() else 1
         
         setup['x1active']     = nx - 2 * (1 + (setup['first_order']^1)) * (nx - 2 > 0)
         setup['x2active']     = ny - 2 * (1 + (setup['first_order']^1)) * (ny - 2 > 0)
         setup['x3active']     = nz - 2 * (1 + (setup['first_order']^1)) * (nz - 2 > 0)
-        setup['time']         = ds.attrs['current_time']
-        setup['linspace']     = ds.attrs['linspace']
-        setup['ad_gamma']     = ds.attrs['adiabatic_gamma']
+        setup['time']         = ds['current_time']
+        setup['x1_cellspacing'] = 'linear' if ds['linspace'] else 'log'
+        setup['ad_gamma']     = ds['adiabatic_gamma']
         setup['x1min']        = try_read(ds, 'x1min', fall_back_key='xmin', fall_back=0.0)
         setup['x1max']        = try_read(ds, 'x1max', fall_back_key='xmax', fall_back=0.0)
         setup['x2min']        = try_read(ds, 'x2min', fall_back_key='ymin', fall_back=0.0)
@@ -204,10 +202,10 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         v   = [flatten_fully(vel.reshape(nz, ny, nx)) for vel in v]
         p   = flatten_fully(p.reshape(nz, ny, nx))
         chi = flatten_fully(chi.reshape(nz, ny, nx))
-        if 'dt' in ds.attrs:
-            setup['dt'] = ds.attrs['dt']
+        if 'dt' in ds:
+            setup['dt'] = ds['dt']
         else:
-            setup['dt'] = ds.attrs['time_step']
+            setup['dt'] = ds['time_step']
             
         npad = tuple(tuple(val) for val in [[((setup['first_order']^1) + 1), ((setup['first_order']^1) + 1)]] * ndim) 
         rho  = unpad(rho, npad)
@@ -226,7 +224,7 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         
         vsqr = np.sum(vel * vel for vel in v) # type: ignore
         if setup['regime'] == 'relativistic':
-            if ds.attrs['using_gamma_beta']:
+            if ds['using_gamma_beta']:
                 W = (1 + vsqr) ** 0.5
                 fields.update({f'v{i+1}': v[i] / W for i in range(len(v))})
                 vsqr /= W**2 
@@ -240,9 +238,16 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         #------------------------
         # Generate Mesh
         #------------------------
-        arr_gen: Union[Callable[..., Any], Callable[..., Any]]
-        arr_gen = np.linspace if setup['linspace'] else np.geomspace
-        funcs  = [arr_gen, np.linspace, np.linspace]
+        funcs = []
+        for x in ['x1', 'x2', 'x3']:
+            if f'{x}_cellspacing' in ds:
+                setup[f'{x}_cellspacing'] = ds[f'{x}_cellspacing']
+                funcs += [np.linspace if ds[f'{x}_cellspacing'] == 'linear' else np.geomspace]
+            else:
+                if x == 'x1':
+                    funcs += [np.linspace if ds['linspace'] else np.geomspace]
+                else:
+                    funcs += [np.linspace]
         mesh = { 
             f'x{i+1}': 
                 try_read(hf, f'x{i+1}',
@@ -255,7 +260,7 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         }
         
         if setup['x1max'] > mesh['x1'][-1]:
-            mesh['x1'] = arr_gen(setup['x1min'], setup['x1max'], setup['x1active'])
+            mesh['x1'] = funcs[0](setup['x1min'], setup['x1max'], setup['x1active'])
     
     return fields, setup, mesh 
 

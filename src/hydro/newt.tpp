@@ -1709,6 +1709,7 @@ void Newtonian<dim>::simulate(
         setup.x3min = x3[0];
         setup.x3    = x3;
     }
+
     setup.nx                  = nx;
     setup.ny                  = ny;
     setup.nz                  = nz;

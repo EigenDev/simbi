@@ -525,7 +525,6 @@ class Hydro:
             solution (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
-        
         if x1_cellspacing not in available_cellspacings:
             raise ValueError(f"cell spacing for x1 should be one of: {available_cellspacings}")
         

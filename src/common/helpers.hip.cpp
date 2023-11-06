@@ -387,15 +387,15 @@ namespace simbi{
             att.close();
 
             att = sim_info.createAttribute("x1_cellspacing", dtype_str, att_space);
-            att.write(dtype_str, &setup.x1_cellspacing);
+            att.write(dtype_str, setup.x1_cellspacing.c_str());
             att.close();
 
             att = sim_info.createAttribute("x2_cellspacing", dtype_str, att_space);
-            att.write(dtype_str, &setup.x2_cellspacing);
+            att.write(dtype_str, setup.x2_cellspacing.c_str());
             att.close();
 
             att = sim_info.createAttribute("x3_cellspacing", dtype_str, att_space);
-            att.write(dtype_str, &setup.x3_cellspacing);
+            att.write(dtype_str, setup.x3_cellspacing.c_str());
             att.close();
 
             sim_info.close();

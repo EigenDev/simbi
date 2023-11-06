@@ -346,10 +346,9 @@ class Visualizer:
         if self.log:
             ax.set_xscale('log')
             ax.set_yscale('log')
-        elif not setup['linspace']:
+        elif setup['x1_cellspacing'] == 'log':
             ax.set_xscale('log')
-            
-        # ax.set_xscale('log')
+
         if len(self.fields) == 1:
             ax.set_ylabel(field_str)
         if self.legend:
