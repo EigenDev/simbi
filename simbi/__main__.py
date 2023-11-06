@@ -218,7 +218,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         type=float)
     overridable.add_argument(
         '--plm-theta',
-        help='piecewise linear consturction parameter',
+        help='piecewise linear construction parameter',
         default=None,
         type=float)
     overridable.add_argument(
@@ -289,7 +289,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
     global_args.add_argument(
         '--nthreads',
         '-p',
-        help="number of omp threads to run at",
+        help="number of omp threads to run with",
         type=max_thread_count,
         default=None)
     global_args.add_argument(
@@ -440,7 +440,9 @@ def configure_state(
         kwargs[idx]['plm_theta'] = config.plm_theta
         kwargs[idx]['dlogt'] = config.dlogt
         kwargs[idx]['data_directory'] = config.data_directory
-        kwargs[idx]['linspace'] = config.linspace
+        kwargs[idx]['x1_cellspacing'] = config.x1_cellspacing
+        kwargs[idx]['x2_cellspacing'] = config.x2_cellspacing
+        kwargs[idx]['x3_cellspacing'] = config.x3_cellspacing
         kwargs[idx]['sources'] = config.sources
         kwargs[idx]['gsources'] = config.gravity_sources
         kwargs[idx]['passive_scalars'] = config.passive_scalars
