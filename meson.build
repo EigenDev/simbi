@@ -67,6 +67,15 @@ max_errors = '-ferror-limit=5'
 add_project_arguments([max_errors], language: 'cpp')
 endif
 
+# if CC, CXX environment variables explicitly set, get their values
+# this is useful because cuda lags behind on tested gcc versions
+cc = run_command(py3, '-c', 'import os; print(os.environ["CC"])')
+if cc.returncode() == 0
+  cc_var = cc.stdout()
+else 
+  cc_var = host_compiler_name
+endif
+
 ##################################################################
 # GPU CHECK
 ##################################################################
@@ -95,7 +104,7 @@ if get_option('gpu_compilation').enabled()
                 '-DGPU_PLATFORM_NVIDIA=1',
                 '-std=c++17',
                 f'-arch=sm_@gpu_arch@',
-                f'-ccbin=@host_compiler_name@',
+                f'-ccbin=@cc_var@',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
