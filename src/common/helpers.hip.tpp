@@ -1154,13 +1154,11 @@ namespace simbi{
         template<const unsigned num, const char separator>
         void separate(std::string & input)
         {
-            for ( auto it = input.rbegin(); (num+0) <= std::distance(it, input.rend()); ++it )
+            for ( auto it = input.rbegin() + 1; (num+0) <= std::distance(it, input.rend()); ++it)
             {
-                std::advance(it,num);
+                std::advance(it, num - 1);
                 it = std::make_reverse_iterator(input.insert(it.base(),separator));
-                std::cout << std::distance(it, input.rend()) << "\n";
             }
-            std::cin.get();
         }
 
         template<typename T>
