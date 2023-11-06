@@ -238,7 +238,7 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         #------------------------
         # Generate Mesh
         #------------------------
-        funcs = []
+        funcs: list[Any] = [] 
         for x in ['x1', 'x2', 'x3']:
             if f'{x}_cellspacing' in ds:
                 setup[f'{x}_cellspacing'] = ds[f'{x}_cellspacing']
