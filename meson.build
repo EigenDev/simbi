@@ -69,10 +69,8 @@ endif
 
 # if CC, CXX environment variables explicitly set, get their values
 # this is useful because cuda lags behind on tested gcc versions
-cc = run_command(py3, '-c', 'import os; print(os.environ["CC"])')
-if cc.returncode() == 0
-  cc_var = cc.stdout()
-else 
+cc_var = run_command(py3, '-c', 'import os; print(os.environ["CC"])', check: true).stdout().strip()
+if cc_var == ''
   cc_var = host_compiler_name
 endif
 
