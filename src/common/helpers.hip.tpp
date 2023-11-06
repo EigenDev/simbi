@@ -142,10 +142,9 @@ namespace simbi{
                     tchunk_order_of_mag += 1;
                 }
                 tnow = create_step_str(step, tchunk_order_of_mag);
-            } else {
+            } else if (t_interval != INFINITY) {
                 tnow = create_step_str(t_interval, tchunk_order_of_mag);
-            }
-            if (t_interval == INFINITY) {
+            } else {
                 tnow = "interrupted";
             }
             const auto filename = string_format("%d.chkpt." + tnow + ".h5", chkpt_zone_label);
