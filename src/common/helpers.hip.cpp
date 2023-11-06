@@ -60,33 +60,8 @@ namespace simbi{
             time_string.insert(0, pad_zeros);
             separate<3, '_'>(time_string);
             return time_string;
-            // int a, b;
-
-            // std::string s = std::to_string(t_interval_int);
-
-            // std::cout << tchunk << "\n";
-            // std::cout << t_interval_int << "\n";
-            // std::cin.get();
-            // // Pad the file string if size less than tchunk_size
-            // if (s.size() < tchunk.size()) {
-
-            //     int num_zeros = tchunk.size() - s.size();
-            //     std::string pad_zeros = std::string(num_zeros, '0');
-            //     s.insert(0, pad_zeros);
-            // }
-
-            // // insert underscore to signify decimal placement
-            // s.insert(s.length() - 3, "_");
-
-            // int label_size = tchunk.size();
-            // for (int i = 0; i < label_size; i++){
-            //     a = tchunk[i] - '0';
-            //     b = s[i] - '0';
-            //     s[i] = a + b + '0';
-            // }
-
-            // return s;
         }
+        
         void write_hdf5(
             const std::string data_directory, 
             const std::string filename, 
