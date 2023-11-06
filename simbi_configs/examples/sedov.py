@@ -57,8 +57,8 @@ class SedovTaylor(BaseConfig):
         return ((self.rinit.value, self.rend.value), (self.theta_min, self.theta_max))
 
     @simbi_property
-    def linspace(self) -> bool:
-        return False
+    def x1_cellspacing(self) -> str:
+        return "log"
     
     @simbi_property
     def coord_system(self) -> str:

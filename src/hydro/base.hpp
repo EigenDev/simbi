@@ -17,6 +17,20 @@
 #include "util/managed.hpp"          // for Managed
 #include "util/ndarray.hpp"          // for ndarray
 
+
+std::unordered_map<std::string, simbi::Cellspacing> const str2cell = { 
+    {"log",   simbi::Cellspacing::LOGSPACE}, 
+    {"linear",simbi::Cellspacing::LINSPACE}
+    // {"log-linear",Cellspacing},
+    // {"linear-log",Cellspacing},
+};
+
+std::unordered_map<simbi::Cellspacing, std::string> const cell2str = { 
+    {simbi::Cellspacing::LOGSPACE, "log"}, 
+    {simbi::Cellspacing::LINSPACE, "linear"}
+    // {"log-linear",Cellspacing},
+    // {"linear-log",Cellspacing},
+};
 namespace simbi
 {
     struct HydroBase : public Managed<managed_memory>
@@ -250,11 +264,13 @@ namespace simbi
             tstart(init_conditions.tstart),
             engine_duration(init_conditions.engine_duration),
             first_order(init_conditions.first_order),
-            linspace(init_conditions.linspace),
             quirk_smoothing(init_conditions.quirk_smoothing),
             constant_sources(init_conditions.constant_sources),
             total_zones(nx * ny  * nz),
             boundary_conditions(init_conditions.boundary_conditions),
+            x1cell_spacing(str2cell.at(init_conditions.x1_cellspacing)),
+            x2cell_spacing(str2cell.at(init_conditions.x2_cellspacing)),
+            x3cell_spacing(str2cell.at(init_conditions.x3_cellspacing)),
             data_directory(init_conditions.data_directory),
             boundary_sources(init_conditions.boundary_sources),
             object_pos(init_conditions.object_cells)
@@ -279,7 +295,6 @@ namespace simbi
             this->zactive_grid      = (nz == 1) ? 1 : (init_conditions.first_order) ? nz - 2: nz - 4;
             this->idx_active          = (init_conditions.first_order) ? 1 : 2;
             this->active_zones        = xactive_grid * yactive_grid * zactive_grid;
-            this->x1cell_spacing      = (init_conditions.linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
             this->dlogx1              = std::log10(x1[xactive_grid - 1]/ x1[0]) / (xactive_grid - 1);
             this->dx1                 = (x1[xactive_grid - 1] - x1[0]) / (xactive_grid - 1);
             this->invdx1              = 1 / dx1;
@@ -298,8 +313,6 @@ namespace simbi
                 this->dx2              = (x2max - x2min) / (yactive_grid - 1);
                 this->invdx2           = 1 / dx2;
                 this->invdx3           = 1 / dx3;
-                this->x3cell_spacing   = simbi::Cellspacing::LINSPACE;
-                this->x2cell_spacing   = simbi::Cellspacing::LINSPACE;
                 this->m2_source   = init_conditions.sources[2];
                 this->m3_source   = init_conditions.sources[3];
                 this->energy_source  = init_conditions.sources[4];
@@ -310,7 +323,6 @@ namespace simbi
             } else if ((ny > 1) && (nz == 1)) { // 2D Check
                 this->x2min            = x2[0];
                 this->x2max            = x2[yactive_grid - 1];
-                this->x2cell_spacing   = simbi::Cellspacing::LINSPACE;
                 this->dx2    = (x2max - x2min) / (yactive_grid - 1);
                 this->invdx2 = 1 / dx2;
                 this->m2_source   = init_conditions.sources[2];

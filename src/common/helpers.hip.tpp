@@ -3,11 +3,6 @@
 namespace simbi{
     namespace helpers
     {
-        template <typename T, size_t N>
-        constexpr size_t array_size(T (&)[N]) {
-            return N;
-        }
-
         template<typename ... Args>
         std::string string_format( const std::string& format, Args ... args )
         {
@@ -130,11 +125,9 @@ namespace simbi{
             PrimData prods;
             static auto step                = sim_state_host.init_chkpt_idx;
             static auto tbefore             = sim_state_host.tstart;
-            static std::string tchunk       = "000000";
             static lint tchunk_order_of_mag = 2;
             const auto time_order_of_mag    = std::floor(std::log10(t));
             if (time_order_of_mag > tchunk_order_of_mag) {
-                tchunk.insert(0, "0");
                 tchunk_order_of_mag += 1;
             }
 
@@ -146,12 +139,11 @@ namespace simbi{
             {
                 const auto time_order_of_mag = std::floor(std::log10(step));
                 if (time_order_of_mag > tchunk_order_of_mag) {
-                    tchunk.insert(0, "0");
                     tchunk_order_of_mag += 1;
                 }
-                tnow = create_step_str(step, tchunk);
+                tnow = create_step_str(step, tchunk_order_of_mag);
             } else {
-                tnow = create_step_str(t_interval, tchunk);
+                tnow = create_step_str(t_interval, tchunk_order_of_mag);
             }
             if (t_interval == INFINITY) {
                 tnow = "interrupted";
@@ -1151,6 +1143,33 @@ namespace simbi{
                 self->dt = atomicMinReal(dt_min, min);
             }
             #endif 
+        };
+        
+        /***
+         * takes a string and adds a separator character every n-th steps 
+         * through the string
+         * @param input input string
+         * @return none
+        */
+        template<const unsigned num, const char separator>
+        void separate(std::string & input)
+        {
+            for ( auto it = input.rbegin(); (num+0) <= std::distance(it, input.rend()); ++it )
+            {
+                std::advance(it,num);
+                it = std::make_reverse_iterator(input.insert(it.base(),separator));
+                std::cout << std::distance(it, input.rend()) << "\n";
+            }
+            std::cin.get();
+        }
+
+        template<typename T>
+        int floor_or_ceil(T val) {
+            constexpr T tol = 1e-16;
+            if (std::abs(val) < tol) {
+                return 0;
+            }
+            return std::floor(val);
         };
     } // namespace helpers
 }

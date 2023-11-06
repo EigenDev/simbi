@@ -1715,7 +1715,9 @@ void Newtonian<dim>::simulate(
     setup.xactive_zones       = xactive_grid;
     setup.yactive_zones       = yactive_grid;
     setup.zactive_zones       = zactive_grid;
-    setup.linspace            = linspace;
+    setup.x1_cellspacing      = cell2str.at(x1cell_spacing);
+    setup.x2_cellspacing      = cell2str.at(x2cell_spacing);
+    setup.x3_cellspacing      = cell2str.at(x3cell_spacing);
     setup.ad_gamma            = gamma;
     setup.first_order         = first_order;
     setup.coord_system        = coord_system;

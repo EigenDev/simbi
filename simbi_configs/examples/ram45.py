@@ -18,8 +18,8 @@ class Ram45(BaseConfig):
         return (0.0, 1.0)
 
     @simbi_property
-    def linspace(self) -> bool:
-        return True
+    def x1_cellspacing(self) -> str:
+        return "linear"
     
     @simbi_property
     def coord_system(self) -> str:

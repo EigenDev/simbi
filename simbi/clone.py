@@ -63,8 +63,8 @@ class {setup_name}(BaseConfig):
         raise NotImplementedError()
 
     @simbi_property
-    def linspace(self) -> bool:
-        return False
+    def x1_cellspacing(self) -> str:
+        return "linear"
 
     @simbi_property
     def sources(

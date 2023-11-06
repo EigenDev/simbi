@@ -136,8 +136,16 @@ class BaseConfig(metaclass=abc.ABCMeta):
         raise NotImplementedError(err_message('gamma'))
     
     @simbi_property
-    def linspace(self) -> bool:
-        return False
+    def x1_cellspacing(self) -> str:
+        return "linear"
+    
+    @simbi_property
+    def x2_cellspacing(self) -> str:
+        return "linear"
+    
+    @simbi_property
+    def x3_cellspacing(self) -> str:
+        return "linear"
     
     @simbi_property
     def sources(self) -> Optional[Union[Sequence[NDArray[numpy_float]], NDArray[numpy_float]]]:

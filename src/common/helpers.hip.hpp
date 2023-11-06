@@ -147,8 +147,6 @@ namespace simbi
         //  HELPER-TEMPLATES
         //---------------------------------------------------------------------------------------------------------
         //-------------Define Function Templates-------------------------
-        template <typename T, size_t N>
-        constexpr size_t array_size(T (&)[N]);
 
         template<typename T, typename U>
         typename std::enable_if<is_3D_primitive<U>::value>::type
@@ -198,7 +196,7 @@ namespace simbi
         //  HELPER-METHODS
         //---------------------------------------------------------------------------------------------------------
         //----------------Define Methods-------------------------
-        std::string create_step_str(real t_interval, std::string &tnow);
+        std::string create_step_str(real t_interval, int max_order_of_mag);
         void write_hdf5(
             const std::string data_directory, 
             const std::string filename, 
@@ -484,6 +482,12 @@ namespace simbi
         }
         #endif 
         
+        template<const unsigned num, const char separator>
+        void separate(std::string & input);
+
+        template<typename T>
+        int floor_or_ceil(T val);
+
     } // namespace helpers
 } // end simbi
 

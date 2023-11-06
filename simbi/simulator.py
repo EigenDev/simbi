@@ -21,10 +21,18 @@ available_coord_systems = [
     'planar_cylindrical',
     'axis_cylindrical']
 available_boundary_conditions = ['outflow', 'reflecting', 'inflow', 'periodic']
+available_cellspacings = [
+    'linear', 
+    'log',
+    # TODO: implement soon 'log-linear',
+    # TODO: implement soon 'linear-log' 
+]
 
 
 class Hydro:
-    linspace: BoolOrNone = None
+    x1_cellspacing: StrOrNone = None
+    x2_cellspacing: StrOrNone = None
+    x3_cellspacing: StrOrNone = None
     sources: SequenceOrNone = None
     passive_scalars: SequenceOrNone = None
     scale_factor: CallableOrNone = None
@@ -150,7 +158,7 @@ class Hydro:
                 # partition the grid based on user-defined partition coordinates
                 partition_inds = list(product(*[permutations(x) for x in pieces]))
                 partition_inds = [tuple([slice(*y) for y in x]) for x in partition_inds]
-                partitions = [self.u[(slice(None), *sector)] for sector in partition_inds]
+                partitions = [self.u[(..., *sector)] for sector in partition_inds]
                 
                 for idx, part in enumerate(partitions):
                     state = initial_state[idx]
@@ -373,34 +381,53 @@ class Hydro:
                 view[slices[boundary]] = source[source_transform]
         return boundary_sources
 
-    def _generate_the_grid(self, linspace: bool) -> None:
-        genspace: Callable[..., Any] = np.linspace
-        if not linspace:
-            genspace = np.geomspace
+    def _generate_the_grid(
+        self, 
+        x1_cellspacing: str,
+        x2_cellspacing: str,
+        x3_cellspacing: str) -> None:
+        
+        x1_func: Callable[...,Any]
+        if x1_cellspacing == 'log':
+            x1_func = np.geomspace
+        elif x1_cellspacing == 'linear':
+            x1_func = np.linspace 
+        
+        x2_func: Callable[...,Any]
+        if x2_cellspacing == 'log':
+            x2_func = np.geomspace
+        elif x2_cellspacing == 'linear':
+            x2_func = np.linspace
+        
+        x3_func: Callable[...,Any]
+        if x3_cellspacing == 'log':
+            x3_func = np.geomspace
+        elif x3_cellspacing == 'linear':
+            x3_func = np.linspace
 
         if self.dimensionality == 1:
             if self.x1 is None:
-                self.x1 =genspace(*self.geometry[:2], *self.resolution)
+                self.x1 = x1_func(*self.geometry[:2], *self.resolution)
         elif self.dimensionality == 2:
             if self.x1 is None:
-                self.x1 = genspace(
+                self.x1 = x1_func(
                     self.geometry[0][0],
                     self.geometry[0][1],
                     self.resolution[0])
             if self.x2 is None:
-                self.x2 = np.linspace(
+                self.x2 = x2_func(
                 self.geometry[1][0], self.geometry[1][1], self.resolution[1])
         else:
             if self.x1 is None:
-                self.x1 = genspace(
+                self.x1 = x1_func(
                     self.geometry[0][0],
                     self.geometry[0][1],
                     self.resolution[0])
             if self.x2 is None:
-                self.x2 = np.linspace(
+                self.x2 = x2_func(
                 self.geometry[1][0], self.geometry[1][1], self.resolution[1])
             if self.x3 is None:
-                self.x3 = np.linspace(
+                self.x3 = x3_func(
                 self.geometry[2][0], self.geometry[2][1], self.resolution[2])
 
         self.x1 = np.asanyarray(self.x1)
@@ -439,7 +466,9 @@ class Hydro:
             dlogt: float = 0.0,
             plm_theta: float = 1.5,
             first_order: bool = True,
-            linspace: bool = True,
+            x1_cellspacing: str = 'linear',
+            x2_cellspacing: str = 'linear',
+            x3_cellspacing: str = 'linear',
             cfl: float = 0.4,
             sources: Optional[NDArray[Any]] = None,
             gsources: Optional[NDArray[Any]] = None,
@@ -469,7 +498,9 @@ class Hydro:
             dlogt       (float):         The desired logarithmic spacing in checkpoints
             plm_theta   (float):         The Piecewise Linear Reconstructed slope parameter
             first_order (boolean):       First order RK1 or the RK2 PLM.
-            linspace    (boolean):       Prompts a linearly spaced mesh or log spaced if False
+            x1_cellspacing    (str):     Option for a linear or log-spaced mesh on x1 
+            x2_cellspacing    (str):     Option for a linear or log-spaced mesh on x2 
+            x3_cellspacing    (str):     Option for a linear or log-spaced mesh on x3 
             cfl         (float):         The cfl number for min adaptive timestep
             sources     (array_like):    The source terms for the simulations
             passive_scalars  (array_like):    The array of passive passive_scalars
@@ -494,6 +525,16 @@ class Hydro:
             solution (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
+        
+        if x1_cellspacing not in available_cellspacings:
+            raise ValueError(f"cell spacing for x1 should be one of: {available_cellspacings}")
+        
+        if x2_cellspacing not in available_cellspacings:
+            raise ValueError(f"cell spacing for x2 should be one of: {available_cellspacings}")
+        
+        if x3_cellspacing not in available_cellspacings:
+            raise ValueError(f"cell spacing for x3 should be one of: {available_cellspacings}")
+        
         self.u = np.asanyarray(self.u)
         self.start_time: float = 0.0
         self.chkpt_idx: int = 0
@@ -503,7 +544,7 @@ class Hydro:
 
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
-        self._generate_the_grid(linspace)
+        self._generate_the_grid(x1_cellspacing, x2_cellspacing, x3_cellspacing)
 
         mesh_motion = scale_factor_derivative(tstart) / scale_factor(tstart) != 0
         volume_factor: Union[float, NDArray[Any]] = 1.0
@@ -694,7 +735,9 @@ class Hydro:
             'data_directory': cython_data_directory,
             'boundary_conditions': cython_boundary_conditions,
             'first_order': first_order,
-            'linspace': linspace,
+            'x1_cellspacing': x1_cellspacing.encode('utf-8'),
+            'x2_cellspacing': x2_cellspacing.encode('utf-8'),
+            'x3_cellspacing': x3_cellspacing.encode('utf-8'),
             'solver': cython_solver,
             'constant_sources': constant_sources,
             'boundary_sources': boundary_sources,
@@ -742,7 +785,6 @@ class Hydro:
             adot = scale_factor_derivative,
             **lambdas
         )
-            
         # self.solution = state.simulate(
         #     sources=sources,
         #     tstart=self.start_time,
@@ -755,7 +797,7 @@ class Hydro:
         #     data_directory=cython_data_directory,
         #     boundary_conditions=cython_boundary_conditions,
         #     first_order=first_order,
-        #     linspace=linspace,
+        #     linspace=x1_cellspacing == 'linear',
         #     solver=cython_solver,
         #     constant_sources=constant_sources,
         #     boundary_sources=boundary_sources,

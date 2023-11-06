@@ -47,35 +47,45 @@ namespace simbi{
         //====================================================================================================
         //                                  WRITE DATA TO FILE
         //====================================================================================================
-        std::string create_step_str(real t_interval, std::string &tnow){
-
+        std::string create_step_str(real t_interval, int max_order_of_mag){
+            if (t_interval == 0) {
+                return "000_000";
+            }
+            const int time_order_of_mag = floor_or_ceil(std::log10(t_interval));
+            const int num_zeros = max_order_of_mag - time_order_of_mag;
             // Convert the time interval into an int with 2 decimal displacements
-            int t_interval_int = round( 1.e3 * t_interval );
-            int a, b;
+            const int t_interval_int = round( 1e3 * t_interval );
+            auto time_string = std::to_string(t_interval_int);
+            std::string pad_zeros = std::string(num_zeros, '0');
+            time_string.insert(0, pad_zeros);
+            separate<3, '_'>(time_string);
+            return time_string;
+            // int a, b;
 
-            std::string s = std::to_string(t_interval_int);
+            // std::string s = std::to_string(t_interval_int);
 
-            // Pad the file string if size less than tnow_size
-            if (s.size() < tnow.size()) {
+            // std::cout << tchunk << "\n";
+            // std::cout << t_interval_int << "\n";
+            // std::cin.get();
+            // // Pad the file string if size less than tchunk_size
+            // if (s.size() < tchunk.size()) {
 
-                int num_zeros = tnow.size() - s.size();
-                std::string pad_zeros = std::string(num_zeros, '0');
-                s.insert(0, pad_zeros);
-            }
+            //     int num_zeros = tchunk.size() - s.size();
+            //     std::string pad_zeros = std::string(num_zeros, '0');
+            //     s.insert(0, pad_zeros);
+            // }
 
-            // insert underscore to signify decimal placement
-            s.insert(s.length() - 3, "_");
+            // // insert underscore to signify decimal placement
+            // s.insert(s.length() - 3, "_");
 
-            int label_size = tnow.size();
-            for (int i = 0; i < label_size; i++){
-                a = tnow[i] - '0';
-                b = s[i] - '0';
-                s[i] = a + b + '0';
-            }
+            // int label_size = tchunk.size();
+            // for (int i = 0; i < label_size; i++){
+            //     a = tchunk[i] - '0';
+            //     b = s[i] - '0';
+            //     s[i] = a + b + '0';
+            // }
 
-            return s;
-
-
+            // return s;
         }
         void write_hdf5(
             const std::string data_directory, 
@@ -374,6 +384,18 @@ namespace simbi{
 
             att = sim_info.createAttribute("dimensions", int_type, att_space);
             att.write(int_type, &setup.dimensions);
+            att.close();
+
+            att = sim_info.createAttribute("x1_cellspacing", dtype_str, att_space);
+            att.write(dtype_str, &setup.x1_cellspacing);
+            att.close();
+
+            att = sim_info.createAttribute("x2_cellspacing", dtype_str, att_space);
+            att.write(dtype_str, &setup.x2_cellspacing);
+            att.close();
+
+            att = sim_info.createAttribute("x3_cellspacing", dtype_str, att_space);
+            att.write(dtype_str, &setup.x3_cellspacing);
             att.close();
 
             sim_info.close();
