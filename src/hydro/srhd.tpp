@@ -43,7 +43,7 @@ template<int dim>
 GPU_CALLABLE_MEMBER
 constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
 {
-    switch (x1cell_spacing)
+    switch (x1_cell_spacing)
     {
     case simbi::Cellspacing::LINSPACE:
         {
@@ -55,11 +55,11 @@ constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
         }
     default:
         {
-            const real rl = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+            const real x1l = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
             if (side == 0) {
-                return rl;
+                return x1l;
             }
-            return helpers::my_min<real>(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+            return helpers::my_min<real>(x1l * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
         }
     }
 }
@@ -69,23 +69,50 @@ template<int dim>
 GPU_CALLABLE_MEMBER
 constexpr real SRHD<dim>::get_x2face(const lint ii, const int side) const
 {
-    const real x2l = helpers::my_max<real>(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
-    if (side == 0) {
-        return x2l;
-    } 
-    return helpers::my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+    switch (x2_cell_spacing)
+    {
+    case simbi::Cellspacing::LINSPACE:
+        {
+            const real x2l = helpers::my_max<real>(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
+            if (side == 0) {
+                return x2l;
+            }
+            return helpers::my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+        }
+    default:
+        {
+            const real x2l = helpers::my_max<real>(x2min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx2),  x2min);
+            if (side == 0) {
+                return x2l;
+            }
+            return helpers::my_min<real>(x2l * std::pow(10, dlogx2 * (ii == 0 ? 0.5 : 1.0)), x2max);
+        }
+    }
 }
 
 template<int dim>
 GPU_CALLABLE_MEMBER
 constexpr real SRHD<dim>::get_x3face(const lint ii, const int side) const
 {
-
-    const real x3l = helpers::my_max<real>(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
-    if (side == 0) {
-        return x3l;
-    } 
-    return helpers::my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
+    switch (x3_cell_spacing)
+    {
+    case simbi::Cellspacing::LINSPACE:
+        {
+            const real x3l = helpers::my_max<real>(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
+            if (side == 0) {
+                return x3l;
+            }
+            return helpers::my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
+        }
+    default:
+        {
+            const real x3l = helpers::my_max<real>(x3min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx3),  x3min);
+            if (side == 0) {
+                return x3l;
+            }
+            return helpers::my_min<real>(x3l * std::pow(10, dlogx3 * (ii == 0 ? 0.5 : 1.0)), x3max);
+        }
+    }
 }
 
 template<int dim>
@@ -189,9 +216,9 @@ void SRHD<dim>::emit_troubled_cells() {
             const real x2r    = get_x2face(jreal, 1);
             const real x3l    = get_x3face(kreal, 0);
             const real x3r    = get_x3face(kreal, 1);
-            const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
-            const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
-            const real x3mean = helpers::calc_any_mean(x3l, x3r, x3cell_spacing);
+            const real x1mean = helpers::calc_any_mean(x1l, x1r, x1_cell_spacing);
+            const real x2mean = helpers::calc_any_mean(x2l, x2r, x2_cell_spacing);
+            const real x3mean = helpers::calc_any_mean(x3l, x3r, x3_cell_spacing);
             const auto s1 = cons[gid].momentum(1);
             const auto s2 = cons[gid].momentum(2);
             const auto s3 = cons[gid].momentum(3);
@@ -239,7 +266,6 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
         troubled_data,
         this
     ] GPU_LAMBDA (luint gid){
-        real eps, pre, v2, et, c2, h, g, f, W, rho;
         bool workLeftToDo = true;
         volatile  __shared__ bool found_failure;
 
@@ -251,7 +277,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
         real invdV = 1.0;
         while (!found_failure && workLeftToDo)
         {
-            if (mesh_motion &&  (geometry != simbi::Geometry::CARTESIAN))
+            if (mesh_motion && (geometry != simbi::Geometry::CARTESIAN))
             {
                 if constexpr(dim == 1) {
                     const auto idx = helpers::get_real_idx(gid, radius, active_zones);
@@ -263,7 +289,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
                     const auto ireal = helpers::get_real_idx(ii, radius, xactive_grid);
                     const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid); 
                     const real dV    = get_cell_volume(ireal, jreal);
-                    invdV = 1.0 / dV;
+                    invdV = 1 / dV;
                 } else {
                     const luint kk  = simbi::helpers::get_height(gid, xactive_grid, yactive_grid);
                     const luint jj  = simbi::helpers::get_row(gid, xactive_grid, yactive_grid, kk);
@@ -272,7 +298,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
                     const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid); 
                     const auto kreal = helpers::get_real_idx(kk, radius, zactive_grid); 
                     const real dV    = get_cell_volume(ireal, jreal, kreal);
-                    invdV = 1.0 / dV;
+                    invdV = 1 / dV;
                 }
             }
             
@@ -284,56 +310,68 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             const real Dchi = cons_data[gid].chi * invdV; 
             const real S    = std::sqrt(S1 * S1 + S2 * S2 + S3 * S3);
 
+            // Perform modified Newton Raphson based on
+            // https://www.sciencedirect.com/science/article/pii/S0893965913002930
+            // so far, the convergence rate is the same, but perhaps I need a slight tweak
+
+            // compute f(x_0)
+            // f = helpers::newton_f(gamma, tau, D, S, peq);
+            int iter = 0;
             real peq = press_data[gid];
-            luint iter  = 0;
             const real tol = D * tol_scale;
+            real f, g;
             do
             {
-                pre = peq;
-                et  = tau + D + pre;
-                v2  = S * S / (et * et);
-                W   = 1 / std::sqrt(1 - v2);
-                rho = D / W;
-                eps = (tau + (1 - W) * D + (1 - W * W) * pre) / (D * W);
+                // compute x_[k+1]
+                f = helpers::newton_f(gamma, tau, D, S, peq);
+                g = helpers::newton_g(gamma, tau, D, S, peq);
+                peq  -= f / g;
 
-                h  = 1 + eps + pre / rho;
-                c2 = gamma * pre / (h * rho);
+                // compute x*_k
+                // f     = helpers::newton_f(gamma, tau, D, S, peq);
+                // pstar = peq - f / g;
 
-                g = c2 * v2 - 1;
-                f = (gamma - 1) * rho * eps - pre;
-
-                peq = pre - f / g;
-                iter++;
                 if (iter >= MAX_ITER || std::isnan(peq))
                 {
                     troubled_data[gid] = iter;
-                    found_failure  = true;
-                    inFailureState = true;
-                    dt             = INFINITY;
+                    dt                = INFINITY;
+                    inFailureState    = true;
+                    found_failure     = true;
                     break;
                 }
+                iter++;
 
-            } while (std::abs(peq - pre) >= tol);
+            } while (std::abs(f / g) >= tol);
 
             const real inv_et = 1 / (tau + D + peq); 
             const real v1 = S1 * inv_et;
-            const real v2 = S2 * inv_et;
-            const real v3 = S3 * inv_et;
             press_data[gid] = peq;
             #if FOUR_VELOCITY
                 if constexpr(dim == 1) {
+                    const real W = 1 / std::sqrt(1 - v1 * v1);
                     prim_data[gid] = sr::Primitive<1>{D/ W, v1 * W, peq, Dchi / D};
                 } else if constexpr(dim == 2) {
+                    const real v2 = S2 * inv_et;
+                    const real W = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
                     prim_data[gid] = sr::Primitive<2>{D/ W, v1 * W, v2 * W, peq, Dchi / D};
                 } else {
+                    const real v2 = S2 * inv_et;
+                    const real v3 = S3 * inv_et;
+                    const real W = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
                     prim_data[gid] = sr::Primitive<3>{D/ W, v1 * W, v2 * W, v3 * W, peq, Dchi / D};
                 }
             #else
                 if constexpr(dim == 1) {
+                    const real W = 1 / std::sqrt(1 - (v1 * v1));
                     prim_data[gid] = sr::Primitive<1>{D/ W, v1, peq, Dchi / D};
                 } else if constexpr(dim == 2) {
+                    const real v2 = S2 * inv_et;
+                    const real W = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
                     prim_data[gid] = sr::Primitive<2>{D/ W, v1, v2, peq, Dchi / D};
                 } else {
+                    const real v2 = S2 * inv_et;
+                    const real v3 = S3 * inv_et;
+                    const real W = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
                     prim_data[gid] = sr::Primitive<3>{D/ W, v1, v2, v3, peq, Dchi / D};
                 }
             #endif
@@ -1968,9 +2006,9 @@ void SRHD<dim>::simulate(
     setup.xactive_zones       = xactive_grid;
     setup.yactive_zones       = yactive_grid;
     setup.zactive_zones       = zactive_grid;
-    setup.x1_cellspacing      = cell2str.at(x1cell_spacing);
-    setup.x2_cellspacing      = cell2str.at(x2cell_spacing);
-    setup.x3_cellspacing      = cell2str.at(x3cell_spacing);
+    setup.x1_cell_spacing      = cell2str.at(x1_cell_spacing);
+    setup.x2_cell_spacing      = cell2str.at(x2_cell_spacing);
+    setup.x3_cell_spacing      = cell2str.at(x3_cell_spacing);
     setup.ad_gamma            = gamma;
     setup.first_order         = first_order;
     setup.coord_system        = coord_system;
@@ -2089,31 +2127,31 @@ void SRHD<dim>::simulate(
         if (inFailureState){
             return;
         }
-        advance(activeP, xstride, ystride);
+        // advance(activeP, xstride, ystride);
         cons2prim(fullP);
-        if constexpr(dim == 1) {
-            helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
-        } else if constexpr(dim == 2) {
-            helpers::config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
-        } else {
-            helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
-        }
+        // if constexpr(dim == 1) {
+        //     helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
+        // } else if constexpr(dim == 2) {
+        //     helpers::config_ghosts2D(fullP, cons.data(), nx, ny, first_order, geometry, bcs.data(), outer_zones.data(), inflow_zones.data(), half_sphere);
+        // } else {
+        //     helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
+        // }
 
-        if constexpr(BuildPlatform == Platform::GPU) {
-            adapt_dt(activeP);
-        } else {
-            adapt_dt();
-        }
-        time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
-        t += step * dt;
-        if (mesh_motion){
-            // update x1 endpoints  
-            const real vmin = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
-            const real vmax = (geometry == simbi::Geometry::SPHERICAL) ? x1max * hubble_param : hubble_param;
-            x1max += step * dt * vmax;
-            x1min += step * dt * vmin;
-            hubble_param = adot(t) / a(t);
-        }
+        // if constexpr(BuildPlatform == Platform::GPU) {
+        //     adapt_dt(activeP);
+        // } else {
+        //     adapt_dt();
+        // }
+        // time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
+        // t += step * dt;
+        // if (mesh_motion){
+        //     // update x1 endpoints  
+        //     const real vmin = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
+        //     const real vmax = (geometry == simbi::Geometry::SPHERICAL) ? x1max * hubble_param : hubble_param;
+        //     x1max += step * dt * vmax;
+        //     x1min += step * dt * vmin;
+        //     hubble_param = adot(t) / a(t);
+        // }
     });
 
     if (inFailureState){

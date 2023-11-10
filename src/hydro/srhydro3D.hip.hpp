@@ -218,9 +218,9 @@ namespace simbi
                     const real x2r    = get_x2face(jreal, 1);
                     const real x3l    = get_x3face(kreal, 0);
                     const real x3r    = get_x3face(kreal, 1);
-                    const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
-                    const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
-                    const real x3mean = helpers::calc_any_mean(x3l, x3r, x3cell_spacing);
+                    const real x1mean = helpers::calc_any_mean(x1l, x1r, x1_cell_spacing);
+                    const real x2mean = helpers::calc_any_mean(x2l, x2r, x2_cell_spacing);
+                    const real x3mean = helpers::calc_any_mean(x3l, x3r, x3_cell_spacing);
 
                     const real et  = (cons[gid].d + cons[gid].tau + prims[gid].p);
                     const real s   = std::sqrt(cons[gid].s1 * cons[gid].s1 + cons[gid].s2 * cons[gid].s2 + cons[gid].s3 * cons[gid].s3);

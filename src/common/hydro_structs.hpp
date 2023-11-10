@@ -25,7 +25,7 @@ struct DataWriteMembers
     bool linspace, first_order, using_fourvelocity, mesh_motion;
     real t, ad_gamma;
     real x1min, x1max, x2min, x2max, x3min, x3max, dt;
-    std::string coord_system, regime, x1_cellspacing, x2_cellspacing, x3_cellspacing;
+    std::string coord_system, regime, x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
     std::vector<real> x1, x2, x3;
     std::vector<std::string> boundary_conditions;
 
@@ -49,7 +49,7 @@ struct InitialConditions {
     bool first_order, quirk_smoothing, constant_sources;
     std::vector<std::vector<real>> sources, gsource;
     std::vector<bool> object_cells; 
-    std::string data_directory, coord_system, solver, x1_cellspacing, x2_cellspacing, x3_cellspacing;
+    std::string data_directory, coord_system, solver, x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
     std::vector<std::string> boundary_conditions;
     std::vector<std::vector<real>> boundary_sources;
     std::vector<real> x1, x2, x3;

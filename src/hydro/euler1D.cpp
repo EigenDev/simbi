@@ -527,7 +527,7 @@ void Newtonian1D::advance(const ExecutionPolicy<> &p)
     this->x1min           = x1[0];
     this->x1max           = x1[active_zones - 1];
     this->total_zones     = nx;
-    this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
+    this->x1_cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
     this->checkpoint_zones= active_zones;
     this->den_source_all_zeros    = std::all_of(sourceRho.begin(), sourceRho.end(), [](real i) {return i==0;});
     this->mom1_source_all_zeros   = std::all_of(sourceMom.begin(), sourceMom.end(), [](real i) {return i==0;});

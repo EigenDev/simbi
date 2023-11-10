@@ -32,7 +32,7 @@ cdef extern from "common/hydro_structs.hpp":
         bool first_order, quirk_smoothing, constant_sources
         vector[vector[real]] sources, gsource
         vector[bool] object_cells
-        string data_directory, coord_system, solver, x1_cellspacing, x2_cellspacing, x3_cellspacing
+        string data_directory, coord_system, solver, x1_cell_spacing, x2_cell_spacing, x3_cell_spacing
         vector[string] boundary_conditions
         vector[vector[real]] boundary_sources
         vector[real] x1, x2, x3

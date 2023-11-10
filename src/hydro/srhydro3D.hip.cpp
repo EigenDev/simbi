@@ -1180,9 +1180,9 @@ std::vector<std::vector<real>> SRHD3D::simulate3D(
     this->zactive_grid  = (first_order) ? nz - 2: nz - 4;
     this->idx_active      = (first_order) ? 1     : 2;
     this->active_zones    = xactive_grid * yactive_grid * zactive_grid;
-    this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
-    this->x2cell_spacing  = simbi::Cellspacing::LINSPACE;
-    this->x3cell_spacing  = simbi::Cellspacing::LINSPACE;
+    this->x1_cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
+    this->x2_cell_spacing  = simbi::Cellspacing::LINSPACE;
+    this->x3_cell_spacing  = simbi::Cellspacing::LINSPACE;
     this->dx3             = (x3[zactive_grid - 1] - x3[0]) / (zactive_grid - 1);
     this->dx2             = (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
     this->dlogx1          = std::log10(x1[xactive_grid - 1]/ x1[0]) / (xactive_grid - 1);

@@ -1234,8 +1234,8 @@ std::vector<std::vector<real>> SRHD2D::simulate2D(
     this->active_zones    = xactive_grid * yactive_grid;
     this->quirk_smoothing = quirk_smoothing;
     this->geometry        = helpers::geometry_map.at(coord_system);
-    this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
-    this->x2cell_spacing  = simbi::Cellspacing::LINSPACE;
+    this->x1_cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
+    this->x2_cell_spacing  = simbi::Cellspacing::LINSPACE;
     this->dx2             = (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
     this->dlogx1          = std::log10(x1[xactive_grid - 1]/ x1[0]) / (xactive_grid - 1);
     this->dx1             = (x1[xactive_grid - 1] - x1[0]) / (xactive_grid - 1);

@@ -136,15 +136,15 @@ class BaseConfig(metaclass=abc.ABCMeta):
         raise NotImplementedError(err_message('gamma'))
     
     @simbi_property
-    def x1_cellspacing(self) -> str:
+    def x1_cell_spacing(self) -> str:
         return "linear"
     
     @simbi_property
-    def x2_cellspacing(self) -> str:
+    def x2_cell_spacing(self) -> str:
         return "linear"
     
     @simbi_property
-    def x3_cellspacing(self) -> str:
+    def x3_cell_spacing(self) -> str:
         return "linear"
     
     @simbi_property

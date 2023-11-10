@@ -21,7 +21,7 @@ class SodProblemQuad(BaseConfig):
         return ((0.0, 1.0, 0.5), (0.0, 1.0, 0.5))
 
     @simbi_property
-    def x1_cellspacing(self) -> str:
+    def x1_cell_spacing(self) -> str:
         return "linear"
     
     @simbi_property
