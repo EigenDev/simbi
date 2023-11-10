@@ -18,7 +18,7 @@
 
 # Requirements
 
-1)  GCC >= GCC5 (for c++17 support at the very least)
+1)  gcc >= gcc5 or clang >= clang5 (for c++17 support at the very least)
 2)  [Cython](https://cython.org/)
 3)  [meson](https://mesonbuild.com/Getting-meson.html), 
     `pip install meson` will usually suffice
