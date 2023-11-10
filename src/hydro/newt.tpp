@@ -253,7 +253,6 @@ void Newtonian<dim>::emit_troubled_cells() {
  * @return none
  */
 template<int dim>
-template<simbi::CONS2PRIMTYPE c2p_type>
 void Newtonian<dim>::cons2prim(const ExecutionPolicy<> &p)
 {
     const auto* const cons_data = cons.data();
@@ -267,7 +266,7 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<> &p)
     ]   GPU_LAMBDA (const luint gid) {
 
         real invdV = 1.0;
-        if constexpr(c2p_type == simbi::CONS2PRIMTYPE::CHARGES)
+        if (changing_volume)
         {
             if constexpr(dim == 1) {
                 const auto idx  = helpers::get_real_idx(gid, radius, active_zones);
@@ -291,11 +290,11 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<> &p)
                 invdV = 1.0 / dV;
             }
         }
-        const real rho     = cons_data[gid].rho * invdV;
+        const real rho     =  cons_data[gid].rho * invdV;
         const real v1      = (cons_data[gid].momentum(1) / rho) * invdV;
         const real v2      = (cons_data[gid].momentum(2) / rho) * invdV;
         const real v3      = (cons_data[gid].momentum(3) / rho) * invdV;
-        const real rho_chi = cons_data[gid].chi * invdV;
+        const real rho_chi =  cons_data[gid].chi * invdV;
         const real pre     = (gamma - 1)*(
             cons_data[gid].e_dens - static_cast<real>(0.5) * rho * (v1 * v1 + v2 * v2 + v3 * v3)
         );
@@ -568,14 +567,11 @@ Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::pri
     const real v1       = prims.vcomponent(1);
     const real v2       = prims.vcomponent(2);
     const real v3       = prims.vcomponent(3);
-    const real chi      = prims.chi;
-    const real vn       = prims.vcomponent(nhat);
     const real pressure = prims.p;
+    const real chi      = prims.chi;
+    const real vn       = nhat == 1 ? v1 : nhat == 2 ? v2 : v3;
     const auto et       = prims.get_energy_density(gamma);
-
-    const real m1 = rho * v1;
-    const real m2 = rho * v2;
-    const real m3 = rho * v3;
+    const real m1       = rho * v1;
     if constexpr(dim == 1) {
         return nt::Conserved<1>{
             rho  * vn, 
@@ -584,6 +580,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::pri
             rho  * vn * chi
         };
     } else if constexpr(dim == 2) {
+        const real m2 = rho * v2;
         return nt::Conserved<2>{
             rho * vn, 
             m1  * vn + helpers::kronecker(nhat, 1) * pressure, 
@@ -592,6 +589,8 @@ Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::pri
             rho * vn * chi
         };
     } else {
+        const real m2 = rho * v2;
+        const real m3 = rho * v3;
         return nt::Conserved<3>{
             rho * vn, 
             m1  * vn + helpers::kronecker(nhat, 1) * pressure, 
@@ -1672,7 +1671,7 @@ void Newtonian<dim>::simulate(
     // Stuff for moving mesh 
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
-    const bool changing_volume = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
+    this->changing_volume = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
     if (mesh_motion && all_outer_bounds) {
         if constexpr(dim == 1) {
             outer_zones.resize(first_order ? 1 : 2);
@@ -1841,15 +1840,8 @@ void Newtonian<dim>::simulate(
     if constexpr(BuildPlatform == Platform::GPU){
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
-    
-    const auto cons2primproxy = [&] {
-        if (changing_volume) {
-            return &simbi::Newtonian<dim>::cons2prim<simbi::CONS2PRIMTYPE::CHARGES>;
-        }
-        return &simbi::Newtonian<dim>::cons2prim<simbi::CONS2PRIMTYPE::VOLUMETRIC>;
-    }();
 
-    (this->*cons2primproxy)(fullP);
+    cons2prim(fullP);
     if constexpr(BuildPlatform == Platform::GPU) {
         adapt_dt(activeP);
     } else {
@@ -1876,7 +1868,7 @@ void Newtonian<dim>::simulate(
             return;
         }
         advance(activeP, xstride, ystride);
-        (this->*cons2primproxy)(fullP);
+        cons2prim(fullP);
         if constexpr(dim == 1) {
             helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
         } else if constexpr(dim == 2) {

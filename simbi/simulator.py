@@ -537,10 +537,6 @@ class Hydro:
         self.u = np.asanyarray(self.u)
         self.start_time: float = 0.0
         self.chkpt_idx: int = 0
-        lib_mode  = 'cpu' if compute_mode in ['cpu', 'omp'] else 'gpu'
-        state_reg = 'SR' if self.regime == 'relativistic' else ''
-        sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), f'PyState{state_reg}{self.dimensionality}D')
-
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
         self._generate_the_grid(x1_cell_spacing, x2_cell_spacing, x3_cell_spacing)
@@ -643,72 +639,26 @@ class Hydro:
         sources = sources.reshape(sources.shape[0], -1)
         gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
         gsources = gsources.reshape(gsources.shape[0], -1)
-        if self.dimensionality == 1:
-            if 'GPUXBLOCK_SIZE' not in os.environ:
-                os.environ['GPUXBLOCK_SIZE'] = "128"
-
-            state = sim_state(
-                self.u,
-                self.gamma,
-                cfl,
-                x1=self.x1,
-                coord_system=cython_coordinates)
-            kwargs = {
-                'a': scale_factor, 
-                'adot': scale_factor_derivative,
-                'gravity_sources': gsources
-                }
-            if mesh_motion and dens_outer and mom_outer and edens_outer:
-                kwargs['d_outer'] = dens_outer
-                kwargs['s_outer'] = mom_outer
-                kwargs['e_outer'] = edens_outer
-
-        elif self.dimensionality == 2:
-            if 'GPUXBLOCK_SIZE' not in os.environ:
-                os.environ['GPUXBLOCK_SIZE'] = "16"
+        if compute_mode == 'gpu':
+            if self.dimensionality == 1:
+                if 'GPUXBLOCK_SIZE' not in os.environ:
+                    os.environ['GPUXBLOCK_SIZE'] = "128"
+            elif self.dimensionality == 2:
+                if 'GPUXBLOCK_SIZE' not in os.environ:
+                    os.environ['GPUXBLOCK_SIZE'] = "16"
+                    
+                if 'GPUYBLOCK_SIZE' not in os.environ:
+                    os.environ['GPUYBLOCK_SIZE'] = "16" 
+            else:
+                if 'GPUXBLOCK_SIZE' not in os.environ:
+                    os.environ['GPUXBLOCK_SIZE'] = "4"
+                    
+                if 'GPUYBLOCK_SIZE' not in os.environ:
+                    os.environ['GPUYBLOCK_SIZE'] = "4" 
+                    
+                if 'GPUZBLOCK_SIZE' not in os.environ:
+                    os.environ['GPUZBLOCK_SIZE'] = "4"
                 
-            if 'GPUYBLOCK_SIZE' not in os.environ:
-                os.environ['GPUYBLOCK_SIZE'] = "16" 
-                
-            state = sim_state(
-                self.u,
-                self.gamma,
-                cfl=cfl,
-                x1=self.x1,
-                x2=self.x2,
-                coord_system=cython_coordinates)
-            kwargs = {
-                'a': scale_factor,
-                'adot': scale_factor_derivative,
-                'quirk_smoothing': quirk_smoothing,
-                'object_cells': object_cells,
-                'gravity_sources': gsources,
-            }
-            if mesh_motion and dens_outer and mom_outer and edens_outer:
-                momentum_components = cast(Sequence[Callable[..., float]], mom_outer)
-                kwargs['d_outer']   = dens_outer
-                kwargs['s1_outer']  = momentum_components[0]
-                kwargs['s2_outer']  = momentum_components[1]
-                kwargs['e_outer']   = edens_outer
-        else:
-            if 'GPUXBLOCK_SIZE' not in os.environ:
-                os.environ['GPUXBLOCK_SIZE'] = "4"
-                
-            if 'GPUYBLOCK_SIZE' not in os.environ:
-                os.environ['GPUYBLOCK_SIZE'] = "4" 
-                
-            if 'GPUZBLOCK_SIZE' not in os.environ:
-                os.environ['GPUZBLOCK_SIZE'] = "4"
-                
-            state = sim_state(
-                self.u,
-                self.gamma,
-                cfl=cfl,
-                x1=self.x1,
-                x2=self.x2,
-                x3=self.x3,
-                coord_system=cython_coordinates)
-            kwargs = {'object_cells': object_cells}
         
         if len(self.resolution) == 1:
             self.nx = self.u[0].shape[0]
@@ -772,6 +722,7 @@ class Hydro:
                 if self.dimensionality == 3:
                     lambdas['mom3_lambda'] = momentum_components[2]
 
+        lib_mode  = 'cpu' if compute_mode in ['cpu', 'omp'] else 'gpu'
         sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), 'SimState')
         state_contig = self.u.reshape(self.u.shape[0], -1)
         state = sim_state()
@@ -784,20 +735,3 @@ class Hydro:
             adot = scale_factor_derivative,
             **lambdas
         )
-        # self.solution = state.simulate(
-        #     sources=sources,
-        #     tstart=self.start_time,
-        #     tend=tend,
-        #     dlogt=dlogt,
-        #     plm_theta=plm_theta,
-        #     engine_duration=engine_duration,
-        #     chkpt_interval=chkpt_interval,
-        #     chkpt_idx=self.chkpt_idx,
-        #     data_directory=cython_data_directory,
-        #     boundary_conditions=cython_boundary_conditions,
-        #     first_order=first_order,
-        #     linspace=x1_cell_spacing == 'linear',
-        #     solver=cython_solver,
-        #     constant_sources=constant_sources,
-        #     boundary_sources=boundary_sources,
-        #     **kwargs)

@@ -253,7 +253,6 @@ void SRHD<dim>::emit_troubled_cells() {
  * @return none
  */
 template<int dim>
-template<simbi::CONS2PRIMTYPE c2p_type>
 void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 {
     const auto* const cons_data  = cons.data();
@@ -278,7 +277,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
         real invdV = 1.0;
         while (!found_failure && workLeftToDo)
         {
-            if constexpr(c2p_type == simbi::CONS2PRIMTYPE::CHARGES)
+            if (changing_volume)
             {
                 if constexpr(dim == 1) {
                     const auto idx = helpers::get_real_idx(gid, radius, active_zones);
@@ -697,9 +696,9 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims
     const real v1       = prims.vcomponent(1);
     const real v2       = prims.vcomponent(2);
     const real v3       = prims.vcomponent(3);
-    const real chi      = prims.chi;
-    const real vn       = prims.vcomponent(nhat);
     const real pressure = prims.p;
+    const real chi      = prims.chi;
+    const real vn       =(nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
     const real lorentz_gamma = prims.get_lorentz_factor();
 
     const real h  = prims.get_enthalpy(gamma);
@@ -707,12 +706,12 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims
     const real S1 = rho * lorentz_gamma * lorentz_gamma * h * v1;
     const real S2 = rho * lorentz_gamma * lorentz_gamma * h * v2;
     const real S3 = rho * lorentz_gamma * lorentz_gamma * h * v3;
-    const real Sj = (nhat == 1) ? S1 : (nhat == 2) ? S2 : S3;
+    const real Sn = (nhat == 1) ? S1 : (nhat == 2) ? S2 : S3;
     if constexpr(dim == 1) {
         return sr::Conserved<1>{
             D  * vn, 
             S1 * vn + helpers::kronecker(nhat, 1) * pressure, 
-            Sj - D * vn, 
+            Sn - D * vn, 
             D  * vn * chi
         };
     } else if constexpr(dim == 2) {
@@ -720,7 +719,7 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims
             D  * vn, 
             S1 * vn + helpers::kronecker(nhat, 1) * pressure, 
             S2 * vn + helpers::kronecker(nhat, 2) * pressure, 
-            Sj - D * vn, 
+            Sn - D * vn, 
             D * vn * chi
         };
     } else {
@@ -729,7 +728,7 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims
             S1 * vn + helpers::kronecker(nhat, 1) * pressure, 
             S2 * vn + helpers::kronecker(nhat, 2) * pressure, 
             S3 * vn + helpers::kronecker(nhat, 3) * pressure,  
-            Sj - D * vn, 
+            Sn - D * vn, 
             D * vn * chi
         };
     }
@@ -1929,7 +1928,7 @@ void SRHD<dim>::simulate(
     // Stuff for moving mesh 
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
-    const bool changing_volume = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
+    this->changing_volume = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
 
     if (mesh_motion && all_outer_bounds) {
         if constexpr(dim == 1) {
@@ -2102,15 +2101,8 @@ void SRHD<dim>::simulate(
     if constexpr(BuildPlatform == Platform::GPU){
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
-
-    const auto cons2primproxy = [&] {
-        if (changing_volume) {
-            return &simbi::SRHD<dim>::cons2prim<simbi::CONS2PRIMTYPE::CHARGES>;
-        }
-        return &simbi::SRHD<dim>::cons2prim<simbi::CONS2PRIMTYPE::VOLUMETRIC>;
-    }();
     
-    (this->*cons2primproxy)(fullP);
+    cons2prim(fullP);
     if constexpr(BuildPlatform == Platform::GPU) {
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP);
     } else {
@@ -2137,7 +2129,7 @@ void SRHD<dim>::simulate(
             return;
         }
         advance(activeP, xstride, ystride);
-        (this->*cons2primproxy)(fullP);
+        cons2prim(fullP);
         if constexpr(dim == 1) {
             helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
         } else if constexpr(dim == 2) {
@@ -2146,21 +2138,21 @@ void SRHD<dim>::simulate(
             helpers::config_ghosts3D(fullP, cons.data(), nx, ny, nz, first_order, bcs.data(), inflow_zones.data(), half_sphere, geometry);
         }
 
-        // if constexpr(BuildPlatform == Platform::GPU) {
-        //     adapt_dt(activeP);
-        // } else {
-        //     adapt_dt();
-        // }
-        // time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
-        // t += step * dt;
-        // if (mesh_motion){
-        //     // update x1 endpoints  
-        //     const real vmin = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
-        //     const real vmax = (geometry == simbi::Geometry::SPHERICAL) ? x1max * hubble_param : hubble_param;
-        //     x1max += step * dt * vmax;
-        //     x1min += step * dt * vmin;
-        //     hubble_param = adot(t) / a(t);
-        // }
+        if constexpr(BuildPlatform == Platform::GPU) {
+            adapt_dt(activeP);
+        } else {
+            adapt_dt();
+        }
+        time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
+        t += step * dt;
+        if (mesh_motion){
+            // update x1 endpoints  
+            const real vmin = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
+            const real vmax = (geometry == simbi::Geometry::SPHERICAL) ? x1max * hubble_param : hubble_param;
+            x1max += step * dt * vmax;
+            x1min += step * dt * vmin;
+            hubble_param = adot(t) / a(t);
+        }
     });
 
     if (inFailureState){

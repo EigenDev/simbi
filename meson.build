@@ -167,11 +167,11 @@ sources = [
     #######################
     #### GPU / CPU IMPLEMENTATIONS
     #######################
-    'src/hydro/euler1D.cpp',
-    'src/hydro/euler2D.cpp',
-    'src/hydro/srhydro1D.hip.cpp',
-    'src/hydro/srhydro2D.hip.cpp',
-    'src/hydro/srhydro3D.hip.cpp',
+    # 'src/hydro/euler1D.cpp',
+    # 'src/hydro/euler2D.cpp',
+    # 'src/hydro/srhydro1D.hip.cpp',
+    # 'src/hydro/srhydro2D.hip.cpp',
+    # 'src/hydro/srhydro3D.hip.cpp',
     'src/hydro/state.cpp',
     
     #######################
@@ -186,11 +186,11 @@ headers = [
     'src/common/hydro_structs.hpp',
     'src/common/traits.hpp',
     
-    'src/hydro/euler1D.hpp',
-    'src/hydro/euler2D.hpp',
-    'src/hydro/srhydro1D.hip.hpp',
-    'src/hydro/srhydro2D.hip.hpp',
-    'src/hydro/srhydro3D.hip.hpp',
+    # 'src/hydro/euler1D.hpp',
+    # 'src/hydro/euler2D.hpp',
+    # 'src/hydro/srhydro1D.hip.hpp',
+    # 'src/hydro/srhydro2D.hip.hpp',
+    # 'src/hydro/srhydro3D.hip.hpp',
     'src/hydro/srhd.hpp',
     'src/hydro/newt.hpp',
 

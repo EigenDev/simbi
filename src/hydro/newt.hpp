@@ -84,7 +84,6 @@ namespace simbi
             const InitialConditions &init_conditions);
         ~Newtonian();
 
-        template<simbi::CONS2PRIMTYPE c2p_type = simbi::CONS2PRIMTYPE::VOLUMETRIC>
         void cons2prim(const ExecutionPolicy<> &p);
 
         void advance(
