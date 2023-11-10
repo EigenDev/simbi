@@ -346,7 +346,7 @@ class Visualizer:
         if self.log:
             ax.set_xscale('log')
             ax.set_yscale('log')
-        elif setup['x1_cellspacing'] == 'log':
+        elif setup['x1_cell_spacing'] == 'log':
             ax.set_xscale('log')
 
         if len(self.fields) == 1:

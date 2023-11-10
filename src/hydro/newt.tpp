@@ -45,7 +45,7 @@ template<int dim>
 GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x1face(const lint ii, const int side) const
 {
-    switch (x1cell_spacing)
+    switch (x1_cell_spacing)
     {
     case simbi::Cellspacing::LINSPACE:
         {
@@ -57,11 +57,11 @@ constexpr real Newtonian<dim>::get_x1face(const lint ii, const int side) const
         }
     default:
         {
-            const real rl = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
+            const real x1l = helpers::my_max<real>(x1min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx1),  x1min);
             if (side == 0) {
-                return rl;
+                return x1l;
             }
-            return helpers::my_min<real>(rl * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
+            return helpers::my_min<real>(x1l * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)), x1max);
         }
     }
 }
@@ -71,23 +71,50 @@ template<int dim>
 GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x2face(const lint ii, const int side) const
 {
-    const real x2l = helpers::my_max<real>(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
-    if (side == 0) {
-        return x2l;
-    } 
-    return helpers::my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+    switch (x2_cell_spacing)
+    {
+    case simbi::Cellspacing::LINSPACE:
+        {
+            const real x2l = helpers::my_max<real>(x2min  + (ii - static_cast<real>(0.5)) * dx2,  x2min);
+            if (side == 0) {
+                return x2l;
+            }
+            return helpers::my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
+        }
+    default:
+        {
+            const real x2l = helpers::my_max<real>(x2min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx2),  x2min);
+            if (side == 0) {
+                return x2l;
+            }
+            return helpers::my_min<real>(x2l * std::pow(10, dlogx2 * (ii == 0 ? 0.5 : 1.0)), x2max);
+        }
+    }
 }
 
 template<int dim>
 GPU_CALLABLE_MEMBER
 constexpr real Newtonian<dim>::get_x3face(const lint ii, const int side) const
 {
-
-    const real x3l = helpers::my_max<real>(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
-    if (side == 0) {
-        return x3l;
-    } 
-    return helpers::my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
+    switch (x3_cell_spacing)
+    {
+    case simbi::Cellspacing::LINSPACE:
+        {
+            const real x3l = helpers::my_max<real>(x3min  + (ii - static_cast<real>(0.5)) * dx3,  x3min);
+            if (side == 0) {
+                return x3l;
+            }
+            return helpers::my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
+        }
+    default:
+        {
+            const real x3l = helpers::my_max<real>(x3min * std::pow(10, (ii - static_cast<real>(0.5)) * dlogx3),  x3min);
+            if (side == 0) {
+                return x3l;
+            }
+            return helpers::my_min<real>(x3l * std::pow(10, dlogx3 * (ii == 0 ? 0.5 : 1.0)), x3max);
+        }
+    }
 }
 
 template<int dim>
@@ -190,9 +217,9 @@ void Newtonian<dim>::emit_troubled_cells() {
             const real x2r    = get_x2face(jreal, 1);
             const real x3l    = get_x3face(kreal, 0);
             const real x3r    = get_x3face(kreal, 1);
-            const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
-            const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
-            const real x3mean = helpers::calc_any_mean(x3l, x3r, x3cell_spacing);
+            const real x1mean = helpers::calc_any_mean(x1l, x1r, x1_cell_spacing);
+            const real x2mean = helpers::calc_any_mean(x2l, x2r, x2_cell_spacing);
+            const real x3mean = helpers::calc_any_mean(x3l, x3r, x3_cell_spacing);
             const auto m1 = cons[gid].momentum(1);
             const auto m2 = cons[gid].momentum(2);
             const auto m3 = cons[gid].momentum(3);
@@ -1724,9 +1751,9 @@ void Newtonian<dim>::simulate(
     setup.xactive_zones       = xactive_grid;
     setup.yactive_zones       = yactive_grid;
     setup.zactive_zones       = zactive_grid;
-    setup.x1_cellspacing      = cell2str.at(x1cell_spacing);
-    setup.x2_cellspacing      = cell2str.at(x2cell_spacing);
-    setup.x3_cellspacing      = cell2str.at(x3cell_spacing);
+    setup.x1_cell_spacing      = cell2str.at(x1_cell_spacing);
+    setup.x2_cell_spacing      = cell2str.at(x2_cell_spacing);
+    setup.x3_cell_spacing      = cell2str.at(x3_cell_spacing);
     setup.ad_gamma            = gamma;
     setup.first_order         = first_order;
     setup.coord_system        = coord_system;

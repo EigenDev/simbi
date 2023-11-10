@@ -63,7 +63,7 @@ class thermalBomb(BaseConfig):
         return ((self.rinit, self.rend), (self.theta_min, self.theta_max), (self.phi_min, self.phi_max))
 
     @simbi_property
-    def x1_cellspacing(self) -> str:
+    def x1_cell_spacing(self) -> str:
         return "log"
     
     @simbi_property

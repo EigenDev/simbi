@@ -172,7 +172,7 @@ namespace simbi
                          const luint idx  = helpers::get_real_idx(ii, radius, active_zones);
                          const real xl    = get_x1face(idx, 0);
                          const real xr    = get_x1face(idx, 1);
-                         const real xmean = helpers::calc_any_mean(xl, xr, x1cell_spacing);
+                         const real xmean = helpers::calc_any_mean(xl, xr, x1_cell_spacing);
                          printf("\nCons2Prim cannot converge: \ndensity: %.3e, pressure: %.3e, v: %.3e, coord: %.2e, iter: %d\n", 
                          cons[ii].d / W, prims[ii].p, v, xmean, troubled_cells[ii]);
                     }

@@ -267,10 +267,7 @@ void SRHD1D::cons2prim(const ExecutionPolicy<> &p)
                 const real dV    = get_cell_volume(idx);
                 invdV            = 1 / dV;
             }
-
-            #if !GPU_CODE
-
-            #endif 
+            
             peq            = press_data[ii];
             // pstar          = peq;
             const real D   = cons_data[ii].d   * invdV;
@@ -724,7 +721,7 @@ SRHD1D::simulate1D(
     this->invdx1          = 1.0 / this->dx1;
     this->x1min           = x1[0];
     this->x1max           = x1[active_zones - 1];
-    this->x1cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
+    this->x1_cell_spacing  = (linspace) ? simbi::Cellspacing::LINSPACE : simbi::Cellspacing::LOGSPACE;
     this->total_zones     = nx;
     this->checkpoint_zones= active_zones;
     this->den_source_all_zeros    = std::all_of(sourceD.begin(), sourceD.end(), [](real i) {return i==0;});
@@ -829,25 +826,25 @@ SRHD1D::simulate1D(
         if (inFailureState){
             return;
         }
-        advance(activeP);
+        // advance(activeP);
         cons2prim(fullP);
-        helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
+        // helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
 
-        if constexpr(BuildPlatform == Platform::GPU) {
-            adapt_dt(activeP.gridSize.x);
-        } else {
-            adapt_dt();
-        }
-        time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
-        t += step * dt;
-        if (mesh_motion){
-            // update x1 endpoints  
-            const real vmin = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
-            const real vmax = (geometry == simbi::Geometry::SPHERICAL) ? x1max * hubble_param : hubble_param;
-            x1max += step * dt * vmax;
-            x1min += step * dt * vmin;
-            hubble_param = adot(t) / a(t);
-        }
+        // if constexpr(BuildPlatform == Platform::GPU) {
+        //     adapt_dt(activeP.gridSize.x);
+        // } else {
+        //     adapt_dt();
+        // }
+        // time_constant = helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
+        // t += step * dt;
+        // if (mesh_motion){
+        //     // update x1 endpoints  
+        //     const real vmin = (geometry == simbi::Geometry::SPHERICAL) ? x1min * hubble_param : hubble_param;
+        //     const real vmax = (geometry == simbi::Geometry::SPHERICAL) ? x1max * hubble_param : hubble_param;
+        //     x1max += step * dt * vmax;
+        //     x1min += step * dt * vmin;
+        //     hubble_param = adot(t) / a(t);
+        // }
     });
     // Check if in failure state, and emit troubled cells
     if (inFailureState){

@@ -55,7 +55,7 @@ class KelvinHelmholtz(BaseConfig):
         return ((self.xmin, self.xmax), (self.ymin, self.ymax))
 
     @simbi_property
-    def x1_cellspacing(self) -> str:
+    def x1_cell_spacing(self) -> str:
         return "linear"
     
     @simbi_property

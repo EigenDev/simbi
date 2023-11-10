@@ -440,9 +440,9 @@ def configure_state(
         kwargs[idx]['plm_theta'] = config.plm_theta
         kwargs[idx]['dlogt'] = config.dlogt
         kwargs[idx]['data_directory'] = config.data_directory
-        kwargs[idx]['x1_cellspacing'] = config.x1_cellspacing
-        kwargs[idx]['x2_cellspacing'] = config.x2_cellspacing
-        kwargs[idx]['x3_cellspacing'] = config.x3_cellspacing
+        kwargs[idx]['x1_cell_spacing'] = config.x1_cell_spacing
+        kwargs[idx]['x2_cell_spacing'] = config.x2_cell_spacing
+        kwargs[idx]['x3_cell_spacing'] = config.x3_cell_spacing
         kwargs[idx]['sources'] = config.sources
         kwargs[idx]['gsources'] = config.gravity_sources
         kwargs[idx]['passive_scalars'] = config.passive_scalars

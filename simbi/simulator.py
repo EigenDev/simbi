@@ -30,9 +30,9 @@ available_cellspacings = [
 
 
 class Hydro:
-    x1_cellspacing: StrOrNone = None
-    x2_cellspacing: StrOrNone = None
-    x3_cellspacing: StrOrNone = None
+    x1_cell_spacing: StrOrNone = None
+    x2_cell_spacing: StrOrNone = None
+    x3_cell_spacing: StrOrNone = None
     sources: SequenceOrNone = None
     passive_scalars: SequenceOrNone = None
     scale_factor: CallableOrNone = None
@@ -383,26 +383,26 @@ class Hydro:
 
     def _generate_the_grid(
         self, 
-        x1_cellspacing: str,
-        x2_cellspacing: str,
-        x3_cellspacing: str) -> None:
+        x1_cell_spacing: str,
+        x2_cell_spacing: str,
+        x3_cell_spacing: str) -> None:
         
         x1_func: Callable[...,Any]
-        if x1_cellspacing == 'log':
+        if x1_cell_spacing == 'log':
             x1_func = np.geomspace
-        elif x1_cellspacing == 'linear':
+        elif x1_cell_spacing == 'linear':
             x1_func = np.linspace 
         
         x2_func: Callable[...,Any]
-        if x2_cellspacing == 'log':
+        if x2_cell_spacing == 'log':
             x2_func = np.geomspace
-        elif x2_cellspacing == 'linear':
+        elif x2_cell_spacing == 'linear':
             x2_func = np.linspace
         
         x3_func: Callable[...,Any]
-        if x3_cellspacing == 'log':
+        if x3_cell_spacing == 'log':
             x3_func = np.geomspace
-        elif x3_cellspacing == 'linear':
+        elif x3_cell_spacing == 'linear':
             x3_func = np.linspace
 
         if self.dimensionality == 1:
@@ -466,9 +466,9 @@ class Hydro:
             dlogt: float = 0.0,
             plm_theta: float = 1.5,
             first_order: bool = True,
-            x1_cellspacing: str = 'linear',
-            x2_cellspacing: str = 'linear',
-            x3_cellspacing: str = 'linear',
+            x1_cell_spacing: str = 'linear',
+            x2_cell_spacing: str = 'linear',
+            x3_cell_spacing: str = 'linear',
             cfl: float = 0.4,
             sources: Optional[NDArray[Any]] = None,
             gsources: Optional[NDArray[Any]] = None,
@@ -498,9 +498,9 @@ class Hydro:
             dlogt       (float):         The desired logarithmic spacing in checkpoints
             plm_theta   (float):         The Piecewise Linear Reconstructed slope parameter
             first_order (boolean):       First order RK1 or the RK2 PLM.
-            x1_cellspacing    (str):     Option for a linear or log-spaced mesh on x1 
-            x2_cellspacing    (str):     Option for a linear or log-spaced mesh on x2 
-            x3_cellspacing    (str):     Option for a linear or log-spaced mesh on x3 
+            x1_cell_spacing    (str):     Option for a linear or log-spaced mesh on x1 
+            x2_cell_spacing    (str):     Option for a linear or log-spaced mesh on x2 
+            x3_cell_spacing    (str):     Option for a linear or log-spaced mesh on x3 
             cfl         (float):         The cfl number for min adaptive timestep
             sources     (array_like):    The source terms for the simulations
             passive_scalars  (array_like):    The array of passive passive_scalars
@@ -525,13 +525,13 @@ class Hydro:
             solution (array): The hydro solution containing the primitive variables
         """
         self._print_params(inspect.currentframe())
-        if x1_cellspacing not in available_cellspacings:
+        if x1_cell_spacing not in available_cellspacings:
             raise ValueError(f"cell spacing for x1 should be one of: {available_cellspacings}")
         
-        if x2_cellspacing not in available_cellspacings:
+        if x2_cell_spacing not in available_cellspacings:
             raise ValueError(f"cell spacing for x2 should be one of: {available_cellspacings}")
         
-        if x3_cellspacing not in available_cellspacings:
+        if x3_cell_spacing not in available_cellspacings:
             raise ValueError(f"cell spacing for x3 should be one of: {available_cellspacings}")
         
         self.u = np.asanyarray(self.u)
@@ -543,7 +543,7 @@ class Hydro:
 
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
-        self._generate_the_grid(x1_cellspacing, x2_cellspacing, x3_cellspacing)
+        self._generate_the_grid(x1_cell_spacing, x2_cell_spacing, x3_cell_spacing)
 
         mesh_motion = scale_factor_derivative(tstart) / scale_factor(tstart) != 0
         volume_factor: Union[float, NDArray[Any]] = 1.0
@@ -734,9 +734,9 @@ class Hydro:
             'data_directory': cython_data_directory,
             'boundary_conditions': cython_boundary_conditions,
             'first_order': first_order,
-            'x1_cellspacing': x1_cellspacing.encode('utf-8'),
-            'x2_cellspacing': x2_cellspacing.encode('utf-8'),
-            'x3_cellspacing': x3_cellspacing.encode('utf-8'),
+            'x1_cell_spacing': x1_cell_spacing.encode('utf-8'),
+            'x2_cell_spacing': x2_cell_spacing.encode('utf-8'),
+            'x3_cell_spacing': x3_cell_spacing.encode('utf-8'),
             'solver': cython_solver,
             'constant_sources': constant_sources,
             'boundary_sources': boundary_sources,
@@ -796,7 +796,7 @@ class Hydro:
         #     data_directory=cython_data_directory,
         #     boundary_conditions=cython_boundary_conditions,
         #     first_order=first_order,
-        #     linspace=x1_cellspacing == 'linear',
+        #     linspace=x1_cell_spacing == 'linear',
         #     solver=cython_solver,
         #     constant_sources=constant_sources,
         #     boundary_sources=boundary_sources,

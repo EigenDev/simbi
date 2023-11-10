@@ -220,8 +220,8 @@ namespace simbi
                     const real x1r    = get_x1face(ireal, 1);
                     const real x2l    = get_x2face(jreal, 0);
                     const real x2r    = get_x2face(jreal, 1);
-                    const real x1mean = helpers::calc_any_mean(x1l, x1r, x1cell_spacing);
-                    const real x2mean = helpers::calc_any_mean(x2l, x2r, x2cell_spacing);
+                    const real x1mean = helpers::calc_any_mean(x1l, x1r, x1_cell_spacing);
+                    const real x2mean = helpers::calc_any_mean(x2l, x2r, x2_cell_spacing);
                     const real s      = std::sqrt(cons[gid].s1 * cons[gid].s1 + cons[gid].s2 * cons[gid].s2);
                     const real p      = prims[gid].p;
                     const real et     = (cons[gid].tau + cons[gid].d + prims[gid].p);

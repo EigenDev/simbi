@@ -50,7 +50,7 @@ namespace simbi
         DataWriteMembers setup;
         real dt, t, tend, t_interval, chkpt_interval, plm_theta, time_constant, hubble_param; 
         real x1min, x1max, x2min, x2max, x3min, x3max, step;
-        real dlogx1, dx1, dx2, dx3, dlogt, tstart, engine_duration, invdx1, invdx2, invdx3;
+        real dlogx1, dx1, dlogx2, dx2, dlogx3, dx3, dlogt, tstart, engine_duration, invdx1, invdx2, invdx3;
         bool first_order, linspace, mesh_motion, adaptive_mesh_motion, half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
         bool den_source_all_zeros, mom1_source_all_zeros, mom2_source_all_zeros, mom3_source_all_zeros, energy_source_all_zeros; 
         bool zero_gravity1, zero_gravity2, zero_gravity3;
@@ -63,7 +63,7 @@ namespace simbi
         ndarray<real> sourceG1, sourceG2, sourceG3;
         ndarray<real> density_source, m1_source, m2_source, m3_source, energy_source;
         simbi::Geometry geometry;
-        simbi::Cellspacing x1cell_spacing, x2cell_spacing, x3cell_spacing;
+        simbi::Cellspacing x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
         luint blockSize, checkpoint_zones;
         std::vector<std::vector<real>> sources;
         std::vector<bool> object_cells;
@@ -268,9 +268,9 @@ namespace simbi
             constant_sources(init_conditions.constant_sources),
             total_zones(nx * ny  * nz),
             boundary_conditions(init_conditions.boundary_conditions),
-            x1cell_spacing(str2cell.at(init_conditions.x1_cellspacing)),
-            x2cell_spacing(str2cell.at(init_conditions.x2_cellspacing)),
-            x3cell_spacing(str2cell.at(init_conditions.x3_cellspacing)),
+            x1_cell_spacing(str2cell.at(init_conditions.x1_cell_spacing)),
+            x2_cell_spacing(str2cell.at(init_conditions.x2_cell_spacing)),
+            x3_cell_spacing(str2cell.at(init_conditions.x3_cell_spacing)),
             data_directory(init_conditions.data_directory),
             boundary_sources(init_conditions.boundary_sources),
             object_pos(init_conditions.object_cells)
@@ -295,11 +295,14 @@ namespace simbi
             this->zactive_grid      = (nz == 1) ? 1 : (init_conditions.first_order) ? nz - 2: nz - 4;
             this->idx_active          = (init_conditions.first_order) ? 1 : 2;
             this->active_zones        = xactive_grid * yactive_grid * zactive_grid;
-            this->dlogx1              = std::log10(x1[xactive_grid - 1]/ x1[0]) / (xactive_grid - 1);
-            this->dx1                 = (x1[xactive_grid - 1] - x1[0]) / (xactive_grid - 1);
-            this->invdx1              = 1 / dx1;
             this->x1min               = x1[0];
             this->x1max               = x1[xactive_grid - 1];
+            if (x1_cell_spacing == simbi::Cellspacing::LOGSPACE) {
+                this->dlogx1 = std::log10(x1[xactive_grid - 1]/ x1[0]) / (xactive_grid - 1);
+            } else {
+                this->dx1 = (x1[xactive_grid - 1] - x1[0]) / (xactive_grid - 1);
+            }
+            this->invdx1 = 1 / dx1;
             // Define the source terms
             this->density_source = init_conditions.sources[0];
             this->m1_source      = init_conditions.sources[1];
@@ -311,8 +314,6 @@ namespace simbi
                 this->x3max            = x3[zactive_grid - 1];
                 this->dx3              = (x3max - x3min) / (zactive_grid - 1);
                 this->dx2              = (x2max - x2min) / (yactive_grid - 1);
-                this->invdx2           = 1 / dx2;
-                this->invdx3           = 1 / dx3;
                 this->m2_source   = init_conditions.sources[2];
                 this->m3_source   = init_conditions.sources[3];
                 this->energy_source  = init_conditions.sources[4];
@@ -320,15 +321,31 @@ namespace simbi
                 this->sourceG3    = init_conditions.gsource[2];
                 this->mom2_source_all_zeros    = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
                 this->mom3_source_all_zeros    = std::all_of(m3_source.begin(),  m3_source.end(),  [](real i) {return i == 0;});
+                if (x2_cell_spacing == simbi::Cellspacing::LOGSPACE) {
+                    this->dlogx2 = std::log10(x2[yactive_grid - 1]/ x2[0]) / (yactive_grid - 1);
+                } else {
+                    this->dx2 = (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
+                    this->invdx2 = 1 / dx2;
+                }
+                if (x3_cell_spacing == simbi::Cellspacing::LOGSPACE) {
+                    this->dlogx3 = std::log10(x3[zactive_grid - 1]/ x3[0]) / (zactive_grid - 1);
+                } else {
+                    this->dx3 = (x3[zactive_grid - 1] - x3[0]) / (zactive_grid - 1);
+                    this->invdx3 = 1 / dx3;
+                }
             } else if ((ny > 1) && (nz == 1)) { // 2D Check
                 this->x2min            = x2[0];
                 this->x2max            = x2[yactive_grid - 1];
-                this->dx2    = (x2max - x2min) / (yactive_grid - 1);
-                this->invdx2 = 1 / dx2;
-                this->m2_source   = init_conditions.sources[2];
+                this->m2_source             = init_conditions.sources[2];
                 this->energy_source         = init_conditions.sources[3];
                 this->sourceG2              = init_conditions.gsource[1];
-                this->mom2_source_all_zeros = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});              
+                this->mom2_source_all_zeros = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});  
+                if (x2_cell_spacing == simbi::Cellspacing::LOGSPACE) {
+                    this->dlogx2 = std::log10(x2[yactive_grid - 1]/ x2[0]) / (yactive_grid - 1);
+                } else {
+                    this->dx2 = (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
+                    this->invdx2 = 1 / dx2;
+                }
             } else {
                 this->energy_source = init_conditions.sources[2];
             }
