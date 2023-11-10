@@ -65,6 +65,12 @@ namespace simbi{
         HUBER_AND_KISSMANN_2021,
         NAIVE,
     };
+
+    enum class CONS2PRIMTYPE {
+        VOLUMETRIC,
+        CHARGES,
+    };
+    
     constexpr auto comp_wave_speed = WaveSpeeds::MIGNONE_AND_BODO_05;
     constexpr auto comp_hllc_type  = HLLCTYPE::CLASSICAL;
 }

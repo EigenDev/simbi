@@ -226,6 +226,7 @@ void SRHD<dim>::emit_troubled_cells() {
  * @return none
  */
 template<int dim>
+template<simbi::CONS2PRIMTYPE c2p_type>
 void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 {
     const auto* const cons_data  = cons.data();
@@ -251,7 +252,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
         real invdV = 1.0;
         while (!found_failure && workLeftToDo)
         {
-            if (mesh_motion &&  (geometry != simbi::Geometry::CARTESIAN))
+            if constexpr(c2p_type == simbi::CONS2PRIMTYPE::CHARGES)
             {
                 if constexpr(dim == 1) {
                     const auto idx = helpers::get_real_idx(gid, radius, active_zones);
@@ -1046,7 +1047,6 @@ void SRHD<dim>::advance(
     ] GPU_LAMBDA (const luint idx){
         #if GPU_CODE 
         auto prim_buff = shared_memory_proxy<sr::Primitive<dim>>();
-        // extern __shared__ sr::Primitive<dim> prim_buff[];
         #else 
         auto *const prim_buff = prim_data;
         #endif 
@@ -1055,7 +1055,13 @@ void SRHD<dim>::advance(
         const luint jj  = dim < 2 ? 0 : (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::helpers::get_row(idx, xpg, ypg, kk);
         const luint ii  = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::helpers::get_column(idx, xpg, ypg, kk);
         #if GPU_CODE
-        if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg)) return;
+        if constexpr(dim == 1) {
+            if (ii >= xpg) return;
+        } else if constexpr(dim == 2) {
+            if ((ii >= xpg) || (jj >= ypg)) return;
+        } else {
+            if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg)) return;
+        }
         #endif 
 
         const luint ia  = ii + radius;
@@ -1630,12 +1636,7 @@ void SRHD<dim>::advance(
                     const real pc     = prim_buff[txa].p;
                     const real invdV  = 1 / dV;
                     const auto geom_sources = sr::Conserved<1>{0.0, pc * (sR - sL) * invdV, 0.0};
-
-                    // #if !GPU_CODE
-                    //     if (frf.d != 0 || flf.d != 0) {
-                    //         printf("ia: %lu, dR: %.2e, dL: %.2e\n", ia, frf.d, flf.d);
-                    //     }
-                    // #endif
+                    
                     cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - source_terms - gravity) * step * dt * factor;
                     break;
                 }
@@ -1890,6 +1891,7 @@ void SRHD<dim>::simulate(
     // Stuff for moving mesh 
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
+    const bool changing_volume = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
 
     if (mesh_motion && all_outer_bounds) {
         if constexpr(dim == 1) {
@@ -2062,8 +2064,15 @@ void SRHD<dim>::simulate(
     if constexpr(BuildPlatform == Platform::GPU){
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
+
+    const auto cons2primproxy = [&] {
+        if (changing_volume) {
+            return &simbi::SRHD<dim>::cons2prim<simbi::CONS2PRIMTYPE::CHARGES>;
+        }
+        return &simbi::SRHD<dim>::cons2prim<simbi::CONS2PRIMTYPE::VOLUMETRIC>;
+    }();
     
-    cons2prim(fullP);
+    (this->*cons2primproxy)(fullP);
     if constexpr(BuildPlatform == Platform::GPU) {
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP);
     } else {
@@ -2090,7 +2099,7 @@ void SRHD<dim>::simulate(
             return;
         }
         advance(activeP, xstride, ystride);
-        cons2prim(fullP);
+        (this->*cons2primproxy)(fullP);
         if constexpr(dim == 1) {
             helpers::config_ghosts1D(fullP, cons.data(), nx, first_order, bcs.data(), outer_zones.data(), inflow_zones.data());
         } else if constexpr(dim == 2) {
