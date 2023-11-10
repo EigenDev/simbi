@@ -240,9 +240,9 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         #------------------------
         funcs: list[Any] = [] 
         for x in ['x1', 'x2', 'x3']:
-            if f'{x}_cellspacing' in ds:
-                setup[f'{x}_cellspacing'] = ds[f'{x}_cellspacing']
-                funcs += [np.linspace if ds[f'{x}_cellspacing'] == 'linear' else np.geomspace]
+            if f'{x}_cell_spacing' in ds:
+                setup[f'{x}_cell_spacing'] = ds[f'{x}_cell_spacing']
+                funcs += [np.linspace if ds[f'{x}_cell_spacing'] == 'linear' else np.geomspace]
             else:
                 if x == 'x1':
                     funcs += [np.linspace if ds['linspace'] else np.geomspace]
