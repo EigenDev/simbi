@@ -786,7 +786,6 @@ class Visualizer:
             times = []
             label = self.labels[key] if self.labels else None
             for idx, file in enumerate(self.flist[key]):
-                print(f'processing file {file}...', flush=True, end='\n')
                 fields, setup, mesh = util.read_file(self, file, self.ndim)
                 if self.fields[0] in derived:
                     var = util.prims2var(fields, self.fields[0])
@@ -810,6 +809,7 @@ class Visualizer:
 
                 weighted_vars += [weighted]
                 times += [setup['time']]
+                print(f'processed file {file}...', flush=True, end='\n')
 
             times = np.asanyarray(times)
             data = np.asanyarray(weighted_vars)
@@ -818,30 +818,31 @@ class Visualizer:
                                           label=label,
                                           alpha=1.0)]
 
-            # at_the_end = key == len(self.flist.keys()) - 1
-            # if self.fields[0] in ['gamma_beta', 'u1', 'u'] and at_the_end:
-            #     self.axs.plot(times,
-            #         data[0] * (times / times[0]) ** (-3 / 2),
-            #         label=r'$\propto t^{-3/2}$',
-            #         color='grey',
-            #         linestyle=':'
-            #     )
-            #     if self.break_time:
-            #         tb_index = int(np.argmin(np.abs(times - self.break_time)))
-            #         tref = times[tb_index:]
-            #         exp_curve = np.exp(1 - tref / tref[0])
-            #         self.axs.plot(
-            #             tref,
-            #             data[tb_index] *
-            #             exp_curve,
-            #             label=r'$\propto \exp(-t)$',
-            #             color='grey',
-            #             linestyle='-.')
-            #         self.axs.plot(tref,
-            #                     data[tb_index] * (tref / tref[0]) ** (-3),
-            #                     label=r'$\propto t^{-3}$',
-            #                     color='grey',
-            #                     linestyle='--')
+            if self.pictorial:
+                at_the_end = key == len(self.flist.keys()) - 1
+                if self.fields[0] in ['gamma_beta', 'u1', 'u'] and at_the_end:
+                    self.axs.plot(times,
+                        data[0] * (times / times[0]) ** (-3 / 2),
+                        label=r'$\propto t^{-3/2}$',
+                        color='grey',
+                        linestyle=':'
+                    )
+                    if self.break_time:
+                        tb_index = int(np.argmin(np.abs(times - self.break_time)))
+                        tref = times[tb_index:]
+                        exp_curve = np.exp(1 - tref / tref[0])
+                        self.axs.plot(
+                            tref,
+                            data[tb_index] *
+                            exp_curve,
+                            label=r'$\propto \exp(-t)$',
+                            color='grey',
+                            linestyle='-.')
+                        self.axs.plot(tref,
+                                    data[tb_index] * (tref / tref[0]) ** (-3),
+                                    label=r'$\propto t^{-3}$',
+                                    color='grey',
+                                    linestyle='--')
 
         if self.log:
             self.axs.set_xscale('log')
