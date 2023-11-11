@@ -344,22 +344,12 @@ def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constr
     
 def get_file_list(inputs: str, sort: bool = False) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
     from pathlib import Path
-    files: list[str] = []
-    file_dict: dict[int, list[str]] = {}
-    dircount  = 0
     multidir = all(Path(path).is_dir() for path in inputs)
     isDirectory = False
-    for idx, obj in enumerate(inputs):
-        fstring = Path(obj)
-        #check if path is a directory
-        if fstring.is_dir():
-            if not multidir:
-                files += sorted([str(f) for f in fstring.glob('*.h5') if f.is_file()])
-            else:
-                file_dict[idx] = sorted([str(f) for f in fstring.glob('*.h5') if f.is_file()])
-        else:
-            files += [file for file in inputs]
-            break
+    if multidir:
+        files = {key: sorted([str(f) for f in Path(fdir).glob('*.h5') if f.is_file()]) for key, fdir in enumerate(inputs) }
+    else:
+        files = [file for file in inputs]
     
     if not multidir:
         # sort by length of strings now
@@ -367,5 +357,5 @@ def get_file_list(inputs: str, sort: bool = False) -> Union[tuple[list[str], int
             files.sort(key=len, reverse=False)
         return files, len(files)
     else:
-        any(file_dict[key].sort(key=len, reverse=False) for key in file_dict.keys())
-        return file_dict, isDirectory
+        any(files[key].sort(key=len, reverse=False) for key in files.keys())
+        return files, isDirectory
