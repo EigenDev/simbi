@@ -626,7 +626,7 @@ class Hydro:
         # Loading bar to have chance to check params
         helpers.print_progress()
 
-        # Create boolean maks for object immersed boundaries (impermable)
+        # Create boolean masks for object immersed boundaries (impermeable)
         object_cells: NDArray[Any] = np.zeros_like(
             self.u[0], dtype=bool) if object_positions is None else np.asanyarray(
             object_positions, dtype=bool)
