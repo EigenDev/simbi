@@ -1672,6 +1672,7 @@ void Newtonian<dim>::simulate(
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
     this->changing_volume = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
+
     if (mesh_motion && all_outer_bounds) {
         if constexpr(dim == 1) {
             outer_zones.resize(first_order ? 1 : 2);
@@ -1743,7 +1744,7 @@ void Newtonian<dim>::simulate(
         setup.x3min = x3[0];
         setup.x3    = x3;
     }
-
+    
     setup.nx                  = nx;
     setup.ny                  = ny;
     setup.nz                  = nz;
@@ -1820,6 +1821,13 @@ void Newtonian<dim>::simulate(
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
     troubled_cells.copyToGpu();
+    sourceG1.copyToGpu();
+    if constexpr(dim > 1) {
+        sourceG2.copyToGpu();
+    }
+    if constexpr(dim > 2) {
+        sourceG3.copyToGpu();
+    }
 
     // Setup the system
     const luint xblockdim    = xactive_grid > gpu_block_dimx ? gpu_block_dimx : xactive_grid;

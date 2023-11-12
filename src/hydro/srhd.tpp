@@ -2081,6 +2081,13 @@ void SRHD<dim>::simulate(
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
     troubled_cells.copyToGpu();
+    sourceG1.copyToGpu();
+    if constexpr(dim > 1) {
+        sourceG2.copyToGpu();
+    }
+    if constexpr(dim > 2) {
+        sourceG3.copyToGpu();
+    }
 
     // Setup the system
     const luint xblockdim    = xactive_grid > gpu_block_dimx ? gpu_block_dimx : xactive_grid;
