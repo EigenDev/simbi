@@ -190,6 +190,7 @@ namespace simbi
 
                         //=================== Record Benchmarks
                         n++;
+                        sim_state.n = n;
                         if (n % nfold == 0) {
                             ncheck += 1;
                             speed   = sim_state.total_zones / delta_t;
