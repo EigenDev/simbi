@@ -219,24 +219,24 @@ void SRHD<dim>::emit_troubled_cells() {
             const real x1mean = helpers::calc_any_mean(x1l, x1r, x1_cell_spacing);
             const real x2mean = helpers::calc_any_mean(x2l, x2r, x2_cell_spacing);
             const real x3mean = helpers::calc_any_mean(x3l, x3r, x3_cell_spacing);
-            const auto s1 = cons[gid].momentum(1);
-            const auto s2 = cons[gid].momentum(2);
-            const auto s3 = cons[gid].momentum(3);
-            const real et  = (cons[gid].d + cons[gid].tau + prims[gid].p);
-            const real s   = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
-            const real v2  = (s * s) / (et * et);
-            const real w   = 1 / std::sqrt(1 - v2);
+            const real s1 = cons[gid].momentum(1);
+            const real s2 = cons[gid].momentum(2);
+            const real s3 = cons[gid].momentum(3);
+            const real et = (cons[gid].d + cons[gid].tau + prims[gid].p);
+            const real s  = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
+            const real v2 = (s * s) / (et * et);
+            const real w  = 1 / std::sqrt(1 - v2);
             if constexpr(dim == 1) {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, iter: %d\n", 
-                        cons[gid].d / w, prims[gid].p, v2, x1mean, troubled_cells[gid]
+                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, iter: %lu\n", 
+                        cons[gid].d / w, prims[gid].p, v2, x1mean, n
                 );
             } else if constexpr(dim == 2) {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %d\n", 
-                        cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, troubled_cells[gid]
+                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", 
+                        cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, n
                 );
             } else {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %d\n", 
-                        cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, x3mean, troubled_cells[gid]
+                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %lu\n", 
+                        cons[gid].d / w, prims[gid].p, v2, x1mean, x2mean, x3mean, n
                 );
             }
         }
@@ -280,9 +280,9 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             if (changing_volume)
             {
                 if constexpr(dim == 1) {
-                    const auto idx = helpers::get_real_idx(gid, radius, active_zones);
-                    const real dV  = get_cell_volume(idx);
-                    invdV          = 1 / dV;
+                    const auto ireal = helpers::get_real_idx(gid, radius, active_zones);
+                    const real dV    = get_cell_volume(ireal);
+                    invdV            = 1 / dV;
                 } else if constexpr(dim == 2) {
                     const luint ii   = gid % nx;
                     const luint jj   = gid / nx;
@@ -333,7 +333,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 
                 if (iter >= MAX_ITER || std::isnan(peq))
                 {
-                    troubled_data[gid] = iter;
+                    troubled_data[gid] = 1;
                     dt                = INFINITY;
                     inFailureState    = true;
                     found_failure     = true;
@@ -378,7 +378,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             workLeftToDo = false;
 
             if (peq < 0) {
-                troubled_data[gid] = iter;
+                troubled_data[gid] = 1;
                 inFailureState = true;
                 found_failure  = true;
                 dt = INFINITY;
@@ -429,10 +429,10 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
         {
             // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-            const real gammaL = 1 / std::sqrt(1 - (vL * vL));
-            const real gammaR = 1 / std::sqrt(1 - (vR * vR));
-            const real sL = csL*csL/(gammaL*gammaL*(1 - csL*csL));
-            const real sR = csR*csR/(gammaR*gammaR*(1 - csR*csR));
+            const real lorentzL = 1 / std::sqrt(1 - (vL * vL));
+            const real lorentzR = 1 / std::sqrt(1 - (vR * vR));
+            const real sL = csL*csL/(lorentzL*lorentzL*(1 - csL*csL));
+            const real sR = csR*csR/(lorentzR*lorentzR*(1 - csR*csR));
             // Define temporaries to save computational cycles
             const real qfL   = 1 / (1 + sL);
             const real qfR   = 1 / (1 + sR);
@@ -882,6 +882,8 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
         {
         case HLLCTYPE::FLEISCHMANN:
             {
+                // Apply the low-Mach HLLC fix found in Fleischmann et al 2020: 
+                // https://www.sciencedirect.com/science/article/pii/S0021999120305362
                 const real csL = lambda.csL;
                 const real csR = lambda.csR;
                 constexpr real ma_lim = static_cast<real>(0.1);
@@ -902,10 +904,10 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                 real Dstar              = cofactor * (aL - vL) * D;
                 real S1star             = cofactor * (S1 * (aL - vL) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
                 real S2star             = cofactor * (S2 * (aL - vL) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
-                real S3star             = cofactor * (S3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
+                real S3star             = cofactor * (S3 * (aL - vL) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
                 real Estar              = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
                 real tauStar            = Estar - Dstar;
-                const auto starStateL = [=] {
+                const auto starStateL = [&] {
                     if constexpr(dim == 2) {
                         return sr::Conserved<2>{Dstar, S1star, S2star, tauStar};
                     } else {
@@ -928,17 +930,17 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                 S3star                = cofactor * (S3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
                 Estar                 = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
                 tauStar               = Estar - Dstar;
-                const auto starStateR = [=] {
+                const auto starStateR = [&] {
                     if constexpr(dim == 2) {
                         return sr::Conserved<2>{Dstar, S1star, S2star, tauStar};
                     } else {
                         return sr::Conserved<3>{Dstar, S1star, S2star, S3star, tauStar};
                     }
                 }();
-                const real ma_left    = vL / csL * std::sqrt((1 - csL * csL) / (1 - vL * vL));
-                const real ma_right   = vR / csR * std::sqrt((1 - csR * csR) / (1 - vR * vR));
+                const real ma_left    = vL / csL; // * std::sqrt((1 - csL * csL) / (1 - vL * vL));
+                const real ma_right   = vR / csR; // * std::sqrt((1 - csR * csR) / (1 - vR * vR));
                 const real ma_local   = helpers::my_max(std::abs(ma_left), std::abs(ma_right));
-                const real phi        = std::sin(helpers::my_min(static_cast<real>(1.0), ma_local / ma_lim) * M_PI * static_cast<real>(0.5));
+                const real phi        = std::sin(helpers::my_min<real>(1, ma_local / ma_lim) * M_PI * 0.5);
                 const real aL_lm      = phi == 0 ? aL : phi * aL;
                 const real aR_lm      = phi == 0 ? aR : phi * aR;
 
@@ -1286,15 +1288,42 @@ void SRHD<dim>::advance(
             switch (sim_solver)
             {
             case Solver::HLLC:
-                frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
-                if constexpr(dim > 1){
-                    grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0);
+                if constexpr(dim == 1) {
+                    frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                    break;
+                } else {
+                    if(quirk_smoothing)
+                    {
+                        if (helpers::quirk_strong_shock(xprimsL.p, xprimsR.p) ){
+                            frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                        } else {
+                            frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                        }
+
+                        if (helpers::quirk_strong_shock(yprimsL.p, yprimsR.p)){
+                            grf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                        } else {
+                            grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                        }
+
+                        if constexpr(dim > 2) {
+                            if (helpers::quirk_strong_shock(zprimsL.p, zprimsR.p)){
+                                hrf = calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0.0);
+                            } else {
+                                hrf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0.0);
+                            }
+                        }
+                        break;
+                    } else {
+                        frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                        grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0);
+
+                        if constexpr(dim > 2) {
+                            hrf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0);
+                        }
+                        break;
+                    }
                 }
-                if constexpr(dim > 2) {
-                    hrf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0);
-                }
-                break;
-            
             default:
                 frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                 if constexpr(dim > 1) {
@@ -1382,15 +1411,42 @@ void SRHD<dim>::advance(
             switch (sim_solver)
             {
             case Solver::HLLC:
-                flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
-                if constexpr(dim > 1){
-                    glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0);
-                }  
-                if constexpr(dim > 2){
-                    hlf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0);
-                } 
-                break;
-            
+                if constexpr(dim == 1) {
+                    flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                    break;
+                } else {
+                    if(quirk_smoothing)
+                    {
+                        if (helpers::quirk_strong_shock(xprimsL.p, xprimsR.p) ){
+                            flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                        } else {
+                            flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                        }
+
+                        if (helpers::quirk_strong_shock(yprimsL.p, yprimsR.p)){
+                            glf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                        } else {
+                            glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                        }
+
+                        if constexpr(dim > 2) {
+                            if (helpers::quirk_strong_shock(zprimsL.p, zprimsR.p)){
+                                hlf = calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0.0);
+                            } else {
+                                hlf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0.0);
+                            }
+                        }
+                        break;
+                    } else {
+                        flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                        glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0);
+
+                        if constexpr(dim > 2) {
+                            hlf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0);
+                        }
+                        break;
+                    }
+                }
             default:
                 flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
                 if constexpr(dim > 1) {
@@ -1498,15 +1554,42 @@ void SRHD<dim>::advance(
             switch (sim_solver)
             {
             case Solver::HLLC:
-                frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
-                if constexpr(dim > 1){
-                    grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0);
+                if constexpr(dim == 1) {
+                    frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                    break;
+                } else {
+                    if(quirk_smoothing)
+                    {
+                        if (helpers::quirk_strong_shock(xprimsL.p, xprimsR.p) ){
+                            frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                        } else {
+                            frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                        }
+
+                        if (helpers::quirk_strong_shock(yprimsL.p, yprimsR.p)){
+                            grf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                        } else {
+                            grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                        }
+
+                        if constexpr(dim > 2) {
+                            if (helpers::quirk_strong_shock(zprimsL.p, zprimsR.p)){
+                                hrf = calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0.0);
+                            } else {
+                                hrf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0.0);
+                            }
+                        }
+                        break;
+                    } else {
+                        frf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
+                        grf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0);
+
+                        if constexpr(dim > 2) {
+                            hrf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0);
+                        }
+                        break;
+                    }
                 }
-                if constexpr(dim > 2) {
-                    hrf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0);
-                }
-                break;
-            
             default:
                 frf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceR);
                 if constexpr(dim > 1) {
@@ -1593,14 +1676,42 @@ void SRHD<dim>::advance(
             switch (sim_solver)
             {
             case Solver::HLLC:
-                flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
-                if constexpr(dim > 1){
-                    glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0);
-                }  
-                if constexpr(dim > 2){
-                    hlf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0);
-                } 
-                break;
+                if constexpr(dim == 1) {
+                    flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                    break;
+                } else {
+                    if(quirk_smoothing)
+                    {
+                        if (helpers::quirk_strong_shock(xprimsL.p, xprimsR.p) ){
+                            flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                        } else {
+                            flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                        }
+
+                        if (helpers::quirk_strong_shock(yprimsL.p, yprimsR.p)){
+                            glf = calc_hll_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                        } else {
+                            glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0.0);
+                        }
+
+                        if constexpr(dim > 2) {
+                            if (helpers::quirk_strong_shock(zprimsL.p, zprimsR.p)){
+                                hlf = calc_hll_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0.0);
+                            } else {
+                                hlf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0.0);
+                            }
+                        }
+                        break;
+                    } else {
+                        flf = calc_hllc_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
+                        glf = calc_hllc_flux(uyL, uyR, gL, gR, yprimsL, yprimsR, 2, 0);
+
+                        if constexpr(dim > 2) {
+                            hlf = calc_hllc_flux(uzL, uzR, hL, hR, zprimsL, zprimsR, 3, 0);
+                        }
+                        break;
+                    }
+                }
             
             default:
                 flf = calc_hll_flux(uxL, uxR, fL, fR, xprimsL, xprimsR, 1, vfaceL);
@@ -2130,6 +2241,7 @@ void SRHD<dim>::simulate(
         }
     }
 
+    this->n = 0;
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
         if (inFailureState){
