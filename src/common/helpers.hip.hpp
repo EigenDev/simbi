@@ -113,16 +113,6 @@ namespace simbi
         constexpr T my_min3(const T a, const T b, const T c) {
             return (a < b) ? (a < c ? a : c) : b < c ? b : c;
         }
-        
-        /*
-        @param index the index you want to shift to
-        @param size the total size of the array
-        @return the peridoically shifted index, accounting for negative values
-        */
-        GPU_CALLABLE_INLINE lint mod(const lint index, const lint size)
-        {
-            return (index % size + size) % size;
-        }
 
         const std::map<std::string, simbi::Geometry> geometry_map = {
         { "spherical", simbi::Geometry::SPHERICAL },
@@ -196,7 +186,7 @@ namespace simbi
         //  HELPER-METHODS
         //---------------------------------------------------------------------------------------------------------
         //----------------Define Methods-------------------------
-        std::string create_step_str(real t_interval, int max_order_of_mag);
+        std::string create_step_str(const real current_time, const int max_order_of_mag);
         void write_hdf5(
             const std::string data_directory, 
             const std::string filename, 
@@ -484,10 +474,6 @@ namespace simbi
         
         template<const unsigned num, const char separator>
         void separate(std::string & input);
-
-        template<typename T>
-        int floor_or_ceil(T val);
-
     } // namespace helpers
 } // end simbi
 
