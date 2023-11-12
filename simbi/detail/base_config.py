@@ -248,7 +248,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return 0.0
     
     @simbi_property
-    def gravity_sources(self) -> Optional[NDArray[Any]]:
+    def gravity_sources(self) -> Optional[Sequence[NDArray[numpy_float]]]:
         return None
     
     @classmethod
