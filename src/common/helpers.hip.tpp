@@ -368,9 +368,6 @@ namespace simbi{
                     }
                 } else {
                     if(jj < x2grid_size - 4) {
-                        // Fix the ghost zones at the x1 boundaries
-                        cons[(jj + 2) * sx +  (x1grid_size - 1) * sy] = cons[(jj + 2) * sx +  (x1grid_size - 3) * sy];
-                        cons[(jj + 2) * sx +  (x1grid_size - 2) * sy] = cons[(jj + 2) * sx +  (x1grid_size - 3) * sy];
                         switch (boundary_conditions[0]) {
                         case simbi::BoundaryCondition::REFLECTING:
                             cons[(jj + 2) * sx +  0 * sy]   = cons[(jj + 2) * sx +  3 * sy];
@@ -1159,15 +1156,6 @@ namespace simbi{
                 it = std::make_reverse_iterator(input.insert(it.base(),separator));
             }
         }
-
-        template<typename T>
-        int floor_or_ceil(T val) {
-            constexpr T tol = 1e-16;
-            if (std::abs(val) < tol) {
-                return 0;
-            }
-            return std::floor(val);
-        };
     } // namespace helpers
 }
 
