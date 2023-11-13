@@ -350,10 +350,9 @@ def get_file_list(inputs: str, sort: bool = False) -> Union[tuple[list[str], int
     multidir = len(dirs) > 1
         
     if multidir:
-        files = cast(dict[int, list[str]], files)
         files = {key: sorted([str(f) for f in Path(fdir).glob('*.h5') if f.is_file()]) for key, fdir in enumerate(inputs) }
     else:
-        files = cast(list[str], files)
+        files = []
         if dirs:
             files = sorted([str(f) for d in dirs for f in Path(d).glob('*.h5') if f.is_file()])
         files += [file for file in filter(lambda x: x not in dirs, inputs)]
