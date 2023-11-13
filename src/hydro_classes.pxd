@@ -4,8 +4,6 @@ from libcpp.vector cimport vector
 from libcpp cimport bool
 from libcpp.string cimport string 
 
-
-
 # adapted from: https://stackoverflow.com/a/39052204/13874039
 cdef extern from "util/pyobj_wrapper.hpp":
     cdef cppclass PyObjWrapper:
@@ -16,14 +14,6 @@ cdef extern from "util/pyobj_wrapper.hpp":
 cdef extern from "build_options.hpp":
     cdef bool col_maj "COLUMN_MAJOR"
     ctypedef double real 
-    # a few cname hacks 
-    ctypedef int dim1 "1" 
-    ctypedef int dim2 "2"
-    ctypedef int dim3 "3"
-
-
-cdef extern from "common/enums.hpp":
-    cdef int FLOAT_PRECISION "FLOAT_PRECISION"
 
 cdef extern from "common/hydro_structs.hpp":
     cdef cppclass InitialConditions:
@@ -38,11 +28,6 @@ cdef extern from "common/hydro_structs.hpp":
         vector[real] x1, x2, x3
 
 cdef extern from "hydro/driver.hpp" namespace "simbi":
-    ctypedef void* void_ptr
-    ctypedef fused null_or_lambda:
-        PyObjWrapper
-        void_ptr
-
     cdef cppclass Driver:
         Driver() except +
 
