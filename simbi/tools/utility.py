@@ -344,13 +344,16 @@ def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constr
     
 def get_file_list(inputs: str, sort: bool = False) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
     from pathlib import Path
+    from typing import cast
     files: Union[list[str], dict[int, list[str]]]
     dirs = list(filter(lambda x: Path(x).is_dir(), inputs))
     multidir = len(dirs) > 1
         
     if multidir:
+        files = cast(dict[int, list[str]], files)
         files = {key: sorted([str(f) for f in Path(fdir).glob('*.h5') if f.is_file()]) for key, fdir in enumerate(inputs) }
     else:
+        files = cast(list[str], files)
         if dirs:
             files = sorted([str(f) for d in dirs for f in Path(d).glob('*.h5') if f.is_file()])
         files += [file for file in filter(lambda x: x not in dirs, inputs)]
