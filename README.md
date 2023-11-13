@@ -8,6 +8,9 @@
 
 <https://user-images.githubusercontent.com/29236993/212521070-0e2a7ced-cd5f-4006-9039-be67f174fb07.mp4>
 
+# 2D Rayleigh-Talor in Newtonian Fluid
+
+https://github.com/EigenDev/simbi/assets/29236993/818d930d-d993-4e5d-8ed4-47a9bae11a7f
 
 
 # 1D Moving mesh techniques
