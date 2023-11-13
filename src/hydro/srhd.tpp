@@ -886,7 +886,7 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                 // https://www.sciencedirect.com/science/article/pii/S0021999120305362
                 const real csL = lambda.csL;
                 const real csR = lambda.csR;
-                constexpr real ma_lim = static_cast<real>(0.1);
+                constexpr real ma_lim = static_cast<real>(5);
 
                 // --------------Compute the L Star State----------
                 real pressure = left_prims.p;
@@ -937,8 +937,8 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                         return sr::Conserved<3>{Dstar, S1star, S2star, S3star, tauStar};
                     }
                 }();
-                const real ma_left    = vL / csL; // * std::sqrt((1 - csL * csL) / (1 - vL * vL));
-                const real ma_right   = vR / csR; // * std::sqrt((1 - csR * csR) / (1 - vR * vR));
+                const real ma_left    = vL / csL * std::sqrt((1 - csL * csL) / (1 - vL * vL));
+                const real ma_right   = vR / csR * std::sqrt((1 - csR * csR) / (1 - vR * vR));
                 const real ma_local   = helpers::my_max(std::abs(ma_left), std::abs(ma_right));
                 const real phi        = std::sin(helpers::my_min<real>(1, ma_local / ma_lim) * M_PI * 0.5);
                 const real aL_lm      = phi == 0 ? aL : phi * aL;
