@@ -220,23 +220,23 @@ void Newtonian<dim>::emit_troubled_cells() {
             const real x1mean = helpers::calc_any_mean(x1l, x1r, x1_cell_spacing);
             const real x2mean = helpers::calc_any_mean(x2l, x2r, x2_cell_spacing);
             const real x3mean = helpers::calc_any_mean(x3l, x3r, x3_cell_spacing);
-            const auto m1 = cons[gid].momentum(1);
-            const auto m2 = cons[gid].momentum(2);
-            const auto m3 = cons[gid].momentum(3);
-            const real et  = (cons[gid].rho + cons[gid].e_dens + prims[gid].p);
-            const real s   = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
-            const real v2  = (s * s) / (et * et);
+            const real m1 = cons[gid].momentum(1);
+            const real m2 = cons[gid].momentum(2);
+            const real m3 = cons[gid].momentum(3);
+            const real et = cons[gid].e_dens;
+            const real s  = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
+            const real v2 = (s * s) / (et * et);
             if constexpr(dim == 1) {
-                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e\n", 
-                        cons[gid].rho, prims[gid].p, v2, x1mean
+                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, iter: %lu\n", 
+                        cons[gid].rho, prims[gid].p, v2, x1mean, n
                 );
             } else if constexpr(dim == 2) {
-                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e\n", 
-                        cons[gid].rho, prims[gid].p, v2, x1mean, x2mean
+                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", 
+                        cons[gid].rho, prims[gid].p, v2, x1mean, x2mean, n
                 );
             } else {
-                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e\n", 
-                        cons[gid].rho, prims[gid].p, v2, x1mean, x2mean, x3mean
+                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %lu\n", 
+                        cons[gid].rho, prims[gid].p, v2, x1mean, x2mean, x3mean, n
                 );
             }
         }
@@ -269,8 +269,8 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<> &p)
         if (changing_volume)
         {
             if constexpr(dim == 1) {
-                const auto idx  = helpers::get_real_idx(gid, radius, active_zones);
-                const real dV    = get_cell_volume(idx);
+                const auto ireal = helpers::get_real_idx(gid, radius, active_zones);
+                const real dV    = get_cell_volume(ireal);
                 invdV            = 1 / dV;
             } else if constexpr(dim == 2) {
                 const luint ii   = gid % nx;
@@ -711,7 +711,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         const real cR = lambda.csR;
         const real aStar = lambda.aStar;
         const real pStar = lambda.pStar;
-        // Apply the low-Mach HLLC fix found in Fleichman et al 2020: 
+        // Apply the low-Mach HLLC fix found in Fleischmann et al 2020: 
         // https://www.sciencedirect.com/science/article/pii/S0021999120305362
         constexpr real ma_lim   = static_cast<real>(0.10);
 
@@ -1672,6 +1672,7 @@ void Newtonian<dim>::simulate(
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
     this->changing_volume = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
+
     if (mesh_motion && all_outer_bounds) {
         if constexpr(dim == 1) {
             outer_zones.resize(first_order ? 1 : 2);
@@ -1743,7 +1744,7 @@ void Newtonian<dim>::simulate(
         setup.x3min = x3[0];
         setup.x3    = x3;
     }
-
+    
     setup.nx                  = nx;
     setup.ny                  = ny;
     setup.nz                  = nz;
@@ -1820,6 +1821,13 @@ void Newtonian<dim>::simulate(
     inflow_zones.copyToGpu();
     bcs.copyToGpu();
     troubled_cells.copyToGpu();
+    sourceG1.copyToGpu();
+    if constexpr(dim > 1) {
+        sourceG2.copyToGpu();
+    }
+    if constexpr(dim > 2) {
+        sourceG3.copyToGpu();
+    }
 
     // Setup the system
     const luint xblockdim    = xactive_grid > gpu_block_dimx ? gpu_block_dimx : xactive_grid;
@@ -1862,6 +1870,7 @@ void Newtonian<dim>::simulate(
         }
     }
 
+    this->n = 0;
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
         if (inFailureState){

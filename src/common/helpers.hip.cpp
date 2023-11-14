@@ -47,16 +47,18 @@ namespace simbi{
         //====================================================================================================
         //                                  WRITE DATA TO FILE
         //====================================================================================================
-        std::string create_step_str(real t_interval, int max_order_of_mag){
-            if (t_interval == 0) {
+        std::string create_step_str(const real current_time, const int max_order_of_mag){
+            if (current_time == 0) {
                 return "000_000";
             }
-            const int time_order_of_mag = floor_or_ceil(std::log10(t_interval));
-            const int num_zeros = max_order_of_mag - time_order_of_mag;
             // Convert the time interval into an int with 2 decimal displacements
-            const int t_interval_int = round( 1e3 * t_interval );
-            auto time_string = std::to_string(t_interval_int);
-            std::string pad_zeros = std::string(num_zeros, '0');
+            const int current_time_int  = std::round(1e3 * current_time);
+            const int time_order_of_mag = std::floor(
+                std::log10(std::round(1000.0 * current_time) / 1000.0)
+            );
+            const int num_zeros = max_order_of_mag - time_order_of_mag;
+            const std::string pad_zeros = std::string(num_zeros, '0');
+            auto time_string = std::to_string(current_time_int);
             time_string.insert(0, pad_zeros);
             separate<3, '_'>(time_string);
             return time_string;
@@ -118,142 +120,96 @@ namespace simbi{
             {
                 case 1:
                 {
-                    auto rho = std::make_unique<real[]>(size);
-                    auto v   = std::make_unique<real[]>(size);
-                    auto p   = std::make_unique<real[]>(size);
-                    auto x1  = std::make_unique<real[]>(setup.x1.size());
-
-                    std::copy(prims.rho.begin(), prims.rho.begin() + size, rho.get());
-                    std::copy(prims.v.begin(), prims.v.begin() + size, v.get());
-                    std::copy(prims.p.begin(), prims.p.begin() + size, p.get());
-                    std::copy(setup.x1.begin(),  setup.x1.begin() + setup.x1.size(), x1.get());
                     H5::DataSet dataset = file.createDataSet("rho", real_type, dataspace);
 
                     // Write the Primitives 
-                    dataset.write(rho.get(), real_type);
+                    dataset.write(prims.rho.data(), real_type);
                     dataset.close();
                     
                     dataset = file.createDataSet("v1", real_type, dataspace);
-                    dataset.write(v.get(), real_type);
+                    dataset.write(prims.v.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("p", real_type, dataspace);
-                    dataset.write(p.get(), real_type);
+                    dataset.write(prims.p.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("x1", real_type, dataspacex1);
-                    dataset.write(x1.get(), real_type);
+                    dataset.write(setup.x1.data(), real_type);
                     dataset.close();
                     break;
                 }
                 case 2:
                     {
-                    // Write the Primitives 
-                    auto rho = std::make_unique<real[]>(size);
-                    auto v1  = std::make_unique<real[]>(size);
-                    auto v2  = std::make_unique<real[]>(size);
-                    auto p   = std::make_unique<real[]>(size);
-                    auto chi = std::make_unique<real[]>(size);
-                    auto x1  = std::make_unique<real[]>(setup.x1.size());
-                    auto x2  = std::make_unique<real[]>(setup.x2.size());
-
-                    std::copy(prims.rho.begin(),  prims.rho.begin() + size, rho.get());
-                    std::copy(prims.v1.begin(),   prims.v1.begin()  + size, v1.get());
-                    std::copy(prims.v2.begin(),   prims.v2.begin()  + size, v2.get());
-                    std::copy(prims.p.begin(),    prims.p.begin()   + size, p.get());
-                    std::copy(prims.chi.begin(),  prims.chi.begin() + size, chi.get());
-                    std::copy(setup.x1.begin(),  setup.x1.begin() + setup.x1.size(), x1.get());
-                    std::copy(setup.x2.begin(),  setup.x2.begin() + setup.x2.size(), x2.get());
                     H5::DataSet dataset = file.createDataSet("rho", real_type, dataspace);
 
                     // Write the Primitives 
-                    dataset.write(rho.get(), real_type);
+                    dataset.write(prims.rho.data(), real_type);
                     dataset.close();
                     
                     dataset = file.createDataSet("v1", real_type, dataspace);
-                    dataset.write(v1.get(), real_type);
+                    dataset.write(prims.v1.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("v2", real_type, dataspace);
-                    dataset.write(v2.get(), real_type);
+                    dataset.write(prims.v2.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("p", real_type, dataspace);
-                    dataset.write(p.get(), real_type);
+                    dataset.write(prims.p.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("chi", real_type, dataspace);
-                    dataset.write(chi.get(), real_type);
+                    dataset.write(prims.chi.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("x1", real_type, dataspacex1);
-                    dataset.write(x1.get(), real_type);
+                    dataset.write(setup.x1.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("x2", real_type, dataspacex2);
-                    dataset.write(x2.get(), real_type);
+                    dataset.write(setup.x2.data(), real_type);
                     dataset.close();
                 break;
                 }
                 case 3:
                     {
-                    // Write the Primitives 
-                    auto rho = std::make_unique<real[]>(size);
-                    auto v1  = std::make_unique<real[]>(size);
-                    auto v2  = std::make_unique<real[]>(size);
-                    auto v3  = std::make_unique<real[]>(size);
-                    auto p   = std::make_unique<real[]>(size);
-                    auto chi = std::make_unique<real[]>(size);
-                    auto x1  = std::make_unique<real[]>(setup.x1.size());
-                    auto x2  = std::make_unique<real[]>(setup.x2.size());
-                    auto x3  = std::make_unique<real[]>(setup.x3.size());
-
-                    std::copy(prims.rho.begin(), prims.rho.begin() + size, rho.get());
-                    std::copy(prims.v1.begin(), prims.v1.begin() + size, v1.get());
-                    std::copy(prims.v2.begin(), prims.v2.begin() + size, v2.get());
-                    std::copy(prims.v3.begin(), prims.v3.begin() + size, v3.get());
-                    std::copy(prims.p.begin(),  prims.p.begin() + size, p.get());
-                    std::copy(prims.chi.begin(),  prims.chi.begin() + size, chi.get());
-                    std::copy(setup.x1.begin(),  setup.x1.begin() + setup.x1.size(), x1.get());
-                    std::copy(setup.x2.begin(),  setup.x2.begin() + setup.x2.size(), x2.get());
-                    std::copy(setup.x3.begin(),  setup.x3.begin() + setup.x3.size(), x3.get());
-
                     H5::DataSet dataset = file.createDataSet("rho", real_type, dataspace);
 
                     // Write the Primitives 
-                    dataset.write(rho.get(), real_type);
+                    dataset.write(prims.rho.data(), real_type);
                     dataset.close();
                     
                     dataset = file.createDataSet("v1", real_type, dataspace);
-                    dataset.write(v1.get(), real_type);
+                    dataset.write(prims.v1.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("v2", real_type, dataspace);
-                    dataset.write(v2.get(), real_type);
+                    dataset.write(prims.v2.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("v3", real_type, dataspace);
-                    dataset.write(v3.get(), real_type);
+                    dataset.write(prims.v3.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("p", real_type, dataspace);
-                    dataset.write(p.get(), real_type);
+                    dataset.write(prims.p.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("chi", real_type, dataspace);
-                    dataset.write(chi.get(), real_type);
+                    dataset.write(prims.chi.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("x1", real_type, dataspacex1);
-                    dataset.write(x1.get(), real_type);
+                    dataset.write(setup.x1.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("x2", real_type, dataspacex2);
-                    dataset.write(x2.get(), real_type);
+                    dataset.write(setup.x2.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("x3", real_type, dataspacex3);
-                    dataset.write(x3.get(), real_type);
+                    dataset.write(setup.x3.data(), real_type);
                     dataset.close();
                 break;
                 }

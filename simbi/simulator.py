@@ -6,7 +6,7 @@ import numpy as np
 import os
 import inspect
 import importlib
-from itertools import product, permutations
+from itertools import product, permutations, chain, repeat
 from .detail import initial_condition as simbi_ic
 from .detail import helpers
 from .detail.slogger import logger
@@ -449,10 +449,10 @@ class Hydro:
             if number_of_given_bcs == 1:
                 boundary_conditions = list(
                     boundary_conditions) * 2 * self.dimensionality
-            elif number_of_given_bcs == self.dimensionality // 2:
-                boundary_conditions = [
-                    boundary_conditions[idx] *
-                    2 for idx in range(number_of_given_bcs)]
+            elif number_of_given_bcs == (self.dimensionality * 2) // 2:
+                boundary_conditions = list(
+                    chain.from_iterable(repeat(x, 2) for x in boundary_conditions)
+                )
             else:
                 raise ValueError(
                     "Please include at a number of boundary conditions equal to at least half the number of cell faces")
@@ -626,7 +626,7 @@ class Hydro:
         # Loading bar to have chance to check params
         helpers.print_progress()
 
-        # Create boolean maks for object immersed boundaries (impermable)
+        # Create boolean masks for object immersed boundaries (impermeable)
         object_cells: NDArray[Any] = np.zeros_like(
             self.u[0], dtype=bool) if object_positions is None else np.asanyarray(
             object_positions, dtype=bool)
@@ -669,7 +669,7 @@ class Hydro:
             self.nz = 1
         else:
             self.nz, self.ny, self.nx = self.u[0].shape
-            
+
         init_conditions = {
             'gamma': self.gamma,
             'sources': sources,

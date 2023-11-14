@@ -268,6 +268,8 @@ namespace simbi
             constant_sources(init_conditions.constant_sources),
             total_zones(nx * ny  * nz),
             boundary_conditions(init_conditions.boundary_conditions),
+            sim_solver(helpers::solver_map.at(init_conditions.solver)),
+            geometry(helpers::geometry_map.at(init_conditions.coord_system)),
             x1_cell_spacing(str2cell.at(init_conditions.x1_cell_spacing)),
             x2_cell_spacing(str2cell.at(init_conditions.x2_cell_spacing)),
             x3_cell_spacing(str2cell.at(init_conditions.x3_cell_spacing)),
@@ -286,17 +288,14 @@ namespace simbi
         }
 
         void initialize(const InitialConditions &init_conditions) {
-
             // Define simulation params
-            this->sim_solver          = helpers::solver_map.at(init_conditions.solver);
-            this->geometry            = helpers::geometry_map.at(init_conditions.coord_system);
-            this->xactive_grid      = (init_conditions.first_order) ? nx - 2: nx - 4;
-            this->yactive_grid      = (ny == 1) ? 1 : (init_conditions.first_order) ? ny - 2: ny - 4;
-            this->zactive_grid      = (nz == 1) ? 1 : (init_conditions.first_order) ? nz - 2: nz - 4;
-            this->idx_active          = (init_conditions.first_order) ? 1 : 2;
-            this->active_zones        = xactive_grid * yactive_grid * zactive_grid;
-            this->x1min               = x1[0];
-            this->x1max               = x1[xactive_grid - 1];
+            this->xactive_grid  = (init_conditions.first_order) ? nx - 2: nx - 4;
+            this->yactive_grid  = (ny == 1) ? 1 : (init_conditions.first_order) ? ny - 2: ny - 4;
+            this->zactive_grid  = (nz == 1) ? 1 : (init_conditions.first_order) ? nz - 2: nz - 4;
+            this->idx_active    = (init_conditions.first_order) ? 1 : 2;
+            this->active_zones  = xactive_grid * yactive_grid * zactive_grid;
+            this->x1min         = x1[0];
+            this->x1max         = x1[xactive_grid - 1];
             if (x1_cell_spacing == simbi::Cellspacing::LOGSPACE) {
                 this->dlogx1 = std::log10(x1[xactive_grid - 1]/ x1[0]) / (xactive_grid - 1);
             } else {

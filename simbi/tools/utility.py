@@ -344,32 +344,24 @@ def fill_below_intersec(x: NDArray[numpy_float], y: NDArray[numpy_float], constr
     
 def get_file_list(inputs: str, sort: bool = False) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
     from pathlib import Path
-    files: list[str] = []
-    file_dict: dict[int, list[str]] = {}
-    dircount  = 0
-    multidir = False
-    isDirectory = False
-    for idx, obj in enumerate(inputs):
-        fstring = Path(obj)
-        #check if path is a directory
-        if fstring.is_dir():
-            if dircount == 0:
-                files += sorted([str(f) for f in fstring.glob('*.h5') if f.is_file()])
-            else:
-                multidir = True
-                if dircount == 1:
-                    file_dict[idx - 1] = files
-                file_dict[idx] = sorted([str(f) for f in fstring.glob('*.h5') if f.is_file()])
-                dircount += 1
-        else:
-            files += [file for file in inputs]
-            break
+    from typing import cast
+    files: Union[list[str], dict[int, list[str]]]
+    dirs = list(filter(lambda x: Path(x).is_dir(), inputs))
+    multidir = len(dirs) > 1
+        
+    if multidir:
+        files = {key: sorted([str(f) for f in Path(fdir).glob('*.h5') if f.is_file()]) for key, fdir in enumerate(inputs) }
+    else:
+        files = []
+        if dirs:
+            files = sorted([str(f) for d in dirs for f in Path(d).glob('*.h5') if f.is_file()])
+        files += [file for file in filter(lambda x: x not in dirs, inputs)]
     
-    if not multidir:
+    if not isinstance(files, dict):
         # sort by length of strings now
         if sort:
             files.sort(key=len, reverse=False)
         return files, len(files)
     else:
-        any(file_dict[key].sort(key=len, reverse=False) for key in file_dict.keys())
-        return file_dict, isDirectory
+        any(files[key].sort(key=len, reverse=False) for key in files.keys())
+        return files, multidir
