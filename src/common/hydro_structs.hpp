@@ -929,9 +929,21 @@ namespace rmhd1d {
             return 0;
         }
 
+        GPU_CALLABLE_MEMBER constexpr real bcomponent(const int nhat) const {
+            if (nhat == 1) {
+                return b1;
+            }
+            return 0;
+        }
+
         GPU_CALLABLE_MEMBER
         real get_enthalpy(real gamma) const {
             return 1 + gamma * p /(rho * (gamma - 1));
+        }
+
+        GPU_CALLABLE_MEMBER
+        real get_vdotb() const {
+            return (v1 * b1);
         }
     };
 
@@ -977,7 +989,17 @@ namespace rmhd1d {
         }
         GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {
             if (nhat == 1) {
-                return s;
+                return hmag;
+            }
+            return 0;
+        }
+
+        GPU_CALLABLE_MEMBER constexpr real& mag_field() {
+            return s;
+        }
+        GPU_CALLABLE_MEMBER constexpr real mag_field(const int nhat) const {
+            if (nhat == 1) {
+                return hmag;
             }
             return 0;
         }
@@ -1056,6 +1078,16 @@ namespace rmhd2d {
         GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat) {
             return (nhat == 1 ? s1 : s2); 
         }
+
+        GPU_CALLABLE_MEMBER constexpr real mag_field(const int nhat) const {
+            if (nhat > 2) {
+                return 0;
+            }
+            return (nhat == 1 ? hmag1 : hmag2); 
+        }
+        GPU_CALLABLE_MEMBER constexpr real& mag_field(const int nhat) {
+            return (nhat == 1 ? hmag1 : hmag2); 
+        }
     };
 
     struct Primitive {
@@ -1100,12 +1132,12 @@ namespace rmhd2d {
             return (nhat == 1 ? get_v1() : get_v2()); 
         }
 
-        GPU_CALLABLE_MEMBER real calc_lorentz_gamma() const {
-            if constexpr(VelocityType == Velocity::Beta) {
-                return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
-            } else {
-                return std::sqrt(1 + (v1 * v1 + v2 * v2));
+        GPU_CALLABLE_MEMBER
+        constexpr real bcomponent(const unsigned nhat) const {
+            if (nhat > 2) {
+                return 0;
             }
+            return (nhat == 1) ? b1 : b2; 
         }
 
         GPU_CALLABLE_MEMBER constexpr real get_v1() const {
@@ -1135,6 +1167,11 @@ namespace rmhd2d {
         GPU_CALLABLE_MEMBER
         real get_enthalpy(real gamma) const {
             return 1 + gamma * p /(rho * (gamma - 1));
+        }
+
+        GPU_CALLABLE_MEMBER
+        real get_vdotb() const {
+            return (v1 * b1 + v2 * b2);
         }
 
     };
@@ -1209,6 +1246,8 @@ namespace rmhd3d {
 
         GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const {return (nhat == 1 ? s1 : (nhat == 2) ? s2 : s3); }
         GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat) {return (nhat == 1 ? s1 : (nhat == 2) ? s2 : s3); }
+        GPU_CALLABLE_MEMBER constexpr real  mag_field(const int nhat) const {return (nhat == 1 ? hmag1 : (nhat == 2) ? hmag2 : hmag3); }
+        GPU_CALLABLE_MEMBER constexpr real& mag_field(const int nhat) {return (nhat == 1 ? hmag1 : (nhat == 2) ? hmag2 : hmag3); }
     };
 
     struct Primitive {
@@ -1267,12 +1306,9 @@ namespace rmhd3d {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
         }
 
-        GPU_CALLABLE_MEMBER real calc_lorentz_gamma() const {
-            if constexpr(VelocityType == Velocity::Beta) {
-                return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
-            } else {
-                return std::sqrt(1 + (v1 * v1 + v2 * v2 + v3 * v3));
-            }
+        GPU_CALLABLE_MEMBER
+        constexpr real bcomponent(const unsigned nhat) const {
+            return nhat == 1 ? b1: (nhat == 2) ? b2 : b3;
         }
 
         GPU_CALLABLE_MEMBER constexpr real get_v1() const {
@@ -1311,6 +1347,11 @@ namespace rmhd3d {
         GPU_CALLABLE_MEMBER
         real get_enthalpy(real gamma) const {
             return 1 + gamma * p /(rho * (gamma - 1));
+        }
+
+        GPU_CALLABLE_MEMBER
+        real get_vdotb() const {
+            return (v1 * b1 + v2 * b2 + v3 * b3);
         }
     };
 

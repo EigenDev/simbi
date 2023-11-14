@@ -292,22 +292,84 @@ namespace simbi
             return 1 / (1 + std::exp(static_cast<real>(10.0) * (t - tduration)));
         }
 
-        GPU_CALLABLE_INLINE real newton_f(real gamma, real tau, real D, real S, real p) {
-            const auto et    = tau + D + p;
-            const auto v2    = S * S / (et * et);
-            const auto W     = 1 / std::sqrt(1 - v2);
-            const auto rho   = D / W;
-            const auto eps   = (tau + (1 - W) * D + (1 - W * W) * p) / (D * W);
+        inline real calc_rmhd_lorentz(const real ssq, const real bsq, const real msq, const real qq ) {
+            return std::sqrt(1 - (ssq * (2 * qq + bsq) + msq * qq * qq)/((qq + bsq) * (qq + bsq) * qq * qq));
+        }
+
+        inline real calc_rmhd_pg(const real gr, const real d, const real w, const real qq) {
+            return (qq - d * w) / (gr * w * w);
+        }
+
+        /*
+        calculate relativistic f(p) 
+
+        @param gamma adiabatic index
+        @param tau energy density minus rest mass energy
+        @param d lab frame density
+        @param S lab frame momentum density
+        @param p pressure
+        */
+        GPU_CALLABLE_INLINE real newton_f(real gamma, real tau, real d, real s, real p) {
+            const auto et    = tau + d + p;
+            const auto v2    = s * s / (et * et);
+            const auto w     = 1 / std::sqrt(1 - v2);
+            const auto rho   = d / w;
+            const auto eps   = (tau + (1 - w) * d + (1 - w * w) * p) / (d * w);
             return (gamma - 1) * rho * eps - p;
         }
 
-        GPU_CALLABLE_INLINE real newton_g(real gamma, real tau, real D, real S, real p) {
-            const auto et    = tau + D + p;
-            const auto v2    = S * S / (et * et);
-            const auto W     = 1 / std::sqrt(1 - v2);
-            const auto eps   = (tau + (1 - W) * D + (1 - W * W) * p) / (D * W);
+        /* 
+        calculate relativistic df/dp
+
+        @param gamma adiabatic index
+        @param tau energy density minus rest mass energy
+        @param d lab frame density
+        @param S lab frame momentum density
+        @param p pressure
+        */
+        GPU_CALLABLE_INLINE real newton_g(real gamma, real tau, real d, real s, real p) {
+            const auto et    = tau + d+ p;
+            const auto v2    = s * s / (et * et);
+            const auto w     = 1 / std::sqrt(1 - v2);
+            const auto eps   = (tau + (1 - w) * d + (1 - w * w) * p) / (d * w);
             const auto c2    = (gamma - 1) * gamma * eps / (1 + gamma * eps);
             return c2 * v2 - 1;
+        }
+
+        /* 
+        calculate relativistic mhd f(q) (Mignone and Bodo (2006))
+        
+        @param gr adiabatic index reduced (gamma / (gamma - 1))
+        @param et total energy density
+        @param d lab frame density
+        @param ssq s-squared
+        @param bsq b-squared
+        @param msq m-squared
+        @param qq energy density
+        */
+        GPU_CALLABLE_INLINE real newton_f_mhd(real gr, real et, real d, real ssq, real bsq, real msq, real qq) {
+            const auto w     = calc_rmhd_lorentz(ssq, bsq, msq, qq);
+            const auto pg    = calc_rmhd_pg(gr, d, w, qq);
+            return qq - pg + (1 - static_cast<real>(0.5) / (w * w)) * bsq - (ssq)/(2 * qq * qq) - et;
+        }
+
+        /* 
+        calculate relativistic mhd df/dq  (Mignone and Bodo (2006))
+        
+        @param gr adiabatic index reduced (gamma / (gamma - 1))
+        @param et total energy density
+        @param d lab frame density
+        @param ssq s-squared
+        @param bsq b-squared
+        @param msq m-squared
+        @param qq energy density
+        */
+        GPU_CALLABLE_INLINE real newton_g_mhd(real gr, real et, real d, real ssq, real bsq, real msq, real qq) {
+            const auto w      = calc_rmhd_lorentz(ssq, bsq, msq, qq);
+            const auto denom  = (qq + bsq);
+            const auto dg_dq  = - (w * w * w) * (2 * ssq * (3 * qq * qq + 3 * qq * bsq + bsq * bsq) + msq * (qq * qq * qq)) / (2 * qq * qq * qq * denom * denom * denom);
+            const auto dpg_dq = (w * (1 + d * dg_dq) - 2 * qq * dg_dq) / (gr * w * w * w);
+            return 1 - dpg_dq + bsq / (w * w * w) * dg_dq + ssq / (qq * qq * qq);
         }
 
         //======================================
