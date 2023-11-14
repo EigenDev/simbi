@@ -39,27 +39,62 @@ namespace simbi{
         typename std::enable_if<is_1D_primitive<U>::value>::type
         writeToProd(T *from, PrimData *to){
             to->rho  = from->rho;
-            to->v    = from->v;
+            to->v1   = from->v1;
             to->p    = from->p;
+            to->chi  = from->chi;
         }
 
+        template<typename T, typename U>
+        typename std::enable_if<is_3D_mhd_primitive<U>::value>::type
+        writeToProd(T *from, PrimData *to){
+            to->rho  = from->rho;
+            to->v1   = from->v1;
+            to->v2   = from->v2;
+            to->v3   = from->v3;
+            to->p    = from->p;
+            to->b1   = from->b1;
+            to->b2   = from->b2;
+            to->b3   = from->b3;
+            to->chi  = from->chi;
+        }
+
+        //Handle 2D primitive arrays whether SR or Newtonian
+        template<typename T, typename U>
+        typename std::enable_if<is_2D_mhd_primitive<U>::value>::type
+        writeToProd(T *from, PrimData *to){
+            to->rho  = from->rho;
+            to->v1   = from->v1;
+            to->v2   = from->v2;
+            to->p    = from->p;
+            to->b1   = from->b1;
+            to->b2   = from->b2;
+            to->chi  = from->chi;
+        }
+
+        template<typename T, typename U>
+        typename std::enable_if<is_1D_mhd_primitive<U>::value>::type
+        writeToProd(T *from, PrimData *to){
+            to->rho  = from->rho;
+            to->v1   = from->v1;
+            to->p    = from->p;
+            to->b1   = from->b1;
+            to->chi  = from->chi;
+        }
+
+
         template<typename T , typename U, typename arr_type>
-        typename std::enable_if<is_3D_primitive<U>::value, T>::type
+        typename std::enable_if<is_1D_primitive<U>::value, T>::type
         vec2struct(const arr_type &p){
             T sprims;
             size_t nzones = p.size();
 
             sprims.rho.reserve(nzones);
             sprims.v1.reserve(nzones);
-            sprims.v2.reserve(nzones);
-            sprims.v3.reserve(nzones);
             sprims.p.reserve(nzones);
             sprims.chi.reserve(nzones);
             for (size_t i = 0; i < nzones; i++) {
                 sprims.rho.push_back(p[i].rho);
                 sprims.v1.push_back(p[i].v1);
-                sprims.v2.push_back(p[i].v2);
-                sprims.v3.push_back(p[i].v3);
                 sprims.p.push_back(p[i].p);
                 sprims.chi.push_back(p[i].chi);
             }
@@ -90,18 +125,102 @@ namespace simbi{
         }
 
         template<typename T , typename U, typename arr_type>
-        typename std::enable_if<is_1D_primitive<U>::value, T>::type
+        typename std::enable_if<is_3D_primitive<U>::value, T>::type
         vec2struct(const arr_type &p){
             T sprims;
             size_t nzones = p.size();
 
             sprims.rho.reserve(nzones);
-            sprims.v.reserve(nzones);
+            sprims.v1.reserve(nzones);
+            sprims.v2.reserve(nzones);
+            sprims.v3.reserve(nzones);
             sprims.p.reserve(nzones);
+            sprims.chi.reserve(nzones);
             for (size_t i = 0; i < nzones; i++) {
                 sprims.rho.push_back(p[i].rho);
-                sprims.v.push_back(p[i].v1);
+                sprims.v1.push_back(p[i].v1);
+                sprims.v2.push_back(p[i].v2);
+                sprims.v3.push_back(p[i].v3);
                 sprims.p.push_back(p[i].p);
+                sprims.chi.push_back(p[i].chi);
+            }
+            
+            return sprims;
+        }
+
+        template<typename T , typename U, typename arr_type>
+        typename std::enable_if<is_1D_mhd_primitive<U>::value, T>::type
+        vec2struct(const arr_type &p){
+            T sprims;
+            size_t nzones = p.size();
+
+            sprims.rho.reserve(nzones);
+            sprims.v1.reserve(nzones);
+            sprims.p.reserve(nzones);
+            sprims.b1.reserve(nzones);
+            sprims.chi.reserve(nzones);
+            for (size_t i = 0; i < nzones; i++) {
+                sprims.rho.push_back(p[i].rho);
+                sprims.v1.push_back(p[i].v1);
+                sprims.p.push_back(p[i].p);
+                sprims.b1.push_back(p[i].b1);
+                sprims.chi.push_back(p[i].chi);
+            }
+            
+            return sprims;
+        }
+
+        template<typename T , typename U, typename arr_type>
+        typename std::enable_if<is_2D_mhd_primitive<U>::value, T>::type
+        vec2struct(const arr_type &p){
+            T sprims;
+            size_t nzones = p.size();
+
+            sprims.rho.reserve(nzones);
+            sprims.v1.reserve(nzones);
+            sprims.v2.reserve(nzones);
+            sprims.p.reserve(nzones);
+            sprims.b1.reserve(nzones);
+            sprims.b2.reserve(nzones);
+            sprims.chi.reserve(nzones);
+            for (size_t i = 0; i < nzones; i++) {
+                sprims.rho.push_back(p[i].rho);
+                sprims.v1.push_back(p[i].v1);
+                sprims.v2.push_back(p[i].v2);
+                sprims.p.push_back(p[i].p);
+                sprims.b1.push_back(p[i].b1);
+                sprims.b2.push_back(p[i].b2);
+                sprims.chi.push_back(p[i].chi);
+            }
+            
+            return sprims;
+        }
+
+        template<typename T , typename U, typename arr_type>
+        typename std::enable_if<is_3D_mhd_primitive<U>::value, T>::type
+        vec2struct(const arr_type &p){
+            T sprims;
+            size_t nzones = p.size();
+
+            sprims.rho.reserve(nzones);
+            sprims.v1.reserve(nzones);
+            sprims.v2.reserve(nzones);
+            sprims.v3.reserve(nzones);
+            sprims.p.reserve(nzones);
+            sprims.b1.reserve(nzones);
+            sprims.b2.reserve(nzones);
+            sprims.b3.reserve(nzones);
+            sprims.chi.reserve(nzones);
+            for (size_t i = 0; i < nzones; i++) {
+                sprims.rho.push_back(p[i].rho);
+                sprims.v1.push_back(p[i].v1);
+                sprims.v2.push_back(p[i].v2);
+                sprims.v3.push_back(p[i].v3);
+                sprims.p.push_back(p[i].p);
+                sprims.b1.push_back(p[i].b1);
+                sprims.b2.push_back(p[i].b2);
+                sprims.b3.push_back(p[i].b3);
+                sprims.chi.push_back(p[i].chi);
             }
             
             return sprims;

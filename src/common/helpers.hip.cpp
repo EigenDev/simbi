@@ -127,7 +127,7 @@ namespace simbi{
                     dataset.close();
                     
                     dataset = file.createDataSet("v1", real_type, dataspace);
-                    dataset.write(prims.v.data(), real_type);
+                    dataset.write(prims.v1.data(), real_type);
                     dataset.close();
 
                     dataset = file.createDataSet("p", real_type, dataspace);
