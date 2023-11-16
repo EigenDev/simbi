@@ -420,7 +420,7 @@ class Visualizer:
                             coord_idx = find_nearest(mesh['x3'], self.box_depth)[0]
                             var = var[coord_idx]
                         elif self.projection[2] == 2:
-                            coord_idx = find_nearest(mesh['x2'], self.box_depth)[0]
+                            coord_idx = find_nearest(mesh['x2'], np.deg2rad(self.box_depth))[0]
                             var = var[:, coord_idx, :]
                         else:
                             coord_idx = find_nearest(mesh['x1'], self.box_depth)[0]
@@ -429,7 +429,7 @@ class Visualizer:
                     if not self.cartesian:
                         # turn in mesh grid and then reverse
                         xx, yy = np.meshgrid(xx, yy)[::-1]
-                        max_theta = np.abs(xx.max())
+                        max_angle = np.abs(xx.max())
                         if any(self.xlims):
                             dtheta = self.xlims[1] - self.xlims[0]
                             ax.set_thetamin(self.xlims[0] - (patches - 1) * dtheta * self.bipolar)
@@ -444,7 +444,7 @@ class Visualizer:
                                     xx = - xx[::+1] + np.deg2rad(dtheta)
                                 else:
                                     xx = xx[::-1]
-                        elif max_theta < np.pi:
+                        elif max_angle == 0.5 * np.pi:
                             # ax.set_position( [0.1, -0.45, 0.8, 2])
                             # ax.set_position( [0.05, -0.40, 0.9, 2])
                             # ax.set_position( [0.1, -0.18, 0.9, 1.43])
@@ -456,7 +456,7 @@ class Visualizer:
                                 self.axs.set_thetamin(-180)
                                 self.axs.set_thetamax(+180)
                             xx = xx[::theta_sign(idx)] + next(theta_cycle)
-                        elif (max_theta > 0.5 * np.pi and max_theta < 2.0 * np.pi) and patches > 1:
+                        elif (max_angle > 0.5 * np.pi and max_angle < 2.0 * np.pi) and patches > 1:
                             if patches == 2:
                                 hemisphere = np.s_[:]
                             elif patches == 3 and idx == 0:
@@ -469,6 +469,16 @@ class Visualizer:
                             xx = theta_sign(idx) * xx[hemisphere]
                             yy = yy[hemisphere]
                             var = var[hemisphere]
+                        elif max_angle == 2.0 * np.pi and patches == 2:
+                            if idx == 0:
+                                hemisphere = slice(None, xx.shape[0]//2)
+                            else:
+                                hemisphere = slice(xx.shape[0]//2, None)
+                                
+                            xx = xx[hemisphere]
+                            yy = yy[hemisphere]
+                            var = var[hemisphere]
+                            
                             
                     color_range = next(self.vrange)
                     if self.log and field not in lin_fields:
@@ -602,7 +612,7 @@ class Visualizer:
                 else:
                     #speciifc to publication figure
                     kwargs = {
-                        'y': 1.03 if mesh['x2'].max() == np.pi else 0.8,
+                        'y': 0.8 if mesh['x2'].max() == 0.5 * np.pi else 1.03,
                         #-------------------- Text for ring wedges
                         # 'y': 0.30,
                         # 'x': 0.80,
