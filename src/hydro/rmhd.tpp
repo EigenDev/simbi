@@ -1085,6 +1085,110 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     }
 };
 
+template<int dim>
+GPU_CALLABLE_MEMBER
+RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
+    const RMHD<dim>::conserved_t &left_state,
+    const RMHD<dim>::conserved_t &right_state,
+    const RMHD<dim>::conserved_t &left_flux,
+    const RMHD<dim>::conserved_t &right_flux,
+    const RMHD<dim>::primitive_t &left_prims,
+    const RMHD<dim>::primitive_t &right_prims,
+    const luint nhat,
+    const real vface) const 
+{
+    const rm::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const real aL  = lambda.aL;
+    const real aR  = lambda.aR;
+    const real aLm = aL < 0 ? aL : 0;
+    const real aRp = aR > 0 ? aR : 0;
+
+    //---- Check wave speeds before wasting computations
+    if (vface <= aLm) {
+        return left_flux - left_state * vface;
+    } else if (vface >= aRp) {
+        return right_flux - right_state * vface;
+    }
+
+    const auto rL = left_state * aLm - left_flux;
+    const auto rR = right_state * arp - right_flux;
+
+    //----------------- Jump conditions across the fast waves (section 3.1)
+    const auto next_perm = (const int nhat, const int step) {
+        return ((nhat - 1) + step) % 3 + 1;
+    };
+    const auto bnL = left_prims.bcomponent(nhat);
+    const auto pL  = left_prims.total_pressure();
+    const auto pR  = right_prims.total_pressure();
+    const auto nperp1 = next_perm(nhat, 1);
+    const auto nperp2 = next_perm(nhat, 2);
+    const auto qL = rL.momentum(nhat) - rL.total_energy() * aLm + pL * (1 - aLm * aLm);
+    const auto gL = rL.bcomponent(nperp1) * rl.bcomponenet(nperp1) + rL.bcomponent(nperp2) * rl.bcomponenet(nperp2);
+    const auto yL = rL.bcomponent(nperp1) * rl.momentum(nperp1) + rL.bcomponent(nperp2) * rl.momentum(nperp2);
+    const auto oL = - qL - gL + bnL * bnL * (1 - aLm * aLm);
+    const auto xL = bnL * (qL * aLm * bnL + yL) - (qL + gL) * (aLm * pL + rL.total_energy());
+    // velocity components
+    const auto vnorm  = (bnL * (qL * bnL + aLm * yL) - (qL + gL) * (pL + rL.momentum(nhat))) / xL;
+    const auto vperp1 = (qL * rL.momentum(nperp1) + rL.bcomponent(nperp1) * (yL + bnL * (aLm * rL.momentum(nhat) - rL.total_energy()))) / xL;
+    const auto vperp2 = (qL * rL.momentum(nperp2) + rL.bcomponent(nperp2) * (yL + bnL * (aLm * rL.momentum(nhat) - rL.total_energy()))) / xL;
+    const auto bnorm  = bnL;
+    const auto bperp1 = (rL.bcompoonent(nperp1) - bnL * verp1) / (aLm - vnorm);
+    const auto bperp2 = (rL.bcompoonent(nperp2) - bnL * verp2) / (aLm - vnorm);
+    const auto enthalpy = pL + (rL.total_energy() - (vnorm * rL.momentum(nhat) + vperp1 * rL.momentum(vperp1) + vperp2 * rL.momentum(vperp2))) / (aLm - vnorm);
+    const auto dL = rL.d / (aLm - vnorm);
+    const auto vdotb = (vnorm * bnL + vnorm1 * bperp1 + vnorm2 * bperp2);
+    const auto eL = (rL.total_energy() + pL * vnorm - vdotb) / (aLm - vnorm);
+    const auto mnorm  = (eL + pL) * vnorm - vdotb * bnorm;
+    const auto mperp1 = (eL + pL) * vperp1 - vdotb * bperp1;
+    const auto mperp2 = (eL + pL) * vperp2 - vdotb * bperp2;
+    if 
+
+    //--------------Jump conditions across the Alfven waves (section 3.2)
+    const auto eta = helpers::sgn(bnL) * std::sqrt(enthalpy);
+    const auto dfac = 1 / (aLm * pL + rL.total_energy() + bnL * eta);
+    const auto calc_kcomp = (const int nhat, const int k, const rm::Conserved<dim> &r, const real p) {
+        return (r.momentum(nhat) + p * helpers::kronecker(k, nhat) + r.bcomponenet(k) * eta) * dfac;
+    }
+    const auto k1L = calc_kcomp(nhat, 1, rL, pL);
+    const auto k2L = calc_kcomp(nhat, 2, rL, pL);
+    const auto k3L = calc_kcomp(nhat, 3, rL, pL);
+    const auto k1R = calc_kcomp(nhat, 1, rR, pR);
+    const auto k2R = calc_kcomp(nhat, 2, rR, pR);
+    const auto k3R = calc_kcomp(nhat, 3, rR, pR);
+    // the k-normal is the Alfven wave speed
+    const auto lalf = [&] (const int dir) {
+        if (nhat == 1 && dir == 0) {
+            return k1L;
+        } else if(nhat == 1 && dir == 1) {
+            return k1R;
+        } else if (nhat == 2 && dir == 0) {
+            return k2L;
+        } else if (nhat == 2 && dir == 1) {
+            return k2R;
+        } else {
+            if (dir == 0) {
+                return k3L;
+            }
+            return k3R;
+        };
+    };
+
+    //---------------Jump conditions across the contact wave (section 3.3)
+    const bk = [&](int nhat) {
+        if constexpr(dim == 1) {
+            if (nhat == 1) {
+                return bnL;
+            } else {
+                return 0;
+            }
+        } else {
+            (bnorm * (lalf()))
+
+        }
+    }
+    
+};
+
 //===================================================================================================================
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
