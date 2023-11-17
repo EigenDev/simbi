@@ -420,7 +420,7 @@ class Visualizer:
                             coord_idx = find_nearest(mesh['x3'], self.box_depth)[0]
                             var = var[coord_idx]
                         elif self.projection[2] == 2:
-                            coord_idx = find_nearest(mesh['x2'], self.box_depth)[0]
+                            coord_idx = find_nearest(mesh['x2'], np.deg2rad(self.box_depth))[0]
                             var = var[:, coord_idx, :]
                         else:
                             coord_idx = find_nearest(mesh['x1'], self.box_depth)[0]
@@ -444,7 +444,7 @@ class Visualizer:
                                     xx = - xx[::+1] + np.deg2rad(dtheta)
                                 else:
                                     xx = xx[::-1]
-                        elif max_theta < np.pi:
+                        elif max_theta == 0.5 * np.pi:
                             # ax.set_position( [0.1, -0.45, 0.8, 2])
                             # ax.set_position( [0.05, -0.40, 0.9, 2])
                             # ax.set_position( [0.1, -0.18, 0.9, 1.43])
