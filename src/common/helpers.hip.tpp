@@ -1275,6 +1275,86 @@ namespace simbi{
                 it = std::make_reverse_iterator(input.insert(it.base(),separator));
             }
         }
+
+        template<typename T>
+        T cubic(T b,T c,T d)
+        {
+            T p=c-b*b/3.0;
+            T q=2.0*b*b*b/27.0-b*c/3.0+d;
+
+            if(p==0.0) return pow(q,1.0/3.0);
+            if(q==0.0) return 0.0;
+
+            T t=sqrt(fabs(p)/3.0);
+            T g=1.5*q/(p*t);
+            if(p>0.0)
+            return -2.0*t*sinh(asinh(g)/3.0)-b/3.0;
+
+
+            if(4.0*p*p*p+27.0*q*q<0.0)
+            return 2.0*t*cos(acos(g)/3.0)-b/3.0;
+
+            if(q>0.0)
+            return -2.0*t*cosh(acosh(-g)/3.0)-b/3.0;
+
+            return 2.0*t*cosh(acosh(g)/3.0)-b/3.0;
+        }
+        /*--------------------------------------------
+
+        --------------------------------------------*/
+        template<typename T>
+        int quartic(T b, T c, T d, T e, std::vector<T> ans)
+        {
+
+            T p = c - 0.375 * b *b;
+            T q = 0.125*b*b*b-0.5*b*c+d;
+            T m = cubic(p,0.25*p*p+0.01171875*b*b*b*b-e+0.25*b*d-0.0625*b*b*c,-0.125*q*q);
+            if(q == 0.0)
+            {
+                if(m<0.0) {
+                    return 0
+                };
+                int nroots = 0;
+                T sqrt_2m=sqrt(2.0*m);
+                if(-m-p>0.0)
+                {
+                    T delta=sqrt(2.0*(-m-p));
+                    ans[nroots++]=-0.25*b+0.5*(sqrt_2m-delta);
+                    ans[nroots++]=-0.25*b-0.5*(sqrt_2m-delta);
+                    ans[nroots++]=-0.25*b+0.5*(sqrt_2m+delta);
+                    ans[nroots++]=-0.25*b-0.5*(sqrt_2m+delta);
+                }
+
+                if(-m-p==0.0)
+                {
+                    ans[nroots++]=-0.25*b-0.5*sqrt_2m;
+                    ans[nroots++]=-0.25*b+0.5*sqrt_2m;
+                }
+
+                return nroots;
+            }
+
+            if(m < 0.0)  {
+                return 0;
+            };
+            T sqrt_2m = std::sqrt(2.0*m);
+            int nroots = 0;
+            if(-m-p+q/sqrt_2m>=0.0)
+            {
+                T delta = std::sqrt(2.0*(-m-p+q/sqrt_2m));
+                ans[nroots++]=0.5*(-sqrt_2m+delta)-0.25*b;
+                ans[nroots++]=0.5*(-sqrt_2m-delta)-0.25*b;
+            }
+
+            if(-m-p-q/sqrt_2m>=0.0)
+            {
+                T delta = std::sqrt(2.0*(-m-p-q/sqrt_2m));
+                ans[nroots++]=0.5*(sqrt_2m+delta)-0.25*b;
+                ans[nroots++]=0.5*(sqrt_2m-delta)-0.25*b;
+            }
+
+            return nroots;
+        }
     } // namespace helpers
 }
 

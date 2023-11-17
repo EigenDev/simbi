@@ -292,11 +292,11 @@ namespace simbi
             return 1 / (1 + std::exp(static_cast<real>(10.0) * (t - tduration)));
         }
 
-        inline real calc_rmhd_lorentz(const real ssq, const real bsq, const real msq, const real qq ) {
+        GPU_CALLABLE_INLINE real calc_rmhd_lorentz(const real ssq, const real bsq, const real msq, const real qq ) {
             return std::sqrt(1 - (ssq * (2 * qq + bsq) + msq * qq * qq)/((qq + bsq) * (qq + bsq) * qq * qq));
         }
 
-        inline real calc_rmhd_pg(const real gr, const real d, const real w, const real qq) {
+        GPU_CALLABLE_INLINE real calc_rmhd_pg(const real gr, const real d, const real w, const real qq) {
             return (qq - d * w) / (gr * w * w);
         }
 
@@ -561,6 +561,14 @@ namespace simbi
         
         template<const unsigned num, const char separator>
         void separate(std::string & input);
+
+        // Cubic and Quartic algos adapted from
+        // https://stackoverflow.com/a/50747781/13874039
+        template<typename T>
+        T cubic(T b, T c, T d);
+
+        template<typename T>
+        T quartic(T b, T c, T d, T e, std::vector<T> res);
     } // namespace helpers
 } // end simbi
 
