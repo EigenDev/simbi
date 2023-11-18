@@ -564,10 +564,14 @@ namespace simbi
 
         // Cubic and Quartic algos adapted from
         // https://stackoverflow.com/a/50747781/13874039
+        
         template<typename T>
+        GPU_CALLABLE
         T cubic(T b, T c, T d);
 
+        
         template<typename T>
+        GPU_CALLABLE
         T quartic(T b, T c, T d, T e, std::vector<T> res);
     } // namespace helpers
 } // end simbi
