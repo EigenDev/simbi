@@ -362,7 +362,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             const real v3 = (1 / qq + bsq) * (m3 + s / qq * b3);
             edens_data[gid] = qq;
             #if FOUR_VELOCITY
-                prim_data[gid] = rm::Primitive<dim>{d/w, v1 * w, v2 * w, v3 * w, pg, dchi / d};
+                prim_data[gid] = rm::Primitive<dim>{d/w, v1 * w, v2 * w, v3 * w, pg, b1, b2, b3, dchi / d};
             #else
                 prim_data[gid] = rm::Primitive<dim>{d/w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
             #endif
