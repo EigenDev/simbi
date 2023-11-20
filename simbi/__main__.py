@@ -445,6 +445,7 @@ def configure_state(
         kwargs[idx]['x3_cell_spacing'] = config.x3_cell_spacing
         kwargs[idx]['sources'] = config.sources
         kwargs[idx]['gsources'] = config.gravity_sources
+        kwargs[idx]['bsources'] = config.magnetic_sources
         kwargs[idx]['passive_scalars'] = config.passive_scalars
         kwargs[idx]['scale_factor'] = config.scale_factor
         kwargs[idx]['scale_factor_derivative'] = config.scale_factor_derivative

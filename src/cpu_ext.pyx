@@ -56,7 +56,7 @@ cdef class SimState:
         sim_cond.x3_cell_spacing  = sim_info['x3_cell_spacing']
         sim_cond.object_cells     = sim_info['object_cells']
         sim_cond.sources          = sim_info['sources']
-        sim_cond.gsource          = sim_info['gsource']
+        sim_cond.gsources         = sim_info['gsource']
         sim_cond.data_directory   = sim_info['data_directory']
         sim_cond.coord_system     = sim_info['coord_system']
         sim_cond.solver           = sim_info['solver']

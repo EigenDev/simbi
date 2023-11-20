@@ -31,6 +31,7 @@ namespace simbi{
     };
 
     enum class Solver {
+        HLLD,
         HLLC,
         HLLE,
     };

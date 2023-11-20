@@ -35,7 +35,7 @@ class Ram45(BaseConfig):
     
     @simbi_property
     def regime(self) -> str:
-        return "relativistic"
+        return "srhd"
     
     @simbi_property
     def boundary_conditions(self) -> Sequence[str]:

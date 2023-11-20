@@ -15,6 +15,7 @@
 #include <cstdint>        // for uint32_t, int64_t, uint64_t
 #include <csignal>        // for size_t
 #include <string>         // for allocator, string
+#include <limits>         // for numeric_limits
 
 
 // Flag that detects whether program is run using openmp
@@ -56,6 +57,8 @@ using atomic_cast = long long;
 using real = double;
 constexpr real tol_scale = 1e-12;
 #endif 
+
+constexpr real minimum_real = std::numeric_limits<real>::min();
 
 //======================== COLUMN MAJOR CHECK
 #if COLUMN_MAJOR 

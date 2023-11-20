@@ -34,7 +34,7 @@ class MartiMuller(BaseConfig):
     
     @simbi_property
     def regime(self) -> str:
-        return "relativistic"
+        return "srhd"
     
     #-------------------- Uncomment if one wants the mesh to move
     # @simbi_classproperty

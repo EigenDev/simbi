@@ -53,6 +53,7 @@ namespace simbi
         real dlogx1, dx1, dlogx2, dx2, dlogx3, dx3, dlogt, tstart, engine_duration, invdx1, invdx2, invdx3;
         bool first_order, linspace, mesh_motion, adaptive_mesh_motion, half_sphere, quirk_smoothing, constant_sources, all_outer_bounds, changing_volume;
         bool den_source_all_zeros, mom1_source_all_zeros, mom2_source_all_zeros, mom3_source_all_zeros, energy_source_all_zeros; 
+        bool mag1_source_all_zeros, mag2_source_all_zeros, mag3_source_all_zeros;
         bool zero_gravity1, zero_gravity2, zero_gravity3;
         luint active_zones, idx_active, total_zones, n, init_chkpt_idx, radius;
         luint xactive_grid, yactive_grid, zactive_grid;
@@ -61,6 +62,7 @@ namespace simbi
         ndarray<simbi::BoundaryCondition> bcs;
         ndarray<int> troubled_cells;
         ndarray<real> sourceG1, sourceG2, sourceG3;
+        ndarray<real> sourceB1, sourceB2, sourceB3;
         ndarray<real> density_source, m1_source, m2_source, m3_source, energy_source;
         simbi::Geometry geometry;
         simbi::Cellspacing x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
@@ -305,7 +307,10 @@ namespace simbi
             // Define the source terms
             this->density_source = init_conditions.sources[0];
             this->m1_source      = init_conditions.sources[1];
-            this->sourceG1       = init_conditions.gsource[0];
+            this->sourceG1       = init_conditions.gsources[0];
+            if (init_conditions.regime == "rmhd") {
+                this->sourceB1 = init_conditions.bsources[0];
+            };
             if ((ny > 1) && (nz > 1)) { // 3D check
                 this->x2min            = x2[0];
                 this->x2max            = x2[yactive_grid - 1];
@@ -313,13 +318,15 @@ namespace simbi
                 this->x3max            = x3[zactive_grid - 1];
                 this->dx3              = (x3max - x3min) / (zactive_grid - 1);
                 this->dx2              = (x2max - x2min) / (yactive_grid - 1);
-                this->m2_source   = init_conditions.sources[2];
-                this->m3_source   = init_conditions.sources[3];
-                this->energy_source  = init_conditions.sources[4];
-                this->sourceG2    = init_conditions.gsource[1];
-                this->sourceG3    = init_conditions.gsource[2];
-                this->mom2_source_all_zeros    = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});
-                this->mom3_source_all_zeros    = std::all_of(m3_source.begin(),  m3_source.end(),  [](real i) {return i == 0;});
+                this->m2_source        = init_conditions.sources[2];
+                this->m3_source        = init_conditions.sources[3];
+                this->energy_source    = init_conditions.sources[4];
+                this->sourceG2         = init_conditions.gsources[1];
+                this->sourceG3         = init_conditions.gsources[2];
+                if (init_conditions.regime == "rmhd") {
+                    this->sourceB2 = init_conditions.bsources[1];
+                    this->sourceB3 = init_conditions.bsources[2];
+                };
                 if (x2_cell_spacing == simbi::Cellspacing::LOGSPACE) {
                     this->dlogx2 = std::log10(x2[yactive_grid - 1]/ x2[0]) / (yactive_grid - 1);
                 } else {
@@ -337,8 +344,11 @@ namespace simbi
                 this->x2max            = x2[yactive_grid - 1];
                 this->m2_source             = init_conditions.sources[2];
                 this->energy_source         = init_conditions.sources[3];
-                this->sourceG2              = init_conditions.gsource[1];
-                this->mom2_source_all_zeros = std::all_of(m2_source.begin(),  m2_source.end(),  [](real i) {return i == 0;});  
+                this->sourceG2              = init_conditions.gsources[1];
+                if (init_conditions.regime == "rmhd") {
+                    this->sourceB2 = init_conditions.bsources[1];
+                };
+                
                 if (x2_cell_spacing == simbi::Cellspacing::LOGSPACE) {
                     this->dlogx2 = std::log10(x2[yactive_grid - 1]/ x2[0]) / (yactive_grid - 1);
                 } else {
@@ -351,6 +361,12 @@ namespace simbi
             this->zero_gravity1            = std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {return i == 0;});
             this->zero_gravity2            = std::all_of(sourceG2.begin(), sourceG2.end(), [](real i) {return i == 0;});
             this->zero_gravity3            = std::all_of(sourceG3.begin(), sourceG3.end(), [](real i) {return i == 0;});
+            this->mag1_source_all_zeros    = std::all_of(sourceB1.begin(), sourceB1.end(), [](real i) {return i == 0;});
+            this->mag2_source_all_zeros    = std::all_of(sourceB2.begin(), sourceB2.end(), [](real i) {return i == 0;});
+            this->mag3_source_all_zeros    = std::all_of(sourceB3.begin(), sourceB3.end(), [](real i) {return i == 0;});
+            this->mom1_source_all_zeros    = std::all_of(m1_source.begin(), m1_source.end(), [](real i) {return i == 0;});
+            this->mom2_source_all_zeros    = std::all_of(m2_source.begin(), m2_source.end(), [](real i) {return i == 0;});
+            this->mom3_source_all_zeros    = std::all_of(m3_source.begin(), sourceB3.end(), [](real i) {return i == 0;});
             this->den_source_all_zeros     = std::all_of(density_source.begin(), density_source.end(),   [](real i) {return i == 0;});
             this->mom1_source_all_zeros    = std::all_of(m1_source.begin(),   m1_source.end(),  [](real i) {return i == 0;});
             this->energy_source_all_zeros  = std::all_of(energy_source.begin(),  energy_source.end(), [](real i) {return i == 0;});

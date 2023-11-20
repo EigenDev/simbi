@@ -14,12 +14,15 @@ namespace sr2d { struct Conserved; }
 namespace sr2d { struct Primitive; }
 namespace sr3d { struct Conserved; }
 namespace sr3d { struct Primitive; }
-namespace rmhd1d { struct Conserved; }
-namespace rmhd1d { struct Primitive; }
-namespace rmhd2d { struct Conserved; }
-namespace rmhd2d { struct Primitive; }
-namespace rmhd3d { struct Conserved; }
-namespace rmhd3d { struct Primitive; }
+namespace rmhd {
+    template<int dim>
+    struct AnyConserved; 
+}
+
+namespace rmhd { 
+    template<int dim>
+    struct AnyPrimitive; 
+}
 
 //==========================================================================
 //                  PRIMTIIVE TYPE TRAITS
@@ -117,32 +120,32 @@ struct is_relativistic_mhd {
 };
 
 template<>
-struct is_relativistic_mhd<rmhd1d::Conserved>
+struct is_relativistic_mhd<rmhd::AnyConserved<1>>
 {
     static constexpr bool value = true;
 };
 template<>
-struct is_relativistic_mhd<rmhd1d::Primitive>
+struct is_relativistic_mhd<rmhd::AnyPrimitive<1>>
 {
     static constexpr bool value = true;
 };
 template<>
-struct is_relativistic_mhd<rmhd2d::Conserved>
+struct is_relativistic_mhd<rmhd::AnyConserved<2>>
 {
     static constexpr bool value = true;
 };
 template<>
-struct is_relativistic_mhd<rmhd2d::Primitive>
+struct is_relativistic_mhd<rmhd::AnyPrimitive<2>>
 {
     static constexpr bool value = true;
 };
 template<>
-struct is_relativistic_mhd<rmhd3d::Conserved>
+struct is_relativistic_mhd<rmhd::AnyConserved<3>>
 {
     static constexpr bool value = true;
 };
 template<>
-struct is_relativistic_mhd<rmhd3d::Primitive>
+struct is_relativistic_mhd<rmhd::AnyPrimitive<3>>
 {
     static constexpr bool value = true;
 };
@@ -154,7 +157,7 @@ struct is_1D_mhd_primitive {
 };
 
 template <>
-struct is_1D_mhd_primitive<rmhd1d::Primitive> {
+struct is_1D_mhd_primitive<rmhd::AnyPrimitive<1>> {
   static const bool value = true;
 };
 
@@ -164,7 +167,7 @@ struct is_2D_mhd_primitive {
 };
 
 template <>
-struct is_2D_mhd_primitive<rmhd2d::Primitive> {
+struct is_2D_mhd_primitive<rmhd::AnyPrimitive<2>> {
   static const bool value = true;
 };
 
@@ -174,7 +177,7 @@ struct is_3D_mhd_primitive {
 };
 
 template <>
-struct is_3D_mhd_primitive<rmhd3d::Primitive> {
+struct is_3D_mhd_primitive<rmhd::AnyPrimitive<3>> {
   static const bool value = true;
 };
 

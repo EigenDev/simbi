@@ -308,7 +308,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             const real s3   = cons_data[gid].momentum(3) * invdV;
             const real tau  = cons_data[gid].tau * invdV;
             const real dchi = cons_data[gid].chi * invdV; 
-            const real S    = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
+            const real s    = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
 
             // Perform modified Newton Raphson based on
             // https://www.sciencedirect.com/science/article/pii/S0893965913002930
@@ -323,8 +323,8 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             do
             {
                 // compute x_[k+1]
-                f = helpers::newton_f(gamma, tau, d, S, peq);
-                g = helpers::newton_g(gamma, tau, d, S, peq);
+                f = helpers::newton_f(gamma, tau, d, s, peq);
+                g = helpers::newton_g(gamma, tau, d, s, peq);
                 peq  -= f / g;
 
                 // compute x*_k
@@ -837,19 +837,19 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
             const real v        = left_prims.get_v();
             const real pressure = left_prims.p;
             const real d        = left_state.d;
-            const real S        = left_state.s;
+            const real s        = left_state.s1;
             const real tau      = left_state.tau;
-            const real E        = tau + d;
+            const real e        = tau + d;
             const real cofactor = 1 / (aLm - aStar);
 
             //--------------Compute the L Star State----------
             // Left Star State in x-direction of coordinate lattice
-            const real Dstar    = cofactor * (aLm - v) * d;
-            const real Sstar    = cofactor * (S * (aLm - v) - pressure + pStar);
-            const real Estar    = cofactor * (E * (aLm - v) + pStar * aStar - pressure * v);
-            const real tauStar  = Estar - Dstar;
+            const real dStar    = cofactor * (aLm - v) * d;
+            const real sStar    = cofactor * (s * (aLm - v) - pressure + pStar);
+            const real eStar    = cofactor * (e * (aLm - v) + pStar * aStar - pressure * v);
+            const real tauStar  = eStar - dStar;
 
-            const auto star_stateL = sr::Conserved<1>{Dstar, Sstar, tauStar};
+            const auto star_stateL = sr::Conserved<1>{dStar, sStar, tauStar};
 
             //---------Compute the L Star Flux
             // Compute the HLL Flux component-wise
@@ -859,19 +859,19 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
             const real v         = right_prims.get_v();
             const real pressure  = right_prims.p;
             const real d         = right_state.d;
-            const real S         = right_state.s;
+            const real s         = right_state.s1;
             const real tau       = right_state.tau;
-            const real E         = tau + d;
+            const real e         = tau + d;
             const real cofactor  = 1 / (aRp - aStar);
 
             //--------------Compute the R Star State----------
             // Left Star State in x-direction of coordinate lattice
-            const real Dstar    = cofactor * (aRp - v) * d;
-            const real Sstar    = cofactor * (S * (aRp - v) - pressure + pStar);
-            const real Estar    = cofactor * (E * (aRp - v) + pStar * aStar - pressure * v);
-            const real tauStar  = Estar - Dstar;
+            const real dStar    = cofactor * (aRp - v) * d;
+            const real sStar    = cofactor * (s * (aRp - v) - pressure + pStar);
+            const real eStar    = cofactor * (e * (aRp - v) + pStar * aStar - pressure * v);
+            const real tauStar  = eStar - dStar;
 
-            const auto star_stateR = sr::Conserved<1>{Dstar, Sstar, tauStar};
+            const auto star_stateR = sr::Conserved<1>{dStar, sStar, tauStar};
 
             //---------Compute the R Star Flux  
             auto hllc_flux = right_flux + (star_stateR - right_state) * aRp;
@@ -895,23 +895,23 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                 real s2       = left_state.momentum(2);
                 real s3       = left_state.momentum(3);
                 real tau      = left_state.tau;
-                real E        = tau + d;
+                real e        = tau + d;
                 real cofactor = 1 / (aL - aStar);
 
                 const real vL           = left_prims.vcomponent(nhat);
                 const real vR           = right_prims.vcomponent(nhat);
                 // Left Star State in x-direction of coordinate lattice
-                real Dstar              = cofactor * (aL - vL) * d;
+                real dStar              = cofactor * (aL - vL) * d;
                 real s1star             = cofactor * (s1 * (aL - vL) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
                 real s2star             = cofactor * (s2 * (aL - vL) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
                 real s3star             = cofactor * (s3 * (aL - vL) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                real Estar              = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
-                real tauStar            = Estar - Dstar;
+                real eStar              = cofactor * (e * (aL - vL) + pStar * aStar - pressure * vL);
+                real tauStar            = eStar - dStar;
                 const auto starStateL = [&] {
                     if constexpr(dim == 2) {
-                        return sr::Conserved<2>{Dstar, s1star, s2star, tauStar};
+                        return sr::Conserved<2>{dStar, s1star, s2star, tauStar};
                     } else {
-                        return sr::Conserved<3>{Dstar, s1star, s2star, s3star, tauStar};
+                        return sr::Conserved<3>{dStar, s1star, s2star, s3star, tauStar};
                     }
                 }();
 
@@ -921,20 +921,20 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                 s2       = right_state.momentum(2);
                 s3       = right_state.momentum(3);
                 tau      = right_state.tau;
-                E        = tau + d;
+                e        = tau + d;
                 cofactor = 1 / (aR - aStar);
 
-                Dstar                 = cofactor * (aR - vR) * d;
+                dStar                 = cofactor * (aR - vR) * d;
                 s1star                = cofactor * (s1 * (aR - vR) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
                 s2star                = cofactor * (s2 * (aR - vR) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
                 s3star                = cofactor * (s3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                Estar                 = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
-                tauStar               = Estar - Dstar;
+                eStar                 = cofactor * (e * (aR - vR) + pStar * aStar - pressure * vR);
+                tauStar               = eStar - dStar;
                 const auto starStateR = [&] {
                     if constexpr(dim == 2) {
-                        return sr::Conserved<2>{Dstar, s1star, s2star, tauStar};
+                        return sr::Conserved<2>{dStar, s1star, s2star, tauStar};
                     } else {
-                        return sr::Conserved<3>{Dstar, s1star, s2star, s3star, tauStar};
+                        return sr::Conserved<3>{dStar, s1star, s2star, s3star, tauStar};
                     }
                 }();
                 const real ma_left    = vL / csL * std::sqrt((1 - csL * csL) / (1 - vL * vL));
@@ -967,23 +967,23 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     const real s3       = left_state.momentum(3);
                     const real tau      = left_state.tau;
                     const real chi      = left_state.chi;
-                    const real E        = tau + d;
+                    const real e        = tau + d;
                     const real cofactor = 1 / (aL - aStar);
 
                     const real vL     = left_prims.vcomponent(nhat);
                     // Left Star State in x-direction of coordinate lattice
-                    const real Dstar      = cofactor * (aL - vL) * d;
+                    const real dStar      = cofactor * (aL - vL) * d;
                     const real chistar    = cofactor * (aL - vL) * chi;
                     const real s1star     = cofactor * (s1 * (aL - vL) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
                     const real s2star     = cofactor * (s2 * (aL - vL) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
                     const real s3star     = cofactor * (s3 * (aL - vL) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                    const real Estar      = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
-                    const real tauStar    = Estar - Dstar;
+                    const real eStar      = cofactor * (e * (aL - vL) + pStar * aStar - pressure * vL);
+                    const real tauStar    = eStar - dStar;
                     const auto starStateL = [=] {
                         if constexpr(dim == 2) {
-                            return sr::Conserved<2>{Dstar, s1star, s2star, tauStar, chistar};
+                            return sr::Conserved<2>{dStar, s1star, s2star, tauStar, chistar};
                         } else {
-                            return sr::Conserved<3>{Dstar, s1star, s2star, s3star, tauStar, chistar};
+                            return sr::Conserved<3>{dStar, s1star, s2star, s3star, tauStar, chistar};
                         }
                     }();
 
@@ -1004,22 +1004,22 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     const real s3       = right_state.momentum(3);
                     const real tau      = right_state.tau;
                     const real chi      = right_state.chi;
-                    const real E        = tau + d;
+                    const real e        = tau + d;
                     const real cofactor = 1 / (aR - aStar);
 
                     const real vR         = right_prims.vcomponent(nhat);
-                    const real Dstar      = cofactor * (aR - vR) * d;
+                    const real dStar      = cofactor * (aR - vR) * d;
                     const real chistar    = cofactor * (aR - vR) * chi;
                     const real s1star     = cofactor * (s1 * (aR - vR) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
                     const real s2star     = cofactor * (s2 * (aR - vR) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
                     const real s3star     = cofactor * (s3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                    const real Estar      = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
-                    const real tauStar    = Estar - Dstar;
+                    const real eStar      = cofactor * (e * (aR - vR) + pStar * aStar - pressure * vR);
+                    const real tauStar    = eStar - dStar;
                     const auto starStateR = [=] {
                         if constexpr(dim == 2) {
-                            return sr::Conserved<2>{Dstar, s1star, s2star, tauStar, chistar};
+                            return sr::Conserved<2>{dStar, s1star, s2star, tauStar, chistar};
                         } else {
-                            return sr::Conserved<3>{Dstar, s1star, s2star, s3star, tauStar, chistar};
+                            return sr::Conserved<3>{dStar, s1star, s2star, s3star, tauStar, chistar};
                         }
                     }();
 
@@ -1939,7 +1939,8 @@ void SRHD<dim>::advance(
                         const real hc   = prim_buff[tid].get_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
 
-                        const auto geom_source  = sr::Conserved<3>{0, 
+                        const auto geom_source  = sr::Conserved<3>{
+                            0, 
                             (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1,
                             rhoc * hc * gam2 * (wc * wc * cot - uc * vc) / rmean + pc * (s2R - s2L)/dV2 , 
                             - rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean, 
@@ -1984,7 +1985,13 @@ void SRHD<dim>::advance(
                         const real hc   = prim_buff[tid].get_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
 
-                        const auto geom_source  = sr::Conserved<3>{0, (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean , 0, 0};
+                        const auto geom_source  = sr::Conserved<3>{
+                            0, 
+                            (rhoc * hc * gam2 * (vc * vc)) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * hc * gam2 * uc * vc) / rmean , 
+                            0, 
+                            0
+                        };
                         cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV + (hrf - hlf) * invdV - geom_source - source_terms) * dt * step;
                         break;
                     }
@@ -2125,7 +2132,7 @@ void SRHD<dim>::simulate(
     setup.first_order         = first_order;
     setup.coord_system        = coord_system;
     setup.using_fourvelocity  = (VelocityType == Velocity::FourVelocity);
-    setup.regime              = "relativistic";
+    setup.regime              = "srhd";
     setup.mesh_motion         = mesh_motion;
     setup.boundary_conditions = boundary_conditions;
     setup.dimensions          = dim;

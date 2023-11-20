@@ -7,7 +7,77 @@ import h5py
 import numpy.typing as npt
 from ..key_types import *
 from . import helpers
+from .slogger import logger
+from itertools import product, permutations
 
+def calc_lorentz_factor(
+        vsquared: NDArray[Any],
+        regime: str) -> FloatOrArray:
+    return 1.0 if regime == 'classical' else (
+        1 - np.asanyarray(vsquared))**(-0.5)
+
+
+def calc_enthalpy(
+        rho: FloatOrArray,
+        pressure: FloatOrArray,
+        internal_energy: FloatOrArray,
+        gamma: float) -> FloatOrArray:
+    return internal_energy + gamma * pressure / (rho * (gamma - 1))
+
+
+def calc_spec_enthalpy(
+        rho: FloatOrArray,
+        pressure: FloatOrArray,
+        internal_energy: FloatOrArray,
+        gamma: float,
+        regime: str) -> FloatOrArray:
+    return 1.0 if regime == 'classical' else calc_enthalpy(
+        rho, pressure, internal_energy, gamma)
+
+
+def calc_internal_energy(
+        vsquared: NDArray[Any],
+        regime: str) -> FloatOrArray:
+    return 1.0 + 0.5 * np.asanyarray(vsquared) if regime == 'classical' else 1
+
+def calc_vsq(velocity: Union[NDArray[Any],
+                Sequence[float]]) -> NDArray[Any]:
+    return np.array(sum(vcomp * vcomp for vcomp in velocity))
+
+def calc_labframe_densiity(
+        rho: FloatOrArray,
+        lorentz: FloatOrArray) -> FloatOrArray:
+    return rho * lorentz
+
+
+def calc_labframe_momentum(
+        rho: FloatOrArray,
+        lorentz: FloatOrArray,
+        enthalpy: FloatOrArray,
+        velocity: NDArray[numpy_float],
+        bfields: NDArray[numpy_float]) -> NDArray[Any]:
+    if len(bfields) == 0:
+        bfields = np.zeros_like(velocity)
+
+    vdb: float = velocity.dot(bfields)
+    bsq: float = bfields.dot(bfields)
+    return (rho * lorentz * lorentz * enthalpy + bsq) * velocity - vdb * bfields
+
+
+def calc_labframe_energy(
+        rho: FloatOrArray,
+        lorentz: FloatOrArray,
+        enthalpy: FloatOrArray,
+        pressure: FloatOrArray,
+        velocity: NDArray[numpy_float],
+        bfields: NDArray[numpy_float]) -> FloatOrArray:
+    if len(bfields) == 0:
+        bfields = np.zeros_like(velocity)
+    bsq: float = bfields.dot(bfields)
+    vdb: float = velocity.dot(bfields)
+    vsq: float = velocity.dot(velocity)
+    return rho * lorentz * lorentz * enthalpy - pressure - rho * lorentz + 0.5 * bsq + 0.5 * (bsq * vsq - vdb**2)
+    
 def flatten_fully(x: Any) -> Any:
     if any(dim == 1 for dim in x.shape):
         x = np.vstack(x)
@@ -88,7 +158,7 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
         # Load Fields
         #-------------------------------
         vsqr = np.sum(vel * vel for vel in v) # type: ignore
-        if setup['regime'] == 'relativistic':
+        if setup['regime'] == "srhd":
             if ds.attrs['using_gamma_beta']:
                 W = (1 + vsqr) ** 0.5
                 v     = [vel / W for vel in v]
@@ -98,7 +168,7 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
         else:
             W = 1
             
-        if setup['regime'] == 'relativistic':
+        if setup['regime'] == "srhd":
             h = 1.0 + setup['ad_gamma'] * p / (rho * (setup['ad_gamma'] - 1.0))
             e = rho * W * W * h - p - rho * W 
         else:
@@ -127,3 +197,114 @@ def initializeModel(model: Any, first_order: bool, volume_factor: Union[float, N
     # npad is a tuple of (n_before, n_after) for each dimension
     npad = ((0,0),) + tuple(tuple(val) for val in [[((first_order^1) + 1),  ((first_order^1) + 1)]] * model.dimensionality) 
     model.u = np.pad(model.u  * volume_factor, npad, 'edge')
+    
+def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None:
+    if not model.mhd:
+        model.nvars = (3 + model.dimensionality)
+    else:
+        model.nvars = 9
+        
+    # Initialize conserved u-array and flux arrays
+    model.u = np.zeros(shape=(model.nvars,*np.asanyarray(model.resolution).flatten()[ ::- 1]))
+    
+    srmhd = model.regime == "srmhd"
+    if srmhd:
+        # last variable is the edensity guess
+        edensity_guess = np.zeros(shape=(*np.asanyarray(model.resolution).flatten()[ ::- 1], *[]))
+    
+    if model.discontinuity:
+        logger.info(  
+            f'Initializing Problem With a {str(model.dimensionality)}D Discontinuity...')
+
+        if len(model.geometry) == 3 and isinstance(model.geometry[0], (int, float)):
+            geom_tuple: Any = (model.geometry,)
+        else:
+            geom_tuple = model.geometry
+
+        break_points = [val[2] for val in geom_tuple if len(val) == 3]
+        if len(break_points) > model.dimensionality:
+            raise ValueError(
+                "Number of break points must be less than or equal to the number of dimensions")
+
+        spacings = [
+            (geom_tuple[idx][1] -
+                geom_tuple[idx][0]) /
+            model.resolution[idx] for idx in range(
+                len(geom_tuple))]
+        
+        pieces = [(None, round(break_points[idx] / spacings[idx]))
+                    for idx in range(len(break_points))]
+
+        # partition the grid based on user-defined partition coordinates
+        partition_inds = list(product(*[permutations(x) for x in pieces]))
+        partition_inds = [tuple([slice(*y) for y in x]) for x in partition_inds]
+        partitions = [model.u[(..., *sector)] for sector in partition_inds]
+        
+        for idx, part in enumerate(partitions):
+            state = initial_state[idx]
+            rho, *velocity, pressure = state[:model.number_of_non_em_terms]
+            velocity = np.asanyarray(velocity)
+            # check if there are any bfields
+            bfields = state[model.number_of_non_em_terms:]
+            
+            vsqr = calc_vsq(velocity)
+            lorentz_factor = calc_lorentz_factor(vsqr, model.regime)
+            internal_energy = calc_internal_energy(vsqr, model.regime)
+            total_enthalpy = calc_enthalpy(
+                rho, pressure, internal_energy, model.gamma)
+            enthalpy_limit = calc_spec_enthalpy(
+                rho, pressure, internal_energy, model.gamma, model.regime)
+
+            energy = calc_labframe_energy(
+                rho, lorentz_factor, total_enthalpy, pressure, velocity, bfields)
+            dens = calc_labframe_densiity(rho, lorentz_factor)
+            mom = calc_labframe_momentum(
+                rho, lorentz_factor, enthalpy_limit, velocity, bfields)
+
+            if model.dimensionality == 1:
+                part[...] = np.array([dens, *mom, energy, *bfields, 0.0])[:, None]
+            else:
+                part[...] = (part[...].transpose(
+                ) + np.array([dens, *mom, energy, *bfields, 0.0])).transpose()
+            
+            if srmhd:
+                edensity_guess[partition_inds[idx]] = rho * total_enthalpy * (1 - vsqr) ** (-1)
+    else:
+        rho, *velocity, pressure = initial_state[:model.number_of_non_em_terms]
+        velocity = np.asanyarray(velocity)
+        # check if there are any bfields
+        bfields = initial_state[model.number_of_non_em_terms:]
+        
+        vsqr = calc_vsq(velocity)
+        lorentz_factor = calc_lorentz_factor(vsqr, model.regime)
+        internal_energy = calc_internal_energy(vsqr, model.regime)
+        total_enthalpy = calc_enthalpy(
+            rho, pressure, internal_energy, model.gamma)
+        enthalpy_limit = calc_spec_enthalpy(
+            rho, pressure, internal_energy, model.gamma, model.regime)
+
+        model.init_density = calc_labframe_densiity(
+            rho, lorentz_factor)
+        model.init_momentum = calc_labframe_momentum(
+            rho, lorentz_factor, enthalpy_limit, velocity, bfields)
+        model.init_energy = calc_labframe_energy(
+            rho, lorentz_factor, total_enthalpy, pressure, velocity, bfields)
+
+        if model.dimensionality == 1:
+            model.u[...] = np.array(
+                [model.init_density, *model.init_momentum, model.init_energy, *bfields, 0.0])
+        else:
+            model.u[...] = np.array([model.init_density,
+                *model.init_momentum,
+                model.init_energy,
+                *bfields,
+                np.zeros_like(model.init_density)])
+            
+        if srmhd:
+            edensity_guess[...] = rho * total_enthalpy * (1 - vsqr) ** (-1)
+
+    if srmhd:
+        if model.discontinuity:
+            edensity_guess = edensity_guess.transpose()
+        model.u = np.insert(model.u, model.u.shape[0], edensity_guess, axis=0)
+        

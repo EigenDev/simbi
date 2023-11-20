@@ -223,9 +223,9 @@ void RMHD<dim>::emit_troubled_cells() {
             const real s2 = cons[gid].momentum(2);
             const real s3 = cons[gid].momentum(3);
             const real et = (cons[gid].d + cons[gid].tau + prims[gid].p);
-            const real h1 = cons[gid].mag_field(1);
-            const real h2 = cons[gid].mag_field(2);
-            const real h3 = cons[gid].mag_field(3);
+            const real h1 = cons[gid].bcomponent(1);
+            const real h2 = cons[gid].bcomponent(2);
+            const real h3 = cons[gid].bcomponent(3);
             const real s  = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
             const real vsq = (s * s) / (et * et);
             const real mag_sq = (h1 * h1 + h2 * h2 + h3 * h3);
@@ -269,6 +269,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<> &p)
         cons_data,
         edens_data,
         troubled_data,
+        gr,
         this
     ] GPU_LAMBDA (luint gid){
         bool workLeftToDo = true;
@@ -312,15 +313,14 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             const real m2   = cons_data[gid].momentum(2) * invdV;
             const real m3   = cons_data[gid].momentum(3) * invdV;
             const real tau  = cons_data[gid].tau * invdV;
-            const real b1   = cons_data[gid].mag_field(1) * invdV;
-            const real b2   = cons_data[gid].mag_field(2) * invdV;
-            const real b3   = cons_data[gid].mag_field(3) * invdV;
+            const real b1   = cons_data[gid].bcomponent(1) * invdV;
+            const real b2   = cons_data[gid].bcomponent(2) * invdV;
+            const real b3   = cons_data[gid].bcomponent(3) * invdV;
             const real dchi = cons_data[gid].chi * invdV; 
             const real s    = (m1 * b1 + m2 * b2 + m3 * b3);
             const real ssq  = s * s;
             const real msq  = (m1 * m1 + m2 * m2 + m3 * m3);
             const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
-
 
             // Perform modified Newton Raphson based on
             // https://www.sciencedirect.com/science/article/pii/S0893965913002930
@@ -330,7 +330,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             // f = helpers::newton_f(gamma, tau, d, S, peq);
             int iter = 0;
             real qq = edens_data[gid];
-            const real tol = D * tol_scale;
+            const real tol = d * tol_scale;
             real f, g;
             do
             {
@@ -358,33 +358,13 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             const real w  = helpers::calc_rmhd_lorentz(ssq, bsq, msq, qq);
             const real pg = helpers::calc_rmhd_pg(gr, d, w, qq);
             const real v1 = (1 / qq + bsq) * (m1 + s / qq * b1);
+            const real v2 = (1 / qq + bsq) * (m2 + s / qq * b2);
+            const real v3 = (1 / qq + bsq) * (m3 + s / qq * b3);
             edens_data[gid] = qq;
             #if FOUR_VELOCITY
-                if constexpr(dim == 1) {
-                    prim_data[gid] = rm::Primitive<1>{d/w, v1 * w, pg, dchi / d};
-                } else if constexpr(dim == 2) {
-                    const real v2 = (1 / qq + bsq) * (m2 + s / qq * b2);
-                    prim_data[gid] = rm::Primitive<2>{d/w, v1 * w, v2 * w, pg, dchi / d};
-                } else {
-                    const real v1 = (1 / qq + bsq) * (m1 + s / qq * b1);
-                    const real v2 = (1 / qq + bsq) * (m2 + s / qq * b2);
-                    const real v3 = (1 / qq + bsq) * (m3 + s / qq * b3);
-                    prim_data[gid] = rm::Primitive<3>{d/w, v1 * w, v2 * w, v3 * w, pg, dchi / d};
-                }
+                prim_data[gid] = rm::Primitive<dim>{d/w, v1 * w, v2 * w, v3 * w, pg, dchi / d};
             #else
-                if constexpr(dim == 1) {
-                    const real w = 1 / std::sqrt(1 - (v1 * v1));
-                    prim_data[gid] = rm::Primitive<1>{d/w, v1, pg, b1, dchi / d};
-                } else if constexpr(dim == 2) {
-                    const real v1 = (1 / qq + bsq) * (m1 + s / qq * b1);
-                    const real v2 = (1 / qq + bsq) * (m2 + s / qq * b2);
-                    prim_data[gid] = rm::Primitive<2>{d/w, v1, v2, pg, b1, b2,  dchi / d};
-                } else {
-                    const real v1 = (1 / qq + bsq) * (m1 + s / qq * b1);
-                    const real v2 = (1 / qq + bsq) * (m2 + s / qq * b2);
-                    const real v3 = (1 / qq + bsq) * (m3 + s / qq * b3);
-                    prim_data[gid] = rm::Primitive<3>{d/w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
-                }
+                prim_data[gid] = rm::Primitive<dim>{d/w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
             #endif
             workLeftToDo = false;
 
@@ -403,11 +383,12 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<> &p)
  * Return the primitive
  * variables density , three-velocity, pressure
  * 
- * @param  p executation policy class  
+ * @param  con conserved array at index
+ * @param gid  current global index
  * @return none
  */
 template<int dim>
-rm::Primitive<dim> RMHD<dim>::cons2prim(const rm::Conserved<dim> &cons, const luint gid)
+RMHD<dim>::primitive_t RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t &cons, const luint gid)
 {
     const auto gr = gamma / (gamma - 1);
     auto* const edens_data = edens_guess.data(); 
@@ -442,9 +423,9 @@ rm::Primitive<dim> RMHD<dim>::cons2prim(const rm::Conserved<dim> &cons, const lu
     const real m2   = cons.momentum(2) * invdV;
     const real m3   = cons.momentum(3) * invdV;
     const real tau  = cons.tau * invdV;
-    const real b1   = cons.mag_field(1) * invdV;
-    const real b2   = cons.mag_field(2) * invdV;
-    const real b3   = cons.mag_field(3) * invdV;
+    const real b1   = cons.bcomponent(1) * invdV;
+    const real b2   = cons.bcomponent(2) * invdV;
+    const real b3   = cons.bcomponent(3) * invdV;
     const real dchi = cons.chi * invdV; 
     const real s    = (m1 * b1 + m2 * b2 + m3 * b3);
     const real ssq  = s * s;
@@ -460,7 +441,7 @@ rm::Primitive<dim> RMHD<dim>::cons2prim(const rm::Conserved<dim> &cons, const lu
     // f = helpers::newton_f(gamma, tau, d, S, peq);
     int iter = 0;
     real qq = edens_data[gid];
-    const real tol = D * tol_scale;
+    const real tol = d * tol_scale;
     real f, g;
     do
     {
@@ -475,10 +456,8 @@ rm::Primitive<dim> RMHD<dim>::cons2prim(const rm::Conserved<dim> &cons, const lu
 
         if (iter >= MAX_ITER || std::isnan(qq))
         {
-            troubled_data[gid] = 1;
             dt                = INFINITY;
             inFailureState    = true;
-            found_failure     = true;
             break;
         }
         iter++;
@@ -488,38 +467,21 @@ rm::Primitive<dim> RMHD<dim>::cons2prim(const rm::Conserved<dim> &cons, const lu
     const real w  = helpers::calc_rmhd_lorentz(ssq, bsq, msq, qq);
     const real pg = helpers::calc_rmhd_pg(gr, d, w, qq);
     const real v1 = (1 / qq + bsq) * (m1 + s / qq * b1);
+    const real v2 = (1 / qq + bsq) * (m2 + s / qq * b2);
+    const real v3 = (1 / qq + bsq) * (m3 + s / qq * b3);
     edens_data[gid] = qq;
     #if FOUR_VELOCITY
-        if constexpr(dim == 1) {
-            return rm::Primitive<1>{d/w, v1 * w, pg, dchi / d};
-        } else if constexpr(dim == 2) {
-            const real v2 = (1 / qq + bsq) * (m2 + s / qq * b2);
-            return rm::Primitive<2>{d/w, v1 * w, v2 * w, pg, dchi / d};
-        } else {
-            const real v1 = (1 / qq + bsq) * (m1 + s / qq * b1);
-            const real v2 = (1 / qq + bsq) * (m2 + s / qq * b2);
-            const real v3 = (1 / qq + bsq) * (m3 + s / qq * b3);
-            return rm::Primitive<3>{d/w, v1 * w, v2 * w, v3 * w, pg, dchi / d};
-        }
+        return rm::Primitive<dim>{d/w, v1 * w, v2 * w, v3 * w, pg, dchi / d};
     #else
-        if constexpr(dim == 1) {
-            const real w = 1 / std::sqrt(1 - (v1 * v1));
-            return rm::Primitive<1>{d/w, v1, pg, b1, dchi / d};
-        } else if constexpr(dim == 2) {
-            const real v1 = (1 / qq + bsq) * (m1 + s / qq * b1);
-            const real v2 = (1 / qq + bsq) * (m2 + s / qq * b2);
-            return rm::Primitive<2>{d/w, v1, v2, pg, b1, b2,  dchi / d};
-        } else {
-            const real v1 = (1 / qq + bsq) * (m1 + s / qq * b1);
-            const real v2 = (1 / qq + bsq) * (m2 + s / qq * b2);
-            const real v3 = (1 / qq + bsq) * (m3 + s / qq * b3);
-            return rm::Primitive<3>{d/w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
-        }
+        return rm::Primitive<dim>{d/w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
     #endif
 }
 //----------------------------------------------------------------------------------------------------------
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
+/*
+    Compute the outer wave speeds as discussed in Mignone and Bodo (2006)
+*/
 template<int dim>
 GPU_CALLABLE_MEMBER
 RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
@@ -529,6 +491,150 @@ RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
 {
     // Solve the quartic equation for the real roots of the wave speeds in Eq. (56)
     rm::Eigenvals<dim> lambdas;
+    real lpL, lpR, lmL, lmR;
+
+    // left side
+    const real rhoL = primsL.rho;
+    const real hL   = primsL.get_gas_enthalpy(gamma);
+    const real cs2L = (gamma * primsL.p / (rhoL * hL));
+    const auto b4L  = rm::MagFourVec<dim>(primsL); 
+    const real bsqL = b4L.inner_product();
+    const real bnL  = primsL.bcomponent(nhat);
+    const real bn2L = bnL * bnL;
+    const real vnL  = primsL.vcomponent(nhat);
+    if (primsL.vsquared() < tol_scale) { // Eq.(57)
+        const real fac = 1 / (rhoL * hL + bsqL);
+        const real a = 1;
+        const real b = - (
+            bsqL + rhoL * hL * cs2L 
+            + bn2L * cs2L
+        ) * fac;
+        const real c = cs2L * bn2L * fac;
+        const real disq = std::sqrt(b * b - 4 * a * c);
+        lpL = std::sqrt(0.5 * (-b + disq));
+        lmL = - lpL;
+    } else if (primsL.bcomponent(nhat) < tol_scale) { // Eq. (58)
+        const real g2L = primsL.get_lorentz_factor_squared();
+        const real vdbperp = primsL.vdotb() - primsL.vcomponent(nhat) * primsL.bcomponent(nhat);
+        const real qL = bsqL - cs2L * vdbperp * vdbperp;
+        const real a2 = rhoL * hL * (cs2L + g2L * (1 - cs2L)) + qL;
+        const real a1 = -2 * rhoL * hL * g2L * vnL * (1 - cs2L);
+        const real a0 = rhoL * hL * (-cs2L + g2L * vnL * vnL * (1 -cs2L)) - qL;
+        const real disq = a1 * a1 - 4 * a2 * a0;
+        lpL = 0.5 * (-a1 + std::sqrt(disq)) / a2;
+        lmL = 0.5 * (-a1 - std::sqrt(disq)) / a2;
+    } else { // solve the full quartic Eq. (56)
+        real speeds[4];
+
+        const real vdB    = primsL.vdotb();
+        const real vdB2   = vdB * vdB;
+        const real wL     = primsL.get_lorentz_factor();
+        const real w2L    = wL * wL;
+        const real nrg    = 1.0 / (rhoL * hL + bsqL);   
+        const real vn2L   = vnL * vnL;
+        const real bnred  = b4L.normal(nhat) / wL;
+        const real bnred2 = bnred * bnred;  
+                        
+        const real invd  = cs2L * nrg;
+        const real eps2  = (cs2L * rhoL * hL + bsqL) * nrg;
+        const real nrgt  = w2L * rhoL * hL * (1.0 - cs2L) * nrg;
+
+        //=========================================
+        //    quartic coefficients adapted from PLUTO
+        //=========================================
+        const real scrh   = 2.0*(invd * vdB * bnred - eps2 * vnL);
+        const real a4     = nrgt  - invd*vdB2 + eps2;
+        const real fac    = 1.0 / a4;
+        const real a3     = fac * (- 4.0 * vnL  * nrgt  + scrh);
+        const real a2     = fac * (  6.0 * vn2L * nrgt  + invd * (vdB2 - bnred2) + eps2 * (vn2L - 1.0));
+        const real a1     = fac * (- 4.0 * vnL * vn2L * nrgt  - scrh);
+        const real a0     = fac * (vn2L * vn2L * nrgt  + invd * bnred2 - eps2 * vn2L);
+        const auto nroots = helpers::quartic(a3, a2, a1, a0, speeds);
+        
+        // #if !GPU_CODE
+        // if (nroots != 4) {
+        //     printf("\nI'm dying on the left, %d, %.2e, %.2e\n", nroots, speeds[3], speeds[0]);
+        // }
+        // #endif
+        lpL = speeds[3];
+        lmL = speeds[0];
+        
+    };
+
+    // right side
+    const real rhoR = primsR.rho;
+    const real hR   = primsR.get_gas_enthalpy(gamma);
+    const real cs2R = (gamma * primsR.p / (rhoR * hR));
+    const auto b4R  = rm::MagFourVec<dim>(primsR); 
+    const real bsqR = b4R.inner_product();
+    const real bnR  = primsR.bcomponent(nhat);
+    const real bn2R = bnR * bnR;
+    const real vnR  = primsR.vcomponent(nhat);
+    if (primsR.vsquared() < minimum_real) { // Eq.(57)
+        const real fac = 1 / (rhoR * hR + bsqR);
+        const real a = 1;
+        const real b = - (
+            bsqR + rhoR * hR * cs2R 
+            + bn2R * cs2R
+        ) * fac;
+        const real c = cs2R * bn2R * fac;
+        const real disq = std::sqrt(b * b - 4 * a * c);
+        lpR = std::sqrt(0.5 * (-b + disq));
+        lmR = - lpR;
+    } else if (primsR.bcomponent(nhat) < minimum_real) { // Eq. (58)
+        const real g2R = primsR.get_lorentz_factor_squared();
+        const real vdbperp = primsR.vdotb() - primsR.vcomponent(nhat) * primsR.bcomponent(nhat);
+        const real qR = bsqR - cs2R * vdbperp * vdbperp;
+        const real a2 = rhoR * hR * (cs2R + g2R * (1 - cs2R)) + qR;
+        const real a1 = -2 * rhoR * hR * g2R * vnR * (1 - cs2R);
+        const real a0 = rhoR * hR * (-cs2R + g2R * vnR * vnR * (1 -cs2R)) - qR;
+        const real disq = a1 * a1 - 4 * a2 * a0;
+        lpR = 0.5 * (-a1 + std::sqrt(disq)) / a2;
+        lmR = 0.5 * (-a1 - std::sqrt(disq)) / a2;
+    } else { // solve the full quartic Eq. (56)
+        real speeds[4];
+
+        const real vdB    = primsR.vdotb();
+        const real vdB2   = vdB * vdB;
+        const real wR     = primsR.get_lorentz_factor();
+        const real w2R    = wR * wR;
+        const real nrg    = 1.0 / (rhoR * hR + bsqR);   
+        const real vn2R   = vnR * vnR;
+        const real bnred  = b4R.normal(nhat) / wR;
+        const real bnred2 = bnred * bnred;  
+                        
+        const real invd  = cs2R * nrg;
+        const real eps2  = (cs2R * rhoR * hR + bsqR) * nrg;
+        const real nrgt  = w2R * rhoR * hR * (1.0 - cs2R) * nrg;
+
+        //=========================================
+        //    quartic coefficients adapted from PLUTO
+        //=========================================
+        const real scrh   = 2.0*(invd * vdB * bnred - eps2 * vnR);
+        const real a4     = nrgt  - invd*vdB2 + eps2;
+        const real fac    = 1.0 / a4;
+        const real a3     = fac * (- 4.0 * vnR  * nrgt  + scrh);
+        const real a2     = fac * (  6.0 * vn2R * nrgt  + invd * (vdB2 - bnred2) + eps2 * (vn2R - 1.0));
+        const real a1     = fac * (- 4.0 * vnR * vn2R * nrgt  - scrh);
+        const real a0     = fac * (vnR * vn2R * nrgt  + invd * bnred2 - eps2 * vn2R);
+        const auto nroots = helpers::quartic(a3, a2, a1, a0, speeds);
+        
+        lpR = speeds[3];
+        lmR = speeds[0];
+
+        // #if !GPU_CODE
+        // if (nroots != 4) {
+        //     printf("\nI'm dying on the right, %d, %.2e, %.2e\n", nroots, speeds[3], speeds[0]);
+        // }
+        // #endif
+    };
+
+    return {
+        helpers::my_min(lmL, lmR),
+        helpers::my_max(lpL, lpR),
+        std::sqrt(cs2L),
+        std::sqrt(cs2R)
+    };
 };
 
 //-----------------------------------------------------------------------------------------
@@ -542,49 +648,27 @@ RMHD<dim>::conserved_t RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t &prims
     const real v1       = prims.vcomponent(1);
     const real v2       = prims.vcomponent(2);
     const real v3       = prims.vcomponent(3);
-    const real pressure = prims.p;
+    const real pg       = prims.p;
     const real b1       = prims.bcomponent(1);
     const real b2       = prims.bcomponent(2);
     const real b3       = prims.bcomponent(3);
     const real lorentz_gamma = prims.get_lorentz_factor();
-    const real h             = prims.get_enthalpy(gamma);
-    const real vdotb         = prims.get_vdotb();
+    const real h             = prims.get_gas_enthalpy(gamma);
+    const real vdotb         = prims.vdotb();
     const real bsq           = (b1 * b1 + b2 * b2 + b3 * b3);
     const real vsq           = (v1 * v1 + v2 * v2 + v3 * v3);
-    if constexpr(dim == 1) {
-        return rm::Conserved<1>{
-             rho * lorentz_gamma, 
-            (rho * h * lorentz_gamma * lorentz_gamma + bsq) * v1 - vdotb * b1,
-             rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma + 0.5 * bsq + 0.5 * (vsq * bsq - vdotb * vdotb),
-             b1,
-             rho * lorentz_gamma * prims.chi
-        };
-    } else if constexpr(dim == 2) {
-        return rm::Conserved<2>{
-             rho * lorentz_gamma, 
-            (rho * h * lorentz_gamma * lorentz_gamma + bsq) * v1 - vdotb * b1,
-            (rho * h * lorentz_gamma * lorentz_gamma + bsq) * v2 - vdotb * b2,
-             rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma + 0.5 * bsq + 0.5 * (vsq * bsq - vdotb * vdotb),
-             b1,
-             b2,
-             rho * lorentz_gamma * prims.chi
-            
-        };
 
-    } else {
-        return rm::Conserved<3>{
-             rho * lorentz_gamma, 
-            (rho * h * lorentz_gamma * lorentz_gamma + bsq) * v1 - vdotb * b1,
-            (rho * h * lorentz_gamma * lorentz_gamma + bsq) * v2 - vdotb * b2,
-            (rho * h * lorentz_gamma * lorentz_gamma + bsq) * v3 - vdotb * b3,
-             rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma + 0.5 * bsq + 0.5 * (vsq * bsq - vdotb * vdotb),
-             b1,
-             b2,
-             b3,
-             rho * lorentz_gamma * prims.chi
-            
-        };
-    }
+    return rm::Conserved<dim>{
+         rho * lorentz_gamma, 
+        (rho * h * lorentz_gamma * lorentz_gamma + bsq) * v1 - vdotb * b1,
+        (rho * h * lorentz_gamma * lorentz_gamma + bsq) * v2 - vdotb * b2,
+        (rho * h * lorentz_gamma * lorentz_gamma + bsq) * v3 - vdotb * b3,
+         rho * h * lorentz_gamma * lorentz_gamma - pg - rho * lorentz_gamma + 0.5 * bsq + 0.5 * (vsq * bsq - vdotb * vdotb),
+         b1,
+         b2,
+         b3,
+         rho * lorentz_gamma * prims.chi
+    };
 };
 //---------------------------------------------------------------------
 //                  ADAPT THE TIMESTEP
@@ -609,7 +693,7 @@ void RMHD<dim>::adapt_dt()
             const auto v2  = prims[aid].vcomponent(2);
             const auto v3  = prims[aid].vcomponent(3);
             const auto pre = prims[aid].p;
-            const real h   = prims[aid].get_enthalpy(gamma);
+            const real h   = prims[aid].get_gas_enthalpy(gamma);
             const real cs  = std::sqrt(gamma * pre / (rho * h));
             v1p = std::abs(v1 + cs) / (1 + v1 * cs);
             v1m = std::abs(v1 - cs) / (1 - v1 * cs);
@@ -760,58 +844,36 @@ RMHD<dim>::conserved_t RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t &prims
     const real v1       = prims.vcomponent(1);
     const real v2       = prims.vcomponent(2);
     const real v3       = prims.vcomponent(3);
+    const real p        = prims.total_pressure();
     const real b1       = prims.bcomponent(1);
     const real b2       = prims.bcomponent(2);
     const real b3       = prims.bcomponent(3);
-    const real pressure = prims.p;
     const real chi      = prims.chi;
     const real vn       = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
     const real bn       = (nhat == 1) ? b1 : (nhat == 2) ? b2 : b3;
     const real lorentz_gamma = prims.get_lorentz_factor();
 
-    const real h     = prims.get_enthalpy(gamma);
+    const real h     = prims.get_gas_enthalpy(gamma);
     const real bsq   = (b1 * b1 + b2 * b2 + b3 * b3);
-    const real vdotb = prims.get_vdotb();
+    const real vdotb = prims.vdotb();
     const real d  = rho * lorentz_gamma;
     const real m1 = (rho * lorentz_gamma * lorentz_gamma * h + bsq) * v1 - vdotb * b1;
     const real m2 = (rho * lorentz_gamma * lorentz_gamma * h + bsq) * v2 - vdotb * b2;
     const real m3 = (rho * lorentz_gamma * lorentz_gamma * h + bsq) * v3 - vdotb * b3;
     const real mn = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
-    const real bu1 = b1 / (lorentz_gamma * lorentz_gamma) + v1 * vdotb;
-    if constexpr(dim == 1) {
-        return rm::Conserved<1>{
-            d  * vn, 
-            m1 * vn + helpers::kronecker(nhat, 1) * pressure - bn * bu1 / lorentz_gamma, 
-            mn - d * vn,
-            0, 
-            d  * vn * chi
-        };
-    } else if constexpr(dim == 2) {
-        const real bu2 = b2 / (lorentz_gamma * lorentz_gamma) + v2 * vdotb;
-        return rm::Conserved<2>{
-            d  * vn, 
-            m1 * vn + helpers::kronecker(nhat, 1) * pressure - bn * bu1 / lorentz_gamma, 
-            m2 * vn + helpers::kronecker(nhat, 2) * pressure - bn * bu2 / lorentz_gamma, 
-            mn - d * vn, 
-            vn * b1 - v1 * bn,
-            vn * b2 - v2 * bn,
-            d * vn * chi
-        };
-    } else {
-        const real bu2 = b2 / (lorentz_gamma * lorentz_gamma) + v2 * vdotb;
-        const real bu3 = b3 / (lorentz_gamma * lorentz_gamma) + v3 * vdotb;
-        return rm::Conserved<3>{
-            d  * vn, 
-            m1 * vn + helpers::kronecker(nhat, 1) * pressure - bn * bu1 / lorentz_gamma, 
-            m2 * vn + helpers::kronecker(nhat, 2) * pressure - bn * bu2 / lorentz_gamma, 
-            m3 * vn + helpers::kronecker(nhat, 3) * pressure - bn * bu3 / lorentz_gamma,  
-            mn - d * vn, 
-            vn * b1 - v1 * bn,
-            vn * b2 - v2 * bn,
-            vn * b3 - v3 * bn,
-            d * vn * chi
-        };
-    }
+
+    const auto b4 = rm::MagFourVec<dim>(prims);
+    return rm::Conserved<dim>{
+        d  * vn, 
+        m1 * vn + helpers::kronecker(nhat, 1) * p - bn * b4.one / lorentz_gamma, 
+        m2 * vn + helpers::kronecker(nhat, 2) * p - bn * b4.two / lorentz_gamma, 
+        m3 * vn + helpers::kronecker(nhat, 3) * p - bn * b4.three / lorentz_gamma,  
+        mn - d * vn, 
+        vn * b1 - v1 * bn,
+        vn * b2 - v2 * bn,
+        vn * b3 - v3 * bn,
+        d * vn * chi
+    };
 };
 
 template<int dim>
@@ -828,8 +890,8 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
 {
     const rm::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
     // Grab the necessary wave speeds
-    const real aL  = lambda.aL;
-    const real aR  = lambda.aR;
+    const real aL  = lambda.afL;
+    const real aR  = lambda.afR;
     const real aLm = aL < 0 ? aL : 0;
     const real aRp = aR > 0 ? aR : 0;
     
@@ -867,9 +929,35 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const luint nhat,
     const real vface) const 
 {
+
+    static auto construct_the_state = [](
+            const luint nhat,
+            const luint np1,
+            const luint np2,
+            const real d, 
+            const real mnorm, 
+            const real mt1, 
+            const real mt2, 
+            const real tau, 
+            const real bnorm, 
+            const real bt1, 
+            const real bt2
+        ) {
+            rm::Conserved<dim> u;
+            u.d = d;
+            u.momentum(nhat) = mnorm;
+            u.momentum(np1)  = mt1; 
+            u.momentum(np2)  = mt2;
+            u.tau = tau;
+            u.bcomponent(nhat) = bnorm;
+            u.bcomponent(np1)  = bt1;
+            u.bcomponent(np2)  = bt2;
+            return u;
+    };
+
     const rm::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
-    const real aL  = lambda.aL;
-    const real aR  = lambda.aR;
+    const real aL  = lambda.afL;
+    const real aR  = lambda.afR;
     const real aLm = aL < 0 ? aL : 0;
     const real aRp = aR > 0 ? aR : 0;
 
@@ -889,232 +977,112 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aRp * aLm) 
             / (aRp - aLm);
 
+    // get the perpendicular directional unit vectors
+    const auto np1 = helpers::next_perm(nhat, 1);
+    const auto np2 = helpers::next_perm(nhat, 2);
+
+    // the normal component of the magnetic field is assumed to 
+    // be continuos across the interace, so bnL = bnR = bnStar
+    const real bnStar  = hll_state.bcomponent(nhat);
+    const real bt1Star = hll_state.bcomponent(np1);
+    const real bt2Star = hll_state.bcomponent(np2);
+
     const real uhlld   = hll_state.d;
-    const real uhlls1  = hll_state.momentum(1);
-    const real uhlls2  = hll_state.momentum(2);
-    const real uhlls3  = hll_state.momentum(3);
+    const real uhllm1  = hll_state.momentum(1);
+    const real uhllm2  = hll_state.momentum(2);
+    const real uhllm3  = hll_state.momentum(3);
     const real uhlltau = hll_state.tau;
+
     const real fhlld   = hll_flux.d;
-    const real fhlls1  = hll_flux.momentum(1);
-    const real fhlls2  = hll_flux.momentum(2);
-    const real fhlls3  = hll_flux.momentum(3);
+    const real fhllm1  = hll_flux.momentum(1);
+    const real fhllm2  = hll_flux.momentum(2);
+    const real fhllm3  = hll_flux.momentum(3);
     const real fhlltau = hll_flux.tau;
+    const real fhllb1  = hll_flux.bcomponent(1);
+    const real fhllb2  = hll_flux.bcomponent(2);
+    const real fhllb3  = hll_flux.bcomponent(3);
+
     const real e  = uhlltau + uhlld;
-    const real s  = (nhat == 1) ? uhlls1 : (nhat == 2) ? uhlls2 : uhlls3;
+    const real s  = (nhat == 1) ? uhllm1 : (nhat == 2) ? uhllm2 : uhllm3;
     const real fe = fhlltau + fhlld;
-    const real fs = (nhat == 1) ? fhlls1 : (nhat == 2) ? fhlls2 : fhlls3;
+    const real fs = (nhat == 1) ? fhllm1 : (nhat == 2) ? fhllm2 : fhllm3;
+    const real fpb1 = (np1 == 1) ? fhllb1 : (np1 == 2) ? fhllb2 : fhllb3;
+    const real fpb2 = (np2 == 1) ? fhllb1 : (np2 == 2) ? fhllb2 : fhllb3;  
 
     //------Calculate the contact wave velocity and pressure
-    const real a = fe;
-    const real b = -(e + fs);
-    const real c = s;
+    const real fdb2 = (bt1Star * fpb1 + bt2Star * fpb2);
+    const real a = fe - fdb2;
+    const real b = -(e + fs) + (bt1Star * bt1Star + bt2Star * bt2Star) + (fpb1 * fpb1 + fpb2 * fpb2);
+    const real c = s - fdb2;
     const real quad  = -static_cast<real>(0.5) * (b + helpers::sgn(b) * std::sqrt(b * b - 4.0 * a * c));
     const real aStar = c * (1 / quad);
-    const real pStar = -aStar * fe + fs;
+    const real vt1Star = (bt1Star * aStar - fpb1) / bnStar; // Eq. (38)
+    const real vt2Star = (bt2Star * aStar - fpb2) / bnStar; // Eq. (38)
+    const real invg2   = (1 - (aStar * aStar + vt1Star * vt1Star + vt2Star * vt2Star));
+    const real vsdB    = (aStar * bnStar + vt1Star * bt1Star + vt2Star * bt2Star);
+    const real pStar   = -aStar * (fe - bnStar * vsdB) + fs + bnStar * bnStar * invg2;
 
-    if constexpr(dim == 1) {
-        if (vface <= aStar) {
-            const real v        = left_prims.get_v();
-            const real pressure = left_prims.p;
-            const real d        = left_state.d;
-            const real S        = left_state.s;
-            const real tau      = left_state.tau;
-            const real E        = tau + d;
-            const real cofactor = 1 / (aLm - aStar);
+    if (vface <= aStar)
+    {
+        // const real pressure = left_prims.p;
+        const real d        = left_state.d;
+        const real m1       = left_state.momentum(1);
+        const real m2       = left_state.momentum(2);
+        const real m3       = left_state.momentum(3);
+        const real tau      = left_state.tau;
+        // const real chi      = left_state.chi;
+        const real e        = tau + d;
+        const real cofactor = 1 / (aL - aStar);
+        const real mnorm    = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
 
-            //--------------Compute the L Star State----------
-            // Left Star State in x-direction of coordinate lattice
-            const real Dstar    = cofactor * (aLm - v) * d;
-            const real Sstar    = cofactor * (S * (aLm - v) - pressure + pStar);
-            const real Estar    = cofactor * (E * (aLm - v) + pStar * aStar - pressure * v);
-            const real tauStar  = Estar - Dstar;
+        const real vL     = left_prims.vcomponent(nhat);
+        // Left Star State in x-direction of coordinate lattice
+        const real dStar      = cofactor * (aL - vL) * d;
+        const real eStar      = cofactor * (aL * e - mnorm + pStar * aStar - vsdB * bnStar);
+        const real mnStar     = (eStar + pStar) * aStar - vsdB * bnStar;
+        const real mt1Star    = cofactor * (-bnStar * (bt1Star * invg2 + vsdB * vt1Star) + aL * left_state.momentum(np1) - left_flux.momentum(np1));
+        const real mt2Star    = cofactor * (-bnStar * (bt2Star * invg2 + vsdB * vt2Star) + aL * left_state.momentum(np2) - left_flux.momentum(np2));
+        const real tauStar    = eStar - dStar;
+        const auto starStateL = construct_the_state(nhat, np1, np2, d, mnStar, mt1Star, mt2Star, tauStar, bnStar, bt1Star, bt2Star);
+        auto hllc_flux        = left_flux + (starStateL - left_state) * aL - starStateL * vface;
 
-            const auto star_stateL = rm::Conserved<1>{Dstar, Sstar, tauStar};
+        // upwind the concentration flux 
+        if (hllc_flux.d < 0)
+            hllc_flux.chi = right_prims.chi * hllc_flux.d;
+        else
+            hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
-            //---------Compute the L Star Flux
-            // Compute the HLL Flux component-wise
-            auto hllc_flux = left_flux + (star_stateL - left_state) * aLm;
-            return    hllc_flux - star_stateL * vface;
-        } else {
-            const real v         = right_prims.get_v();
-            const real pressure  = right_prims.p;
-            const real d         = right_state.d;
-            const real S         = right_state.s;
-            const real tau       = right_state.tau;
-            const real E         = tau + d;
-            const real cofactor  = 1 / (aRp - aStar);
-
-            //--------------Compute the R Star State----------
-            // Left Star State in x-direction of coordinate lattice
-            const real Dstar    = cofactor * (aRp - v) * d;
-            const real Sstar    = cofactor * (S * (aRp - v) - pressure + pStar);
-            const real Estar    = cofactor * (E * (aRp - v) + pStar * aStar - pressure * v);
-            const real tauStar  = Estar - Dstar;
-
-            const auto star_stateR = rm::Conserved<1>{Dstar, Sstar, tauStar};
-
-            //---------Compute the R Star Flux  
-            auto hllc_flux = right_flux + (star_stateR - right_state) * aRp;
-            return    hllc_flux - star_stateR * vface;
-        }
+        return hllc_flux;
     } else {
-        switch (comp_hllc_type)
-        {
-        case HLLCTYPE::FLEISCHMANN:
-            {
-                // Apply the low-Mach HLLC fix found in Fleischmann et al 2020: 
-                // https://www.sciencedirect.com/science/article/pii/S0021999120305362
-                const real csL = lambda.csL;
-                const real csR = lambda.csR;
-                constexpr real ma_lim = static_cast<real>(5);
+        // const real pressure = right_prims.p;
+        const real d        = right_state.d;
+        const real m1       = right_state.momentum(1);
+        const real m2       = right_state.momentum(2);
+        const real m3       = right_state.momentum(3);
+        const real tau      = right_state.tau;
+        // const real chi      = right_state.chi;
+        const real e        = tau + d;
+        const real cofactor = 1 / (aR - aStar);
+        const real mnorm    = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
 
-                // --------------Compute the L Star State----------
-                real pressure = left_prims.p;
-                real d        = left_state.d;
-                real m1       = left_state.momentum(1);
-                real m2       = left_state.momentum(2);
-                real m3       = left_state.momentum(3);
-                real tau      = left_state.tau;
-                real E        = tau + d;
-                real cofactor = 1 / (aL - aStar);
+        const real vR     = right_prims.vcomponent(nhat);
+        // Right Star State in x-direction of coordinate lattice
+        const real dStar      = cofactor * (aR - vR) * d;
+        const real eStar      = cofactor * (aR * e - mnorm + pStar * aStar - vsdB * bnStar);
+        const real mnStar     = (eStar + pStar) * aStar - vsdB * bnStar;
+        const real mt1Star    = cofactor * (-bnStar * (bt1Star * invg2 + vsdB * vt1Star) + aR * right_state.momentum(np1) - right_flux.momentum(np1));
+        const real mt2Star    = cofactor * (-bnStar * (bt2Star * invg2 + vsdB * vt2Star) + aR * right_state.momentum(np2) - right_flux.momentum(np2));
+        const real tauStar    = eStar - dStar;
+        const auto starStateR = construct_the_state(nhat, np1, np2, d, mnStar, mt1Star, mt2Star, tauStar, bnStar, bt1Star, bt2Star);
+        auto hllc_flux        = right_flux + (starStateR - right_state) * aR - starStateR * vface;
 
-                const real vL           = left_prims.vcomponent(nhat);
-                const real vR           = right_prims.vcomponent(nhat);
-                // Left Star State in x-direction of coordinate lattice
-                real Dstar              = cofactor * (aL - vL) * d;
-                real m1star             = cofactor * (m1 * (aL - vL) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
-                real m2star             = cofactor * (m2 * (aL - vL) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
-                real m3star             = cofactor * (m3 * (aL - vL) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                real Estar              = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
-                real tauStar            = Estar - Dstar;
-                const auto starStateL = [&] {
-                    if constexpr(dim == 2) {
-                        return rm::Conserved<2>{Dstar, m1star, m2star, tauStar};
-                    } else {
-                        return rm::Conserved<3>{Dstar, m1star, m2star, m3star, tauStar};
-                    }
-                }();
+        // upwind the concentration flux 
+        if (hllc_flux.d < 0)
+            hllc_flux.chi = right_prims.chi * hllc_flux.d;
+        else
+            hllc_flux.chi = left_prims.chi  * hllc_flux.d;
 
-                pressure = right_prims.p;
-                d        = right_state.d;
-                m1       = right_state.momentum(1);
-                m2       = right_state.momentum(2);
-                m3       = right_state.momentum(3);
-                tau      = right_state.tau;
-                E        = tau + d;
-                cofactor = 1 / (aR - aStar);
-
-                Dstar                 = cofactor * (aR - vR) * d;
-                m1star                = cofactor * (m1 * (aR - vR) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
-                m2star                = cofactor * (m2 * (aR - vR) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
-                m3star                = cofactor * (m3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                Estar                 = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
-                tauStar               = Estar - Dstar;
-                const auto starStateR = [&] {
-                    if constexpr(dim == 2) {
-                        return rm::Conserved<2>{Dstar, m1star, m2star, tauStar};
-                    } else {
-                        return rm::Conserved<3>{Dstar, m1star, m2star, m3star, tauStar};
-                    }
-                }();
-                const real ma_left    = vL / csL * std::sqrt((1 - csL * csL) / (1 - vL * vL));
-                const real ma_right   = vR / csR * std::sqrt((1 - csR * csR) / (1 - vR * vR));
-                const real ma_local   = helpers::my_max(std::abs(ma_left), std::abs(ma_right));
-                const real phi        = std::sin(helpers::my_min<real>(1, ma_local / ma_lim) * M_PI * 0.5);
-                const real aL_lm      = phi == 0 ? aL : phi * aL;
-                const real aR_lm      = phi == 0 ? aR : phi * aR;
-
-                const auto face_starState = (aStar <= 0) ? starStateR : starStateL;
-                auto net_flux = (left_flux + right_flux) * static_cast<real>(0.5) + ( (starStateL - left_state) * aL_lm
-                            + (starStateL - starStateR) * std::abs(aStar) + (starStateR - right_state) * aR_lm) * static_cast<real>(0.5) - face_starState * vface;
-
-                // upwind the concentration flux 
-                if (net_flux.d < 0)
-                    net_flux.chi = right_prims.chi * net_flux.d;
-                else
-                    net_flux.chi = left_prims.chi  * net_flux.d;
-                return net_flux;
-            }
-        
-        default:
-            {
-                if (vface <= aStar)
-                {
-                    const real pressure = left_prims.p;
-                    const real d        = left_state.d;
-                    const real m1       = left_state.momentum(1);
-                    const real m2       = left_state.momentum(2);
-                    const real m3       = left_state.momentum(3);
-                    const real tau      = left_state.tau;
-                    const real chi      = left_state.chi;
-                    const real E        = tau + d;
-                    const real cofactor = 1 / (aL - aStar);
-
-                    const real vL     = left_prims.vcomponent(nhat);
-                    // Left Star State in x-direction of coordinate lattice
-                    const real Dstar      = cofactor * (aL - vL) * d;
-                    const real chistar    = cofactor * (aL - vL) * chi;
-                    const real m1star     = cofactor * (m1 * (aL - vL) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
-                    const real m2star     = cofactor * (m2 * (aL - vL) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
-                    const real m3star     = cofactor * (m3 * (aL - vL) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                    const real Estar      = cofactor * (E  * (aL - vL) + pStar * aStar - pressure * vL);
-                    const real tauStar    = Estar - Dstar;
-                    const auto starStateL = [=] {
-                        if constexpr(dim == 2) {
-                            return rm::Conserved<2>{Dstar, m1star, m2star, tauStar, chistar};
-                        } else {
-                            return rm::Conserved<3>{Dstar, m1star, m2star, m3star, tauStar, chistar};
-                        }
-                    }();
-
-                    auto hllc_flux = left_flux + (starStateL - left_state) * aL - starStateL * vface;
-
-                    // upwind the concentration flux 
-                    if (hllc_flux.d < 0)
-                        hllc_flux.chi = right_prims.chi * hllc_flux.d;
-                    else
-                        hllc_flux.chi = left_prims.chi  * hllc_flux.d;
-
-                    return hllc_flux;
-                } else {
-                    const real pressure = right_prims.p;
-                    const real d        = right_state.d;
-                    const real m1       = right_state.momentum(1);
-                    const real m2       = right_state.momentum(2);
-                    const real m3       = right_state.momentum(3);
-                    const real tau      = right_state.tau;
-                    const real chi      = right_state.chi;
-                    const real E        = tau + d;
-                    const real cofactor = 1 / (aR - aStar);
-
-                    const real vR         = right_prims.vcomponent(nhat);
-                    const real Dstar      = cofactor * (aR - vR) * d;
-                    const real chistar    = cofactor * (aR - vR) * chi;
-                    const real m1star     = cofactor * (m1 * (aR - vR) + helpers::kronecker(nhat, 1) * (-pressure + pStar) );
-                    const real m2star     = cofactor * (m2 * (aR - vR) + helpers::kronecker(nhat, 2) * (-pressure + pStar) );
-                    const real m3star     = cofactor * (m3 * (aR - vR) + helpers::kronecker(nhat, 3) * (-pressure + pStar) );
-                    const real Estar      = cofactor * (E  * (aR - vR) + pStar * aStar - pressure * vR);
-                    const real tauStar    = Estar - Dstar;
-                    const auto starStateR = [=] {
-                        if constexpr(dim == 2) {
-                            return rm::Conserved<2>{Dstar, m1star, m2star, tauStar, chistar};
-                        } else {
-                            return rm::Conserved<3>{Dstar, m1star, m2star, m3star, tauStar, chistar};
-                        }
-                    }();
-
-                    auto hllc_flux = right_flux + (starStateR - right_state) * aR - starStateR * vface;
-
-                    // upwind the concentration flux 
-                    if (hllc_flux.d < 0)
-                        hllc_flux.chi = right_prims.chi * hllc_flux.d;
-                    else
-                        hllc_flux.chi = left_prims.chi  * hllc_flux.d;
-
-                    return hllc_flux;
-                }
-            }
-        } // end switch 
+        return hllc_flux;
     }
 };
 
@@ -1131,349 +1099,347 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const real vface,
     const luint gid) const 
 {
-    rm::Conserved<dim> ua, uc;
-    const rm::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
-    const real aL  = lambda.aL;
-    const real aR  = lambda.aR;
-    const real aLm = aL < 0 ? aL : 0;
-    const real aRp = aR > 0 ? aR : 0;
+    // rm::Conserved<dim> ua, uc;
+    // const rm::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    // const real aL  = lambda.afL;
+    // const real aR  = lambda.afR;
+    // const real aLm = aL < 0 ? aL : 0;
+    // const real aRp = aR > 0 ? aR : 0;
 
-    //---- Check wave speeds before wasting computations
-    if (vface <= aLm) {
-        return left_flux - left_state * vface;
-    } else if (vface >= aRp) {
-        return right_flux - right_state * vface;
-    }
+    // //---- Check wave speeds before wasting computations
+    // if (vface <= aLm) {
+    //     return left_flux - left_state * vface;
+    // } else if (vface >= aRp) {
+    //     return right_flux - right_state * vface;
+    // }
 
-     //-------------------Calculate the HLL Intermediate State
-    const auto hll_state = 
-        (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
+    //  //-------------------Calculate the HLL Intermediate State
+    // const auto hll_state = 
+    //     (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
 
-    //------------------Calculate the RHLLE Flux---------------
-    const auto hll_flux 
-        = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aRp * aLm) 
-            / (aRp - aLm);
+    // //------------------Calculate the RHLLE Flux---------------
+    // const auto hll_flux 
+    //     = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aRp * aLm) 
+    //         / (aRp - aLm);
 
-    // define the magnetic field normal to the zone
-    const auto bn = hll_state.bcomponenet(nhat);
+    // // define the magnetic field normal to the zone
+    // const auto bn = hll_state.bcomponent(nhat);
 
 
-    // Eq. (12)
-    const auto rL = left_state * aLm - left_flux;
-    const auto rR = right_state * aRp - right_flux;
+    // // Eq. (12)
+    // const auto rL = left_state * aLm - left_flux;
+    // const auto rR = right_state * aRp - right_flux;
 
-    //==================================================================
-    // Helper functions to ease repetition
-    //==================================================================
-    constexpr auto next_perm = [](const luint nhat, const luint step) {
-        return ((nhat - 1) + step) % 3 + 1;
-    };
-    const real qfunc = [](const rm::Conserved<dim> &r, const luint nhat, const real a, const real p) {
-        return r.total_energy() * a + p * (1 - a * a);
-    };
-    const real gfunc =[](const luint np1, const luint np2, const rm::Conserved<dim> &r) {
-        if constexpr(dim == 1) {
-            return 0;
-        } else if constexpr(dim == 2) {
-            return (r.bcomponenet(np1) * r.bcomponenet(np1));
-        } else {
-            return (r.bcomponenet(np1) * r.bcomponenet(np1) + r.bcomponenet(np2) * r.bcomponenet(np2));
-        }
-    };
-    const real yfunc = [](const luint np1, const luint np2, const rm::Conserved<dim> &r) {
-        if constexpr(dim == 1) {
-            return 0;
-        } else if constexpr(dim == 2) {
-            return r.bcomponent(np1) * r.momentum(np1);
-        } else {   
-            return r.bcomponent(np1) * r.momentum(np1) + r.bcomponent(np2) * r.momentum(np2);
-        }
-    };
-    const real ofunc = [](const real q, const real g, const real bn, const real a) {
-        return q - g + bn * bn * (1 - a * a);
-    };
-    const real xfunc = [](const real q, const real y, const real g, const real bn, const real a, const real p, const real et) {
-        return bn * (q * a * bn + y) - (q + g) * (a * p + et);
-    };
-    const real vnfunc = [](const real bn, const real q, const real a, const real y, const real g, const real p, const real mn, const real x) {
-        return (bn * (q* bn + a * y) - (q + g) * (p + mn)) / x;
-    };
-    const real vt1func = [](const real o, const real mt1, const real bt1, const real y, const real bn, const real a, const real mn, const real et, const real x) {
-        if constexpr(dim == 1) {
-            return 0;
-        };
-        return (o * mt1 + bt1 * (y + bn * (a * mn - et))) / x;
-    };
-    const real vt2func = [](const real o, const real mt2, const real bt2, const real y, const real bn, const real a, const real mn, const real et, const real x) {
-        if constexpr(dim < 3) {
-            return 0;
-        };
-        return (o * mt1 + bt2 * (y + bn * (a * mn - et))) / x;
-    };
-    const real btanfunc = [](const real rbk, const real bn, const real vn, const real a) {
-        if constexpr(dim == 1) {
-            return 0;
-        };
-        return (rbk - bn * vn) / (a - vn);
-    };
+    // //==================================================================
+    // // Helper functions to ease repetition
+    // //==================================================================
+    // const real qfunc = [](const rm::Conserved<dim> &r, const luint nhat, const real a, const real p) {
+    //     return r.total_energy() * a + p * (1 - a * a);
+    // };
+    // const real gfunc =[](const luint np1, const luint np2, const rm::Conserved<dim> &r) {
+    //     if constexpr(dim == 1) {
+    //         return 0;
+    //     } else if constexpr(dim == 2) {
+    //         return (r.bcomponent(np1) * r.bcomponent(np1));
+    //     } else {
+    //         return (r.bcomponent(np1) * r.bcomponent(np1) + r.bcomponent(np2) * r.bcomponent(np2));
+    //     }
+    // };
+    // const real yfunc = [](const luint np1, const luint np2, const rm::Conserved<dim> &r) {
+    //     if constexpr(dim == 1) {
+    //         return 0;
+    //     } else if constexpr(dim == 2) {
+    //         return r.bcomponent(np1) * r.momentum(np1);
+    //     } else {   
+    //         return r.bcomponent(np1) * r.momentum(np1) + r.bcomponent(np2) * r.momentum(np2);
+    //     }
+    // };
+    // const real ofunc = [](const real q, const real g, const real bn, const real a) {
+    //     return q - g + bn * bn * (1 - a * a);
+    // };
+    // const real xfunc = [](const real q, const real y, const real g, const real bn, const real a, const real p, const real et) {
+    //     return bn * (q * a * bn + y) - (q + g) * (a * p + et);
+    // };
+    // const real vnfunc = [](const real bn, const real q, const real a, const real y, const real g, const real p, const real mn, const real x) {
+    //     return (bn * (q* bn + a * y) - (q + g) * (p + mn)) / x;
+    // };
+    // const real vt1func = [](const real o, const real mt1, const real bt1, const real y, const real bn, const real a, const real mn, const real et, const real x) {
+    //     if constexpr(dim == 1) {
+    //         return 0;
+    //     };
+    //     return (o * mt1 + bt1 * (y + bn * (a * mn - et))) / x;
+    // };
+    // const real vt2func = [](const real o, const real mt2, const real bt2, const real y, const real bn, const real a, const real mn, const real et, const real x) {
+    //     if constexpr(dim < 3) {
+    //         return 0;
+    //     };
+    //     return (o * mt1 + bt2 * (y + bn * (a * mn - et))) / x;
+    // };
+    // const real btanfunc = [](const real rbk, const real bn, const real vn, const real a) {
+    //     if constexpr(dim == 1) {
+    //         return 0;
+    //     };
+    //     return (rbk - bn * vn) / (a - vn);
+    // };
 
-    const real total_enthalpy(const real p, const real et, const real vdr, const real a, const real vn) {
-        return p + (et - vdr) / (a - vn);
-    };
+    // const real total_enthalpy(const real p, const real et, const real vdr, const real a, const real vn) {
+    //     return p + (et - vdr) / (a - vn);
+    // };
 
-    const real bkc = [](const real bkL, const real bkR, const real vaL, const real vaR, const real vnL, const real vnR, const real bn, const real vkL, const real vkR) {
-        return (
-              bkR * (vaR - vnR) 
-            - bkL * (vaL - vnL)
-            + bn  * (vkR - vkL)
-        ) / (vaR - vaL);
-    };
+    // const real bkc = [](const real bkL, const real bkR, const real vaL, const real vaR, const real vnL, const real vnR, const real bn, const real vkL, const real vkR) {
+    //     return (
+    //           bkR * (vaR - vnR) 
+    //         - bkL * (vaL - vnL)
+    //         + bn  * (vkR - vkL)
+    //     ) / (vaR - vaL);
+    // };
 
-    const real vec_dot = [](const real x1, const real x2, const real x3, const real y1, const real y2, const real y3) {
-        x1 * y1 + x2 * y2 + x3 * y3;
-    };
+    // const real vec_dot = [](const real x1, const real x2, const real x3, const real y1, const real y2, const real y3) {
+    //     x1 * y1 + x2 * y2 + x3 * y3;
+    // };
 
-    const real vec_sq = [](const real x1, const real x2, const real x3) {
-        return x1 *x1 + x2 * x2 + x3 * x3;
-    };
+    // const real vec_sq = [](const real x1, const real x2, const real x3) {
+    //     return x1 *x1 + x2 * x2 + x3 * x3;
+    // };
 
-    const rm::Conserved<dim> construct_the_state = [](
-        const luint nhat,
-        const luint np1,
-        const luint np2
-        const real d, 
-        const real vfac, 
-        const real et, 
-        const real p, 
-        const real vn, 
-        const real vdb, 
-        const real bn, 
-        const real bp1, 
-        const real bp2,
-        const real vp1,
-        const real vp2
-    ) {
-        rm::Conserved<dim> u;
-        u.d = d * vfac;
-        u.momentum(nhat) = (et + p) * vn - vdb * bn;
-        if constexpr(dim > 1) {
-            u.momentum(np1 > dim ? 1 : np1) = (et + p) * vp1 - vdb * bp1;
-        }
-        if constexpr(dim > 2) {
-            u.momentum(np2) = (et + p) * vp2 - vdb * bp2;
-        }
-        u.tau = et - u.d;
-        u.bcomponent(nhat) = bn;
-        if constexpr(dim > 1) {
-            u.bcomponent(np1 > dim ? 1 : np1) = bp1;
-        }
-        if constexpr(dim > 2) {
-            u.bcomponent(np2) = bp2;
-        }
-        return u;
-    }l
-    //==============================================================================
-    // initial pressure guess
-    real p0 = 0;
-    if (bn * bn / (pguess * pguess) < 0.01) {
-        const real a = aRp - aLm;
-        const real b = rR.total_energy() - rL.total_energy() + aRp * rL - aLm * rR;
-        const real c = rL.momentum(nhat) * rR.total_energy() - rR.momentum(nhat) * rL.total_energy();
-        const real quad = std::max(static_cast<real>(0), b * b - 4 * a * c);
-        p0 = 0.5 * (-b + std::sqrt(quad)) / (aRp - aLm);
-    } else {
-        const auto phll = cons2prim(hll_state, gid);
-        p0 = phll.total_pressure();
-    }
-    //----------------- Jump conditions across the fast waves (section 3.1)
-    const auto np1  = next_perm(nhat, 1);
-    const auto np2  = next_perm(nhat, 2);
+    // const rm::Conserved<dim> construct_the_state = [](
+    //     const luint nhat,
+    //     const luint np1,
+    //     const luint np2
+    //     const real d, 
+    //     const real vfac, 
+    //     const real et, 
+    //     const real p, 
+    //     const real vn, 
+    //     const real vdb, 
+    //     const real bn, 
+    //     const real bp1, 
+    //     const real bp2,
+    //     const real vp1,
+    //     const real vp2
+    // ) {
+    //     rm::Conserved<dim> u;
+    //     u.d = d * vfac;
+    //     u.momentum(nhat) = (et + p) * vn - vdb * bn;
+    //     if constexpr(dim > 1) {
+    //         u.momentum(np1 > dim ? 1 : np1) = (et + p) * vp1 - vdb * bp1;
+    //     }
+    //     if constexpr(dim > 2) {
+    //         u.momentum(np2) = (et + p) * vp2 - vdb * bp2;
+    //     }
+    //     u.tau = et - u.d;
+    //     u.bcomponent(nhat) = bn;
+    //     if constexpr(dim > 1) {
+    //         u.bcomponent(np1 > dim ? 1 : np1) = bp1;
+    //     }
+    //     if constexpr(dim > 2) {
+    //         u.bcomponent(np2) = bp2;
+    //     }
+    //     return u;
+    // };
 
-    // left side
-    const auto pL   = left_prims.total_pressure();
-    const auto qL   = qfunc(rL, nhat, aLm, pL);;
-    const auto gL   = gfunc(np1, np2, rL);
-    const auto yL   = yfunc(np1, np2, rL);
-    const auto oL   = ofunc(qL, gL, bn, aLm);
-    const auto xL   = xfunc(qL, yL, gL, bn, aLm, pL, rL.total_energ());
-    // velocity components
-    const auto vnL   = vnfunc(bn, qL, aLm, yL, gL, pL, mnL, xL);
-    const auto vt1L  = vt1func(oL, rL.momentum(np1), rL.bcomponent(np1), yL, bn, aLm, rL.momentum(nhat), rL.total_energy(), xL); 
-    const auto vt2L  = vt2func(oL, rL.momentum(np2), rL.bcomponent(np2), yL, bn, aLm, rL.momentum(nhat), rL.total_energy(), xL);
-    const auto bp1L  = btanfunc(rL.bcomponent(np1), bn, vnL, vt1L, aLm); 
-    const auto bp2L  = btanfunc(rL.bcomponent(np2), bn, vnL, vt2L, aLm);
-    const auto vdrL  = vnL * rL.momentum(nhat) + vt1L * rL.momentum(np1) + vt2L * rL.momentum(np2);
-    const auto wL    = total_enthalpy(pL, rL.total_energy(), vdr, aLm, vnL);
-    const auto vdbL  = (vnL * bn + vnL1 * bp1 + vnL2 * bp2);
-    const auto vfacL = 1 / (aLm - vnL);
+    // //==============================================================================
+    // // initial pressure guess
+    // real p0 = 0;
+    // if (bn * bn / (pguess * pguess) < 0.01) {
+    //     const real a = aRp - aLm;
+    //     const real b = rR.total_energy() - rL.total_energy() + aRp * rL - aLm * rR;
+    //     const real c = rL.momentum(nhat) * rR.total_energy() - rR.momentum(nhat) * rL.total_energy();
+    //     const real quad = std::max(static_cast<real>(0), b * b - 4 * a * c);
+    //     p0 = 0.5 * (-b + std::sqrt(quad)) / (aRp - aLm);
+    // } else {
+    //     const auto phll = cons2prim(hll_state, gid);
+    //     p0 = phll.total_pressure();
+    // }
+    // //----------------- Jump conditions across the fast waves (section 3.1)
+    // const auto np1  = helpers::next_perm(nhat, 1);
+    // const auto np2  = helpers::next_perm(nhat, 2);
 
-    // right side
-    const auto pR   = right_prims.total_pressure();
-    const auto qR   = qfunc(rR, nhat, aRm, pR);;
-    const auto gR   = gfunc(np1, np2, rR);
-    const auto yR   = yfunc(np1, np2, rR);
-    const auto oR   = ofunc(qR, gR, bn, aRm);
-    const auto xR   = xfunc(qR, yR, gR, bn, aRm, pR, rR.total_energ());
-    // velocity components
-    const auto vnR   = vnfunc(bn, qR, aRm, yR, gR, pR, mnR, xR);
-    const auto vt1R  = vt1func(oR, rR.momentum(np1), rR.bcomponent(np1), yR, bn, aRm, rR.momentum(nhat), rR.total_energy(), xR); 
-    const auto vt2R  = vt2func(oR, rR.momentum(np2), rR.bcomponent(np2), yR, bn, aRm, rR.momentum(nhat), rR.total_energy(), xR);
-    const auto bp1R  = btanfunc(rR.bcomponent(np1), bn, vnR, vt1R, aRm); 
-    const auto bp2R  = btanfunc(rR.bcomponent(np2), bn, vnR, vt2R, aRm);
-    const auto vdrR  = vnR * rR.momentum(nhat) + vt1R * rR.momentum(np1) + vt2R * rR.momentum(np2);
-    const auto wR    = total_enthalpy(pR, rR.total_energy(), vdr, aRm, vnR);
-    const auto vdbR  = (vnR * bn + vnR1 * bp1 + vnR2 * bp2);
-    const auto vfacR = 1 / (aRm - vnR);
+    // // left side
+    // const auto pL   = left_prims.total_pressure();
+    // const auto qL   = qfunc(rL, nhat, aLm, pL);;
+    // const auto gL   = gfunc(np1, np2, rL);
+    // const auto yL   = yfunc(np1, np2, rL);
+    // const auto oL   = ofunc(qL, gL, bn, aLm);
+    // const auto xL   = xfunc(qL, yL, gL, bn, aLm, pL, rL.total_energ());
+    // // velocity components
+    // const auto vnL   = vnfunc(bn, qL, aLm, yL, gL, pL, mnL, xL);
+    // const auto vt1L  = vt1func(oL, rL.momentum(np1), rL.bcomponent(np1), yL, bn, aLm, rL.momentum(nhat), rL.total_energy(), xL); 
+    // const auto vt2L  = vt2func(oL, rL.momentum(np2), rL.bcomponent(np2), yL, bn, aLm, rL.momentum(nhat), rL.total_energy(), xL);
+    // const auto bp1L  = btanfunc(rL.bcomponent(np1), bn, vnL, vt1L, aLm); 
+    // const auto bp2L  = btanfunc(rL.bcomponent(np2), bn, vnL, vt2L, aLm);
+    // const auto vdrL  = vnL * rL.momentum(nhat) + vt1L * rL.momentum(np1) + vt2L * rL.momentum(np2);
+    // const auto wL    = total_enthalpy(pL, rL.total_energy(), vdr, aLm, vnL);
+    // const auto vdbL  = (vnL * bn + vnL1 * bp1 + vnL2 * bp2);
+    // const auto vfacL = 1 / (aLm - vnL);
 
-    //--------------Jump conditions across the Alfven waves (section 3.2)
-    const auto etaL = - helpers::sgn(bn) * std::sqrt(wL);
-    const auto etaR =   helpers::sgn(bn) * std::sqrt(wR);
-    const auto calc_kcomp = (const int nhat, const int ehat, const rm::Conserved<dim> &r, const real p, const real a, const real eta) {
-        return (r.momentum(nhat) + p * helpers::kronecker(ehat, nhat) + r.bcomponenet(ehat) * eta) / (a * p + r.total_energy() + bn * eta);
-    }
-    const auto knL  = calc_kcomp(nhat, nhat, rL, pL, aLm, etaL);
-    const auto knR  = calc_kcomp(nhat, nhat, rR, pR, aRm, etaR);
-    const auto kt1L = calc_kcomp(nhat, np1, rL,  pL, aLm, etaL);
-    const auto kt1R = calc_kcomp(nhat, np1, rR,  pR, aRm, etaR);
-    const auto kt2L = calc_kcomp(nhat, np2, rL,  pL, aLm, etaL);
-    const auto kt2R = calc_kcomp(nhat, np2, rR,  pR, aRp, etaR);
-    // the k-normal is the Alfven wave speed
-    const auto vaL = knL;
-    const auto vaR = knR;
-    if (aLm - vaL < vface) { // return FaL
-        ua = construct_the_state(
-            nhat, 
-            np1, 
-            np2, 
-            rL.d, 
-            vfacL, 
-            rL.total_energy(), 
-            pL, 
-            vnL, 
-            vdbL, 
-            bn, 
-            bp1L, 
-            bp2L, 
-            vt1L, 
-            vt2L
-        );
-        return left_flux + (ua - left_state) * vaL - ua * vface;
-    } else if (vaR - aRp < vface) { // return FaR
-        ua = construct_the_state(
-            nhat, 
-            np1, 
-            np2, 
-            rR.d, 
-            vfacR, 
-            rR.total_energy(), 
-            pR, 
-            vnR, 
-            vdbR, 
-            bn, 
-            bp1R, 
-            bp2R, 
-            vt1R, 
-            vt2R
-        );
+    // // right side
+    // const auto pR   = right_prims.total_pressure();
+    // const auto qR   = qfunc(rR, nhat, aRm, pR);;
+    // const auto gR   = gfunc(np1, np2, rR);
+    // const auto yR   = yfunc(np1, np2, rR);
+    // const auto oR   = ofunc(qR, gR, bn, aRm);
+    // const auto xR   = xfunc(qR, yR, gR, bn, aRm, pR, rR.total_energ());
+    // // velocity components
+    // const auto vnR   = vnfunc(bn, qR, aRm, yR, gR, pR, mnR, xR);
+    // const auto vt1R  = vt1func(oR, rR.momentum(np1), rR.bcomponent(np1), yR, bn, aRm, rR.momentum(nhat), rR.total_energy(), xR); 
+    // const auto vt2R  = vt2func(oR, rR.momentum(np2), rR.bcomponent(np2), yR, bn, aRm, rR.momentum(nhat), rR.total_energy(), xR);
+    // const auto bp1R  = btanfunc(rR.bcomponent(np1), bn, vnR, vt1R, aRm); 
+    // const auto bp2R  = btanfunc(rR.bcomponent(np2), bn, vnR, vt2R, aRm);
+    // const auto vdrR  = vnR * rR.momentum(nhat) + vt1R * rR.momentum(np1) + vt2R * rR.momentum(np2);
+    // const auto wR    = total_enthalpy(pR, rR.total_energy(), vdr, aRm, vnR);
+    // const auto vdbR  = (vnR * bn + vnR1 * bp1 + vnR2 * bp2);
+    // const auto vfacR = 1 / (aRm - vnR);
 
-        return right_flux + (ua - right_state) * vaR - ua * vface;
-    } else {
-        dK  = 1 / (vaR - vaL);
-        //---------------Jump conditions across the contact wave (section 3.3)
-        const auto bkxn  = bn;
-        const auto bkc1  = bkc(uaL.bcomponent(np1), uaR.bcomponenet(np1), vaL, vaR, vnL, vnR, vt1L, vt1R) * dK;
-        const auto bkc2  = bkc(uaL.bcomponent(np2), uaR.bcomponenet(np2), vaL, vaR, vnL, vnR, vt2L, vt2R) * dK;
-        const auto kdbL  = vec_dot(bkxn, bkc1, bkc2, knL, kt1L, kt2L);
-        const auto kdbR  = vec_dot(bkxn, bkc1, bkc2, knR, kt1R, kt2R);
-        const auto ksqL  = vec_sq(knL, kt1L, kt2L);
-        const auto ksqR  = vec_sq(knR, kt1R, kt2R);
-        const auto kfacL = (1 - ksqL) / (etaL - kdbL);
-        const auto kfacR = (1 - ksqR) / (etaR - kdbR);
-        const auto vanL  = knL  -  bn * kfacL;
-        const auto vat1L = kt1L - bkc1 * kfacL;
-        const auto vat2L = kt2L - bkc2 * kfacL;
-        const auto vanR  = knR  -  bn * kfacR;
-        const auto vat1R = kt1R - bkc1 * kfacR;
-        const auto vat2R = kt2R - bkc2 * kfacR;
-        const auto vakn = 0.5 * (vanL + vanR);
-        const auto vat1 = 0.5 * (vat1L + vat1R);
-        const auto vat2 = 0.5 * (vat2L + vat2R);
-        const auto vdbc = vec_dot(vakn, vat1, vat2, bkxn, bkc1, bkc2);
-        if (vakn > 0) {
-            ua = construct_the_state(
-                nhat, 
-                np1, 
-                np2, 
-                rL.d, 
-                vfacL, 
-                rL.total_energy(), 
-                pL, 
-                vnL, 
-                vdbL, 
-                bn, 
-                bp1L, 
-                bp2L, 
-                vt1L, 
-                vt2L
-            );
-            const real etc  = (vaL * ua.total_energy() - ua.momentum(nhat) + pL * vakn - vdbc * bn) / (vaL - vakn);
-            uc = construct_the_state(
-                nhat, 
-                np1, 
-                np2, 
-                ua.d, 
-                (vaL - vnL) / (vaL - vakn), 
-                etc, 
-                pL, 
-                vnL, 
-                vdbc, 
-                bn, 
-                bkc1, 
-                bkc2, 
-                vat1L, 
-                vat2L
-            );
+    // //--------------Jump conditions across the Alfven waves (section 3.2)
+    // const auto etaL = - helpers::sgn(bn) * std::sqrt(wL);
+    // const auto etaR =   helpers::sgn(bn) * std::sqrt(wR);
+    // const auto calc_kcomp = (const int nhat, const int ehat, const rm::Conserved<dim> &r, const real p, const real a, const real eta) {
+    //     return (r.momentum(nhat) + p * helpers::kronecker(ehat, nhat) + r.bcomponent(ehat) * eta) / (a * p + r.total_energy() + bn * eta);
+    // }
+    // const auto knL  = calc_kcomp(nhat, nhat, rL, pL, aLm, etaL);
+    // const auto knR  = calc_kcomp(nhat, nhat, rR, pR, aRm, etaR);
+    // const auto kt1L = calc_kcomp(nhat, np1, rL,  pL, aLm, etaL);
+    // const auto kt1R = calc_kcomp(nhat, np1, rR,  pR, aRm, etaR);
+    // const auto kt2L = calc_kcomp(nhat, np2, rL,  pL, aLm, etaL);
+    // const auto kt2R = calc_kcomp(nhat, np2, rR,  pR, aRp, etaR);
+    // // the k-normal is the Alfven wave speed
+    // const auto vaL = knL;
+    // const auto vaR = knR;
+    // if (aLm - vaL < vface) { // return FaL
+    //     ua = construct_the_state(
+    //         nhat, 
+    //         np1, 
+    //         np2, 
+    //         rL.d, 
+    //         vfacL, 
+    //         rL.total_energy(), 
+    //         pL, 
+    //         vnL, 
+    //         vdbL, 
+    //         bn, 
+    //         bp1L, 
+    //         bp2L, 
+    //         vt1L, 
+    //         vt2L
+    //     );
+    //     return left_flux + (ua - left_state) * vaL - ua * vface;
+    // } else if (vaR - aRp < vface) { // return FaR
+    //     ua = construct_the_state(
+    //         nhat, 
+    //         np1, 
+    //         np2, 
+    //         rR.d, 
+    //         vfacR, 
+    //         rR.total_energy(), 
+    //         pR, 
+    //         vnR, 
+    //         vdbR, 
+    //         bn, 
+    //         bp1R, 
+    //         bp2R, 
+    //         vt1R, 
+    //         vt2R
+    //     );
 
-            const auto fa = left_flux + (ua - left_state) * vaL;
-            return fa + (uc - ua) * vakn - uc * vface;
-        } else {
-            ua = construct_the_state(
-                nhat, 
-                np1, 
-                np2, 
-                rL.d, 
-                vfacR, 
-                rR.total_energy(), 
-                pR, 
-                vnR, 
-                vdbR, 
-                bn, 
-                bp1R, 
-                bp2R, 
-                vt1R, 
-                vt2R
-            );
-            const real etc  = (vaR * uaR.total_energy() - uaR.momentum(nhat) + pR * vakn - vdbc * bnR) / (vaR - vakn);
-            uc = construct_the_state(
-                nhat, 
-                np1, 
-                np2, 
-                ua.d, 
-                (vaR - vnR) / (vaR - vakn), 
-                etc, 
-                pR, 
-                vnR, 
-                vdbc, 
-                bn, 
-                bkc1, 
-                bkc2, 
-                vat1R, 
-                vat2R
-            );
-            const auto fa = right_flux + (ua - right_state) * vaR;
-            return fa + (uc - ua) * vakn - uc * vface;
-        }
-    }
+    //     return right_flux + (ua - right_state) * vaR - ua * vface;
+    // } else {
+    //     dK  = 1 / (vaR - vaL);
+    //     //---------------Jump conditions across the contact wave (section 3.3)
+    //     const auto bkxn  = bn;
+    //     const auto bkc1  = bkc(uaL.bcomponent(np1), uaR.bcomponent(np1), vaL, vaR, vnL, vnR, vt1L, vt1R) * dK;
+    //     const auto bkc2  = bkc(uaL.bcomponent(np2), uaR.bcomponent(np2), vaL, vaR, vnL, vnR, vt2L, vt2R) * dK;
+    //     const auto kdbL  = vec_dot(bkxn, bkc1, bkc2, knL, kt1L, kt2L);
+    //     const auto kdbR  = vec_dot(bkxn, bkc1, bkc2, knR, kt1R, kt2R);
+    //     const auto ksqL  = vec_sq(knL, kt1L, kt2L);
+    //     const auto ksqR  = vec_sq(knR, kt1R, kt2R);
+    //     const auto kfacL = (1 - ksqL) / (etaL - kdbL);
+    //     const auto kfacR = (1 - ksqR) / (etaR - kdbR);
+    //     const auto vanL  = knL  -  bn * kfacL;
+    //     const auto vat1L = kt1L - bkc1 * kfacL;
+    //     const auto vat2L = kt2L - bkc2 * kfacL;
+    //     const auto vanR  = knR  -  bn * kfacR;
+    //     const auto vat1R = kt1R - bkc1 * kfacR;
+    //     const auto vat2R = kt2R - bkc2 * kfacR;
+    //     const auto vakn = 0.5 * (vanL + vanR);
+    //     const auto vat1 = 0.5 * (vat1L + vat1R);
+    //     const auto vat2 = 0.5 * (vat2L + vat2R);
+    //     const auto vdbc = vec_dot(vakn, vat1, vat2, bkxn, bkc1, bkc2);
+    //     if (vakn > 0) {
+    //         ua = construct_the_state(
+    //             nhat, 
+    //             np1, 
+    //             np2, 
+    //             rL.d, 
+    //             vfacL, 
+    //             rL.total_energy(), 
+    //             pL, 
+    //             vnL, 
+    //             vdbL, 
+    //             bn, 
+    //             bp1L, 
+    //             bp2L, 
+    //             vt1L, 
+    //             vt2L
+    //         );
+    //         const real etc  = (vaL * ua.total_energy() - ua.momentum(nhat) + pL * vakn - vdbc * bn) / (vaL - vakn);
+    //         uc = construct_the_state(
+    //             nhat, 
+    //             np1, 
+    //             np2, 
+    //             ua.d, 
+    //             (vaL - vnL) / (vaL - vakn), 
+    //             etc, 
+    //             pL, 
+    //             vnL, 
+    //             vdbc, 
+    //             bn, 
+    //             bkc1, 
+    //             bkc2, 
+    //             vat1L, 
+    //             vat2L
+    //         );
+
+    //         const auto fa = left_flux + (ua - left_state) * vaL;
+    //         return fa + (uc - ua) * vakn - uc * vface;
+    //     } else {
+    //         ua = construct_the_state(
+    //             nhat, 
+    //             np1, 
+    //             np2, 
+    //             rL.d, 
+    //             vfacR, 
+    //             rR.total_energy(), 
+    //             pR, 
+    //             vnR, 
+    //             vdbR, 
+    //             bn, 
+    //             bp1R, 
+    //             bp2R, 
+    //             vt1R, 
+    //             vt2R
+    //         );
+    //         const real etc  = (vaR * uaR.total_energy() - uaR.momentum(nhat) + pR * vakn - vdbc * bnR) / (vaR - vakn);
+    //         uc = construct_the_state(
+    //             nhat, 
+    //             np1, 
+    //             np2, 
+    //             ua.d, 
+    //             (vaR - vnR) / (vaR - vakn), 
+    //             etc, 
+    //             pR, 
+    //             vnR, 
+    //             vdbc, 
+    //             bn, 
+    //             bkc1, 
+    //             bkc2, 
+    //             vat1R, 
+    //             vat2R
+    //         );
+    //         const auto fa = right_flux + (ua - right_state) * vaR;
+    //         return fa + (uc - ua) * vakn - uc * vface;
+    //     }
+    // }
 };
 
 //===================================================================================================================
@@ -1496,6 +1462,9 @@ void RMHD<dim>::advance(
     const auto* const mom1_source = m1_source.data();
     const auto* const mom2_source = m2_source.data();
     const auto* const mom3_source = m3_source.data();
+    const auto* const mag1_source = sourceB1.data();
+    const auto* const mag2_source = sourceB2.data();
+    const auto* const mag3_source = sourceB3.data();
     const auto* const erg_source  = energy_source.data();
     const auto* const object_data = object_pos.data();
     const auto* const grav1_source = sourceG1.data();
@@ -1512,6 +1481,9 @@ void RMHD<dim>::advance(
         mom1_source,
         mom2_source,
         mom3_source,
+        mag1_source,
+        mag2_source,
+        mag3_source,
         erg_source,
         object_data,
         grav1_source,
@@ -2168,38 +2140,24 @@ void RMHD<dim>::advance(
         const real d_source  = den_source_all_zeros     ? 0.0 : dens_source[real_loc];
         const real s1_source = mom1_source_all_zeros    ? 0.0 : mom1_source[real_loc];
         const real e_source  = energy_source_all_zeros  ? 0.0 : erg_source[real_loc];
+        const real b1_source = mag1_source_all_zeros  ? 0.0 : mag1_source[real_loc];
         
         const auto source_terms = [&]{
-            if constexpr(dim == 1) {
-                return rm::Conserved<1>{d_source, s1_source, e_source} * time_constant;
-            } else if constexpr(dim == 2) {
-                const real s2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
-                return rm::Conserved<2>{d_source, s1_source, s2_source, e_source} * time_constant;
-            } else {
-                const real s2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
-                const real s3_source = mom3_source_all_zeros ? 0.0 : mom3_source[real_loc];
-                return rm::Conserved<3>{d_source, s1_source, s2_source, s3_source, e_source} * time_constant;
-            }
+            const real s2_source = mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
+            const real s3_source = mom3_source_all_zeros ? 0.0 : mom3_source[real_loc];
+            const real b2_source = mag2_source_all_zeros ? 0.0 : mag2_source[real_loc];
+            const real b3_source = mag3_source_all_zeros ? 0.0 : mag3_source[real_loc];
+            return rm::Conserved<dim>{d_source, s1_source, s2_source, s3_source, e_source, b1_source, b2_source, b3_source} * time_constant;
         }();
 
         // Gravity
         const auto gs1_source = zero_gravity1 ? 0 : grav1_source[real_loc] * cons_data[aid].d;
         const auto tid = tza * sx * sy + tya * sx + txa;
         const auto gravity = [&]{
-            if constexpr(dim == 1) {
-                const auto ge_source  = gs1_source * prim_buff[tid].v1;
-                return rm::Conserved<1>{0, gs1_source, ge_source};
-            } else if constexpr(dim == 2) {
-                const auto gs2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].d;
-                const auto ge_source  = gs1_source * prim_buff[tid].v1 + gs2_source * prim_buff[tid].v2;
-                return rm::Conserved<2>{0, gs1_source, gs2_source, ge_source};
-            } else {
-                const auto gs2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].d;
-                const auto gs3_source = zero_gravity3 ? 0 : grav3_source[real_loc] * cons_data[aid].d;
-                const auto ge_source  = gs1_source * prim_buff[tid].v1 + gs2_source * prim_buff[tid].v2 + gs3_source * prim_buff[tid].v3;
-
-                return rm::Conserved<3>{0, gs1_source, gs2_source, gs3_source, ge_source};
-            }
+            const auto gs2_source = zero_gravity2 ? 0 : grav2_source[real_loc] * cons_data[aid].d;
+            const auto gs3_source = zero_gravity3 ? 0 : grav3_source[real_loc] * cons_data[aid].d;
+            const auto ge_source  = gs1_source * prim_buff[tid].v1 + gs2_source * prim_buff[tid].v2 + gs3_source * prim_buff[tid].v3;
+            return rm::Conserved<dim>{0, gs1_source, gs2_source, gs3_source, ge_source, 0, 0, 0};
         }();
 
         if constexpr(dim == 1) {
@@ -2207,6 +2165,7 @@ void RMHD<dim>::advance(
             {
                 case simbi::Geometry::CARTESIAN:
                 {
+                    // printf("flf: %.2e, frf: %.2e, cons: %.2e\n", flf.d, frf.d, cons_data[ia].d);
                     cons_data[ia] -= ((frf - flf) * invdx1 - source_terms - gravity) * dt * step;
                     break;
                 }
@@ -2219,9 +2178,9 @@ void RMHD<dim>::advance(
                     const real sL     = 4.0 * M_PI * rlf * rlf; 
                     const real dV     = 4.0 * M_PI * rmean * rmean * (rrf - rlf);    
                     const real factor = (mesh_motion) ? dV : 1;         
-                    const real pc     = prim_buff[txa].p;
+                    const real pc     = prim_buff[txa].total_pressure();
                     const real invdV  = 1 / dV;
-                    const auto geom_sources = rm::Conserved<1>{0.0, pc * (sR - sL) * invdV, 0.0};
+                    const auto geom_sources = rm::Conserved<1>{0.0, pc * (sR - sL) * invdV, 0.0, 0.0};
                     
                     cons_data[ia] -= ( (frf * sR - flf * sL) * invdV - geom_sources - source_terms - gravity) * step * dt * factor;
                     break;
@@ -2256,14 +2215,17 @@ void RMHD<dim>::advance(
                         const real rhoc = prim_buff[tid].rho;
                         const real uc   = prim_buff[tid].get_v1();
                         const real vc   = prim_buff[tid].get_v2();
-                        const real pc   = prim_buff[tid].p;
-                        const real hc   = prim_buff[tid].get_enthalpy(gamma);
+                        const real pc   = prim_buff[tid].total_pressure();
+                        const real hc   = prim_buff[tid].get_gas_enthalpy(gamma);
+                        const auto b4c  = rm::MagFourVec<dim>(prim_buff[tid]);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc));
 
                         const rm::Conserved<2> geom_source  = {
                             0, 
-                            (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
-                            - (rhoc * hc * gam2 * uc * vc) / rmean + pc * (s2R - s2L) * invdV, 
+                            (rhoc * hc * gam2 * vc * vc - b4c.two * b4c.two) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * hc * gam2 * uc * vc - b4c.one * b4c.two) / rmean + pc * (s2R - s2L) * invdV, 
+                            0,
+                            0,
                             0
                         };
 
@@ -2294,15 +2256,17 @@ void RMHD<dim>::advance(
                         const real rhoc = prim_buff[tid].rho;
                         const real uc   = prim_buff[tid].get_v1();
                         const real vc   = prim_buff[tid].get_v2();
-                        const real pc   = prim_buff[tid].p;
+                        const real pc   = prim_buff[tid].total_pressure();
+                        const auto b4c  = rm::MagFourVec<dim>(prim_buff[tid]);
                         
-                        const real hc   = prim_buff[tid].get_enthalpy(gamma);
+                        const real hc   = prim_buff[tid].get_gas_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc));
-
                         const rm::Conserved<2> geom_source  = {
                             0, 
-                            (rhoc * hc * gam2 * vc * vc) / rmean + pc * (s1R - s1L) * invdV, 
-                            - (rhoc * hc * gam2 * uc * vc) / rmean, 
+                            (rhoc * hc * gam2 * vc * vc - b4c.two * b4c.two) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * hc * gam2 * uc * vc - b4c.one * b4c.two) / rmean, 
+                            0,
+                            0,
                             0
                         };
                         cons_data[aid] -= ( 
@@ -2327,8 +2291,17 @@ void RMHD<dim>::advance(
                         const real s2L          = rmean * (rr - rl);  
 
                         // Grab central primitives
-                        const real pc   = prim_buff[tid].p;
-                        const auto geom_source  = rm::Conserved<2>{0, pc * (s1R - s1L) * invdV, 0, 0};
+                        const real pc   = prim_buff[tid].total_pressure();
+                        const auto b4c  = rm::MagFourVec<dim>(prim_buff[tid]);
+                        const auto geom_source  = rm::Conserved<2>{
+                            0, 
+                            (- b4c.two * b4c.two) / rmean + pc * (s1R - s1L) * invdV, 
+                            (+ b4c.one * b4c.two) / rmean, 
+                            0,
+                            0,
+                            0
+                        };
+                        
                         cons_data[aid] -= ( 
                               (frf * s1R - flf * s1L) * invdV 
                             + (grf * s2R - glf * s2L) * invdV 
@@ -2372,15 +2345,20 @@ void RMHD<dim>::advance(
                         const real uc   = prim_buff[tid].get_v1();
                         const real vc   = prim_buff[tid].get_v2();
                         const real wc   = prim_buff[tid].get_v3();
-                        const real pc   = prim_buff[tid].p;
+                        const real pc   = prim_buff[tid].total_pressure();
+                        const auto b4c  = rm::MagFourVec<dim>(prim_buff[tid]);
 
-                        const real hc   = prim_buff[tid].get_enthalpy(gamma);
+                        const real hc   = prim_buff[tid].get_gas_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
 
-                        const auto geom_source  = rm::Conserved<3>{0, 
-                            (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) / dV1,
-                            rhoc * hc * gam2 * (wc * wc * cot - uc * vc) / rmean + pc * (s2R - s2L)/dV2 , 
-                            - rhoc * hc * gam2 * wc * (uc + vc * cot) / rmean, 
+                        const auto geom_source  = rm::Conserved<3>{
+                            0, 
+                            (rhoc * hc * gam2 * (vc * vc + wc * wc) - b4c.two * b4c.two - b4c.three * b4c.three) / rmean + pc * (s1R - s1L) / dV1,
+                            (rhoc * hc * gam2 * (wc * wc * cot - uc * vc) - b4c.three * b4c.three * cot + b4c.one * b4c.two) / rmean + pc * (s2R - s2L)/dV2 , 
+                            - (rhoc * hc * gam2 * wc * (uc + vc * cot) - b4c.three * b4c.one - b4c.three * b4c.two * cot ) / rmean, 
+                            0,
+                            0,
+                            0,
                             0
                         };
                         cons_data[aid] -= ( 
@@ -2409,7 +2387,7 @@ void RMHD<dim>::advance(
                         // const real s3L          = rmean * (rr - rl) * (tr - tl);
                         // const real s3R          = s3L;
                         // const real thmean       = static_cast<real>(0.5) * (tl + tr);
-                        const real dV    = rmean  * (rr - rl) * (zr - zl) * (qr - ql);
+                        const real dV    = rmean * (rr - rl) * (zr - zl) * (qr - ql);
                         const real invdV = 1/ dV;
 
                         // Grab central primitives
@@ -2417,12 +2395,22 @@ void RMHD<dim>::advance(
                         const real uc   = prim_buff[tid].get_v1();
                         const real vc   = prim_buff[tid].get_v2();
                         const real wc   = prim_buff[tid].get_v3();
-                        const real pc   = prim_buff[tid].p;
+                        const real pc   = prim_buff[tid].total_pressure();
+                        const auto b4c  = rm::MagFourVec<dim>(prim_buff[tid]);
 
-                        const real hc   = prim_buff[tid].get_enthalpy(gamma);
+                        const real hc   = prim_buff[tid].get_gas_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
 
-                        const auto geom_source  = rm::Conserved<3>{0, (rhoc * hc * gam2 * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) * invdV, - (rhoc * hc * gam2 * uc * vc) / rmean , 0, 0};
+                        const auto geom_source  = rm::Conserved<3>{
+                            0, 
+                            (rhoc * hc * gam2 * (vc * vc) - b4c.two * b4c.two - b4c.three * b4c.three) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * hc * gam2 * uc * vc - b4c.one * b4c.two) / rmean , 
+                            0, 
+                            0,
+                            0,
+                            0,
+                            0
+                        };
                         cons_data[aid] -= ( (frf * s1R - flf * s1L) * invdV + (grf * s2R - glf * s2L) * invdV + (hrf - hlf) * invdV - geom_source - source_terms) * dt * step;
                         break;
                     }
@@ -2486,7 +2474,12 @@ void RMHD<dim>::simulate(
             outer_zones[0] = conserved_t{
                 dens_outer(x1max), 
                 mom1_outer(x1max), 
-                enrg_outer(x1max)} * dV;
+                mom2_outer(x1max),
+                mom3_outer(x1max),
+                enrg_outer(x1max),
+                mag1_outer(x1max),
+                mag2_outer(x1max),
+                mag3_outer(x1max)} * dV;
             outer_zones.copyToGpu();
         } else if constexpr(dim == 2) {
             outer_zones.resize(ny);
@@ -2496,8 +2489,12 @@ void RMHD<dim>::simulate(
                 outer_zones[jj]  = conserved_t{
                     dens_outer(x1max, x2[jreal]), 
                     mom1_outer(x1max, x2[jreal]), 
-                    mom2_outer(x1max, x2[jreal]), 
-                    enrg_outer(x1max, x2[jreal])} * dV;
+                    mom2_outer(x1max, x2[jreal]),
+                    mom3_outer(x1max, x2[jreal]), 
+                    enrg_outer(x1max, x2[jreal]),
+                    mag1_outer(x1max, x2[jreal]),
+                    mag2_outer(x1max, x2[jreal]),
+                    mag3_outer(x1max, x2[jreal])} * dV;
             }
             outer_zones.copyToGpu();
         } else {
@@ -2513,7 +2510,10 @@ void RMHD<dim>::simulate(
                         mom1_outer(x1max, x2[jreal], x3[kreal]), 
                         mom2_outer(x1max, x2[jreal], x3[kreal]),
                         mom3_outer(x1max, x2[jreal], x3[kreal]), 
-                        enrg_outer(x1max, x2[jreal], x3[kreal])} * dV;
+                        enrg_outer(x1max, x2[jreal], x3[kreal]),
+                        mag1_outer(x1max, x2[jreal], x3[kreal]), 
+                        mag2_outer(x1max, x2[jreal], x3[kreal]),
+                        mag3_outer(x1max, x2[jreal], x3[kreal])} * dV;
                 }
             }
             outer_zones.copyToGpu();
@@ -2527,13 +2527,16 @@ void RMHD<dim>::simulate(
     inflow_zones.resize(dim * 2);
     for (int i = 0; i < 2 * dim; i++) {
         this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]));
-        if constexpr(dim == 1) {
-            this->inflow_zones[i] = rm::Conserved<1>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2]};
-        } else if constexpr(dim == 2) {
-            this->inflow_zones[i] = rm::Conserved<2>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3]};
-        } else {
-            this->inflow_zones[i] = rm::Conserved<3>{boundary_sources[i][0], boundary_sources[i][1], boundary_sources[i][2], boundary_sources[i][3], boundary_sources[i][4]};
-        }
+        this->inflow_zones[i] = rm::Conserved<dim>{
+            boundary_sources[i][0], 
+            boundary_sources[i][1], 
+            boundary_sources[i][2], 
+            boundary_sources[i][3], 
+            boundary_sources[i][4],
+            boundary_sources[i][5],
+            boundary_sources[i][6],
+            boundary_sources[i][7]
+        };
     }
 
     // Write some info about the setup for writeup later
@@ -2563,7 +2566,7 @@ void RMHD<dim>::simulate(
     setup.first_order         = first_order;
     setup.coord_system        = coord_system;
     setup.using_fourvelocity  = (VelocityType == Velocity::FourVelocity);
-    setup.regime              = "relativistic";
+    setup.regime              = "srmhd";
     setup.mesh_motion         = mesh_motion;
     setup.boundary_conditions = boundary_conditions;
     setup.dimensions          = dim;
@@ -2577,85 +2580,18 @@ void RMHD<dim>::simulate(
     // Copy the state array into real & profile variables
     for (size_t i = 0; i < total_zones; i++)
     {
-        const auto d  = state[0][i];
-        const auto m1 = state[1][i];
-        const auto m2 = [&]{
-            if constexpr(dim < 2) {
-                return static_cast<real>(0.0);
-            }
-            return state[2][i];
-        }();
-        const auto m3 = [&]{
-            if constexpr(dim < 3) {
-                return static_cast<real>(0.0);
-            }
-            return state[3][i];
-        }();
-        const auto E = [&] {
-            if constexpr(dim == 1) {
-                return state[2][i];
-            } else if constexpr(dim == 2) {
-                return state[3][i];
-            } else {
-                return state[4][i];
-            }
-        }(); 
-        const auto hmag1 = [&]{
-            if constexpr(dim == 1) {
-                return state[3][i];
-            } else if constexpr(dim == 2) {
-                return state[4][i];
-            } else {
-                return state[5][i];
-            }
-        }();
-        const auto hmag2 = [&]{
-            if constexpr(dim == 1) {
-                return 0;
-            } else if constexpr(dim == 2) {
-                return state[5][i];
-            } else {
-                return state[6][i];
-            }
-        }();
-        const auto hmag3 = [&]{
-            if constexpr(dim == 1) {
-                return 0;
-            } else if constexpr(dim == 2) {
-                return state[6][i];
-            } else {
-                return state[7][i];
-            }
-        }();
-        const auto dchi = [&] {
-            if constexpr(dim == 1) {
-                return state[4][i];
-            } else if constexpr(dim == 2) {
-                return state[6][i];
-            } else {
-                return state[8][i];
-            }
-        }();
-
-        const auto S = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
-        if constexpr(dim == 1) {
-            cons[i] = rm::Conserved<1>{d, m1, E, hmag1, dchi};
-        } else if constexpr(dim == 2) {
-            cons[i] = rm::Conserved<2>{d, m1, m2, E, hmag1, hmag2, dchi};
-        } else {
-            cons[i] = rm::Conserved<3>{d, m1, m2, m3, E, hmag1, hmag2, hmag3, dchi};
-        }
-        edens_guess[i] = [&] {
-            if constexpr(dim == 1) {
-                return state[5][i];
-            } else if constexpr(dim == 2) {
-                return state[7][i];
-            } else {
-                return state[9][i];
-            }
-        }();
+        const auto d    = state[0][i];
+        const auto m1   = state[1][i];
+        const auto m2   = state[2][i];
+        const auto m3   = state[3][i];
+        const auto tau  = state[4][i];
+        const auto b1   = state[5][i];
+        const auto b2   = state[6][i];
+        const auto b3   = state[7][i];
+        const auto dchi = state[8][i];
+        edens_guess[i]  = state[9][i];
+        cons[i] = rm::Conserved<dim>{d, m1, m2, m3, tau, b1, b2, b3, dchi};
     }
-
     cons.copyToGpu();
     prims.copyToGpu();
     edens_guess.copyToGpu();
@@ -2681,6 +2617,13 @@ void RMHD<dim>::simulate(
     }
     if constexpr(dim > 2) {
         sourceG3.copyToGpu();
+    }
+    sourceB1.copyToGpu();
+    if constexpr(dim > 1) {
+        sourceB2.copyToGpu();
+    }
+    if constexpr(dim > 2) {
+        sourceB3.copyToGpu();
     }
 
     // Setup the system
@@ -2755,6 +2698,8 @@ void RMHD<dim>::simulate(
             x1min += step * dt * vmin;
             hubble_param = adot(t) / a(t);
         }
+        // std::cout << "pause" << "\n";
+        // std::cin.get();
     });
 
     if (inFailureState){

@@ -677,7 +677,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             real pressure = left_prims.p;
             real v        = left_prims.v1;
             real rho      = left_state.rho;
-            real m        = left_state.m;
+            real m        = left_state.m1;
             real energy   = left_state.e_dens;
             real cofac    = 1/(aL - aStar);
 
@@ -693,7 +693,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             real pressure = right_prims.p;
             real v        = right_prims.v1;
             real rho      = right_state.rho;
-            real m        = right_state.m;
+            real m        = right_state.m1;
             real energy   = right_state.e_dens;
             real cofac    = 1./(aR - aStar);
 
@@ -1600,12 +1600,12 @@ void Newtonian<dim>::advance(
                         const real rhoc = prim_buff[tid].rho;
                         const real uc   = prim_buff[tid].v1;
                         const real vc   = prim_buff[tid].v2;
-                        const real wc   = prim_buff[tid].v3;
+                        // const real wc   = prim_buff[tid].v3;
                         const real pc   = prim_buff[tid].p;
 
                         const auto geom_source  = nt::Conserved<3>{
                             0, 
-                            (rhoc * (vc * vc + wc * wc)) / rmean + pc * (s1R - s1L) * invdV, 
+                            (rhoc * (vc * vc)) / rmean + pc * (s1R - s1L) * invdV, 
                             - (rhoc * uc * vc) / rmean , 
                             0, 
                             0

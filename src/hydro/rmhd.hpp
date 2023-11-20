@@ -22,38 +22,11 @@ namespace simbi
     struct RMHD : public HydroBase
     {
         // set the primitive and conservative types at compile time
-        using primitive_t = typename std::conditional_t<
-        dim == 1,
-        rmhd1d::Primitive,
-        std::conditional_t<
-        dim == 2,
-        rmhd2d::Primitive,
-        rmhd3d::Primitive>
-        >;
-        using conserved_t = typename std::conditional_t<
-        dim == 1,
-        rmhd1d::Conserved,
-        std::conditional_t<
-        dim == 2,
-        rmhd2d::Conserved,
-        rmhd3d::Conserved>
-        >;
-        using primitive_soa_t = typename std::conditional_t<
-        dim == 1,
-        rmhd1d::PrimitiveSOA,
-        std::conditional_t<
-        dim == 2,
-        rmhd2d::PrimitiveSOA,
-        rmhd3d::PrimitiveSOA>
-        >;
-        using eigenvals_t = typename std::conditional_t<
-        dim == 1,
-        rmhd1d::Eigenvals,
-        std::conditional_t<
-        dim == 2,
-        rmhd2d::Eigenvals,
-        rmhd3d::Eigenvals>
-        >;
+        using primitive_t     = rmhd::AnyPrimitive<dim>;
+        using conserved_t     = rmhd::AnyConserved<dim>;
+        using primitive_soa_t = rmhd::PrimitiveSOA;
+        using eigenvals_t     = rmhd::Eigenvals;
+        using mag_fourvec_t   = rmhd::mag_four_vec<dim>;
 
         using function_t = typename std::conditional_t<
         dim == 1,
@@ -69,13 +42,16 @@ namespace simbi
         function_t mom2_outer;
         function_t mom3_outer;
         function_t enrg_outer;
+        function_t mag1_outer;
+        function_t mag2_outer;
+        function_t mag3_outer;
 
         const static int dimensions = dim;
 
         /* Shared Data Members */
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons, outer_zones, inflow_zones;
-        ndarray<real> enthalpy_density_guess, dt_min;
+        ndarray<real> edens_guess, dt_min;
         bool scalar_all_zeros;
 
         /* Methods */
@@ -86,6 +62,16 @@ namespace simbi
         ~RMHD();
 
         void cons2prim(const ExecutionPolicy<> &p);
+
+        /**
+         * Return the primitive
+         * variables density , three-velocity, pressure
+         * 
+         * @param  con conserved array at index
+         * @param gid  current global index
+         * @return none
+         */
+        primitive_t cons2prim(const conserved_t &cons, const luint gid);
 
         void advance(
             const ExecutionPolicy<> &p,
@@ -111,6 +97,18 @@ namespace simbi
             const primitive_t &right_prims,
             const luint nhat,
             const real vface) const;
+
+        GPU_CALLABLE_MEMBER
+        conserved_t calc_hlld_flux(
+            const conserved_t &left_state,
+            const conserved_t &right_state,
+            const conserved_t &left_flux,
+            const conserved_t &right_flux,
+            const primitive_t &left_prims,
+            const primitive_t &right_prims,
+            const luint nhat,
+            const real vface,
+            const luint gid) const;
 
         GPU_CALLABLE_MEMBER
         conserved_t prims2flux(const primitive_t &prims, const luint nhat) const;
@@ -183,22 +181,25 @@ namespace simbi
         // file writer template alias
         template<int dim>
         constexpr auto write2file = helpers::write_to_file<typename RMHD<dim>::primitive_soa_t, dim, RMHD<dim>>;
+
+        template<int dim>
+        using MagFourVec = typename RMHD<dim>::mag_fourvec_t;
             
     } // namespace srhd
 }
 
 template<>
-struct is_relativistic<simbi::RMHD<1>>
+struct is_relativistic_mhd<simbi::RMHD<1>>
 {
     static constexpr bool value = true;
 };
 template<>
-struct is_relativistic<simbi::RMHD<2>>
+struct is_relativistic_mhd<simbi::RMHD<2>>
 {
     static constexpr bool value = true;
 };
 template<>
-struct is_relativistic<simbi::RMHD<3>>
+struct is_relativistic_mhd<simbi::RMHD<3>>
 {
     static constexpr bool value = true;
 };

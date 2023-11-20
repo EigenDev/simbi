@@ -6,14 +6,14 @@ import numpy as np
 import os
 import inspect
 import importlib
-from itertools import product, permutations, chain, repeat
+from itertools import chain, repeat
 from .detail import initial_condition as simbi_ic
 from .detail import helpers
 from .detail.slogger import logger
 from .key_types import *
 
 
-available_regimes = ['classical', 'relativistic']
+available_regimes = ['classical', "srhd", "srmhd"]
 available_coord_systems = [
     'spherical',
     'cartesian',
@@ -101,116 +101,63 @@ class Hydro:
         
         self.geometry   = geometry
         self.resolution = resolution
-        tuple_of_tuples: Callable[..., bool] = lambda x: any(isinstance(a, Sequence) for a in x)
+        self.coord_system = coord_system
+        self.regime       = regime
+        self.gamma        = gamma
+        self.mhd = self.regime in ['srmhd']
+        
+        tuple_of_tuples: Callable[..., bool] = lambda x: all(isinstance(a, Sequence) for a in x)
         
         if tuple_of_tuples(initial_state): 
-            # check if given simple nexted sequence to split across the grid
+            # check if given simple nested sequence to split across the grid
             if all(len(v) == 3 for v in initial_state):
+                if self.mhd:
+                    raise ValueError("Not enough variables across discontinuity for mhd run")
                 self.dimensionality = 1
                 self.discontinuity = True
             elif all(len(v) == 4 for v in initial_state):
-                self.dimensionality = 2
+                if self.mhd:
+                    raise ValueError("Not enough variables across discontinuity for mhd run")
+                self.dimensionality = 1
                 self.discontinuity = True
             elif all(len(v) == 5 for v in initial_state):
+                if self.mhd:
+                    raise ValueError("Not enough variables across discontinuity for mhd run")
                 self.dimensionality = 3
                 self.discontinuity = True
+            elif all(len(v) == 6 for v in initial_state):
+                if self.mhd:
+                    raise ValueError("Not enough variables across discontinuity for mhd run")
+                self.dimensionality = 2
+                self.discontinuity = True
+            elif all(len(v) == 8 for v in initial_state):
+                if not self.mhd:
+                    raise ValueError("Too many variables across discontinuity for non-mhd run")
+                self.dimensionality = np.asanyarray(initial_state[0]).ndim
+                self.discontinuity = True
             else:
-                raise ValueError("State arrays across discontuinty need to have equal length")
+                raise ValueError("State arrays across discontinuity need to have equal length")
         else:
             if all(isinstance(x, (float, int)) for x in initial_state):
                 initial_state = tuple(x * np.ones(shape=self.resolution) for x in initial_state)
             self.dimensionality = np.asanyarray(initial_state[0]).ndim
 
-        self.coord_system = coord_system
-        self.regime       = regime
-        initial_state     = helpers.pad_jagged_array(initial_state)
-        self.gamma        = gamma
+        ngeom = len(self.geometry)
+        nres  = len(self.resolution)
         
-        if len(initial_state) < 6 or len(initial_state) < 8 and self.discontinuity:
-            self.nvars = (2 + 1 * (self.dimensionality != 1) +
-                          self.dimensionality)
-
-            # Initialize conserved u-array and flux arrays
-            self.u = np.zeros(shape=(self.nvars,*np.asanyarray(self.resolution).flatten()[ ::- 1]))
-            if self.discontinuity:
-                logger.info(  
-                    f'Initializing Problem With a {str(self.dimensionality)}D Discontinuity...')
-
-                if len(self.geometry) == 3 and isinstance(self.geometry[0], (int, float)):
-                    geom_tuple: Any = (self.geometry,)
-                else:
-                    geom_tuple = self.geometry
-
-                break_points = [val[2] for val in geom_tuple if len(val) == 3]
-                if len(break_points) > self.dimensionality:
-                    raise ValueError(
-                        "Number of break points must be less than or equal to the number of dimensions")
-
-                spacings = [
-                    (geom_tuple[idx][1] -
-                     geom_tuple[idx][0]) /
-                    self.resolution[idx] for idx in range(
-                        len(geom_tuple))]
-                
-                pieces = [(None, round(break_points[idx] / spacings[idx]))
-                          for idx in range(len(break_points))]
-
-                # partition the grid based on user-defined partition coordinates
-                partition_inds = list(product(*[permutations(x) for x in pieces]))
-                partition_inds = [tuple([slice(*y) for y in x]) for x in partition_inds]
-                partitions = [self.u[(..., *sector)] for sector in partition_inds]
-                
-                for idx, part in enumerate(partitions):
-                    state = initial_state[idx]
-                    rho, *velocity, pressure = state
-                    velocity = np.asanyarray(velocity)
-
-                    vsqr = self.calc_vsq(velocity)
-                    lorentz_factor = self.calc_lorentz_factor(vsqr, regime)
-                    internal_energy = self.calc_internal_energy(vsqr, regime)
-                    total_enthalpy = self.calc_enthalpy(
-                        rho, pressure, internal_energy, self.gamma)
-                    enthalpy_limit = self.calc_spec_enthalpy(
-                        rho, pressure, internal_energy, gamma, regime)
-
-                    energy = self.calc_energy_density(
-                        rho, lorentz_factor, total_enthalpy, pressure)
-                    dens = self.calc_labframe_densiity(rho, lorentz_factor)
-                    mom = self.calc_labframe_momentum(
-                        rho, lorentz_factor, enthalpy_limit, velocity)
-
-                    if self.dimensionality == 1:
-                        part[...] = np.array([dens, *mom, energy])[:, None]
-                    else:
-                        part[...] = (part[...].transpose(
-                        ) + np.array([dens, *mom, energy, 0.0])).transpose()
-            else:
-                rho, *velocity, pressure = initial_state
-                velocity = np.asanyarray(velocity)
-                vsqr = self.calc_vsq(velocity)
-                lorentz_factor = self.calc_lorentz_factor(vsqr, regime)
-                internal_energy = self.calc_internal_energy(vsqr, regime)
-                total_enthalpy = self.calc_enthalpy(
-                    rho, pressure, internal_energy, gamma)
-                enthalpy_limit = self.calc_spec_enthalpy(
-                    rho, pressure, internal_energy, gamma, regime)
-
-                self.init_density = self.calc_labframe_densiity(
-                    rho, lorentz_factor)
-                self.init_momentum = self.calc_labframe_momentum(
-                    rho, lorentz_factor, enthalpy_limit, velocity)
-                self.init_energy = self.calc_labframe_energy(
-                    rho, lorentz_factor, total_enthalpy, pressure)
-
-                if self.dimensionality == 1:
-                    self.u[...] = np.array(
-                        [self.init_density, *self.init_momentum, self.init_energy])
-                else:
-                    self.u[...] = np.array([self.init_density,
-                        *self.init_momentum,
-                        self.init_energy,
-                        np.zeros_like(self.init_density)])
-                    
+        # if len(self.geometry) != self.dimensionality:
+        #     raise ValueError(f"Detecing a {self.dimensionality}D run, but only {ngeom} geometry tuples")
+        
+        if len(self.resolution) != self.dimensionality:
+            raise ValueError(f"Detecing a {self.dimensionality}D run, but only {nres} resolution args")
+        
+        initial_state = helpers.pad_jagged_array(initial_state)
+        nstates = len(initial_state)
+        max_discont = 2 ** self.dimensionality
+        self.number_of_non_em_terms = 2 + self.dimensionality if not self.mhd else 5
+        max_prims = self.number_of_non_em_terms + 3 * self.mhd
+        if nstates < max_prims or (nstates < max_discont and self.discontinuity):
+            simbi_ic.construct_the_state(self, initial_state=initial_state)
         else:
             raise ValueError("Initial State contains too many variables")
 
@@ -218,72 +165,6 @@ class Hydro:
     def gen_from_setup(cls, setup: Any) -> Any:
         return cls(**{str(param): getattr(setup, param)
                    for param in dir(setup)})
-
-    @staticmethod
-    def calc_lorentz_factor(
-            vsquared: NDArray[Any],
-            regime: str) -> FloatOrArray:
-        return 1.0 if regime == 'classical' else (
-            1 - np.asanyarray(vsquared))**(-0.5)
-
-    @staticmethod
-    def calc_enthalpy(
-            rho: FloatOrArray,
-            pressure: FloatOrArray,
-            internal_energy: FloatOrArray,
-            gamma: float) -> FloatOrArray:
-        return internal_energy + gamma * pressure / (rho * (gamma - 1))
-
-    @staticmethod
-    def calc_spec_enthalpy(
-            rho: FloatOrArray,
-            pressure: FloatOrArray,
-            internal_energy: FloatOrArray,
-            gamma: float,
-            regime: str) -> FloatOrArray:
-        return 1.0 if regime == 'classical' else Hydro.calc_enthalpy(
-            rho, pressure, internal_energy, gamma)
-
-    @staticmethod
-    def calc_internal_energy(
-            vsquared: NDArray[Any],
-            regime: str) -> FloatOrArray:
-        return 1.0 + 0.5 * np.asanyarray(vsquared) if regime == 'classical' else 1
-
-    @staticmethod
-    def calc_vsq(velocity: Union[NDArray[Any],
-                 Sequence[float]]) -> NDArray[Any]:
-        return np.array(sum(vcomp * vcomp for vcomp in velocity))
-
-    @staticmethod
-    def calc_energy_density(
-            rho: FloatOrArray,
-            lorentz: FloatOrArray,
-            enthalpy: FloatOrArray,
-            pressure: FloatOrArray) -> FloatOrArray:
-        return rho * lorentz * lorentz * enthalpy - pressure - rho * lorentz
-
-    @staticmethod
-    def calc_labframe_densiity(
-            rho: FloatOrArray,
-            lorentz: FloatOrArray) -> FloatOrArray:
-        return rho * lorentz
-
-    @staticmethod
-    def calc_labframe_momentum(
-            rho: FloatOrArray,
-            lorentz: FloatOrArray,
-            enthalpy: FloatOrArray,
-            velocity: NDArray[Any]) -> NDArray[Any]:
-        return rho * lorentz * lorentz * enthalpy * velocity
-
-    @staticmethod
-    def calc_labframe_energy(
-            rho: FloatOrArray,
-            lorentz: FloatOrArray,
-            enthalpy: FloatOrArray,
-            pressure: FloatOrArray) -> FloatOrArray:
-        return rho * lorentz * lorentz * enthalpy - pressure - rho * lorentz
 
     def _print_params(self, frame: Any) -> None:
         params = inspect.getargvalues(frame)
@@ -472,6 +353,7 @@ class Hydro:
             cfl: float = 0.4,
             sources: Optional[NDArray[Any]] = None,
             gsources: Optional[NDArray[Any]] = None,
+            bsources: Optional[NDArray[Any]] = None,
             passive_scalars: Optional[Union[NDArray[Any], int]] = None,
             solver: str = 'hllc',
             chkpt: Optional[str] = None,
@@ -639,6 +521,9 @@ class Hydro:
         sources = sources.reshape(sources.shape[0], -1)
         gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
         gsources = gsources.reshape(gsources.shape[0], -1)
+        bsources = np.zeros(3) if bsources is None else np.asanyarray(bsources)
+        bsources = bsources.reshape(bsources.shape[0], -1)
+        
         if compute_mode == 'gpu':
             if self.dimensionality == 1:
                 if 'GPUXBLOCK_SIZE' not in os.environ:
@@ -702,6 +587,9 @@ class Hydro:
             'object_cells': object_cells.flatten()
         }
         
+        if self.mhd:
+            init_conditions['bsources'] = bsources
+        
         lambdas: dict[str, Optional[Callable[...,float]]] = {
             'dens_lambda': None,
             'mom1_lambda': None,
@@ -726,6 +614,7 @@ class Hydro:
         sim_state = getattr(importlib.import_module(f'.{lib_mode}_ext', package='simbi.libs'), 'SimState')
         state_contig = self.u.reshape(self.u.shape[0], -1)
         state = sim_state()
+        
         state.run(
             state = state_contig, 
             dim = self.dimensionality,

@@ -193,7 +193,7 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         setup['x2max']        = try_read(ds, 'x2max', fall_back_key='ymax', fall_back=0.0)
         setup['x3min']        = try_read(ds, 'x3min', fall_back_key='zmin', fall_back=0.0)
         setup['x3max']        = try_read(ds, 'x3max', fall_back_key='zmax', fall_back=0.0)
-        setup['regime']       = try_read(ds, 'regime', fall_back='relativistic')
+        setup['regime']       = try_read(ds, 'regime', fall_back="srhd")
         setup['coord_system'] = try_read(ds, 'geometry', fall_back='spherical') 
         setup['mesh_motion']  = try_read(ds, key='mesh_motion', fall_back=False)
         setup['is_cartesian'] = setup['coord_system'] in logically_cartesian
@@ -223,16 +223,27 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         fields['ad_gamma']     = setup['ad_gamma']
         
         vsqr = np.sum(vel * vel for vel in v) # type: ignore
-        if setup['regime'] == 'relativistic':
+        if setup['regime'] in ['srhd', 'srmhd']:
             if ds['using_gamma_beta']:
                 W = (1 + vsqr) ** 0.5
                 fields.update({f'v{i+1}': v[i] / W for i in range(len(v))})
                 vsqr /= W**2 
             else:
                 W = (1 - vsqr) ** (-0.5)
+            
+            if setup['regime'] == 'srmhd':
+                b1 = flatten_fully(hf.get('b1')[:].reshape(nz, ny, nx))
+                b2 = flatten_fully(hf.get('b2')[:].reshape(nz, ny, nx))
+                b3 = flatten_fully(hf.get('b3')[:].reshape(nz, ny, nx))
+                b1 = unpad(b1, npad)
+                b2 = unpad(b2, npad)
+                b3 = unpad(b3, npad)
+                fields['b1'] = b1
+                fields['b2'] = b2 
+                fields['b3'] = b3
         else:
             W = 1
-        fields['gamma_beta']   = np.sqrt(vsqr) * W 
+        fields['gamma_beta'] = np.sqrt(vsqr) * W 
         fields['W'] = W 
 
         #------------------------
@@ -259,6 +270,7 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
                 ) for i in range(ndim)
         }
         
+        # print(any(v < 0 for v in fields['rho']))
         if setup['x1max'] > mesh['x1'][-1]:
             mesh['x1'] = funcs[0](setup['x1min'], setup['x1max'], setup['x1active'])
     

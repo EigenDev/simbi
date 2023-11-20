@@ -270,10 +270,52 @@ namespace simbi
         plm_gradient(const T &a, const T &b, const T &c, const real plm_theta)
         {
             const real rho = minmod((a - b).rho * plm_theta, (c - b).rho * static_cast<real>(0.5), (c - a).rho * plm_theta);
-            const real v   = minmod((a - b).v1  * plm_theta, (c - b).v1  * static_cast<real>(0.5), (c - a).v1  * plm_theta);
+            const real v1  = minmod((a - b).v1  * plm_theta, (c - b).v1  * static_cast<real>(0.5), (c - a).v1  * plm_theta);
             const real pre = minmod((a - b).p   * plm_theta, (c - b).p   * static_cast<real>(0.5), (c - a).p   * plm_theta);
             const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
-            return T{rho, v, pre, chi};
+            return T{rho, v1, pre, chi};
+        }
+
+        template<typename T>
+        GPU_CALLABLE_INLINE typename std::enable_if<is_3D_mhd_primitive<T>::value, T>::type
+        plm_gradient(const T &a, const T &b, const T &c, const real plm_theta)
+        {
+            const real rho = minmod((a - b).rho * plm_theta, (c - b).rho * static_cast<real>(0.5), (c - a).rho * plm_theta);
+            const real v1  = minmod((a - b).v1  * plm_theta, (c - b).v1  * static_cast<real>(0.5), (c - a).v1  * plm_theta);
+            const real v2  = minmod((a - b).v2  * plm_theta, (c - b).v2  * static_cast<real>(0.5), (c - a).v2  * plm_theta);
+            const real v3  = minmod((a - b).v3  * plm_theta, (c - b).v3  * static_cast<real>(0.5), (c - a).v3  * plm_theta);
+            const real pre = minmod((a - b).p   * plm_theta, (c - b).p   * static_cast<real>(0.5), (c - a).p   * plm_theta);
+            const real b1  = minmod((a - b).b1  * plm_theta, (c - b).b1  * static_cast<real>(0.5), (c - a).b1  * plm_theta);
+            const real b2  = minmod((a - b).b2  * plm_theta, (c - b).b2  * static_cast<real>(0.5), (c - a).b2  * plm_theta);
+            const real b3  = minmod((a - b).b3  * plm_theta, (c - b).b3  * static_cast<real>(0.5), (c - a).b3  * plm_theta);
+            const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
+            return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
+        }
+
+        template<typename T>
+        GPU_CALLABLE_INLINE typename std::enable_if<is_2D_mhd_primitive<T>::value, T>::type
+        plm_gradient(const T &a, const T &b, const T &c, const real plm_theta)
+        {
+            const real rho = minmod((a - b).rho * plm_theta, (c - b).rho * static_cast<real>(0.5), (c - a).rho * plm_theta);
+            const real v1  = minmod((a - b).v1  * plm_theta, (c - b).v1  * static_cast<real>(0.5), (c - a).v1  * plm_theta);
+            const real v2  = minmod((a - b).v2  * plm_theta, (c - b).v2  * static_cast<real>(0.5), (c - a).v2  * plm_theta);
+            const real pre = minmod((a - b).p   * plm_theta, (c - b).p   * static_cast<real>(0.5), (c - a).p   * plm_theta);
+            const real b1  = minmod((a - b).b1  * plm_theta, (c - b).b1  * static_cast<real>(0.5), (c - a).b1  * plm_theta);
+            const real b2  = minmod((a - b).b2  * plm_theta, (c - b).b2  * static_cast<real>(0.5), (c - a).b2  * plm_theta);
+            const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
+            return T{rho, v1, v2, pre, b1, b2, chi};
+        }
+
+        template<typename T>
+        GPU_CALLABLE_INLINE typename std::enable_if<is_1D_mhd_primitive<T>::value, T>::type
+        plm_gradient(const T &a, const T &b, const T &c, const real plm_theta)
+        {
+            const real rho = minmod((a - b).rho * plm_theta, (c - b).rho * static_cast<real>(0.5), (c - a).rho * plm_theta);
+            const real v1  = minmod((a - b).v1  * plm_theta, (c - b).v1  * static_cast<real>(0.5), (c - a).v1  * plm_theta);
+            const real pre = minmod((a - b).p   * plm_theta, (c - b).p   * static_cast<real>(0.5), (c - a).p   * plm_theta);
+            const real b1  = minmod((a - b).b1  * plm_theta, (c - b).b1  * static_cast<real>(0.5), (c - a).b1  * plm_theta);
+            const real chi = minmod((a - b).chi * plm_theta, (c - b).chi * static_cast<real>(0.5), (c - a).chi * plm_theta);
+            return T{rho, v1, pre, b1, chi};
         }
 
         GPU_CALLABLE_INLINE 
@@ -393,6 +435,24 @@ namespace simbi
         real *dt_min,
         const simbi::Geometry geometry);
 
+        template<typename T, TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE, typename U, typename V>
+        GPU_LAUNCHABLE  typename std::enable_if<is_1D_mhd_primitive<T>::value>::type 
+        compute_dt(U *s, const V* prim_buffer, real* dt_min);
+
+        template<typename T, TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE, typename U, typename V>
+        GPU_LAUNCHABLE  typename std::enable_if<is_2D_mhd_primitive<T>::value>::type 
+        compute_dt(U *s, 
+        const V* prim_buffer,
+        real *dt_min,
+        const simbi::Geometry geometry);
+
+        template<typename T, TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE, typename U, typename V>
+        GPU_LAUNCHABLE  typename std::enable_if<is_3D_mhd_primitive<T>::value>::type 
+        compute_dt(U *s, 
+        const V* prim_buffer,
+        real *dt_min,
+        const simbi::Geometry geometry);
+
         //======================================
         //              HELPER OVERLOADS
         //======================================
@@ -423,6 +483,11 @@ namespace simbi
                 return static_cast<real>(2.0/3.0) * (xr * xr * xr - xl * xl * xl) / (xr * xr - xl * xl);
             }
         }
+        
+        GPU_CALLABLE_INLINE
+        constexpr auto next_perm (const luint nhat, const luint step) {
+            return ((nhat - 1) + step) % 3 + 1;
+        };
 
 
         template<typename T, typename U>
@@ -572,7 +637,21 @@ namespace simbi
         
         template<typename T>
         GPU_CALLABLE
-        T quartic(T b, T c, T d, T e, std::vector<T> res);
+        int quartic(T b, T c, T d, T e, T res[4]);
+
+        template<typename T>
+        GPU_CALLABLE
+        void swap(T& a, T& b);
+
+        // Partition the array and return the pivot index
+        template<typename T, typename index_type>
+        GPU_CALLABLE
+        index_type partition(T arr[], index_type low, index_type high);
+
+        // Quick sort implementation
+        template<typename T, typename index_type>
+        GPU_CALLABLE
+        void quickSort(T arr[], index_type low, index_type high);
     } // namespace helpers
 } // end simbi
 

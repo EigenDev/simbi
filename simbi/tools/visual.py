@@ -49,7 +49,10 @@ field_choices = [
     'v',
     'p',
     'gamma_beta',
-    'chi'] + derived
+    'chi',
+    'b1',
+    'b2',
+    'b3'] + derived
 lin_fields = [
     'chi', 
     'gamma_beta', 
@@ -284,7 +287,7 @@ class Visualizer:
         scale_cycle = cycle(self.scale_downs)
         refcount = 0
         for ax in get_iterable(self.axs, func = list if self.nplots == 1 else iter):
-            for file in get_iterable(self.flist[self.current_frame]):
+            for fidx, file in enumerate(get_iterable(self.flist[self.current_frame])):
                 fields, setup, mesh = util.read_file(
                     self, file, ndim=self.ndim)
                 for idx, field in enumerate(self.fields):
@@ -308,6 +311,9 @@ class Visualizer:
                     scale = next(scale_cycle)
                     if scale != 1:
                         label = label + f'/{int(scale)}'
+                    
+                    if self.labels:
+                        label += f", {self.labels[fidx]}"
                     
                     if self.oned_slice:
                         x = mesh[self.oned_slice]
@@ -778,9 +784,6 @@ class Visualizer:
                     ax.legend(loc=self.legend_loc)
                     
             
-           
-                
-
     def plot_mean_vs_time(self) -> None:
         weighted_vars = []
         times = []

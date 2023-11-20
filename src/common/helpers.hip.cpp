@@ -134,9 +134,35 @@ namespace simbi{
                     dataset.write(prims.p.data(), real_type);
                     dataset.close();
 
+                    dataset = file.createDataSet("chi", real_type, dataspace);
+                    dataset.write(prims.chi.data(), real_type);
+                    dataset.close();
+
                     dataset = file.createDataSet("x1", real_type, dataspacex1);
                     dataset.write(setup.x1.data(), real_type);
                     dataset.close();
+
+                    if (setup.regime == "srmhd"){
+                        dataset = file.createDataSet("v2", real_type, dataspace);
+                        dataset.write(prims.v2.data(), real_type);
+                        dataset.close();
+
+                        dataset = file.createDataSet("v3", real_type, dataspace);
+                        dataset.write(prims.v3.data(), real_type);
+                        dataset.close();
+
+                        dataset = file.createDataSet("b1", real_type, dataspace);
+                        dataset.write(prims.b1.data(), real_type);
+                        dataset.close();
+
+                        dataset = file.createDataSet("b2", real_type, dataspace);
+                        dataset.write(prims.b2.data(), real_type);
+                        dataset.close();
+                        
+                        dataset = file.createDataSet("b3", real_type, dataspace);
+                        dataset.write(prims.b3.data(), real_type);
+                        dataset.close();
+                    }
                     break;
                 }
                 case 2:
@@ -170,6 +196,25 @@ namespace simbi{
                     dataset = file.createDataSet("x2", real_type, dataspacex2);
                     dataset.write(setup.x2.data(), real_type);
                     dataset.close();
+
+                    if (setup.regime == "srmhd"){
+
+                        dataset = file.createDataSet("v3", real_type, dataspace);
+                        dataset.write(prims.v3.data(), real_type);
+                        dataset.close();
+
+                        dataset = file.createDataSet("b1", real_type, dataspace);
+                        dataset.write(prims.b1.data(), real_type);
+                        dataset.close();
+
+                        dataset = file.createDataSet("b2", real_type, dataspace);
+                        dataset.write(prims.b2.data(), real_type);
+                        dataset.close();
+                        
+                        dataset = file.createDataSet("b3", real_type, dataspace);
+                        dataset.write(prims.b3.data(), real_type);
+                        dataset.close();
+                    }
                 break;
                 }
                 case 3:
@@ -211,6 +256,20 @@ namespace simbi{
                     dataset = file.createDataSet("x3", real_type, dataspacex3);
                     dataset.write(setup.x3.data(), real_type);
                     dataset.close();
+
+                    if (setup.regime == "srmhd"){
+                        dataset = file.createDataSet("b1", real_type, dataspace);
+                        dataset.write(prims.b1.data(), real_type);
+                        dataset.close();
+
+                        dataset = file.createDataSet("b2", real_type, dataspace);
+                        dataset.write(prims.b2.data(), real_type);
+                        dataset.close();
+                        
+                        dataset = file.createDataSet("b3", real_type, dataspace);
+                        dataset.write(prims.b3.data(), real_type);
+                        dataset.close();
+                    }
                 break;
                 }
             } // end switch

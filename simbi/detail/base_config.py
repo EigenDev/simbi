@@ -251,6 +251,10 @@ class BaseConfig(metaclass=abc.ABCMeta):
     def gravity_sources(self) -> Optional[Sequence[NDArray[numpy_float]]]:
         return None
     
+    @simbi_property
+    def magnetic_sources(self) -> Optional[Sequence[NDArray[numpy_float]]]:
+        return None
+    
     @classmethod
     def _find_dynamic_args(cls) -> None:
         """

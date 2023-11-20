@@ -65,9 +65,11 @@ namespace simbi{
             to->rho  = from->rho;
             to->v1   = from->v1;
             to->v2   = from->v2;
+            to->v3   = from->v3;
             to->p    = from->p;
             to->b1   = from->b1;
             to->b2   = from->b2;
+            to->b3   = from->b3;
             to->chi  = from->chi;
         }
 
@@ -76,8 +78,12 @@ namespace simbi{
         writeToProd(T *from, PrimData *to){
             to->rho  = from->rho;
             to->v1   = from->v1;
+            to->v2   = from->v2;
+            to->v3   = from->v3;
             to->p    = from->p;
             to->b1   = from->b1;
+            to->b2   = from->b2;
+            to->b3   = from->b3;
             to->chi  = from->chi;
         }
 
@@ -156,14 +162,22 @@ namespace simbi{
 
             sprims.rho.reserve(nzones);
             sprims.v1.reserve(nzones);
+            sprims.v2.reserve(nzones);
+            sprims.v3.reserve(nzones);
             sprims.p.reserve(nzones);
             sprims.b1.reserve(nzones);
+            sprims.b2.reserve(nzones);
+            sprims.b3.reserve(nzones);
             sprims.chi.reserve(nzones);
             for (size_t i = 0; i < nzones; i++) {
                 sprims.rho.push_back(p[i].rho);
                 sprims.v1.push_back(p[i].v1);
+                sprims.v2.push_back(p[i].v2);
+                sprims.v3.push_back(p[i].v3);
                 sprims.p.push_back(p[i].p);
                 sprims.b1.push_back(p[i].b1);
+                sprims.b2.push_back(p[i].b2);
+                sprims.b3.push_back(p[i].b3);
                 sprims.chi.push_back(p[i].chi);
             }
             
@@ -179,17 +193,21 @@ namespace simbi{
             sprims.rho.reserve(nzones);
             sprims.v1.reserve(nzones);
             sprims.v2.reserve(nzones);
+            sprims.v3.reserve(nzones);
             sprims.p.reserve(nzones);
             sprims.b1.reserve(nzones);
             sprims.b2.reserve(nzones);
+            sprims.b3.reserve(nzones);
             sprims.chi.reserve(nzones);
             for (size_t i = 0; i < nzones; i++) {
                 sprims.rho.push_back(p[i].rho);
                 sprims.v1.push_back(p[i].v1);
                 sprims.v2.push_back(p[i].v2);
+                sprims.v3.push_back(p[i].v3);
                 sprims.p.push_back(p[i].p);
                 sprims.b1.push_back(p[i].b1);
                 sprims.b2.push_back(p[i].b2);
+                sprims.b3.push_back(p[i].b3);
                 sprims.chi.push_back(p[i].chi);
             }
             
@@ -1199,6 +1217,270 @@ namespace simbi{
             #endif
         }
 
+        template<typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
+        GPU_LAUNCHABLE  typename std::enable_if<is_1D_mhd_primitive<T>::value>::type 
+        compute_dt(U *self, const V* prim_buffer, real* dt_min)
+        {
+            #if GPU_CODE
+            real vPlus, vMinus;
+            int ii   = blockDim.x * blockIdx.x + threadIdx.x;
+            int aid  = ii + self->radius;
+            if (ii < self->active_zones)
+            {
+                const real rho = prim_buffer[aid].rho;
+                const real p   = prim_buffer[aid].p;
+                const real v   = prim_buffer[aid].get_v1();
+            
+                if constexpr(is_relativistic_mhd<T>::value)
+                {
+                    if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                        real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
+                        real cs  = std::sqrt(self->gamma * p / (rho * h));
+                        vPlus  = (v + cs) / (1 + v * cs);
+                        vMinus = (v - cs) / (1 - v * cs);
+                    } else {
+                        vPlus  = 1;
+                        vMinus = 1;
+                    }
+                } else {
+                    const real cs = std::sqrt(self->gamma * p / rho );
+                    vPlus         = (v + cs);
+                    vMinus        = (v - cs);
+                }
+                const real x1l    = self->get_x1face(ii, 0);
+                const real x1r    = self->get_x1face(ii, 1);
+                const real dx1    = x1r - x1l;
+                const real vfaceL = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1l * self->hubble_param;
+                const real vfaceR = (self->geometry == simbi::Geometry::CARTESIAN) ? self->hubble_param : x1r * self->hubble_param;
+                const real cfl_dt = dx1 / (helpers::my_max(std::abs(vPlus + vfaceR), std::abs(vMinus + vfaceL)));
+                dt_min[ii]        = self->cfl * cfl_dt;
+            }
+            #endif
+        }
+
+        template<typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
+        GPU_LAUNCHABLE  typename std::enable_if<is_2D_mhd_primitive<T>::value>::type 
+        compute_dt(U *self, 
+        const V* prim_buffer,
+        real* dt_min,
+        const simbi::Geometry geometry)
+        {
+            #if GPU_CODE
+            real cfl_dt, v1p, v1m, v2p, v2m;
+            const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
+            const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
+            const luint ia  = ii + self->idx_active;
+            const luint ja  = jj + self->idx_active;
+            const luint aid = (col_maj) ? ia * self-> ny + ja : ja * self->nx + ia;
+            if ((ii < self->xactive_grid) && (jj < self->yactive_grid))
+            {
+                real plus_v1 , plus_v2 , minus_v1, minus_v2;
+                const real rho  = prim_buffer[aid].rho;
+                const real p    = prim_buffer[aid].p;
+                const real v1   = prim_buffer[aid].get_v1();
+                const real v2   = prim_buffer[aid].get_v2();
+
+                if constexpr(is_relativistic_mhd<T>::value)
+                {
+                    if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                        real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
+                        real cs  = std::sqrt(self->gamma * p / (rho * h));
+                        plus_v1  = (v1 + cs) / (1 + v1 * cs);
+                        plus_v2  = (v2 + cs) / (1 + v2 * cs);
+                        minus_v1 = (v1 - cs) / (1 - v1 * cs);
+                        minus_v2 = (v2 - cs) / (1 - v2 * cs);
+                    } else {
+                        plus_v1  = 1;
+                        plus_v2  = 1;
+                        minus_v1 = 1;
+                        minus_v2 = 1;
+                    }
+                } else {
+                    real cs  = std::sqrt(self->gamma * p / rho);
+                    plus_v1  = (v1 + cs);
+                    plus_v2  = (v2 + cs);
+                    minus_v1 = (v1 - cs);
+                    minus_v2 = (v2 - cs);
+                }
+
+                v1p = std::abs(plus_v1);
+                v1m = std::abs(minus_v1);
+                v2p = std::abs(plus_v2);
+                v2m = std::abs(minus_v2);
+                switch (geometry)
+                {
+                    case simbi::Geometry::CARTESIAN:
+                        cfl_dt = helpers::my_min(self->dx1 / (helpers::my_max(v1p, v1m)),
+                                                self->dx2 / (helpers::my_max(v2m, v2m)));
+                        break;
+                    
+                    case simbi::Geometry::SPHERICAL:
+                    {
+                        // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
+                        const real rl           = self->get_x1face(ii, 0);
+                        const real rr           = self->get_x1face(ii, 1);
+                        const real tl           = self->get_x2face(jj, 0);  
+                        const real tr           = self->get_x2face(jj, 1); 
+                        if (self->mesh_motion)
+                        {
+                            const real vfaceL   = rl * self->hubble_param;
+                            const real vfaceR   = rr * self->hubble_param;
+                            v1p = std::abs(plus_v1  - vfaceR);
+                            v1m = std::abs(minus_v1 - vfaceL);
+                        }
+                        const real rmean        = 0.75 * (rr * rr * rr * rr - rl * rl * rl *rl) / (rr * rr * rr - rl * rl * rl);
+                        cfl_dt = helpers::my_min((rr - rl) / (helpers::my_max(v1p, v1m)),
+                                        rmean * (tr - tl) / (helpers::my_max(v2p, v2m)));
+                        break;
+                    }
+                    case simbi::Geometry::PLANAR_CYLINDRICAL:
+                    {
+                        // Compute avg spherical distance 3/4 *(rf^4 - ri^4)/(rf^3 - ri^3)
+                        const real rl           = self->get_x1face(ii, 0);
+                        const real rr           = self->get_x1face(ii, 1);
+                        const real tl           = self->get_x2face(jj, 0);  
+                        const real tr           = self->get_x2face(jj, 1); 
+                        if (self->mesh_motion)
+                        {
+                            const real vfaceL   = rl * self->hubble_param;
+                            const real vfaceR   = rr * self->hubble_param;
+                            v1p = std::abs(plus_v1  - vfaceR);
+                            v1m = std::abs(minus_v1 - vfaceL);
+                        }
+                        const real rmean        = (2.0 / 3.0) * (rr * rr * rr - rl * rl * rl) / (rr * rr - rl * rl);
+                        cfl_dt = helpers::my_min((rr - rl) / (helpers::my_max(v1p, v1m)),
+                                        rmean * (tr - tl) / (helpers::my_max(v2p, v2m)));
+                        break;
+                    }
+                    case simbi::Geometry::AXIS_CYLINDRICAL:
+                    {
+                        const real rl           = self->get_x1face(ii, 0);
+                        const real rr           = self->get_x1face(ii, 1);
+                        const real zl           = self->get_x2face(jj, 0);  
+                        const real zr           = self->get_x2face(jj, 1); 
+                        if (self->mesh_motion)
+                        {
+                            const real vfaceL   = rl * self->hubble_param;
+                            const real vfaceR   = rr * self->hubble_param;
+                            v1p = std::abs(plus_v1  - vfaceR);
+                            v1m = std::abs(minus_v1 - vfaceL);
+                        }
+                        cfl_dt = helpers::my_min((rr - rl) / (helpers::my_max(v1p, v1m)),
+                                                (zr - zl) / (helpers::my_max(v2p, v2m)));
+                        break;
+                    }
+                    // TODO: Implement
+                } // end switch
+                dt_min[jj * self->xactive_grid + ii] = self->cfl * cfl_dt;
+            }
+            #endif
+        }
+
+        template<typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
+        GPU_LAUNCHABLE  typename std::enable_if<is_3D_mhd_primitive<T>::value>::type 
+        compute_dt(U *self, 
+        const V* prim_buffer,
+        real *dt_min,
+        const simbi::Geometry geometry)
+        {
+            #if GPU_CODE
+            real cfl_dt;
+            const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
+            const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
+            const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
+            const luint ia  = ii + self->idx_active;
+            const luint ja  = jj + self->idx_active;
+            const luint ka  = kk + self->idx_active;
+            const luint aid = (col_maj) ? ia * self-> ny + ja : ka * self->nx * self->ny + ja * self->nx + ia;
+            if ((ii < self->xactive_grid) && (jj < self->yactive_grid) && (kk < self->zactive_grid))
+            {
+                real plus_v1 , plus_v2 , minus_v1, minus_v2, plus_v3, minus_v3;
+
+                if constexpr(is_relativistic_mhd<T>::value)
+                {
+                    if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                        const real rho  = prim_buffer[aid].rho;
+                        const real p    = prim_buffer[aid].p;
+                        const real v1   = prim_buffer[aid].get_v1();
+                        const real v2   = prim_buffer[aid].get_v2();
+                        const real v3   = prim_buffer[aid].get_v3();
+
+                        real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
+                        real cs  = std::sqrt(self->gamma * p / (rho * h));
+                        plus_v1  = (v1 + cs) / (1 + v1 * cs);
+                        plus_v2  = (v2 + cs) / (1 + v2 * cs);
+                        plus_v3  = (v3 + cs) / (1 + v3 * cs);
+                        minus_v1 = (v1 - cs) / (1 - v1 * cs);
+                        minus_v2 = (v2 - cs) / (1 - v2 * cs);
+                        minus_v3 = (v3 - cs) / (1 - v3 * cs);
+                    } else {
+                        plus_v1  = 1;
+                        plus_v2  = 1;
+                        plus_v3  = 1;
+                        minus_v1 = 1;
+                        minus_v2 = 1;
+                        minus_v3 = 1;
+                    }
+                } else {
+                    const real rho  = prim_buffer[aid].rho;
+                    const real p    = prim_buffer[aid].p;
+                    const real v1   = prim_buffer[aid].get_v1();
+                    const real v2   = prim_buffer[aid].get_v2();
+                    const real v3   = prim_buffer[aid].get_v3();
+                    
+                    real cs  = std::sqrt(self->gamma * p / rho);
+                    plus_v1  = (v1 + cs);
+                    plus_v2  = (v2 + cs);
+                    plus_v3  = (v3 + cs);
+                    minus_v1 = (v1 - cs);
+                    minus_v2 = (v2 - cs);
+                    minus_v3 = (v3 - cs);
+                }
+
+                const auto x1l = self->get_x1face(ii, 0);
+                const auto x1r = self->get_x1face(ii, 1);
+                const auto dx1 = x1r - x1l; 
+                const auto x2l = self->get_x2face(jj, 0);
+                const auto x2r = self->get_x2face(jj, 1);
+                const auto dx2 = x2r - x2l; 
+                const auto x3l = self->get_x3face(kk, 0);
+                const auto x3r = self->get_x3face(kk, 1);
+                const auto dx3 = x3r - x3l; 
+                switch (geometry)
+                {
+                    case simbi::Geometry::CARTESIAN:
+                    {
+
+                        cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                                dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                                                dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
+                        break;
+                    }
+                    case simbi::Geometry::SPHERICAL:
+                    {     
+                        const real rmean = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l *x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
+                        const real th    = static_cast<real>(0.5) * (x2l + x2r);
+                        cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                        rmean * dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                        rmean * std::sin(th) * dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
+                        break;
+                    }
+                    case simbi::Geometry::CYLINDRICAL:
+                    {    
+                        const real rmean = static_cast<real>(2.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                        const real th    = static_cast<real>(0.5) * (x2l + x2r);
+                        cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
+                                        rmean * dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
+                                                dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
+                        break;
+                    }
+                } // end switch
+                
+                dt_min[kk * self->xactive_grid * self->yactive_grid + jj * self->xactive_grid + ii] = self->cfl * cfl_dt;
+            }
+            #endif
+        }
+
         template<int dim, typename T>
         GPU_LAUNCHABLE void deviceReduceKernel(T *self, real *dt_min, lint nmax) {
             #if GPU_CODE
@@ -1298,7 +1580,7 @@ namespace simbi{
             }
 
             if(4.0 * p * p * p + 27.0 * q * q < 0.0) {
-                return 2.0*t*cos(acos(g)/3.0)-b/3.0;
+                return 2.0*t*std::cos(std::acos(g)/3.0)-b/3.0;
             }
             
             if(q > 0.0) {
@@ -1313,9 +1595,8 @@ namespace simbi{
         
         template<typename T>
         GPU_CALLABLE
-        int quartic(T b, T c, T d, T e, std::vector<T> ans)
+        int quartic(T b, T c, T d, T e, T res[4])
         {
-
             T p = c - 0.375 * b *b;
             T q = 0.125 * b * b * b - 0.5 * b * c + d;
             T m = cubic(p, 0.25 * p * p + 0.01171875 * b * b * b * b - e + 0.25 * b * d - 0.0625 * b * b *c, -0.125 * q * q);
@@ -1330,16 +1611,16 @@ namespace simbi{
                 if(-m - p > 0.0)
                 {
                     T delta = std::sqrt(2.0 * (-m - p));
-                    ans[nroots++]= -0.25 * b + 0.5 * (sqrt_2m - delta);
-                    ans[nroots++]= -0.25 * b - 0.5 * (sqrt_2m - delta);
-                    ans[nroots++]= -0.25 * b + 0.5 * (sqrt_2m + delta);
-                    ans[nroots++]= -0.25 * b - 0.5 * (sqrt_2m + delta);
+                    res[nroots++]= -0.25 * b + 0.5 * (sqrt_2m - delta);
+                    res[nroots++]= -0.25 * b - 0.5 * (sqrt_2m - delta);
+                    res[nroots++]= -0.25 * b + 0.5 * (sqrt_2m + delta);
+                    res[nroots++]= -0.25 * b - 0.5 * (sqrt_2m + delta);
                 }
 
                 if(- m - p == 0.0)
                 {
-                    ans[nroots++]= -0.25 * b - 0.5 * sqrt_2m;
-                    ans[nroots++]= -0.25 * b + 0.5 * sqrt_2m;
+                    res[nroots++]= -0.25 * b - 0.5 * sqrt_2m;
+                    res[nroots++]= -0.25 * b + 0.5 * sqrt_2m;
                 }
 
                 return nroots;
@@ -1353,18 +1634,58 @@ namespace simbi{
             if(-m - p + q / sqrt_2m >= 0.0)
             {
                 T delta = std::sqrt(2.0 * (-m - p + q / sqrt_2m));
-                ans[nroots++] = 0.5 * (-sqrt_2m + delta) - 0.25 * b;
-                ans[nroots++] = 0.5 * (-sqrt_2m - delta) - 0.25 * b;
+                res[nroots++] = 0.5 * (-sqrt_2m + delta) - 0.25 * b;
+                res[nroots++] = 0.5 * (-sqrt_2m - delta) - 0.25 * b;
             }
 
             if(-m - p - q / sqrt_2m >= 0.0)
             {
                 T delta = std::sqrt(2.0*(-m - p -q / sqrt_2m));
-                ans[nroots++] = 0.5 * (sqrt_2m + delta) - 0.25 * b;
-                ans[nroots++] = 0.5 * (sqrt_2m - delta) - 0.25 * b;
+                res[nroots++] = 0.5 * (sqrt_2m + delta) - 0.25 * b;
+                res[nroots++] = 0.5 * (sqrt_2m - delta) - 0.25 * b;
             }
 
+            quickSort(res, 0, nroots - 1);
             return nroots;
+        }
+
+        // Function to swap two elements
+        template<typename T>
+        GPU_CALLABLE
+        void myswap(T& a, T& b) {
+            T temp = a;
+            a = b;
+            b = temp;
+        }
+
+        // Partition the array and return the pivot index
+        template<typename T, typename index_type>
+        GPU_CALLABLE
+        index_type partition(T arr[], index_type low, index_type high) {
+            T pivot = arr[high]; // Choose the rightmost element as the pivot
+            index_type i = low - 1;     // Index of the smaller element
+
+            for (index_type j = low; j <= high - 1; j++) {
+                if (arr[j] <= pivot) {
+                    i++;
+                    myswap(arr[i], arr[j]);
+                }
+            }
+            myswap(arr[i + 1], arr[high]);
+            return i + 1; // Return the pivot index
+        }
+
+        // Quick sort implementation
+        template<typename T, typename index_type>
+        GPU_CALLABLE
+        void quickSort(T arr[], index_type low, index_type high) {
+            if (low < high) {
+                index_type pivotIndex = partition(arr, low, high);
+
+                // Recursively sort the left and right subarrays
+                quickSort(arr, low, pivotIndex - 1);
+                quickSort(arr, pivotIndex + 1, high);
+            }
         }
     } // namespace helpers
 }

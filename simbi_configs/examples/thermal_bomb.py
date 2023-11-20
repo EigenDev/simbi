@@ -74,7 +74,7 @@ class thermalBomb(BaseConfig):
     
     @simbi_property
     def regime(self) -> str:
-        return "relativistic"
+        return "srhd"
     
     @simbi_property
     def default_start_time(self) -> float:

@@ -36,4 +36,4 @@ class MignoneBodo(BaseConfig):
     
     @simbi_property
     def regime(self) -> str:
-        return "relativistic"
+        return "srhd"
