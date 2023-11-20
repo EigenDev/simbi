@@ -471,7 +471,7 @@ RMHD<dim>::primitive_t RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t &cons, 
     const real v3 = (1 / qq + bsq) * (m3 + s / qq * b3);
     edens_data[gid] = qq;
     #if FOUR_VELOCITY
-        return rm::Primitive<dim>{d/w, v1 * w, v2 * w, v3 * w, pg, dchi / d};
+        return rm::Primitive<dim>{d/w, v1 * w, v2 * w, v3 * w, pg, b1, b2, b3, dchi / d};
     #else
         return rm::Primitive<dim>{d/w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
     #endif
