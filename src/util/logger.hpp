@@ -6,20 +6,20 @@
 #include <iostream>                // for operator<<, char_traits, basic_ost...
 #include <memory>                  // for allocator
 #include <type_traits>             // for conditional_t
-#include "build_options.hpp"       // for real, Platform, BuildPlatform, luint
+#include "build_options.hpp"       // for real, Platform, global::BuildPlatform, luint
 #include "common/helpers.hip.hpp"  // for get_real_idx, catch_signals, Inter...
 #include "common/traits.hpp"       // for is_relativistic
 #include "device_api.hpp"          // for gpuEventCreate, gpuEventDestroy
 #include "printb.hpp"              // for writeln, writefl
-
+#include "progress.hpp"            // for progress_bar
 namespace simbi
 {
     namespace detail
     {
         class Timer
         {
-            using time_type     = std::conditional_t<BuildPlatform == Platform::GPU, anyGpuEvent_t, std::chrono::high_resolution_clock::time_point>;
-            using duration_type = std::conditional_t<BuildPlatform == Platform::GPU, float, double>;
+            using time_type     = std::conditional_t<global::BuildPlatform == global::Platform::GPU, anyGpuEvent_t, std::chrono::high_resolution_clock::time_point>;
+            using duration_type = std::conditional_t<global::BuildPlatform == global::Platform::GPU, float, double>;
             time_type tstart, tstop;
             duration_type duration;
             public:
@@ -36,16 +36,16 @@ namespace simbi
                 recordEvent(tstart);
             }
 
-            template<Platform P = BuildPlatform, typename T>
+            template<global::Platform P = global::BuildPlatform, typename T>
             void create_event(T &stamp) {
-                if constexpr(P == Platform::GPU) {
+                if constexpr(P == global::Platform::GPU) {
                     gpu::api::gpuEventCreate(&stamp);
                 }
             }
 
-            template<Platform P = BuildPlatform, typename T>
+            template<global::Platform P = global::BuildPlatform, typename T>
             void destroy_event(T &stamp) {
-                if constexpr(P == Platform::GPU) {
+                if constexpr(P == global::Platform::GPU) {
                     gpu::api::gpuEventDestroy(stamp);
                 }
             }
@@ -85,19 +85,6 @@ namespace simbi
                 Logger() : n(0), nfold(100), ncheck(0), speed(0), zu_avg(0), delta_t(0) {};
                 ~Logger(){};
             };
-
-            inline void progress_bar(double percentage) {
-                static int barWidth = 35;
-                std::cout << "[";
-                int pos = barWidth * percentage;
-                for (int i = 0; i < barWidth; ++i) {
-                    if (i < pos) std::cout << "=";
-                    else if (i == pos) std::cout << ">";
-                    else std::cout << " ";
-                }
-                std::cout << "] " << int(percentage * 100.0) << " %\r";
-                std::cout.flush();
-            }
 
             inline void print_avg_speed(Logger &logger) {
                 if (logger.ncheck > 0) {
@@ -196,14 +183,14 @@ namespace simbi
                             speed   = sim_state.total_zones / delta_t;
                             zu_avg += speed;
 
-                            if constexpr(BuildPlatform == Platform::GPU) {
-                            const real gpu_emperical_bw = helpers::getFlops<conserved_t, primitive_t>(sim_state_t::dimensions, sim_state.radius, sim_state.total_zones, sim_state.active_zones, delta_t);
-                            util::writefl<Color::LIGHT_MAGENTA>("iteration:{:>06}  dt: {:>08.2e}  time: {:>08.2e}  zones/sec: {:>08.2e}  ebw(%): {:>04.2f} ", 
-                            n, sim_state.dt, sim_state.t, speed, static_cast<real>(100.0) * gpu_emperical_bw / gpu_theoretical_bw);
+                            if constexpr(global::BuildPlatform == global::Platform::GPU) {
+                                const real gpu_emperical_bw = helpers::getFlops<conserved_t, primitive_t>(sim_state_t::dimensions, sim_state.radius, sim_state.total_zones, sim_state.active_zones, delta_t);
+                                util::writefl<Color::LIGHT_MAGENTA>("iteration:{:>06}  dt: {:>08.2e}  time: {:>08.2e}  zones/sec: {:>08.2e}  ebw(%): {:>04.2f} ", 
+                                n, sim_state.dt, sim_state.t, speed, 100.0 * gpu_emperical_bw / gpu_theoretical_bw);
                             } else {
                                 util::writefl<Color::LIGHT_MAGENTA>("iteration:{:>06}    dt: {:>08.2e}    time: {:>08.2e}    zones/sec: {:>08.2e} ", n, sim_state.dt, sim_state.t, speed);
                             }
-                            progress_bar(sim_state.t / end_time);
+                            helpers::progress_bar(sim_state.t / end_time);
                         }
                         
                         // Write to a file at every checkpoint interval

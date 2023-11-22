@@ -208,10 +208,6 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
     model.u = np.zeros(shape=(model.nvars,*np.asanyarray(model.resolution).flatten()[ ::- 1]))
     
     srmhd = model.regime == "srmhd"
-    if srmhd:
-        # last variable is the edensity guess
-        edensity_guess = np.zeros(shape=(*np.asanyarray(model.resolution).flatten()[ ::- 1], *[]))
-    
     if model.discontinuity:
         logger.info(  
             f'Initializing Problem With a {str(model.dimensionality)}D Discontinuity...')
@@ -266,9 +262,6 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
             else:
                 part[...] = (part[...].transpose(
                 ) + np.array([dens, *mom, energy, *bfields, 0.0])).transpose()
-            
-            if srmhd:
-                edensity_guess[partition_inds[idx]] = rho * total_enthalpy * (1 - vsqr) ** (-1)
     else:
         rho, *velocity, pressure = initial_state[:model.number_of_non_em_terms]
         velocity = np.asanyarray(velocity)
@@ -300,11 +293,3 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
                 *bfields,
                 np.zeros_like(model.init_density)])
             
-        if srmhd:
-            edensity_guess[...] = rho * total_enthalpy * (1 - vsqr) ** (-1)
-
-    if srmhd:
-        if model.discontinuity:
-            edensity_guess = edensity_guess.transpose()
-        model.u = np.insert(model.u, model.u.shape[0], edensity_guess, axis=0)
-        

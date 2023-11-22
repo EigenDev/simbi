@@ -14,9 +14,9 @@ namespace sogbo_rad
     /*
     The Doppler Boost Factor
     */
-    const double calc_delta_doppler(const double lorentz_gamma, const std::vector<double> beta_vec, const std::vector<double> nhat)
+    const double calc_delta_doppler(const double lorentz_factor, const std::vector<double> beta_vec, const std::vector<double> nhat)
     {
-        return 1.0 / (lorentz_gamma * (1.0 - vector_dotproduct(beta_vec, nhat)));
+        return 1.0 / (lorentz_factor * (1.0 - vector_dotproduct(beta_vec, nhat)));
     }
 
     /*
@@ -30,7 +30,7 @@ namespace sogbo_rad
     /*
     The Lorentz factor
     */
-    constexpr double calc_lorentz_gamma(const double gamma_beta)
+    constexpr double calc_lorentz_factor(const double gamma_beta)
     {
         return std::sqrt(1.0 + gamma_beta * gamma_beta);
     }
@@ -57,7 +57,7 @@ namespace sogbo_rad
         
         Params:
         --------------------------------------
-        lorentz_gamma:   lorentz factor 
+        lorentz_factor:   lorentz factor 
         ub:              magnetic field energy density 
         beta:            dimensionless flow veloccity 
         
@@ -65,9 +65,9 @@ namespace sogbo_rad
         --------------------------------------
         Total synchrotron power
     */
-    constexpr double calc_total_synch_power(const double lorentz_gamma, const double ub, const double beta)
+    constexpr double calc_total_synch_power(const double lorentz_factor, const double ub, const double beta)
     {
-        return (4.0 / 3.0) * constants::sigmaT * constants::c_light * beta * beta * lorentz_gamma * lorentz_gamma * ub;
+        return (4.0 / 3.0) * constants::sigmaT * constants::c_light * beta * beta * lorentz_factor * lorentz_factor * ub;
     }
 
     /**
@@ -357,7 +357,7 @@ namespace sogbo_rad
                 {
                     const auto central_idx  = kreal * ni * nj + jreal * ni + ii;
                     const auto beta         = calc_beta(gb[central_idx]);
-                    const auto w            = calc_lorentz_gamma(gb[central_idx]);
+                    const auto w            = calc_lorentz_factor(gb[central_idx]);
                     const auto t_prime      = args.current_time * qscales.time_scale ;
                     const auto t_emitter    = t_prime / w;
                     //================================================================

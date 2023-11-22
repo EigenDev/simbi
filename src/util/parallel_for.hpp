@@ -1,7 +1,7 @@
 #ifndef PARALLEL_FOR_HPP
 #define PARALLEL_FOR_HPP
 
-#include "build_options.hpp"     // for BuildPlatform, GPU_LAMBDA, Platform ...
+#include "build_options.hpp"     // for global::BuildPlatform, GPU_LAMBDA, Platform ...
 #include "thread_pool.hpp"       // for (anonymous), ThreadPool, get_nthreads
 #include "util/exec_policy.hpp"  // for ExecutionPolicy
 #include "util/launch.hpp"       // for launch
@@ -17,13 +17,13 @@ namespace simbi
 		parallel_for(p, first, last, function);
 	}
 
-	template <typename index_type, typename F, Platform P = BuildPlatform>
+	template <typename index_type, typename F, global::Platform P = global::BuildPlatform>
 	void parallel_for(const ExecutionPolicy<> &p, index_type first, index_type last, F function) {
 		simbi::launch(p, [=] GPU_LAMBDA () {
 			#if GPU_CODE
 				for (auto idx : range(first, last, globalThreadCount()))  function(idx);
 			#else	
-				if (use_omp) {
+				if (global::use_omp) {
 					#pragma omp parallel for schedule(static) 
 					for(auto idx = first; idx < last; idx++) function(idx);
 				} else {

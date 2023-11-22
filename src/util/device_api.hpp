@@ -78,9 +78,9 @@ namespace simbi
             void gpuMemset(void *obj, int val, size_t bytes);
             // void deviceSynch();
 
-            template<Platform P = BuildPlatform>
+            template<global::Platform P = global::BuildPlatform>
             inline void deviceSynch() {
-                if constexpr(P == Platform::GPU)
+                if constexpr(P == global::Platform::GPU)
                 {
                     auto status = error::status_t(anyGpuDeviceSynchronize());
                     error::check_err(status, "Failed to synch device(s)");
@@ -88,9 +88,9 @@ namespace simbi
                     return;
                 }
             }
-            template<Platform P = BuildPlatform>
+            template<global::Platform P = global::BuildPlatform>
             GPU_DEV_INLINE void synchronize() {
-                if constexpr(P == Platform::GPU)
+                if constexpr(P == global::Platform::GPU)
                 {
                     __syncthreads();
                 } else {
@@ -103,7 +103,7 @@ namespace simbi
     
     GPU_CALLABLE_INLINE
     unsigned int globalThreadIdx() {
-    if constexpr(BuildPlatform == Platform::GPU)
+    if constexpr(global::BuildPlatform == global::Platform::GPU)
     	return ( 
                   (blockIdx.z * blockDim.z + threadIdx.z) * blockDim.x * gridDim.x * blockDim.y * gridDim.y
                 + (blockIdx.y * blockDim.y + threadIdx.y) * blockDim.x * gridDim.x 
@@ -120,7 +120,7 @@ namespace simbi
 
     GPU_CALLABLE_INLINE
     unsigned int get_ii_in2D(){
-        if constexpr(col_maj) {
+        if constexpr(global::col_maj) {
             return blockDim.y * blockIdx.y + threadIdx.y;
         }
         return blockDim.x * blockIdx.x + threadIdx.x;
@@ -128,17 +128,17 @@ namespace simbi
 
     GPU_CALLABLE_INLINE
     unsigned int get_jj_in2D(){
-        if constexpr(col_maj) {
+        if constexpr(global::col_maj) {
             return blockDim.x * blockIdx.x + threadIdx.x;
         }
         return blockDim.y * blockIdx.y + threadIdx.y;
     }
 
-    template<Platform P = BuildPlatform>
+    template<global::Platform P = global::BuildPlatform>
     GPU_CALLABLE_INLINE 
     unsigned int get_tx() {
-        if constexpr(P == Platform::GPU) {
-            if constexpr(col_maj) {
+        if constexpr(P == global::Platform::GPU) {
+            if constexpr(global::col_maj) {
                 return threadIdx.y;
             }
             return threadIdx.x;
@@ -147,11 +147,11 @@ namespace simbi
         }
     }
 
-    template<Platform P = BuildPlatform>
+    template<global::Platform P = global::BuildPlatform>
     GPU_CALLABLE_INLINE 
     unsigned int get_ty() {
-        if constexpr(P == Platform::GPU) {
-            if constexpr(col_maj) {
+        if constexpr(P == global::Platform::GPU) {
+            if constexpr(global::col_maj) {
                 return threadIdx.x;
             }
             return threadIdx.y;
@@ -160,13 +160,13 @@ namespace simbi
         }
     }
 
-    template<Platform P = BuildPlatform>
+    template<global::Platform P = global::BuildPlatform>
     GPU_CALLABLE_INLINE
     unsigned int get_threadId() {
         #if GPU_CODE
             return blockDim.x * blockDim.y * threadIdx.z + blockDim.x * threadIdx.y + threadIdx.x;
         #else
-            if (use_omp) {
+            if (global::use_omp) {
                 return omp_get_thread_num();
             } else {
                 return std::hash<std::thread::id>{}(std::this_thread::get_id());

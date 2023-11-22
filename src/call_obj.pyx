@@ -1,4 +1,3 @@
-# distutils: language = c++
 cdef public double call_obj(obj, double x):
     cdef double res = obj(x)
     return res 

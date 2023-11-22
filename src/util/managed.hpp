@@ -2,12 +2,12 @@
 #define MANAGED_HPP
 
 #include <cstddef>            // for size_t
-#include "build_options.hpp"  // for managed_memory
+#include "build_options.hpp"  // for global::managed_memory
 #include "device_api.hpp"     // for deviceSynch, gpuFree, gpuMallocManaged
 
 namespace simbi
 {
-    template<bool gpu_managed = managed_memory>
+    template<bool gpu_managed = global::managed_memory>
     class Managed{
         public: 
         static constexpr void* operator new(std::size_t len) {

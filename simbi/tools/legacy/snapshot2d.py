@@ -1004,7 +1004,7 @@ def plot_dec_rad(
     mdots   = (mdots * u.M_sun / u.yr).to(u.g/u.s)
     factor  = np.array([0.75 * 4.0 * np.pi * vw.value / mdot.value for mdot in mdots])
     gb      = fields['gamma_beta']
-    W       = util.calc_lorentz_gamma(fields)
+    W       = util.calc_lorentz_factor(fields)
     dV      = util.calc_cell_volume2D(mesh['x1'], mesh['x2'])
     mass    = W * dV * fields['rho'] * util.m.value
 
@@ -1106,11 +1106,11 @@ def plot_hist(
         dV_1d    = util.calc_cell_volume1D(mesh['x1'])
         
         if args.kinetic:
-            W        = util.calc_lorentz_gamma(fields)
+            W        = util.calc_lorentz_factor(fields)
             mass     = dV_1d * fields['rho'] * W
             var      = (W - 1.0) * mass * util.e_scale.value # Kinetic Energy in [erg]
         elif args.mass:
-            W        = util.calc_lorentz_gamma(fields)
+            W        = util.calc_lorentz_factor(fields)
             mass     = dV_1d * fields['rho'] * W
             var      = mass * util.m.value            # Mass in [g]
         elif args.enthalpy:
@@ -1159,14 +1159,14 @@ def plot_hist(
     dV          = util.calc_cell_volume2D(r, theta)
     
     if args.kinetic:
-        W    = util.calc_lorentz_gamma(fields)
+        W    = util.calc_lorentz_factor(fields)
         mass = dV * fields['rho'] * W
         var  = (W - 1.0) * mass * util.e_scale.value
     elif args.enthalpy:
         h   = calc_enthalpy(fields)
         var = (h - 1.0) *  dV * util.e_scale.value
     elif args.mass:
-        W   = util.calc_lorentz_gamma(fields)
+        W   = util.calc_lorentz_factor(fields)
         var = dV * fields['rho'] * W * util.m.value
     elif args.dm_du:
         u   = fields['gamma_beta']
@@ -1377,12 +1377,12 @@ def plot_dx_domega(
     
     if energy_and_mass:
         if args.kinetic:
-            W    = util.calc_lorentz_gamma(fields)
+            W    = util.calc_lorentz_factor(fields)
             mass = dV * fields['rho'] * W
             ek   = (W - 1.0) * mass * util.e_scale.value
     elif args.de_domega:
         if args.kinetic:
-            W    = util.calc_lorentz_gamma(fields)
+            W    = util.calc_lorentz_factor(fields)
             mass = dV * fields['rho'] * W
             var  = (W - 1.0) * mass * util.e_scale.value
         elif args.enthalpy:
@@ -1394,7 +1394,7 @@ def plot_dx_domega(
             edens_total = util.prims2var(fields, 'energy')
             var = edens_total * dV * util.e_scale.value
     elif args.dm_domega:
-        W   = util.calc_lorentz_gamma(fields)
+        W   = util.calc_lorentz_factor(fields)
         var = dV * fields['rho'] * W * util.m.value
     
         

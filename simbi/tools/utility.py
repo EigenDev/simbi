@@ -39,11 +39,11 @@ t_scale       = const.c.cgs * ell_scale
 def calc_enthalpy(fields: dict[str, NDArray[numpy_float]]) -> Any:
     return 1.0 + fields['p']*fields['ad_gamma'] / (fields['rho'] * (fields['ad_gamma'] - 1.0))
     
-def calc_lorentz_gamma(fields: dict[str, NDArray[numpy_float]]) -> Any:
+def calc_lorentz_factor(fields: dict[str, NDArray[numpy_float]]) -> Any:
     return (1.0 + fields['gamma_beta']**2)**0.5
 
 def calc_beta(fields: dict[str, NDArray[numpy_float]]) -> Any:
-    W = calc_lorentz_gamma(fields)
+    W = calc_lorentz_factor(fields)
     return (1.0 - 1.0 / W**2)**0.5
 
 def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
@@ -241,6 +241,15 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
                 fields['b1'] = b1
                 fields['b2'] = b2 
                 fields['b3'] = b3
+                if 'v2' not in fields:
+                    v2 = flatten_fully(hf.get('v2')[:].reshape(nz, ny, nx))
+                    v2 = unpad(v2, npad)
+                    fields['v2'] = v2
+                
+                if 'v3' not in fields:
+                    v3 = flatten_fully(hf.get('v3')[:].reshape(nz, ny, nx))
+                    v3 = unpad(v3, npad)
+                    fields['v3'] = v3
         else:
             W = 1
         fields['gamma_beta'] = np.sqrt(vsqr) * W 
@@ -278,7 +287,7 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
 
 def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
     h = calc_enthalpy(fields)
-    W = calc_lorentz_gamma(fields)
+    W = calc_lorentz_factor(fields)
     if var == 'D':
         # Lab frame density
         return fields['rho'] * W

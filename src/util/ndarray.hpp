@@ -7,7 +7,7 @@
 #include <iterator>           // for forward_iterator_tag
 #include <memory>             // for unique_ptr
 #include <vector>             // for vector
-#include "build_options.hpp"  // for Platform, BuildPlatform
+#include "build_options.hpp"  // for Platform, global::BuildPlatform
 #include "device_api.hpp"     // for gpuFree, gpuMalloc, gpuMallocManaged
 
 
@@ -16,7 +16,7 @@ namespace simbi
 {
 	// Template class to create array of
 	// different data_type
-	template <typename DT, Platform build_mode = BuildPlatform>
+	template <typename DT, global::Platform build_mode= global::BuildPlatform>
 	class ndarray {
 	template <typename Deleter>
 	using unique_p = std::unique_ptr<DT[], Deleter>;
@@ -34,7 +34,7 @@ namespace simbi
 		std::unique_ptr<DT[]> arr;
 		// Device-side array
 		void* myGpuMalloc(size_type size) { 
-			if constexpr(build_mode == Platform::GPU) {
+			if constexpr(build_mode == global::Platform::GPU) {
 				void* ptr; 
 				gpu::api::gpuMalloc(&ptr, size);
 				return ptr; 
@@ -44,7 +44,7 @@ namespace simbi
 
 		// Device-side array
 		void* myGpuMallocManaged(size_type size) { 
-			if constexpr(build_mode == Platform::GPU) {
+			if constexpr(build_mode == global::Platform::GPU) {
 				void* ptr; 
 				gpu::api::gpuMallocManaged(&ptr, size);
 				return ptr; 
@@ -53,7 +53,7 @@ namespace simbi
 		
 		struct gpuDeleter {
 			void operator()(DT* ptr) {
-				if constexpr(build_mode == Platform::GPU) {
+				if constexpr(build_mode == global::Platform::GPU) {
 					gpu::api::gpuFree(ptr); 
 				}
 			 }

@@ -4,7 +4,7 @@
 #include <exception>          // for exception
 #include <iostream>           // for operator<<, char_traits, basic_ostream
 #include <vector>             // for vector
-#include "build_options.hpp"  // for dim3, luint, col_maj, simbiStream_t
+#include "build_options.hpp"  // for dim3, luint, global::col_maj, simbiStream_t
 
 struct ExecutionException : public std::exception {
    const char * what () const throw () {
@@ -116,21 +116,21 @@ namespace simbi {
         }
 
         constexpr auto get_xextent() const {
-            if constexpr(col_maj) {
+            if constexpr(global::col_maj) {
                 return blockSize.y;
             }
             return blockSize.x;
         }
 
         constexpr auto get_yextent() const {
-            if constexpr(col_maj) {
+            if constexpr(global::col_maj) {
                 return blockSize.x;
             }
             return blockSize.y;
         }
 
         constexpr auto get_full_extent() const {
-            if constexpr(BuildPlatform == Platform::GPU) {
+            if constexpr(global::BuildPlatform == global::Platform::GPU) {
                 return blockSize.z * gridSize.z * blockSize.x * blockSize.y * gridSize.x * gridSize.y;
             } else {
                 return nzones;
@@ -146,7 +146,7 @@ namespace simbi {
                 this->nzones = glist[0] * glist[1];
                 luint nxBlocks    = (glist[0] + blist[0] - 1) / blist[0];
                 luint nyBlocks    = (glist[1] + blist[1] - 1) / blist[1];
-                if constexpr(col_maj) {
+                if constexpr(global::col_maj) {
                     this->gridSize  = dim3(nyBlocks, nxBlocks);
                     this->blockSize = dim3(blist[1], blist[0]);
                 } else {

@@ -408,11 +408,11 @@ namespace simbi{
             const bool half_sphere)
         {
             const int extent = p.get_full_extent();
-            const int sx = (col_maj) ? 1 : x1grid_size;
-            const int sy = (col_maj) ? x2grid_size : 1;
+            const int sx = (global::col_maj) ? 1 : x1grid_size;
+            const int sy = (global::col_maj) ? x2grid_size : 1;
             simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
-                const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % x1grid_size;
-                const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / x1grid_size;
+                const int ii = (global::BuildPlatform == global::Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x: gid % x1grid_size;
+                const int jj = (global::BuildPlatform == global::Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y: gid / x1grid_size;
                 if (first_order){
                     if(jj < x2grid_size - 2) {
                         switch (boundary_conditions[0])
@@ -636,9 +636,9 @@ namespace simbi{
             const int sx = x1grid_size;
             const int sy = x2grid_size;
             simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA (const int gid) {
-                const int kk = (BuildPlatform == Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::helpers::get_height(gid, x1grid_size, x2grid_size);
-                const int jj = (BuildPlatform == Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::helpers::get_row(gid, x1grid_size, x2grid_size, kk);
-                const int ii = (BuildPlatform == Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::helpers::get_column(gid, x1grid_size, x2grid_size, kk);
+                const int kk = (global::BuildPlatform == global::Platform::GPU) ? blockDim.z * blockIdx.z + threadIdx.z : simbi::helpers::get_height(gid, x1grid_size, x2grid_size);
+                const int jj = (global::BuildPlatform == global::Platform::GPU) ? blockDim.y * blockIdx.y + threadIdx.y : simbi::helpers::get_row(gid, x1grid_size, x2grid_size, kk);
+                const int ii = (global::BuildPlatform == global::Platform::GPU) ? blockDim.x * blockIdx.x + threadIdx.x : simbi::helpers::get_column(gid, x1grid_size, x2grid_size, kk);
 
                 if (first_order){
                     if(jj < x2grid_size - 2 && kk < x3grid_size - 2) {
@@ -1007,7 +1007,7 @@ namespace simbi{
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint ia  = ii + self->idx_active;
             const luint ja  = jj + self->idx_active;
-            const luint aid = (col_maj) ? ia * self-> ny + ja : ja * self->nx + ia;
+            const luint aid = (global::col_maj) ? ia * self-> ny + ja : ja * self->nx + ia;
             if ((ii < self->xactive_grid) && (jj < self->yactive_grid))
             {
                 real plus_v1 , plus_v2 , minus_v1, minus_v2;
@@ -1127,7 +1127,7 @@ namespace simbi{
             const luint ia  = ii + self->idx_active;
             const luint ja  = jj + self->idx_active;
             const luint ka  = kk + self->idx_active;
-            const luint aid = (col_maj) ? ia * self-> ny + ja : ka * self->nx * self->ny + ja * self->nx + ia;
+            const luint aid = (global::col_maj) ? ia * self-> ny + ja : ka * self->nx * self->ny + ja * self->nx + ia;
             if ((ii < self->xactive_grid) && (jj < self->yactive_grid) && (kk < self->zactive_grid))
             {
                 real plus_v1 , plus_v2 , minus_v1, minus_v2, plus_v3, minus_v3;
@@ -1194,8 +1194,8 @@ namespace simbi{
                     }
                     case simbi::Geometry::SPHERICAL:
                     {     
-                        const real rmean = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l *x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
-                        const real th    = static_cast<real>(0.5) * (x2l + x2r);
+                        const real rmean = 0.75 * (x1r * x1r * x1r * x1r - x1l * x1l * x1l *x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
+                        const real th    = 0.5 * (x2l + x2r);
                         cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
                                         rmean * dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
                         rmean * std::sin(th) * dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
@@ -1203,8 +1203,8 @@ namespace simbi{
                     }
                     case simbi::Geometry::CYLINDRICAL:
                     {    
-                        const real rmean = static_cast<real>(2.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
-                        const real th    = static_cast<real>(0.5) * (x2l + x2r);
+                        const real rmean = (2.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                        const real th    = 0.5 * (x2l + x2r);
                         cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
                                         rmean * dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
                                                 dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
@@ -1271,7 +1271,7 @@ namespace simbi{
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint ia  = ii + self->idx_active;
             const luint ja  = jj + self->idx_active;
-            const luint aid = (col_maj) ? ia * self-> ny + ja : ja * self->nx + ia;
+            const luint aid = (global::col_maj) ? ia * self-> ny + ja : ja * self->nx + ia;
             if ((ii < self->xactive_grid) && (jj < self->yactive_grid))
             {
                 real plus_v1 , plus_v2 , minus_v1, minus_v2;
@@ -1391,7 +1391,7 @@ namespace simbi{
             const luint ia  = ii + self->idx_active;
             const luint ja  = jj + self->idx_active;
             const luint ka  = kk + self->idx_active;
-            const luint aid = (col_maj) ? ia * self-> ny + ja : ka * self->nx * self->ny + ja * self->nx + ia;
+            const luint aid = (global::col_maj) ? ia * self-> ny + ja : ka * self->nx * self->ny + ja * self->nx + ia;
             if ((ii < self->xactive_grid) && (jj < self->yactive_grid) && (kk < self->zactive_grid))
             {
                 real plus_v1 , plus_v2 , minus_v1, minus_v2, plus_v3, minus_v3;
@@ -1458,8 +1458,8 @@ namespace simbi{
                     }
                     case simbi::Geometry::SPHERICAL:
                     {     
-                        const real rmean = static_cast<real>(0.75) * (x1r * x1r * x1r * x1r - x1l * x1l * x1l *x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
-                        const real th    = static_cast<real>(0.5) * (x2l + x2r);
+                        const real rmean = 0.75 * (x1r * x1r * x1r * x1r - x1l * x1l * x1l *x1l) / (x1r * x1r * x1r - x1l * x1l * x1l);
+                        const real th    = 0.5 * (x2l + x2r);
                         cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
                                         rmean * dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
                         rmean * std::sin(th) * dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
@@ -1467,8 +1467,8 @@ namespace simbi{
                     }
                     case simbi::Geometry::CYLINDRICAL:
                     {    
-                        const real rmean = static_cast<real>(2.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
-                        const real th    = static_cast<real>(0.5) * (x2l + x2r);
+                        const real rmean = (2.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) / (x1r * x1r - x1l * x1l);
+                        const real th    = 0.5 * (x2l + x2r);
                         cfl_dt = helpers::my_min3(dx1 / (helpers::my_max(std::abs(plus_v1), std::abs(minus_v1))),
                                         rmean * dx2 / (helpers::my_max(std::abs(plus_v2), std::abs(minus_v2))),
                                                 dx3 / (helpers::my_max(std::abs(plus_v3), std::abs(minus_v3))));
@@ -1599,7 +1599,7 @@ namespace simbi{
         {
             T p = c - 0.375 * b *b;
             T q = 0.125 * b * b * b - 0.5 * b * c + d;
-            T m = cubic(p, 0.25 * p * p + 0.01171875 * b * b * b * b - e + 0.25 * b * d - 0.0625 * b * b *c, -0.125 * q * q);
+            T m = cubic<real>(p, 0.25 * p * p + 0.01171875 * b * b * b * b - e + 0.25 * b * d - 0.0625 * b * b *c, -0.125 * q * q);
             if(q == 0.0)
             {
                 if(m < 0.0) {

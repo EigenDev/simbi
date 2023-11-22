@@ -79,6 +79,14 @@ namespace simbi
             const luint ystride);
 
         GPU_CALLABLE_MEMBER
+        void calc_max_wave_speeds(
+            const primitive_t &prims,
+            const luint nhat,
+            real speeds[],
+            real &cs2
+        ) const;
+
+        GPU_CALLABLE_MEMBER
         eigenvals_t calc_eigenvals(
             const primitive_t &primsL,
             const primitive_t &primsR,

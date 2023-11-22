@@ -46,7 +46,7 @@ namespace simbi {
 
 				template<typename index_type, typename F>
 				void parallel_for(const index_type start, const index_type stop, const F &func) {
-					if (use_omp) {
+					if (global::use_omp) {
 						#pragma omp parallel for schedule(static) 
 						for(auto idx = start; idx < stop; idx++) func(idx);
 						return;

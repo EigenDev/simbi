@@ -28,7 +28,7 @@ cdef class SimState:
     def run(
         self,
         *,
-        np.ndarray[np.double_t, ndim=2] state,
+        np.ndarray[real, ndim=2] state,
         int dim,
         string regime,
         dict sim_info,

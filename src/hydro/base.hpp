@@ -10,7 +10,7 @@
 #include <string>                    // for stoi, string, operator<=>
 #include <utility>                   // for swap
 #include <vector>                    // for vector
-#include "build_options.hpp"         // for real, luint, managed_memory, use...
+#include "build_options.hpp"         // for real, luint, global::managed_memory, use...
 #include "common/enums.hpp"          // for Cellspacing, BoundaryCondition (...
 #include "common/helpers.hip.hpp"    // for geometry_map, solver_map
 #include "common/hydro_structs.hpp"  // for InitialConditions, DataWriteMembers
@@ -33,7 +33,7 @@ std::unordered_map<simbi::Cellspacing, std::string> const cell2str = {
 };
 namespace simbi
 {
-    struct HydroBase : public Managed<managed_memory>
+    struct HydroBase : public Managed<global::managed_memory>
     {
         // Initializer members
         std::vector<std::vector<real>> state;
@@ -99,7 +99,7 @@ namespace simbi
             real round_place = 1 / chkpt_interval;
             t_interval = 
                  dlogt != 0 ? tstart * std::pow(10, dlogt)
-               : floor(tstart * round_place + static_cast<real>(0.5)) / round_place + chkpt_interval;
+               : floor(tstart * round_place + 0.5) / round_place + chkpt_interval;
         }
 
         void define_total_zones() {
@@ -159,7 +159,7 @@ namespace simbi
             gpu_block_dimz(1)
         {
             if (std::getenv("USE_OMP")) {
-                use_omp = true;
+                global::use_omp = true;
                 if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
                     omp_set_num_threads(std::stoi(omp_tnum));
                 }
@@ -194,7 +194,7 @@ namespace simbi
             gpu_block_dimz(1)
         {
             if (std::getenv("USE_OMP")) {
-                use_omp = true;
+                global::use_omp = true;
                 if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
                     omp_set_num_threads(std::stoi(omp_tnum));
                 }
@@ -231,7 +231,7 @@ namespace simbi
             gpu_block_dimz(get_zblock_dims())
         {
             if (std::getenv("USE_OMP")) {
-                use_omp = true;
+                global::use_omp = true;
                 if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
                     omp_set_num_threads(std::stoi(omp_tnum));
                 }
@@ -281,7 +281,7 @@ namespace simbi
         {
             initialize(init_conditions);
             if (std::getenv("USE_OMP")) {
-                use_omp = true;
+                global::use_omp = true;
                 if (char * omp_tnum = std::getenv("OMP_NUM_THREADS")) {
                     omp_set_num_threads(std::stoi(omp_tnum));
                 }

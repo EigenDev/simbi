@@ -60,10 +60,10 @@ gpu_comp_args = []
 host_compiler  = meson.get_compiler('cpp')
 host_compiler_name = host_compiler.get_id()
 if host_compiler_name == 'g++' or host_compiler_name == 'gcc'
-max_errors = '-fmax-errors=5'
+max_errors = '-fmax-errors=1'
 add_project_arguments([max_errors], language: 'cpp')
 elif host_compiler_name == 'clang++' or host_compiler_name == 'clang'
-max_errors = '-ferror-limit=5'
+max_errors = '-ferror-limit=1'
 add_project_arguments([max_errors], language: 'cpp')
 endif
 
@@ -78,7 +78,7 @@ endif
 # GPU CHECK
 ##################################################################
 if get_option('gpu_compilation').enabled()
-    hip  = dependency('HIP', cmake_module_path : '/opt/rocm', required: false)
+    hip  = dependency('HIP', cmake_module_path : '/opt/rocm', modules: ['hip::device', 'hip::host'], required: false)
     cuda = dependency('CUDA', required: false)
     host_compiler_version = host_compiler.version().split('.')[0]
     if host_compiler_name == 'g++' or host_compiler_name == 'gcc'
@@ -102,7 +102,7 @@ if get_option('gpu_compilation').enabled()
                 '-DGPU_PLATFORM_NVIDIA=1',
                 '-std=c++17',
                 f'-arch=sm_@gpu_arch@',
-                f'-ccbin=@cc_var@',
+                # f'-ccbin=@cc_var@',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
@@ -144,7 +144,7 @@ if get_option('gpu_compilation').enabled()
                 '-std=c++17',
                 '-DGPU_PLATFORM_NVIDIA=1',
                 f'-arch=sm_@gpu_arch@', 
-                f'-ccbin=@host_compiler_name@',
+                # f'-ccbin=@cc_var@',
                 '--ptxas-options=-v', 
                 '-lineinfo',
                 '--extended-lambda',

@@ -24,7 +24,7 @@ namespace sogbo_rad
     /*
     The Doppler Boost Factor
     */
-    const double calc_delta_doppler(const double lorentz_gamma, const std::vector<double> beta, const std::vector<double> nhat);
+    const double calc_delta_doppler(const double lorentz_factor, const std::vector<double> beta, const std::vector<double> nhat);
 
     /*
     The velocity of the flow in dimensions of speed of ligt
@@ -34,7 +34,7 @@ namespace sogbo_rad
     /*
     The Lorentz factor
     */
-    constexpr double calc_lorentz_gamma(const double gamma_beta);
+    constexpr double calc_lorentz_factor(const double gamma_beta);
 
     /*
     The magnetic field behind the shock
@@ -51,7 +51,7 @@ namespace sogbo_rad
         
         Params:
         --------------------------------------
-        lorentz_gamma:   lorentz factor 
+        lorentz_factor:   lorentz factor 
         ub:              magnetic field energy density 
         beta:            dimensionless flow veloccity 
         
@@ -59,7 +59,7 @@ namespace sogbo_rad
         --------------------------------------
         Total synchrotron power
     */
-    constexpr units::power calc_total_synch_power(const double lorentz_gamma, const units::edens ub, const double beta);
+    constexpr units::power calc_total_synch_power(const double lorentz_factor, const units::edens ub, const double beta);
 
     /**
         Calculate the number of photons per energy (gamma_e) bin

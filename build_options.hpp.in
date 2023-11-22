@@ -5,34 +5,37 @@
 #mesondefine COLUMN_MAJOR
 #mesondefine FOUR_VELOCITY
 
-#if __cplusplus >= 202002L
-#define CAPTURE_THIS =,this
-#else
-#define CAPTURE_THIS =
-#endif 
-
 #include <chrono>         // for high_resolution_clock
 #include <cstdint>        // for uint32_t, int64_t, uint64_t
 #include <csignal>        // for size_t
 #include <string>         // for allocator, string
 
+/*
+* defines a global namespace for functions and
+* variables scattered throughout the code
+*/
+namespace global
+{
+    // Flag that detects whether program is run using openmp
+    inline bool use_omp = false;
 
-// Flag that detects whether program is run using openmp
-inline bool use_omp = false;
+    enum class Platform: int {CPU = 0, GPU = 1};
+    enum class Runtime:  int {CUDA = 0, ROCM = 1, CPU = 2};
+    enum class Velocity: int {Beta = 0, FourVelocity = 1};
+
+    // enum to check the relativisitc primitive velocity type (beta, or gamma-beta)
+    #if FOUR_VELOCITY
+    constexpr Velocity VelocityType = Velocity::FourVelocity;
+    #else
+    constexpr Velocity VelocityType = global::Velocity::Beta;
+    #endif
+
+    // max iterations in newton-raphson loop
+    const int MAX_ITER = 1000;
+} // namespace global
 
 using luint = uint64_t;
 using lint  = int64_t;
-
-enum class Platform: int {CPU = 0, GPU = 1};
-enum class Runtime:  int {CUDA = 0, ROCM = 1, CPU = 2};
-enum class Velocity: int {Beta = 0, FourVelocity = 1};
-#if FOUR_VELOCITY
-constexpr Velocity VelocityType = Velocity::FourVelocity;
-#else
-constexpr Velocity VelocityType = Velocity::Beta;
-#endif
-
-const int MAX_ITER = 1000;
 
 //========================= FLOAT PRECISION CHECK
 #if FLOAT_PRECISION
@@ -44,7 +47,11 @@ using atomic_cast = int;
 #define __int_as_real __int_as_float
 #define __real_as_int __float_as_int
 using real = float;
-constexpr real tol_scale = 1e-6;
+namespace global
+{
+    // newton-raphson tolerance scale
+    constexpr real tol_scale = 1e-6;
+} // namespace global
 #else
 #if defined(GPU_PLATFORM_AMD)
 using atomic_cast = unsigned long long;
@@ -54,36 +61,55 @@ using atomic_cast = long long;
 #define __int_as_real __longlong_as_double
 #define __real_as_int __double_as_longlong
 using real = double;
-constexpr real tol_scale = 1e-12;
+namespace global
+{
+    // newton-raphson tolerance scale
+    constexpr real tol_scale = 1e-12;
+} // namespace global
 #endif 
 
-//======================== COLUMN MAJOR CHECK
-#if COLUMN_MAJOR 
-constexpr bool col_maj = true;
-#else 
-constexpr bool col_maj = false;
-#endif 
+namespace global
+{
+    //======================== COLUMN MAJOR CHECK
+    #if COLUMN_MAJOR 
+    // column major flag
+    constexpr bool col_maj = true;
+    #else 
+    // column major flag
+    constexpr bool col_maj = false;
+    #endif 
 
-//======================== Managed Memory Check
-#ifdef MANAGED_MEMORY
-constexpr bool managed_memory = true;
-#else 
-constexpr bool managed_memory = false;
-#endif
+    //======================== Managed Memory Check
+    #ifdef MANAGED_MEMORY
+    // unified memory flag
+    constexpr bool managed_memory = true;
+    #else 
+    // unified memory flag
+    constexpr bool managed_memory = false;
+    #endif
+} // namespace global
+
+
 
 //=========================== RUNTIME CHECK
 #if GPU_CODE
-template <typename T>
-__device__ T* shared_memory_proxy()
+namespace global
 {
-    // do we need an __align__() here? I don't think so...
-    extern __shared__ unsigned char memory[];
-    return reinterpret_cast<T*>(memory);
-}
+    template <typename T>
+    __device__ T* shared_memory_proxy()
+    {
+        // do we need an __align__() here? I don't think so...
+        extern __shared__ unsigned char memory[];
+        return reinterpret_cast<T*>(memory);
+    }
+} // namespace global
 
 #define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...) \
         kernel_name<<<((gridsize), (blocksize)) >>> (__VA_ARGS__);
-constexpr Platform BuildPlatform = Platform::GPU;
+namespace global
+{
+    constexpr Platform BuildPlatform = Platform::GPU;
+} // namespace global
 #define GPU_DEV                        __device__
 #define GPU_DEV_INLINE                 __device__ inline
 #define GPU_LAUNCHABLE                 __global__
@@ -96,7 +122,10 @@ constexpr Platform BuildPlatform = Platform::GPU;
 #if GPU_PLATFORM_NVIDIA
 #include <cuda_runtime.h>
 #define CUDA_CODE 1
-constexpr int WARP_SIZE = 32;
+namespace global
+{
+    constexpr int WARP_SIZE = 32;
+} // namespace global
 template<typename T>
 constexpr auto anyGpuMalloc(T **devPtr, size_t size) {
     return cudaMalloc(devPtr, size);
@@ -132,7 +161,11 @@ using simbiStream_t                         = cudaStream_t;
 #elif GPU_PLATFORM_AMD
 #include "hip/hip_runtime.h"
 #define HIP_CODE 1
-constexpr int WARP_SIZE = 64;
+namespace global
+{
+    constexpr int WARP_SIZE = 64;
+} // namespace global
+
 template<typename T>
 constexpr auto anyGpuMalloc(T **devPtr, size_t size) {
     return hipMalloc(devPtr, size);
@@ -170,8 +203,12 @@ using simbiStream_t                         = hipStream_t;
 #define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...) \
         kernel_name(__VA_ARGS__);
 
-constexpr Platform BuildPlatform = Platform::CPU;
-constexpr int WARP_SIZE = 32;
+namespace global
+{
+    constexpr auto BuildPlatform = Platform::CPU;
+    constexpr int WARP_SIZE = 32;
+} // namespace global
+
 #define CUDA_CODE 0
 #define HIP_CODE 0
 
@@ -222,7 +259,7 @@ namespace simbi {
     inline dim3 blockDim(1, 1, 1); 
     inline dim3 gridDim(1, 1, 1); 
     inline dim3 threadIdx(1, 1, 1);
-    constexpr Platform pyBuild = BuildPlatform;
+    constexpr auto pyBuild = global::BuildPlatform;
 
     inline int anyGpuMallocManaged(void** ptr , size_t size) {
         return 0;
@@ -279,7 +316,6 @@ namespace simbi {
         return std::string("Something went wrong with anyGpu instance");
     }
 } // end simbi
-using namespace simbi;
 #endif
 
 #endif

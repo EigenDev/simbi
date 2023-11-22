@@ -9,7 +9,8 @@ class MagneticShockTube(BaseConfig):
     
     @simbi_property
     def initial_state(self) -> Sequence[Sequence[float]]:
-        return ((1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 1.0, 0.0), (0.125, 0.0, 0.0, 0.0, 0.1, 0.5, -1, 0.0))
+        # defined as (rho, v1, v2, v3, pg, b1, b2, b3)
+        return ((1.0, 0.0, 0.0, 0.0, 1.0, 0.5, 1.0, 0.0), (0.125, 0.0, 0.0, 0.0, 0.1, 0.5, -1.0, 0.0))
     
     @simbi_property
     def geometry(self) -> Sequence[float]:

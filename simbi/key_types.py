@@ -5,7 +5,7 @@ from numpy import float64 as numpy_float, string_ as numpy_string, int64 as nump
 FloatOrArray = Union[float, NDArray[Any]]
 FloatOrNone  = Optional[float] 
 IntOrNone    = Optional[int] 
-ListOrNone   = Optional[list] 
+ListOrNone   = Optional[list[Any]] 
 ArrayOrNone  = Optional[NDArray[Any]] 
 StrOrNone    = Optional[str] 
 BoolOrNone   = Optional[bool]
