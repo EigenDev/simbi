@@ -420,16 +420,19 @@ class Visualizer:
                     xx = mesh['x1'] if self.ndim == 2 else mesh[f'x{self.projection[0]}']
                     yy = mesh['x2'] if self.ndim == 2 else mesh[f'x{self.projection[1]}']
                     if self.ndim == 3:
+                        box_depth = self.box_depth
                         if self.projection[2] == 3:
                             if not self.cartesian:
-                                self.box_depth = np.deg2rad(self.box_depth) + np.pi * (idx > 0)
-                            coord_idx = find_nearest(mesh['x3'], self.box_depth)[0]
+                                box_depth = np.deg2rad(self.box_depth) # + np.pi * (idx > 0)
+                            coord_idx = find_nearest(mesh['x3'], box_depth)[0]
                             var = var[coord_idx]
                         elif self.projection[2] == 2:
-                            coord_idx = find_nearest(mesh['x2'], self.box_depth)[0]
+                            if not self.cartesian:
+                                box_depth = np.deg2rad(self.box_depth) # + np.pi * (idx > 0)
+                            coord_idx = find_nearest(mesh['x2'], box_depth)[0]
                             var = var[:, coord_idx, :]
                         else:
-                            coord_idx = find_nearest(mesh['x1'], self.box_depth)[0]
+                            coord_idx = find_nearest(mesh['x1'], box_depth)[0]
                             var = var[:, :, coord_idx]
 
                     if not self.cartesian:
