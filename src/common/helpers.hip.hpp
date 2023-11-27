@@ -482,7 +482,7 @@ namespace simbi
         * @return gas pressure from Eq.(19)
         */
         GPU_CALLABLE_INLINE real calc_rmhd_lorentz(const real ssq, const real bsq, const real msq, const real qq ) {
-            return std::sqrt(1.0 - (ssq * (2.0 * qq + bsq) + msq * qq * qq)/((qq + bsq) * (qq + bsq) * qq * qq));
+            return std::sqrt(1.0 - (ssq * (2.0 * qq + bsq) + msq * qq * qq) / ((qq + bsq) * (qq + bsq) * qq * qq));
         }
 
         /**
