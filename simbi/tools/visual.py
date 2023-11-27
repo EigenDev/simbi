@@ -419,6 +419,10 @@ class Visualizer:
 
                     xx = mesh['x1'] if self.ndim == 2 else mesh[f'x{self.projection[0]}']
                     yy = mesh['x2'] if self.ndim == 2 else mesh[f'x{self.projection[1]}']
+                    
+                    if setup['coord_system'] == 'axis_cylindrical' and idx == 1:
+                        xx *= -1
+                        
                     if self.ndim == 3:
                         box_depth = self.box_depth
                         if self.projection[2] == 3:
@@ -515,8 +519,13 @@ class Visualizer:
                         if idx < len(self.fields):
                             if self.cartesian:
                                 divider = make_axes_locatable(ax)
-                                cbaxes = divider.append_axes(
-                                    'right', size='5%', pad=0.05)
+                                if setup['coord_system'] == 'axis_cylindrical':
+                                    side = 'right' if idx == 0 else 'left'
+                                    pad  = 0.05 if idx == 0 else 0.3
+                                    cbaxes = divider.append_axes(side, size='5%', pad=pad)
+                                else:
+                                    cbaxes = divider.append_axes(
+                                        'right', size='5%', pad=0.05)
                             else:
                                 if cbar_orientation == 'horizontal':
                                     single_width = 0.8
