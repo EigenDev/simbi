@@ -963,13 +963,12 @@ namespace simbi{
             int aid  = ii + self->radius;
             if (ii < self->active_zones)
             {
-                const real rho = prim_buffer[aid].rho;
-                const real p   = prim_buffer[aid].p;
-                const real v   = prim_buffer[aid].get_v();
-            
                 if constexpr(is_relativistic<T>::value)
                 {
                     if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                        const real rho = prim_buffer[aid].rho;
+                        const real p   = prim_buffer[aid].p;
+                        const real v   = prim_buffer[aid].get_v();
                         real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
                         real cs  = std::sqrt(self->gamma * p / (rho * h));
                         vPlus  = (v + cs) / (1 + v * cs);
@@ -979,6 +978,9 @@ namespace simbi{
                         vMinus = 1;
                     }
                 } else {
+                    const real rho = prim_buffer[aid].rho;
+                    const real p   = prim_buffer[aid].p;
+                    const real v   = prim_buffer[aid].get_v();
                     const real cs = std::sqrt(self->gamma * p / rho );
                     vPlus         = (v + cs);
                     vMinus        = (v - cs);
@@ -1011,14 +1013,13 @@ namespace simbi{
             if ((ii < self->xactive_grid) && (jj < self->yactive_grid))
             {
                 real plus_v1 , plus_v2 , minus_v1, minus_v2;
-                const real rho  = prim_buffer[aid].rho;
-                const real p    = prim_buffer[aid].p;
-                const real v1   = prim_buffer[aid].get_v1();
-                const real v2   = prim_buffer[aid].get_v2();
-
                 if constexpr(is_relativistic<T>::value)
                 {
                     if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+                        const real rho  = prim_buffer[aid].rho;
+                        const real p    = prim_buffer[aid].p;
+                        const real v1   = prim_buffer[aid].get_v1();
+                        const real v2   = prim_buffer[aid].get_v2();
                         real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
                         real cs  = std::sqrt(self->gamma * p / (rho * h));
                         plus_v1  = (v1 + cs) / (1 + v1 * cs);
@@ -1032,6 +1033,10 @@ namespace simbi{
                         minus_v2 = 1;
                     }
                 } else {
+                    const real rho  = prim_buffer[aid].rho;
+                    const real p    = prim_buffer[aid].p;
+                    const real v1   = prim_buffer[aid].get_v1();
+                    const real v2   = prim_buffer[aid].get_v2();
                     real cs  = std::sqrt(self->gamma * p / rho);
                     plus_v1  = (v1 + cs);
                     plus_v2  = (v2 + cs);
@@ -1227,22 +1232,21 @@ namespace simbi{
             int aid  = ii + self->radius;
             if (ii < self->active_zones)
             {
-                const real rho = prim_buffer[aid].rho;
-                const real p   = prim_buffer[aid].p;
-                const real v   = prim_buffer[aid].get_v1();
-            
                 if constexpr(is_relativistic_mhd<T>::value)
                 {
                     if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
-                        real cs  = std::sqrt(self->gamma * p / (rho * h));
-                        vPlus  = (v + cs) / (1 + v * cs);
-                        vMinus = (v - cs) / (1 - v * cs);
+                        real cs, speeds[4];
+                        self->calc_max_wave_speeds(prim_buffer[aid], 1, speeds, cs);
+                        vPlus  = std::abs(speeds[3]);
+                        vMinus = std::abs(speeds[0]);
                     } else {
                         vPlus  = 1;
                         vMinus = 1;
                     }
                 } else {
+                    const real rho = prim_buffer[aid].rho;
+                    const real p   = prim_buffer[aid].p;
+                    const real v   = prim_buffer[aid].get_v1();
                     const real cs = std::sqrt(self->gamma * p / rho );
                     vPlus         = (v + cs);
                     vMinus        = (v - cs);
@@ -1275,20 +1279,16 @@ namespace simbi{
             if ((ii < self->xactive_grid) && (jj < self->yactive_grid))
             {
                 real plus_v1 , plus_v2 , minus_v1, minus_v2;
-                const real rho  = prim_buffer[aid].rho;
-                const real p    = prim_buffer[aid].p;
-                const real v1   = prim_buffer[aid].get_v1();
-                const real v2   = prim_buffer[aid].get_v2();
-
                 if constexpr(is_relativistic_mhd<T>::value)
                 {
                     if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
-                        real cs  = std::sqrt(self->gamma * p / (rho * h));
-                        plus_v1  = (v1 + cs) / (1 + v1 * cs);
-                        plus_v2  = (v2 + cs) / (1 + v2 * cs);
-                        minus_v1 = (v1 - cs) / (1 - v1 * cs);
-                        minus_v2 = (v2 - cs) / (1 - v2 * cs);
+                        real cs, speeds[4];
+                        self->calc_max_wave_speeds(prim_buffer[aid], 1, speeds, cs);
+                        plus_v1  = std::abs(speeds[3]);
+                        minus_v1 = std::abs(speeds[0]);
+                        self->calc_max_wave_speeds(prim_buffer[aid], 2, speeds, cs);
+                        plus_v2  = std::abs(speeds[3]);
+                        minus_v2 = std::abs(speeds[0]);
                     } else {
                         plus_v1  = 1;
                         plus_v2  = 1;
@@ -1296,6 +1296,10 @@ namespace simbi{
                         minus_v2 = 1;
                     }
                 } else {
+                    const real rho  = prim_buffer[aid].rho;
+                    const real p    = prim_buffer[aid].p;
+                    const real v1   = prim_buffer[aid].get_v1();
+                    const real v2   = prim_buffer[aid].get_v2();
                     real cs  = std::sqrt(self->gamma * p / rho);
                     plus_v1  = (v1 + cs);
                     plus_v2  = (v2 + cs);
@@ -1384,7 +1388,7 @@ namespace simbi{
         const simbi::Geometry geometry)
         {
             #if GPU_CODE
-            real cfl_dt;
+            real cfl_dt, cs;
             const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
@@ -1399,20 +1403,16 @@ namespace simbi{
                 if constexpr(is_relativistic_mhd<T>::value)
                 {
                     if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        const real rho  = prim_buffer[aid].rho;
-                        const real p    = prim_buffer[aid].p;
-                        const real v1   = prim_buffer[aid].get_v1();
-                        const real v2   = prim_buffer[aid].get_v2();
-                        const real v3   = prim_buffer[aid].get_v3();
-
-                        real h   = 1 + self->gamma * p / (rho * (self->gamma - 1));
-                        real cs  = std::sqrt(self->gamma * p / (rho * h));
-                        plus_v1  = (v1 + cs) / (1 + v1 * cs);
-                        plus_v2  = (v2 + cs) / (1 + v2 * cs);
-                        plus_v3  = (v3 + cs) / (1 + v3 * cs);
-                        minus_v1 = (v1 - cs) / (1 - v1 * cs);
-                        minus_v2 = (v2 - cs) / (1 - v2 * cs);
-                        minus_v3 = (v3 - cs) / (1 - v3 * cs);
+                        real cs, speeds[4];
+                        self->calc_max_wave_speeds(prim_buffer[aid], 1, speeds, cs);
+                        plus_v1  = std::abs(speeds[3]);
+                        minus_v1 = std::abs(speeds[0]);
+                        self->calc_max_wave_speeds(prim_buffer[aid], 2, speeds, cs);
+                        plus_v2  = std::abs(speeds[3]);
+                        minus_v2 = std::abs(speeds[0]);
+                        self->calc_max_wave_speeds(prim_buffer[aid], 3, speeds, cs);
+                        plus_v3  = std::abs(speeds[3]);
+                        minus_v3 = std::abs(speeds[0]);
                     } else {
                         plus_v1  = 1;
                         plus_v2  = 1;
