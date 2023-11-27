@@ -2574,6 +2574,17 @@ void RMHD<dim>::simulate(
     setup.boundary_conditions = boundary_conditions;
     setup.dimensions          = dim;
 
+    // allocate space for face-centered magnetic fields
+    if constexpr(dim > 1) {
+        bstag1.resize(nx + 1);
+        bstag2.resize(ny + 1);
+        if constexpr(dim > 2) {
+            bstag3.resize(nz + 1);
+        }
+    }
+    
+
+    // allocate space for volume-average qauntities
     cons.resize(total_zones);
     prims.resize(total_zones);
     troubled_cells.resize(total_zones, 0);
@@ -2599,7 +2610,7 @@ void RMHD<dim>::simulate(
         const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
         const real msq  = (m1 * m1 + m2 * m2 + b3 * m3);
         const real et   = tau + d;
-        const real a    = 3;
+        const real a    = 3.0;
         const real b    = -4.0 * (et - bsq);
         const real c    = msq - 2.0 * et * bsq + bsq * bsq;
         const real qq   = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
@@ -2638,6 +2649,14 @@ void RMHD<dim>::simulate(
     }
     if constexpr(dim > 2) {
         sourceB3.copyToGpu();
+    }
+
+    if constexpr(dim > 1) {
+        bstag1.copyToGpu();
+        bstag2.copyToGpu();
+        if constexpr(dim > 2) {
+            bstag3.copyToGpu();
+        }
     }
 
     // Setup the system

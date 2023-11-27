@@ -51,7 +51,7 @@ namespace simbi
         /* Shared Data Members */
         ndarray<primitive_t> prims;
         ndarray<conserved_t> cons, outer_zones, inflow_zones;
-        ndarray<real> edens_guess, dt_min;
+        ndarray<real> edens_guess, dt_min, bstag1, bstag2, bstag3;
         bool scalar_all_zeros;
 
         /* Methods */
