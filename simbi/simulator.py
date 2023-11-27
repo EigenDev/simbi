@@ -156,7 +156,7 @@ class Hydro:
         max_discont = 2 ** self.dimensionality
         self.number_of_non_em_terms = 2 + self.dimensionality if not self.mhd else 5
         max_prims = self.number_of_non_em_terms + 3 * self.mhd
-        if nstates < max_prims or (nstates < max_discont and self.discontinuity):
+        if nstates <= max_prims or (nstates < max_discont and self.discontinuity):
             simbi_ic.construct_the_state(self, initial_state=initial_state)
         else:
             raise ValueError("Initial State contains too many variables")
