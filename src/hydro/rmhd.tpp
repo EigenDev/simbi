@@ -222,7 +222,7 @@ void RMHD<dim>::emit_troubled_cells() {
             const real m1 = cons[gid].momentum(1);
             const real m2 = cons[gid].momentum(2);
             const real m3 = cons[gid].momentum(3);
-            const real et = (cons[gid].d + cons[gid].tau + prims[gid].p);
+            const real et = (cons[gid].d + cons[gid].tau);
             const real b1 = cons[gid].bcomponent(1);
             const real b2 = cons[gid].bcomponent(2);
             const real b3 = cons[gid].bcomponent(3);
@@ -346,6 +346,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 
                 if (iter >= global::MAX_ITER || std::isnan(qq))
                 {
+                    printf("\nratio: %.2e\n", std::abs(f / g));
                     troubled_data[gid] = 1;
                     dt                = INFINITY;
                     inFailureState    = true;
@@ -525,8 +526,8 @@ void RMHD<dim>::calc_max_wave_speeds(
     const real rho = prims.rho;
     const real h   = prims.gas_enthalpy(gamma);
                cs2 = (gamma * prims.p / (rho * h));
-    const auto b4  = rm::MagFourVec<dim>(prims); 
-    const real bsq = b4.inner_product();
+    const auto bmu  = rm::MagFourVec<dim>(prims); 
+    const real bsq = bmu.inner_product();
     const real bn  = prims.bcomponent(nhat);
     const real bn2 = bn * bn;
     const real vn  = prims.vcomponent(nhat);
@@ -553,15 +554,15 @@ void RMHD<dim>::calc_max_wave_speeds(
         speeds[3] = 0.5 * (-a1 + std::sqrt(disq)) / a2;
         speeds[0] = 0.5 * (-a1 - std::sqrt(disq)) / a2;
     } else { // solve the full quartic Eq. (56)
-        const real b40 = b4.zero;
-        const real b4n = b4.normal(nhat);
+        const real bmu0 = bmu.zero;
+        const real bmun = bmu.normal(nhat);
         const real w   = prims.lorentz_factor();
         const real w2  = w * w;
         const real vn2 = vn * vn;
 
         const real a4 = (
-            - b40 * b40 * cs2 
-            + bsq* w2 
+            - bmu0 * bmu0 * cs2 
+            + bsq * w2 
             - cs2 * w2 * w2 * h * rho 
             + cs2 * w2 * h * rho
             + w2 * w2 * h * rho
@@ -569,34 +570,34 @@ void RMHD<dim>::calc_max_wave_speeds(
         const real fac = 1 / a4;
 
         const real a3 = fac * (
-              2 * b40 * b4n * cs2 
-            - 2 * bsq * w2 * vn 
-            + 4 * cs2 * w2 * w2 * h * rho * vn 
-            - 2 * cs2 * w2 * h * rho * vn 
-            - 4 * w2 * w2 * h * rho * vn
+              2.0 * bmu0 * bmun * cs2 
+            - 2.0 * bsq * w2 * vn 
+            + 4.0 * cs2 * w2 * w2 * h * rho * vn 
+            - 2.0 * cs2 * w2 * h * rho * vn 
+            - 4.0 * w2 * w2 * h * rho * vn
         );
         const real a2 = fac * (
-              b40 * b40 * cs2 
+              bmu0 * bmu0 * cs2 
             + bsq * w2 * vn2 
             - bsq * w2 
-            - b4n * b4n * cs2 
-            - 6 * cs2 * w2 * w2 * h * rho * vn2 
+            - bmun * bmun * cs2 
+            - 6.0 * cs2 * w2 * w2 * h * rho * vn2 
             + cs2 * w2 * h * rho * vn2 
             - cs2 * w2 * h * rho 
-            + 6 * w2 * w2 * h * rho * vn2
+            + 6.0 * w2 * w2 * h * rho * vn2
         );
 
         const real a1 = fac * (
-            - 2 * b40 * b4n * cs2 
-            + 2 * bsq * w2 * vn 
-            + 4 * cs2 * w2 * w2 * h * rho * vn * vn2 
-            + 2 * cs2 * w2 * h * rho * vn 
-            - 4 * w2 * w2 * h * rho * vn * vn2
+            - 2.0 * bmu0 * bmun * cs2 
+            + 2.0 * bsq * w2 * vn 
+            + 4.0 * cs2 * w2 * w2 * h * rho * vn * vn2 
+            + 2.0 * cs2 * w2 * h * rho * vn 
+            - 4.0 * w2 * w2 * h * rho * vn * vn2
         );
 
         const real a0 = fac * (
             - bsq * w2 * vn2 
-            + b4n * b4n * cs2 
+            + bmun * bmun * cs2 
             - cs2 * w2 * w2 * h * rho * vn2 * vn2 
             - cs2 * w2 * h * rho * vn2 
             + w2 * w2 * h * rho * vn2 * vn2
@@ -604,11 +605,12 @@ void RMHD<dim>::calc_max_wave_speeds(
 
         [[maybe_unused]] const auto nroots = helpers::quartic(a3, a2, a1, a0, speeds);
         
-        #if !GPU_CODE
-        if (nroots != 4) {
-            printf("\n number of quartic roots less than 4, nrotts: %d, fastest wave: %.2e, slowest_wave: %.2e\n", nroots, speeds[3], speeds[0]);
-        }
-        #endif
+        // #if !GPU_CODE
+        // if (nroots != 4) {
+        //     printf("\n number of quartic roots less than 4, nroots: %d, fastest wave: %.2e, slowest_wave: %.2e\n", nroots, speeds[3], speeds[0]);
+        // }
+        // printf("\naL: %.2e, ar: %.2e\n", speeds[0], speeds[3]);
+        // #endif
     }
 }
 template<int dim>
@@ -864,13 +866,12 @@ RMHD<dim>::conserved_t RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t &prims
     const real m2 = (d * lorentz_factor * h + bsq) * v2 - vdotb * b2;
     const real m3 = (d * lorentz_factor * h + bsq) * v3 - vdotb * b3;
     const real mn = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
-
-    const auto b4 = rm::MagFourVec<dim>(prims);
+    const auto bmu = rm::MagFourVec<dim>(prims);
     return {
         d  * vn, 
-        m1 * vn + helpers::kronecker(nhat, 1) * p - bn * b4.one / lorentz_factor, 
-        m2 * vn + helpers::kronecker(nhat, 2) * p - bn * b4.two / lorentz_factor, 
-        m3 * vn + helpers::kronecker(nhat, 3) * p - bn * b4.three / lorentz_factor,  
+        m1 * vn + helpers::kronecker(nhat, 1) * p - bn * bmu.one / lorentz_factor, 
+        m2 * vn + helpers::kronecker(nhat, 2) * p - bn * bmu.two / lorentz_factor, 
+        m3 * vn + helpers::kronecker(nhat, 3) * p - bn * bmu.three / lorentz_factor,  
         mn - d * vn, 
         vn * b1 - v1 * bn,
         vn * b2 - v2 * bn,
@@ -907,6 +908,9 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
     } else {    
         const auto f_hll = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
         const auto u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
+        // #if !GPU_CODE
+        // printf("aL: %.2e, aR: %.2e, fhll_By: %.2e, uhll_By: %.2e\n", aLm, aRp, f_hll.b2, u_hll.b2);
+        // #endif
         net_flux = f_hll - u_hll * vface;
     }
 
@@ -2169,7 +2173,7 @@ void RMHD<dim>::advance(
                 case simbi::Geometry::CARTESIAN:
                 {
                     // printf("flf: %.2e, frf: %.2e, cons: %.2e\n", flf.d, frf.d, cons_data[ia].d);
-                    cons_data[ia] -= ((frf - flf) * invdx1 - source_terms - gravity) * dt * step;
+                    cons_data[ia] -= ((frf - flf) * invdx1) * dt * step;
                     break;
                 }
                 default:
@@ -2220,13 +2224,13 @@ void RMHD<dim>::advance(
                         const real vc   = prim_buff[tid].get_v2();
                         const real pc   = prim_buff[tid].total_pressure();
                         const real hc   = prim_buff[tid].gas_enthalpy(gamma);
-                        const auto b4c  = rm::MagFourVec<dim>(prim_buff[tid]);
+                        const auto bmuc  = rm::MagFourVec<dim>(prim_buff[tid]);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc));
 
                         const rm::Conserved<2> geom_source  = {
                             0, 
-                            (rhoc * hc * gam2 * vc * vc - b4c.two * b4c.two) / rmean + pc * (s1R - s1L) * invdV, 
-                            - (rhoc * hc * gam2 * uc * vc - b4c.one * b4c.two) / rmean + pc * (s2R - s2L) * invdV, 
+                            (rhoc * hc * gam2 * vc * vc - bmuc.two * bmuc.two) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two) / rmean + pc * (s2R - s2L) * invdV, 
                             0,
                             0,
                             0
@@ -2260,14 +2264,14 @@ void RMHD<dim>::advance(
                         const real uc   = prim_buff[tid].get_v1();
                         const real vc   = prim_buff[tid].get_v2();
                         const real pc   = prim_buff[tid].total_pressure();
-                        const auto b4c  = rm::MagFourVec<dim>(prim_buff[tid]);
+                        const auto bmuc  = rm::MagFourVec<dim>(prim_buff[tid]);
                         
                         const real hc   = prim_buff[tid].gas_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc));
                         const rm::Conserved<2> geom_source  = {
                             0, 
-                            (rhoc * hc * gam2 * vc * vc - b4c.two * b4c.two) / rmean + pc * (s1R - s1L) * invdV, 
-                            - (rhoc * hc * gam2 * uc * vc - b4c.one * b4c.two) / rmean, 
+                            (rhoc * hc * gam2 * vc * vc - bmuc.two * bmuc.two) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two) / rmean, 
                             0,
                             0,
                             0
@@ -2295,11 +2299,11 @@ void RMHD<dim>::advance(
 
                         // Grab central primitives
                         const real pc   = prim_buff[tid].total_pressure();
-                        const auto b4c  = rm::MagFourVec<dim>(prim_buff[tid]);
+                        const auto bmuc  = rm::MagFourVec<dim>(prim_buff[tid]);
                         const auto geom_source  = rm::Conserved<2>{
                             0, 
-                            (- b4c.two * b4c.two) / rmean + pc * (s1R - s1L) * invdV, 
-                            (+ b4c.one * b4c.two) / rmean, 
+                            (- bmuc.two * bmuc.two) / rmean + pc * (s1R - s1L) * invdV, 
+                            (+ bmuc.one * bmuc.two) / rmean, 
                             0,
                             0,
                             0
@@ -2349,16 +2353,16 @@ void RMHD<dim>::advance(
                         const real vc   = prim_buff[tid].get_v2();
                         const real wc   = prim_buff[tid].get_v3();
                         const real pc   = prim_buff[tid].total_pressure();
-                        const auto b4c  = rm::MagFourVec<dim>(prim_buff[tid]);
+                        const auto bmuc  = rm::MagFourVec<dim>(prim_buff[tid]);
 
                         const real hc   = prim_buff[tid].gas_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
 
                         const auto geom_source  = rm::Conserved<3>{
                             0, 
-                            (rhoc * hc * gam2 * (vc * vc + wc * wc) - b4c.two * b4c.two - b4c.three * b4c.three) / rmean + pc * (s1R - s1L) / dV1,
-                            (rhoc * hc * gam2 * (wc * wc * cot - uc * vc) - b4c.three * b4c.three * cot + b4c.one * b4c.two) / rmean + pc * (s2R - s2L)/dV2 , 
-                            - (rhoc * hc * gam2 * wc * (uc + vc * cot) - b4c.three * b4c.one - b4c.three * b4c.two * cot ) / rmean, 
+                            (rhoc * hc * gam2 * (vc * vc + wc * wc) - bmuc.two * bmuc.two - bmuc.three * bmuc.three) / rmean + pc * (s1R - s1L) / dV1,
+                            (rhoc * hc * gam2 * (wc * wc * cot - uc * vc) - bmuc.three * bmuc.three * cot + bmuc.one * bmuc.two) / rmean + pc * (s2R - s2L)/dV2 , 
+                            - (rhoc * hc * gam2 * wc * (uc + vc * cot) - bmuc.three * bmuc.one - bmuc.three * bmuc.two * cot ) / rmean, 
                             0,
                             0,
                             0,
@@ -2399,15 +2403,15 @@ void RMHD<dim>::advance(
                         const real vc   = prim_buff[tid].get_v2();
                         const real wc   = prim_buff[tid].get_v3();
                         const real pc   = prim_buff[tid].total_pressure();
-                        const auto b4c  = rm::MagFourVec<dim>(prim_buff[tid]);
+                        const auto bmuc  = rm::MagFourVec<dim>(prim_buff[tid]);
 
                         const real hc   = prim_buff[tid].gas_enthalpy(gamma);
                         const real gam2 = 1/(1 - (uc * uc + vc * vc + wc * wc));
 
                         const auto geom_source  = rm::Conserved<3>{
                             0, 
-                            (rhoc * hc * gam2 * (vc * vc) - b4c.two * b4c.two - b4c.three * b4c.three) / rmean + pc * (s1R - s1L) * invdV, 
-                            - (rhoc * hc * gam2 * uc * vc - b4c.one * b4c.two) / rmean , 
+                            (rhoc * hc * gam2 * (vc * vc) - bmuc.two * bmuc.two - bmuc.three * bmuc.three) / rmean + pc * (s1R - s1L) * invdV, 
+                            - (rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two) / rmean , 
                             0, 
                             0,
                             0,
@@ -2712,8 +2716,6 @@ void RMHD<dim>::simulate(
             x1min += step * dt * vmin;
             hubble_param = adot(t) / a(t);
         }
-        // std::cout << "pause" << "\n";
-        // std::cin.get();
     });
 
     if (inFailureState){
