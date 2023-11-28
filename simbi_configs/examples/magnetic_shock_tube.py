@@ -5,7 +5,7 @@ class MagneticShockTube(BaseConfig):
     Mignone & Bodo (2006), Relativistic MHD Test Problems in 1D Fluid
     """
     nzones    = DynamicArg("nzones", 100, help="number of grid zones", var_type=int)
-    ad_gamma  = DynamicArg("ad-gamma", 2 , help="Adiabatic gas index", var_type = float)
+    ad_gamma  = DynamicArg("ad-gamma", 2, help="Adiabatic gas index", var_type = float)
     
     @simbi_property
     def initial_state(self) -> Sequence[Sequence[float]]:
