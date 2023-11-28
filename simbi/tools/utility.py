@@ -223,7 +223,7 @@ def read_file(args: argparse.Namespace, filename: str, ndim: int) -> tuple[dict[
         fields['ad_gamma']     = setup['ad_gamma']
         
         vsqr = np.sum(vel * vel for vel in v) # type: ignore
-        if setup['regime'] in ['srhd', 'srmhd']:
+        if setup['regime'] in ['srhd', 'srmhd', 'relativistic']:
             if ds['using_gamma_beta']:
                 W = (1 + vsqr) ** 0.5
                 fields.update({f'v{i+1}': v[i] / W for i in range(len(v))})
