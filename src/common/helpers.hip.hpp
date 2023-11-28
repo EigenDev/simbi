@@ -353,7 +353,7 @@ namespace simbi
         * @param gr reduced adiabatic index
         * @param ssq s-squared
         * @param bsq b-squared
-        * @param ms1 m-squared
+        * @param msq m-squared
         * @param qq  variational parameter
         * @return gas pressure from Eq.(19)
         */
@@ -438,8 +438,8 @@ namespace simbi
         */
         GPU_CALLABLE_INLINE real newton_g_mhd(real gr, real d, real ssq, real bsq, real msq, real qq) {
             const auto w      = calc_rmhd_lorentz(ssq, bsq, msq, qq);
-            const auto term   = (qq + bsq);
-            const auto dg_dq  = - (w * w * w) * (2.0 * ssq * (3.0 * qq * qq + 3.0 * qq * bsq + bsq * bsq) + msq * (qq * qq * qq)) / (2.0 * qq * qq * qq * term * term * term);
+            const auto term   = qq * (qq + bsq);
+            const auto dg_dq  = - (w * w * w) * (2.0 * ssq * (3.0 * qq * qq + 3.0 * qq * bsq + bsq * bsq) + msq * (qq * qq * qq)) / (2.0 * term * term * term);
             const auto dpg_dq = (w * (1.0 + d * dg_dq) - 2.0 * qq * dg_dq) / (gr * w * w * w);
             return 1.0 - dpg_dq + bsq / (w * w * w) * dg_dq + ssq / (qq * qq * qq);
         }
@@ -493,7 +493,7 @@ namespace simbi
         }
 
         GPU_CALLABLE_INLINE
-        constexpr unsigned int kronecker(luint i, luint j) { return (i == j ? 1 : 0); }
+        constexpr unsigned int kronecker(luint i, luint j) { return i == j; }
 
         GPU_CALLABLE_INLINE
         auto get_2d_idx(const luint ii, const luint jj, const luint nx, const luint ny){
