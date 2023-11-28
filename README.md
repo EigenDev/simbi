@@ -129,7 +129,7 @@ $ CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std
 6)  Profit
 
 ## Physics Features (so far)
-1) Special Relativistic adn Newtonian Hydro up to 3D (set the `regime` property to `classical` or `relativistic`)
+1) Special Relativistic and Newtonian Hydro up to 3D (set the `regime` property to `classical` or `relativistic`)
 2) Supports user-defined mesh expansion / contraction (`scale_factor` & `scale_factor_derivative` methods)
 3) Supports user-defined density, momentum, and energy density terms outside of grid (Implementing the `dens_outer`, `mom_outer`, AND `edens_outer` methods sets this)
 4) Supports source terms in the Euler equations (implementing the `sources` property sets this)
