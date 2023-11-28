@@ -970,8 +970,8 @@ class Visualizer:
                         label = None
                     color_idx = idx if len(self.fields) > 1 else cidx
                     if self.norm:
-                        iso_var *= dw / (4.0 * np.pi)
-                        # iso_var /= (4.0 * np.pi)
+                        # iso_var *= dw / (4.0 * np.pi)
+                        iso_var /= (4.0 * np.pi)
                         
                     if self.xlims == [-90, 90]:
                         tbins -= 90
@@ -1112,12 +1112,10 @@ class Visualizer:
                             len(self.coords['x3'].split(',')))
         else:
             nind_curves = len(self.files) // self.nplots
+        
         colors     = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
         linestyles = [x[0] for x in zip(cycle(['-', '--', ':', '-.']), range(len(self.fields)))]
         default_cycler = cycler(color=colors) * (cycler(linestyle=linestyles) )
-                          
-            
-        
                         
         plt.rc('axes', prop_cycle=default_cycler)
         if self.nplots == 1:
