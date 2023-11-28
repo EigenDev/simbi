@@ -10,6 +10,10 @@ from . import helpers
 from .slogger import logger
 from itertools import product, permutations
 
+
+def dot_product(a: NDArray[Any], b: NDArray[Any]) -> Any:
+    return np.sum([x * y for x, y in zip(a, b)], axis=0)
+
 def calc_lorentz_factor(
         vsquared: NDArray[Any],
         regime: str) -> FloatOrArray:
@@ -59,8 +63,8 @@ def calc_labframe_momentum(
     if len(bfields) == 0:
         bfields = np.zeros_like(velocity)
 
-    vdb: float = velocity.dot(bfields)
-    bsq: float = bfields.dot(bfields)
+    vdb: FloatOrArray = dot_product(velocity, bfields)
+    bsq: FloatOrArray = dot_product(bfields, bfields)
     return (rho * lorentz * lorentz * enthalpy + bsq) * velocity - vdb * bfields
 
 
@@ -73,9 +77,11 @@ def calc_labframe_energy(
         bfields: NDArray[numpy_float]) -> FloatOrArray:
     if len(bfields) == 0:
         bfields = np.zeros_like(velocity)
-    bsq: float = bfields.dot(bfields)
-    vdb: float = velocity.dot(bfields)
-    vsq: float = velocity.dot(velocity)
+        
+    bsq: FloatOrArray = dot_product(bfields, bfields)
+    vdb: FloatOrArray = dot_product(velocity, bfields)
+    vsq: FloatOrArray = dot_product(velocity, velocity)
+    
     return rho * lorentz * lorentz * enthalpy - pressure - rho * lorentz + 0.5 * bsq + 0.5 * (bsq * vsq - vdb**2)
     
 def flatten_fully(x: Any) -> Any:

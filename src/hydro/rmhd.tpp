@@ -359,7 +359,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 
             const real w  = helpers::calc_rmhd_lorentz(ssq, bsq, msq, qq);
             const real pg = helpers::calc_rmhd_pg(gr, d, w, qq);
-            const real fac = 1 / (qq + bsq);
+            const real fac = 1.0 / (qq + bsq);
             const real rat = s / qq;
             const real v1 = fac * (m1 + rat * b1);
             const real v2 = fac * (m2 + rat * b2);
@@ -662,13 +662,14 @@ RMHD<dim>::conserved_t RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t &prims
     const real bsq   = (b1 * b1 + b2 * b2 + b3 * b3);
     const real vsq   = (v1 * v1 + v2 * v2 + v3 * v3);
     const real d     = rho * lorentz_factor;
+    const real ed    = d * h * lorentz_factor;
 
     return {
          d, 
-        (d * h * lorentz_factor + bsq) * v1 - vdotb * b1,
-        (d * h * lorentz_factor + bsq) * v2 - vdotb * b2,
-        (d * h * lorentz_factor + bsq) * v3 - vdotb * b3,
-         d * h * lorentz_factor - pg - d + static_cast<real>(0.5) * bsq + static_cast<real>(0.5) * (vsq * bsq - vdotb * vdotb),
+        (ed + bsq) * v1 - vdotb * b1,
+        (ed + bsq) * v2 - vdotb * b2,
+        (ed + bsq) * v3 - vdotb * b3,
+         ed - pg - d + static_cast<real>(0.5) * bsq + static_cast<real>(0.5) * (vsq * bsq - vdotb * vdotb),
          b1,
          b2,
          b3,
@@ -695,20 +696,20 @@ void RMHD<dim>::adapt_dt()
         // Left/Right wave speeds
         if constexpr(dt_type == TIMESTEP_TYPE::ADAPTIVE) {
             calc_max_wave_speeds(prims[aid], 1, speeds, cs);
-            v1p = speeds[3];
-            v1m = speeds[0];
+            v1p = std::abs(speeds[3]);
+            v1m = std::abs(speeds[0]);
             // #if !GPU_CODE
             // printf("v1p: %.2e, v1m: %.2e\n", v1p, v1m);
             // #endif
             if constexpr(dim > 1) {
                 calc_max_wave_speeds(prims[aid], 2, speeds, cs);
-                v2p = speeds[3];
-                v2m = speeds[0];
+                v2p = std::abs(speeds[3]);
+                v2m = std::abs(speeds[0]);
             }
             if constexpr(dim > 2) {
                 calc_max_wave_speeds(prims[aid], 3, speeds, cs);
-                v3p = speeds[3];
-                v3m = speeds[0];
+                v3p = std::abs(speeds[3]);
+                v3m = std::abs(speeds[0]);
             }                        
         } else {
             v1p = 1;
@@ -2578,6 +2579,17 @@ void RMHD<dim>::simulate(
     setup.boundary_conditions = boundary_conditions;
     setup.dimensions          = dim;
 
+    // allocate space for face-centered magnetic fields
+    if constexpr(dim > 1) {
+        bstag1.resize(nx + 1);
+        bstag2.resize(ny + 1);
+        if constexpr(dim > 2) {
+            bstag3.resize(nz + 1);
+        }
+    }
+    
+
+    // allocate space for volume-average qauntities
     cons.resize(total_zones);
     prims.resize(total_zones);
     troubled_cells.resize(total_zones, 0);
@@ -2603,7 +2615,7 @@ void RMHD<dim>::simulate(
         const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
         const real msq  = (m1 * m1 + m2 * m2 + b3 * m3);
         const real et   = tau + d;
-        const real a    = 3;
+        const real a    = 3.0;
         const real b    = -4.0 * (et - bsq);
         const real c    = msq - 2.0 * et * bsq + bsq * bsq;
         const real qq   = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
@@ -2642,6 +2654,14 @@ void RMHD<dim>::simulate(
     }
     if constexpr(dim > 2) {
         sourceB3.copyToGpu();
+    }
+
+    if constexpr(dim > 1) {
+        bstag1.copyToGpu();
+        bstag2.copyToGpu();
+        if constexpr(dim > 2) {
+            bstag3.copyToGpu();
+        }
     }
 
     // Setup the system
