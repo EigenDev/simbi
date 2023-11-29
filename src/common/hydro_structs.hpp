@@ -1074,7 +1074,11 @@ namespace rmhd {
 
     template<int dim>
     struct mag_four_vec {
-        real lorentz, vdb, zero, one, two, three;
+        private:
+        real lorentz, vdb;
+
+        public:
+        real zero, one, two, three;
         GPU_CALLABLE_MEMBER mag_four_vec() {}
         GPU_CALLABLE_MEMBER ~mag_four_vec() {}
 
