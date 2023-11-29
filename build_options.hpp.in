@@ -222,9 +222,7 @@ namespace global
 #define GPU_DEV_INLINE               inline 
 #define __shared__                   static
 
-// Define a bunch of ghost functions to make the compiler
-// happy and avoid a bunch if #ifdefs throughout code
-// Don't get too mad at me... I'm a physicist, not a programmer :-)
+// Define a bunch of ghost functions that are optimized out in cpu mode
 namespace simbi {
     struct u3
     {
