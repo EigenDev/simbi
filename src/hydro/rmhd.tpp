@@ -857,11 +857,11 @@ RMHD<dim>::conserved_t RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t &prims
     const real vn       = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
     const real bn       = (nhat == 1) ? b1 : (nhat == 2) ? b2 : b3;
     const real lorentz_factor = prims.lorentz_factor();
-    const real ed    = d * h * lorentz_factor
     const real h     = prims.gas_enthalpy(gamma);
     const real bsq   = (b1 * b1 + b2 * b2 + b3 * b3);
     const real vdotb = prims.vdotb();
     const real d  = rho * lorentz_factor;
+    const real ed = d * h * lorentz_factor;
     const real m1 = (ed + bsq) * v1 - vdotb * b1;
     const real m2 = (ed + bsq) * v2 - vdotb * b2;
     const real m3 = (ed + bsq) * v3 - vdotb * b3;
