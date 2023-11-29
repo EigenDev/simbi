@@ -346,7 +346,6 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<> &p)
 
                 if (iter >= global::MAX_ITER || std::isnan(qq))
                 {
-                    printf("\nratio: %.2e\n", std::abs(f / g));
                     troubled_data[gid] = 1;
                     dt                = INFINITY;
                     inFailureState    = true;
@@ -500,7 +499,7 @@ void RMHD<dim>::calc_max_wave_speeds(
 {
     /*
     evaluate the full quartic if the simplfying conditions are not met.
-    Polynomial coefficients were calculated using sympy to in the following way: 
+    Polynomial coefficients were calculated using sympy in the following way: 
 
     In [1]: import sympy
     In [2]: rho = sympy.Symbol('rho')
@@ -527,26 +526,26 @@ void RMHD<dim>::calc_max_wave_speeds(
     const real h   = prims.gas_enthalpy(gamma);
                cs2 = (gamma * prims.p / (rho * h));
     const auto bmu  = rm::MagFourVec<dim>(prims); 
-    const real bsq = bmu.inner_product();
+    const real b4sq = bmu.inner_product();
     const real bn  = prims.bcomponent(nhat);
     const real bn2 = bn * bn;
     const real vn  = prims.vcomponent(nhat);
     if (prims.vsquared() < global::tol_scale) { // Eq.(57)
-        const real fac = 1 / (rho * h + bsq);
-        const real a = 1;
+        const real fac = 1 / (rho * h + b4sq);
+        const real a = 1.0;
         const real b = - (
-            bsq 
+            b4sq 
             + rho * h * cs2 
             + bn2 * cs2
         ) * fac;
         const real c = cs2 * bn2 * fac;
-        const real disq = std::sqrt(b * b - 4 * a * c);
+        const real disq = std::sqrt(b * b - 4.0 * a * c);
         speeds[3] = std::sqrt(0.5 * (-b + disq));
         speeds[0] = - speeds[3];
-    } else if (bn < global::tol_scale) { // Eq. (58)
+    } else if (std::abs(bn) < global::tol_scale) { // Eq. (58)
         const real g2 = prims.lorentz_factor_squared();
         const real vdbperp = prims.vdotb() - prims.vcomponent(nhat) * prims.bcomponent(nhat);
-        const real q = bsq - cs2 * vdbperp * vdbperp;
+        const real q = b4sq - cs2 * vdbperp * vdbperp;
         const real a2 = rho * h * (cs2 + g2 * (1 - cs2)) + q;
         const real a1 = -2 * rho * h * g2 * vn * (1 - cs2);
         const real a0 = rho * h * (-cs2 + g2 * vn * vn * (1 - cs2)) - q;
@@ -562,7 +561,7 @@ void RMHD<dim>::calc_max_wave_speeds(
 
         const real a4 = (
             - bmu0 * bmu0 * cs2 
-            + bsq * w2 
+            + b4sq * w2 
             - cs2 * w2 * w2 * h * rho 
             + cs2 * w2 * h * rho
             + w2 * w2 * h * rho
@@ -571,15 +570,15 @@ void RMHD<dim>::calc_max_wave_speeds(
 
         const real a3 = fac * (
               2.0 * bmu0 * bmun * cs2 
-            - 2.0 * bsq * w2 * vn 
+            - 2.0 * b4sq * w2 * vn 
             + 4.0 * cs2 * w2 * w2 * h * rho * vn 
             - 2.0 * cs2 * w2 * h * rho * vn 
             - 4.0 * w2 * w2 * h * rho * vn
         );
         const real a2 = fac * (
               bmu0 * bmu0 * cs2 
-            + bsq * w2 * vn2 
-            - bsq * w2 
+            + b4sq * w2 * vn2 
+            - b4sq * w2 
             - bmun * bmun * cs2 
             - 6.0 * cs2 * w2 * w2 * h * rho * vn2 
             + cs2 * w2 * h * rho * vn2 
@@ -589,14 +588,14 @@ void RMHD<dim>::calc_max_wave_speeds(
 
         const real a1 = fac * (
             - 2.0 * bmu0 * bmun * cs2 
-            + 2.0 * bsq * w2 * vn 
+            + 2.0 * b4sq * w2 * vn 
             + 4.0 * cs2 * w2 * w2 * h * rho * vn * vn2 
             + 2.0 * cs2 * w2 * h * rho * vn 
             - 4.0 * w2 * w2 * h * rho * vn * vn2
         );
 
         const real a0 = fac * (
-            - bsq * w2 * vn2 
+            - b4sq * w2 * vn2 
             + bmun * bmun * cs2 
             - cs2 * w2 * w2 * h * rho * vn2 * vn2 
             - cs2 * w2 * h * rho * vn2 
@@ -648,14 +647,14 @@ template<int dim>
 GPU_CALLABLE_MEMBER 
 RMHD<dim>::conserved_t RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t &prims) const
 {
-    const real rho      = prims.rho;
-    const real v1       = prims.vcomponent(1);
-    const real v2       = prims.vcomponent(2);
-    const real v3       = prims.vcomponent(3);
-    const real pg       = prims.p;
-    const real b1       = prims.bcomponent(1);
-    const real b2       = prims.bcomponent(2);
-    const real b3       = prims.bcomponent(3);
+    const real rho = prims.rho;
+    const real v1  = prims.vcomponent(1);
+    const real v2  = prims.vcomponent(2);
+    const real v3  = prims.vcomponent(3);
+    const real pg  = prims.p;
+    const real b1  = prims.bcomponent(1);
+    const real b2  = prims.bcomponent(2);
+    const real b3  = prims.bcomponent(3);
     const real lorentz_factor = prims.lorentz_factor();
     const real h     = prims.gas_enthalpy(gamma);
     const real vdotb = prims.vdotb();
@@ -858,14 +857,14 @@ RMHD<dim>::conserved_t RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t &prims
     const real vn       = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
     const real bn       = (nhat == 1) ? b1 : (nhat == 2) ? b2 : b3;
     const real lorentz_factor = prims.lorentz_factor();
-
+    const real ed    = d * h * lorentz_factor
     const real h     = prims.gas_enthalpy(gamma);
     const real bsq   = (b1 * b1 + b2 * b2 + b3 * b3);
     const real vdotb = prims.vdotb();
     const real d  = rho * lorentz_factor;
-    const real m1 = (d * lorentz_factor * h + bsq) * v1 - vdotb * b1;
-    const real m2 = (d * lorentz_factor * h + bsq) * v2 - vdotb * b2;
-    const real m3 = (d * lorentz_factor * h + bsq) * v3 - vdotb * b3;
+    const real m1 = (ed + bsq) * v1 - vdotb * b1;
+    const real m2 = (ed + bsq) * v2 - vdotb * b2;
+    const real m3 = (ed + bsq) * v3 - vdotb * b3;
     const real mn = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
     const auto bmu = rm::MagFourVec<dim>(prims);
     return {
@@ -921,7 +920,6 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
     else
         net_flux.chi = left_prims.chi  * net_flux.d;
 
-    // Compute the HLL Flux component-wise
     return net_flux;
 };
 
@@ -2143,7 +2141,7 @@ void RMHD<dim>::advance(
             }
         }// end else 
 
-        //Advance depending on geometry
+        
         const luint real_loc = kk * xpg * ypg + jj * xpg + ii;
         const real d_source  = den_source_all_zeros     ? 0.0 : dens_source[real_loc];
         const real s1_source = mom1_source_all_zeros    ? 0.0 : mom1_source[real_loc];
@@ -2168,13 +2166,13 @@ void RMHD<dim>::advance(
             return rm::Conserved<dim>{0, gs1_source, gs2_source, gs3_source, ge_source, 0, 0, 0};
         }();
 
+        // Advance depending on geometry
         if constexpr(dim == 1) {
             switch(geometry)
             {
                 case simbi::Geometry::CARTESIAN:
                 {
-                    // printf("flf: %.2e, frf: %.2e, cons: %.2e\n", flf.d, frf.d, cons_data[ia].d);
-                    cons_data[ia] -= ((frf - flf) * invdx1) * dt * step;
+                    cons_data[ia] -= ((frf - flf) * invdx1 - source_terms - gravity) * dt * step;
                     break;
                 }
                 default:
