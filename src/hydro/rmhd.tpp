@@ -920,7 +920,7 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
         net_flux.chi = right_prims.chi * net_flux.d;
     else
         net_flux.chi = left_prims.chi  * net_flux.d;
-
+        
     return net_flux;
 };
 
