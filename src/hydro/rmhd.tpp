@@ -892,27 +892,28 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
     const luint nhat,
     const real vface) const
 {
-    const rm::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
     // Grab the necessary wave speeds
     const real aL  = lambda.afL;
     const real aR  = lambda.afR;
     const real aLm = aL < 0 ? aL : 0;
     const real aRp = aR > 0 ? aR : 0;
     
-    rm::Conserved<dim> net_flux;
-    // Compute the HLL Flux component-wise
-    if (vface < aLm) {
-        net_flux = left_flux - left_state * vface;
-    } else if (vface > aRp) {
-        net_flux = right_flux - right_state * vface;
-    } else {    
-        const auto f_hll = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
-        const auto u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
-        // #if !GPU_CODE
-        // printf("aL: %.2e, aR: %.2e, fhll_By: %.2e, uhll_By: %.2e\n", aLm, aRp, f_hll.b2, u_hll.b2);
-        // #endif
-        net_flux = f_hll - u_hll * vface;
-    }
+    auto net_flux = [&]{
+        // Compute the HLL Flux component-wise
+        if (vface <= aLm) {
+            return left_flux - left_state * vface;
+        } else if (vface >= aRp) {
+            return right_flux - right_state * vface;
+        } else {    
+            const auto f_hll = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
+            const auto u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
+            // #if !GPU_CODE
+            // printf("aL: %.2e, aR: %.2e, fhll_By: %.2e, uhll_By: %.2e\n", aLm, aRp, f_hll.b2, u_hll.b2);
+            // #endif
+            return f_hll - u_hll * vface;
+        }
+    }();
 
     // Upwind the scalar concentration flux
     if (net_flux.d < 0)
@@ -935,7 +936,6 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const luint nhat,
     const real vface) const 
 {
-
     static auto construct_the_state = [](
             const luint nhat,
             const luint np1,
@@ -961,7 +961,7 @@ RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
             return u;
     };
 
-    const rm::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL  = lambda.afL;
     const real aR  = lambda.afR;
     const real aLm = aL < 0 ? aL : 0;

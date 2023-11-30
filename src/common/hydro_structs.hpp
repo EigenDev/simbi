@@ -651,7 +651,7 @@ namespace sr2d {
             return (nhat == 1 ? get_v1() : get_v2()); 
         }
 
-        GPU_CALLABLE_MEMBER real calc_lorentz_gamma() const {
+        GPU_CALLABLE_MEMBER real lorentz_factor() const {
             if constexpr(global::VelocityType == global::Velocity::Beta) {
                 return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
             } else {
@@ -674,14 +674,6 @@ namespace sr2d {
                 return v2 / std::sqrt(1 + v1 * v1 + v2 * v2);
             }
         } 
-
-        GPU_CALLABLE_MEMBER constexpr real lorentz_factor() const {
-            if constexpr(global::VelocityType == global::Velocity::Beta) {
-                return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
-            } else {
-                return std::sqrt(1 + (v1 * v1 + v2 * v2));
-            }
-        }
 
         GPU_CALLABLE_MEMBER
         real get_enthalpy(real gamma) const {
@@ -800,7 +792,7 @@ namespace sr3d {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
         }
 
-        GPU_CALLABLE_MEMBER real calc_lorentz_gamma() const {
+        GPU_CALLABLE_MEMBER real lorentz_factor() const {
             if constexpr(global::VelocityType == global::Velocity::Beta) {
                 return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
             } else {
@@ -829,15 +821,6 @@ namespace sr3d {
                 return v3;
             } else {
                 return v3 / std::sqrt(1 + v1 * v1 + v2 * v2 + v3 * v3);
-            }
-        }
-
-
-        GPU_CALLABLE_MEMBER constexpr real lorentz_factor() const {
-            if constexpr(global::VelocityType == global::Velocity::Beta) {
-                return 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
-            } else {
-                return std::sqrt(1 + (v1 * v1 + v2 * v2 + v3 * v3));
             }
         }
 

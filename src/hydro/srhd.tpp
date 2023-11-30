@@ -349,30 +349,30 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<> &p)
             #if FOUR_VELOCITY
                 if constexpr(dim == 1) {
                     const real w = 1 / std::sqrt(1 - v1 * v1);
-                    prim_data[gid] = sr::Primitive<1>{d/w, v1 * w, peq, dchi / d};
+                    prim_data[gid] = {d/w, v1 * w, peq, dchi / d};
                 } else if constexpr(dim == 2) {
                     const real v2 = s2 * inv_et;
                     const real w = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
-                    prim_data[gid] = sr::Primitive<2>{d/w, v1 * w, v2 * w, peq, dchi / d};
+                    prim_data[gid] = {d/w, v1 * w, v2 * w, peq, dchi / d};
                 } else {
                     const real v2 = s2 * inv_et;
                     const real v3 = s3 * inv_et;
                     const real w = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
-                    prim_data[gid] = sr::Primitive<3>{d/w, v1 * w, v2 * w, v3 * w, peq, dchi / d};
+                    prim_data[gid] = {d/w, v1 * w, v2 * w, v3 * w, peq, dchi / d};
                 }
             #else
                 if constexpr(dim == 1) {
                     const real w = 1 / std::sqrt(1 - (v1 * v1));
-                    prim_data[gid] = sr::Primitive<1>{d/w, v1, peq, dchi / d};
+                    prim_data[gid] = {d/w, v1, peq, dchi / d};
                 } else if constexpr(dim == 2) {
                     const real v2 = s2 * inv_et;
                     const real w = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
-                    prim_data[gid] = sr::Primitive<2>{d/w, v1, v2, peq, dchi / d};
+                    prim_data[gid] = {d/w, v1, v2, peq, dchi / d};
                 } else {
                     const real v2 = s2 * inv_et;
                     const real v3 = s3 * inv_et;
                     const real w = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
-                    prim_data[gid] = sr::Primitive<3>{d/w, v1, v2, v3, peq, dchi / d};
+                    prim_data[gid] = {d/w, v1, v2, v3, peq, dchi / d};
                 }
             #endif
             workLeftToDo = false;
@@ -423,7 +423,7 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
             const real aL    = helpers::my_min(bl, (vL - csL)/(1 - vL*csL));
             const real aR    = helpers::my_max(br, (vR + csR)/(1 + vR*csR));
 
-            return sr::Eigenvals<dim>(aL, aR, csL, csR);
+            return {aL, aR, csL, csR};
         }
     //-----------Calculate wave speeds based on Mignone & Bodo 2005
     case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
@@ -447,7 +447,7 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
             const real aL = lamLm < lamRm ? lamLm : lamRm;
             const real aR = lamLp > lamRp ? lamLp : lamRp;
 
-            return sr::Eigenvals<dim>(aL, aR, csL, csR);
+            return {aL, aR, csL, csR};
         }
     //-----------Calculate wave speeds based on Huber & Kissmann 2021
     case simbi::WaveSpeeds::HUBER_AND_KISSMANN_2021:
@@ -471,7 +471,7 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
             const real aL = lamLm < lamRm ? lamLm : lamRm;
             const real aR = lamLp > lamRp ? lamLp : lamRp;
 
-            return sr::Eigenvals<dim>(aL, aR, csL, csR);
+            return {aL, aR, csL, csR};
         }
     default: // NAIVE wave speeds
         {
@@ -482,7 +482,7 @@ SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
 
             const real aL = helpers::my_min(aLm, aRm);
             const real aR = helpers::my_max(aLp, aRp);
-            return sr::Eigenvals<dim>(aL, aR, csL, csR);
+            return {aL, aR, csL, csR};
         }
     }
 };
@@ -499,27 +499,32 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t &prims
     const real v2       = prims.vcomponent(2);
     const real v3       = prims.vcomponent(3);
     const real pressure = prims.p;
-    const real lorentz_gamma = prims.lorentz_factor();
+    const real lorentz_factor = prims.lorentz_factor();
     const real h = prims.get_enthalpy(gamma);
+    const real d = rho * lorentz_factor;
+    const real ed = d * lorentz_factor * h;
     if constexpr(dim == 1) {
-        return sr::Conserved<1>{
-            rho * lorentz_gamma, 
-            rho * h * lorentz_gamma * lorentz_gamma * v1,
-            rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma};
+        return {
+            d, 
+            ed * v1,
+            ed - pressure - d
+        };
     } else if constexpr(dim == 2) {
-        return sr::Conserved<2>{
-            rho * lorentz_gamma, 
-            rho * h * lorentz_gamma * lorentz_gamma * v1,
-            rho * h * lorentz_gamma * lorentz_gamma * v2,
-            rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma};
+        return {
+            d, 
+            ed * v1,
+            ed * v2,
+            ed - pressure - d
+        };
 
     } else {
-        return sr::Conserved<3>{
-            rho * lorentz_gamma, 
-            rho * h * lorentz_gamma * lorentz_gamma * v1,
-            rho * h * lorentz_gamma * lorentz_gamma * v2,
-            rho * h * lorentz_gamma * lorentz_gamma * v3,
-            rho * h * lorentz_gamma * lorentz_gamma - pressure - rho * lorentz_gamma};
+        return {
+            d, 
+            ed * v1,
+            ed * v2,
+            ed * v3,
+            ed - pressure - d
+        };
     }
 };
 //---------------------------------------------------------------------
@@ -698,24 +703,25 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims
     const real v3       = prims.vcomponent(3);
     const real pressure = prims.p;
     const real chi      = prims.chi;
-    const real vn       =(nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
-    const real lorentz_gamma = prims.lorentz_factor();
+    const real vn       = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
+    const real lorentz_factor = prims.lorentz_factor();
 
     const real h  = prims.get_enthalpy(gamma);
-    const real d  = rho * lorentz_gamma;
-    const real s1 = rho * lorentz_gamma * lorentz_gamma * h * v1;
-    const real s2 = rho * lorentz_gamma * lorentz_gamma * h * v2;
-    const real s3 = rho * lorentz_gamma * lorentz_gamma * h * v3;
+    const real d  = rho * lorentz_factor;
+    const real ed = d * lorentz_factor * h;
+    const real s1 = ed * v1;
+    const real s2 = ed * v2;
+    const real s3 = ed * v3;
     const real mn = (nhat == 1) ? s1 : (nhat == 2) ? s2 : s3;
     if constexpr(dim == 1) {
-        return sr::Conserved<1>{
+        return {
             d  * vn, 
             s1 * vn + helpers::kronecker(nhat, 1) * pressure, 
             mn - d * vn, 
             d  * vn * chi
         };
     } else if constexpr(dim == 2) {
-        return sr::Conserved<2>{
+        return {
             d  * vn, 
             s1 * vn + helpers::kronecker(nhat, 1) * pressure, 
             s2 * vn + helpers::kronecker(nhat, 2) * pressure, 
@@ -723,7 +729,7 @@ SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims
             d * vn * chi
         };
     } else {
-        return sr::Conserved<3>{
+        return {
             d  * vn, 
             s1 * vn + helpers::kronecker(nhat, 1) * pressure, 
             s2 * vn + helpers::kronecker(nhat, 2) * pressure, 
@@ -746,25 +752,25 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
     const luint nhat,
     const real vface) const
 {
-    const sr::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
     // Grab the necessary wave speeds
     const real aL  = lambda.aL;
     const real aR  = lambda.aR;
     const real aLm = aL < 0 ? aL : 0;
     const real aRp = aR > 0 ? aR : 0;
-    
-    sr::Conserved<dim> net_flux;
-    // Compute the HLL Flux component-wise
-    if (vface < aLm) {
-        net_flux = left_flux - left_state * vface;
-    } else if (vface > aRp) {
-        net_flux = right_flux - right_state * vface;
-    } else {    
-        const auto f_hll = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
-        const auto u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
-        net_flux = f_hll - u_hll * vface;
-    }
 
+    auto net_flux = [&] {
+        // Compute the HLL Flux component-wise
+        if (vface <= aLm) {
+            return left_flux - left_state * vface;
+        } else if (vface >= aRp) {
+            return right_flux - right_state * vface;
+        } else {    
+            const auto f_hll = (left_flux * aRp - right_flux * aLm + (right_state - left_state) * aLm * aRp) / (aRp - aLm);
+            const auto u_hll = (right_state * aRp - left_state * aLm - right_flux + left_flux) / (aRp - aLm);
+            return f_hll - u_hll * vface;
+        }
+    }();
     // Upwind the scalar concentration flux
     if (net_flux.d < 0)
         net_flux.chi = right_prims.chi * net_flux.d;
@@ -787,7 +793,7 @@ SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
     const luint nhat,
     const real vface) const 
 {
-    const sr::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL  = lambda.aL;
     const real aR  = lambda.aR;
     const real aLm = aL < 0 ? aL : 0;

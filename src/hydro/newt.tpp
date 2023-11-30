@@ -383,30 +383,32 @@ template<int dim>
 GPU_CALLABLE_MEMBER 
 Newtonian<dim>::conserved_t Newtonian<dim>::prims2cons(const Newtonian<dim>::primitive_t &prims) const
 {
-    const real rho      = prims.rho;
-    const real v1       = prims.vcomponent(1);
-    const real v2       = prims.vcomponent(2);
-    const real v3       = prims.vcomponent(3);
-    const real et       = prims.get_energy_density(gamma);
+    const real rho = prims.rho;
+    const real v1  = prims.vcomponent(1);
+    const real v2  = prims.vcomponent(2);
+    const real v3  = prims.vcomponent(3);
+    const real et  = prims.get_energy_density(gamma);
     if constexpr(dim == 1) { 
-        return nt::Conserved<1>{
+        return {
             rho, 
             rho * v1,
-            et};
+            et
+        };
     } else if constexpr(dim == 2) {
-        return nt::Conserved<2>{
+        return {
             rho, 
             rho * v1,
             rho * v2,
-            et};
-
+            et
+        };
     } else {
-        return nt::Conserved<3>{
+        return {
             rho, 
             rho * v1,
             rho * v2,
             rho * v3,
-            et};
+            et
+        };
     }
 };
 //---------------------------------------------------------------------
@@ -573,7 +575,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::pri
     const auto et       = prims.get_energy_density(gamma);
     const real m1       = rho * v1;
     if constexpr(dim == 1) {
-        return nt::Conserved<1>{
+        return {
             rho  * vn, 
             m1   * vn + helpers::kronecker(nhat, 1) * pressure, 
             (et + pressure) * vn, 
@@ -581,7 +583,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::pri
         };
     } else if constexpr(dim == 2) {
         const real m2 = rho * v2;
-        return nt::Conserved<2>{
+        return {
             rho * vn, 
             m1  * vn + helpers::kronecker(nhat, 1) * pressure, 
             m2  * vn + helpers::kronecker(nhat, 2) * pressure, 
@@ -591,7 +593,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::pri
     } else {
         const real m2 = rho * v2;
         const real m3 = rho * v3;
-        return nt::Conserved<3>{
+        return {
             rho * vn, 
             m1  * vn + helpers::kronecker(nhat, 1) * pressure, 
             m2  * vn + helpers::kronecker(nhat, 2) * pressure, 
@@ -614,23 +616,24 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
     const luint nhat,
     const real vface) const
 {
-    const nt::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL = lambda.aL;
     const real aR = lambda.aR;
 
-    nt::Conserved<dim> net_flux;
-    // Compute the HLL Flux component-wise
-    if (vface < aL) {
-        net_flux = left_flux - left_state * vface;
-    }
-    else if (vface > aR) {
-        net_flux = right_flux - right_state * vface;
-    }
-    else {    
-        nt::Conserved<dim> f_hll       = (left_flux * aR - right_flux * aL + (right_state - left_state) * aR * aL) / (aR - aL);
-        const nt::Conserved<dim> u_hll = (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
-        net_flux = f_hll - u_hll * vface;
-    }
+    auto net_flux = [&] {
+        // Compute the HLL Flux component-wise
+        if (vface <= aL) {
+            return left_flux - left_state * vface;
+        }
+        else if (vface >= aR) {
+            return right_flux - right_state * vface;
+        }
+        else {    
+            const auto f_hll = (left_flux * aR - right_flux * aL + (right_state - left_state) * aR * aL) / (aR - aL);
+            const auto u_hll = (right_state * aR - left_state * aL - right_flux + left_flux) / (aR - aL);
+            return f_hll - u_hll * vface;
+        }
+    }();
 
     // Upwind the scalar concentration flux
     if (net_flux.rho < 0)
@@ -654,7 +657,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     const luint nhat,
     const real vface) const 
 {
-    const nt::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL    = lambda.aL;
     const real aR    = lambda.aR;
 
