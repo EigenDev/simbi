@@ -290,7 +290,7 @@ def install_simbi(args: argparse.Namespace) -> None:
     try:
         gpu_include = f"{gpu_runtime_dir.split()[0]}/include"
     except IndexError:
-        pass 
+        gpu_include = "" 
     
     h5cc_show = get_output(["h5cc", "-show"]).split()
     hdf5_include = " ".join(
