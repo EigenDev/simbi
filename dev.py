@@ -273,7 +273,7 @@ def install_simbi(args: argparse.Namespace) -> None:
         simbi_env["CXX"] = get_tool("c++")
         print(f"{YELLOW}WRN{RST}: C++ compiler not set")
         print(f"Using symbolic link {simbi_env['CXX']} as default")
-
+    
     gpu_runtime_dir = ""
     if is_tool("nvcc"):
         which_cuda = Path(get_tool("nvcc"))
@@ -287,7 +287,11 @@ def install_simbi(args: argparse.Namespace) -> None:
     elif is_tool("hipcc"):
         gpu_runtime_dir = get_output(["hipconfig", "--rocmpath"])
 
-    gpu_include = f"{gpu_runtime_dir.split()[0]}/include"
+    try:
+        gpu_include = f"{gpu_runtime_dir.split()[0]}/include"
+    except IndexError:
+        pass 
+    
     h5cc_show = get_output(["h5cc", "-show"]).split()
     hdf5_include = " ".join(
         [
