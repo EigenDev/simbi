@@ -21,7 +21,7 @@ pymod   = import('python')
 py3     = pymod.find_installation('python3', required: true)
 py3_dep = py3.dependency()
 omp     = dependency('openmp', language: 'cpp')
-hdf5    = dependency('hdf5', language: 'cpp', required: true)
+hdf5    = dependency('hdf5', language: 'c', required: true)
 # ensure the install directory recognizes conda environment
 py3_purelib   = py3.get_path('purelib')
 py3env_prefix = py3.get_variable('prefix', 'empty')
