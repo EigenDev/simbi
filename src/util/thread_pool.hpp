@@ -17,7 +17,7 @@
 
 namespace simbi {
     namespace pooling {
-		#if __cplusplus >= 202002L
+		#if __cplusplus >= 202002L && !defined(__clang__)
 		using std_thread = std::jthread;
 		#else
 		using std_thread = std::thread;
