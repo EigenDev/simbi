@@ -8,6 +8,7 @@
 #include <Windows.h>
 #elif defined(__linux__) || defined(__APPLE__)
 #include <sys/ioctl.h>
+#include <unistd.h>
 #endif // Windows/Linux/Apple
 
 namespace simbi
