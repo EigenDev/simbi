@@ -21,7 +21,7 @@ pymod   = import('python')
 py3     = pymod.find_installation('python3', required: true)
 py3_dep = py3.dependency()
 omp     = dependency('openmp', language: 'cpp')
-hdf5    = dependency('hdf5', language: 'c', required: true)
+hdf5    = dependency('hdf5', language: 'cpp', required: true)
 # ensure the install directory recognizes conda environment
 py3_purelib   = py3.get_path('purelib')
 py3env_prefix = py3.get_variable('prefix', 'empty')
@@ -33,6 +33,18 @@ elif py3env_prefix.endswith('site-packages')
     py3_install_dir = py3env_prefix
 else
     py3_install_dir = py3.get_install_dir()
+endif
+
+# Check if on a Mac
+host_system = host_machine.system()
+if host_system == 'darwin'
+    homebrew = find_program('brew')
+    if homebrew.found()
+        brew_prefix = run_command(['brew', '--prefix'], check: true).stdout().strip()
+        brew_inc = f'-I@brew_prefix@/include'
+        # brew_lib = f'@brew_prefix@/lib'
+        add_project_arguments([brew_inc], language: 'cpp')
+    endif
 endif
 
 install_dir_permission = run_command(py3,
