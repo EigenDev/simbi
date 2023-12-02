@@ -36,23 +36,11 @@ def get_tool(name: str) -> Optional[str]:
             comps: list[str]
             homebrew = Path('/opt/homebrew/opt/')
             if not homebrew:
-                raise FileExistsError("Homebrew should be installed for Mac downloads")
-            #search for gcc in homebrew channel
-            if name == 'cc':
-                comps = [str(x) for x in Path(f'{homebrew}/gcc/bin/').glob('gcc*')]
-            elif name == 'c++':
-                comps = [str(x) for x in Path(f'{homebrew}/gcc/bin/').glob('g++*')]
-            # no gcc? ok, search for LLVM's clang    
-            if not comps:
-                if name == 'cc':
-                    comps = [str(x) for x in Path(f'{homebrew}/llvm/bin').glob('clang*')]
-                elif name == 'c++':
-                    comps  = [str(x) for x in Path(f'{homebrew}/llvm/bin').glob('clang++*')]
-            
-            return min(comps, key=len)
-        else:
-            return which(name)
-    
+                print(f"{YELLOW}WRN{RST}no homebrew found. running Apple's default compiler might raise issues")
+                cont = input("Continue anyway? [y/N]")
+                if cont == 'N':
+                    sys.exit(0)
+        return which(name)
     return which(name)
 
 
@@ -367,7 +355,7 @@ def uninstall_simbi(args: argparse.Namespace) -> None:
     subprocess.run([sys.executable, "-m", "pip", "uninstall", "simbi"], check=True)
     try:
         exts = [str(ext) for ext in Path(simbi_dir / "simbi/libs/").glob("*.so")]
-        subprocess.run(["rm", "-r", *exts], check=True, capture_output=True)
+        subprocess.run(["rm", "-ri", *exts], check=True, capture_output=True)
     except subprocess.CalledProcessError as err:
         print(f"{err} {err.stderr.decode('utf8')}")
 
