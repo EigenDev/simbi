@@ -227,15 +227,15 @@ void Newtonian<dim>::emit_troubled_cells() {
             const real s  = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
             const real v2 = (s * s) / (et * et);
             if constexpr(dim == 1) {
-                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, iter: %lu\n", 
+                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, iter: %" PRIu64 "\n", 
                         cons[gid].rho, prims[gid].p, v2, x1mean, n
                 );
             } else if constexpr(dim == 2) {
-                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", 
+                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %" PRIu64 "\n", 
                         cons[gid].rho, prims[gid].p, v2, x1mean, x2mean, n
                 );
             } else {
-                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %lu\n", 
+                printf("\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %" PRIu64 "\n", 
                         cons[gid].rho, prims[gid].p, v2, x1mean, x2mean, x3mean, n
                 );
             }

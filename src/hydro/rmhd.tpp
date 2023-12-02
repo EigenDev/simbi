@@ -231,15 +231,15 @@ void RMHD<dim>::emit_troubled_cells() {
             const real bsq = (b1 * b1 + b2 * b2 + b3 * b3);
             const real w  = 1 / std::sqrt(1 - vsq);
             if constexpr(dim == 1) {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, iter: %lu\n", 
+                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, iter: %" PRIu64 "\n", 
                         cons[gid].d / w, prims[gid].p, vsq, bsq, x1mean, n
                 );
             } else if constexpr(dim == 2) {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %lu\n", 
+                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %" PRIu64 "\n", 
                         cons[gid].d / w, prims[gid].p, vsq, bsq, x1mean, x2mean, n
                 );
             } else {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %lu\n", 
+                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: %.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, x2coord: %.2e, x3coord: %.2e, iter: %" PRIu64 "\n", 
                         cons[gid].d / w, prims[gid].p, vsq, bsq, x1mean, x2mean, x3mean, n
                 );
             }
