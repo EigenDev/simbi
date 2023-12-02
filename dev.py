@@ -28,9 +28,31 @@ flag_overrides["four_velocity"] = ["--four-velocity", "--no-four-velocity"]
 flag_overrides["install_mode"] = ["develop", "default"]
 
 
-def get_tool(name: str) -> str:
+def get_tool(name: str) -> Optional[str]:
+    import platform 
     from shutil import which
-
+    if name in ['cc', 'c++']:
+        if platform.system() == 'Darwin':
+            comps: list[str]
+            homebrew = Path('/opt/homebrew/opt/')
+            if not homebrew:
+                raise FileExistsError("Homebrew should be installed for Mac downloads")
+            #search for gcc in homebrew channel
+            if name == 'cc':
+                comps = [str(x) for x in Path(f'{homebrew}/gcc/bin/').glob('gcc*')]
+            elif name == 'c++':
+                comps = [str(x) for x in Path(f'{homebrew}/gcc/bin/').glob('g++*')]
+            # no gcc? ok, search for LLVM's clang    
+            if not comps:
+                if name == 'cc':
+                    comps = [str(x) for x in Path(f'{homebrew}/llvm/bin').glob('clang*')]
+                elif name == 'c++':
+                    comps  = [str(x) for x in Path(f'{homebrew}/llvm/bin').glob('clang++*')]
+            
+            return min(comps, key=len)
+        else:
+            return which(name)
+    
     return which(name)
 
 
@@ -269,6 +291,11 @@ def install_simbi(args: argparse.Namespace) -> None:
     )
 
     reconfigure_flag = "--reconfigure" if build_configured else ""
+    if "CC" not in simbi_env:
+        simbi_env["CC"] = get_tool("cc")
+        print(f"{YELLOW}WRN{RST}: C compiler not set")
+        print(f"Using symbolic link {simbi_env['CC']} as default")
+        
     if "CXX" not in simbi_env:
         simbi_env["CXX"] = get_tool("c++")
         print(f"{YELLOW}WRN{RST}: C++ compiler not set")
@@ -336,12 +363,18 @@ def install_simbi(args: argparse.Namespace) -> None:
 
 
 def uninstall_simbi(args: argparse.Namespace) -> None:
+    simbi_dir = Path().resolve()
     subprocess.run([sys.executable, "-m", "pip", "uninstall", "simbi"], check=True)
-
+    try:
+        exts = [str(ext) for ext in Path(simbi_dir / "simbi/libs/").glob("*.so")]
+        subprocess.run(["rm", "-r", *exts], check=True, capture_output=True)
+    except subprocess.CalledProcessError as err:
+        print(f"{err} {err.stderr.decode('utf8')}")
 
 def main() -> int:
     _, args = parse_the_arguments()
     args.func(args)
+    return 0
 
 
 if __name__ == "__main__":
