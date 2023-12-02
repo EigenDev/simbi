@@ -18,8 +18,10 @@
 namespace simbi {
     namespace pooling {
 		#if __cplusplus >= 202002L && !defined(__clang__)
+		constexpr bool need_join = false;
 		using std_thread = std::jthread;
 		#else
+		constexpr bool need_join = true;
 		using std_thread = std::thread;
 		#endif 
 		/**
@@ -103,11 +105,11 @@ namespace simbi {
 						should_terminate = true;
 					}
 					cv_task.notify_all();
-					#if __cplusplus < 202002L
-					for (std_thread& active_thread : threads) {
-						active_thread.join();
+					if constexpr(need_join) {
+						for (std_thread& active_thread : threads) {
+							active_thread.join();
+						}
 					}
-					#endif 
 					threads.clear();
 				}
 
