@@ -80,20 +80,19 @@ namespace simbi {
 
         class InterruptException : public std::exception
         {
-            public:
-                InterruptException(int s);
-                const char* what() const noexcept;
-                int status;
+          public:
+            InterruptException(int s);
+            const char* what() const noexcept;
+            int status;
         };
 
         class SimulationFailureException : public std::exception
         {
-            public:
-                SimulationFailureException(const char* reason,
-                                           const char* details);
-                const char* what() const noexcept;
-                const std::string reason;
-                const std::string details;
+          public:
+            SimulationFailureException(const char* reason, const char* details);
+            const char* what() const noexcept;
+            const std::string reason;
+            const std::string details;
         };
 
         /*
