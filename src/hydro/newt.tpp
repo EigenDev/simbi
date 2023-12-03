@@ -569,7 +569,7 @@ Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::pri
     const real pressure = prims.p;
     const real chi      = prims.chi;
     const real vn       = nhat == 1 ? v1 : nhat == 2 ? v2 : v3;
-    const auto et       = prims.get_energy_density(gamma);
+    const real et       = prims.get_energy_density(gamma);
     const real m1       = rho * v1;
     if constexpr(dim == 1) {
         return {
