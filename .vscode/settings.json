@@ -54,4 +54,53 @@
         "type_traits": "cpp",
         "utility": "cpp"
     }
+
+    "doxdocgen.generic.authorEmail": "md4469@nyu.edu",
+    "doxdocgen.generic.authorName": "Marcus DuPont",
+    "doxdocgen.generic.commandSuggestionAddPrefix": true,
+    "doxdocgen.file.copyrightTag": [
+        "@copyright Copyright (c) {year} Marcus DuPont"
+    ],
+    "doxdocgen.file.customTag": [
+        "***********************(C) COPYRIGHT {year} Marcus DuPont**********************",
+        "@file{indent:12}{file}",
+        "@brief{indent:12}",
+        "",
+        "@note{indent:12}",
+        "@history:",
+        "  Version{indent:12}Date{indent:28}Author{indent:44}Modification{indent:60}Email",
+        "  V0.8.0{indent:12}{date}{indent:28}{author}{indent:44}{indent:60}{email}",
+        "",
+        "@verbatim",
+        "==============================================================================",
+        "",
+        "==============================================================================",
+        "@endverbatim",
+        "***********************(C) COPYRIGHT {year} Marus DuPont**********************",
+    ],
+    "doxdocgen.file.versionTag": "@version 0.8",
+    "doxdocgen.generic.dateFormat": "MMM-DD-YYYY",
+    "doxdocgen.file.fileOrder": [
+        // "file",      // @file
+        // "brief", // @brief
+        // "author",    // 
+        // "version",   // 
+        // "date",      // 
+        // "empty", // 
+        // "copyright",// 
+        // "empty",
+        "custom" //
+    ],
+    "doxdocgen.generic.customTags": [
+        "@retval{indent:16}",
+    ],
+    "doxdocgen.generic.order": [
+        "brief",
+        "param",
+        "return",
+        "custom",
+    ],
+    "doxdocgen.generic.paramTemplate": "@param[in/out/in,out]{indent:17}{param}:",
+    "doxdocgen.generic.briefTemplate": "@brief{indent:17}",
+    "doxdocgen.generic.returnTemplate": "@return{indent:17}{type}",
 }
