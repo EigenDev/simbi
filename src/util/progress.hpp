@@ -1,3 +1,20 @@
+/**
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       progress.hpp
+ * @brief      implements a custom, portable progress bar
+ *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ */
 #ifndef PROGRESS_HPP
 #define PROGRESS_HPP
 

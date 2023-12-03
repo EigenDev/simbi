@@ -1,3 +1,20 @@
+/**
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       logger.hpp
+ * @brief      the logger "context" which executes most of the I/O on the host
+ *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ */
 #ifndef LOGGER_HPP
 #define LOGGER_HPP
 

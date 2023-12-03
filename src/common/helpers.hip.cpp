@@ -43,10 +43,7 @@ namespace simbi {
 
         const char* SimulationFailureException::what() const noexcept
         {
-            const auto err_ms = "Simulation failed\n reason: " + reason +
-                                "\n details: " + details;
-            const auto err_char = err_ms.c_str();
-            return err_char;
+            return "Simulation Crashed";
         }
 
         //====================================================================================================

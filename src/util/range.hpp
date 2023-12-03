@@ -1,3 +1,20 @@
+/**
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       range.hpp
+ * @brief      implements a custom python-like range generator
+ *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ */
 #ifndef RANGE_HPP
 #define RANGE_HPP
 

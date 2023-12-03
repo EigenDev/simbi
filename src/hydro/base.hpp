@@ -1,3 +1,20 @@
+/**
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       base.hpp
+ * @brief      base state for all hydro states to derive from
+ *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ */
 #ifndef BASE_HPP
 #define BASE_HPP
 

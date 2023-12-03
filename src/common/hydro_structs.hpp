@@ -1,9 +1,20 @@
-/*
- * Houses the different 1D struct members Conserved, Primitives, Eigenvals
- * for ease of access and organization. All definitions within header files
- * to ensure inlining by the compiler.
+/**
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       hydro_structs.hpp
+ * @brief      the data structs for states, primtives, and sim configuration
+ *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
  */
-
 #ifndef HYDRO_STRUCTS_HPP
 #define HYDRO_STRUCTS_HPP
 

@@ -1,3 +1,20 @@
+/**
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       helpers.hip.hpp
+ * @brief      home to all helper functions used throughout library
+ *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ */
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 

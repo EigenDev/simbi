@@ -1,10 +1,3 @@
-/*
- * C++ Source to perform RMHD Calculations
- * Marcus DuPont
- * New York University
- * 11/14/2023
- * Compressible Hydro Simulation
- */
 #include "util/device_api.hpp"     // for syncrohonize, devSynch, ...
 #include "util/logger.hpp"         // for logger
 #include "util/parallel_for.hpp"   // for parallel_for

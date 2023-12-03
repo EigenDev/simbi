@@ -1,7 +1,21 @@
 /**
- * Houses all of the system configuration enum classes
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       enums.hpp
+ * @brief A place to house compilation enums for context switching in a sim
  *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
  */
+
 #ifndef ENUMS_HPP
 #define ENUMS_HPP
 

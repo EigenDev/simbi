@@ -1,10 +1,3 @@
-/*
- * C++ Source to perform SRHD Calculations
- * Marcus DuPont
- * New York University
- * 07/15/2020
- * Compressible Hydro Simulation
- */
 #include "util/device_api.hpp"     // for syncrohonize, devSynch, ...
 #include "util/logger.hpp"         // for logger
 #include "util/parallel_for.hpp"   // for parallel_for

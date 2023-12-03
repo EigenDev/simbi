@@ -1,6 +1,19 @@
 /**
- * Where all of the type traits will live
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       traits.hpp
+ * @brief      home of all type traits
  *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
  */
 #ifndef TRAITS_HPP
 #define TRAITS_HPP

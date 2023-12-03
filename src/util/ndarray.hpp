@@ -1,4 +1,20 @@
-// Header to implement custom cpu / gpu array class
+/**
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       ndarray.hpp
+ * @brief      implementation of custom cpu-gpu translatable array class
+ *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ */
 #ifndef NDARRAY_HPP
 #define NDARRAY_HPP
 

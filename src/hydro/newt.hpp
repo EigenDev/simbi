@@ -1,6 +1,21 @@
-/*
- * Single header for 1, 2, and 3D Newtonian Calculations
+/**
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       newt.hpp
+ * @brief      single header for 1, 2, adn 3D Newtonain calculations
+ *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
  */
+
 #ifndef NEWT_HPP
 #define NEWT_HPP
 
