@@ -1,9 +1,9 @@
 # Module to config the initial condition for the SIMBI
-# hydro setup. From here on, I will fragment the code 
+# hydro setup. From here on, I will fragment the code
 # to try and reduce the confusion between functions
 
-import numpy as np 
-import h5py 
+import numpy as np
+import h5py
 import numpy.typing as npt
 from ..key_types import *
 from . import helpers
@@ -13,6 +13,7 @@ from itertools import product, permutations
 
 def dot_product(a: NDArray[Any], b: NDArray[Any]) -> Any:
     return np.sum([x * y for x, y in zip(a, b)], axis=0)
+
 
 def calc_lorentz_factor(
         vsquared: NDArray[Any],
@@ -44,9 +45,6 @@ def calc_internal_energy(
         regime: str) -> FloatOrArray:
     return 1.0 + 0.5 * np.asanyarray(vsquared) if regime == 'classical' else 1
 
-def calc_vsq(velocity: Union[NDArray[Any],
-                Sequence[float]]) -> NDArray[Any]:
-    return np.array(sum(vcomp * vcomp for vcomp in velocity))
 
 def calc_labframe_densiity(
         rho: FloatOrArray,
@@ -77,13 +75,14 @@ def calc_labframe_energy(
         bfields: NDArray[numpy_float]) -> FloatOrArray:
     if len(bfields) == 0:
         bfields = np.zeros_like(velocity)
-        
+
     bsq: FloatOrArray = dot_product(bfields, bfields)
     vdb: FloatOrArray = dot_product(velocity, bfields)
     vsq: FloatOrArray = dot_product(velocity, velocity)
-    
+
     return rho * lorentz * lorentz * enthalpy - pressure - rho * lorentz + 0.5 * bsq + 0.5 * (bsq * vsq - vdb**2)
-    
+
+
 def flatten_fully(x: Any) -> Any:
     if any(dim == 1 for dim in x.shape):
         x = np.vstack(x)
@@ -91,131 +90,139 @@ def flatten_fully(x: Any) -> Any:
             return x.flatten()
         return flatten_fully(x)
     else:
-        return np.asanyarray(x) 
-    
+        return np.asanyarray(x)
+
+
 def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> None:
     print(f"Loading from checkpoint: {filename}...", flush=True)
     setup: dict[str, Any] = {}
     volume_factor: Union[float, NDArray[numpy_float]] = 1.0
-    with h5py.File(filename, 'r') as hf:         
-        ds  = hf.get('sim_info')
-        nx  = ds.attrs['nx'] or 1
-        ny  = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
-        nz  = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
+    with h5py.File(filename, 'r') as hf:
+        ds = hf.get('sim_info')
+        nx = ds.attrs['nx'] or 1
+        ny = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
+        nz = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
         try:
             ndim = ds.attrs['dimensions']
         except KeyError:
             ndim = 1 + (ny > 1) + (nz > 1)
-            
-        setup['ad_gamma']     = ds.attrs['adiabatic_gamma']
-        setup['regime']       = ds.attrs['regime'].decode('utf-8')
+
+        setup['ad_gamma'] = ds.attrs['adiabatic_gamma']
+        setup['regime'] = ds.attrs['regime'].decode('utf-8')
         setup['coord_system'] = ds.attrs['geometry'].decode('utf-8')
-        setup['mesh_motion']  = ds.attrs['mesh_motion']
-        setup['linspace']     = ds.attrs['linspace']
-        
-        #------------------------
+        setup['mesh_motion'] = ds.attrs['mesh_motion']
+        setup['linspace'] = ds.attrs['linspace']
+
+        # ------------------------
         # Generate Mesh
-        #------------------------
+        # ------------------------
         arr_gen: Any = np.linspace if setup['linspace'] else np.geomspace
-        funcs  = [arr_gen, np.linspace, np.linspace]
+        funcs = [arr_gen, np.linspace, np.linspace]
         mesh = {
             f'x{i+1}': hf.get(f'x{i+1}')[:] for i in range(ndim)
         }
-        
+
         if ds.attrs['x1max'] > mesh['x1'][-1]:
-            mesh['x1'] = arr_gen(ds.attrs['x1min'], ds.attrs['x1max'], ds.attrs['xactive_zones'])
-        
+            mesh['x1'] = arr_gen(
+                ds.attrs['x1min'], ds.attrs['x1max'], ds.attrs['xactive_zones'])
+
         if setup['mesh_motion']:
             if ndim == 1 and setup['coord_system'] != 'cartesian':
                 volume_factor = helpers.calc_cell_volume1D(
-                    x1=mesh['x1'], 
+                    x1=mesh['x1'],
                     coord_system=setup['coord_system']
                 )
             elif ndim == 2:
                 volume_factor = helpers.calc_cell_volume2D(
-                    x1=mesh['x1'], 
+                    x1=mesh['x1'],
                     x2=mesh['x2'],
                     coord_system=setup['coord_system']
                 )
             elif ndim == 3:
                 raise NotImplementedError()
                 # volume_factor = helpers.calc_cell_volume3D(
-                #     x1=mesh['x1'], 
+                #     x1=mesh['x1'],
                 #     x2=mesh['x2'],
                 #     x3=mesh['x3'],
                 #     coord_system=setup['coord_system']
                 # )
-            
+
             if setup['coord_system'] != 'cartesian':
-                npad = tuple(tuple(val) for val in [[((ds.attrs['first_order']^1) + 1), 
-                                                     ((ds.attrs['first_order']^1) + 1)]] * ndim)
+                npad = tuple(tuple(val) for val in [[((ds.attrs['first_order'] ^ 1) + 1),
+                                                     ((ds.attrs['first_order'] ^ 1) + 1)]] * ndim)
                 volume_factor = np.pad(volume_factor, npad, 'edge')
-        
-        rho  = hf.get('rho')[:]
-        v    = [(hf.get(f'v{dim}') or hf.get(f'v'))[:] for dim in range(1,ndim + 1)]
-        p    = hf.get('p')[:]         
-        chi  = (hf.get('chi') or np.zeros_like(rho))[:]
+
+        rho = hf.get('rho')[:]
+        v = [(hf.get(f'v{dim}') or hf.get(f'v'))[:]
+             for dim in range(1, ndim + 1)]
+        p = hf.get('p')[:]
+        chi = (hf.get('chi') or np.zeros_like(rho))[:]
         rho = flatten_fully(rho.reshape(nz, ny, nx))
-        v   = [flatten_fully(vel.reshape(nz, ny, nx)) for vel in v]
-        p   = flatten_fully(p.reshape(nz, ny, nx))
+        v = [flatten_fully(vel.reshape(nz, ny, nx)) for vel in v]
+        p = flatten_fully(p.reshape(nz, ny, nx))
         chi = flatten_fully(chi.reshape(nz, ny, nx))
-        
-        #-------------------------------
+
+        # -------------------------------
         # Load Fields
-        #-------------------------------
-        vsqr = np.sum(vel * vel for vel in v) # type: ignore
+        # -------------------------------
+        vsqr = np.sum(vel * vel for vel in v)  # type: ignore
         if setup['regime'] == "srhd":
             if ds.attrs['using_gamma_beta']:
                 W = (1 + vsqr) ** 0.5
-                v     = [vel / W for vel in v]
-                vsqr /= W**2 
+                v = [vel / W for vel in v]
+                vsqr /= W**2
             else:
                 W = (1 - vsqr) ** (-0.5)
         else:
             W = 1
-            
+
         if setup['regime'] == "srhd":
             h = 1.0 + setup['ad_gamma'] * p / (rho * (setup['ad_gamma'] - 1.0))
-            e = rho * W * W * h - p - rho * W 
+            e = rho * W * W * h - p - rho * W
         else:
-            h = 1.0 
+            h = 1.0
             e = p / (setup['ad_gamma'] - 1.0) + 0.5 * rho * vsqr
-            
-        momentum         = np.asarray([rho * W * W * h * vel for vel in v])
+
+        momentum = np.asarray([rho * W * W * h * vel for vel in v])
         model.start_time = ds.attrs['current_time']
-        model.x1         = mesh['x1']
+        model.x1 = mesh['x1']
         if ndim >= 2:
             model.x2 = mesh['x2']
         if ndim >= 3:
             model.x3 = mesh['x3']
-            
+
         if ndim == 1:
             model.u = np.array([rho * W, *momentum, e]) * volume_factor
         else:
-            model.u = np.array([rho * W, *momentum, e, rho * W * chi]) * volume_factor
-        
+            model.u = np.array(
+                [rho * W, *momentum, e, rho * W * chi]) * volume_factor
+
         model.chkpt_idx = ds.attrs['chkpt_idx']
-        
+
+
 def initializeModel(model: Any, first_order: bool, volume_factor: Union[float, NDArray[Any]], passive_scalars: Union[npt.NDArray[Any], Any]) -> None:
     if passive_scalars is not None:
-        model.u[-1,...] = passive_scalars * model.u[0]
-    
+        model.u[-1, ...] = passive_scalars * model.u[0]
+
     # npad is a tuple of (n_before, n_after) for each dimension
-    npad = ((0,0),) + tuple(tuple(val) for val in [[((first_order^1) + 1),  ((first_order^1) + 1)]] * model.dimensionality) 
-    model.u = np.pad(model.u  * volume_factor, npad, 'edge')
-    
+    npad = ((0, 0),) + tuple(tuple(val)
+                             for val in [[((first_order ^ 1) + 1),  ((first_order ^ 1) + 1)]] * model.dimensionality)
+    model.u = np.pad(model.u * volume_factor, npad, 'edge')
+
+
 def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None:
     if not model.mhd:
         model.nvars = (3 + model.dimensionality)
     else:
         model.nvars = 9
-        
+
     # Initialize conserved u-array and flux arrays
-    model.u = np.zeros(shape=(model.nvars,*np.asanyarray(model.resolution).flatten()[ ::- 1]))
-    
+    model.u = np.zeros(
+        shape=(model.nvars, *np.asanyarray(model.resolution).flatten()[::- 1]))
+
     srmhd = model.regime == "srmhd"
     if model.discontinuity:
-        logger.info(  
+        logger.info(
             f'Initializing Problem With a {str(model.dimensionality)}D Discontinuity...')
 
         if len(model.geometry) == 3 and isinstance(model.geometry[0], (int, float)):
@@ -233,23 +240,24 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
                 geom_tuple[idx][0]) /
             model.resolution[idx] for idx in range(
                 len(geom_tuple))]
-        
+
         pieces = [(None, round(break_points[idx] / spacings[idx]))
-                    for idx in range(len(break_points))]
+                  for idx in range(len(break_points))]
 
         # partition the grid based on user-defined partition coordinates
         partition_inds = list(product(*[permutations(x) for x in pieces]))
-        partition_inds = [tuple([slice(*y) for y in x]) for x in partition_inds]
+        partition_inds = [tuple([slice(*y) for y in x])
+                          for x in partition_inds]
         partitions = [model.u[(..., *sector)] for sector in partition_inds]
-        
+
         for idx, part in enumerate(partitions):
             state = initial_state[idx]
             rho, *velocity, pressure = state[:model.number_of_non_em_terms]
             velocity = np.asanyarray(velocity)
             # check if there are any bfields
             bfields = state[model.number_of_non_em_terms:]
-            
-            vsqr = calc_vsq(velocity)
+
+            vsqr = dot_product(velocity, velocity)
             lorentz_factor = calc_lorentz_factor(vsqr, model.regime)
             internal_energy = calc_internal_energy(vsqr, model.regime)
             total_enthalpy = calc_enthalpy(
@@ -264,7 +272,8 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
                 rho, lorentz_factor, enthalpy_limit, velocity, bfields)
 
             if model.dimensionality == 1:
-                part[...] = np.array([dens, *mom, energy, *bfields, 0.0])[:, None]
+                part[...] = np.array(
+                    [dens, *mom, energy, *bfields, 0.0])[:, None]
             else:
                 part[...] = (part[...].transpose(
                 ) + np.array([dens, *mom, energy, *bfields, 0.0])).transpose()
@@ -273,8 +282,8 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
         velocity = np.asanyarray(velocity)
         # check if there are any bfields
         bfields = initial_state[model.number_of_non_em_terms:]
-        
-        vsqr = calc_vsq(velocity)
+
+        vsqr = dot_product(velocity, velocity)
         lorentz_factor = calc_lorentz_factor(vsqr, model.regime)
         internal_energy = calc_internal_energy(vsqr, model.regime)
         total_enthalpy = calc_enthalpy(
@@ -294,8 +303,7 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
                 [model.init_density, *model.init_momentum, model.init_energy, *bfields, 0.0])
         else:
             model.u[...] = np.array([model.init_density,
-                *model.init_momentum,
-                model.init_energy,
-                *bfields,
-                np.zeros_like(model.init_density)])
-            
+                                     *model.init_momentum,
+                                     model.init_energy,
+                                     *bfields,
+                                     np.zeros_like(model.init_density)])
