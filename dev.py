@@ -33,8 +33,8 @@ def get_tool(name: str) -> Optional[str]:
     from shutil import which
     if name in ['cc', 'c++']:
         if platform.system() == 'Darwin':
-            homebrew = Path('/opt/homebrew/opt/')
-            if not homebrew:
+            homebrew = Path('/opt/homebrew/')
+            if not homebrew.is_dir():
                 print(f"{YELLOW}WRN{RST}no homebrew found. running Apple's default compiler might raise issues")
                 cont = input("Continue anyway? [y/N]")
                 if cont == 'N':
