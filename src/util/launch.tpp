@@ -1,4 +1,5 @@
-#include "kernel.hpp" // for Kernel
+#include "kernel.hpp"   // for Kernel
+
 namespace simbi {
 
     //
@@ -9,21 +10,22 @@ namespace simbi {
     {
         f(args...);
     }
+
     //
     // Launch with explicit (or partial) configuration
     //
     template <typename Function, typename... Arguments>
-    void launch(const ExecutionPolicy<> &policy, Function f, Arguments... args)
+    void launch(const ExecutionPolicy<>& policy, Function f, Arguments... args)
     {
 
-        #if GPU_CODE
-            Kernel<<<policy.gridSize, 
-                     policy.blockSize, 
-                     policy.sharedMemBytes, 
-                     policy.stream>>>(f, args...);
-        #else 
-            f(args...);
-        #endif
+#if GPU_CODE
+        Kernel<<<policy.gridSize,
+                 policy.blockSize,
+                 policy.sharedMemBytes,
+                 policy.stream>>>(f, args...);
+#else
+        f(args...);
+#endif
     }
 
-} // namespace simbi
+}   // namespace simbi

@@ -5,315 +5,314 @@
 #mesondefine COLUMN_MAJOR
 #mesondefine FOUR_VELOCITY
 
-#include <chrono>         // for high_resolution_clock
-#include <cinttypes>      // for uint32_t, int64_t, uint64_t
-#include <csignal>        // for size_t
-#include <string>         // for allocator, string
+#include <chrono>      // for high_resolution_clock
+#include <cinttypes>   // for uint32_t, int64_t, uint64_t
+#include <csignal>     // for size_t
+#include <string>      // for allocator, string
 
 /*
-* defines a global namespace for functions and
-* variables scattered throughout the code
-*/
-namespace global
-{
+ * defines a global namespace for functions and
+ * variables scattered throughout the code
+ */
+namespace global {
     // Flag that detects whether program is run using openmp
     inline bool use_omp = false;
 
-    enum class Platform: int {CPU = 0, GPU = 1};
-    enum class Runtime:  int {CUDA = 0, ROCM = 1, CPU = 2};
-    enum class Velocity: int {Beta = 0, FourVelocity = 1};
+    enum class Platform : int {
+        CPU = 0,
+        GPU = 1
+    };
+    enum class Runtime : int {
+        CUDA = 0,
+        ROCM = 1,
+        CPU  = 2
+    };
+    enum class Velocity : int {
+        Beta         = 0,
+        FourVelocity = 1
+    };
 
-    // enum to check the relativisitc primitive velocity type (beta, or gamma-beta)
-    #if FOUR_VELOCITY
+// enum to check the relativisitc primitive velocity type (beta, or gamma-beta)
+#if FOUR_VELOCITY
     constexpr Velocity VelocityType = Velocity::FourVelocity;
-    #else
+#else
     constexpr Velocity VelocityType = global::Velocity::Beta;
-    #endif
+#endif
 
     // max iterations in newton-raphson loop
     const int MAX_ITER = 1000;
-} // namespace global
+}   // namespace global
 
 using luint = uint64_t;
 using lint  = int64_t;
 
 //========================= FLOAT PRECISION CHECK
 #if FLOAT_PRECISION
-#if defined(GPU_PLATFORM_AMD)
+    #if defined(GPU_PLATFORM_AMD)
 using atomic_cast = unsigned int;
-#else
+    #else
 using atomic_cast = int;
-#endif
-#define __int_as_real __int_as_float
-#define __real_as_int __float_as_int
+    #endif
+    #define __int_as_real __int_as_float
+    #define __real_as_int __float_as_int
 using real = float;
-namespace global
-{
+
+namespace global {
     // newton-raphson tolerance scale
     constexpr real tol_scale = 1e-6;
-} // namespace global
+}   // namespace global
 #else
-#if defined(GPU_PLATFORM_AMD)
+    #if defined(GPU_PLATFORM_AMD)
 using atomic_cast = unsigned long long;
-#else
+    #else
 using atomic_cast = long long;
-#endif
-#define __int_as_real __longlong_as_double
-#define __real_as_int __double_as_longlong
+    #endif
+    #define __int_as_real __longlong_as_double
+    #define __real_as_int __double_as_longlong
 using real = double;
-namespace global
-{
+
+namespace global {
     // newton-raphson tolerance scale
     constexpr real tol_scale = 1e-12;
-} // namespace global
-#endif 
+}   // namespace global
+#endif
 
-namespace global
-{
-    //======================== COLUMN MAJOR CHECK
-    #if COLUMN_MAJOR 
+namespace global {
+//======================== COLUMN MAJOR CHECK
+#if COLUMN_MAJOR
     // column major flag
     constexpr bool col_maj = true;
-    #else 
+#else
     // column major flag
     constexpr bool col_maj = false;
-    #endif 
+#endif
 
-    //======================== Managed Memory Check
-    #ifdef MANAGED_MEMORY
+//======================== Managed Memory Check
+#ifdef MANAGED_MEMORY
     // unified memory flag
     constexpr bool managed_memory = true;
-    #else 
+#else
     // unified memory flag
     constexpr bool managed_memory = false;
-    #endif
-} // namespace global
-
-
+#endif
+}   // namespace global
 
 //=========================== RUNTIME CHECK
 #if GPU_CODE
-namespace global
-{
-    template <typename T>
-    __device__ T* shared_memory_proxy()
+namespace global {
+    template <typename T> __device__ T* shared_memory_proxy()
     {
         // do we need an __align__() here? I don't think so...
         extern __shared__ unsigned char memory[];
         return reinterpret_cast<T*>(memory);
     }
-} // namespace global
+}   // namespace global
 
-#define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...) \
-        kernel_name<<<((gridsize), (blocksize)) >>> (__VA_ARGS__);
-namespace global
-{
+    #define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...)                \
+        kernel_name<<<((gridsize), (blocksize))>>>(__VA_ARGS__);
+
+namespace global {
     constexpr Platform BuildPlatform = Platform::GPU;
-} // namespace global
-#define GPU_DEV                        __device__
-#define GPU_DEV_INLINE                 __device__ inline
-#define GPU_LAUNCHABLE                 __global__
-#define GPU_LAMBDA                     __device__
-#define GPU_CALLABLE                   __host__ __device__
-#define GPU_CALLABLE_INLINE            __host__ __device__ inline
-#define GPU_CALLABLE_MEMBER            __host__ __device__
-#define GPU_CALLABLE_INLINE_MEMBER     __host__ __device__ inline
+}   // namespace global
 
-#if GPU_PLATFORM_NVIDIA
-#include <cuda_runtime.h>
-#define CUDA_CODE 1
-namespace global
-{
+    #define GPU_DEV                    __device__
+    #define GPU_DEV_INLINE             __device__ inline
+    #define GPU_LAUNCHABLE             __global__
+    #define GPU_LAMBDA                 __device__
+    #define GPU_CALLABLE               __host__ __device__
+    #define GPU_CALLABLE_INLINE        __host__ __device__ inline
+    #define GPU_CALLABLE_MEMBER        __host__ __device__
+    #define GPU_CALLABLE_INLINE_MEMBER __host__ __device__ inline
+
+    #if GPU_PLATFORM_NVIDIA
+        #include <cuda_runtime.h>
+        #define CUDA_CODE 1
+
+namespace global {
     constexpr int WARP_SIZE = 32;
-} // namespace global
-template<typename T>
-constexpr auto anyGpuMalloc(T **devPtr, size_t size) {
+}   // namespace global
+
+template <typename T> constexpr auto anyGpuMalloc(T** devPtr, size_t size)
+{
     return cudaMalloc(devPtr, size);
 }
-template<typename T>
-constexpr auto anyGpuMallocManaged(T **devPtr, size_t size) {
+
+template <typename T>
+constexpr auto anyGpuMallocManaged(T** devPtr, size_t size)
+{
     return cudaMallocManaged(devPtr, size);
 }
 
-inline auto anyGpuEventCreate(cudaEvent_t *stamp) {
+inline auto anyGpuEventCreate(cudaEvent_t* stamp)
+{
     return cudaEventCreate(stamp);
 };
-inline auto anyGpuEventRecord(cudaEvent_t stamp) { 
+
+inline auto anyGpuEventRecord(cudaEvent_t stamp)
+{
     return cudaEventRecord(stamp);
 };
-constexpr auto anyGpuMemcpy                 = cudaMemcpy;
-constexpr auto anyGpuFree                   = cudaFree;
-constexpr auto anyGpuMemset                 = cudaMemset;
-constexpr auto anyGpuDeviceSynchronize      = cudaDeviceSynchronize;
-constexpr auto anyGpuMemcpyHostToDevice     = cudaMemcpyHostToDevice;
-constexpr auto anyGpuMemcpyDeviceToDevice   = cudaMemcpyDeviceToDevice;
-constexpr auto anyGpuMemcpyDeviceToHost     = cudaMemcpyDeviceToHost;
-constexpr auto anyGpuGetErrorString         = cudaGetErrorString;
-constexpr auto anyGpuEventDestroy           = cudaEventDestroy;
-constexpr auto anyGpuEventSynchronize       = cudaEventSynchronize;
-constexpr auto anyGpuEventElapsedTime       = cudaEventElapsedTime;
-constexpr auto anyGpuGetDeviceProperties    = cudaGetDeviceProperties;
-constexpr auto anyGpuGetDeviceCount         = cudaGetDeviceCount;
-using anyGpuProp_t                          = cudaDeviceProp;
-using anyGpuError_t                         = cudaError_t;
-using anyGpuEvent_t                         = cudaEvent_t;
-using simbiStream_t                         = cudaStream_t;
-#elif GPU_PLATFORM_AMD
-#include "hip/hip_runtime.h"
-#define HIP_CODE 1
-namespace global
-{
-    constexpr int WARP_SIZE = 64;
-} // namespace global
 
-template<typename T>
-constexpr auto anyGpuMalloc(T **devPtr, size_t size) {
+constexpr auto anyGpuMemcpy               = cudaMemcpy;
+constexpr auto anyGpuFree                 = cudaFree;
+constexpr auto anyGpuMemset               = cudaMemset;
+constexpr auto anyGpuDeviceSynchronize    = cudaDeviceSynchronize;
+constexpr auto anyGpuMemcpyHostToDevice   = cudaMemcpyHostToDevice;
+constexpr auto anyGpuMemcpyDeviceToDevice = cudaMemcpyDeviceToDevice;
+constexpr auto anyGpuMemcpyDeviceToHost   = cudaMemcpyDeviceToHost;
+constexpr auto anyGpuGetErrorString       = cudaGetErrorString;
+constexpr auto anyGpuEventDestroy         = cudaEventDestroy;
+constexpr auto anyGpuEventSynchronize     = cudaEventSynchronize;
+constexpr auto anyGpuEventElapsedTime     = cudaEventElapsedTime;
+constexpr auto anyGpuGetDeviceProperties  = cudaGetDeviceProperties;
+constexpr auto anyGpuGetDeviceCount       = cudaGetDeviceCount;
+using anyGpuProp_t                        = cudaDeviceProp;
+using anyGpuError_t                       = cudaError_t;
+using anyGpuEvent_t                       = cudaEvent_t;
+using simbiStream_t                       = cudaStream_t;
+    #elif GPU_PLATFORM_AMD
+        #include "hip/hip_runtime.h"
+        #define HIP_CODE 1
+
+namespace global {
+    constexpr int WARP_SIZE = 64;
+}   // namespace global
+
+template <typename T> constexpr auto anyGpuMalloc(T** devPtr, size_t size)
+{
     return hipMalloc(devPtr, size);
 }
-template<typename T>
-constexpr auto anyGpuMallocManaged(T **devPtr, size_t size) {
+
+template <typename T>
+constexpr auto anyGpuMallocManaged(T** devPtr, size_t size)
+{
     return hipMallocManaged(devPtr, size);
 }
 
-inline auto anyGpuEventCreate(hipEvent_t *stamp) {
+inline auto anyGpuEventCreate(hipEvent_t* stamp)
+{
     return hipEventCreate(stamp);
 };
-inline auto anyGpuEventRecord(hipEvent_t stamp) { 
+
+inline auto anyGpuEventRecord(hipEvent_t stamp)
+{
     return hipEventRecord(stamp);
 };
-constexpr auto anyGpuMemcpy                 = hipMemcpy;
-constexpr auto anyGpuFree                   = hipFree;
-constexpr auto anyGpuMemset                 = hipMemset;
-constexpr auto anyGpuDeviceSynchronize      = hipDeviceSynchronize;
-constexpr auto anyGpuMemcpyHostToDevice     = hipMemcpyHostToDevice;
-constexpr auto anyGpuMemcpyDeviceToDevice   = hipMemcpyDeviceToDevice;
-constexpr auto anyGpuMemcpyDeviceToHost     = hipMemcpyDeviceToHost;
-constexpr auto anyGpuGetErrorString         = hipGetErrorString;
-constexpr auto anyGpuEventDestroy           = hipEventDestroy;
-constexpr auto anyGpuEventSynchronize       = hipEventSynchronize;
-constexpr auto anyGpuEventElapsedTime       = hipEventElapsedTime;
-constexpr auto anyGpuGetDeviceProperties    = hipGetDeviceProperties;
-constexpr auto anyGpuGetDeviceCount         = hipGetDeviceCount;
-using anyGpuProp_t                          = hipDeviceProp_t;
-using anyGpuError_t                         = hipError_t;
-using anyGpuEvent_t                         = hipEvent_t;
-using simbiStream_t                         = hipStream_t;
-#endif
+
+constexpr auto anyGpuMemcpy               = hipMemcpy;
+constexpr auto anyGpuFree                 = hipFree;
+constexpr auto anyGpuMemset               = hipMemset;
+constexpr auto anyGpuDeviceSynchronize    = hipDeviceSynchronize;
+constexpr auto anyGpuMemcpyHostToDevice   = hipMemcpyHostToDevice;
+constexpr auto anyGpuMemcpyDeviceToDevice = hipMemcpyDeviceToDevice;
+constexpr auto anyGpuMemcpyDeviceToHost   = hipMemcpyDeviceToHost;
+constexpr auto anyGpuGetErrorString       = hipGetErrorString;
+constexpr auto anyGpuEventDestroy         = hipEventDestroy;
+constexpr auto anyGpuEventSynchronize     = hipEventSynchronize;
+constexpr auto anyGpuEventElapsedTime     = hipEventElapsedTime;
+constexpr auto anyGpuGetDeviceProperties  = hipGetDeviceProperties;
+constexpr auto anyGpuGetDeviceCount       = hipGetDeviceCount;
+using anyGpuProp_t                        = hipDeviceProp_t;
+using anyGpuError_t                       = hipError_t;
+using anyGpuEvent_t                       = hipEvent_t;
+using simbiStream_t                       = hipStream_t;
+    #endif
 #else
-#define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...) \
+    #define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...)                \
         kernel_name(__VA_ARGS__);
 
-namespace global
-{
+namespace global {
     constexpr auto BuildPlatform = Platform::CPU;
-    constexpr int WARP_SIZE = 32;
-} // namespace global
+    constexpr int WARP_SIZE      = 32;
+}   // namespace global
 
-#define CUDA_CODE 0
-#define HIP_CODE 0
+    #define CUDA_CODE 0
+    #define HIP_CODE  0
 
-#define GPU_DEV                         
-#define GPU_LAUNCHABLE                 
-#define GPU_LAMBDA                     
-#define GPU_CALLABLE               
-#define GPU_CALLABLE_INLINE          inline
-#define GPU_CALLABLE_MEMBER        
-#define GPU_CALLABLE_INLINE_MEMBER   inline
-#define GPU_DEV_INLINE               inline 
-#define __shared__                   static
+    #define GPU_DEV
+    #define GPU_LAUNCHABLE
+    #define GPU_LAMBDA
+    #define GPU_CALLABLE
+    #define GPU_CALLABLE_INLINE inline
+    #define GPU_CALLABLE_MEMBER
+    #define GPU_CALLABLE_INLINE_MEMBER inline
+    #define GPU_DEV_INLINE             inline
+    #define __shared__                 static
 
 // Define a bunch of ghost functions that are optimized out in cpu mode
 namespace simbi {
-    struct u3
-    {
+    struct u3 {
         ~u3() = default;
         uint32_t x;
         uint32_t y;
         uint32_t z;
 
-        u3(uint32_t x = 1, uint32_t y = 1, uint32_t z = 1)
-        :
-        x(x),
-        y(y),
-        z(z)
-        {
-            
-        }
-
+        u3(uint32_t x = 1, uint32_t y = 1, uint32_t z = 1) : x(x), y(y), z(z) {}
     };
 
     using simbiStream_t = int;
     using anyGpuError_t = int;
     using anyGpuProp_t  = int;
-    using dim3 = u3;
+    using dim3          = u3;
 
     using anyGpuEvent_t = std::chrono::high_resolution_clock::time_point;
+
     enum anyGpuMemcpyType {
         anyGpuMemcpyHostToDevice,
         anyGpuMemcpyDeviceToDevice,
         anyGpuMemcpyDeviceToHost
     };
-    inline dim3 blockIdx(1, 1, 1); 
-    inline dim3 blockDim(1, 1, 1); 
-    inline dim3 gridDim(1, 1, 1); 
+
+    inline dim3 blockIdx(1, 1, 1);
+    inline dim3 blockDim(1, 1, 1);
+    inline dim3 gridDim(1, 1, 1);
     inline dim3 threadIdx(1, 1, 1);
     constexpr auto pyBuild = global::BuildPlatform;
 
-    inline int anyGpuMallocManaged(void** ptr , size_t size) {
+    inline int anyGpuMallocManaged(void** ptr, size_t size) { return 0; }
+
+    inline int anyGpuMalloc(void** ptr, size_t size) { return 0; }
+
+    inline int anyGpuMemset(void* ptr, int val, size_t size) { return 0; }
+
+    template <typename T> inline int anyGpuFree(T* ptr) { return 0; }
+
+    inline int
+    anyGpuMemcpy(void* dest, const void* src, size_t size, anyGpuMemcpyType tt)
+    {
         return 0;
     }
 
-    inline int anyGpuMalloc(void** ptr , size_t size) {
+    inline int anyGpuEventCreate(anyGpuEvent_t* a) { return 0; }
+
+    inline int anyGpuEventDestroy(anyGpuEvent_t a) { return 0; }
+
+    inline int anyGpuEventRecord(anyGpuEvent_t a) { return 0; }
+
+    inline int anyGpuEventSynchronize(anyGpuEvent_t a) { return 0; }
+
+    inline int
+    anyGpuEventElapsedTime(float* time, anyGpuEvent_t a, anyGpuEvent_t b)
+    {
         return 0;
     }
 
-    inline int anyGpuMemset(void* ptr, int val, size_t size){
-        return 0;
-    }
+    inline int anyGpuGetDeviceCount(int* count) { return 0; }
 
-    template <typename T> inline int anyGpuFree(T * ptr) {
-        return 0;
-    }
-
-    inline int anyGpuMemcpy( void* dest , const void* src , size_t size, anyGpuMemcpyType tt) {
-        return 0;
-    }
-
-    inline int anyGpuEventCreate(anyGpuEvent_t *a) {
-        return 0;
-    }
-
-    inline int anyGpuEventDestroy(anyGpuEvent_t a) {
-        return 0;
-    }
-
-    inline int anyGpuEventRecord(anyGpuEvent_t a) {
-        return 0;
-    }
-
-    inline int anyGpuEventSynchronize(anyGpuEvent_t a) {
-        return 0;
-    }
-
-    inline int anyGpuEventElapsedTime(float *time, anyGpuEvent_t a, anyGpuEvent_t b) {
-        return 0;
-    }
-
-    inline int anyGpuGetDeviceCount(int *count) {
-        return 0;
-    }
-
-    inline int anyGpuGetDeviceProperties(anyGpuProp_t *props, int i) {
+    inline int anyGpuGetDeviceProperties(anyGpuProp_t* props, int i)
+    {
         return 0;
     };
-    inline void __syncthreads() { return;}
-    inline anyGpuError_t anyGpuDeviceSynchronize() { return 0;}
 
-    template <typename T>
-    inline std::string anyGpuGetErrorString(T) { 
+    inline void __syncthreads() { return; }
+
+    inline anyGpuError_t anyGpuDeviceSynchronize() { return 0; }
+
+    template <typename T> inline std::string anyGpuGetErrorString(T)
+    {
         return std::string("Something went wrong with anyGpu instance");
     }
-} // end simbi
+}   // namespace simbi
 #endif
 
 #endif

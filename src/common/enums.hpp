@@ -1,11 +1,11 @@
 /**
  * Houses all of the system configuration enum classes
- * 
-*/
+ *
+ */
 #ifndef ENUMS_HPP
 #define ENUMS_HPP
 
-namespace simbi{
+namespace simbi {
     enum class MemSide {
         Host,
         Dev,
@@ -24,8 +24,7 @@ namespace simbi{
         PLANAR_CYLINDRICAL,
     };
 
-    enum class Accuracy
-    {
+    enum class Accuracy {
         FIRST_ORDER,
         SECOND_ORDER,
     };
@@ -43,7 +42,7 @@ namespace simbi{
 
     enum class HLLCTYPE {
         CLASSICAL,
-        // Apply the low-Mach HLLC fix found in Fleischmann et al 2020: 
+        // Apply the low-Mach HLLC fix found in Fleischmann et al 2020:
         // https://www.sciencedirect.com/science/article/pii/S0021999120305362
         FLEISCHMANN,
     };
@@ -71,8 +70,8 @@ namespace simbi{
         VOLUMETRIC,
         CHARGES,
     };
-    
+
     constexpr auto comp_wave_speed = WaveSpeeds::MIGNONE_AND_BODO_05;
     constexpr auto comp_hllc_type  = HLLCTYPE::CLASSICAL;
-}
+}   // namespace simbi
 #endif

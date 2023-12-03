@@ -1,0 +1,61 @@
+---
+# options: https://clang.llvm.org/docs/ClangFormatStyleOptions.html
+BasedOnStyle: LLVM
+IndentWidth: 4
+# TabWidth: 1
+PPIndentWidth: 4
+MaxEmptyLinesToKeep: 1
+BracedInitializerIndentWidth: 2
+ContinuationIndentWidth: 4
+# Must be 80 characters or less!
+ColumnLimit: 80
+# does (int) x instead of (int)x
+SpaceAfterCStyleCast: true
+# spaces, not tabs!
+# UseTab: Always
+# if (x) doStuff()  is not allowed, bad style
+AllowShortIfStatementsOnASingleLine: false
+# 
+AlignTrailingComments: true
+AlignAfterOpenBracket: Align
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+SpacesBeforeTrailingComments: 3
+# change the next line to All for Alistair's textbook style
+# AlwaysBreakAfterReturnType: TopLevelDefinitions
+#  #define SHORT_NAME       42
+#  #define LONGER_NAME      0x007f   # does nice spacing for macros
+AlignConsecutiveMacros: Consecutive
+AlignConsecutiveAssignments: true
+NamespaceIndentation: All
+FixNamespaceComments: true
+AllowShortEnumsOnASingleLine: false 
+# IndentAccessModifiers: true         
+AlignOperands: true
+IndentCaseBlocks: true
+IndentCaseLabels: true
+SortIncludes: true
+SeparateDefinitionBlocks: Always
+ReflowComments: true
+PointerAlignment: Left
+PackConstructorInitializers: NextLine
+
+IndentPPDirectives: BeforeHash
+InsertBraces: true
+BinPackArguments: false
+BinPackParameters: false
+# use \n instead of \r\n
+UseCRLF: false
+BraceWrapping:
+  AfterClass:      true
+  AfterControlStatement: false
+  AfterEnum:       false
+  AfterFunction:   true
+  AfterNamespace:  false
+  AfterObjCDeclaration: false
+  AfterStruct:     false
+  AfterUnion:      false
+  BeforeCatch:     true
+  BeforeElse:      true
+  IndentBraces:    false
+BreakBeforeBraces: Custom

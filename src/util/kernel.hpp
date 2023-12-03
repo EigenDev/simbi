@@ -5,11 +5,10 @@
 
 namespace simbi {
     template <typename Function, typename... Arguments>
-    GPU_LAUNCHABLE
-    void Kernel(Function f, Arguments... args)
+    GPU_LAUNCHABLE void Kernel(Function f, Arguments... args)
     {
         f(args...);
     }
-} // namespace simbi
+}   // namespace simbi
 
 #endif
