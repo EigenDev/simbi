@@ -558,9 +558,6 @@ void Newtonian<dim>::adapt_dt(const ExecutionPolicy<> &p)
 //===================================================================================================================
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
-
-// Get the 2D Flux array (4,1). Either return F or G depending on directional
-// flag
 template<int dim>
 GPU_CALLABLE_MEMBER
 Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(const Newtonian<dim>::primitive_t &prims, const luint nhat) const

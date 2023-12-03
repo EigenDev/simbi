@@ -690,9 +690,6 @@ void SRHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
 //===================================================================================================================
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
-
-// Get the 2D Flux array (4,1). Either return F or G depending on directional
-// flag
 template<int dim>
 GPU_CALLABLE_MEMBER
 SRHD<dim>::conserved_t SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t &prims, const luint nhat) const

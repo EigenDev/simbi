@@ -386,7 +386,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<> &p)
  * Return the primitive
  * variables density , three-velocity, pressure
  * 
- * @param  con conserved array at index
+ * @param con conserved array at index
  * @param gid  current global index
  * @return none
  */
@@ -838,9 +838,6 @@ void RMHD<dim>::adapt_dt(const ExecutionPolicy<> &p)
 //===================================================================================================================
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
-
-// Get the 2D Flux array (4,1). Either return F or G depending on directional
-// flag
 template<int dim>
 GPU_CALLABLE_MEMBER
 RMHD<dim>::conserved_t RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t &prims, const luint nhat) const
