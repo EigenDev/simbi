@@ -2,7 +2,6 @@
 # options: https://clang.llvm.org/docs/ClangFormatStyleOptions.html
 BasedOnStyle: LLVM
 IndentWidth: 4
-# TabWidth: 1
 PPIndentWidth: 4
 MaxEmptyLinesToKeep: 1
 BracedInitializerIndentWidth: 2
@@ -21,8 +20,6 @@ AlignAfterOpenBracket: Align
 AllowAllArgumentsOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
 SpacesBeforeTrailingComments: 3
-# change the next line to All for Alistair's textbook style
-# AlwaysBreakAfterReturnType: TopLevelDefinitions
 #  #define SHORT_NAME       42
 #  #define LONGER_NAME      0x007f   # does nice spacing for macros
 AlignConsecutiveMacros: Consecutive
