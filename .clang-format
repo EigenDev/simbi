@@ -16,10 +16,10 @@ SpaceAfterCStyleCast: true
 AllowShortIfStatementsOnASingleLine: false
 # 
 AlignTrailingComments: true
-AlignAfterOpenBracket: Align
 AllowAllArgumentsOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
 SpacesBeforeTrailingComments: 3
+AlignAfterOpenBracket: BlockIndent
 #  #define SHORT_NAME       42
 #  #define LONGER_NAME      0x007f   # does nice spacing for macros
 AlignConsecutiveMacros: Consecutive

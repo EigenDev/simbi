@@ -47,19 +47,23 @@ namespace simbi {
                 ///@cond
                 // Just the error code? Okay, no problem
                 runtime_error(status_t error_code)
-                    : ::std::runtime_error(describe(error_code) +
-                                           " at  " __FILE__ ":" +
-                                           std::to_string(__LINE__)),
+                    : ::std::runtime_error(
+                          describe(error_code) + " at  " __FILE__ ":" +
+                          std::to_string(__LINE__)
+                      ),
                       internal_code(error_code)
                 {
                 }
 
                 // Human-readable error logic
-                runtime_error(status_t error_code,
-                              const ::std::string& what_arg)
+                runtime_error(
+                    status_t error_code,
+                    const ::std::string& what_arg
+                )
                     : ::std::runtime_error(
                           what_arg + ": " + describe(error_code) +
-                          " at  " __FILE__ ":" + std::to_string(__LINE__)),
+                          " at  " __FILE__ ":" + std::to_string(__LINE__)
+                      ),
                       internal_code(error_code)
                 {
                 }
@@ -81,8 +85,10 @@ namespace simbi {
                 return status != status_t::success;
             }
 
-            inline void check_err(status_t status,
-                                  const ::std::string& message) noexcept(false)
+            inline void check_err(
+                status_t status,
+                const ::std::string& message
+            ) noexcept(false)
             {
                 if (is_err(status)) {
                     throw runtime_error(status, message);
@@ -140,11 +146,13 @@ namespace simbi {
     unsigned int globalThreadIdx()
     {
         if constexpr (global::BuildPlatform == global::Platform::GPU) {
-            return ((blockIdx.z * blockDim.z + threadIdx.z) * blockDim.x *
-                        gridDim.x * blockDim.y * gridDim.y +
-                    (blockIdx.y * blockDim.y + threadIdx.y) * blockDim.x *
-                        gridDim.x +
-                    blockIdx.x * blockDim.x + threadIdx.x);
+            return (
+                (blockIdx.z * blockDim.z + threadIdx.z) * blockDim.x *
+                    gridDim.x * blockDim.y * gridDim.y +
+                (blockIdx.y * blockDim.y + threadIdx.y) * blockDim.x *
+                    gridDim.x +
+                blockIdx.x * blockDim.x + threadIdx.x
+            );
         }
         else {
             return 0;

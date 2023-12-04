@@ -88,9 +88,8 @@ namespace simbi {
          * @return height index
          */
         template <typename index_type, typename T>
-        GPU_CALLABLE_INLINE index_type get_height(index_type idx,
-                                                  T width,
-                                                  T length)
+        GPU_CALLABLE_INLINE index_type
+        get_height(index_type idx, T width, T length)
         {
             return idx / width / length;
         }
@@ -182,7 +181,8 @@ namespace simbi {
           {"cartesian", simbi::Geometry::CARTESIAN},
           {"planar_cylindrical", simbi::Geometry::PLANAR_CYLINDRICAL},
           {"axis_cylindrical", simbi::Geometry::AXIS_CYLINDRICAL},
-          {"cylindtical", simbi::Geometry::CYLINDRICAL}};
+          {"cylindtical", simbi::Geometry::CYLINDRICAL}
+        };
 
         // map boundary condition string to simbi::BoundaryCondition enum class
         const std::map<std::string, simbi::BoundaryCondition>
@@ -190,12 +190,14 @@ namespace simbi {
               {"inflow", simbi::BoundaryCondition::INFLOW},
               {"outflow", simbi::BoundaryCondition::OUTFLOW},
               {"reflecting", simbi::BoundaryCondition::REFLECTING},
-              {"periodic", simbi::BoundaryCondition::PERIODIC}};
+              {"periodic", simbi::BoundaryCondition::PERIODIC}
+        };
 
         // map solver string to simbi::Solver enum class
         const std::map<std::string, simbi::Solver> solver_map = {
           {"hllc", simbi::Solver::HLLC},
-          {"hlle", simbi::Solver::HLLE}};
+          {"hlle", simbi::Solver::HLLE}
+        };
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-TEMPLATES
         //---------------------------------------------------------------------------------------------------------
@@ -292,13 +294,15 @@ namespace simbi {
          * <zone>.chkpt.<time>.h5
          */
         template <typename Prim_type, int Ndim, typename Sim_type>
-        void write_to_file(Sim_type& sim_state_host,
-                           DataWriteMembers& setup,
-                           const std::string data_directory,
-                           const real t,
-                           const real t_interval,
-                           const real chkpt_interval,
-                           const luint chkpt_zone_label);
+        void write_to_file(
+            Sim_type& sim_state_host,
+            DataWriteMembers& setup,
+            const std::string data_directory,
+            const real t,
+            const real t_interval,
+            const real chkpt_interval,
+            const luint chkpt_zone_label
+        );
 
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-METHODS
@@ -312,8 +316,8 @@ namespace simbi {
          * step
          * @return the step string for the checkpoint filename
          */
-        std::string create_step_str(const real current_time,
-                                    const int max_order_of_mag);
+        std::string
+        create_step_str(const real current_time, const int max_order_of_mag);
 
         /**
          * @brief write to the hdf5 file (serial)
@@ -325,12 +329,14 @@ namespace simbi {
          * @param dim
          * @param size
          */
-        void write_hdf5(const std::string data_directory,
-                        const std::string filename,
-                        const PrimData prims,
-                        const DataWriteMembers system,
-                        const int dim,
-                        const int size);
+        void write_hdf5(
+            const std::string data_directory,
+            const std::string filename,
+            const PrimData prims,
+            const DataWriteMembers system,
+            const int dim,
+            const int size
+        );
 
         //-------------------Inline for
         // Speed--------------------------------------
@@ -342,9 +348,8 @@ namespace simbi {
          * @param z
          * @return minmod value between x, y, and z
          */
-        GPU_CALLABLE_INLINE real minmod(const real x,
-                                        const real y,
-                                        const real z)
+        GPU_CALLABLE_INLINE real
+        minmod(const real x, const real y, const real z)
         {
             return 0.25 * std::abs(sgn(x) + sgn(y)) * (sgn(x) + sgn(z)) *
                    my_min3(std::abs(x), std::abs(y), std::abs(z));
@@ -360,9 +365,11 @@ namespace simbi {
          * @return arithmetic or geometric mean between a and b
          */
         GPU_CALLABLE_INLINE
-        real calc_any_mean(const real a,
-                           const real b,
-                           const simbi::Cellspacing cellspacing)
+        real calc_any_mean(
+            const real a,
+            const real b,
+            const simbi::Cellspacing cellspacing
+        )
         {
             switch (cellspacing) {
                 case simbi::Cellspacing::LOGSPACE:
@@ -378,29 +385,43 @@ namespace simbi {
         template <typename T>
         GPU_CALLABLE_INLINE
             typename std::enable_if<is_3D_primitive<T>::value, T>::type
-            plm_gradient(const T& a,
-                         const T& b,
-                         const T& c,
-                         const real plm_theta)
+            plm_gradient(
+                const T& a,
+                const T& b,
+                const T& c,
+                const real plm_theta
+            )
         {
-            const real rho = minmod((a - b).rho * plm_theta,
-                                    (c - b).rho * 0.5,
-                                    (c - a).rho * plm_theta);
-            const real v1  = minmod((a - b).v1 * plm_theta,
-                                   (c - b).v1 * 0.5,
-                                   (c - a).v1 * plm_theta);
-            const real v2  = minmod((a - b).v2 * plm_theta,
-                                   (c - b).v2 * 0.5,
-                                   (c - a).v2 * plm_theta);
-            const real v3  = minmod((a - b).v3 * plm_theta,
-                                   (c - b).v3 * 0.5,
-                                   (c - a).v3 * plm_theta);
-            const real pre = minmod((a - b).p * plm_theta,
-                                    (c - b).p * 0.5,
-                                    (c - a).p * plm_theta);
-            const real chi = minmod((a - b).chi * plm_theta,
-                                    (c - b).chi * 0.5,
-                                    (c - a).chi * plm_theta);
+            const real rho = minmod(
+                (a - b).rho * plm_theta,
+                (c - b).rho * 0.5,
+                (c - a).rho * plm_theta
+            );
+            const real v1 = minmod(
+                (a - b).v1 * plm_theta,
+                (c - b).v1 * 0.5,
+                (c - a).v1 * plm_theta
+            );
+            const real v2 = minmod(
+                (a - b).v2 * plm_theta,
+                (c - b).v2 * 0.5,
+                (c - a).v2 * plm_theta
+            );
+            const real v3 = minmod(
+                (a - b).v3 * plm_theta,
+                (c - b).v3 * 0.5,
+                (c - a).v3 * plm_theta
+            );
+            const real pre = minmod(
+                (a - b).p * plm_theta,
+                (c - b).p * 0.5,
+                (c - a).p * plm_theta
+            );
+            const real chi = minmod(
+                (a - b).chi * plm_theta,
+                (c - b).chi * 0.5,
+                (c - a).chi * plm_theta
+            );
             return T{rho, v1, v2, v3, pre, chi};
         }
 
@@ -408,26 +429,38 @@ namespace simbi {
         template <typename T>
         GPU_CALLABLE_INLINE
             typename std::enable_if<is_2D_primitive<T>::value, T>::type
-            plm_gradient(const T& a,
-                         const T& b,
-                         const T& c,
-                         const real plm_theta)
+            plm_gradient(
+                const T& a,
+                const T& b,
+                const T& c,
+                const real plm_theta
+            )
         {
-            const real rho = minmod((a - b).rho * plm_theta,
-                                    (c - b).rho * 0.5,
-                                    (c - a).rho * plm_theta);
-            const real v1  = minmod((a - b).v1 * plm_theta,
-                                   (c - b).v1 * 0.5,
-                                   (c - a).v1 * plm_theta);
-            const real v2  = minmod((a - b).v2 * plm_theta,
-                                   (c - b).v2 * 0.5,
-                                   (c - a).v2 * plm_theta);
-            const real pre = minmod((a - b).p * plm_theta,
-                                    (c - b).p * 0.5,
-                                    (c - a).p * plm_theta);
-            const real chi = minmod((a - b).chi * plm_theta,
-                                    (c - b).chi * 0.5,
-                                    (c - a).chi * plm_theta);
+            const real rho = minmod(
+                (a - b).rho * plm_theta,
+                (c - b).rho * 0.5,
+                (c - a).rho * plm_theta
+            );
+            const real v1 = minmod(
+                (a - b).v1 * plm_theta,
+                (c - b).v1 * 0.5,
+                (c - a).v1 * plm_theta
+            );
+            const real v2 = minmod(
+                (a - b).v2 * plm_theta,
+                (c - b).v2 * 0.5,
+                (c - a).v2 * plm_theta
+            );
+            const real pre = minmod(
+                (a - b).p * plm_theta,
+                (c - b).p * 0.5,
+                (c - a).p * plm_theta
+            );
+            const real chi = minmod(
+                (a - b).chi * plm_theta,
+                (c - b).chi * 0.5,
+                (c - a).chi * plm_theta
+            );
             return T{rho, v1, v2, pre, chi};
         }
 
@@ -435,23 +468,33 @@ namespace simbi {
         template <typename T>
         GPU_CALLABLE_INLINE
             typename std::enable_if<is_1D_primitive<T>::value, T>::type
-            plm_gradient(const T& a,
-                         const T& b,
-                         const T& c,
-                         const real plm_theta)
+            plm_gradient(
+                const T& a,
+                const T& b,
+                const T& c,
+                const real plm_theta
+            )
         {
-            const real rho = minmod((a - b).rho * plm_theta,
-                                    (c - b).rho * 0.5,
-                                    (c - a).rho * plm_theta);
-            const real v1  = minmod((a - b).v1 * plm_theta,
-                                   (c - b).v1 * 0.5,
-                                   (c - a).v1 * plm_theta);
-            const real pre = minmod((a - b).p * plm_theta,
-                                    (c - b).p * 0.5,
-                                    (c - a).p * plm_theta);
-            const real chi = minmod((a - b).chi * plm_theta,
-                                    (c - b).chi * 0.5,
-                                    (c - a).chi * plm_theta);
+            const real rho = minmod(
+                (a - b).rho * plm_theta,
+                (c - b).rho * 0.5,
+                (c - a).rho * plm_theta
+            );
+            const real v1 = minmod(
+                (a - b).v1 * plm_theta,
+                (c - b).v1 * 0.5,
+                (c - a).v1 * plm_theta
+            );
+            const real pre = minmod(
+                (a - b).p * plm_theta,
+                (c - b).p * 0.5,
+                (c - a).p * plm_theta
+            );
+            const real chi = minmod(
+                (a - b).chi * plm_theta,
+                (c - b).chi * 0.5,
+                (c - a).chi * plm_theta
+            );
             return T{rho, v1, pre, chi};
         }
 
@@ -459,38 +502,58 @@ namespace simbi {
         template <typename T>
         GPU_CALLABLE_INLINE
             typename std::enable_if<is_3D_mhd_primitive<T>::value, T>::type
-            plm_gradient(const T& a,
-                         const T& b,
-                         const T& c,
-                         const real plm_theta)
+            plm_gradient(
+                const T& a,
+                const T& b,
+                const T& c,
+                const real plm_theta
+            )
         {
-            const real rho = minmod((a - b).rho * plm_theta,
-                                    (c - b).rho * 0.5,
-                                    (c - a).rho * plm_theta);
-            const real v1  = minmod((a - b).v1 * plm_theta,
-                                   (c - b).v1 * 0.5,
-                                   (c - a).v1 * plm_theta);
-            const real v2  = minmod((a - b).v2 * plm_theta,
-                                   (c - b).v2 * 0.5,
-                                   (c - a).v2 * plm_theta);
-            const real v3  = minmod((a - b).v3 * plm_theta,
-                                   (c - b).v3 * 0.5,
-                                   (c - a).v3 * plm_theta);
-            const real pre = minmod((a - b).p * plm_theta,
-                                    (c - b).p * 0.5,
-                                    (c - a).p * plm_theta);
-            const real b1  = minmod((a - b).b1 * plm_theta,
-                                   (c - b).b1 * 0.5,
-                                   (c - a).b1 * plm_theta);
-            const real b2  = minmod((a - b).b2 * plm_theta,
-                                   (c - b).b2 * 0.5,
-                                   (c - a).b2 * plm_theta);
-            const real b3  = minmod((a - b).b3 * plm_theta,
-                                   (c - b).b3 * 0.5,
-                                   (c - a).b3 * plm_theta);
-            const real chi = minmod((a - b).chi * plm_theta,
-                                    (c - b).chi * 0.5,
-                                    (c - a).chi * plm_theta);
+            const real rho = minmod(
+                (a - b).rho * plm_theta,
+                (c - b).rho * 0.5,
+                (c - a).rho * plm_theta
+            );
+            const real v1 = minmod(
+                (a - b).v1 * plm_theta,
+                (c - b).v1 * 0.5,
+                (c - a).v1 * plm_theta
+            );
+            const real v2 = minmod(
+                (a - b).v2 * plm_theta,
+                (c - b).v2 * 0.5,
+                (c - a).v2 * plm_theta
+            );
+            const real v3 = minmod(
+                (a - b).v3 * plm_theta,
+                (c - b).v3 * 0.5,
+                (c - a).v3 * plm_theta
+            );
+            const real pre = minmod(
+                (a - b).p * plm_theta,
+                (c - b).p * 0.5,
+                (c - a).p * plm_theta
+            );
+            const real b1 = minmod(
+                (a - b).b1 * plm_theta,
+                (c - b).b1 * 0.5,
+                (c - a).b1 * plm_theta
+            );
+            const real b2 = minmod(
+                (a - b).b2 * plm_theta,
+                (c - b).b2 * 0.5,
+                (c - a).b2 * plm_theta
+            );
+            const real b3 = minmod(
+                (a - b).b3 * plm_theta,
+                (c - b).b3 * 0.5,
+                (c - a).b3 * plm_theta
+            );
+            const real chi = minmod(
+                (a - b).chi * plm_theta,
+                (c - b).chi * 0.5,
+                (c - a).chi * plm_theta
+            );
             return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
         }
 
@@ -498,38 +561,58 @@ namespace simbi {
         template <typename T>
         GPU_CALLABLE_INLINE
             typename std::enable_if<is_2D_mhd_primitive<T>::value, T>::type
-            plm_gradient(const T& a,
-                         const T& b,
-                         const T& c,
-                         const real plm_theta)
+            plm_gradient(
+                const T& a,
+                const T& b,
+                const T& c,
+                const real plm_theta
+            )
         {
-            const real rho = minmod((a - b).rho * plm_theta,
-                                    (c - b).rho * 0.5,
-                                    (c - a).rho * plm_theta);
-            const real v1  = minmod((a - b).v1 * plm_theta,
-                                   (c - b).v1 * 0.5,
-                                   (c - a).v1 * plm_theta);
-            const real v2  = minmod((a - b).v2 * plm_theta,
-                                   (c - b).v2 * 0.5,
-                                   (c - a).v2 * plm_theta);
-            const real v3  = minmod((a - b).v3 * plm_theta,
-                                   (c - b).v3 * 0.5,
-                                   (c - a).v3 * plm_theta);
-            const real pre = minmod((a - b).p * plm_theta,
-                                    (c - b).p * 0.5,
-                                    (c - a).p * plm_theta);
-            const real b1  = minmod((a - b).b1 * plm_theta,
-                                   (c - b).b1 * 0.5,
-                                   (c - a).b1 * plm_theta);
-            const real b2  = minmod((a - b).b2 * plm_theta,
-                                   (c - b).b2 * 0.5,
-                                   (c - a).b2 * plm_theta);
-            const real b3  = minmod((a - b).b3 * plm_theta,
-                                   (c - b).b3 * 0.5,
-                                   (c - a).b3 * plm_theta);
-            const real chi = minmod((a - b).chi * plm_theta,
-                                    (c - b).chi * 0.5,
-                                    (c - a).chi * plm_theta);
+            const real rho = minmod(
+                (a - b).rho * plm_theta,
+                (c - b).rho * 0.5,
+                (c - a).rho * plm_theta
+            );
+            const real v1 = minmod(
+                (a - b).v1 * plm_theta,
+                (c - b).v1 * 0.5,
+                (c - a).v1 * plm_theta
+            );
+            const real v2 = minmod(
+                (a - b).v2 * plm_theta,
+                (c - b).v2 * 0.5,
+                (c - a).v2 * plm_theta
+            );
+            const real v3 = minmod(
+                (a - b).v3 * plm_theta,
+                (c - b).v3 * 0.5,
+                (c - a).v3 * plm_theta
+            );
+            const real pre = minmod(
+                (a - b).p * plm_theta,
+                (c - b).p * 0.5,
+                (c - a).p * plm_theta
+            );
+            const real b1 = minmod(
+                (a - b).b1 * plm_theta,
+                (c - b).b1 * 0.5,
+                (c - a).b1 * plm_theta
+            );
+            const real b2 = minmod(
+                (a - b).b2 * plm_theta,
+                (c - b).b2 * 0.5,
+                (c - a).b2 * plm_theta
+            );
+            const real b3 = minmod(
+                (a - b).b3 * plm_theta,
+                (c - b).b3 * 0.5,
+                (c - a).b3 * plm_theta
+            );
+            const real chi = minmod(
+                (a - b).chi * plm_theta,
+                (c - b).chi * 0.5,
+                (c - a).chi * plm_theta
+            );
             return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
         }
 
@@ -537,38 +620,58 @@ namespace simbi {
         template <typename T>
         GPU_CALLABLE_INLINE
             typename std::enable_if<is_1D_mhd_primitive<T>::value, T>::type
-            plm_gradient(const T& a,
-                         const T& b,
-                         const T& c,
-                         const real plm_theta)
+            plm_gradient(
+                const T& a,
+                const T& b,
+                const T& c,
+                const real plm_theta
+            )
         {
-            const real rho = minmod((a - b).rho * plm_theta,
-                                    (c - b).rho * 0.5,
-                                    (c - a).rho * plm_theta);
-            const real v1  = minmod((a - b).v1 * plm_theta,
-                                   (c - b).v1 * 0.5,
-                                   (c - a).v1 * plm_theta);
-            const real v2  = minmod((a - b).v2 * plm_theta,
-                                   (c - b).v2 * 0.5,
-                                   (c - a).v2 * plm_theta);
-            const real v3  = minmod((a - b).v3 * plm_theta,
-                                   (c - b).v3 * 0.5,
-                                   (c - a).v3 * plm_theta);
-            const real pre = minmod((a - b).p * plm_theta,
-                                    (c - b).p * 0.5,
-                                    (c - a).p * plm_theta);
-            const real b1  = minmod((a - b).b1 * plm_theta,
-                                   (c - b).b1 * 0.5,
-                                   (c - a).b1 * plm_theta);
-            const real b2  = minmod((a - b).b2 * plm_theta,
-                                   (c - b).b2 * 0.5,
-                                   (c - a).b2 * plm_theta);
-            const real b3  = minmod((a - b).b3 * plm_theta,
-                                   (c - b).b3 * 0.5,
-                                   (c - a).b3 * plm_theta);
-            const real chi = minmod((a - b).chi * plm_theta,
-                                    (c - b).chi * 0.5,
-                                    (c - a).chi * plm_theta);
+            const real rho = minmod(
+                (a - b).rho * plm_theta,
+                (c - b).rho * 0.5,
+                (c - a).rho * plm_theta
+            );
+            const real v1 = minmod(
+                (a - b).v1 * plm_theta,
+                (c - b).v1 * 0.5,
+                (c - a).v1 * plm_theta
+            );
+            const real v2 = minmod(
+                (a - b).v2 * plm_theta,
+                (c - b).v2 * 0.5,
+                (c - a).v2 * plm_theta
+            );
+            const real v3 = minmod(
+                (a - b).v3 * plm_theta,
+                (c - b).v3 * 0.5,
+                (c - a).v3 * plm_theta
+            );
+            const real pre = minmod(
+                (a - b).p * plm_theta,
+                (c - b).p * 0.5,
+                (c - a).p * plm_theta
+            );
+            const real b1 = minmod(
+                (a - b).b1 * plm_theta,
+                (c - b).b1 * 0.5,
+                (c - a).b1 * plm_theta
+            );
+            const real b2 = minmod(
+                (a - b).b2 * plm_theta,
+                (c - b).b2 * 0.5,
+                (c - a).b2 * plm_theta
+            );
+            const real b3 = minmod(
+                (a - b).b3 * plm_theta,
+                (c - b).b3 * 0.5,
+                (c - a).b3 * plm_theta
+            );
+            const real chi = minmod(
+                (a - b).chi * plm_theta,
+                (c - b).chi * 0.5,
+                (c - a).chi * plm_theta
+            );
             return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
         }
 
@@ -599,10 +702,12 @@ namespace simbi {
          * @param constant_sources flag to check if the source terms are
          * constant
          */
-        inline real sigmoid(const real t,
-                            const real tduration,
-                            const real time_step,
-                            const bool constant_sources)
+        inline real sigmoid(
+            const real t,
+            const real tduration,
+            const real time_step,
+            const bool constant_sources
+        )
         {
             if (constant_sources) {
                 return 1.0 / time_step;
@@ -621,13 +726,17 @@ namespace simbi {
          * @param qq  variational parameter
          * @return gas pressure from Eq.(19)
          */
-        GPU_CALLABLE_INLINE real calc_rmhd_lorentz(const real ssq,
-                                                   const real bsq,
-                                                   const real msq,
-                                                   const real qq)
+        GPU_CALLABLE_INLINE real calc_rmhd_lorentz(
+            const real ssq,
+            const real bsq,
+            const real msq,
+            const real qq
+        )
         {
-            return std::sqrt(1.0 - (ssq * (2.0 * qq + bsq) + msq * qq * qq) /
-                                       ((qq + bsq) * (qq + bsq) * qq * qq));
+            return std::sqrt(
+                1.0 - (ssq * (2.0 * qq + bsq) + msq * qq * qq) /
+                          ((qq + bsq) * (qq + bsq) * qq * qq)
+            );
         }
 
         /**
@@ -640,10 +749,8 @@ namespace simbi {
          * @param qq rho * h * g *g
          * @return gas pressure from Eq.(19)
          */
-        GPU_CALLABLE_INLINE real calc_rmhd_pg(const real gr,
-                                              const real d,
-                                              const real w,
-                                              const real qq)
+        GPU_CALLABLE_INLINE real
+        calc_rmhd_pg(const real gr, const real d, const real w, const real qq)
         {
             return (qq - d * w) / (gr * w * w);
         }
@@ -697,13 +804,15 @@ namespace simbi {
          * @param qq energy density
          * @return Eq.(20)
          */
-        GPU_CALLABLE_INLINE real newton_f_mhd(real gr,
-                                              real et,
-                                              real d,
-                                              real ssq,
-                                              real bsq,
-                                              real msq,
-                                              real qq)
+        GPU_CALLABLE_INLINE real newton_f_mhd(
+            real gr,
+            real et,
+            real d,
+            real ssq,
+            real bsq,
+            real msq,
+            real qq
+        )
         {
             const auto w  = calc_rmhd_lorentz(ssq, bsq, msq, qq);
             const auto pg = calc_rmhd_pg(gr, d, w, qq);
@@ -742,67 +851,81 @@ namespace simbi {
         //          GPU TEMPLATES
         //======================================
         // compute the discrete dts for 1D primitive array
-        template <typename T,
-                  TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-                  typename U,
-                  typename V>
+        template <
+            typename T,
+            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
+            typename U,
+            typename V>
         GPU_LAUNCHABLE typename std::enable_if<is_1D_primitive<T>::value>::type
         compute_dt(U* s, const V* prim_buffer, real* dt_min);
 
         // compute the discrete dts for 2D primitive array
-        template <typename T,
-                  TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-                  typename U,
-                  typename V>
+        template <
+            typename T,
+            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
+            typename U,
+            typename V>
         GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<T>::value>::type
-        compute_dt(U* s,
-                   const V* prim_buffer,
-                   real* dt_min,
-                   const simbi::Geometry geometry);
+        compute_dt(
+            U* s,
+            const V* prim_buffer,
+            real* dt_min,
+            const simbi::Geometry geometry
+        );
 
         // compute the discrete dts for 3D primitive array
-        template <typename T,
-                  TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-                  typename U,
-                  typename V>
+        template <
+            typename T,
+            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
+            typename U,
+            typename V>
         GPU_LAUNCHABLE typename std::enable_if<is_3D_primitive<T>::value>::type
-        compute_dt(U* s,
-                   const V* prim_buffer,
-                   real* dt_min,
-                   const simbi::Geometry geometry);
+        compute_dt(
+            U* s,
+            const V* prim_buffer,
+            real* dt_min,
+            const simbi::Geometry geometry
+        );
 
         // compute the discrete dts for 1D MHD primitive array
-        template <typename T,
-                  TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-                  typename U,
-                  typename V>
+        template <
+            typename T,
+            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
+            typename U,
+            typename V>
         GPU_LAUNCHABLE
             typename std::enable_if<is_1D_mhd_primitive<T>::value>::type
             compute_dt(U* s, const V* prim_buffer, real* dt_min);
 
         // compute the discrete dts for 2D MHD primitive array
-        template <typename T,
-                  TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-                  typename U,
-                  typename V>
+        template <
+            typename T,
+            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
+            typename U,
+            typename V>
         GPU_LAUNCHABLE
             typename std::enable_if<is_2D_mhd_primitive<T>::value>::type
-            compute_dt(U* s,
-                       const V* prim_buffer,
-                       real* dt_min,
-                       const simbi::Geometry geometry);
+            compute_dt(
+                U* s,
+                const V* prim_buffer,
+                real* dt_min,
+                const simbi::Geometry geometry
+            );
 
         // compute the discrete dts for 3D MHD primitive array
-        template <typename T,
-                  TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
-                  typename U,
-                  typename V>
+        template <
+            typename T,
+            TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
+            typename U,
+            typename V>
         GPU_LAUNCHABLE
             typename std::enable_if<is_3D_mhd_primitive<T>::value>::type
-            compute_dt(U* s,
-                       const V* prim_buffer,
-                       real* dt_min,
-                       const simbi::Geometry geometry);
+            compute_dt(
+                U* s,
+                const V* prim_buffer,
+                real* dt_min,
+                const simbi::Geometry geometry
+            );
 
         //======================================
         //              HELPER OVERLOADS
@@ -843,10 +966,12 @@ namespace simbi {
          * @return row-major or column-major index for 2D array
          */
         GPU_CALLABLE_INLINE
-        auto get_2d_idx(const luint ii,
-                        const luint jj,
-                        const luint nx,
-                        const luint ny)
+        auto get_2d_idx(
+            const luint ii,
+            const luint jj,
+            const luint nx,
+            const luint ny
+        )
         {
             if constexpr (global::col_maj) {
                 return ii * ny + jj;
@@ -867,12 +992,14 @@ namespace simbi {
          * @return row-major or column-major index for 3D array
          */
         GPU_CALLABLE_INLINE
-        auto get_2d_idx(const luint ii,
-                        const luint jj,
-                        const luint kk,
-                        const luint nx,
-                        const luint ny,
-                        const luint nk)
+        auto get_2d_idx(
+            const luint ii,
+            const luint jj,
+            const luint kk,
+            const luint nx,
+            const luint ny,
+            const luint nk
+        )
         {
             if constexpr (global::col_maj) {
                 return ii * nk * ny + jj * nk + kk;
@@ -890,9 +1017,11 @@ namespace simbi {
          * @return cell centroid
          */
         GPU_CALLABLE_INLINE
-        auto get_cell_centroid(const real xr,
-                               const real xl,
-                               const simbi::Geometry geometry)
+        auto get_cell_centroid(
+            const real xr,
+            const real xl,
+            const simbi::Geometry geometry
+        )
         {
             switch (geometry) {
                 case Geometry::SPHERICAL:
@@ -919,42 +1048,45 @@ namespace simbi {
 
         // configure the ghost zones in 1D hydro
         template <typename T, typename U>
-        void
-        config_ghosts1D(const ExecutionPolicy<> p,
-                        T* cons,
-                        const int grid_size,
-                        const bool first_order,
-                        const simbi::BoundaryCondition* boundary_conditions,
-                        const U* outer_zones  = nullptr,
-                        const U* inflow_zones = nullptr);
+        void config_ghosts1D(
+            const ExecutionPolicy<> p,
+            T* cons,
+            const int grid_size,
+            const bool first_order,
+            const simbi::BoundaryCondition* boundary_conditions,
+            const U* outer_zones  = nullptr,
+            const U* inflow_zones = nullptr
+        );
 
         // configure the ghost zones in 2D hydro
         template <typename T, typename U>
-        void
-        config_ghosts2D(const ExecutionPolicy<> p,
-                        T* cons,
-                        const int x1grid_size,
-                        const int x2grid_size,
-                        const bool first_order,
-                        const simbi::Geometry geometry,
-                        const simbi::BoundaryCondition* boundary_conditions,
-                        const U* outer_zones,
-                        const U* boundary_zones,
-                        const bool half_sphere);
+        void config_ghosts2D(
+            const ExecutionPolicy<> p,
+            T* cons,
+            const int x1grid_size,
+            const int x2grid_size,
+            const bool first_order,
+            const simbi::Geometry geometry,
+            const simbi::BoundaryCondition* boundary_conditions,
+            const U* outer_zones,
+            const U* boundary_zones,
+            const bool half_sphere
+        );
 
         // configure the ghost zones in 3D hydro
         template <typename T, typename U>
-        void
-        config_ghosts3D(const ExecutionPolicy<> p,
-                        T* cons,
-                        const int x1grid_size,
-                        const int x2grid_size,
-                        const int x3grid_size,
-                        const bool first_order,
-                        const simbi::BoundaryCondition* boundary_conditions,
-                        const U* inflow_zones,
-                        const bool half_sphere,
-                        const simbi::Geometry geometry);
+        void config_ghosts3D(
+            const ExecutionPolicy<> p,
+            T* cons,
+            const int x1grid_size,
+            const int x2grid_size,
+            const int x3grid_size,
+            const bool first_order,
+            const simbi::BoundaryCondition* boundary_conditions,
+            const U* inflow_zones,
+            const bool half_sphere,
+            const simbi::Geometry geometry
+        );
 
         /**
          * @brief perform the reduction within the warp
@@ -1056,11 +1188,13 @@ namespace simbi {
          * @return float
          */
         template <typename T, typename U>
-        inline real getFlops(const luint dim,
-                             const luint radius,
-                             const luint total_zones,
-                             const luint real_zones,
-                             const float delta_t)
+        inline real getFlops(
+            const luint dim,
+            const luint radius,
+            const luint total_zones,
+            const luint real_zones,
+            const float delta_t
+        )
         {
             // the advance step does one write plus 1 + dim * 2 * radius reads
             const float advance_contr =
@@ -1076,7 +1210,8 @@ namespace simbi {
         __device__ __forceinline__ real atomicMinReal(real* addr, real value)
         {
             real old = __int_as_real(
-                atomicMin((atomic_cast*) addr, __real_as_int(value)));
+                atomicMin((atomic_cast*) addr, __real_as_int(value))
+            );
             return old;
         }
 #endif
@@ -1100,9 +1235,8 @@ namespace simbi {
 
         // Partition the array and return the pivot index
         template <typename T, typename index_type>
-        GPU_CALLABLE index_type partition(T arr[],
-                                          index_type low,
-                                          index_type high);
+        GPU_CALLABLE index_type
+        partition(T arr[], index_type low, index_type high);
 
         // Quick sort implementation
         template <typename T, typename index_type>

@@ -38,10 +38,10 @@ namespace simbi {
                 global::BuildPlatform == global::Platform::GPU,
                 anyGpuEvent_t,
                 std::chrono::high_resolution_clock::time_point>;
-            using duration_type = std::conditional_t<global::BuildPlatform ==
-                                                         global::Platform::GPU,
-                                                     float,
-                                                     double>;
+            using duration_type = std::conditional_t<
+                global::BuildPlatform == global::Platform::GPU,
+                float,
+                double>;
             time_type tstart, tstop;
             duration_type duration;
 
@@ -96,8 +96,9 @@ namespace simbi {
                                   U,
                                   std::chrono::high_resolution_clock::
                                       time_point>) {
-                    dt = static_cast<std::chrono::duration<real>>(t2 - t1)
-                             .count();
+                    dt =
+                        static_cast<std::chrono::duration<real>>(t2 - t1).count(
+                        );
                 }
                 else {
                     gpu::api::gpuEventSynchronize(t2);
@@ -133,10 +134,12 @@ namespace simbi {
             inline void print_avg_speed(Logger& logger)
             {
                 if (logger.ncheck > 0) {
-                    util::writeln("Average zone update/sec for {:>5} "
-                                  "iterations was {:>5.2e} zones/sec",
-                                  logger.n,
-                                  logger.zu_avg / logger.ncheck);
+                    util::writeln(
+                        "Average zone update/sec for {:>5} "
+                        "iterations was {:>5.2e} zones/sec",
+                        logger.n,
+                        logger.zu_avg / logger.ncheck
+                    );
                 }
             }
 
@@ -158,8 +161,8 @@ namespace simbi {
                     sim_state_t::dimensions,
                     sim_state_t>;
 
-                while ((sim_state.t < end_time) &&
-                       (!sim_state.inFailureState)) {
+                while ((sim_state.t < end_time) && (!sim_state.inFailureState)
+                ) {
                     if constexpr (is_relativistic<sim_state_t>::value) {
                         if constexpr (sim_state_t::dimensions == 1) {
                             // Fill outer zones if user-defined conservative
@@ -167,12 +170,14 @@ namespace simbi {
                             if (sim_state.all_outer_bounds &&
                                 (sim_state.mesh_motion)) {
                                 const real dV = sim_state.get_cell_volume(
-                                    sim_state.active_zones - 1);
+                                    sim_state.active_zones - 1
+                                );
                                 sim_state.outer_zones[0] =
                                     conserved_t{
                                       sim_state.dens_outer(sim_state.x1max),
                                       sim_state.mom1_outer(sim_state.x1max),
-                                      sim_state.enrg_outer(sim_state.x1max)} *
+                                      sim_state.enrg_outer(sim_state.x1max)
+                                    } *
                                     dV;
 
                                 sim_state.outer_zones.copyToGpu();
@@ -188,23 +193,31 @@ namespace simbi {
                                     const auto jreal = helpers::get_real_idx(
                                         jj,
                                         sim_state.radius,
-                                        sim_state.yactive_grid);
+                                        sim_state.yactive_grid
+                                    );
                                     const real dV = sim_state.get_cell_volume(
                                         sim_state.xactive_grid - 1,
-                                        jreal);
+                                        jreal
+                                    );
                                     sim_state.outer_zones[jj] =
-                                        conserved_t{sim_state.dens_outer(
-                                                        sim_state.x1max,
-                                                        sim_state.x2[jreal]),
-                                                    sim_state.mom1_outer(
-                                                        sim_state.x1max,
-                                                        sim_state.x2[jreal]),
-                                                    sim_state.mom2_outer(
-                                                        sim_state.x1max,
-                                                        sim_state.x2[jreal]),
-                                                    sim_state.enrg_outer(
-                                                        sim_state.x1max,
-                                                        sim_state.x2[jreal])} *
+                                        conserved_t{
+                                          sim_state.dens_outer(
+                                              sim_state.x1max,
+                                              sim_state.x2[jreal]
+                                          ),
+                                          sim_state.mom1_outer(
+                                              sim_state.x1max,
+                                              sim_state.x2[jreal]
+                                          ),
+                                          sim_state.mom2_outer(
+                                              sim_state.x1max,
+                                              sim_state.x2[jreal]
+                                          ),
+                                          sim_state.enrg_outer(
+                                              sim_state.x1max,
+                                              sim_state.x2[jreal]
+                                          )
+                                        } *
                                         dV;
                                 }
                                 sim_state.outer_zones.copyToGpu();
@@ -217,43 +230,51 @@ namespace simbi {
                                     const auto kreal = helpers::get_real_idx(
                                         kk,
                                         sim_state.radius,
-                                        sim_state.zactive_grid);
+                                        sim_state.zactive_grid
+                                    );
                                     for (luint jj = 0; jj < sim_state.ny;
                                          jj++) {
                                         const auto jreal =
                                             helpers::get_real_idx(
                                                 jj,
                                                 sim_state.radius,
-                                                sim_state.yactive_grid);
+                                                sim_state.yactive_grid
+                                            );
                                         const real dV =
                                             sim_state.get_cell_volume(
                                                 sim_state.xactive_grid - 1,
                                                 jreal,
-                                                kreal);
-                                        sim_state
-                                            .outer_zones[kk * sim_state.ny +
-                                                         jj] =
+                                                kreal
+                                            );
+                                        sim_state.outer_zones
+                                            [kk * sim_state.ny + jj] =
                                             conserved_t{
                                               sim_state.dens_outer(
                                                   sim_state.x1max,
                                                   sim_state.x2[jreal],
-                                                  sim_state.x3[kreal]),
+                                                  sim_state.x3[kreal]
+                                              ),
                                               sim_state.mom1_outer(
                                                   sim_state.x1max,
                                                   sim_state.x2[jreal],
-                                                  sim_state.x3[kreal]),
+                                                  sim_state.x3[kreal]
+                                              ),
                                               sim_state.mom2_outer(
                                                   sim_state.x1max,
                                                   sim_state.x2[jreal],
-                                                  sim_state.x3[kreal]),
+                                                  sim_state.x3[kreal]
+                                              ),
                                               sim_state.mom3_outer(
                                                   sim_state.x1max,
                                                   sim_state.x2[jreal],
-                                                  sim_state.x3[kreal]),
+                                                  sim_state.x3[kreal]
+                                              ),
                                               sim_state.enrg_outer(
                                                   sim_state.x1max,
                                                   sim_state.x2[jreal],
-                                                  sim_state.x3[kreal])} *
+                                                  sim_state.x3[kreal]
+                                              )
+                                            } *
                                             dV;
                                     }
                                     sim_state.outer_zones.copyToGpu();
@@ -283,15 +304,15 @@ namespace simbi {
                             speed = sim_state.total_zones / delta_t;
                             zu_avg += speed;
 
-                            if constexpr (global::BuildPlatform ==
-                                          global::Platform::GPU) {
+                            if constexpr (global::BuildPlatform == global::Platform::GPU) {
                                 const real gpu_emperical_bw =
                                     helpers::getFlops<conserved_t, primitive_t>(
                                         sim_state_t::dimensions,
                                         sim_state.radius,
                                         sim_state.total_zones,
                                         sim_state.active_zones,
-                                        delta_t);
+                                        delta_t
+                                    );
                                 util::writefl<Color::LIGHT_MAGENTA>(
                                     "iteration:{:>06}  dt: {:>08.2e}  time: "
                                     "{:>08.2e}  zones/sec: {:>08.2e}  ebw(%): "
@@ -301,7 +322,8 @@ namespace simbi {
                                     sim_state.t,
                                     speed,
                                     100.0 * gpu_emperical_bw /
-                                        gpu_theoretical_bw);
+                                        gpu_theoretical_bw
+                                );
                             }
                             else {
                                 util::writefl<Color::LIGHT_MAGENTA>(
@@ -310,7 +332,8 @@ namespace simbi {
                                     n,
                                     sim_state.dt,
                                     sim_state.t,
-                                    speed);
+                                    speed
+                                );
                             }
                             helpers::progress_bar(sim_state.t / end_time);
                         }
@@ -318,13 +341,15 @@ namespace simbi {
                         // Write to a file at every checkpoint interval
                         if (sim_state.t >= sim_state.t_interval &&
                             sim_state.t != INFINITY) {
-                            write2file(sim_state,
-                                       sim_state.setup,
-                                       sim_state.data_directory,
-                                       sim_state.t,
-                                       sim_state.t_interval,
-                                       sim_state.chkpt_interval,
-                                       sim_state.checkpoint_zones);
+                            write2file(
+                                sim_state,
+                                sim_state.setup,
+                                sim_state.data_directory,
+                                sim_state.t,
+                                sim_state.t_interval,
+                                sim_state.chkpt_interval,
+                                sim_state.checkpoint_zones
+                            );
                             if (sim_state.dlogt != 0) {
                                 sim_state.t_interval *=
                                     std::pow(10, sim_state.dlogt);
@@ -340,13 +365,15 @@ namespace simbi {
                     catch (helpers::InterruptException& e) {
                         util::writeln("Interrupt Exception: {}", e.what());
                         sim_state.inFailureState = true;
-                        write2file(sim_state,
-                                   sim_state.setup,
-                                   sim_state.data_directory,
-                                   sim_state.t,
-                                   INFINITY,
-                                   sim_state.chkpt_interval,
-                                   sim_state.checkpoint_zones);
+                        write2file(
+                            sim_state,
+                            sim_state.setup,
+                            sim_state.data_directory,
+                            sim_state.t,
+                            INFINITY,
+                            sim_state.chkpt_interval,
+                            sim_state.checkpoint_zones
+                        );
                     }
                 }
                 print_avg_speed(logger);

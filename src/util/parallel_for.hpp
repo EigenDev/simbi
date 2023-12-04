@@ -34,13 +34,16 @@ namespace simbi {
         parallel_for(p, first, last, function);
     }
 
-    template <typename index_type,
-              typename F,
-              global::Platform P = global::BuildPlatform>
-    void parallel_for(const ExecutionPolicy<>& p,
-                      index_type first,
-                      index_type last,
-                      F function)
+    template <
+        typename index_type,
+        typename F,
+        global::Platform P = global::BuildPlatform>
+    void parallel_for(
+        const ExecutionPolicy<>& p,
+        index_type first,
+        index_type last,
+        F function
+    )
     {
         simbi::launch(p, [=] GPU_LAMBDA() {
 #if GPU_CODE

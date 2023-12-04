@@ -36,7 +36,8 @@ namespace simbi {
 
         SimulationFailureException::SimulationFailureException(
             const char* reason,
-            const char* details)
+            const char* details
+        )
             : reason(reason), details(details)
         {
         }
@@ -49,8 +50,8 @@ namespace simbi {
         //====================================================================================================
         //                                  WRITE DATA TO FILE
         //====================================================================================================
-        std::string create_step_str(const real current_time,
-                                    const int max_order_of_mag)
+        std::string
+        create_step_str(const real current_time, const int max_order_of_mag)
         {
             if (current_time == 0) {
                 return "000_000";
@@ -59,7 +60,8 @@ namespace simbi {
             // displacements
             const int current_time_int  = std::round(1e3 * current_time);
             const int time_order_of_mag = std::floor(
-                std::log10(std::round(1000.0 * current_time) / 1000.0));
+                std::log10(std::round(1000.0 * current_time) / 1000.0)
+            );
             const int num_zeros         = max_order_of_mag - time_order_of_mag;
             const std::string pad_zeros = std::string(num_zeros, '0');
             auto time_string            = std::to_string(current_time_int);
@@ -68,12 +70,14 @@ namespace simbi {
             return time_string;
         }
 
-        void write_hdf5(const std::string data_directory,
-                        const std::string filename,
-                        const PrimData prims,
-                        const DataWriteMembers setup,
-                        const int dim  = 2,
-                        const int size = 1)
+        void write_hdf5(
+            const std::string data_directory,
+            const std::string filename,
+            const PrimData prims,
+            const DataWriteMembers setup,
+            const int dim  = 2,
+            const int size = 1
+        )
         {
             std::string filePath = data_directory;
             std::cout << "\n"
@@ -112,9 +116,11 @@ namespace simbi {
 
             // Variable length string
             H5::StrType str_datatype(H5::PredType::C_S1, H5T_VARIABLE);
-            H5::DataSet str_dataset = file.createDataSet("boundary_conditions",
-                                                         str_datatype,
-                                                         bc_dataspace);
+            H5::DataSet str_dataset = file.createDataSet(
+                "boundary_conditions",
+                str_datatype,
+                bc_dataspace
+            );
             str_dataset.write(arr_c_str.data(), str_datatype);
             str_dataset.close();
 
@@ -340,9 +346,11 @@ namespace simbi {
             att.write(bool_type, &setup.first_order);
             att.close();
 
-            att = sim_info.createAttribute("using_gamma_beta",
-                                           bool_type,
-                                           att_space);
+            att = sim_info.createAttribute(
+                "using_gamma_beta",
+                bool_type,
+                att_space
+            );
             att.write(bool_type, &setup.using_fourvelocity);
             att.close();
 
@@ -374,9 +382,8 @@ namespace simbi {
             att.write(real_type, &setup.x3min);
             att.close();
 
-            att = sim_info.createAttribute("adiabatic_gamma",
-                                           real_type,
-                                           att_space);
+            att = sim_info
+                      .createAttribute("adiabatic_gamma", real_type, att_space);
             att.write(real_type, &setup.ad_gamma);
             att.close();
 
@@ -423,21 +430,18 @@ namespace simbi {
             att.write(int_type, &setup.dimensions);
             att.close();
 
-            att = sim_info.createAttribute("x1_cell_spacing",
-                                           dtype_str,
-                                           att_space);
+            att = sim_info
+                      .createAttribute("x1_cell_spacing", dtype_str, att_space);
             att.write(dtype_str, setup.x1_cell_spacing.c_str());
             att.close();
 
-            att = sim_info.createAttribute("x2_cell_spacing",
-                                           dtype_str,
-                                           att_space);
+            att = sim_info
+                      .createAttribute("x2_cell_spacing", dtype_str, att_space);
             att.write(dtype_str, setup.x2_cell_spacing.c_str());
             att.close();
 
-            att = sim_info.createAttribute("x3_cell_spacing",
-                                           dtype_str,
-                                           att_space);
+            att = sim_info
+                      .createAttribute("x3_cell_spacing", dtype_str, att_space);
             att.write(dtype_str, setup.x3_cell_spacing.c_str());
             att.close();
 

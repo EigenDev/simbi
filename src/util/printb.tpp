@@ -108,12 +108,14 @@ namespace simbi {
                             if (right != '}' && right != '>') {
                                 throw std::invalid_argument(
                                     "syntax error in format string, "
-                                    "missing closing brace");
+                                    "missing closing brace"
+                                );
                             }
                             else {
                                 throw std::invalid_argument(
                                     "syntax error in format string, "
-                                    "missing format signifier (:)");
+                                    "missing format signifier (:)"
+                                );
                             }
                         }
                         inserted = true;

@@ -23,12 +23,14 @@ namespace simbi {
             std::optional<typename func_type<1>::type> const& mom1_lambda,
             std::optional<typename func_type<1>::type> const& mom2_lambda,
             std::optional<typename func_type<1>::type> const& mom3_lambda,
-            std::optional<typename func_type<1>::type> const& enrg_lambda)
+            std::optional<typename func_type<1>::type> const& enrg_lambda
+        )
         {
-            using sr_rm_or_nt = std::variant<std::unique_ptr<Newtonian<1>>,
-                                             std::unique_ptr<SRHD<1>>,
-                                             std::unique_ptr<RMHD<1>>>;
-            auto self         = [&]() -> sr_rm_or_nt {
+            using sr_rm_or_nt = std::variant<
+                std::unique_ptr<Newtonian<1>>,
+                std::unique_ptr<SRHD<1>>,
+                std::unique_ptr<RMHD<1>>>;
+            auto self = [&]() -> sr_rm_or_nt {
                 if (regime == "srhd") {
                     return std::make_unique<SRHD<1>>(state, init_cond);
                 }
@@ -42,15 +44,18 @@ namespace simbi {
 
             std::visit(
                 [=](auto&& arg) {
-                    arg->simulate(scale_factor,
-                                  scale_factor_derivative,
-                                  density_lambda,
-                                  mom1_lambda,
-                                  nullptr,
-                                  nullptr,
-                                  enrg_lambda);
+                    arg->simulate(
+                        scale_factor,
+                        scale_factor_derivative,
+                        density_lambda,
+                        mom1_lambda,
+                        nullptr,
+                        nullptr,
+                        enrg_lambda
+                    );
                 },
-                self);
+                self
+            );
         };
 
         template <>
@@ -64,12 +69,14 @@ namespace simbi {
             std::optional<typename func_type<2>::type> const& mom1_lambda,
             std::optional<typename func_type<2>::type> const& mom2_lambda,
             std::optional<typename func_type<2>::type> const& mom3_lambda,
-            std::optional<typename func_type<2>::type> const& enrg_lambda)
+            std::optional<typename func_type<2>::type> const& enrg_lambda
+        )
         {
-            using sr_rm_or_nt = std::variant<std::unique_ptr<Newtonian<2>>,
-                                             std::unique_ptr<SRHD<2>>,
-                                             std::unique_ptr<RMHD<2>>>;
-            auto self         = [&]() -> sr_rm_or_nt {
+            using sr_rm_or_nt = std::variant<
+                std::unique_ptr<Newtonian<2>>,
+                std::unique_ptr<SRHD<2>>,
+                std::unique_ptr<RMHD<2>>>;
+            auto self = [&]() -> sr_rm_or_nt {
                 if (regime == "srhd") {
                     return std::make_unique<SRHD<2>>(state, init_cond);
                 }
@@ -82,15 +89,18 @@ namespace simbi {
             }();
             std::visit(
                 [=](auto&& arg) {
-                    arg->simulate(scale_factor,
-                                  scale_factor_derivative,
-                                  density_lambda,
-                                  mom1_lambda,
-                                  mom2_lambda,
-                                  mom3_lambda,
-                                  enrg_lambda);
+                    arg->simulate(
+                        scale_factor,
+                        scale_factor_derivative,
+                        density_lambda,
+                        mom1_lambda,
+                        mom2_lambda,
+                        mom3_lambda,
+                        enrg_lambda
+                    );
                 },
-                self);
+                self
+            );
         };
 
         template <>
@@ -104,12 +114,14 @@ namespace simbi {
             std::optional<typename func_type<3>::type> const& mom1_lambda,
             std::optional<typename func_type<3>::type> const& mom2_lambda,
             std::optional<typename func_type<3>::type> const& mom3_lambda,
-            std::optional<typename func_type<3>::type> const& enrg_lambda)
+            std::optional<typename func_type<3>::type> const& enrg_lambda
+        )
         {
-            using sr_rm_or_nt = std::variant<std::unique_ptr<Newtonian<3>>,
-                                             std::unique_ptr<SRHD<3>>,
-                                             std::unique_ptr<RMHD<3>>>;
-            auto self         = [&]() -> sr_rm_or_nt {
+            using sr_rm_or_nt = std::variant<
+                std::unique_ptr<Newtonian<3>>,
+                std::unique_ptr<SRHD<3>>,
+                std::unique_ptr<RMHD<3>>>;
+            auto self = [&]() -> sr_rm_or_nt {
                 if (regime == "srhd") {
                     return std::make_unique<SRHD<3>>(state, init_cond);
                 }
@@ -123,15 +135,18 @@ namespace simbi {
 
             std::visit(
                 [=](auto&& arg) {
-                    arg->simulate(scale_factor,
-                                  scale_factor_derivative,
-                                  density_lambda,
-                                  mom1_lambda,
-                                  mom2_lambda,
-                                  mom3_lambda,
-                                  enrg_lambda);
+                    arg->simulate(
+                        scale_factor,
+                        scale_factor_derivative,
+                        density_lambda,
+                        mom1_lambda,
+                        mom2_lambda,
+                        mom3_lambda,
+                        enrg_lambda
+                    );
                 },
-                self);
+                self
+            );
         };
     }   // namespace hydrostate
 

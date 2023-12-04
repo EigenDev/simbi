@@ -83,7 +83,8 @@ const std::map<Color, std::string> color_map = {
   {Color::MAGENTA, magenta},
   {Color::BLUE, blue},
   {Color::RESET, reset},
-  {Color::BOLD, bold}};
+  {Color::BOLD, bold}
+};
 
 namespace simbi {
     namespace util {

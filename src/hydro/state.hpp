@@ -56,8 +56,8 @@ namespace simbi {
             std::optional<typename func_type<dim>::type> const& mom1_lambda,
             std::optional<typename func_type<dim>::type> const& mom2_lambda,
             std::optional<typename func_type<dim>::type> const& mom3_lambda,
-            std::optional<typename func_type<dim>::type> const& enrg_lambda) =
-            delete;
+            std::optional<typename func_type<dim>::type> const& enrg_lambda
+        ) = delete;
 
         template <>
         void simulate<1>(
@@ -70,7 +70,8 @@ namespace simbi {
             std::optional<typename func_type<1>::type> const& mom1_lambda,
             std::optional<typename func_type<1>::type> const& mom2_lambda,
             std::optional<typename func_type<1>::type> const& mom3_lambda,
-            std::optional<typename func_type<1>::type> const& enrg_lambda);
+            std::optional<typename func_type<1>::type> const& enrg_lambda
+        );
 
         template <>
         void simulate<2>(
@@ -83,7 +84,8 @@ namespace simbi {
             std::optional<typename func_type<2>::type> const& mom1_lambda,
             std::optional<typename func_type<2>::type> const& mom2_lambda,
             std::optional<typename func_type<2>::type> const& mom3_lambda,
-            std::optional<typename func_type<2>::type> const& enrg_lambda);
+            std::optional<typename func_type<2>::type> const& enrg_lambda
+        );
 
         template <>
         void simulate<3>(
@@ -96,7 +98,8 @@ namespace simbi {
             std::optional<typename func_type<3>::type> const& mom1_lambda,
             std::optional<typename func_type<3>::type> const& mom2_lambda,
             std::optional<typename func_type<3>::type> const& mom3_lambda,
-            std::optional<typename func_type<3>::type> const& enrg_lambda);
+            std::optional<typename func_type<3>::type> const& enrg_lambda
+        );
     }   // namespace hydrostate
 }   // namespace simbi
 

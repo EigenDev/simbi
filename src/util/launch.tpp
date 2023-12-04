@@ -19,10 +19,11 @@ namespace simbi {
     {
 
 #if GPU_CODE
-        Kernel<<<policy.gridSize,
-                 policy.blockSize,
-                 policy.sharedMemBytes,
-                 policy.stream>>>(f, args...);
+        Kernel<<<
+            policy.gridSize,
+            policy.blockSize,
+            policy.sharedMemBytes,
+            policy.stream>>>(f, args...);
 #else
         f(args...);
 #endif

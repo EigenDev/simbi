@@ -12,8 +12,10 @@ template <int dim> RMHD<dim>::RMHD() {}
 
 // Overloaded Constructor
 template <int dim>
-RMHD<dim>::RMHD(std::vector<std::vector<real>>& state,
-                const InitialConditions& init_conditions)
+RMHD<dim>::RMHD(
+    std::vector<std::vector<real>>& state,
+    const InitialConditions& init_conditions
+)
     : HydroBase(state, init_conditions)
 {
 }
@@ -23,8 +25,8 @@ template <int dim> RMHD<dim>::~RMHD() {}
 
 // Helpers
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x1face(const lint ii,
-                                                         const int side) const
+GPU_CALLABLE_MEMBER constexpr real
+RMHD<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -34,27 +36,31 @@ GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x1face(const lint ii,
                 if (side == 0) {
                     return x1l;
                 }
-                return helpers::my_min<real>(x1l + dx1 * (ii == 0 ? 0.5 : 1.0),
-                                             x1max);
+                return helpers::my_min<real>(
+                    x1l + dx1 * (ii == 0 ? 0.5 : 1.0),
+                    x1max
+                );
             }
         default:
             {
                 const real x1l = helpers::my_max<real>(
                     x1min * std::pow(10, (ii - 0.5) * dlogx1),
-                    x1min);
+                    x1min
+                );
                 if (side == 0) {
                     return x1l;
                 }
                 return helpers::my_min<real>(
                     x1l * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)),
-                    x1max);
+                    x1max
+                );
             }
     }
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x2face(const lint ii,
-                                                         const int side) const
+GPU_CALLABLE_MEMBER constexpr real
+RMHD<dim>::get_x2face(const lint ii, const int side) const
 {
     switch (x2_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -64,27 +70,31 @@ GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x2face(const lint ii,
                 if (side == 0) {
                     return x2l;
                 }
-                return helpers::my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0),
-                                             x2max);
+                return helpers::my_min<real>(
+                    x2l + dx2 * (ii == 0 ? 0.5 : 1.0),
+                    x2max
+                );
             }
         default:
             {
                 const real x2l = helpers::my_max<real>(
                     x2min * std::pow(10, (ii - 0.5) * dlogx2),
-                    x2min);
+                    x2min
+                );
                 if (side == 0) {
                     return x2l;
                 }
                 return helpers::my_min<real>(
                     x2l * std::pow(10, dlogx2 * (ii == 0 ? 0.5 : 1.0)),
-                    x2max);
+                    x2max
+                );
             }
     }
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x3face(const lint ii,
-                                                         const int side) const
+GPU_CALLABLE_MEMBER constexpr real
+RMHD<dim>::get_x3face(const lint ii, const int side) const
 {
     switch (x3_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -94,27 +104,31 @@ GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x3face(const lint ii,
                 if (side == 0) {
                     return x3l;
                 }
-                return helpers::my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0),
-                                             x3max);
+                return helpers::my_min<real>(
+                    x3l + dx3 * (ii == 0 ? 0.5 : 1.0),
+                    x3max
+                );
             }
         default:
             {
                 const real x3l = helpers::my_max<real>(
                     x3min * std::pow(10, (ii - 0.5) * dlogx3),
-                    x3min);
+                    x3min
+                );
                 if (side == 0) {
                     return x3l;
                 }
                 return helpers::my_min<real>(
                     x3l * std::pow(10, dlogx3 * (ii == 0 ? 0.5 : 1.0)),
-                    x3max);
+                    x3max
+                );
             }
     }
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
-RMHD<dim>::get_x1_differential(const lint ii) const
+GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x1_differential(const lint ii
+) const
 {
     const real x1l   = get_x1face(ii, 0);
     const real x1r   = get_x1face(ii, 1);
@@ -128,8 +142,8 @@ RMHD<dim>::get_x1_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
-RMHD<dim>::get_x2_differential(const lint ii) const
+GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x2_differential(const lint ii
+) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -157,8 +171,8 @@ RMHD<dim>::get_x2_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
-RMHD<dim>::get_x3_differential(const lint ii) const
+GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x3_differential(const lint ii
+) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -182,9 +196,8 @@ RMHD<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real RMHD<dim>::get_cell_volume(const lint ii,
-                                                    const lint jj,
-                                                    const lint kk) const
+GPU_CALLABLE_MEMBER real
+RMHD<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
 {
     // the volume in cartesian coordinates is only nominal
     if (geometry == Geometry::CARTESIAN) {
@@ -242,32 +255,37 @@ template <int dim> void RMHD<dim>::emit_troubled_cells()
                     vsq,
                     bsq,
                     x1mean,
-                    n);
+                    n
+                );
             }
             else if constexpr (dim == 2) {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
-                       "%.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, x2coord: "
-                       "%.2e, iter: %" PRIu64 "\n",
-                       cons[gid].d / w,
-                       prims[gid].p,
-                       vsq,
-                       bsq,
-                       x1mean,
-                       x2mean,
-                       n);
+                printf(
+                    "\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
+                    "%.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, x2coord: "
+                    "%.2e, iter: %" PRIu64 "\n",
+                    cons[gid].d / w,
+                    prims[gid].p,
+                    vsq,
+                    bsq,
+                    x1mean,
+                    x2mean,
+                    n
+                );
             }
             else {
-                printf("\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
-                       "%.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, x2coord: "
-                       "%.2e, x3coord: %.2e, iter: %" PRIu64 "\n",
-                       cons[gid].d / w,
-                       prims[gid].p,
-                       vsq,
-                       bsq,
-                       x1mean,
-                       x2mean,
-                       x3mean,
-                       n);
+                printf(
+                    "\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
+                    "%.2e, Vsq: %.2e, Bsq: %.2e, x1coord: %.2e, x2coord: "
+                    "%.2e, x3coord: %.2e, iter: %" PRIu64 "\n",
+                    cons[gid].d / w,
+                    prims[gid].p,
+                    vsq,
+                    bsq,
+                    x1mean,
+                    x2mean,
+                    x3mean,
+                    n
+                );
             }
         }
     }
@@ -295,7 +313,8 @@ template <int dim> void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
         (luint) 0,
         total_zones,
         [prim_data, cons_data, edens_data, troubled_data, gr, this] GPU_LAMBDA(
-            luint gid) {
+            luint gid
+        ) {
             bool workLeftToDo = true;
             volatile __shared__ bool found_failure;
 
@@ -325,19 +344,23 @@ template <int dim> void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                         invdV         = 1 / dV;
                     }
                     else {
-                        const luint kk =
-                            simbi::helpers::get_height(gid,
-                                                       xactive_grid,
-                                                       yactive_grid);
-                        const luint jj = simbi::helpers::get_row(gid,
-                                                                 xactive_grid,
-                                                                 yactive_grid,
-                                                                 kk);
-                        const luint ii =
-                            simbi::helpers::get_column(gid,
-                                                       xactive_grid,
-                                                       yactive_grid,
-                                                       kk);
+                        const luint kk = simbi::helpers::get_height(
+                            gid,
+                            xactive_grid,
+                            yactive_grid
+                        );
+                        const luint jj = simbi::helpers::get_row(
+                            gid,
+                            xactive_grid,
+                            yactive_grid,
+                            kk
+                        );
+                        const luint ii = simbi::helpers::get_column(
+                            gid,
+                            xactive_grid,
+                            yactive_grid,
+                            kk
+                        );
                         const auto ireal =
                             helpers::get_real_idx(ii, radius, xactive_grid);
                         const auto jreal =
@@ -420,7 +443,8 @@ template <int dim> void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                 }
                 simbi::gpu::api::synchronize();
             }
-        });
+        }
+    );
 }
 
 /**
@@ -432,8 +456,8 @@ template <int dim> void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
  * @return none
  */
 template <int dim>
-RMHD<dim>::primitive_t RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons,
-                                            const luint gid)
+RMHD<dim>::primitive_t
+RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons, const luint gid)
 {
     const auto gr          = gamma / (gamma - 1);
     auto* const edens_data = edens_guess.data();
@@ -535,11 +559,12 @@ RMHD<dim>::primitive_t RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons,
 */
 
 template <int dim>
-GPU_CALLABLE_MEMBER void
-RMHD<dim>::calc_max_wave_speeds(const RMHD<dim>::primitive_t& prims,
-                                const luint nhat,
-                                real speeds[],
-                                real& cs2) const
+GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
+    const RMHD<dim>::primitive_t& prims,
+    const luint nhat,
+    real speeds[],
+    real& cs2
+) const
 {
     /*
     evaluate the full quartic if the simplfying conditions are not met.
@@ -646,10 +671,11 @@ RMHD<dim>::calc_max_wave_speeds(const RMHD<dim>::primitive_t& prims,
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER RMHD<dim>::eigenvals_t
-RMHD<dim>::calc_eigenvals(const RMHD<dim>::primitive_t& primsL,
-                          const RMHD<dim>::primitive_t& primsR,
-                          const luint nhat) const
+GPU_CALLABLE_MEMBER RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
+    const RMHD<dim>::primitive_t& primsL,
+    const RMHD<dim>::primitive_t& primsR,
+    const luint nhat
+) const
 {
     real cs2L, cs2R;
     real speeds[4];
@@ -664,10 +690,12 @@ RMHD<dim>::calc_eigenvals(const RMHD<dim>::primitive_t& primsL,
     const real lpR = speeds[3];
     const real lmR = speeds[0];
 
-    return {helpers::my_min(lmL, lmR),
-            helpers::my_max(lpL, lpR),
-            std::sqrt(cs2L),
-            std::sqrt(cs2R)};
+    return {
+      helpers::my_min(lmL, lmR),
+      helpers::my_max(lpL, lpR),
+      std::sqrt(cs2L),
+      std::sqrt(cs2R)
+    };
 };
 
 //-----------------------------------------------------------------------------------------
@@ -693,16 +721,18 @@ RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t& prims) const
     const real d              = rho * lorentz_factor;
     const real ed             = d * h * lorentz_factor;
 
-    return {d,
-            (ed + bsq) * v1 - vdotb * b1,
-            (ed + bsq) * v2 - vdotb * b2,
-            (ed + bsq) * v3 - vdotb * b3,
-            ed - pg - d + static_cast<real>(0.5) * bsq +
-                static_cast<real>(0.5) * (vsq * bsq - vdotb * vdotb),
-            b1,
-            b2,
-            b3,
-            d * prims.chi};
+    return {
+      d,
+      (ed + bsq) * v1 - vdotb * b1,
+      (ed + bsq) * v2 - vdotb * b2,
+      (ed + bsq) * v3 - vdotb * b3,
+      ed - pg - d + static_cast<real>(0.5) * bsq +
+          static_cast<real>(0.5) * (vsq * bsq - vdotb * vdotb),
+      b1,
+      b2,
+      b3,
+      d * prims.chi
+    };
 };
 
 //---------------------------------------------------------------------
@@ -715,21 +745,23 @@ template <int dim> template <TIMESTEP_TYPE dt_type> void RMHD<dim>::adapt_dt()
     static auto& thread_pool =
         simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
     std::atomic<real> min_dt = INFINITY;
-    thread_pool.parallel_for(
-        static_cast<luint>(0),
-        active_zones,
-        [&](luint aid) {
+    thread_pool
+        .parallel_for(static_cast<luint>(0), active_zones, [&](luint aid) {
             real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt, cs;
             real speeds[4];
             const luint kk = dim < 3 ? 0
-                                     : simbi::helpers::get_height(aid,
-                                                                  xactive_grid,
-                                                                  yactive_grid);
+                                     : simbi::helpers::get_height(
+                                           aid,
+                                           xactive_grid,
+                                           yactive_grid
+                                       );
             const luint jj = dim < 2 ? 0
-                                     : simbi::helpers::get_row(aid,
-                                                               xactive_grid,
-                                                               yactive_grid,
-                                                               kk);
+                                     : simbi::helpers::get_row(
+                                           aid,
+                                           xactive_grid,
+                                           yactive_grid,
+                                           kk
+                                       );
             const luint ii =
                 simbi::helpers::get_column(aid, xactive_grid, yactive_grid, kk);
             // Left/Right wave speeds
@@ -773,13 +805,17 @@ template <int dim> template <TIMESTEP_TYPE dt_type> void RMHD<dim>::adapt_dt()
                         cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
                     }
                     else if constexpr (dim == 2) {
-                        cfl_dt = std::min({dx1 / (std::max(v1p, v1m)),
-                                           dx2 / (std::max(v2p, v2m))});
+                        cfl_dt = std::min(
+                            {dx1 / (std::max(v1p, v1m)),
+                             dx2 / (std::max(v2p, v2m))}
+                        );
                     }
                     else {
-                        cfl_dt = std::min({dx1 / (std::max(v1p, v1m)),
-                                           dx2 / (std::max(v2p, v2m)),
-                                           dx3 / (std::max(v3p, v3m))});
+                        cfl_dt = std::min(
+                            {dx1 / (std::max(v1p, v1m)),
+                             dx2 / (std::max(v2p, v2m)),
+                             dx3 / (std::max(v3p, v3m))}
+                        );
                     }
                     break;
 
@@ -792,10 +828,12 @@ template <int dim> template <TIMESTEP_TYPE dt_type> void RMHD<dim>::adapt_dt()
                             const real rmean = helpers::get_cell_centroid(
                                 x1r,
                                 x1l,
-                                simbi::Geometry::SPHERICAL);
-                            cfl_dt =
-                                std::min({dx1 / (std::max(v1p, v1m)),
-                                          rmean * dx2 / (std::max(v2p, v2m))});
+                                simbi::Geometry::SPHERICAL
+                            );
+                            cfl_dt = std::min(
+                                {dx1 / (std::max(v1p, v1m)),
+                                 rmean * dx2 / (std::max(v2p, v2m))}
+                            );
                         }
                         else {
                             const real x2l   = get_x2face(jj, 0);
@@ -803,13 +841,15 @@ template <int dim> template <TIMESTEP_TYPE dt_type> void RMHD<dim>::adapt_dt()
                             const real rmean = helpers::get_cell_centroid(
                                 x1r,
                                 x1l,
-                                simbi::Geometry::SPHERICAL);
+                                simbi::Geometry::SPHERICAL
+                            );
                             const real th    = 0.5 * (x2r + x2l);
                             const real rproj = rmean * std::sin(th);
-                            cfl_dt =
-                                std::min({dx1 / (std::max(v1p, v1m)),
-                                          rmean * dx2 / (std::max(v2p, v2m)),
-                                          rproj * dx3 / (std::max(v3p, v3m))});
+                            cfl_dt           = std::min(
+                                {dx1 / (std::max(v1p, v1m)),
+                                           rmean * dx2 / (std::max(v2p, v2m)),
+                                           rproj * dx3 / (std::max(v3p, v3m))}
+                            );
                         }
                         break;
                     }
@@ -824,7 +864,8 @@ template <int dim> template <TIMESTEP_TYPE dt_type> void RMHD<dim>::adapt_dt()
                                     {
                                         cfl_dt = std::min(
                                             {dx1 / (std::max(v1p, v1m)),
-                                             dx2 / (std::max(v2p, v2m))});
+                                             dx2 / (std::max(v2p, v2m))}
+                                        );
                                         break;
                                     }
 
@@ -834,11 +875,12 @@ template <int dim> template <TIMESTEP_TYPE dt_type> void RMHD<dim>::adapt_dt()
                                             helpers::get_cell_centroid(
                                                 x1r,
                                                 x1l,
-                                                simbi::Geometry::CYLINDRICAL);
+                                                simbi::Geometry::CYLINDRICAL
+                                            );
                                         cfl_dt = std::min(
                                             {dx1 / (std::max(v1p, v1m)),
-                                             rmean * dx2 /
-                                                 (std::max(v2p, v2m))});
+                                             rmean * dx2 / (std::max(v2p, v2m))}
+                                        );
                                         break;
                                     }
                             }
@@ -847,11 +889,13 @@ template <int dim> template <TIMESTEP_TYPE dt_type> void RMHD<dim>::adapt_dt()
                             const real rmean = helpers::get_cell_centroid(
                                 x1r,
                                 x1l,
-                                simbi::Geometry::CYLINDRICAL);
-                            cfl_dt =
-                                std::min({dx1 / (std::max(v1p, v1m)),
-                                          rmean * dx2 / (std::max(v2p, v2m)),
-                                          dx3 / (std::max(v3p, v3m))});
+                                simbi::Geometry::CYLINDRICAL
+                            );
+                            cfl_dt = std::min(
+                                {dx1 / (std::max(v1p, v1m)),
+                                 rmean * dx2 / (std::max(v2p, v2m)),
+                                 dx3 / (std::max(v3p, v3m))}
+                            );
                         }
                         break;
                     }
@@ -877,10 +921,12 @@ void RMHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
         // p.gridSize, p.blockSize, this, prims.data(), dt_min.data(),
         // geometry);
         helpers::compute_dt<rm::Primitive<dim>, dt_type>
-            <<<p.gridSize, p.blockSize>>>(this,
-                                          prims.data(),
-                                          dt_min.data(),
-                                          geometry);
+            <<<p.gridSize, p.blockSize>>>(
+                this,
+                prims.data(),
+                dt_min.data(),
+                geometry
+            );
     }
     // LAUNCH_ASYNC((helpers::deviceReduceWarpAtomicKernel<dim>), p.gridSize,
     // p.blockSize, this, dt_min.data(), active_zones);
@@ -895,8 +941,8 @@ void RMHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
 //===================================================================================================================
 template <int dim>
 GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t
-RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims,
-                      const luint nhat) const
+RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
+    const
 {
     const real rho            = prims.rho;
     const real v1             = prims.vcomponent(1);
@@ -930,19 +976,21 @@ RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims,
       vn * b1 - v1 * bn,
       vn * b2 - v2 * bn,
       vn * b3 - v3 * bn,
-      d * vn * chi};
+      d * vn * chi
+    };
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t
-RMHD<dim>::calc_hll_flux(const RMHD<dim>::conserved_t& left_state,
-                         const RMHD<dim>::conserved_t& right_state,
-                         const RMHD<dim>::conserved_t& left_flux,
-                         const RMHD<dim>::conserved_t& right_flux,
-                         const RMHD<dim>::primitive_t& left_prims,
-                         const RMHD<dim>::primitive_t& right_prims,
-                         const luint nhat,
-                         const real vface) const
+GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
+    const RMHD<dim>::conserved_t& left_state,
+    const RMHD<dim>::conserved_t& right_state,
+    const RMHD<dim>::conserved_t& left_flux,
+    const RMHD<dim>::conserved_t& right_flux,
+    const RMHD<dim>::primitive_t& left_prims,
+    const RMHD<dim>::primitive_t& right_prims,
+    const luint nhat,
+    const real vface
+) const
 {
     const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
     // Grab the necessary wave speeds
@@ -985,15 +1033,16 @@ RMHD<dim>::calc_hll_flux(const RMHD<dim>::conserved_t& left_state,
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t
-RMHD<dim>::calc_hllc_flux(const RMHD<dim>::conserved_t& left_state,
-                          const RMHD<dim>::conserved_t& right_state,
-                          const RMHD<dim>::conserved_t& left_flux,
-                          const RMHD<dim>::conserved_t& right_flux,
-                          const RMHD<dim>::primitive_t& left_prims,
-                          const RMHD<dim>::primitive_t& right_prims,
-                          const luint nhat,
-                          const real vface) const
+GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
+    const RMHD<dim>::conserved_t& left_state,
+    const RMHD<dim>::conserved_t& right_state,
+    const RMHD<dim>::conserved_t& left_flux,
+    const RMHD<dim>::conserved_t& right_flux,
+    const RMHD<dim>::primitive_t& left_prims,
+    const RMHD<dim>::primitive_t& right_prims,
+    const luint nhat,
+    const real vface
+) const
 {
     static auto construct_the_state = [](const luint nhat,
                                          const luint np1,
@@ -1118,17 +1167,19 @@ RMHD<dim>::calc_hllc_flux(const RMHD<dim>::conserved_t& left_state,
             (-bnStar * (bt2Star * invg2 + vsdB * vt2Star) +
              aL * left_state.momentum(np2) - left_flux.momentum(np2));
         const real tauStar    = eStar - dStar;
-        const auto starStateL = construct_the_state(nhat,
-                                                    np1,
-                                                    np2,
-                                                    d,
-                                                    mnStar,
-                                                    mt1Star,
-                                                    mt2Star,
-                                                    tauStar,
-                                                    bnStar,
-                                                    bt1Star,
-                                                    bt2Star);
+        const auto starStateL = construct_the_state(
+            nhat,
+            np1,
+            np2,
+            d,
+            mnStar,
+            mt1Star,
+            mt2Star,
+            tauStar,
+            bnStar,
+            bt1Star,
+            bt2Star
+        );
         auto hllc_flux =
             left_flux + (starStateL - left_state) * aL - starStateL * vface;
 
@@ -1169,17 +1220,19 @@ RMHD<dim>::calc_hllc_flux(const RMHD<dim>::conserved_t& left_state,
             (-bnStar * (bt2Star * invg2 + vsdB * vt2Star) +
              aR * right_state.momentum(np2) - right_flux.momentum(np2));
         const real tauStar    = eStar - dStar;
-        const auto starStateR = construct_the_state(nhat,
-                                                    np1,
-                                                    np2,
-                                                    d,
-                                                    mnStar,
-                                                    mt1Star,
-                                                    mt2Star,
-                                                    tauStar,
-                                                    bnStar,
-                                                    bt1Star,
-                                                    bt2Star);
+        const auto starStateR = construct_the_state(
+            nhat,
+            np1,
+            np2,
+            d,
+            mnStar,
+            mt1Star,
+            mt2Star,
+            tauStar,
+            bnStar,
+            bt1Star,
+            bt2Star
+        );
         auto hllc_flux =
             right_flux + (starStateR - right_state) * aR - starStateR * vface;
 
@@ -1196,16 +1249,17 @@ RMHD<dim>::calc_hllc_flux(const RMHD<dim>::conserved_t& left_state,
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t
-RMHD<dim>::calc_hlld_flux(const RMHD<dim>::conserved_t& left_state,
-                          const RMHD<dim>::conserved_t& right_state,
-                          const RMHD<dim>::conserved_t& left_flux,
-                          const RMHD<dim>::conserved_t& right_flux,
-                          const RMHD<dim>::primitive_t& left_prims,
-                          const RMHD<dim>::primitive_t& right_prims,
-                          const luint nhat,
-                          const real vface,
-                          const luint gid) const {
+GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
+    const RMHD<dim>::conserved_t& left_state,
+    const RMHD<dim>::conserved_t& right_state,
+    const RMHD<dim>::conserved_t& left_flux,
+    const RMHD<dim>::conserved_t& right_flux,
+    const RMHD<dim>::primitive_t& left_prims,
+    const RMHD<dim>::primitive_t& right_prims,
+    const luint nhat,
+    const real vface,
+    const luint gid
+) const {
   // rm::Conserved<dim> ua, uc;
   // const rm::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims,
   // nhat); const real aL  = lambda.afL; const real aR  = lambda.afR; const real
@@ -1577,9 +1631,11 @@ RMHD<dim>::calc_hlld_flux(const RMHD<dim>::conserved_t& left_state,
 //                                            UDOT CALCULATIONS
 //===================================================================================================================
 template <int dim>
-void RMHD<dim>::advance(const ExecutionPolicy<>& p,
-                        const luint sx,
-                        const luint sy)
+void RMHD<dim>::advance(
+    const ExecutionPolicy<>& p,
+    const luint sx,
+    const luint sy
+)
 {
     const luint xpg = this->xactive_grid;
     const luint ypg = this->yactive_grid;
@@ -1787,36 +1843,45 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
 
             const bool object_to_my_left =
                 dim < 2 ? false
-                        : object_data[kk * xpg * ypg + jj * xpg +
-                                      helpers::my_max(static_cast<lint>(ii - 1),
-                                                      static_cast<lint>(0))];
+                        : object_data
+                              [kk * xpg * ypg + jj * xpg +
+                               helpers::my_max(
+                                   static_cast<lint>(ii - 1),
+                                   static_cast<lint>(0)
+                               )];
             const bool object_to_my_right =
                 dim < 2 ? false
-                        : object_data[kk * xpg * ypg + jj * xpg +
-                                      helpers::my_min(ii + 1, xpg - 1)];
+                        : object_data
+                              [kk * xpg * ypg + jj * xpg +
+                               helpers::my_min(ii + 1, xpg - 1)];
             const bool object_in_front =
-                dim < 2
-                    ? false
-                    : object_data[kk * xpg * ypg +
-                                  helpers::my_min(jj + 1, ypg - 1) * xpg + ii];
-            const bool object_behind =
                 dim < 2 ? false
-                        : object_data[kk * xpg * ypg +
-                                      helpers::my_max(static_cast<lint>(jj - 1),
-                                                      static_cast<lint>(0)) *
-                                          xpg +
-                                      ii];
+                        : object_data
+                              [kk * xpg * ypg +
+                               helpers::my_min(jj + 1, ypg - 1) * xpg + ii];
+            const bool object_behind = dim < 2
+                                           ? false
+                                           : object_data
+                                                 [kk * xpg * ypg +
+                                                  helpers::my_max(
+                                                      static_cast<lint>(jj - 1),
+                                                      static_cast<lint>(0)
+                                                  ) * xpg +
+                                                  ii];
             const bool object_above_me =
-                dim < 3
-                    ? false
-                    : object_data[helpers::my_min(kk + 1, zpg - 1) * xpg * ypg +
-                                  jj * xpg + ii];
+                dim < 3 ? false
+                        : object_data
+                              [helpers::my_min(kk + 1, zpg - 1) * xpg * ypg +
+                               jj * xpg + ii];
             const bool object_below_me =
                 dim < 3 ? false
-                        : object_data[helpers::my_max(static_cast<lint>(kk - 1),
-                                                      static_cast<lint>(0)) *
-                                          xpg * ypg +
-                                      jj * xpg + ii];
+                        : object_data
+                              [helpers::my_max(
+                                   static_cast<lint>(kk - 1),
+                                   static_cast<lint>(0)
+                               ) * xpg *
+                                   ypg +
+                               jj * xpg + ii];
 
             const real x1l    = get_x1face(ii, 0);
             const real x1r    = get_x1face(ii, 1);
@@ -1903,147 +1968,178 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                 switch (sim_solver) {
                     case Solver::HLLC:
                         if constexpr (dim == 1) {
-                            frf = calc_hllc_flux(uxL,
-                                                 uxR,
-                                                 fL,
-                                                 fR,
-                                                 xprimsL,
-                                                 xprimsR,
-                                                 1,
-                                                 vfaceR);
+                            frf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceR
+                            );
                             break;
                         }
                         else {
                             if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(xprimsL.p,
-                                                                xprimsR.p)) {
-                                    frf = calc_hll_flux(uxL,
-                                                        uxR,
-                                                        fL,
-                                                        fR,
-                                                        xprimsL,
-                                                        xprimsR,
-                                                        1,
-                                                        vfaceR);
+                                if (helpers::quirk_strong_shock(
+                                        xprimsL.p,
+                                        xprimsR.p
+                                    )) {
+                                    frf = calc_hll_flux(
+                                        uxL,
+                                        uxR,
+                                        fL,
+                                        fR,
+                                        xprimsL,
+                                        xprimsR,
+                                        1,
+                                        vfaceR
+                                    );
                                 }
                                 else {
-                                    frf = calc_hllc_flux(uxL,
-                                                         uxR,
-                                                         fL,
-                                                         fR,
-                                                         xprimsL,
-                                                         xprimsR,
-                                                         1,
-                                                         vfaceR);
+                                    frf = calc_hllc_flux(
+                                        uxL,
+                                        uxR,
+                                        fL,
+                                        fR,
+                                        xprimsL,
+                                        xprimsR,
+                                        1,
+                                        vfaceR
+                                    );
                                 }
 
-                                if (helpers::quirk_strong_shock(yprimsL.p,
-                                                                yprimsR.p)) {
-                                    grf = calc_hll_flux(uyL,
-                                                        uyR,
-                                                        gL,
-                                                        gR,
-                                                        yprimsL,
-                                                        yprimsR,
-                                                        2,
-                                                        0.0);
+                                if (helpers::quirk_strong_shock(
+                                        yprimsL.p,
+                                        yprimsR.p
+                                    )) {
+                                    grf = calc_hll_flux(
+                                        uyL,
+                                        uyR,
+                                        gL,
+                                        gR,
+                                        yprimsL,
+                                        yprimsR,
+                                        2,
+                                        0.0
+                                    );
                                 }
                                 else {
-                                    grf = calc_hllc_flux(uyL,
-                                                         uyR,
-                                                         gL,
-                                                         gR,
-                                                         yprimsL,
-                                                         yprimsR,
-                                                         2,
-                                                         0.0);
+                                    grf = calc_hllc_flux(
+                                        uyL,
+                                        uyR,
+                                        gL,
+                                        gR,
+                                        yprimsL,
+                                        yprimsR,
+                                        2,
+                                        0.0
+                                    );
                                 }
 
                                 if constexpr (dim > 2) {
                                     if (helpers::quirk_strong_shock(
                                             zprimsL.p,
-                                            zprimsR.p)) {
-                                        hrf = calc_hll_flux(uzL,
-                                                            uzR,
-                                                            hL,
-                                                            hR,
-                                                            zprimsL,
-                                                            zprimsR,
-                                                            3,
-                                                            0.0);
+                                            zprimsR.p
+                                        )) {
+                                        hrf = calc_hll_flux(
+                                            uzL,
+                                            uzR,
+                                            hL,
+                                            hR,
+                                            zprimsL,
+                                            zprimsR,
+                                            3,
+                                            0.0
+                                        );
                                     }
                                     else {
-                                        hrf = calc_hllc_flux(uzL,
-                                                             uzR,
-                                                             hL,
-                                                             hR,
-                                                             zprimsL,
-                                                             zprimsR,
-                                                             3,
-                                                             0.0);
+                                        hrf = calc_hllc_flux(
+                                            uzL,
+                                            uzR,
+                                            hL,
+                                            hR,
+                                            zprimsL,
+                                            zprimsR,
+                                            3,
+                                            0.0
+                                        );
                                     }
                                 }
                                 break;
                             }
                             else {
-                                frf = calc_hllc_flux(uxL,
-                                                     uxR,
-                                                     fL,
-                                                     fR,
-                                                     xprimsL,
-                                                     xprimsR,
-                                                     1,
-                                                     vfaceR);
-                                grf = calc_hllc_flux(uyL,
-                                                     uyR,
-                                                     gL,
-                                                     gR,
-                                                     yprimsL,
-                                                     yprimsR,
-                                                     2,
-                                                     0);
+                                frf = calc_hllc_flux(
+                                    uxL,
+                                    uxR,
+                                    fL,
+                                    fR,
+                                    xprimsL,
+                                    xprimsR,
+                                    1,
+                                    vfaceR
+                                );
+                                grf = calc_hllc_flux(
+                                    uyL,
+                                    uyR,
+                                    gL,
+                                    gR,
+                                    yprimsL,
+                                    yprimsR,
+                                    2,
+                                    0
+                                );
 
                                 if constexpr (dim > 2) {
-                                    hrf = calc_hllc_flux(uzL,
-                                                         uzR,
-                                                         hL,
-                                                         hR,
-                                                         zprimsL,
-                                                         zprimsR,
-                                                         3,
-                                                         0);
+                                    hrf = calc_hllc_flux(
+                                        uzL,
+                                        uzR,
+                                        hL,
+                                        hR,
+                                        zprimsL,
+                                        zprimsR,
+                                        3,
+                                        0
+                                    );
                                 }
                                 break;
                             }
                         }
                     default:
-                        frf = calc_hll_flux(uxL,
-                                            uxR,
-                                            fL,
-                                            fR,
-                                            xprimsL,
-                                            xprimsR,
-                                            1,
-                                            vfaceR);
+                        frf = calc_hll_flux(
+                            uxL,
+                            uxR,
+                            fL,
+                            fR,
+                            xprimsL,
+                            xprimsR,
+                            1,
+                            vfaceR
+                        );
                         if constexpr (dim > 1) {
-                            grf = calc_hll_flux(uyL,
-                                                uyR,
-                                                gL,
-                                                gR,
-                                                yprimsL,
-                                                yprimsR,
-                                                2,
-                                                0);
+                            grf = calc_hll_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2,
+                                0
+                            );
                         }
                         if constexpr (dim > 2) {
-                            hrf = calc_hll_flux(uzL,
-                                                uzR,
-                                                hL,
-                                                hR,
-                                                zprimsL,
-                                                zprimsR,
-                                                3,
-                                                0);
+                            hrf = calc_hll_flux(
+                                uzL,
+                                uzR,
+                                hL,
+                                hR,
+                                zprimsL,
+                                zprimsR,
+                                3,
+                                0
+                            );
                         }
                         break;
                 }
@@ -2124,147 +2220,178 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                 switch (sim_solver) {
                     case Solver::HLLC:
                         if constexpr (dim == 1) {
-                            flf = calc_hllc_flux(uxL,
-                                                 uxR,
-                                                 fL,
-                                                 fR,
-                                                 xprimsL,
-                                                 xprimsR,
-                                                 1,
-                                                 vfaceL);
+                            flf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceL
+                            );
                             break;
                         }
                         else {
                             if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(xprimsL.p,
-                                                                xprimsR.p)) {
-                                    flf = calc_hll_flux(uxL,
-                                                        uxR,
-                                                        fL,
-                                                        fR,
-                                                        xprimsL,
-                                                        xprimsR,
-                                                        1,
-                                                        vfaceL);
+                                if (helpers::quirk_strong_shock(
+                                        xprimsL.p,
+                                        xprimsR.p
+                                    )) {
+                                    flf = calc_hll_flux(
+                                        uxL,
+                                        uxR,
+                                        fL,
+                                        fR,
+                                        xprimsL,
+                                        xprimsR,
+                                        1,
+                                        vfaceL
+                                    );
                                 }
                                 else {
-                                    flf = calc_hllc_flux(uxL,
-                                                         uxR,
-                                                         fL,
-                                                         fR,
-                                                         xprimsL,
-                                                         xprimsR,
-                                                         1,
-                                                         vfaceL);
+                                    flf = calc_hllc_flux(
+                                        uxL,
+                                        uxR,
+                                        fL,
+                                        fR,
+                                        xprimsL,
+                                        xprimsR,
+                                        1,
+                                        vfaceL
+                                    );
                                 }
 
-                                if (helpers::quirk_strong_shock(yprimsL.p,
-                                                                yprimsR.p)) {
-                                    glf = calc_hll_flux(uyL,
-                                                        uyR,
-                                                        gL,
-                                                        gR,
-                                                        yprimsL,
-                                                        yprimsR,
-                                                        2,
-                                                        0.0);
+                                if (helpers::quirk_strong_shock(
+                                        yprimsL.p,
+                                        yprimsR.p
+                                    )) {
+                                    glf = calc_hll_flux(
+                                        uyL,
+                                        uyR,
+                                        gL,
+                                        gR,
+                                        yprimsL,
+                                        yprimsR,
+                                        2,
+                                        0.0
+                                    );
                                 }
                                 else {
-                                    glf = calc_hllc_flux(uyL,
-                                                         uyR,
-                                                         gL,
-                                                         gR,
-                                                         yprimsL,
-                                                         yprimsR,
-                                                         2,
-                                                         0.0);
+                                    glf = calc_hllc_flux(
+                                        uyL,
+                                        uyR,
+                                        gL,
+                                        gR,
+                                        yprimsL,
+                                        yprimsR,
+                                        2,
+                                        0.0
+                                    );
                                 }
 
                                 if constexpr (dim > 2) {
                                     if (helpers::quirk_strong_shock(
                                             zprimsL.p,
-                                            zprimsR.p)) {
-                                        hlf = calc_hll_flux(uzL,
-                                                            uzR,
-                                                            hL,
-                                                            hR,
-                                                            zprimsL,
-                                                            zprimsR,
-                                                            3,
-                                                            0.0);
+                                            zprimsR.p
+                                        )) {
+                                        hlf = calc_hll_flux(
+                                            uzL,
+                                            uzR,
+                                            hL,
+                                            hR,
+                                            zprimsL,
+                                            zprimsR,
+                                            3,
+                                            0.0
+                                        );
                                     }
                                     else {
-                                        hlf = calc_hllc_flux(uzL,
-                                                             uzR,
-                                                             hL,
-                                                             hR,
-                                                             zprimsL,
-                                                             zprimsR,
-                                                             3,
-                                                             0.0);
+                                        hlf = calc_hllc_flux(
+                                            uzL,
+                                            uzR,
+                                            hL,
+                                            hR,
+                                            zprimsL,
+                                            zprimsR,
+                                            3,
+                                            0.0
+                                        );
                                     }
                                 }
                                 break;
                             }
                             else {
-                                flf = calc_hllc_flux(uxL,
-                                                     uxR,
-                                                     fL,
-                                                     fR,
-                                                     xprimsL,
-                                                     xprimsR,
-                                                     1,
-                                                     vfaceL);
-                                glf = calc_hllc_flux(uyL,
-                                                     uyR,
-                                                     gL,
-                                                     gR,
-                                                     yprimsL,
-                                                     yprimsR,
-                                                     2,
-                                                     0);
+                                flf = calc_hllc_flux(
+                                    uxL,
+                                    uxR,
+                                    fL,
+                                    fR,
+                                    xprimsL,
+                                    xprimsR,
+                                    1,
+                                    vfaceL
+                                );
+                                glf = calc_hllc_flux(
+                                    uyL,
+                                    uyR,
+                                    gL,
+                                    gR,
+                                    yprimsL,
+                                    yprimsR,
+                                    2,
+                                    0
+                                );
 
                                 if constexpr (dim > 2) {
-                                    hlf = calc_hllc_flux(uzL,
-                                                         uzR,
-                                                         hL,
-                                                         hR,
-                                                         zprimsL,
-                                                         zprimsR,
-                                                         3,
-                                                         0);
+                                    hlf = calc_hllc_flux(
+                                        uzL,
+                                        uzR,
+                                        hL,
+                                        hR,
+                                        zprimsL,
+                                        zprimsR,
+                                        3,
+                                        0
+                                    );
                                 }
                                 break;
                             }
                         }
                     default:
-                        flf = calc_hll_flux(uxL,
-                                            uxR,
-                                            fL,
-                                            fR,
-                                            xprimsL,
-                                            xprimsR,
-                                            1,
-                                            vfaceL);
+                        flf = calc_hll_flux(
+                            uxL,
+                            uxR,
+                            fL,
+                            fR,
+                            xprimsL,
+                            xprimsR,
+                            1,
+                            vfaceL
+                        );
                         if constexpr (dim > 1) {
-                            glf = calc_hll_flux(uyL,
-                                                uyR,
-                                                gL,
-                                                gR,
-                                                yprimsL,
-                                                yprimsR,
-                                                2,
-                                                0);
+                            glf = calc_hll_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2,
+                                0
+                            );
                         }
                         if constexpr (dim > 2) {
-                            hlf = calc_hll_flux(uzL,
-                                                uzR,
-                                                hL,
-                                                hR,
-                                                zprimsL,
-                                                zprimsR,
-                                                3,
-                                                0);
+                            hlf = calc_hll_flux(
+                                uzL,
+                                uzR,
+                                hL,
+                                hR,
+                                zprimsL,
+                                zprimsR,
+                                3,
+                                0
+                            );
                         }
                         break;
                 }
@@ -2287,16 +2414,18 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                     zright_most;
                 // Reconstructed left X rm::Primitive<dim> vector at the i+1/2
                 // interface
-                xprimsL = center + helpers::plm_gradient(center,
-                                                         xleft_mid,
-                                                         xright_mid,
-                                                         plm_theta) *
-                                       0.5;
-                xprimsR = xright_mid - helpers::plm_gradient(xright_mid,
-                                                             center,
-                                                             xright_most,
-                                                             plm_theta) *
-                                           0.5;
+                xprimsL = center + helpers::plm_gradient(
+                                       center,
+                                       xleft_mid,
+                                       xright_mid,
+                                       plm_theta
+                                   ) * 0.5;
+                xprimsR = xright_mid - helpers::plm_gradient(
+                                           xright_mid,
+                                           center,
+                                           xright_most,
+                                           plm_theta
+                                       ) * 0.5;
 
                 // Coordinate Y
                 if constexpr (dim > 1) {
@@ -2307,16 +2436,18 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                         prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
                     yright_most =
                         prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
-                    yprimsL = center + helpers::plm_gradient(center,
-                                                             yleft_mid,
-                                                             yright_mid,
-                                                             plm_theta) *
-                                           0.5;
-                    yprimsR = yright_mid - helpers::plm_gradient(yright_mid,
-                                                                 center,
-                                                                 yright_most,
-                                                                 plm_theta) *
-                                               0.5;
+                    yprimsL = center + helpers::plm_gradient(
+                                           center,
+                                           yleft_mid,
+                                           yright_mid,
+                                           plm_theta
+                                       ) * 0.5;
+                    yprimsR = yright_mid - helpers::plm_gradient(
+                                               yright_mid,
+                                               center,
+                                               yright_most,
+                                               plm_theta
+                                           ) * 0.5;
                 }
 
                 // Coordinate z
@@ -2328,16 +2459,18 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                         prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
                     zright_most =
                         prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
-                    zprimsL = center + helpers::plm_gradient(center,
-                                                             zleft_mid,
-                                                             zright_mid,
-                                                             plm_theta) *
-                                           0.5;
-                    zprimsR = zright_mid - helpers::plm_gradient(zright_mid,
-                                                                 center,
-                                                                 zright_most,
-                                                                 plm_theta) *
-                                               0.5;
+                    zprimsL = center + helpers::plm_gradient(
+                                           center,
+                                           zleft_mid,
+                                           zright_mid,
+                                           plm_theta
+                                       ) * 0.5;
+                    zprimsR = zright_mid - helpers::plm_gradient(
+                                               zright_mid,
+                                               center,
+                                               zright_most,
+                                               plm_theta
+                                           ) * 0.5;
                 }
 
                 if (object_to_my_right) {
@@ -2404,185 +2537,222 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                 switch (sim_solver) {
                     case Solver::HLLC:
                         if constexpr (dim == 1) {
-                            frf = calc_hllc_flux(uxL,
-                                                 uxR,
-                                                 fL,
-                                                 fR,
-                                                 xprimsL,
-                                                 xprimsR,
-                                                 1,
-                                                 vfaceR);
+                            frf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceR
+                            );
                             break;
                         }
                         else {
                             if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(xprimsL.p,
-                                                                xprimsR.p)) {
-                                    frf = calc_hll_flux(uxL,
-                                                        uxR,
-                                                        fL,
-                                                        fR,
-                                                        xprimsL,
-                                                        xprimsR,
-                                                        1,
-                                                        vfaceR);
+                                if (helpers::quirk_strong_shock(
+                                        xprimsL.p,
+                                        xprimsR.p
+                                    )) {
+                                    frf = calc_hll_flux(
+                                        uxL,
+                                        uxR,
+                                        fL,
+                                        fR,
+                                        xprimsL,
+                                        xprimsR,
+                                        1,
+                                        vfaceR
+                                    );
                                 }
                                 else {
-                                    frf = calc_hllc_flux(uxL,
-                                                         uxR,
-                                                         fL,
-                                                         fR,
-                                                         xprimsL,
-                                                         xprimsR,
-                                                         1,
-                                                         vfaceR);
+                                    frf = calc_hllc_flux(
+                                        uxL,
+                                        uxR,
+                                        fL,
+                                        fR,
+                                        xprimsL,
+                                        xprimsR,
+                                        1,
+                                        vfaceR
+                                    );
                                 }
 
-                                if (helpers::quirk_strong_shock(yprimsL.p,
-                                                                yprimsR.p)) {
-                                    grf = calc_hll_flux(uyL,
-                                                        uyR,
-                                                        gL,
-                                                        gR,
-                                                        yprimsL,
-                                                        yprimsR,
-                                                        2,
-                                                        0.0);
+                                if (helpers::quirk_strong_shock(
+                                        yprimsL.p,
+                                        yprimsR.p
+                                    )) {
+                                    grf = calc_hll_flux(
+                                        uyL,
+                                        uyR,
+                                        gL,
+                                        gR,
+                                        yprimsL,
+                                        yprimsR,
+                                        2,
+                                        0.0
+                                    );
                                 }
                                 else {
-                                    grf = calc_hllc_flux(uyL,
-                                                         uyR,
-                                                         gL,
-                                                         gR,
-                                                         yprimsL,
-                                                         yprimsR,
-                                                         2,
-                                                         0.0);
+                                    grf = calc_hllc_flux(
+                                        uyL,
+                                        uyR,
+                                        gL,
+                                        gR,
+                                        yprimsL,
+                                        yprimsR,
+                                        2,
+                                        0.0
+                                    );
                                 }
 
                                 if constexpr (dim > 2) {
                                     if (helpers::quirk_strong_shock(
                                             zprimsL.p,
-                                            zprimsR.p)) {
-                                        hrf = calc_hll_flux(uzL,
-                                                            uzR,
-                                                            hL,
-                                                            hR,
-                                                            zprimsL,
-                                                            zprimsR,
-                                                            3,
-                                                            0.0);
+                                            zprimsR.p
+                                        )) {
+                                        hrf = calc_hll_flux(
+                                            uzL,
+                                            uzR,
+                                            hL,
+                                            hR,
+                                            zprimsL,
+                                            zprimsR,
+                                            3,
+                                            0.0
+                                        );
                                     }
                                     else {
-                                        hrf = calc_hllc_flux(uzL,
-                                                             uzR,
-                                                             hL,
-                                                             hR,
-                                                             zprimsL,
-                                                             zprimsR,
-                                                             3,
-                                                             0.0);
+                                        hrf = calc_hllc_flux(
+                                            uzL,
+                                            uzR,
+                                            hL,
+                                            hR,
+                                            zprimsL,
+                                            zprimsR,
+                                            3,
+                                            0.0
+                                        );
                                     }
                                 }
                                 break;
                             }
                             else {
-                                frf = calc_hllc_flux(uxL,
-                                                     uxR,
-                                                     fL,
-                                                     fR,
-                                                     xprimsL,
-                                                     xprimsR,
-                                                     1,
-                                                     vfaceR);
-                                grf = calc_hllc_flux(uyL,
-                                                     uyR,
-                                                     gL,
-                                                     gR,
-                                                     yprimsL,
-                                                     yprimsR,
-                                                     2,
-                                                     0);
+                                frf = calc_hllc_flux(
+                                    uxL,
+                                    uxR,
+                                    fL,
+                                    fR,
+                                    xprimsL,
+                                    xprimsR,
+                                    1,
+                                    vfaceR
+                                );
+                                grf = calc_hllc_flux(
+                                    uyL,
+                                    uyR,
+                                    gL,
+                                    gR,
+                                    yprimsL,
+                                    yprimsR,
+                                    2,
+                                    0
+                                );
 
                                 if constexpr (dim > 2) {
-                                    hrf = calc_hllc_flux(uzL,
-                                                         uzR,
-                                                         hL,
-                                                         hR,
-                                                         zprimsL,
-                                                         zprimsR,
-                                                         3,
-                                                         0);
+                                    hrf = calc_hllc_flux(
+                                        uzL,
+                                        uzR,
+                                        hL,
+                                        hR,
+                                        zprimsL,
+                                        zprimsR,
+                                        3,
+                                        0
+                                    );
                                 }
                                 break;
                             }
                         }
                     default:
-                        frf = calc_hll_flux(uxL,
-                                            uxR,
-                                            fL,
-                                            fR,
-                                            xprimsL,
-                                            xprimsR,
-                                            1,
-                                            vfaceR);
+                        frf = calc_hll_flux(
+                            uxL,
+                            uxR,
+                            fL,
+                            fR,
+                            xprimsL,
+                            xprimsR,
+                            1,
+                            vfaceR
+                        );
                         if constexpr (dim > 1) {
-                            grf = calc_hll_flux(uyL,
-                                                uyR,
-                                                gL,
-                                                gR,
-                                                yprimsL,
-                                                yprimsR,
-                                                2,
-                                                0);
+                            grf = calc_hll_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2,
+                                0
+                            );
                         }
                         if constexpr (dim > 2) {
-                            hrf = calc_hll_flux(uzL,
-                                                uzR,
-                                                hL,
-                                                hR,
-                                                zprimsL,
-                                                zprimsR,
-                                                3,
-                                                0);
+                            hrf = calc_hll_flux(
+                                uzL,
+                                uzR,
+                                hL,
+                                hR,
+                                zprimsL,
+                                zprimsR,
+                                3,
+                                0
+                            );
                         }
                         break;
                 }
 
                 // Do the same thing, but for the left side interface [i - 1/2]
-                xprimsL = xleft_mid + helpers::plm_gradient(xleft_mid,
-                                                            xleft_most,
-                                                            center,
-                                                            plm_theta) *
-                                          0.5;
-                xprimsR = center - helpers::plm_gradient(center,
-                                                         xleft_mid,
-                                                         xright_mid,
-                                                         plm_theta) *
-                                       0.5;
+                xprimsL = xleft_mid + helpers::plm_gradient(
+                                          xleft_mid,
+                                          xleft_most,
+                                          center,
+                                          plm_theta
+                                      ) * 0.5;
+                xprimsR = center - helpers::plm_gradient(
+                                       center,
+                                       xleft_mid,
+                                       xright_mid,
+                                       plm_theta
+                                   ) * 0.5;
                 if constexpr (dim > 1) {
-                    yprimsL = yleft_mid + helpers::plm_gradient(yleft_mid,
-                                                                yleft_most,
-                                                                center,
-                                                                plm_theta) *
-                                              0.5;
-                    yprimsR = center - helpers::plm_gradient(center,
-                                                             yleft_mid,
-                                                             yright_mid,
-                                                             plm_theta) *
-                                           0.5;
+                    yprimsL = yleft_mid + helpers::plm_gradient(
+                                              yleft_mid,
+                                              yleft_most,
+                                              center,
+                                              plm_theta
+                                          ) * 0.5;
+                    yprimsR = center - helpers::plm_gradient(
+                                           center,
+                                           yleft_mid,
+                                           yright_mid,
+                                           plm_theta
+                                       ) * 0.5;
                 }
                 if constexpr (dim > 2) {
-                    zprimsL = zleft_mid + helpers::plm_gradient(zleft_mid,
-                                                                zleft_most,
-                                                                center,
-                                                                plm_theta) *
-                                              0.5;
-                    zprimsR = center - helpers::plm_gradient(center,
-                                                             zleft_mid,
-                                                             zright_mid,
-                                                             plm_theta) *
-                                           0.5;
+                    zprimsL = zleft_mid + helpers::plm_gradient(
+                                              zleft_mid,
+                                              zleft_most,
+                                              center,
+                                              plm_theta
+                                          ) * 0.5;
+                    zprimsR = center - helpers::plm_gradient(
+                                           center,
+                                           zleft_mid,
+                                           zright_mid,
+                                           plm_theta
+                                       ) * 0.5;
                 }
 
                 if (object_to_my_left) {
@@ -2648,148 +2818,179 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                 switch (sim_solver) {
                     case Solver::HLLC:
                         if constexpr (dim == 1) {
-                            flf = calc_hllc_flux(uxL,
-                                                 uxR,
-                                                 fL,
-                                                 fR,
-                                                 xprimsL,
-                                                 xprimsR,
-                                                 1,
-                                                 vfaceL);
+                            flf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceL
+                            );
                             break;
                         }
                         else {
                             if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(xprimsL.p,
-                                                                xprimsR.p)) {
-                                    flf = calc_hll_flux(uxL,
-                                                        uxR,
-                                                        fL,
-                                                        fR,
-                                                        xprimsL,
-                                                        xprimsR,
-                                                        1,
-                                                        vfaceL);
+                                if (helpers::quirk_strong_shock(
+                                        xprimsL.p,
+                                        xprimsR.p
+                                    )) {
+                                    flf = calc_hll_flux(
+                                        uxL,
+                                        uxR,
+                                        fL,
+                                        fR,
+                                        xprimsL,
+                                        xprimsR,
+                                        1,
+                                        vfaceL
+                                    );
                                 }
                                 else {
-                                    flf = calc_hllc_flux(uxL,
-                                                         uxR,
-                                                         fL,
-                                                         fR,
-                                                         xprimsL,
-                                                         xprimsR,
-                                                         1,
-                                                         vfaceL);
+                                    flf = calc_hllc_flux(
+                                        uxL,
+                                        uxR,
+                                        fL,
+                                        fR,
+                                        xprimsL,
+                                        xprimsR,
+                                        1,
+                                        vfaceL
+                                    );
                                 }
 
-                                if (helpers::quirk_strong_shock(yprimsL.p,
-                                                                yprimsR.p)) {
-                                    glf = calc_hll_flux(uyL,
-                                                        uyR,
-                                                        gL,
-                                                        gR,
-                                                        yprimsL,
-                                                        yprimsR,
-                                                        2,
-                                                        0.0);
+                                if (helpers::quirk_strong_shock(
+                                        yprimsL.p,
+                                        yprimsR.p
+                                    )) {
+                                    glf = calc_hll_flux(
+                                        uyL,
+                                        uyR,
+                                        gL,
+                                        gR,
+                                        yprimsL,
+                                        yprimsR,
+                                        2,
+                                        0.0
+                                    );
                                 }
                                 else {
-                                    glf = calc_hllc_flux(uyL,
-                                                         uyR,
-                                                         gL,
-                                                         gR,
-                                                         yprimsL,
-                                                         yprimsR,
-                                                         2,
-                                                         0.0);
+                                    glf = calc_hllc_flux(
+                                        uyL,
+                                        uyR,
+                                        gL,
+                                        gR,
+                                        yprimsL,
+                                        yprimsR,
+                                        2,
+                                        0.0
+                                    );
                                 }
 
                                 if constexpr (dim > 2) {
                                     if (helpers::quirk_strong_shock(
                                             zprimsL.p,
-                                            zprimsR.p)) {
-                                        hlf = calc_hll_flux(uzL,
-                                                            uzR,
-                                                            hL,
-                                                            hR,
-                                                            zprimsL,
-                                                            zprimsR,
-                                                            3,
-                                                            0.0);
+                                            zprimsR.p
+                                        )) {
+                                        hlf = calc_hll_flux(
+                                            uzL,
+                                            uzR,
+                                            hL,
+                                            hR,
+                                            zprimsL,
+                                            zprimsR,
+                                            3,
+                                            0.0
+                                        );
                                     }
                                     else {
-                                        hlf = calc_hllc_flux(uzL,
-                                                             uzR,
-                                                             hL,
-                                                             hR,
-                                                             zprimsL,
-                                                             zprimsR,
-                                                             3,
-                                                             0.0);
+                                        hlf = calc_hllc_flux(
+                                            uzL,
+                                            uzR,
+                                            hL,
+                                            hR,
+                                            zprimsL,
+                                            zprimsR,
+                                            3,
+                                            0.0
+                                        );
                                     }
                                 }
                                 break;
                             }
                             else {
-                                flf = calc_hllc_flux(uxL,
-                                                     uxR,
-                                                     fL,
-                                                     fR,
-                                                     xprimsL,
-                                                     xprimsR,
-                                                     1,
-                                                     vfaceL);
-                                glf = calc_hllc_flux(uyL,
-                                                     uyR,
-                                                     gL,
-                                                     gR,
-                                                     yprimsL,
-                                                     yprimsR,
-                                                     2,
-                                                     0);
+                                flf = calc_hllc_flux(
+                                    uxL,
+                                    uxR,
+                                    fL,
+                                    fR,
+                                    xprimsL,
+                                    xprimsR,
+                                    1,
+                                    vfaceL
+                                );
+                                glf = calc_hllc_flux(
+                                    uyL,
+                                    uyR,
+                                    gL,
+                                    gR,
+                                    yprimsL,
+                                    yprimsR,
+                                    2,
+                                    0
+                                );
 
                                 if constexpr (dim > 2) {
-                                    hlf = calc_hllc_flux(uzL,
-                                                         uzR,
-                                                         hL,
-                                                         hR,
-                                                         zprimsL,
-                                                         zprimsR,
-                                                         3,
-                                                         0);
+                                    hlf = calc_hllc_flux(
+                                        uzL,
+                                        uzR,
+                                        hL,
+                                        hR,
+                                        zprimsL,
+                                        zprimsR,
+                                        3,
+                                        0
+                                    );
                                 }
                                 break;
                             }
                         }
 
                     default:
-                        flf = calc_hll_flux(uxL,
-                                            uxR,
-                                            fL,
-                                            fR,
-                                            xprimsL,
-                                            xprimsR,
-                                            1,
-                                            vfaceL);
+                        flf = calc_hll_flux(
+                            uxL,
+                            uxR,
+                            fL,
+                            fR,
+                            xprimsL,
+                            xprimsR,
+                            1,
+                            vfaceL
+                        );
                         if constexpr (dim > 1) {
-                            glf = calc_hll_flux(uyL,
-                                                uyR,
-                                                gL,
-                                                gR,
-                                                yprimsL,
-                                                yprimsR,
-                                                2,
-                                                0);
+                            glf = calc_hll_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2,
+                                0
+                            );
                         }
                         if constexpr (dim > 2) {
-                            hlf = calc_hll_flux(uzL,
-                                                uzR,
-                                                hL,
-                                                hR,
-                                                zprimsL,
-                                                zprimsR,
-                                                3,
-                                                0);
+                            hlf = calc_hll_flux(
+                                uzL,
+                                uzR,
+                                hL,
+                                hR,
+                                zprimsL,
+                                zprimsR,
+                                3,
+                                0
+                            );
                         }
                         break;
                 }
@@ -2814,14 +3015,16 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                     mag2_source_all_zeros ? 0.0 : mag2_source[real_loc];
                 const real b3_source =
                     mag3_source_all_zeros ? 0.0 : mag3_source[real_loc];
-                return rm::Conserved<dim>{d_source,
-                                          s1_source,
-                                          s2_source,
-                                          s3_source,
-                                          e_source,
-                                          b1_source,
-                                          b2_source,
-                                          b3_source} *
+                return rm::Conserved<dim>{
+                         d_source,
+                         s1_source,
+                         s2_source,
+                         s3_source,
+                         e_source,
+                         b1_source,
+                         b2_source,
+                         b3_source
+                       } *
                        time_constant;
             }();
 
@@ -2839,14 +3042,16 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                 const auto ge_source = gs1_source * prim_buff[tid].v1 +
                                        gs2_source * prim_buff[tid].v2 +
                                        gs3_source * prim_buff[tid].v3;
-                return rm::Conserved<dim>{0,
-                                          gs1_source,
-                                          gs2_source,
-                                          gs3_source,
-                                          ge_source,
-                                          0,
-                                          0,
-                                          0};
+                return rm::Conserved<dim>{
+                  0,
+                  gs1_source,
+                  gs2_source,
+                  gs3_source,
+                  ge_source,
+                  0,
+                  0,
+                  0
+                };
             }();
 
             // Advance depending on geometry
@@ -2872,11 +3077,12 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                             const real factor = (mesh_motion) ? dV : 1;
                             const real pc     = prim_buff[txa].total_pressure();
                             const real invdV  = 1 / dV;
-                            const auto geom_sources =
-                                rm::Conserved<1>{0.0,
-                                                 pc * (sR - sL) * invdV,
-                                                 0.0,
-                                                 0.0};
+                            const auto geom_sources = rm::Conserved<1>{
+                              0.0,
+                              pc * (sR - sL) * invdV,
+                              0.0,
+                              0.0
+                            };
 
                             cons_data[ia] -=
                                 ((frf * sR - flf * sL) * invdV - geom_sources -
@@ -2903,12 +3109,14 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                             const real rr = x1r + vfaceR * step * dt;
                             const real rmean =
                                 helpers::get_cell_centroid(rr, rl, geometry);
-                            const real tl =
-                                helpers::my_max<real>(x2min + (jj - 0.5) * dx2,
-                                                      x2min);
+                            const real tl = helpers::my_max<real>(
+                                x2min + (jj - 0.5) * dx2,
+                                x2min
+                            );
                             const real tr = helpers::my_min<real>(
                                 tl + dx2 * (jj == 0 ? 0.5 : 1.0),
-                                x2max);
+                                x2max
+                            );
                             const real dcos = std::cos(tl) - std::cos(tr);
                             const real dV   = 2.0 * M_PI * (1.0 / 3.0) *
                                             (rr * rr * rr - rl * rl * rl) *
@@ -2934,17 +3142,16 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
 
                             const rm::Conserved<2> geom_source = {
                               0,
-                              (rhoc * hc * gam2 * vc * vc -
-                               bmuc.two * bmuc.two) /
-                                      rmean +
+                              (rhoc * hc * gam2 * vc * vc - bmuc.two * bmuc.two
+                              ) / rmean +
                                   pc * (s1R - s1L) * invdV,
-                              -(rhoc * hc * gam2 * uc * vc -
-                                bmuc.one * bmuc.two) /
-                                      rmean +
+                              -(rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two
+                              ) / rmean +
                                   pc * (s2R - s2L) * invdV,
                               0,
                               0,
-                              0};
+                              0
+                            };
 
                             cons_data[aid] -=
                                 ((frf * s1R - flf * s1L) * invdV +
@@ -2960,7 +3167,8 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                             const real rmean = helpers::get_cell_centroid(
                                 rr,
                                 rl,
-                                simbi::Geometry::PLANAR_CYLINDRICAL);
+                                simbi::Geometry::PLANAR_CYLINDRICAL
+                            );
                             // const real tl           = helpers::my_max(x2min +
                             // (jj - 0.5) * dx2 , x2min); const real tr =
                             // helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0),
@@ -2984,16 +3192,15 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                             const real gam2 = 1 / (1 - (uc * uc + vc * vc));
                             const rm::Conserved<2> geom_source = {
                               0,
-                              (rhoc * hc * gam2 * vc * vc -
-                               bmuc.two * bmuc.two) /
-                                      rmean +
+                              (rhoc * hc * gam2 * vc * vc - bmuc.two * bmuc.two
+                              ) / rmean +
                                   pc * (s1R - s1L) * invdV,
-                              -(rhoc * hc * gam2 * uc * vc -
-                                bmuc.one * bmuc.two) /
-                                  rmean,
+                              -(rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two
+                              ) / rmean,
                               0,
                               0,
-                              0};
+                              0
+                            };
                             cons_data[aid] -=
                                 ((frf * s1R - flf * s1L) * invdV +
                                  (grf * s2R - glf * s2L) * invdV - geom_source -
@@ -3008,7 +3215,8 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                             const real rmean = helpers::get_cell_centroid(
                                 rr,
                                 rl,
-                                simbi::Geometry::AXIS_CYLINDRICAL);
+                                simbi::Geometry::AXIS_CYLINDRICAL
+                            );
                             const real dV    = rmean * (rr - rl) * dx2;
                             const real invdV = 1.0 / dV;
                             const real s1R   = rr * dx2;
@@ -3027,7 +3235,8 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                               (+bmuc.one * bmuc.two) / rmean,
                               0,
                               0,
-                              0};
+                              0
+                            };
 
                             cons_data[aid] -=
                                 ((frf * s1R - flf * s1L) * invdV +
@@ -3060,7 +3269,8 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                             const real rmean = helpers::get_cell_centroid(
                                 rr,
                                 rl,
-                                simbi::Geometry::SPHERICAL);
+                                simbi::Geometry::SPHERICAL
+                            );
                             const real s1R    = rr * rr;
                             const real s1L    = rl * rl;
                             const real s2R    = std::sin(tr);
@@ -3103,7 +3313,8 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                               0,
                               0,
                               0,
-                              0};
+                              0
+                            };
                             cons_data[aid] -= ((frf * s1R - flf * s1L) / dV1 +
                                                (grf * s2R - glf * s2L) / dV2 +
                                                (hrf - hlf) / dV3 - geom_source -
@@ -3122,7 +3333,8 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                             const real rmean = helpers::get_cell_centroid(
                                 rr,
                                 rl,
-                                simbi::Geometry::CYLINDRICAL);
+                                simbi::Geometry::CYLINDRICAL
+                            );
                             const real s1R = rr * (zr - zl) * (qr - ql);
                             const real s1L = rl * (zr - zl) * (qr - ql);
                             const real s2R = (rr - rl) * (zr - rl);
@@ -3153,14 +3365,14 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                                bmuc.two * bmuc.two - bmuc.three * bmuc.three) /
                                       rmean +
                                   pc * (s1R - s1L) * invdV,
-                              -(rhoc * hc * gam2 * uc * vc -
-                                bmuc.one * bmuc.two) /
-                                  rmean,
+                              -(rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two
+                              ) / rmean,
                               0,
                               0,
                               0,
                               0,
-                              0};
+                              0
+                            };
                             cons_data[aid] -= ((frf * s1R - flf * s1L) * invdV +
                                                (grf * s2R - glf * s2L) * invdV +
                                                (hrf - hlf) * invdV -
@@ -3170,20 +3382,23 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p,
                         }
                 }   // end switch
             }
-        });
+        }
+    );
 }
 
 // //===================================================================================================================
 // //                                            SIMULATE
 // //===================================================================================================================
 template <int dim>
-void RMHD<dim>::simulate(std::function<real(real)> const& a,
-                         std::function<real(real)> const& adot,
-                         std::optional<RMHD<dim>::function_t> const& d_outer,
-                         std::optional<RMHD<dim>::function_t> const& s1_outer,
-                         std::optional<RMHD<dim>::function_t> const& s2_outer,
-                         std::optional<RMHD<dim>::function_t> const& s3_outer,
-                         std::optional<RMHD<dim>::function_t> const& e_outer)
+void RMHD<dim>::simulate(
+    std::function<real(real)> const& a,
+    std::function<real(real)> const& adot,
+    std::optional<RMHD<dim>::function_t> const& d_outer,
+    std::optional<RMHD<dim>::function_t> const& s1_outer,
+    std::optional<RMHD<dim>::function_t> const& s2_outer,
+    std::optional<RMHD<dim>::function_t> const& s3_outer,
+    std::optional<RMHD<dim>::function_t> const& e_outer
+)
 {
     helpers::anyDisplayProps();
     // set the primtive functionals
@@ -3194,17 +3409,20 @@ void RMHD<dim>::simulate(std::function<real(real)> const& a,
     this->enrg_outer = e_outer.value_or(nullptr);
 
     if constexpr (dim == 1) {
-        this->all_outer_bounds = (d_outer.has_value() && s1_outer.has_value() &&
-                                  e_outer.has_value());
+        this->all_outer_bounds =
+            (d_outer.has_value() && s1_outer.has_value() && e_outer.has_value()
+            );
     }
     else if constexpr (dim == 2) {
-        this->all_outer_bounds = (d_outer.has_value() && s1_outer.has_value() &&
-                                  s2_outer.has_value() && e_outer.has_value());
+        this->all_outer_bounds =
+            (d_outer.has_value() && s1_outer.has_value() &&
+             s2_outer.has_value() && e_outer.has_value());
     }
     else {
-        this->all_outer_bounds = (d_outer.has_value() && s1_outer.has_value() &&
-                                  s2_outer.has_value() &&
-                                  s3_outer.has_value() && e_outer.has_value());
+        this->all_outer_bounds =
+            (d_outer.has_value() && s1_outer.has_value() &&
+             s2_outer.has_value() && s3_outer.has_value() &&
+             e_outer.has_value());
     }
 
     // Stuff for moving mesh
@@ -3216,16 +3434,19 @@ void RMHD<dim>::simulate(std::function<real(real)> const& a,
     if (mesh_motion && all_outer_bounds) {
         if constexpr (dim == 1) {
             outer_zones.resize(first_order ? 1 : 2);
-            const real dV  = get_cell_volume(active_zones - 1);
-            outer_zones[0] = conserved_t{dens_outer(x1max),
-                                         mom1_outer(x1max),
-                                         mom2_outer(x1max),
-                                         mom3_outer(x1max),
-                                         enrg_outer(x1max),
-                                         mag1_outer(x1max),
-                                         mag2_outer(x1max),
-                                         mag3_outer(x1max)} *
-                             dV;
+            const real dV = get_cell_volume(active_zones - 1);
+            outer_zones[0] =
+                conserved_t{
+                  dens_outer(x1max),
+                  mom1_outer(x1max),
+                  mom2_outer(x1max),
+                  mom3_outer(x1max),
+                  enrg_outer(x1max),
+                  mag1_outer(x1max),
+                  mag2_outer(x1max),
+                  mag3_outer(x1max)
+                } *
+                dV;
             outer_zones.copyToGpu();
         }
         else if constexpr (dim == 2) {
@@ -3233,16 +3454,19 @@ void RMHD<dim>::simulate(std::function<real(real)> const& a,
             for (luint jj = 0; jj < ny; jj++) {
                 const auto jreal =
                     helpers::get_real_idx(jj, radius, yactive_grid);
-                const real dV   = get_cell_volume(xactive_grid - 1, jreal);
-                outer_zones[jj] = conserved_t{dens_outer(x1max, x2[jreal]),
-                                              mom1_outer(x1max, x2[jreal]),
-                                              mom2_outer(x1max, x2[jreal]),
-                                              mom3_outer(x1max, x2[jreal]),
-                                              enrg_outer(x1max, x2[jreal]),
-                                              mag1_outer(x1max, x2[jreal]),
-                                              mag2_outer(x1max, x2[jreal]),
-                                              mag3_outer(x1max, x2[jreal])} *
-                                  dV;
+                const real dV = get_cell_volume(xactive_grid - 1, jreal);
+                outer_zones[jj] =
+                    conserved_t{
+                      dens_outer(x1max, x2[jreal]),
+                      mom1_outer(x1max, x2[jreal]),
+                      mom2_outer(x1max, x2[jreal]),
+                      mom3_outer(x1max, x2[jreal]),
+                      enrg_outer(x1max, x2[jreal]),
+                      mag1_outer(x1max, x2[jreal]),
+                      mag2_outer(x1max, x2[jreal]),
+                      mag3_outer(x1max, x2[jreal])
+                    } *
+                    dV;
             }
             outer_zones.copyToGpu();
         }
@@ -3257,14 +3481,16 @@ void RMHD<dim>::simulate(std::function<real(real)> const& a,
                     const real dV =
                         get_cell_volume(xactive_grid - 1, jreal, kreal);
                     outer_zones[kk * ny + jj] =
-                        conserved_t{dens_outer(x1max, x2[jreal], x3[kreal]),
-                                    mom1_outer(x1max, x2[jreal], x3[kreal]),
-                                    mom2_outer(x1max, x2[jreal], x3[kreal]),
-                                    mom3_outer(x1max, x2[jreal], x3[kreal]),
-                                    enrg_outer(x1max, x2[jreal], x3[kreal]),
-                                    mag1_outer(x1max, x2[jreal], x3[kreal]),
-                                    mag2_outer(x1max, x2[jreal], x3[kreal]),
-                                    mag3_outer(x1max, x2[jreal], x3[kreal])} *
+                        conserved_t{
+                          dens_outer(x1max, x2[jreal], x3[kreal]),
+                          mom1_outer(x1max, x2[jreal], x3[kreal]),
+                          mom2_outer(x1max, x2[jreal], x3[kreal]),
+                          mom3_outer(x1max, x2[jreal], x3[kreal]),
+                          enrg_outer(x1max, x2[jreal], x3[kreal]),
+                          mag1_outer(x1max, x2[jreal], x3[kreal]),
+                          mag2_outer(x1max, x2[jreal], x3[kreal]),
+                          mag3_outer(x1max, x2[jreal], x3[kreal])
+                        } *
                         dV;
                 }
             }
@@ -3278,16 +3504,18 @@ void RMHD<dim>::simulate(std::function<real(real)> const& a,
 
     inflow_zones.resize(dim * 2);
     for (int i = 0; i < 2 * dim; i++) {
-        this->bcs.push_back(
-            helpers::boundary_cond_map.at(boundary_conditions[i]));
-        this->inflow_zones[i] = rm::Conserved<dim>{boundary_sources[i][0],
-                                                   boundary_sources[i][1],
-                                                   boundary_sources[i][2],
-                                                   boundary_sources[i][3],
-                                                   boundary_sources[i][4],
-                                                   boundary_sources[i][5],
-                                                   boundary_sources[i][6],
-                                                   boundary_sources[i][7]};
+        this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]
+        ));
+        this->inflow_zones[i] = rm::Conserved<dim>{
+          boundary_sources[i][0],
+          boundary_sources[i][1],
+          boundary_sources[i][2],
+          boundary_sources[i][3],
+          boundary_sources[i][4],
+          boundary_sources[i][5],
+          boundary_sources[i][6],
+          boundary_sources[i][7]
+        };
     }
 
     // Write some info about the setup for writeup later
@@ -3430,10 +3658,11 @@ void RMHD<dim>::simulate(std::function<real(real)> const& a,
     const luint shBlockBytes = shBlockSpace * sizeof(rm::Primitive<dim>);
     const auto fullP =
         simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
-    const auto activeP =
-        simbi::ExecutionPolicy({xactive_grid, yactive_grid, zactive_grid},
-                               {xblockdim, yblockdim, zblockdim},
-                               shBlockBytes);
+    const auto activeP = simbi::ExecutionPolicy(
+        {xactive_grid, yactive_grid, zactive_grid},
+        {xblockdim, yblockdim, zblockdim},
+        shBlockBytes
+    );
 
     if constexpr (global::BuildPlatform == global::Platform::GPU) {
         writeln("Requested shared memory: {} bytes", shBlockBytes);
@@ -3453,45 +3682,53 @@ void RMHD<dim>::simulate(std::function<real(real)> const& a,
         helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
     if (t == 0 || init_chkpt_idx == 0) {
-        rm::write2file<dim>(*this,
-                            setup,
-                            data_directory,
-                            t,
-                            0,
-                            chkpt_interval,
-                            checkpoint_zones);
+        rm::write2file<dim>(
+            *this,
+            setup,
+            data_directory,
+            t,
+            0,
+            chkpt_interval,
+            checkpoint_zones
+        );
         if constexpr (dim == 1) {
-            helpers::config_ghosts1D(fullP,
-                                     cons.data(),
-                                     nx,
-                                     first_order,
-                                     bcs.data(),
-                                     outer_zones.data(),
-                                     inflow_zones.data());
+            helpers::config_ghosts1D(
+                fullP,
+                cons.data(),
+                nx,
+                first_order,
+                bcs.data(),
+                outer_zones.data(),
+                inflow_zones.data()
+            );
         }
         else if constexpr (dim == 2) {
-            helpers::config_ghosts2D(fullP,
-                                     cons.data(),
-                                     nx,
-                                     ny,
-                                     first_order,
-                                     geometry,
-                                     bcs.data(),
-                                     outer_zones.data(),
-                                     inflow_zones.data(),
-                                     half_sphere);
+            helpers::config_ghosts2D(
+                fullP,
+                cons.data(),
+                nx,
+                ny,
+                first_order,
+                geometry,
+                bcs.data(),
+                outer_zones.data(),
+                inflow_zones.data(),
+                half_sphere
+            );
         }
         else {
-            helpers::config_ghosts3D(fullP,
-                                     cons.data(),
-                                     nx,
-                                     ny,
-                                     nz,
-                                     first_order,
-                                     bcs.data(),
-                                     inflow_zones.data(),
-                                     half_sphere,
-                                     geometry);
+            helpers::config_ghosts3D(
+                fullP,
+                cons.data(),
+                nx,
+                ny,
+                nz,
+                first_order,
+                bcs.data(),
+                inflow_zones.data(),
+                half_sphere,
+                geometry
+            );
         }
     }
 
@@ -3504,37 +3741,43 @@ void RMHD<dim>::simulate(std::function<real(real)> const& a,
         advance(activeP, xstride, ystride);
         cons2prim(fullP);
         if constexpr (dim == 1) {
-            helpers::config_ghosts1D(fullP,
-                                     cons.data(),
-                                     nx,
-                                     first_order,
-                                     bcs.data(),
-                                     outer_zones.data(),
-                                     inflow_zones.data());
+            helpers::config_ghosts1D(
+                fullP,
+                cons.data(),
+                nx,
+                first_order,
+                bcs.data(),
+                outer_zones.data(),
+                inflow_zones.data()
+            );
         }
         else if constexpr (dim == 2) {
-            helpers::config_ghosts2D(fullP,
-                                     cons.data(),
-                                     nx,
-                                     ny,
-                                     first_order,
-                                     geometry,
-                                     bcs.data(),
-                                     outer_zones.data(),
-                                     inflow_zones.data(),
-                                     half_sphere);
+            helpers::config_ghosts2D(
+                fullP,
+                cons.data(),
+                nx,
+                ny,
+                first_order,
+                geometry,
+                bcs.data(),
+                outer_zones.data(),
+                inflow_zones.data(),
+                half_sphere
+            );
         }
         else {
-            helpers::config_ghosts3D(fullP,
-                                     cons.data(),
-                                     nx,
-                                     ny,
-                                     nz,
-                                     first_order,
-                                     bcs.data(),
-                                     inflow_zones.data(),
-                                     half_sphere,
-                                     geometry);
+            helpers::config_ghosts3D(
+                fullP,
+                cons.data(),
+                nx,
+                ny,
+                nz,
+                first_order,
+                bcs.data(),
+                inflow_zones.data(),
+                half_sphere,
+                geometry
+            );
         }
 
         if constexpr (global::BuildPlatform == global::Platform::GPU) {

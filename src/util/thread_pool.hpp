@@ -66,9 +66,11 @@ namespace simbi {
             }
 
             template <typename index_type, typename F>
-            void parallel_for(const index_type start,
-                              const index_type stop,
-                              const F& func)
+            void parallel_for(
+                const index_type start,
+                const index_type stop,
+                const F& func
+            )
             {
                 if (global::use_omp) {
 #pragma omp parallel for schedule(static)
@@ -122,7 +124,8 @@ namespace simbi {
                 threads.reserve(nthreads);
                 for (unsigned i = 0; i < nthreads; i++) {
                     threads.emplace_back(
-                        std_thread(&ThreadPool::spawn_thread_proc, this));
+                        std_thread(&ThreadPool::spawn_thread_proc, this)
+                    );
                 }
             }
 
@@ -195,8 +198,9 @@ namespace simbi {
             void waitUntilFinished()
             {
                 std::unique_lock<std::mutex> latch(queue_mutex);
-                cv_finished.wait(latch,
-                                 [this] { return jobs.empty() && busy == 0; });
+                cv_finished.wait(latch, [this] {
+                    return jobs.empty() && busy == 0;
+                });
             }
 
             unsigned int nthreads;
@@ -213,12 +217,14 @@ namespace simbi {
         inline auto get_nthreads = ([] {
             if (const char* thread_env = std::getenv("NTHREADS")) {
                 return static_cast<unsigned int>(
-                    std::stoul(std::string(thread_env)));
+                    std::stoul(std::string(thread_env))
+                );
             }
 
             if (const char* thread_env = std::getenv("OMP_NUM_THREADS")) {
                 return static_cast<unsigned int>(
-                    std::stoul(std::string(thread_env)));
+                    std::stoul(std::string(thread_env))
+                );
             }
 
             return std_thread::hardware_concurrency();

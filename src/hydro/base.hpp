@@ -107,26 +107,28 @@ namespace simbi {
 
         const auto get_xblock_dims() const
         {
-            return static_cast<luint>(
-                std::stoi(readGpuEnvVar("GPUXBLOCK_SIZE")));
+            return static_cast<luint>(std::stoi(readGpuEnvVar("GPUXBLOCK_SIZE"))
+            );
         }
 
         const auto get_yblock_dims() const
         {
-            return static_cast<luint>(
-                std::stoi(readGpuEnvVar("GPUYBLOCK_SIZE")));
+            return static_cast<luint>(std::stoi(readGpuEnvVar("GPUYBLOCK_SIZE"))
+            );
         }
 
         const auto get_zblock_dims() const
         {
-            return static_cast<luint>(
-                std::stoi(readGpuEnvVar("GPUZBLOCK_SIZE")));
+            return static_cast<luint>(std::stoi(readGpuEnvVar("GPUZBLOCK_SIZE"))
+            );
         }
 
-        void define_tinterval(real t,
-                              real dlogt,
-                              real chkpt_interval,
-                              real chkpt_idx)
+        void define_tinterval(
+            real t,
+            real dlogt,
+            real chkpt_interval,
+            real chkpt_idx
+        )
         {
             real round_place = 1 / chkpt_interval;
             t_interval       = dlogt != 0
@@ -145,8 +147,10 @@ namespace simbi {
 
         ~HydroBase() {}
 
-        HydroBase(std::vector<std::vector<real>> state,
-                  const InitialConditions& init_conditions)
+        HydroBase(
+            std::vector<std::vector<real>> state,
+            const InitialConditions& init_conditions
+        )
             : state(state),
               gamma(init_conditions.gamma),
               cfl(init_conditions.cfl),
@@ -280,15 +284,18 @@ namespace simbi {
             else {
                 this->energy_source = init_conditions.sources[2];
             }
-            this->zero_gravity1 = std::all_of(sourceG1.begin(),
-                                              sourceG1.end(),
-                                              [](real i) { return i == 0; });
-            this->zero_gravity2 = std::all_of(sourceG2.begin(),
-                                              sourceG2.end(),
-                                              [](real i) { return i == 0; });
-            this->zero_gravity3 = std::all_of(sourceG3.begin(),
-                                              sourceG3.end(),
-                                              [](real i) { return i == 0; });
+            this->zero_gravity1 =
+                std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {
+                    return i == 0;
+                });
+            this->zero_gravity2 =
+                std::all_of(sourceG2.begin(), sourceG2.end(), [](real i) {
+                    return i == 0;
+                });
+            this->zero_gravity3 =
+                std::all_of(sourceG3.begin(), sourceG3.end(), [](real i) {
+                    return i == 0;
+                });
             this->mag1_source_all_zeros =
                 std::all_of(sourceB1.begin(), sourceB1.end(), [](real i) {
                     return i == 0;
@@ -313,18 +320,20 @@ namespace simbi {
                 std::all_of(m3_source.begin(), sourceB3.end(), [](real i) {
                     return i == 0;
                 });
-            this->den_source_all_zeros =
-                std::all_of(density_source.begin(),
-                            density_source.end(),
-                            [](real i) { return i == 0; });
+            this->den_source_all_zeros = std::all_of(
+                density_source.begin(),
+                density_source.end(),
+                [](real i) { return i == 0; }
+            );
             this->mom1_source_all_zeros =
                 std::all_of(m1_source.begin(), m1_source.end(), [](real i) {
                     return i == 0;
                 });
-            this->energy_source_all_zeros =
-                std::all_of(energy_source.begin(),
-                            energy_source.end(),
-                            [](real i) { return i == 0; });
+            this->energy_source_all_zeros = std::all_of(
+                energy_source.begin(),
+                energy_source.end(),
+                [](real i) { return i == 0; }
+            );
 
             if (nz > 1) {
                 this->checkpoint_zones = zactive_grid;
@@ -336,10 +345,12 @@ namespace simbi {
                 this->checkpoint_zones = xactive_grid;
             }
 
-            define_tinterval(t,
-                             dlogt,
-                             chkpt_interval,
-                             init_conditions.chkpt_idx);
+            define_tinterval(
+                t,
+                dlogt,
+                chkpt_interval,
+                init_conditions.chkpt_idx
+            );
             define_chkpt_idx(init_conditions.chkpt_idx);
         }
     };

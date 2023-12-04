@@ -44,9 +44,11 @@ namespace simbi {
             this->gridSize  = dim3(nBlocks);
         }
 
-        ExecutionPolicy(const T nzones,
-                        const U blockSize,
-                        const size_t sharedMemBytes)
+        ExecutionPolicy(
+            const T nzones,
+            const U blockSize,
+            const size_t sharedMemBytes
+        )
             : blockSize(dim3(blockSize)),
               sharedMemBytes(sharedMemBytes),
               stream(0)
@@ -55,10 +57,12 @@ namespace simbi {
             this->gridSize  = dim3(nBlocks);
         }
 
-        ExecutionPolicy(const T nzones,
-                        const U blockSize,
-                        const size_t sharedMemBytes,
-                        const simbiStream_t stream)
+        ExecutionPolicy(
+            const T nzones,
+            const U blockSize,
+            const size_t sharedMemBytes,
+            const simbiStream_t stream
+        )
             : blockSize(dim3(blockSize)),
               sharedMemBytes(sharedMemBytes),
               stream(stream)
@@ -83,9 +87,11 @@ namespace simbi {
             build_grid(glist, blist);
         }
 
-        ExecutionPolicy(const std::vector<T> glist,
-                        const std::vector<U> blist,
-                        const size_t sharedMemBytes)
+        ExecutionPolicy(
+            const std::vector<T> glist,
+            const std::vector<U> blist,
+            const size_t sharedMemBytes
+        )
             : sharedMemBytes(sharedMemBytes), stream(0)
         {
             try {
@@ -101,10 +107,12 @@ namespace simbi {
             build_grid(glist, blist);
         }
 
-        ExecutionPolicy(const std::vector<T> glist,
-                        const std::vector<U> blist,
-                        const size_t sharedMemBytes,
-                        const simbiStream_t stream)
+        ExecutionPolicy(
+            const std::vector<T> glist,
+            const std::vector<U> blist,
+            const size_t sharedMemBytes,
+            const simbiStream_t stream
+        )
             : sharedMemBytes(sharedMemBytes), stream(stream)
         {
             try {

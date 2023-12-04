@@ -80,9 +80,11 @@ simbi::ndarray<DT, build_mode>::ndarray::operator+=(const ndarray& other)
 {
     simbi::ndarray<DT, build_mode> newArray(sz + other.sz);
     std::copy(this->arr.get(), this->arr.get() + this->sz, newArray.arr.get());
-    std::copy(other.arr.get(),
-              other.arr.get() + other.sz,
-              newArray.arr.get() + this->sz);
+    std::copy(
+        other.arr.get(),
+        other.arr.get() + other.sz,
+        newArray.arr.get() + this->sz
+    );
     newArray.swap(*this);
     return *this;
 };
@@ -134,8 +136,8 @@ constexpr void simbi::ndarray<DT, build_mode>::resize(size_type new_size)
 }
 
 template <typename DT, global::Platform build_mode>
-constexpr void simbi::ndarray<DT, build_mode>::resize(size_type new_size,
-                                                      const DT new_value)
+constexpr void
+simbi::ndarray<DT, build_mode>::resize(size_type new_size, const DT new_value)
 {
     if (new_size > sz) {
         arr.reset(new DT[new_size * sizeof(DT)]);
@@ -298,8 +300,8 @@ bool simbi::ndarray<DT, build_mode>::empty() const
 }
 
 template <typename DT, global::Platform build_mode>
-std::ostream& operator<<(std::ostream& out,
-                         const simbi::ndarray<DT, build_mode>& v)
+std::ostream&
+operator<<(std::ostream& out, const simbi::ndarray<DT, build_mode>& v)
 {
     unsigned counter        = 1;
     const int max_cols      = 10;
@@ -400,9 +402,11 @@ template <typename DT, global::Platform build_mode>
 void simbi::ndarray<DT, build_mode>::copyBetweenGpu(const ndarray& rhs)
 {
     if (dev_arr) {
-        gpu::api::copyDevToDev(dev_arr.get(),
-                               rhs.dev_arr.get(),
-                               rhs.nd_capacity);
+        gpu::api::copyDevToDev(
+            dev_arr.get(),
+            rhs.dev_arr.get(),
+            rhs.nd_capacity
+        );
     }
 }
 
