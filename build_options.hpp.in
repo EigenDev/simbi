@@ -1,3 +1,20 @@
+/**
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * @file       build_options.hpp.in
+ * @brief      file to configure build mode gpu various cpu / gpu archiectures
+ *
+ * @note
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Dec-03-2023     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2023 Marus DuPont**********************
+ */
 #ifndef BUILD_OPTIONS_HPP
 #define BUILD_OPTIONS_HPP
 
