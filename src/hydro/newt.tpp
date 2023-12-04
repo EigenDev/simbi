@@ -209,11 +209,8 @@ GPU_CALLABLE_MEMBER real Newtonian<dim>::get_cell_volume(
            get_x3_differential(kk);
 }
 
-template <int dim> void Newtonian<dim>::emit_troubled_cells()
+template <int dim> void Newtonian<dim>::emit_troubled_cells() const
 {
-    troubled_cells.copyFromGpu();
-    cons.copyFromGpu();
-    prims.copyFromGpu();
     for (luint gid = 0; gid < total_zones; gid++) {
         if (troubled_cells[gid] != 0) {
             const luint xpg  = xactive_grid;
@@ -239,9 +236,8 @@ template <int dim> void Newtonian<dim>::emit_troubled_cells()
             const real m1 = cons[gid].momentum(1);
             const real m2 = cons[gid].momentum(2);
             const real m3 = cons[gid].momentum(3);
-            const real et = cons[gid].e_dens;
-            const real s  = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
-            const real v2 = (s * s) / (et * et);
+            const real s2 = m1 * m1 + m2 * m2 + m3 * m3;
+            const real v2 = s2 / cons[gid].rho;
             if constexpr (dim == 1) {
                 printf(
                     "\nSimulation in bad state\nDensity: %.2e, Pressure: "
@@ -255,9 +251,9 @@ template <int dim> void Newtonian<dim>::emit_troubled_cells()
             }
             else if constexpr (dim == 2) {
                 printf(
-                    "\nSimulation in bad state\nDensity: %.2e, Pressure: %.2e, "
-                    "Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: %" PRIu64
-                    "\n",
+                    "\nSimulation in bad state\nDensity: %.2e, Pressure: "
+                    "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: "
+                    "%" PRIu64 "\n",
                     cons[gid].rho,
                     prims[gid].p,
                     v2,
@@ -360,15 +356,13 @@ template <int dim> void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
                 (gamma - 1) * (cons_data[gid].e_dens -
                                0.5 * rho * (v1 * v1 + v2 * v2 + v3 * v3));
             if constexpr (dim == 1) {
-                prim_data[gid] = nt::Primitive<1>{rho, v1, pre, rho_chi / rho};
+                prim_data[gid] = {rho, v1, pre, rho_chi / rho};
             }
             else if constexpr (dim == 2) {
-                prim_data[gid] =
-                    nt::Primitive<2>{rho, v1, v2, pre, rho_chi / rho};
+                prim_data[gid] = {rho, v1, v2, pre, rho_chi / rho};
             }
             else {
-                prim_data[gid] =
-                    nt::Primitive<3>{rho, v1, v2, v3, pre, rho_chi / rho};
+                prim_data[gid] = {rho, v1, v2, v3, pre, rho_chi / rho};
             }
 
             if (pre < 0 || std::isnan(pre)) {
@@ -2103,8 +2097,8 @@ void Newtonian<dim>::advance(
                             const real rl    = x1l + vfaceL * step * dt;
                             const real rr    = x1r + vfaceR * step * dt;
                             const real rmean = helpers::get_cell_centroid(
-                                rr,
                                 rl,
+                                rr,
                                 simbi::Geometry::AXIS_CYLINDRICAL
                             );
                             const real dV    = rmean * (rr - rl) * dx2;
@@ -2440,13 +2434,13 @@ void Newtonian<dim>::simulate(
             }
         }();
         if constexpr (dim == 1) {
-            cons[i] = nt::Conserved<1>{rho, m1, E};
+            cons[i] = {rho, m1, E};
         }
         else if constexpr (dim == 2) {
-            cons[i] = nt::Conserved<2>{rho, m1, m2, E};
+            cons[i] = {rho, m1, m2, E};
         }
         else {
-            cons[i] = nt::Conserved<3>{rho, m1, m2, m3, E};
+            cons[i] = {rho, m1, m2, m3, E};
         }
     }
 
@@ -2633,6 +2627,9 @@ void Newtonian<dim>::simulate(
     });
 
     if (inFailureState) {
+        troubled_cells.copyFromGpu();
+        cons.copyFromGpu();
+        prims.copyFromGpu();
         emit_troubled_cells();
     }
 };

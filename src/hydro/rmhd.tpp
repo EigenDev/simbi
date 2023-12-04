@@ -207,11 +207,8 @@ RMHD<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
            get_x3_differential(kk);
 }
 
-template <int dim> void RMHD<dim>::emit_troubled_cells()
+template <int dim> void RMHD<dim>::emit_troubled_cells() const
 {
-    troubled_cells.copyFromGpu();
-    cons.copyFromGpu();
-    prims.copyFromGpu();
     for (luint gid = 0; gid < total_zones; gid++) {
         if (troubled_cells[gid] != 0) {
             const luint xpg  = xactive_grid;
@@ -3804,6 +3801,9 @@ void RMHD<dim>::simulate(
     });
 
     if (inFailureState) {
+        troubled_cells.copyFromGpu();
+        cons.copyFromGpu();
+        prims.copyFromGpu();
         emit_troubled_cells();
     }
 };

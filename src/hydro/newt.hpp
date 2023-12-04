@@ -174,7 +174,7 @@ namespace simbi {
         get_cell_volume(const lint ii, const lint jj = 0, const lint kk = 0)
             const;
 
-        void emit_troubled_cells();
+        void emit_troubled_cells() const;
     };
 
     namespace nt {
