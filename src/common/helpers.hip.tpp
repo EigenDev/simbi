@@ -651,7 +651,7 @@ namespace simbi {
                         }
                     }
 
-                    // Fix the ghost zones at the x3 boundaries
+                    // Fix the ghost zones at the x2 boundaries
                     if (ii < x1grid_size - 4) {
                         switch (geometry) {
                             case simbi::Geometry::SPHERICAL:
@@ -740,10 +740,12 @@ namespace simbi {
                                                 .momentum(2) *= -1;
                                         break;
                                     case simbi::BoundaryCondition::INFLOW:
-                                        cons[0 * sx + (ii + 2) * sy] =
-                                            boundary_zones[3];
-                                        cons[1 * sx + (ii + 2) * sy] =
-                                            boundary_zones[3];
+                                        cons
+                                            [(x2grid_size - 1) * sx +
+                                             (ii + 2) * sy] = boundary_zones[3];
+                                        cons
+                                            [(x2grid_size - 2) * sx +
+                                             (ii + 2) * sy] = boundary_zones[3];
                                         break;
                                     case simbi::BoundaryCondition::PERIODIC:
                                         cons
