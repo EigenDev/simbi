@@ -7,13 +7,10 @@ builddir/
 data/
 science
 movies/
-plots/
 scripts/
 simbi/tools/extras/*
 version.py
-call_obj.cpp
-call_obj.h
-dual.*
+call_obj.*
 *.h5
 *.pdf
 *.png
