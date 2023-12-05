@@ -140,11 +140,9 @@ $ CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std
 9) Gravity source terms (Implementing the `gravity_sources` property sets this)
 
 TODO: 
-<ol type="a">
-  <li>Explore general IB in greater detail for sources and sinks!</li>
-  <li>multi-gpu support</li>
-  <li>MPI support</li>
-</ol>
+  - [ ] Explore general IB in greater detail for sources and sinks!
+  - [ ] multi-gpu support
+  - [ ] MPI support
 
 
 
