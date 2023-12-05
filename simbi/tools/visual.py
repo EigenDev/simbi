@@ -212,7 +212,7 @@ class Visualizer:
             )
             plot_parser.add_argument(
                 "--pan-speed",
-                help="speed of camaera pan for animations",
+                help="speed of camera pan for animations",
                 type=float,
                 default=None,
             )
@@ -230,7 +230,6 @@ class Visualizer:
 
         if self.dbg:
             plt.style.use("dark_background")
-
         self.color_map = []
         self.cartesian = True
         self.flist, self.frame_count = util.get_file_list(self.files, self.sort)
@@ -331,9 +330,13 @@ class Visualizer:
                                         x3coord = np.deg2rad(x3coord)
                                     zidx = find_nearest(mesh["x3"], x3coord)[0]
                                     yvar = var[zidx, yidx]
-                                (line,) = ax.plot(
-                                    mesh["x1"], yvar / scale, label=coord_label
-                                )
+                                if self.shock_coord:
+                                    shock_location = np.argmax(yvar)
+                                    xvar = mesh["x1"] / mesh["x1"][shock_location]
+                                    scale = yvar[shock_location]
+                                else:
+                                    xvar = mesh["x1"]
+                                (line,) = ax.plot(xvar, yvar / scale, label=coord_label)
                     else:
                         x = mesh["x1"]
                         (line,) = ax.plot(mesh["x1"], var / scale, label=label)
@@ -356,7 +359,7 @@ class Visualizer:
                         refcount += 1
 
         if self.setup:
-            ax.set_title(f'{self.setup} t = {setup["time"]:.5f}')
+            ax.set_title(f'{self.setup} t = {setup["time"]:.1f}')
         if self.log:
             ax.set_xscale("log")
             ax.set_yscale("log")
@@ -373,10 +376,13 @@ class Visualizer:
 
         if any(self.ylims):
             ax.set_ylim(*self.ylims)
-        if self.cartesian:
-            ax.set_xlabel("$x$")
+        if self.shock_coord:
+            ax.set_xlabel(r"$\xi$")
         else:
-            ax.set_xlabel("$r$")
+            if setup["coord_system"] == "cartesian":
+                ax.set_xlabel("$x$")
+            else:
+                ax.set_xlabel("$r$")
 
         if any(self.xlims):
             ax.set_xlim(*self.xlims)
@@ -417,8 +423,22 @@ class Visualizer:
                         var = util.prims2var(fields, field)
                     else:
                         if field == "v":
-                            field = "v1"
-                        var = fields[field]
+                            if self.ndim == 1:
+                                var = fields["v1"]
+                            else:
+                                var = np.sqrt(
+                                    np.sum(
+                                        [
+                                            fields[x] * fields[x]
+                                            for x in [
+                                                f"v{d+1}" for d in range(self.ndim)
+                                            ]
+                                        ],
+                                        axis=0,
+                                    )
+                                )
+                        else:
+                            var = fields[field]
 
                     if self.units:
                         if field in ["p", "energy", "energy_rst"]:
@@ -553,7 +573,7 @@ class Visualizer:
                                 divider = make_axes_locatable(ax)
                                 if setup["coord_system"] == "axis_cylindrical":
                                     side = "right" if idx == 0 else "left"
-                                    pad = 0.5 if idx == 0 else 0.3
+                                    pad = 0.5 if idx == 0 else 0.5
                                     cbaxes = divider.append_axes(
                                         side, size="5%", pad=pad
                                     )
