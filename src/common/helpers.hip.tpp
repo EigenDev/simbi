@@ -1507,7 +1507,9 @@ namespace simbi {
             real vPlus, vMinus;
             int ii  = blockDim.x * blockIdx.x + threadIdx.x;
             int aid = ii + self->radius;
-            if (ii < self->active_zones) {
+            if (ii < self->total_zones) {
+                const auto ireal =
+                    helpers::get_real_idx(ii, self->radius, self->xactive_grid);
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                         const real rho = prim_buffer[aid].rho;
@@ -1532,8 +1534,8 @@ namespace simbi {
                     vPlus          = (v + cs);
                     vMinus         = (v - cs);
                 }
-                const real x1l = self->get_x1face(ii, 0);
-                const real x1r = self->get_x1face(ii, 1);
+                const real x1l = self->get_x1face(ireal, 0);
+                const real x1r = self->get_x1face(ireal, 1);
                 const real dx1 = x1r - x1l;
                 const real vfaceL =
                     (self->geometry == simbi::Geometry::CARTESIAN)
@@ -1569,7 +1571,7 @@ namespace simbi {
             const luint ja = jj + self->idx_active;
             const luint aid =
                 (global::col_maj) ? ia * self->ny + ja : ja * self->nx + ia;
-            if ((ii < self->xactive_grid) && (jj < self->yactive_grid)) {
+            if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
@@ -1618,12 +1620,22 @@ namespace simbi {
 
                     case simbi::Geometry::SPHERICAL:
                         {
+                            const auto ireal = helpers::get_real_idx(
+                                ii,
+                                self->radius,
+                                self->xactive_grid
+                            );
+                            const auto jreal = helpers::get_real_idx(
+                                jj,
+                                self->radius,
+                                self->yactive_grid
+                            );
                             // Compute avg spherical distance 3/4 *(rf^4 -
                             // ri^4)/(rf^3 - ri^3)
-                            const real rl = self->get_x1face(ii, 0);
-                            const real rr = self->get_x1face(ii, 1);
-                            const real tl = self->get_x2face(jj, 0);
-                            const real tr = self->get_x2face(jj, 1);
+                            const real rl = self->get_x1face(ireal, 0);
+                            const real rr = self->get_x1face(ireal, 1);
+                            const real tl = self->get_x2face(jreal, 0);
+                            const real tr = self->get_x2face(jreal, 1);
                             if (self->mesh_motion) {
                                 const real vfaceL = rl * self->hubble_param;
                                 const real vfaceR = rr * self->hubble_param;
@@ -1643,10 +1655,22 @@ namespace simbi {
                         {
                             // Compute avg spherical distance 3/4 *(rf^4 -
                             // ri^4)/(rf^3 - ri^3)
-                            const real rl = self->get_x1face(ii, 0);
-                            const real rr = self->get_x1face(ii, 1);
-                            const real tl = self->get_x2face(jj, 0);
-                            const real tr = self->get_x2face(jj, 1);
+                            const auto ireal = helpers::get_real_idx(
+                                ii,
+                                self->radius,
+                                self->xactive_grid
+                            );
+                            const auto jreal = helpers::get_real_idx(
+                                jj,
+                                self->radius,
+                                self->yactive_grid
+                            );
+                            // Compute avg spherical distance 3/4 *(rf^4 -
+                            // ri^4)/(rf^3 - ri^3)
+                            const real rl = self->get_x1face(ireal, 0);
+                            const real rr = self->get_x1face(ireal, 1);
+                            const real tl = self->get_x2face(jreal, 0);
+                            const real tr = self->get_x2face(jreal, 1);
                             if (self->mesh_motion) {
                                 const real vfaceL = rl * self->hubble_param;
                                 const real vfaceR = rr * self->hubble_param;
@@ -1664,10 +1688,22 @@ namespace simbi {
                         }
                     case simbi::Geometry::AXIS_CYLINDRICAL:
                         {
-                            const real rl = self->get_x1face(ii, 0);
-                            const real rr = self->get_x1face(ii, 1);
-                            const real zl = self->get_x2face(jj, 0);
-                            const real zr = self->get_x2face(jj, 1);
+                            const auto ireal = helpers::get_real_idx(
+                                ii,
+                                self->radius,
+                                self->xactive_grid
+                            );
+                            const auto jreal = helpers::get_real_idx(
+                                jj,
+                                self->radius,
+                                self->yactive_grid
+                            );
+                            // Compute avg spherical distance 3/4 *(rf^4 -
+                            // ri^4)/(rf^3 - ri^3)
+                            const real rl = self->get_x1face(ireal, 0);
+                            const real rr = self->get_x1face(ireal, 1);
+                            const real zl = self->get_x2face(jreal, 0);
+                            const real zr = self->get_x2face(jreal, 1);
                             if (self->mesh_motion) {
                                 const real vfaceL = rl * self->hubble_param;
                                 const real vfaceR = rr * self->hubble_param;
@@ -1707,8 +1743,7 @@ namespace simbi {
             const luint aid = (global::col_maj) ? ia * self->ny + ja
                                                 : ka * self->nx * self->ny +
                                                       ja * self->nx + ia;
-            if ((ii < self->xactive_grid) && (jj < self->yactive_grid) &&
-                (kk < self->zactive_grid)) {
+            if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
 
                 if constexpr (is_relativistic<T>::value) {
@@ -1754,14 +1789,20 @@ namespace simbi {
                     minus_v3 = (v3 - cs);
                 }
 
-                const auto x1l = self->get_x1face(ii, 0);
-                const auto x1r = self->get_x1face(ii, 1);
+                const auto ireal =
+                    helpers::get_real_idx(ii, self->radius, self->xactive_grid);
+                const auto jreal =
+                    helpers::get_real_idx(jj, self->radius, self->yactive_grid);
+                const auto kreal =
+                    helpers::get_real_idx(kk, self->radius, self->zactive_grid);
+                const auto x1l = self->get_x1face(ireal, 0);
+                const auto x1r = self->get_x1face(ireal, 1);
                 const auto dx1 = x1r - x1l;
-                const auto x2l = self->get_x2face(jj, 0);
-                const auto x2r = self->get_x2face(jj, 1);
+                const auto x2l = self->get_x2face(jreal, 0);
+                const auto x2r = self->get_x2face(jreal, 1);
                 const auto dx2 = x2r - x2l;
-                const auto x3l = self->get_x3face(kk, 0);
-                const auto x3r = self->get_x3face(kk, 1);
+                const auto x3l = self->get_x3face(kreal, 0);
+                const auto x3r = self->get_x3face(kreal, 1);
                 const auto dx3 = x3r - x3l;
                 switch (geometry) {
                     case simbi::Geometry::CARTESIAN:
@@ -1851,7 +1892,7 @@ namespace simbi {
             real vPlus, vMinus;
             int ii  = blockDim.x * blockIdx.x + threadIdx.x;
             int aid = ii + self->radius;
-            if (ii < self->active_zones) {
+            if (ii < self->total_zones) {
                 if constexpr (is_relativistic_mhd<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                         real cs, speeds[4];
@@ -1877,8 +1918,10 @@ namespace simbi {
                     vPlus          = (v + cs);
                     vMinus         = (v - cs);
                 }
-                const real x1l = self->get_x1face(ii, 0);
-                const real x1r = self->get_x1face(ii, 1);
+                const auto ireal =
+                    helpers::get_real_idx(ii, self->radius, self->xactive_grid);
+                const real x1l = self->get_x1face(ireal, 0);
+                const real x1r = self->get_x1face(ireal, 1);
                 const real dx1 = x1r - x1l;
                 const real vfaceL =
                     (self->geometry == simbi::Geometry::CARTESIAN)
@@ -1915,7 +1958,7 @@ namespace simbi {
             const luint ja = jj + self->idx_active;
             const luint aid =
                 (global::col_maj) ? ia * self->ny + ja : ja * self->nx + ia;
-            if ((ii < self->xactive_grid) && (jj < self->yactive_grid)) {
+            if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
                 if constexpr (is_relativistic_mhd<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
@@ -1972,10 +2015,20 @@ namespace simbi {
                         {
                             // Compute avg spherical distance 3/4 *(rf^4 -
                             // ri^4)/(rf^3 - ri^3)
-                            const real rl = self->get_x1face(ii, 0);
-                            const real rr = self->get_x1face(ii, 1);
-                            const real tl = self->get_x2face(jj, 0);
-                            const real tr = self->get_x2face(jj, 1);
+                            const auto ireal = helpers::get_real_idx(
+                                ii,
+                                self->radius,
+                                self->xactive_grid
+                            );
+                            const auto jreal = helpers::get_real_idx(
+                                jj,
+                                self->radius,
+                                self->yactive_grid
+                            );
+                            const real rl = self->get_x1face(ireal, 0);
+                            const real rr = self->get_x1face(ireal, 1);
+                            const real tl = self->get_x2face(jreal, 0);
+                            const real tr = self->get_x2face(jreal, 1);
                             if (self->mesh_motion) {
                                 const real vfaceL = rl * self->hubble_param;
                                 const real vfaceR = rr * self->hubble_param;
@@ -1995,10 +2048,20 @@ namespace simbi {
                         {
                             // Compute avg spherical distance 3/4 *(rf^4 -
                             // ri^4)/(rf^3 - ri^3)
-                            const real rl = self->get_x1face(ii, 0);
-                            const real rr = self->get_x1face(ii, 1);
-                            const real tl = self->get_x2face(jj, 0);
-                            const real tr = self->get_x2face(jj, 1);
+                            const auto ireal = helpers::get_real_idx(
+                                ii,
+                                self->radius,
+                                self->xactive_grid
+                            );
+                            const auto jreal = helpers::get_real_idx(
+                                jj,
+                                self->radius,
+                                self->yactive_grid
+                            );
+                            const real rl = self->get_x1face(ireal, 0);
+                            const real rr = self->get_x1face(ireal, 1);
+                            const real tl = self->get_x2face(jreal, 0);
+                            const real tr = self->get_x2face(jreal, 1);
                             if (self->mesh_motion) {
                                 const real vfaceL = rl * self->hubble_param;
                                 const real vfaceR = rr * self->hubble_param;
@@ -2016,10 +2079,20 @@ namespace simbi {
                         }
                     case simbi::Geometry::AXIS_CYLINDRICAL:
                         {
-                            const real rl = self->get_x1face(ii, 0);
-                            const real rr = self->get_x1face(ii, 1);
-                            const real zl = self->get_x2face(jj, 0);
-                            const real zr = self->get_x2face(jj, 1);
+                            const auto ireal = helpers::get_real_idx(
+                                ii,
+                                self->radius,
+                                self->xactive_grid
+                            );
+                            const auto jreal = helpers::get_real_idx(
+                                jj,
+                                self->radius,
+                                self->yactive_grid
+                            );
+                            const real rl = self->get_x1face(ireal, 0);
+                            const real rr = self->get_x1face(ireal, 1);
+                            const real zl = self->get_x2face(jreal, 0);
+                            const real zr = self->get_x2face(jreal, 1);
                             if (self->mesh_motion) {
                                 const real vfaceL = rl * self->hubble_param;
                                 const real vfaceR = rr * self->hubble_param;
@@ -2060,8 +2133,7 @@ namespace simbi {
             const luint aid = (global::col_maj) ? ia * self->ny + ja
                                                 : ka * self->nx * self->ny +
                                                       ja * self->nx + ia;
-            if ((ii < self->xactive_grid) && (jj < self->yactive_grid) &&
-                (kk < self->zactive_grid)) {
+            if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
 
                 if constexpr (is_relativistic_mhd<T>::value) {
@@ -2117,14 +2189,21 @@ namespace simbi {
                     minus_v3 = (v3 - cs);
                 }
 
-                const auto x1l = self->get_x1face(ii, 0);
-                const auto x1r = self->get_x1face(ii, 1);
+                const auto ireal =
+                    helpers::get_real_idx(ii, self->radius, self->xactive_grid);
+                const auto jreal =
+                    helpers::get_real_idx(jj, self->radius, self->yactive_grid);
+                const auto kreal =
+                    helpers::get_real_idx(kk, self->radius, self->zactive_grid);
+
+                const auto x1l = self->get_x1face(ireal, 0);
+                const auto x1r = self->get_x1face(ireal, 1);
                 const auto dx1 = x1r - x1l;
-                const auto x2l = self->get_x2face(jj, 0);
-                const auto x2r = self->get_x2face(jj, 1);
+                const auto x2l = self->get_x2face(jreal, 0);
+                const auto x2r = self->get_x2face(jreal, 1);
                 const auto dx2 = x2r - x2l;
-                const auto x3l = self->get_x3face(kk, 0);
-                const auto x3r = self->get_x3face(kk, 1);
+                const auto x3l = self->get_x3face(kreal, 0);
+                const auto x3r = self->get_x3face(kreal, 1);
                 const auto dx3 = x3r - x3l;
                 switch (geometry) {
                     case simbi::Geometry::CARTESIAN:

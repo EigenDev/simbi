@@ -211,11 +211,9 @@ template <int dim> void RMHD<dim>::emit_troubled_cells() const
 {
     for (luint gid = 0; gid < total_zones; gid++) {
         if (troubled_cells[gid] != 0) {
-            const luint xpg  = xactive_grid;
-            const luint ypg  = yactive_grid;
-            const luint kk   = helpers::get_height(gid, xpg, ypg);
-            const luint jj   = helpers::get_row(gid, xpg, ypg, kk);
-            const luint ii   = helpers::get_column(gid, xpg, ypg, kk);
+            const luint kk   = helpers::get_height(gid, nx, ny);
+            const luint jj   = helpers::get_row(gid, nx, ny, kk);
+            const luint ii   = helpers::get_column(gid, nx, ny, kk);
             const lint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
             const lint jreal = helpers::get_real_idx(jj, radius, yactive_grid);
             const lint kreal = helpers::get_real_idx(kk, radius, zactive_grid);
@@ -743,39 +741,30 @@ template <int dim> template <TIMESTEP_TYPE dt_type> void RMHD<dim>::adapt_dt()
         simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
     std::atomic<real> min_dt = INFINITY;
     thread_pool
-        .parallel_for(static_cast<luint>(0), active_zones, [&](luint aid) {
+        .parallel_for(static_cast<luint>(0), total_zones, [&](luint gid) {
             real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt, cs;
             real speeds[4];
-            const luint kk = dim < 3 ? 0
-                                     : simbi::helpers::get_height(
-                                           aid,
-                                           xactive_grid,
-                                           yactive_grid
-                                       );
-            const luint jj = dim < 2 ? 0
-                                     : simbi::helpers::get_row(
-                                           aid,
-                                           xactive_grid,
-                                           yactive_grid,
-                                           kk
-                                       );
-            const luint ii =
-                simbi::helpers::get_column(aid, xactive_grid, yactive_grid, kk);
+            const luint kk =
+                dim < 3 ? 0 : simbi::helpers::get_height(gid, nx, ny);
+            const luint jj =
+                dim < 2 ? 0 : simbi::helpers::get_row(gid, nx, ny, kk);
+            const luint ii    = simbi::helpers::get_column(gid, nx, ny, kk);
+            const luint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
             // Left/Right wave speeds
             if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                calc_max_wave_speeds(prims[aid], 1, speeds, cs);
+                calc_max_wave_speeds(prims[gid], 1, speeds, cs);
                 v1p = std::abs(speeds[3]);
                 v1m = std::abs(speeds[0]);
                 // #if !GPU_CODE
                 // printf("v1p: %.2e, v1m: %.2e\n", v1p, v1m);
                 // #endif
                 if constexpr (dim > 1) {
-                    calc_max_wave_speeds(prims[aid], 2, speeds, cs);
+                    calc_max_wave_speeds(prims[gid], 2, speeds, cs);
                     v2p = std::abs(speeds[3]);
                     v2m = std::abs(speeds[0]);
                 }
                 if constexpr (dim > 2) {
-                    calc_max_wave_speeds(prims[aid], 3, speeds, cs);
+                    calc_max_wave_speeds(prims[gid], 3, speeds, cs);
                     v3p = std::abs(speeds[3]);
                     v3m = std::abs(speeds[0]);
                 }
@@ -793,8 +782,8 @@ template <int dim> template <TIMESTEP_TYPE dt_type> void RMHD<dim>::adapt_dt()
                 }
             }
 
-            const real x1l = get_x1face(ii, 0);
-            const real x1r = get_x1face(ii, 1);
+            const real x1l = get_x1face(ireal, 0);
+            const real x1r = get_x1face(ireal, 1);
             const real dx1 = x1r - x1l;
             switch (geometry) {
                 case simbi::Geometry::CARTESIAN:
@@ -3667,7 +3656,7 @@ void RMHD<dim>::simulate(
 
     cons2prim(fullP);
     if constexpr (global::BuildPlatform == global::Platform::GPU) {
-        adapt_dt<TIMESTEP_TYPE::MINIMUM>(activeP);
+        adapt_dt<TIMESTEP_TYPE::MINIMUM>(fullP);
     }
     else {
         adapt_dt<TIMESTEP_TYPE::MINIMUM>();
@@ -3778,7 +3767,7 @@ void RMHD<dim>::simulate(
         }
 
         if constexpr (global::BuildPlatform == global::Platform::GPU) {
-            adapt_dt(activeP);
+            adapt_dt(fullP);
         }
         else {
             adapt_dt();
