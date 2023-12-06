@@ -249,12 +249,11 @@ template <int dim> void Newtonian<dim>::emit_troubled_cells() const
             }
             else if constexpr (dim == 2) {
                 printf(
-                    "\n [jj: %lu] Simulation in bad state\n"
+                    "\nSimulation in bad state\n"
                     "Density: %.2e, "
                     "Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: "
                     "%" PRIu64 "\n",
-                    jj,
                     cons[gid].rho,
                     prims[gid].p,
                     v2,
@@ -354,8 +353,8 @@ template <int dim> void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
             const real v3      = (cons_data[gid].momentum(3) / rho) * invdV;
             const real rho_chi = cons_data[gid].chi * invdV;
             const real pre =
-                (gamma - 1) * (cons_data[gid].e_dens -
-                               0.5 * rho * (v1 * v1 + v2 * v2 + v3 * v3));
+                (gamma - 1.0) * (cons_data[gid].e_dens -
+                                 0.5 * rho * (v1 * v1 + v2 * v2 + v3 * v3));
             if constexpr (dim == 1) {
                 prim_data[gid] = {rho, v1, pre, rho_chi / rho};
             }
@@ -398,9 +397,10 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     switch (sim_solver) {
         case Solver::HLLC:
             {
-                // real cbar   = 0.5*(csL + csR);
-                // real rhoBar = 0.5*(rhoL + rhoR);
-                // real pStar  = 0.5*(pL + pR) + 0.5*(vL - vR)*cbar*rhoBar;
+                // real cbar   = 0.5 * (csL + csR);
+                // real rhoBar = 0.5 * (rhoL + rhoR);
+                // real pStar_old =
+                //     0.5 * (pL + pR) + 0.5 * (vL - vR) * cbar * rhoBar;
 
                 // Steps to Compute HLLC as described in Toro et al. 2019
                 const real num = csL + csR - (gamma - 1.0) * 0.5 * (vR - vL);
@@ -430,11 +430,21 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                     ((pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
                      (rhoL * (aL - vL) - rhoR * (aR - vR)));
 
+                // if (std::abs(aStar) > 0) {
+                //     printf(
+                //         "aStar: %.2e, pStar: %.2e, pStar_old: %.2e, z: %.2e,
+                //         " "num: %.2e, denom: %.2e\n", aStar, pStar,
+                //         pStar_old,
+                //         hllc_z,
+                //         num,
+                //         denom
+                //     );
+                // }
                 if constexpr (dim == 1) {
-                    return nt::Eigenvals<dim>(aL, aR, aStar, pStar);
+                    return nt::Eigenvals<dim>(aL, aR, aStar);
                 }
                 else {
-                    return nt::Eigenvals<dim>(aL, aR, csL, csR, aStar, pStar);
+                    return nt::Eigenvals<dim>(aL, aR, csL, csR, aStar);
                 }
             }
 
@@ -442,11 +452,11 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
             {
                 const real aR = helpers::my_max<real>(
                     helpers::my_max<real>(vL + csL, vR + csR),
-                    (0.0)
+                    0.0
                 );
                 const real aL = helpers::my_min<real>(
                     helpers::my_min<real>(vL - csL, vR - csR),
-                    (0.0)
+                    0.0
                 );
                 return nt::Eigenvals<dim>{aL, aR};
             }
@@ -773,47 +783,38 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 
     if constexpr (dim == 1) {
         const real aStar = lambda.aStar;
-        const real pStar = lambda.pStar;
-        const real ap    = helpers::my_max<real>(0, aR);
-        const real am    = helpers::my_min<real>(0, aL);
-        auto hll_flux    = (left_flux * ap + right_flux * am -
-                         (right_state - left_state) * am * ap) /
-                        (am + ap);
-        auto hll_state =
-            (right_state * aR - left_state * aL - right_flux + left_flux) /
-            (aR - aL);
-
+        // const real pStar = lambda.pStar;
         if (vface <= aStar) {
-            real pressure = left_prims.p;
-            real v        = left_prims.v1;
-            real rho      = left_state.rho;
-            real m        = left_state.m1;
-            real energy   = left_state.e_dens;
-            real cofac    = 1 / (aL - aStar);
+            const real pressure = left_prims.p;
+            const real v        = left_prims.v1;
+            const real rho      = left_state.rho;
+            const real energy   = left_state.e_dens;
+            const real cofac    = (aL - v) / (aL - aStar);
 
-            real rhoStar = cofac * (aL - v) * rho;
-            real mstar   = cofac * (m * (aL - v) - pressure + pStar);
-            real eStar =
-                cofac * (energy * (aL - v) + pStar * aStar - pressure * v);
+            const real rhoStar = cofac * rho;
+            const real mstar   = cofac * (rho * aStar);
+            const real eStar =
+                cofac *
+                (energy + (aStar - v) * (rho * aStar + pressure / (aL - v)));
 
-            auto star_state = nt::Conserved<1>{rhoStar, mstar, eStar};
+            const auto star_state = nt::Conserved<1>{rhoStar, mstar, eStar};
 
             // Compute the luintermediate left flux
             return left_flux + (star_state - left_state) * aL -
                    star_state * vface;
         }
         else {
-            real pressure = right_prims.p;
-            real v        = right_prims.v1;
-            real rho      = right_state.rho;
-            real m        = right_state.m1;
-            real energy   = right_state.e_dens;
-            real cofac    = 1. / (aR - aStar);
+            const real pressure = right_prims.p;
+            const real v        = right_prims.v1;
+            const real rho      = right_state.rho;
+            const real energy   = right_state.e_dens;
+            const real cofac    = (aR - v) / (aR - aStar);
 
-            real rhoStar = cofac * (aR - v) * rho;
-            real mstar   = cofac * (m * (aR - v) - pressure + pStar);
-            real eStar =
-                cofac * (energy * (aR - v) + pStar * aStar - pressure * v);
+            const real rhoStar = cofac * rho;
+            const real mstar   = cofac * (rho * aStar);
+            const real eStar =
+                cofac *
+                (energy + (aStar - v) * (rho * aStar + pressure / (aR - v)));
 
             auto star_state = nt::Conserved<1>{rhoStar, mstar, eStar};
 
@@ -823,274 +824,10 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         }
     }
     else {
-        // const real aStar = lambda.aStar;
-        // const real pStar = lambda.pStar;
-        // switch (comp_hllc_type) {
-        //     case HLLCTYPE::FLEISCHMANN:
-        //         {
-        //             // Apply the low-Mach HLLC fix found in Fleischmann et al
-        //             // 2020:
-        //             //
-        //             https://www.sciencedirect.com/science/article/pii/S0021999120305362
-        //             const real csL        = lambda.csL;
-        //             const real csR        = lambda.csR;
-        //             constexpr real ma_lim = 0.1;
-
-        //             // --------------Compute the L Star State----------
-        //             real pressure = left_prims.p;
-        //             real rho      = left_state.rho;
-        //             real m1       = left_state.momentum(1);
-        //             real m2       = left_state.momentum(2);
-        //             real m3       = left_state.momentum(3);
-        //             real e        = left_state.e_dens;
-        //             real cofactor = 1 / (aL - aStar);
-
-        //             const real vL = left_prims.vcomponent(nhat);
-        //             const real vR = right_prims.vcomponent(nhat);
-        //             // Left Star State in x-direction of coordinate lattice
-        //             real rhoStar = cofactor * (aL - vL) * rho;
-        //             real m1Star  = cofactor * (m1 * (aL - vL) +
-        //                                       helpers::kronecker(nhat, 1) *
-        //                                           (-pressure + pStar));
-        //             real m2Star  = cofactor * (m2 * (aL - vL) +
-        //                                       helpers::kronecker(nhat, 2) *
-        //                                           (-pressure + pStar));
-        //             real m3star  = cofactor * (m3 * (aL - vL) +
-        //                                       helpers::kronecker(nhat, 3) *
-        //                                           (-pressure + pStar));
-        //             real eStar   = cofactor * (e * (aL - vL) + pStar * aStar
-        //             -
-        //                                      pressure * vL);
-        //             const auto starStateL = [&] {
-        //                 if constexpr (dim == 2) {
-        //                     return nt::Conserved<2>{
-        //                       rhoStar,
-        //                       m1Star,
-        //                       m2Star,
-        //                       eStar
-        //                     };
-        //                 }
-        //                 else {
-        //                     return nt::Conserved<3>{
-        //                       rhoStar,
-        //                       m1Star,
-        //                       m2Star,
-        //                       m3star,
-        //                       eStar
-        //                     };
-        //                 }
-        //             }();
-
-        //             pressure = right_prims.p;
-        //             rho      = right_state.rho;
-        //             m1       = right_state.momentum(1);
-        //             m2       = right_state.momentum(2);
-        //             m3       = right_state.momentum(3);
-        //             e        = right_state.e_dens;
-        //             cofactor = 1 / (aR - aStar);
-
-        //             rhoStar = cofactor * (aR - vR) * rho;
-        //             m1Star  = cofactor *
-        //                      (m1 * (aR - vR) + helpers::kronecker(nhat, 1) *
-        //                                            (-pressure + pStar));
-        //             m2Star = cofactor *
-        //                      (m2 * (aR - vR) + helpers::kronecker(nhat, 2) *
-        //                                            (-pressure + pStar));
-        //             m3star = cofactor *
-        //                      (m3 * (aR - vR) + helpers::kronecker(nhat, 3) *
-        //                                            (-pressure + pStar));
-        //             eStar = cofactor *
-        //                     (e * (aR - vR) + pStar * aStar - pressure * vR);
-        //             const auto starStateR = [&] {
-        //                 if constexpr (dim == 2) {
-        //                     return nt::Conserved<2>{
-        //                       rhoStar,
-        //                       m1Star,
-        //                       m2Star,
-        //                       eStar
-        //                     };
-        //                 }
-        //                 else {
-        //                     return nt::Conserved<3>{
-        //                       rhoStar,
-        //                       m1Star,
-        //                       m2Star,
-        //                       m3star,
-        //                       eStar
-        //                     };
-        //                 }
-        //             }();
-        //             const real ma_left =
-        //                 vL / csL * std::sqrt((1 - csL * csL) / (1 - vL *
-        //                 vL));
-        //             const real ma_right =
-        //                 vR / csR * std::sqrt((1 - csR * csR) / (1 - vR *
-        //                 vR));
-        //             const real ma_local =
-        //                 helpers::my_max(std::abs(ma_left),
-        //                 std::abs(ma_right));
-        //             const real phi = std::sin(
-        //                 helpers::my_min<real>(1, ma_local / ma_lim) * M_PI *
-        //                 0.5
-        //             );
-        //             const real aL_lm = phi == 0 ? aL : phi * aL;
-        //             const real aR_lm = phi == 0 ? aR : phi * aR;
-
-        //             const auto face_starState =
-        //                 (aStar <= 0) ? starStateR : starStateL;
-        //             auto net_flux =
-        //                 (left_flux + right_flux) * 0.5 +
-        //                 ((starStateL - left_state) * aL_lm +
-        //                  (starStateL - starStateR) * std::abs(aStar) +
-        //                  (starStateR - right_state) * aR_lm) *
-        //                     0.5 -
-        //                 face_starState * vface;
-
-        //             // upwind the concentration flux
-        //             if (net_flux.rho < 0) {
-        //                 net_flux.chi = right_prims.chi * net_flux.rho;
-        //             }
-        //             else {
-        //                 net_flux.chi = left_prims.chi * net_flux.rho;
-        //             }
-        //             return net_flux;
-        //         }
-
-        //     default:
-        //         {
-        //             if (vface <= aStar) {
-        //                 const real pressure = left_prims.p;
-        //                 const real rho      = left_state.rho;
-        //                 const real m1       = left_state.momentum(1);
-        //                 const real m2       = left_state.momentum(2);
-        //                 const real m3       = left_state.momentum(3);
-        //                 const real e        = left_state.e_dens;
-        //                 const real cofactor = 1 / (aL - aStar);
-
-        //                 const real vL = left_prims.vcomponent(nhat);
-        //                 // Left Star State in x-direction of coordinate
-        //                 lattice const real rhoStar = cofactor * (aL - vL) *
-        //                 rho; const real m1Star =
-        //                     cofactor *
-        //                     (m1 * (aL - vL) +
-        //                      helpers::kronecker(nhat, 1) * (-pressure +
-        //                      pStar));
-        //                 const real m2Star =
-        //                     cofactor *
-        //                     (m2 * (aL - vL) +
-        //                      helpers::kronecker(nhat, 2) * (-pressure +
-        //                      pStar));
-        //                 const real m3star =
-        //                     cofactor *
-        //                     (m3 * (aL - vL) +
-        //                      helpers::kronecker(nhat, 3) * (-pressure +
-        //                      pStar));
-        //                 const real eStar =
-        //                     cofactor *
-        //                     (e * (aL - vL) + pStar * aStar - pressure * vL);
-        //                 const auto starStateL = [=] {
-        //                     if constexpr (dim == 2) {
-        //                         return nt::Conserved<2>{
-        //                           rhoStar,
-        //                           m1Star,
-        //                           m2Star,
-        //                           eStar
-        //                         };
-        //                     }
-        //                     else {
-        //                         return nt::Conserved<3>{
-        //                           rhoStar,
-        //                           m1Star,
-        //                           m2Star,
-        //                           m3star,
-        //                           eStar
-        //                         };
-        //                     }
-        //                 }();
-
-        //                 auto hllc_flux = left_flux +
-        //                                  (starStateL - left_state) * aL -
-        //                                  starStateL * vface;
-
-        //                 // upwind the concentration flux
-        //                 if (hllc_flux.rho < 0) {
-        //                     hllc_flux.chi = right_prims.chi * hllc_flux.rho;
-        //                 }
-        //                 else {
-        //                     hllc_flux.chi = left_prims.chi * hllc_flux.rho;
-        //                 }
-
-        //                 return hllc_flux;
-        //             }
-        //             else {
-        //                 const real pressure = right_prims.p;
-        //                 const real rho      = right_state.rho;
-        //                 const real m1       = right_state.momentum(1);
-        //                 const real m2       = right_state.momentum(2);
-        //                 const real m3       = right_state.momentum(3);
-        //                 const real e        = right_state.e_dens;
-        //                 const real cofactor = 1 / (aR - aStar);
-
-        //                 const real vR      = right_prims.vcomponent(nhat);
-        //                 const real rhoStar = cofactor * (aR - vR) * rho;
-        //                 const real m1Star =
-        //                     cofactor *
-        //                     (m1 * (aR - vR) +
-        //                      helpers::kronecker(nhat, 1) * (-pressure +
-        //                      pStar));
-        //                 const real m2Star =
-        //                     cofactor *
-        //                     (m2 * (aR - vR) +
-        //                      helpers::kronecker(nhat, 2) * (-pressure +
-        //                      pStar));
-        //                 const real m3star =
-        //                     cofactor *
-        //                     (m3 * (aR - vR) +
-        //                      helpers::kronecker(nhat, 3) * (-pressure +
-        //                      pStar));
-        //                 const real eStar =
-        //                     cofactor *
-        //                     (e * (aR - vR) + pStar * aStar - pressure * vR);
-        //                 const auto starStateR = [=] {
-        //                     if constexpr (dim == 2) {
-        //                         return nt::Conserved<2>{
-        //                           rhoStar,
-        //                           m1Star,
-        //                           m2Star,
-        //                           eStar
-        //                         };
-        //                     }
-        //                     else {
-        //                         return nt::Conserved<3>{
-        //                           rhoStar,
-        //                           m1Star,
-        //                           m2Star,
-        //                           m3star,
-        //                           eStar
-        //                         };
-        //                     }
-        //                 }();
-
-        //                 auto hllc_flux = right_flux +
-        //                                  (starStateR - right_state) * aR -
-        //                                  starStateR * vface;
-
-        //                 // upwind the concentration flux
-        //                 if (hllc_flux.rho < 0) {
-        //                     hllc_flux.chi = right_prims.chi * hllc_flux.rho;
-        //                 }
-        //                 else {
-        //                     hllc_flux.chi = left_prims.chi * hllc_flux.rho;
-        //                 }
-
-        //                 return hllc_flux;
-        //             }
-        //         }
-        // }   // end switch
         const real cL    = lambda.csL;
         const real cR    = lambda.csR;
         const real aStar = lambda.aStar;
-        const real pStar = lambda.pStar;
+        // const real pStar = lambda.pStar;
         // Apply the low-Mach HLLC fix found in Fleischmann et al 2020:
         // https://www.sciencedirect.com/science/article/pii/S0021999120305362
         constexpr real ma_lim = 0.10;
@@ -1102,21 +839,24 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         real m2       = left_state.momentum(2);
         real m3       = left_state.momentum(3);
         real edens    = left_state.e_dens;
-        real cofactor = 1 / (aL - aStar);
-
         const real vL = left_prims.vcomponent(nhat);
         const real vR = right_prims.vcomponent(nhat);
+        real cofactor = (aL - vL) / (aL - aStar);
 
         // Left Star State in x-direction of coordinate lattice
-        real rhostar = cofactor * (aL - vL) * rho;
-        real m1star = cofactor * (m1 * (aL - vL) + helpers::kronecker(nhat, 1) *
-                                                       (-pressure + pStar));
-        real m2star = cofactor * (m2 * (aL - vL) + helpers::kronecker(nhat, 2) *
-                                                       (-pressure + pStar));
-        real m3star = cofactor * (m3 * (aL - vL) + helpers::kronecker(nhat, 3) *
-                                                       (-pressure + pStar));
+        const bool x_direction = helpers::kronecker(nhat, 1);
+        const bool y_direction = helpers::kronecker(nhat, 2);
+        const bool z_direction = helpers::kronecker(nhat, 3);
+        real rhostar           = cofactor * rho;
+        real m1star =
+            cofactor * (rho * aStar * x_direction + m1 * !x_direction);
+        real m2star =
+            cofactor * (rho * aStar * y_direction + m2 * !y_direction);
+        real m3star =
+            cofactor * (rho * aStar * z_direction + m3 * !z_direction);
         real estar =
-            cofactor * (edens * (aL - vL) + pStar * aStar - pressure * vL);
+            cofactor *
+            (edens + (aStar - vL) * (rho * aStar + pressure / (aL - vL)));
         const auto starStateL = [=] {
             if constexpr (dim == 2) {
                 return nt::Conserved<2>{rhostar, m1star, m2star, estar};
@@ -1132,16 +872,14 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         m2       = right_state.momentum(2);
         m3       = right_state.momentum(3);
         edens    = right_state.e_dens;
-        cofactor = 1 / (aR - aStar);
+        cofactor = (aR - vR) / (aR - aStar);
 
-        rhostar = cofactor * (aR - vR) * rho;
-        m1star  = cofactor * (m1 * (aR - vR) +
-                             helpers::kronecker(nhat, 1) * (-pressure + pStar));
-        m2star  = cofactor * (m2 * (aR - vR) +
-                             helpers::kronecker(nhat, 2) * (-pressure + pStar));
-        m3star  = cofactor * (m3 * (aR - vR) +
-                             helpers::kronecker(nhat, 3) * (-pressure + pStar));
-        estar = cofactor * (edens * (aR - vR) + pStar * aStar - pressure * vR);
+        rhostar = cofactor * rho;
+        m1star  = cofactor * (rho * aStar * x_direction + m1 * !x_direction);
+        m2star  = cofactor * (rho * aStar * y_direction + m2 * !y_direction);
+        m3star  = cofactor * (rho * aStar * z_direction + m3 * !z_direction);
+        estar   = cofactor *
+                (edens + (aStar - aR) * (rho * aStar + pressure / (aR - vR)));
         const auto starStateR = [=] {
             if constexpr (dim == 2) {
                 return nt::Conserved<2>{rhostar, m1star, m2star, estar};
