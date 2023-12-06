@@ -265,6 +265,33 @@ class Hydro:
                 for a in boundary_sources
             ]
         )
+        edges = [0, -1] if first_order else [0, 1, -1, -2]
+        view = self.u[: self.dimensionality + 2]
+
+        slices: list[Any]
+        if view.ndim == 1:
+            slices = [(..., i) for i in edges]
+        elif view.ndim == 2:
+            slices = [np.s_[:, i, :] for i in edges] + [np.s_[..., i] for i in edges]
+        else:
+            slices = (
+                [np.s_[..., i] for i in edges]
+                + [np.s_[..., i, :] for i in edges]
+                + [np.s_[:, i, ...] for i in edges]
+            )
+
+        order = 1 if first_order else 2
+        if self.dimensionality == 3:
+            source_transform: Any = np.s_[:, None, None]
+        elif self.dimensionality == 2:
+            source_transform = np.s_[:, None]
+        else:
+            source_transform = np.s_[:]
+
+        for boundary in range(self.dimensionality * len(edges)):
+            source = boundary_sources[boundary // order]
+            if any(val != 0 for val in source):
+                view[slices[boundary]] = source[source_transform]
         return boundary_sources
 
     def _generate_the_grid(
