@@ -83,7 +83,8 @@
         "cinttypes": "cpp",
         "semaphore": "cpp",
         "__nullptr": "cpp",
-        "span": "cpp"
+        "span": "cpp",
+        "complex": "cpp"
     },
     "doxdocgen.generic.authorEmail": "md4469@nyu.edu",
     "doxdocgen.generic.authorName": "Marcus DuPont",
