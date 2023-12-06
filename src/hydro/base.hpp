@@ -156,7 +156,7 @@ namespace simbi {
               cfl(init_conditions.cfl),
               coord_system(init_conditions.coord_system),
               inFailureState(false),
-              hllc_z((gamma - 1) / (2 * gamma)),
+              hllc_z((gamma - 1.0) / (2.0 * gamma)),
               nx(init_conditions.nx),
               ny(init_conditions.ny),
               nz(init_conditions.nz),
