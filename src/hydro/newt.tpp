@@ -413,14 +413,14 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                                     ? 1.0
                                     : std::sqrt(
                                           1.0 + ((gamma + 1.0) / (2.0 * gamma)
-                                                ) * (pStar / pL - 1)
+                                                ) * (pStar / pL - 1.0)
                                       );
 
                 const real qR = (pStar <= pR)
                                     ? 1.0
                                     : std::sqrt(
                                           1.0 + ((gamma + 1.0) / (2.0 * gamma)
-                                                ) * (pStar / pR - 1)
+                                                ) * (pStar / pR - 1.0)
                                       );
 
                 const real aL = vL - qL * csL;
