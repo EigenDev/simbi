@@ -397,18 +397,17 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     switch (sim_solver) {
         case Solver::HLLC:
             {
-                const real cbar   = 0.5 * (csL + csR);
-                const real rhoBar = 0.5 * (rhoL + rhoR);
-                const real pStar =
-                    0.5 * (pL + pR) + 0.5 * (vL - vR) * cbar * rhoBar;
+                // const real cbar   = 0.5 * (csL + csR);
+                // const real rhoBar = 0.5 * (rhoL + rhoR);
+                // const real pStar =
+                //     0.5 * (pL + pR) + 0.5 * (vL - vR) * cbar * rhoBar;
 
                 // Steps to Compute HLLC as described in Toro et al. 2019
-                // const real num = csL + csR - (gamma - 1.0) * 0.5 * (vR - vL);
-                // const real denom =
-                //     csL * std::pow(pL, -hllc_z) + csR * std::pow(pR,
-                //     -hllc_z);
-                // const real p_term = num / denom;
-                // const real pStar  = std::pow(p_term, (1.0 / hllc_z));
+                const real num = csL + csR - (gamma - 1.0) * 0.5 * (vR - vL);
+                const real denom =
+                    csL * std::pow(pL, -hllc_z) + csR * std::pow(pR, -hllc_z);
+                const real p_term = num / denom;
+                const real pStar  = std::pow(p_term, (1.0 / hllc_z));
 
                 const real qL = (pStar <= pL)
                                     ? 1.0
