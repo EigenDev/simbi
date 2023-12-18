@@ -166,13 +166,16 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
         # Load Fields
         # -------------------------------
         vsqr = np.sum(vel * vel for vel in v)  # type: ignore
-        if setup['regime'] == "srhd":
-            if ds.attrs['using_gamma_beta']:
-                W = (1 + vsqr) ** 0.5
-                v = [vel / W for vel in v]
-                vsqr /= W**2
-            else:
-                W = (1 - vsqr) ** (-0.5)
+        if setup['regime'] in ["srhd", "srmhd"]:
+            try:
+                if ds.attrs['using_gamma_beta']:
+                    W = (1 + vsqr) ** 0.5
+                    v = [vel / W for vel in v]
+                    vsqr /= W**2
+                else:
+                    W = (1 - vsqr) ** (-0.5)
+            except KeyError:
+                W = (1 - vsqr)**(-0.5)
         else:
             W = 1
 
@@ -300,7 +303,7 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
 
         if model.dimensionality == 1:
             model.u[...] = np.array(
-                [model.init_density, *model.init_momentum, model.init_energy, *bfields, 0.0])
+                [model.init_density, *model.init_momentum, model.init_energy, *bfields, np.zeros_like(model.init_density)])
         else:
             model.u[...] = np.array([model.init_density,
                                      *model.init_momentum,
