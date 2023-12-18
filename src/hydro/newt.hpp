@@ -108,7 +108,12 @@ namespace simbi {
         ) const;
 
         GPU_CALLABLE_MEMBER
-        conserved_t prims2cons(const primitive_t& prims) const;
+        void
+        wave_speeds(const primitive_t& prims, real speeds[], const luint nhat)
+            const;
+
+        GPU_CALLABLE_MEMBER conserved_t prims2cons(const primitive_t& prims
+        ) const;
 
         GPU_CALLABLE_MEMBER
         conserved_t calc_hllc_flux(
