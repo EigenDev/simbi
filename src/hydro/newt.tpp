@@ -397,9 +397,9 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     switch (sim_solver) {
         case Solver::HLLC:
             {
-                // real cbar   = 0.5 * (csL + csR);
-                // real rhoBar = 0.5 * (rhoL + rhoR);
-                // real pStar_old =
+                // const real cbar   = 0.5 * (csL + csR);
+                // const real rhoBar = 0.5 * (rhoL + rhoR);
+                // const real pStar_old =
                 //     0.5 * (pL + pR) + 0.5 * (vL - vR) * cbar * rhoBar;
 
                 // Steps to Compute HLLC as described in Toro et al. 2019
@@ -413,14 +413,14 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                                     ? 1.0
                                     : std::sqrt(
                                           1.0 + ((gamma + 1.0) / (2.0 * gamma)
-                                                ) * (pStar / pL - 1)
+                                                ) * (pStar / pL - 1.0)
                                       );
 
                 const real qR = (pStar <= pR)
                                     ? 1.0
                                     : std::sqrt(
                                           1.0 + ((gamma + 1.0) / (2.0 * gamma)
-                                                ) * (pStar / pR - 1)
+                                                ) * (pStar / pR - 1.0)
                                       );
 
                 const real aL = vL - qL * csL;
@@ -430,16 +430,6 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                     ((pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
                      (rhoL * (aL - vL) - rhoR * (aR - vR)));
 
-                // if (std::abs(aStar) > 0) {
-                //     printf(
-                //         "aStar: %.2e, pStar: %.2e, pStar_old: %.2e, z: %.2e,
-                //         " "num: %.2e, denom: %.2e\n", aStar, pStar,
-                //         pStar_old,
-                //         hllc_z,
-                //         num,
-                //         denom
-                //     );
-                // }
                 if constexpr (dim == 1) {
                     return nt::Eigenvals<dim>(aL, aR, aStar);
                 }
@@ -1151,20 +1141,20 @@ void Newtonian<dim>::advance(
                                                       static_cast<lint>(0)
                                                   ) * xpg +
                                                   ii];
-            const bool object_above_me =
+            const bool object_above =
                 dim < 3 ? false
                         : object_data
                               [helpers::my_min(kk + 1, zpg - 1) * xpg * ypg +
                                jj * xpg + ii];
-            const bool object_below_me =
-                dim < 3 ? false
-                        : object_data
-                              [helpers::my_max(
-                                   static_cast<lint>(kk - 1),
-                                   static_cast<lint>(0)
-                               ) * xpg *
-                                   ypg +
-                               jj * xpg + ii];
+            const bool object_below = dim < 3
+                                          ? false
+                                          : object_data
+                                                [helpers::my_max(
+                                                     static_cast<lint>(kk - 1),
+                                                     static_cast<lint>(0)
+                                                 ) * xpg *
+                                                     ypg +
+                                                 jj * xpg + ii];
 
             const real x1l    = get_x1face(ii, 0);
             const real x1r    = get_x1face(ii, 1);
@@ -1215,7 +1205,7 @@ void Newtonian<dim>::advance(
                     yprimsR.chi = yprimsL.chi;
                 }
 
-                if (object_above_me) {
+                if (object_above) {
                     zprimsR.rho = zprimsL.rho;
                     zprimsR.v1  = zprimsL.v1;
                     if constexpr (dim == 3) {
@@ -1364,7 +1354,7 @@ void Newtonian<dim>::advance(
                     yprimsL.chi = yprimsR.chi;
                 }
 
-                if (object_below_me) {
+                if (object_below) {
                     zprimsL.rho = zprimsR.rho;
                     zprimsL.v1  = zprimsR.v1;
                     if constexpr (dim == 3) {
@@ -1576,7 +1566,7 @@ void Newtonian<dim>::advance(
                     yprimsR.chi = yprimsL.chi;
                 }
 
-                if (object_above_me) {
+                if (object_above) {
                     zprimsR.rho = zprimsL.rho;
                     zprimsR.v1  = zprimsL.v1;
                     if constexpr (dim == 3) {
@@ -1755,7 +1745,7 @@ void Newtonian<dim>::advance(
                     yprimsL.chi = yprimsR.chi;
                 }
 
-                if (object_below_me) {
+                if (object_below) {
                     zprimsL.rho = zprimsR.rho;
                     zprimsL.v1  = zprimsR.v1;
                     if constexpr (dim == 3) {

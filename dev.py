@@ -352,11 +352,9 @@ def install_simbi(args: argparse.Namespace) -> None:
 def uninstall_simbi(args: argparse.Namespace) -> None:
     simbi_dir = Path().resolve()
     subprocess.run([sys.executable, "-m", "pip", "uninstall", "simbi"], check=True)
-    try:
-        exts = [str(ext) for ext in Path(simbi_dir / "simbi/libs/").glob("*.so")]
-        subprocess.run(["rm", "-ri", *exts], check=True, capture_output=True)
-    except subprocess.CalledProcessError as err:
-        print(f"{err} {err.stderr.decode('utf8')}")
+    exts = [str(ext) for ext in Path(simbi_dir / "simbi/libs/").glob("*.so")]
+    if exts:
+        subprocess.run(["rm", "-ri", *exts], check=True)
 
 def main() -> int:
     _, args = parse_the_arguments()
