@@ -134,7 +134,6 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     ndim: int = 0
     if isinstance(files, dict):
         import itertools
-
         files = list(itertools.chain(*files.values()))
 
     files = list(filter(bool, files))
@@ -250,11 +249,14 @@ def read_file(
 
         vsqr = np.sum(vel * vel for vel in v)  # type: ignore
         if setup["regime"] in ["srhd", "srmhd", "relativistic"]:
-            if ds["using_gamma_beta"]:
-                W = (1 + vsqr) ** 0.5
-                fields.update({f"v{i+1}": v[i] / W for i in range(len(v))})
-                vsqr /= W**2
-            else:
+            try:
+                if ds["using_gamma_beta"]:
+                    W = (1 + vsqr) ** 0.5
+                    fields.update({f"v{i+1}": v[i] / W for i in range(len(v))})
+                    vsqr /= W**2
+                else:
+                    W = (1 - vsqr) ** (-0.5)
+            except KeyError:
                 W = (1 - vsqr) ** (-0.5)
 
             if setup["regime"] == "srmhd":
