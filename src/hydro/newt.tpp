@@ -431,10 +431,10 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
                      (rhoL * (aL - vL) - rhoR * (aR - vR)));
 
                 if constexpr (dim == 1) {
-                    return nt::Eigenvals<dim>(aL, aR, aStar);
+                    return nt::Eigenvals<dim>(aL, aR, aStar, pStar);
                 }
                 else {
-                    return nt::Eigenvals<dim>(aL, aR, csL, csR, aStar);
+                    return nt::Eigenvals<dim>(aL, aR, csL, csR, aStar, pStar);
                 }
             }
 
@@ -773,38 +773,47 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 
     if constexpr (dim == 1) {
         const real aStar = lambda.aStar;
-        // const real pStar = lambda.pStar;
+        const real pStar = lambda.pStar;
+        const real ap    = helpers::my_max<real>(0, aR);
+        const real am    = helpers::my_min<real>(0, aL);
+        auto hll_flux    = (left_flux * ap + right_flux * am -
+                         (right_state - left_state) * am * ap) /
+                        (am + ap);
+        auto hll_state =
+            (right_state * aR - left_state * aL - right_flux + left_flux) /
+            (aR - aL);
+
         if (vface <= aStar) {
-            const real pressure = left_prims.p;
-            const real v        = left_prims.v1;
-            const real rho      = left_state.rho;
-            const real energy   = left_state.e_dens;
-            const real cofac    = (aL - v) / (aL - aStar);
+            real pressure = left_prims.p;
+            real v        = left_prims.v1;
+            real rho      = left_state.rho;
+            real m        = left_state.m1;
+            real energy   = left_state.e_dens;
+            real cofac    = 1 / (aL - aStar);
 
-            const real rhoStar = cofac * rho;
-            const real mstar   = cofac * (rho * aStar);
-            const real eStar =
-                cofac *
-                (energy + (aStar - v) * (rho * aStar + pressure / (aL - v)));
+            real rhoStar = cofac * (aL - v) * rho;
+            real mstar   = cofac * (m * (aL - v) - pressure + pStar);
+            real eStar =
+                cofac * (energy * (aL - v) + pStar * aStar - pressure * v);
 
-            const auto star_state = nt::Conserved<1>{rhoStar, mstar, eStar};
+            auto star_state = nt::Conserved<1>{rhoStar, mstar, eStar};
 
             // Compute the luintermediate left flux
             return left_flux + (star_state - left_state) * aL -
                    star_state * vface;
         }
         else {
-            const real pressure = right_prims.p;
-            const real v        = right_prims.v1;
-            const real rho      = right_state.rho;
-            const real energy   = right_state.e_dens;
-            const real cofac    = (aR - v) / (aR - aStar);
+            real pressure = right_prims.p;
+            real v        = right_prims.v1;
+            real rho      = right_state.rho;
+            real m        = right_state.m1;
+            real energy   = right_state.e_dens;
+            real cofac    = 1. / (aR - aStar);
 
-            const real rhoStar = cofac * rho;
-            const real mstar   = cofac * (rho * aStar);
-            const real eStar =
-                cofac *
-                (energy + (aStar - v) * (rho * aStar + pressure / (aR - v)));
+            real rhoStar = cofac * (aR - v) * rho;
+            real mstar   = cofac * (m * (aR - v) - pressure + pStar);
+            real eStar =
+                cofac * (energy * (aR - v) + pStar * aStar - pressure * v);
 
             auto star_state = nt::Conserved<1>{rhoStar, mstar, eStar};
 
@@ -817,7 +826,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         const real cL    = lambda.csL;
         const real cR    = lambda.csR;
         const real aStar = lambda.aStar;
-        // const real pStar = lambda.pStar;
+        const real pStar = lambda.pStar;
         // Apply the low-Mach HLLC fix found in Fleischmann et al 2020:
         // https://www.sciencedirect.com/science/article/pii/S0021999120305362
         constexpr real ma_lim = 0.10;
@@ -829,24 +838,21 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         real m2       = left_state.momentum(2);
         real m3       = left_state.momentum(3);
         real edens    = left_state.e_dens;
+        real cofactor = 1 / (aL - aStar);
+
         const real vL = left_prims.vcomponent(nhat);
         const real vR = right_prims.vcomponent(nhat);
-        real cofactor = (aL - vL) / (aL - aStar);
 
         // Left Star State in x-direction of coordinate lattice
-        const bool x_direction = helpers::kronecker(nhat, 1);
-        const bool y_direction = helpers::kronecker(nhat, 2);
-        const bool z_direction = helpers::kronecker(nhat, 3);
-        real rhostar           = cofactor * rho;
-        real m1star =
-            cofactor * (rho * aStar * x_direction + m1 * !x_direction);
-        real m2star =
-            cofactor * (rho * aStar * y_direction + m2 * !y_direction);
-        real m3star =
-            cofactor * (rho * aStar * z_direction + m3 * !z_direction);
+        real rhostar = cofactor * (aL - vL) * rho;
+        real m1star = cofactor * (m1 * (aL - vL) + helpers::kronecker(nhat, 1) *
+                                                       (-pressure + pStar));
+        real m2star = cofactor * (m2 * (aL - vL) + helpers::kronecker(nhat, 2) *
+                                                       (-pressure + pStar));
+        real m3star = cofactor * (m3 * (aL - vL) + helpers::kronecker(nhat, 3) *
+                                                       (-pressure + pStar));
         real estar =
-            cofactor *
-            (edens + (aStar - vL) * (rho * aStar + pressure / (aL - vL)));
+            cofactor * (edens * (aL - vL) + pStar * aStar - pressure * vL);
         const auto starStateL = [=] {
             if constexpr (dim == 2) {
                 return nt::Conserved<2>{rhostar, m1star, m2star, estar};
@@ -862,14 +868,16 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         m2       = right_state.momentum(2);
         m3       = right_state.momentum(3);
         edens    = right_state.e_dens;
-        cofactor = (aR - vR) / (aR - aStar);
+        cofactor = 1 / (aR - aStar);
 
-        rhostar = cofactor * rho;
-        m1star  = cofactor * (rho * aStar * x_direction + m1 * !x_direction);
-        m2star  = cofactor * (rho * aStar * y_direction + m2 * !y_direction);
-        m3star  = cofactor * (rho * aStar * z_direction + m3 * !z_direction);
-        estar   = cofactor *
-                (edens + (aStar - aR) * (rho * aStar + pressure / (aR - vR)));
+        rhostar = cofactor * (aR - vR) * rho;
+        m1star  = cofactor * (m1 * (aR - vR) +
+                             helpers::kronecker(nhat, 1) * (-pressure + pStar));
+        m2star  = cofactor * (m2 * (aR - vR) +
+                             helpers::kronecker(nhat, 2) * (-pressure + pStar));
+        m3star  = cofactor * (m3 * (aR - vR) +
+                             helpers::kronecker(nhat, 3) * (-pressure + pStar));
+        estar = cofactor * (edens * (aR - vR) + pStar * aStar - pressure * vR);
         const auto starStateR = [=] {
             if constexpr (dim == 2) {
                 return nt::Conserved<2>{rhostar, m1star, m2star, estar};

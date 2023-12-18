@@ -270,7 +270,7 @@ namespace hydro1d {
     };
 
     struct Eigenvals {
-        real aL, aR, aStar;
+        real aL, aR, aStar, pStar;
 
         GPU_CALLABLE_MEMBER Eigenvals() {}
 
@@ -279,7 +279,8 @@ namespace hydro1d {
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
 
         GPU_CALLABLE_MEMBER
-        Eigenvals(real aL, real aR, real aStar) : aL(aL), aR(aR), aStar(aStar)
+        Eigenvals(real aL, real aR, real aStar, real pStar)
+            : aL(aL), aR(aR), aStar(aStar), pStar(pStar)
         {
         }
     };
@@ -516,13 +517,13 @@ namespace hydro2d {
 
         GPU_CALLABLE_MEMBER ~Eigenvals() {}
 
-        real aL, aR, csL, csR, aStar;
+        real aL, aR, csL, csR, aStar, pStar;
 
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
 
         GPU_CALLABLE_MEMBER
-        Eigenvals(real aL, real aR, real csL, real csR, real aStar)
-            : aL(aL), aR(aR), csL(csL), csR(csR), aStar(aStar)
+        Eigenvals(real aL, real aR, real csL, real csR, real aStar, real pStar)
+            : aL(aL), aR(aR), csL(csL), csR(csR), aStar(aStar), pStar(pStar)
         {
         }
     };
@@ -770,13 +771,13 @@ namespace hydro3d {
 
         GPU_CALLABLE_MEMBER ~Eigenvals() {}
 
-        real aL, aR, csL, csR, aStar;
+        real aL, aR, csL, csR, aStar, pStar;
 
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
 
         GPU_CALLABLE_MEMBER
-        Eigenvals(real aL, real aR, real csL, real csR, real aStar)
-            : aL(aL), aR(aR), csL(csL), csR(csR), aStar(aStar)
+        Eigenvals(real aL, real aR, real csL, real csR, real aStar, real pStar)
+            : aL(aL), aR(aR), csL(csL), csR(csR), aStar(aStar), pStar(pStar)
         {
         }
     };
