@@ -737,6 +737,7 @@ class Visualizer:
         colormap = plt.get_cmap(self.cmap[0])
         set_labels = cycle([None]) if not self.labels else cycle(self.labels)
         annotation_placed = False
+        dims = [1, 2, 2]
         for axidx, ax in enumerate(
             ax_iter := get_iterable(self.axs, func=list if self.nplots == 1 else iter)
         ):
@@ -747,11 +748,11 @@ class Visualizer:
                         axidx += 1
                         annotation_placed = False
 
-                fields, setup, mesh = util.read_file(self, file, self.ndim)
+                fields, setup, mesh = util.read_file(self, file, dims[idx])
                 time = setup["time"] * util.time_scale
-                if self.ndim == 1:
+                if fields['rho'].ndim == 1:
                     dV = calc_cell_volume1D(x1=mesh["x1"])
-                elif self.ndim == 2:
+                elif fields['rho'].ndim == 2:
                     dV = calc_cell_volume2D(x1=mesh["x1"], x2=mesh["x2"])
                     if mesh["x2"][-1] == 0.5 * np.pi:
                         dV *= 2.0
@@ -864,7 +865,8 @@ class Visualizer:
                 if self.nplots > 1:
                     self.axs[0].legend(loc=self.legend_loc)
                 else:
-                    ax.legend(loc=self.legend_loc)
+                    alpha = 0.0 if self.transparent else 1.0
+                    ax.legend(loc=self.legend_loc, framealpha=alpha)
 
     def plot_mean_vs_time(self) -> None:
         weighted_vars = []
