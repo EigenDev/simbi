@@ -20,11 +20,6 @@
 #define ENUMS_HPP
 
 namespace simbi {
-    enum class MemSide {
-        Host,
-        Dev,
-    };
-
     enum class Cellspacing {
         LINSPACE,
         LOGSPACE,
