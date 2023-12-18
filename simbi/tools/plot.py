@@ -351,6 +351,6 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace, *_) -> None:
 
     sys.path.insert(1, f"{tool_src}")
     file_list, _ = get_file_list(args.files)
-    # ndim = get_dimensionality(file_list)
+    ndim = get_dimensionality(file_list)
 
-    visual.visualize(parser, 2)
+    visual.visualize(parser, ndim)
