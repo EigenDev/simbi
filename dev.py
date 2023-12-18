@@ -10,6 +10,7 @@ cache_file = "simbi_build_cache.txt"
 github_toplevel = "gitrepo_home.txt"
 default = {}
 default["gpu_compilation"] = "disabled"
+default["progress_bar"] = "enabled"
 default["column_major"] = False
 default["float_precision"] = False
 default["install_mode"] = "default"
@@ -25,6 +26,7 @@ flag_overrides["float_precision"] = ["--double", "--float"]
 flag_overrides["gpu_compilation"] = ["--gpu-compilation", "--cpu-compilation"]
 flag_overrides["column_major"] = ["--row-major", "--column-major"]
 flag_overrides["four_velocity"] = ["--four-velocity", "--no-four-velocity"]
+flag_overrides["progress_bar"] = ["--progress-bar", "--no-progress-bar"]
 flag_overrides["install_mode"] = ["develop", "default"]
 
 
@@ -113,7 +115,8 @@ def configure(
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
     -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} -Dfour_velocity={args.four_velocity} \
-    -Dcpp_std={args.cpp_version} -Dbuildtype={args.build_type} {reconfigure}""".split()
+    -Dcpp_std={args.cpp_version} -Dbuildtype={args.build_type} {reconfigure} \
+    -Dprogress_bar={args.progress_bar}""".split()
     return command
 
 
@@ -179,6 +182,12 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         help="flag to set four-velocity as the velocity primitive instead of beta",
         action=argparse.BooleanOptionalAction,
         default=False,
+    )
+    install_parser.add_argument(
+        "--progress-bar",
+        help="flag to show / hide progress bar",
+        action=argparse.BooleanOptionalAction,
+        default=True,
     )
     install_parser.add_argument(
         "--cpp17",

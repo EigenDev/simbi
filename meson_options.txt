@@ -45,3 +45,9 @@ option(
     type: 'boolean',
     value: false
 )
+
+option(
+    'progress_bar',
+    type: 'boolean',
+    value: true
+)

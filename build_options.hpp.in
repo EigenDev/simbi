@@ -21,6 +21,7 @@
 #mesondefine FLOAT_PRECISION
 #mesondefine COLUMN_MAJOR
 #mesondefine FOUR_VELOCITY
+#mesondefine PROGRESS_BAR
 
 #include <chrono>      // for high_resolution_clock
 #include <cinttypes>   // for uint32_t, int64_t, uint64_t
@@ -54,6 +55,12 @@ namespace global {
     constexpr Velocity VelocityType = Velocity::FourVelocity;
 #else
     constexpr Velocity VelocityType = global::Velocity::Beta;
+#endif
+
+#if PROGRESS_BAR
+    constexpr bool progress_bar_enabled = true;
+#else
+    constexpr bool progress_bar_enabled = false;
 #endif
 
     // max iterations in newton-raphson loop

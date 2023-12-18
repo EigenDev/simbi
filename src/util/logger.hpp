@@ -335,7 +335,12 @@ namespace simbi {
                                     speed
                                 );
                             }
-                            helpers::progress_bar(sim_state.t / end_time);
+                            if constexpr (global::progress_bar_enabled) {
+                                helpers::progress_bar(sim_state.t / end_time);
+                            }
+                            else {
+                                std::cout << "\r";
+                            }
                         }
 
                         // Write to a file at every checkpoint interval
