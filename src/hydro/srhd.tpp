@@ -1491,20 +1491,20 @@ void SRHD<dim>::advance(
                                                       static_cast<lint>(0)
                                                   ) * xpg +
                                                   ii];
-            const bool object_above_me =
+            const bool object_above =
                 dim < 3 ? false
                         : object_data
                               [helpers::my_min(kk + 1, zpg - 1) * xpg * ypg +
                                jj * xpg + ii];
-            const bool object_below_me =
-                dim < 3 ? false
-                        : object_data
-                              [helpers::my_max(
-                                   static_cast<lint>(kk - 1),
-                                   static_cast<lint>(0)
-                               ) * xpg *
-                                   ypg +
-                               jj * xpg + ii];
+            const bool object_below = dim < 3
+                                          ? false
+                                          : object_data
+                                                [helpers::my_max(
+                                                     static_cast<lint>(kk - 1),
+                                                     static_cast<lint>(0)
+                                                 ) * xpg *
+                                                     ypg +
+                                                 jj * xpg + ii];
 
             const real x1l    = get_x1face(ii, 0);
             const real x1r    = get_x1face(ii, 1);
@@ -1555,7 +1555,7 @@ void SRHD<dim>::advance(
                     yprimsR.chi = yprimsL.chi;
                 }
 
-                if (object_above_me) {
+                if (object_above) {
                     zprimsR.rho = zprimsL.rho;
                     zprimsR.v1  = zprimsL.v1;
                     if constexpr (dim == 3) {
@@ -1807,7 +1807,7 @@ void SRHD<dim>::advance(
                     yprimsL.chi = yprimsR.chi;
                 }
 
-                if (object_below_me) {
+                if (object_below) {
                     zprimsL.rho = zprimsR.rho;
                     zprimsL.v1  = zprimsR.v1;
                     if constexpr (dim == 3) {
@@ -2122,7 +2122,7 @@ void SRHD<dim>::advance(
                     yprimsR.chi = yprimsL.chi;
                 }
 
-                if (object_above_me) {
+                if (object_above) {
                     zprimsR.rho = zprimsL.rho;
                     zprimsR.v1  = zprimsL.v1;
                     if constexpr (dim == 3) {
@@ -2404,7 +2404,7 @@ void SRHD<dim>::advance(
                     yprimsL.chi = yprimsR.chi;
                 }
 
-                if (object_below_me) {
+                if (object_below) {
                     zprimsL.rho = zprimsR.rho;
                     zprimsL.v1  = zprimsR.v1;
                     if constexpr (dim == 3) {
