@@ -292,6 +292,12 @@ def parse_plotting_arguments(
         default=False,
         help="flag for plotting in shock coordinate xi",
     )
+    plot_parser.add_argument(
+        "--font-color",
+        type=str,
+        default="black",
+        help="font color for plot",
+    )
     fillgroup = plot_parser.add_mutually_exclusive_group()
     fillgroup.add_argument(
         "--xfill-scale",
@@ -328,6 +334,11 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace, *_) -> None:
                 "font.family": "serif",
                 "font.serif": "Times New Roman",
                 "font.size": BIGGER_SIZE,
+                "text.color": args.font_color,
+                'axes.labelcolor': args.font_color,
+                "xtick.color": args.font_color,
+                "ytick.color": args.font_color,
+                "axes.edgecolor": args.font_color,
             }
         )
 
@@ -340,6 +351,6 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace, *_) -> None:
 
     sys.path.insert(1, f"{tool_src}")
     file_list, _ = get_file_list(args.files)
-    ndim = get_dimensionality(file_list)
+    # ndim = get_dimensionality(file_list)
 
-    visual.visualize(parser, ndim)
+    visual.visualize(parser, 2)
