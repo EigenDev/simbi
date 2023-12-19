@@ -1504,17 +1504,16 @@ namespace simbi {
         compute_dt(U* self, const V* prim_buffer, real* dt_min)
         {
 #if GPU_CODE
-            real vPlus, vMinus;
-            int ii  = blockDim.x * blockIdx.x + threadIdx.x;
-            int aid = ii + self->radius;
+            real vPlus, vMinus, speeds[2];
+            int gid = blockDim.x * blockIdx.x + threadIdx.x;
             if (ii < self->total_zones) {
                 const auto ireal =
                     helpers::get_real_idx(ii, self->radius, self->xactive_grid);
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        const real rho = prim_buffer[aid].rho;
-                        const real p   = prim_buffer[aid].p;
-                        const real v   = prim_buffer[aid].get_v();
+                        const real rho = prim_buffer[gid].rho;
+                        const real p   = prim_buffer[gid].p;
+                        const real v   = prim_buffer[gid].get_v();
                         real h =
                             1 + self->gamma * p / (rho * (self->gamma - 1));
                         real cs = std::sqrt(self->gamma * p / (rho * h));
@@ -1527,12 +1526,9 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[aid].rho;
-                    const real p   = prim_buffer[aid].p;
-                    const real v   = prim_buffer[aid].get_v();
-                    const real cs  = std::sqrt(self->gamma * p / rho);
-                    vPlus          = (v + cs);
-                    vMinus         = (v - cs);
+                    self->wave_speeds(prim_buffer[gid], speeds, 1);
+                    vPLus  = speeds[0];
+                    vMinus = speeds[1];
                 }
                 const real x1l = self->get_x1face(ireal, 0);
                 const real x1r = self->get_x1face(ireal, 1);
@@ -1567,18 +1563,16 @@ namespace simbi {
             real cfl_dt, v1p, v1m, v2p, v2m;
             const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
-            const luint ia = ii + self->idx_active;
-            const luint ja = jj + self->idx_active;
-            const luint aid =
-                (global::col_maj) ? ia * self->ny + ja : ja * self->nx + ia;
+            const luint gid =
+                (global::col_maj) ? ii * self->ny + jj : jj * self->nx + ii;
             if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        const real rho = prim_buffer[aid].rho;
-                        const real p   = prim_buffer[aid].p;
-                        const real v1  = prim_buffer[aid].get_v1();
-                        const real v2  = prim_buffer[aid].get_v2();
+                        const real rho = prim_buffer[gid].rho;
+                        const real p   = prim_buffer[gid].p;
+                        const real v1  = prim_buffer[gid].get_v1();
+                        const real v2  = prim_buffer[gid].get_v2();
                         real h =
                             1 + self->gamma * p / (rho * (self->gamma - 1));
                         real cs  = std::sqrt(self->gamma * p / (rho * h));
@@ -1595,10 +1589,10 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[aid].rho;
-                    const real p   = prim_buffer[aid].p;
-                    const real v1  = prim_buffer[aid].get_v1();
-                    const real v2  = prim_buffer[aid].get_v2();
+                    const real rho = prim_buffer[gid].rho;
+                    const real p   = prim_buffer[gid].p;
+                    const real v1  = prim_buffer[gid].get_v1();
+                    const real v2  = prim_buffer[gid].get_v2();
                     real cs        = std::sqrt(self->gamma * p / rho);
                     plus_v1        = (v1 + cs);
                     plus_v2        = (v2 + cs);
@@ -1737,22 +1731,19 @@ namespace simbi {
             const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
-            const luint ia  = ii + self->idx_active;
-            const luint ja  = jj + self->idx_active;
-            const luint ka  = kk + self->idx_active;
-            const luint aid = (global::col_maj) ? ia * self->ny + ja
-                                                : ka * self->nx * self->ny +
-                                                      ja * self->nx + ia;
+            const luint gid = (global::col_maj) ? ii * self->ny + jj
+                                                : kk * self->nx * self->ny +
+                                                      jj * self->nx + ii;
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
 
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        const real rho = prim_buffer[aid].rho;
-                        const real p   = prim_buffer[aid].p;
-                        const real v1  = prim_buffer[aid].get_v1();
-                        const real v2  = prim_buffer[aid].get_v2();
-                        const real v3  = prim_buffer[aid].get_v3();
+                        const real rho = prim_buffer[gid].rho;
+                        const real p   = prim_buffer[gid].p;
+                        const real v1  = prim_buffer[gid].get_v1();
+                        const real v2  = prim_buffer[gid].get_v2();
+                        const real v3  = prim_buffer[gid].get_v3();
 
                         real h =
                             1 + self->gamma * p / (rho * (self->gamma - 1));
@@ -1774,11 +1765,11 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[aid].rho;
-                    const real p   = prim_buffer[aid].p;
-                    const real v1  = prim_buffer[aid].get_v1();
-                    const real v2  = prim_buffer[aid].get_v2();
-                    const real v3  = prim_buffer[aid].get_v3();
+                    const real rho = prim_buffer[gid].rho;
+                    const real p   = prim_buffer[gid].p;
+                    const real v1  = prim_buffer[gid].get_v1();
+                    const real v2  = prim_buffer[gid].get_v2();
+                    const real v3  = prim_buffer[gid].get_v3();
 
                     real cs  = std::sqrt(self->gamma * p / rho);
                     plus_v1  = (v1 + cs);
@@ -1891,13 +1882,13 @@ namespace simbi {
 #if GPU_CODE
             real vPlus, vMinus;
             int ii  = blockDim.x * blockIdx.x + threadIdx.x;
-            int aid = ii + self->radius;
+            int gid = ii + self->radius;
             if (ii < self->total_zones) {
                 if constexpr (is_relativistic_mhd<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                         real cs, speeds[4];
                         self->calc_max_wave_speeds(
-                            prim_buffer[aid],
+                            prim_buffer[gid],
                             1,
                             speeds,
                             cs
@@ -1911,9 +1902,9 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[aid].rho;
-                    const real p   = prim_buffer[aid].p;
-                    const real v   = prim_buffer[aid].get_v1();
+                    const real rho = prim_buffer[gid].rho;
+                    const real p   = prim_buffer[gid].p;
+                    const real v   = prim_buffer[gid].get_v1();
                     const real cs  = std::sqrt(self->gamma * p / rho);
                     vPlus          = (v + cs);
                     vMinus         = (v - cs);
@@ -1954,9 +1945,7 @@ namespace simbi {
             real cfl_dt, v1p, v1m, v2p, v2m;
             const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
-            const luint ia = ii + self->idx_active;
-            const luint ja = jj + self->idx_active;
-            const luint aid =
+            const luint gid =
                 (global::col_maj) ? ia * self->ny + ja : ja * self->nx + ia;
             if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
@@ -1964,7 +1953,7 @@ namespace simbi {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                         real cs, speeds[4];
                         self->calc_max_wave_speeds(
-                            prim_buffer[aid],
+                            prim_buffer[gid],
                             1,
                             speeds,
                             cs
@@ -1972,7 +1961,7 @@ namespace simbi {
                         plus_v1  = std::abs(speeds[3]);
                         minus_v1 = std::abs(speeds[0]);
                         self->calc_max_wave_speeds(
-                            prim_buffer[aid],
+                            prim_buffer[gid],
                             2,
                             speeds,
                             cs
@@ -1988,10 +1977,10 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[aid].rho;
-                    const real p   = prim_buffer[aid].p;
-                    const real v1  = prim_buffer[aid].get_v1();
-                    const real v2  = prim_buffer[aid].get_v2();
+                    const real rho = prim_buffer[gid].rho;
+                    const real p   = prim_buffer[gid].p;
+                    const real v1  = prim_buffer[gid].get_v1();
+                    const real v2  = prim_buffer[gid].get_v2();
                     real cs        = std::sqrt(self->gamma * p / rho);
                     plus_v1        = (v1 + cs);
                     plus_v2        = (v2 + cs);
@@ -2127,10 +2116,7 @@ namespace simbi {
             const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
-            const luint ia  = ii + self->idx_active;
-            const luint ja  = jj + self->idx_active;
-            const luint ka  = kk + self->idx_active;
-            const luint aid = (global::col_maj) ? ia * self->ny + ja
+            const luint gid = (global::col_maj) ? ia * self->ny + ja
                                                 : ka * self->nx * self->ny +
                                                       ja * self->nx + ia;
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
@@ -2140,7 +2126,7 @@ namespace simbi {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
                         real cs, speeds[4];
                         self->calc_max_wave_speeds(
-                            prim_buffer[aid],
+                            prim_buffer[gid],
                             1,
                             speeds,
                             cs
@@ -2148,7 +2134,7 @@ namespace simbi {
                         plus_v1  = std::abs(speeds[3]);
                         minus_v1 = std::abs(speeds[0]);
                         self->calc_max_wave_speeds(
-                            prim_buffer[aid],
+                            prim_buffer[gid],
                             2,
                             speeds,
                             cs
@@ -2156,7 +2142,7 @@ namespace simbi {
                         plus_v2  = std::abs(speeds[3]);
                         minus_v2 = std::abs(speeds[0]);
                         self->calc_max_wave_speeds(
-                            prim_buffer[aid],
+                            prim_buffer[gid],
                             3,
                             speeds,
                             cs
@@ -2174,11 +2160,11 @@ namespace simbi {
                     }
                 }
                 else {
-                    const real rho = prim_buffer[aid].rho;
-                    const real p   = prim_buffer[aid].p;
-                    const real v1  = prim_buffer[aid].get_v1();
-                    const real v2  = prim_buffer[aid].get_v2();
-                    const real v3  = prim_buffer[aid].get_v3();
+                    const real rho = prim_buffer[gid].rho;
+                    const real p   = prim_buffer[gid].p;
+                    const real v1  = prim_buffer[gid].get_v1();
+                    const real v2  = prim_buffer[gid].get_v2();
+                    const real v3  = prim_buffer[gid].get_v3();
 
                     real cs  = std::sqrt(self->gamma * p / rho);
                     plus_v1  = (v1 + cs);
