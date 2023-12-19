@@ -57,7 +57,7 @@ def parse_plotting_arguments(
         type=float,
     )
     plot_parser.add_argument(
-        "--log", default=False, action="store_true", help="logarithmic plotting scale"
+        "--log", default=False, action=argparse.BooleanOptionalAction, help="logarithmic plotting scale"
     )
     plot_parser.add_argument(
         "--kinetic",
