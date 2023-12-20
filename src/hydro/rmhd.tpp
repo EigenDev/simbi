@@ -629,7 +629,7 @@ GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
         const real a4 =
             (-bmu0 * bmu0 * cs2 + b4sq * w2 - cs2 * w2 * w2 * h * rho +
              cs2 * w2 * h * rho + w2 * w2 * h * rho);
-        const real fac = 1 / a4;
+        const real fac = 1.0 / a4;
 
         const real a3 = fac * (2.0 * bmu0 * bmun * cs2 - 2.0 * b4sq * w2 * vn +
                                4.0 * cs2 * w2 * w2 * h * rho * vn -
