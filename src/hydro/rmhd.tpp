@@ -298,7 +298,7 @@ template <int dim> void RMHD<dim>::emit_troubled_cells() const
  */
 template <int dim> void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 {
-    const auto gr               = gamma / (gamma - 1);
+    const auto gr               = gamma / (gamma - 1.0);
     const auto* const cons_data = cons.data();
     auto* const prim_data       = prims.data();
     auto* const edens_data      = edens_guess.data();
@@ -454,7 +454,7 @@ template <int dim>
 RMHD<dim>::primitive_t
 RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons, const luint gid)
 {
-    const auto gr          = gamma / (gamma - 1);
+    const auto gr          = gamma / (gamma - 1.0);
     auto* const edens_data = edens_guess.data();
     real invdV             = 1.0;
     if (changing_volume) {
@@ -1001,8 +1001,12 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
                                 right_flux + left_flux) /
                                (aRp - aLm);
             // #if !GPU_CODE
-            // printf("aL: %.2e, aR: %.2e, fhll_By: %.2e, uhll_By: %.2e\n", aLm,
-            // aRp, f_hll.b2, u_hll.b2); #endif
+            //             printf(
+            //                 "aL: %.2e, aR: %.2e, fhll_By: %.2e, uhll_By:
+            //                 %.2e\n", aLm, aRp, f_hll.b2, u_hll.b2
+            //             );
+            //             std::cin.get();
+            // #endif
             return f_hll - u_hll * vface;
         }
     }();
@@ -1668,11 +1672,14 @@ void RMHD<dim>::advance(
          ypg,
          zpg,
          this] GPU_LAMBDA(const luint idx) {
-#if GPU_CODE
-            auto prim_buff = global::shared_memory_proxy<rm::Primitive<dim>>();
-#else
-            auto* const prim_buff = prim_data;
-#endif
+            auto prim_buff =
+                helpers::shared_memory_proxy<rm::Primitive<dim>>(prim_data);
+            // #if GPU_CODE
+            //             auto prim_buff =
+            //             global::shared_memory_proxy<rm::Primitive<dim>>();
+            // #else
+            //             auto* const prim_buff = prim_data;
+            // #endif
 
             const luint kk = dim < 3 ? 0
                              : (global::BuildPlatform == global::Platform::GPU)
@@ -1686,20 +1693,24 @@ void RMHD<dim>::advance(
                 (global::BuildPlatform == global::Platform::GPU)
                     ? blockDim.x * blockIdx.x + threadIdx.x
                     : simbi::helpers::get_column(idx, xpg, ypg, kk);
-#if GPU_CODE
-            if constexpr (dim == 1) {
-                if (ii >= xpg)
-                    return;
+
+            if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                if constexpr (dim == 1) {
+                    if (ii >= xpg) {
+                        return;
+                    }
+                }
+                else if constexpr (dim == 2) {
+                    if ((ii >= xpg) || (jj >= ypg)) {
+                        return;
+                    }
+                }
+                else {
+                    if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg)) {
+                        return;
+                    }
+                }
             }
-            else if constexpr (dim == 2) {
-                if ((ii >= xpg) || (jj >= ypg))
-                    return;
-            }
-            else {
-                if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg))
-                    return;
-            }
-#endif
 
             const luint ia  = ii + radius;
             const luint ja  = dim < 2 ? 0 : jj + radius;

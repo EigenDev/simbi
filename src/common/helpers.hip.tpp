@@ -2491,5 +2491,17 @@ namespace simbi {
                 quickSort(arr, pivotIndex + 1, high);
             }
         }
+
+        template <typename T, typename U>
+        GPU_DEV const T* shared_memory_proxy(U object)
+        {
+#if GPU_CODE
+            // do we need an __align__() here? I don't think so...
+            GPU_EXTERN_SHARED unsigned char memory[];
+            return reinterpret_cast<T*>(memory);
+#else
+            return object;
+#endif
+        }
     }   // namespace helpers
 }   // namespace simbi

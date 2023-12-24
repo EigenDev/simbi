@@ -1242,6 +1242,9 @@ namespace simbi {
         template <typename T, typename index_type>
         GPU_CALLABLE void quickSort(T arr[], index_type low, index_type high);
     }   // namespace helpers
+
+    template <typename T, typename U>
+    GPU_DEV const T* shared_memory_proxy(U object = nullptr);
 }   // namespace simbi
 
 #include "helpers.hip.tpp"

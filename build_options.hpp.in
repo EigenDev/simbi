@@ -147,6 +147,7 @@ namespace global {
     #define GPU_CALLABLE_INLINE        __host__ __device__ inline
     #define GPU_CALLABLE_MEMBER        __host__ __device__
     #define GPU_CALLABLE_INLINE_MEMBER __host__ __device__ inline
+    #define GPU_EXTERN_SHARED          extern __shared__
 
     #if GPU_PLATFORM_NVIDIA
         #include <cuda_runtime.h>
@@ -262,6 +263,7 @@ namespace global {
     #define GPU_CALLABLE_INLINE_MEMBER inline
     #define GPU_DEV_INLINE             inline
     #define __shared__                 static
+    #define GPU_EXTERN_SHARED
 
 // Define a bunch of ghost functions that are optimized out in cpu mode
 namespace simbi {
@@ -338,5 +340,4 @@ namespace simbi {
     }
 }   // namespace simbi
 #endif
-
 #endif
