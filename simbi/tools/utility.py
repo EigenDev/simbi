@@ -104,6 +104,8 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
             field_str_list.append("$v_3 / v_0$")
         elif field == "tau-s":
             field_str_list.append(r"$\tau_s$")
+        elif field in ["b1", "b2", "b3"]:
+            field_str_list.append(rf"$B_{field[1]}$")
         else:
             field_str_list.append(rf"${field}$")
 
