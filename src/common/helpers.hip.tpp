@@ -1505,15 +1505,15 @@ namespace simbi {
         {
 #if GPU_CODE
             real vPlus, vMinus, speeds[2];
-            int gid = blockDim.x * blockIdx.x + threadIdx.x;
+            int ii = blockDim.x * blockIdx.x + threadIdx.x;
             if (ii < self->total_zones) {
                 const auto ireal =
                     helpers::get_real_idx(ii, self->radius, self->xactive_grid);
                 if constexpr (is_relativistic<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                        const real rho = prim_buffer[gid].rho;
-                        const real p   = prim_buffer[gid].p;
-                        const real v   = prim_buffer[gid].get_v();
+                        const real rho = prim_buffer[ii].rho;
+                        const real p   = prim_buffer[ii].p;
+                        const real v   = prim_buffer[ii].get_v();
                         real h =
                             1 + self->gamma * p / (rho * (self->gamma - 1));
                         real cs = std::sqrt(self->gamma * p / (rho * h));
@@ -1526,8 +1526,8 @@ namespace simbi {
                     }
                 }
                 else {
-                    self->wave_speeds(prim_buffer[gid], speeds, 1);
-                    vPLus  = speeds[0];
+                    self->wave_speeds(prim_buffer[ii], speeds, 1);
+                    vPlus  = speeds[0];
                     vMinus = speeds[1];
                 }
                 const real x1l = self->get_x1face(ireal, 0);
@@ -1946,7 +1946,7 @@ namespace simbi {
             const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
             const luint gid =
-                (global::col_maj) ? ia * self->ny + ja : ja * self->nx + ia;
+                (global::col_maj) ? ii * self->ny + jj : jj * self->nx + ii;
             if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
                 if constexpr (is_relativistic_mhd<T>::value) {
@@ -2116,9 +2116,9 @@ namespace simbi {
             const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
-            const luint gid = (global::col_maj) ? ia * self->ny + ja
-                                                : ka * self->nx * self->ny +
-                                                      ja * self->nx + ia;
+            const luint gid = (global::col_maj) ? ii * self->ny + jj
+                                                : kk * self->nx * self->ny +
+                                                      jj * self->nx + ii;
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
 
@@ -2493,7 +2493,7 @@ namespace simbi {
         }
 
         template <typename T, typename U>
-        GPU_DEV const T* shared_memory_proxy(U object)
+        GPU_SHARED T* shared_memory_proxy(U object)
         {
 #if GPU_CODE
             // do we need an __align__() here? I don't think so...

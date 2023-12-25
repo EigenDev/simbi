@@ -1006,11 +1006,7 @@ void Newtonian<dim>::advance(
          ypg,
          zpg,
          this] GPU_LAMBDA(const luint idx) {
-#if GPU_CODE
-            auto prim_buff = global::shared_memory_proxy<nt::Primitive<dim>>();
-#else
-            auto* const prim_buff = prim_data;
-#endif
+            auto prim_buff = helpers::shared_memory_proxy<nt::Primitive<dim>>(prim_data);
 
             const luint kk = dim < 3 ? 0
                              : (global::BuildPlatform == global::Platform::GPU)
@@ -1024,20 +1020,21 @@ void Newtonian<dim>::advance(
                 (global::BuildPlatform == global::Platform::GPU)
                     ? blockDim.x * blockIdx.x + threadIdx.x
                     : simbi::helpers::get_column(idx, xpg, ypg, kk);
-#if GPU_CODE
-            if constexpr (dim == 1) {
-                if (ii >= xpg)
-                    return;
+
+            if constexpr(global::BuildPlatform == global::Platform::GPU) {
+                if constexpr (dim == 1) {
+                    if (ii >= xpg)
+                        return;
+                }
+                else if constexpr (dim == 2) {
+                    if ((ii >= xpg) || (jj >= ypg))
+                        return;
+                }
+                else {
+                    if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg))
+                        return;
+                }
             }
-            else if constexpr (dim == 2) {
-                if ((ii >= xpg) || (jj >= ypg))
-                    return;
-            }
-            else {
-                if ((ii >= xpg) || (jj >= ypg) || (kk >= zpg))
-                    return;
-            }
-#endif
 
             const luint ia  = ii + radius;
             const luint ja  = dim < 2 ? 0 : jj + radius;
@@ -1072,7 +1069,8 @@ void Newtonian<dim>::advance(
                 zprimsR;
 
             const luint aid = ka * nx * ny + ja * nx + ia;
-#if GPU_CODE
+            
+            if constexpr(global::BuildPlatform == global::Platform::GPU) {
             if constexpr (dim == 1) {
                 luint txl = p.blockSize.x;
                 // Check if the active index exceeds the active zones
@@ -1163,7 +1161,7 @@ void Newtonian<dim>::advance(
                 }
                 simbi::gpu::api::synchronize();
             }
-#endif
+         }
 
             const bool object_to_my_left =
                 dim < 2 ? false

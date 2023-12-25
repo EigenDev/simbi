@@ -1244,7 +1244,7 @@ namespace simbi {
     }   // namespace helpers
 
     template <typename T, typename U>
-    GPU_DEV const T* shared_memory_proxy(U object = nullptr);
+    GPU_SHARED T* shared_memory_proxy(U object = nullptr);
 }   // namespace simbi
 
 #include "helpers.hip.tpp"
