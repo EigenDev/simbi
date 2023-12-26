@@ -22,7 +22,7 @@
 #include "base.hpp"            // for HydroBase
 #include "build_options.hpp"   // for real, GPU_CALLABLE_MEMBER, lint, luint
 #include "common/enums.hpp"    // for TIMESTEP_TYPE
-#include "common/helpers.hip.hpp"     // for my_min, my_max, ...
+#include "common/helpers.hpp"     // for my_min, my_max, ...
 #include "common/hydro_structs.hpp"   // for Conserved, Primitive
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
 #include "util/ndarray.hpp"           // for ndarray

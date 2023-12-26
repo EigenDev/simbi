@@ -19,7 +19,7 @@
 #define LOGGER_HPP
 
 #include "build_options.hpp"   // for real, Platform, global::BuildPlatform, luint
-#include "common/helpers.hip.hpp"   // for get_real_idx, catch_signals, Inter...
+#include "common/helpers.hpp"   // for get_real_idx, catch_signals, Inter...
 #include "common/traits.hpp"        // for is_relativistic
 #include "device_api.hpp"           // for gpuEventCreate, gpuEventDestroy
 #include "printb.hpp"               // for writeln, writefl
