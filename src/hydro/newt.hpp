@@ -107,11 +107,6 @@ namespace simbi {
             const luint nhat
         ) const;
 
-        GPU_CALLABLE_MEMBER
-        void
-        wave_speeds(const primitive_t& prims, real speeds[], const luint nhat)
-            const;
-
         GPU_CALLABLE_MEMBER conserved_t prims2cons(const primitive_t& prims
         ) const;
 

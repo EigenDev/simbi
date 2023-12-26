@@ -453,45 +453,6 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     }
 };
 
-template <int dim>
-GPU_CALLABLE_MEMBER void Newtonian<dim>::wave_speeds(
-    const Newtonian<dim>::primitive_t& prims,
-    real speeds[],
-    const luint nhat
-) const
-{
-    const real rho = prims.rho;
-    const real v   = prims.vcomponent(nhat);
-    const real p   = prims.p;
-    const real cs  = std::sqrt(gamma * p / rho);
-
-    switch (sim_solver) {
-        case Solver::HLLC:
-            {
-                const real num    = cs - (gamma - 1.0) * 0.5 * v;
-                const real denom  = cs * std::pow(p, -hllc_z);
-                const real p_term = num / denom;
-                const real pStar  = std::pow(p_term, (1.0 / hllc_z));
-
-                const real q = (pStar <= p)
-                                   ? 1.0
-                                   : std::sqrt(
-                                         1.0 + ((gamma + 1.0) / (2.0 * gamma)) *
-                                                   (pStar / p - 1.0)
-                                     );
-
-                speeds[0] = std::abs(v - q * cs);
-                speeds[1] = std::abs(v + q * cs);
-            }
-
-        default:
-            {
-                speeds[0] = std::abs(v + cs);
-                speeds[1] = std::abs(v - cs);
-            }
-    }
-};
-
 //-----------------------------------------------------------------------------------------
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
@@ -536,24 +497,22 @@ template <int dim> void Newtonian<dim>::adapt_dt()
             const luint ii    = simbi::helpers::get_column(gid, nx, ny, kk);
             const luint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
             // Left/Right wave speeds
-            // const real rho = prims[gid].rho;
-            // const real v1  = prims[gid].vcomponent(1);
-            // const real v2  = prims[gid].vcomponent(2);
-            // const real v3  = prims[gid].vcomponent(3);
-            // const real pre = prims[gid].p;
-            // const real cs  = std::sqrt(gamma * pre / rho);
-            wave_speeds(prims[gid], speeds, 1);
-            v1m = speeds[0];
-            v1p = speeds[1];
+            const real rho = prims[gid].rho;
+            const real v1  = prims[gid].vcomponent(1);
+            const real v2  = prims[gid].vcomponent(2);
+            const real v3  = prims[gid].vcomponent(3);
+            const real pre = prims[gid].p;
+            const real cs  = std::sqrt(gamma * pre / rho);
+            
+            v1m = std::abs(v1 - cs);
+            v1p = std::abs(v1 + cs);
             if constexpr (dim > 1) {
-                wave_speeds(prims[gid], speeds, 2);
-                v2m = speeds[0];
-                v2p = speeds[1];
+                v2m = std::abs(v2 - cs);
+                v2p = std::abs(v2 + cs);
             }
             if constexpr (dim > 2) {
-                wave_speeds(prims[gid], speeds, 3);
-                v3m = speeds[0];
-                v3p = speeds[1];
+                v3m = std::abs(v3 - cs);
+                v3p = std::abs(v3 + cs);
             }
 
             const real x1l = get_x1face(ireal, 0);

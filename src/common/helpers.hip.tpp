@@ -1526,9 +1526,12 @@ namespace simbi {
                     }
                 }
                 else {
-                    self->wave_speeds(prim_buffer[ii], speeds, 1);
-                    vPlus  = speeds[0];
-                    vMinus = speeds[1];
+                    const real rho = prim_buffer[ii].rho;
+                    const real p   = prim_buffer[ii].p;
+                    const real v   = prim_buffer[ii].get_v();
+                    const real cs  = std::sqrt(self->gamma * p / rho);
+                    vPlus  = std::abs(v + cs);
+                    vMinus = std::abs(v - cs);
                 }
                 const real x1l = self->get_x1face(ireal, 0);
                 const real x1r = self->get_x1face(ireal, 1);
