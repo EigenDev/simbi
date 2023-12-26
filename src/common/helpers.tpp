@@ -1504,7 +1504,7 @@ namespace simbi {
         compute_dt(U* self, const V* prim_buffer, real* dt_min)
         {
 #if GPU_CODE
-            real vPlus, vMinus, speeds[2];
+            real vPlus, vMinus;
             int ii = blockDim.x * blockIdx.x + threadIdx.x;
             if (ii < self->total_zones) {
                 const auto ireal =

@@ -1,6 +1,6 @@
 /**
  * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
- * @file       helpers.hip.hpp
+ * @file       helpers.hpp
  * @brief      home to all helper functions used throughout library
  *
  * @note
@@ -1247,5 +1247,5 @@ namespace simbi {
     GPU_SHARED T* shared_memory_proxy(U object = nullptr);
 }   // namespace simbi
 
-#include "helpers.hip.tpp"
+#include "helpers.tpp"
 #endif

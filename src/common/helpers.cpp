@@ -1,4 +1,4 @@
-#include "common/helpers.hip.hpp"
+#include "common/helpers.hpp"
 #include "H5Cpp.h"
 #include <thread>
 
