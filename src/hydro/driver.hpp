@@ -1,7 +1,7 @@
 /**
  * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
  * @file       driver.hpp
- * @brief      the key driver for any simulation in any regime, dimentions
+ * @brief      the key driver for any simulation in any regime, dimensions
  *
  * @note
  * @history:
