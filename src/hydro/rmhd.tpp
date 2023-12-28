@@ -3531,7 +3531,7 @@ void RMHD<dim>::simulate(
         }
     }
 
-    // allocate space for volume-average qauntities
+    // allocate space for volume-average quantities
     cons.resize(total_zones);
     prims.resize(total_zones);
     troubled_cells.resize(total_zones, 0);
