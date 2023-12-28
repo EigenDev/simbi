@@ -566,8 +566,7 @@ class Hydro:
         logger.info(
             f"Computing {'First' if first_order else 'Second'} Order Solution..."
         )
-        kwargs: dict[str, Any] = {}
-
+        
         sources = (
             np.zeros(self.dimensionality + 2)
             if sources is None
