@@ -342,4 +342,8 @@ namespace simbi {
     }
 }   // namespace simbi
 #endif
+
+namespace global {
+    constexpr bool on_gpu = BuildPlatform == Platform::GPU;
+}   // namespace global
 #endif

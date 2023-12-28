@@ -1194,17 +1194,7 @@ namespace simbi {
             const luint total_zones,
             const luint real_zones,
             const float delta_t
-        )
-        {
-            // the advance step does one write plus 1 + dim * 2 * radius reads
-            const float advance_contr =
-                real_zones * sizeof(T) * (1 + (1 + dim * 2 * radius));
-            const float cons2prim_contr = total_zones * sizeof(U);
-            const float ghost_conf_contr =
-                (total_zones - real_zones) * sizeof(T);
-            return (advance_contr + cons2prim_contr + ghost_conf_contr) /
-                   (delta_t * 1e9);
-        }
+        );
 
 #if GPU_CODE
         __device__ __forceinline__ real atomicMinReal(real* addr, real value)
@@ -1245,6 +1235,19 @@ namespace simbi {
 
     template <typename T, typename U>
     GPU_SHARED T* shared_memory_proxy(U object = nullptr);
+
+    template <typename index_type, typename T>
+    index_type flattened_index(
+        index_type ii,
+        index_type jj,
+        index_type kk,
+        T ni,
+        T nj,
+        T nk
+    );
+
+    template <int dim, BlockAxis axis, typename T>
+    T get_axis_index(T idx, T ni, T nj, T kk = T(0));
 }   // namespace simbi
 
 #include "helpers.tpp"

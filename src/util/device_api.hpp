@@ -145,7 +145,7 @@ namespace simbi {
     GPU_CALLABLE_INLINE
     unsigned int globalThreadIdx()
     {
-        if constexpr (global::BuildPlatform == global::Platform::GPU) {
+        if constexpr (global::on_gpu) {
             return (
                 (blockIdx.z * blockDim.z + threadIdx.z) * blockDim.x *
                     gridDim.x * blockDim.y * gridDim.y +

@@ -967,20 +967,14 @@ void Newtonian<dim>::advance(
             auto prim_buff =
                 helpers::shared_memory_proxy<nt::Primitive<dim>>(prim_data);
 
-            const luint kk = dim < 3 ? 0
-                             : (global::BuildPlatform == global::Platform::GPU)
-                                 ? blockDim.z * blockIdx.z + threadIdx.z
-                                 : simbi::helpers::get_height(idx, xpg, ypg);
-            const luint jj = dim < 2 ? 0
-                             : (global::BuildPlatform == global::Platform::GPU)
-                                 ? blockDim.y * blockIdx.y + threadIdx.y
-                                 : simbi::helpers::get_row(idx, xpg, ypg, kk);
+            const luint kk =
+                helpers::get_axis_index<dim, BlockAxis::K>(idx, xpg, ypg);
+            const luint jj =
+                helpers::get_axis_index<dim, BlockAxis::J>(idx, xpg, ypg, kk);
             const luint ii =
-                (global::BuildPlatform == global::Platform::GPU)
-                    ? blockDim.x * blockIdx.x + threadIdx.x
-                    : simbi::helpers::get_column(idx, xpg, ypg, kk);
+                helpers::get_axis_index<dim, BlockAxis::I>(idx, xpg, ypg, kk);
 
-            if constexpr (global::BuildPlatform == global::Platform::GPU) {
+            if constexpr (global::on_gpu) {
                 if constexpr (dim == 1) {
                     if (ii >= xpg) {
                         return;
@@ -1001,28 +995,12 @@ void Newtonian<dim>::advance(
             const luint ia  = ii + radius;
             const luint ja  = dim < 2 ? 0 : jj + radius;
             const luint ka  = dim < 3 ? 0 : kk + radius;
-            const luint tx  = (global::BuildPlatform == global::Platform::GPU)
-                                  ? threadIdx.x
-                                  : 0;
-            const luint ty  = dim < 2 ? 0
-                              : (global::BuildPlatform == global::Platform::GPU)
-                                  ? threadIdx.y
-                                  : 0;
-            const luint tz  = dim < 3 ? 0
-                              : (global::BuildPlatform == global::Platform::GPU)
-                                  ? threadIdx.z
-                                  : 0;
-            const luint txa = (global::BuildPlatform == global::Platform::GPU)
-                                  ? tx + radius
-                                  : ia;
-            const luint tya = dim < 2 ? 0
-                              : (global::BuildPlatform == global::Platform::GPU)
-                                  ? ty + radius
-                                  : ja;
-            const luint tza = dim < 3 ? 0
-                              : (global::BuildPlatform == global::Platform::GPU)
-                                  ? tz + radius
-                                  : ka;
+            const luint tx  = (global::on_gpu) ? threadIdx.x : 0;
+            const luint ty  = dim < 2 ? 0 : (global::on_gpu) ? threadIdx.y : 0;
+            const luint tz  = dim < 3 ? 0 : (global::on_gpu) ? threadIdx.z : 0;
+            const luint txa = (global::on_gpu) ? tx + radius : ia;
+            const luint tya = dim < 2 ? 0 : (global::on_gpu) ? ty + radius : ja;
+            const luint tza = dim < 3 ? 0 : (global::on_gpu) ? tz + radius : ka;
 
             nt::Conserved<dim> uxL, uxR, uyL, uyR, uzL, uzR;
             nt::Conserved<dim> fL, fR, gL, gR, hL, hR, frf, flf, grf, glf, hrf,
@@ -1032,7 +1010,7 @@ void Newtonian<dim>::advance(
 
             const luint aid = ka * nx * ny + ja * nx + ia;
 
-            if constexpr (global::BuildPlatform == global::Platform::GPU) {
+            if constexpr (global::on_gpu) {
                 if constexpr (dim == 1) {
                     luint txl = p.blockSize.x;
                     // Check if the active index exceeds the active zones
@@ -2477,13 +2455,10 @@ void Newtonian<dim>::simulate(
         zactive_grid > gpu_block_dimz ? gpu_block_dimz : zactive_grid;
     this->radius             = (first_order) ? 1 : 2;
     this->step               = (first_order) ? 1 : 0.5;
-    const luint xstride      = (global::BuildPlatform == global::Platform::GPU)
-                                   ? xblockdim + 2 * radius
-                                   : nx;
-    const luint ystride      = (dim < 3) ? 1
-                               : (global::BuildPlatform == global::Platform::GPU)
-                                   ? yblockdim + 2 * radius
-                                   : ny;
+    const luint xstride      = (global::on_gpu) ? xblockdim + 2 * radius : nx;
+    const luint ystride      = (dim < 3)          ? 1
+                               : (global::on_gpu) ? yblockdim + 2 * radius
+                                                  : ny;
     const auto xblockspace   = xblockdim + 2 * radius;
     const auto yblockspace   = (dim < 2) ? 1 : yblockdim + 2 * radius;
     const auto zblockspace   = (dim < 3) ? 1 : zblockdim + 2 * radius;
@@ -2497,12 +2472,12 @@ void Newtonian<dim>::simulate(
         shBlockBytes
     );
 
-    if constexpr (global::BuildPlatform == global::Platform::GPU) {
+    if constexpr (global::on_gpu) {
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
 
     cons2prim(fullP);
-    if constexpr (global::BuildPlatform == global::Platform::GPU) {
+    if constexpr (global::on_gpu) {
         adapt_dt(fullP);
     }
     else {
@@ -2613,7 +2588,7 @@ void Newtonian<dim>::simulate(
             );
         }
 
-        if constexpr (global::BuildPlatform == global::Platform::GPU) {
+        if constexpr (global::on_gpu) {
             adapt_dt(fullP);
         }
         else {

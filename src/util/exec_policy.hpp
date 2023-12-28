@@ -153,7 +153,7 @@ namespace simbi {
 
         constexpr auto get_full_extent() const
         {
-            if constexpr (global::BuildPlatform == global::Platform::GPU) {
+            if constexpr (global::on_gpu) {
                 return blockSize.z * gridSize.z * blockSize.x * blockSize.y *
                        gridSize.x * gridSize.y;
             }

@@ -429,7 +429,7 @@ DT* simbi::ndarray<DT, build_mode>::data()
         return nullptr;
     }
 
-    if constexpr (global::BuildPlatform == global::Platform::GPU) {
+    if constexpr (global::on_gpu) {
         return dev_arr.get();
     }
     else {

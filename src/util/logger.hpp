@@ -20,28 +20,26 @@
 
 #include "build_options.hpp"   // for real, Platform, global::BuildPlatform, luint
 #include "common/helpers.hpp"   // for get_real_idx, catch_signals, Inter...
-#include "common/traits.hpp"        // for is_relativistic
-#include "device_api.hpp"           // for gpuEventCreate, gpuEventDestroy
-#include "printb.hpp"               // for writeln, writefl
-#include "progress.hpp"             // for progress_bar
-#include <chrono>                   // for time_point, high_resolution_clock
-#include <cmath>                    // for INFINITY, pow
-#include <iostream>                 // for operator<<, char_traits, basic_ost...
-#include <memory>                   // for allocator
-#include <type_traits>              // for conditional_t
+#include "common/traits.hpp"    // for is_relativistic
+#include "device_api.hpp"       // for gpuEventCreate, gpuEventDestroy
+#include "printb.hpp"           // for writeln, writefl
+#include "progress.hpp"         // for progress_bar
+#include <chrono>               // for time_point, high_resolution_clock
+#include <cmath>                // for INFINITY, pow
+#include <iostream>             // for operator<<, char_traits, basic_ost...
+#include <memory>               // for allocator
+#include <type_traits>          // for conditional_t
 
 namespace simbi {
     namespace detail {
         class Timer
         {
             using time_type = std::conditional_t<
-                global::BuildPlatform == global::Platform::GPU,
+                global::on_gpu,
                 anyGpuEvent_t,
                 std::chrono::high_resolution_clock::time_point>;
-            using duration_type = std::conditional_t<
-                global::BuildPlatform == global::Platform::GPU,
-                float,
-                double>;
+            using duration_type =
+                std::conditional_t<global::on_gpu, float, double>;
             time_type tstart, tstop;
             duration_type duration;
 
@@ -304,7 +302,7 @@ namespace simbi {
                             speed = sim_state.total_zones / delta_t;
                             zu_avg += speed;
 
-                            if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                            if constexpr (global::on_gpu) {
                                 const real gpu_emperical_bw =
                                     helpers::getFlops<conserved_t, primitive_t>(
                                         sim_state_t::dimensions,

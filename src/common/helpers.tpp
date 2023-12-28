@@ -443,10 +443,10 @@ namespace simbi {
             const int sx     = (global::col_maj) ? 1 : x1grid_size;
             const int sy     = (global::col_maj) ? x2grid_size : 1;
             simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA(const int gid) {
-                const int ii = (global::BuildPlatform == global::Platform::GPU)
+                const int ii = (global::on_gpu)
                                    ? blockDim.x * blockIdx.x + threadIdx.x
                                    : gid % x1grid_size;
-                const int jj = (global::BuildPlatform == global::Platform::GPU)
+                const int jj = (global::on_gpu)
                                    ? blockDim.y * blockIdx.y + threadIdx.y
                                    : gid / x1grid_size;
                 if (first_order) {
@@ -795,14 +795,14 @@ namespace simbi {
             const int sx     = x1grid_size;
             const int sy     = x2grid_size;
             simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA(const int gid) {
-                const int kk = (global::BuildPlatform == global::Platform::GPU)
+                const int kk = (global::on_gpu)
                                    ? blockDim.z * blockIdx.z + threadIdx.z
                                    : simbi::helpers::get_height(
                                          gid,
                                          x1grid_size,
                                          x2grid_size
                                      );
-                const int jj = (global::BuildPlatform == global::Platform::GPU)
+                const int jj = (global::on_gpu)
                                    ? blockDim.y * blockIdx.y + threadIdx.y
                                    : simbi::helpers::get_row(
                                          gid,
@@ -810,7 +810,7 @@ namespace simbi {
                                          x2grid_size,
                                          kk
                                      );
-                const int ii = (global::BuildPlatform == global::Platform::GPU)
+                const int ii = (global::on_gpu)
                                    ? blockDim.x * blockIdx.x + threadIdx.x
                                    : simbi::helpers::get_column(
                                          gid,
@@ -2113,13 +2113,13 @@ namespace simbi {
             )
         {
 #if GPU_CODE
-            real cfl_dt, cs;
-            const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
-            const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
-            const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
-            const luint gid = (global::col_maj) ? ii * self->ny + jj
-                                                : kk * self->nx * self->ny +
-                                                      jj * self->nx + ii;
+            real cfl_dt;
+            const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
+            const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
+            const luint kk = blockDim.z * blockIdx.z + threadIdx.z;
+            const luint gid =
+                flattened_index(ii, jj, kk, self->nx, self->ny, self->nz);
+
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
 
@@ -2499,6 +2499,91 @@ namespace simbi {
 #else
             return object;
 #endif
+        }
+
+        template <typename index_type, typename T>
+        index_type flattened_index(
+            index_type ii,
+            index_type jj,
+            index_type kk,
+            T ni,
+            T nj,
+            T nk
+        )
+        {
+            if constexpr (global::col_maj) {
+                return ii * nk * nj + jj * nk + kk;
+            }
+            else {
+                return kk * nj * ni + jj * ni + ii;
+            }
+        }
+
+        template <int dim, BlockAxis axis, typename T>
+        T get_axis_index(T idx, T ni, T nj, T kk = T(0))
+        {
+            if constexpr (dim == 1) {
+                if constexpr (axis != BlockAxis::I) {
+                    return 0;
+                }
+                return idx;
+            }
+            else if constexpr (dim == 2) {
+                if constexpr (axis == BlockAxis::I) {
+                    if constexpr (global::on_gpu) {
+                        return blockDim.x * blockIdx.x + threadIdx.x;
+                    }
+                    return idx % ni;
+                }
+                else if constexpr (axis == BlockAxis::J) {
+                    if constexpr (global::on_gpu) {
+                        return blockDim.y * blockIdx.y + threadIdx.y;
+                    }
+                    return idx / ni;
+                }
+                else {
+                    return 0;
+                }
+            }
+            else {
+                if constexpr (axis == BlockAxis::I) {
+                    if constexpr (global::on_gpu) {
+                        return blockDim.x * blockIdx.x + threadIdx.x;
+                    }
+                    return get_column(idx, ni, nj, kk);
+                }
+                else if constexpr (axis == BlockAxis::J) {
+                    if constexpr (global::on_gpu) {
+                        return blockDim.y * blockIdx.y + threadIdx.y;
+                    }
+                    return get_row(idx, ni, nj, kk);
+                }
+                else {
+                    if constexpr (global::on_gpu) {
+                        return blockDim.z * blockIdx.z + threadIdx.z;
+                    }
+                    return get_height(idx, ni, nj);
+                }
+            }
+        }
+
+        template <typename T, typename U>
+        inline real getFlops(
+            const luint dim,
+            const luint radius,
+            const luint total_zones,
+            const luint real_zones,
+            const float delta_t
+        )
+        {
+            // the advance step does one write plus 1 + dim * 2 * radius reads
+            const float advance_contr =
+                real_zones * sizeof(T) * (1 + (1 + dim * 2 * radius));
+            const float cons2prim_contr = total_zones * sizeof(U);
+            const float ghost_conf_contr =
+                (total_zones - real_zones) * sizeof(T);
+            return (advance_contr + cons2prim_contr + ghost_conf_contr) /
+                   (delta_t * 1e9);
         }
     }   // namespace helpers
 }   // namespace simbi
