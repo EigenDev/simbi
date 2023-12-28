@@ -3535,7 +3535,7 @@ void RMHD<dim>::simulate(
     cons.resize(total_zones);
     prims.resize(total_zones);
     troubled_cells.resize(total_zones, 0);
-    dt_min.resize(active_zones);
+    dt_min.resize(total_zones);
     edens_guess.resize(total_zones);
 
     // Copy the state array into real & profile variables
