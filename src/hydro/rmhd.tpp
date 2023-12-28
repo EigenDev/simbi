@@ -917,7 +917,7 @@ void RMHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
     // LAUNCH_ASYNC((helpers::deviceReduceWarpAtomicKernel<dim>), p.gridSize,
     // p.blockSize, this, dt_min.data(), active_zones);
     helpers::deviceReduceWarpAtomicKernel<dim>
-        <<<p.gridSize, p.blockSize>>>(this, dt_min.data(), active_zones);
+        <<<p.gridSize, p.blockSize>>>(this, dt_min.data(), total_zones);
     gpu::api::deviceSynch();
 #endif
 }
@@ -1739,7 +1739,7 @@ void RMHD<dim>::advance(
                 zprimsR;
 
             const luint aid = ka * nx * ny + ja * nx + ia;
-            if constexpr(global::BuildPlatform == global::Platform::GPU) {
+            if constexpr (global::BuildPlatform == global::Platform::GPU) {
                 if constexpr (dim == 1) {
                     luint txl = p.blockSize.x;
                     // Check if the active index exceeds the active zones
@@ -1759,7 +1759,8 @@ void RMHD<dim>::advance(
                 else if constexpr (dim == 2) {
                     luint txl = p.blockSize.x;
                     luint tyl = p.blockSize.y;
-                    // Load Shared memory into buffer for active zones plus ghosts
+                    // Load Shared memory into buffer for active zones plus
+                    // ghosts
                     prim_buff[tya * sx + txa * sy] = prim_data[aid];
                     if (ty < radius) {
                         if (blockIdx.y == p.gridSize.y - 1 &&
@@ -1787,7 +1788,8 @@ void RMHD<dim>::advance(
                     luint txl = p.blockSize.x;
                     luint tyl = p.blockSize.y;
                     luint tzl = p.blockSize.z;
-                    // Load Shared memory into buffer for active zones plus ghosts
+                    // Load Shared memory into buffer for active zones plus
+                    // ghosts
                     prim_buff[tza * sx * sy + tya * sx + txa] = prim_data[aid];
                     if (tz == 0) {
                         if ((blockIdx.z == p.gridSize.z - 1) &&
