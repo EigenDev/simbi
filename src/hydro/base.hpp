@@ -286,53 +286,50 @@ namespace simbi {
             }
             this->zero_gravity1 =
                 std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {
-                    return i == 0;
+                    return i == real(0);
                 });
             this->zero_gravity2 =
                 std::all_of(sourceG2.begin(), sourceG2.end(), [](real i) {
-                    return i == 0;
+                    return i == real(0);
                 });
             this->zero_gravity3 =
                 std::all_of(sourceG3.begin(), sourceG3.end(), [](real i) {
-                    return i == 0;
+                    return i == real(0);
                 });
             this->mag1_source_all_zeros =
                 std::all_of(sourceB1.begin(), sourceB1.end(), [](real i) {
-                    return i == 0;
+                    return i == real(0);
                 });
             this->mag2_source_all_zeros =
                 std::all_of(sourceB2.begin(), sourceB2.end(), [](real i) {
-                    return i == 0;
+                    return i == real(0);
                 });
             this->mag3_source_all_zeros =
                 std::all_of(sourceB3.begin(), sourceB3.end(), [](real i) {
-                    return i == 0;
+                    return i == real(0);
                 });
-            this->mom1_source_all_zeros =
-                std::all_of(m1_source.begin(), m1_source.end(), [](real i) {
-                    return i == 0;
-                });
-            this->mom2_source_all_zeros =
-                std::all_of(m2_source.begin(), m2_source.end(), [](real i) {
-                    return i == 0;
-                });
-            this->mom3_source_all_zeros =
-                std::all_of(m3_source.begin(), sourceB3.end(), [](real i) {
-                    return i == 0;
-                });
+
             this->den_source_all_zeros = std::all_of(
                 density_source.begin(),
                 density_source.end(),
-                [](real i) { return i == 0; }
+                [](real i) { return i == real(0); }
             );
             this->mom1_source_all_zeros =
                 std::all_of(m1_source.begin(), m1_source.end(), [](real i) {
-                    return i == 0;
+                    return i == real(0);
+                });
+            this->mom2_source_all_zeros =
+                std::all_of(m2_source.begin(), m2_source.end(), [](real i) {
+                    return i == real(0);
+                });
+            this->mom3_source_all_zeros =
+                std::all_of(m3_source.begin(), m3_source.end(), [](real i) {
+                    return i == real(0);
                 });
             this->energy_source_all_zeros = std::all_of(
                 energy_source.begin(),
                 energy_source.end(),
-                [](real i) { return i == 0; }
+                [](real i) { return i == real(0); }
             );
 
             if (nz > 1) {

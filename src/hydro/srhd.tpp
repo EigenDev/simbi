@@ -3313,7 +3313,7 @@ void SRHD<dim>::simulate(
             );
         }
     }
-
+    
     this->n = 0;
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
