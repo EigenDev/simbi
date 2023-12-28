@@ -1446,7 +1446,7 @@ void SRHD<dim>::advance(
                 }
             }
 
-            const bool object_to_my_left =
+            const bool object_to_left =
                 dim < 2 ? false
                         : object_data
                               [kk * xpg * ypg + jj * xpg +
@@ -1454,7 +1454,7 @@ void SRHD<dim>::advance(
                                    static_cast<lint>(ii - 1),
                                    static_cast<lint>(0)
                                )];
-            const bool object_to_my_right =
+            const bool object_to_right =
                 dim < 2 ? false
                         : object_data
                               [kk * xpg * ypg + jj * xpg +
@@ -1511,7 +1511,7 @@ void SRHD<dim>::advance(
                     zprimsR = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
                 }
 
-                if (object_to_my_right) {
+                if (object_to_right) {
                     xprimsR.rho = xprimsL.rho;
                     xprimsR.v1  = -xprimsL.v1;
                     if constexpr (dim > 1) {
@@ -1763,7 +1763,7 @@ void SRHD<dim>::advance(
                     zprimsR = prim_buff[(tza - 0) * sx * sy + tya * sx + txa];
                 }
 
-                if (object_to_my_left) {
+                if (object_to_left) {
                     xprimsL.rho = xprimsR.rho;
                     xprimsL.v1  = -xprimsR.v1;
                     if constexpr (dim > 1) {
@@ -2078,7 +2078,7 @@ void SRHD<dim>::advance(
                                            ) * 0.5;
                 }
 
-                if (object_to_my_right) {
+                if (object_to_right) {
                     xprimsR.rho = xprimsL.rho;
                     xprimsR.v1  = -xprimsL.v1;
                     if constexpr (dim > 1) {
@@ -2360,7 +2360,7 @@ void SRHD<dim>::advance(
                                        ) * 0.5;
                 }
 
-                if (object_to_my_left) {
+                if (object_to_left) {
                     xprimsL.rho = xprimsR.rho;
                     xprimsL.v1  = -xprimsR.v1;
                     if constexpr (dim > 1) {
