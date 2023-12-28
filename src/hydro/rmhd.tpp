@@ -745,10 +745,11 @@ template <int dim> template <TIMESTEP_TYPE dt_type> void RMHD<dim>::adapt_dt()
             real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt, cs;
             real speeds[4];
             const luint kk =
-                dim < 3 ? 0 : simbi::helpers::get_height(gid, nx, ny);
+                helpers::get_axis_index<dim, BlockAxis::K>(idx, nx, ny);
             const luint jj =
-                dim < 2 ? 0 : simbi::helpers::get_row(gid, nx, ny, kk);
-            const luint ii    = simbi::helpers::get_column(gid, nx, ny, kk);
+                helpers::get_axis_index<dim, BlockAxis::J>(idx, nx, ny, kk);
+            const luint ii =
+                helpers::get_axis_index<dim, BlockAxis::I>(idx, nx, ny, kk);
             const luint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
             // Left/Right wave speeds
             if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
