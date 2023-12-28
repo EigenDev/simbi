@@ -1567,7 +1567,7 @@ namespace simbi {
             const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
             const luint gid =
-                (global::col_maj) ? ii * self->ny + jj : jj * self->nx + ii;
+                flattened_index(ii, jj, luint(0), self->nx, self->ny, luint(1));
             if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
                 if constexpr (is_relativistic<T>::value) {
@@ -1734,9 +1734,8 @@ namespace simbi {
             const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
             const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
-            const luint gid = (global::col_maj) ? ii * self->ny + jj
-                                                : kk * self->nx * self->ny +
-                                                      jj * self->nx + ii;
+            const luint gid =
+                flattened_index(ii, jj, kk, self->nx, self->ny, self->nz);
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2, plus_v3, minus_v3;
 
@@ -1883,7 +1882,7 @@ namespace simbi {
 #if GPU_CODE
             real vPlus, vMinus;
             int ii  = blockDim.x * blockIdx.x + threadIdx.x;
-            int gid = ii + self->radius;
+            int gid = ii;
             if (ii < self->total_zones) {
                 if constexpr (is_relativistic_mhd<T>::value) {
                     if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
@@ -1947,7 +1946,7 @@ namespace simbi {
             const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
             const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
             const luint gid =
-                (global::col_maj) ? ii * self->ny + jj : jj * self->nx + ii;
+                flattened_index(ii, jj, luint(0), self->nx, self->ny, luint(1));
             if ((ii < self->nx) && (jj < self->ny)) {
                 real plus_v1, plus_v2, minus_v1, minus_v2;
                 if constexpr (is_relativistic_mhd<T>::value) {
@@ -2502,6 +2501,7 @@ namespace simbi {
         }
 
         template <typename index_type, typename T>
+        GPU_CALLABLE
         index_type flattened_index(
             index_type ii,
             index_type jj,
@@ -2520,7 +2520,8 @@ namespace simbi {
         }
 
         template <int dim, BlockAxis axis, typename T>
-        T get_axis_index(T idx, T ni, T nj, T kk = T(0))
+        GPU_CALLABLE
+        T get_axis_index(T idx, T ni, T nj, T kk)
         {
             if constexpr (dim == 1) {
                 if constexpr (axis != BlockAxis::I) {

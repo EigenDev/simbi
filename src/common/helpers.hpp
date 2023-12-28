@@ -1231,12 +1231,12 @@ namespace simbi {
         // Quick sort implementation
         template <typename T, typename index_type>
         GPU_CALLABLE void quickSort(T arr[], index_type low, index_type high);
-    }   // namespace helpers
 
-    template <typename T, typename U>
+            template <typename T, typename U>
     GPU_SHARED T* shared_memory_proxy(U object = nullptr);
 
     template <typename index_type, typename T>
+    GPU_CALLABLE
     index_type flattened_index(
         index_type ii,
         index_type jj,
@@ -1247,7 +1247,10 @@ namespace simbi {
     );
 
     template <int dim, BlockAxis axis, typename T>
+    GPU_CALLABLE
     T get_axis_index(T idx, T ni, T nj, T kk = T(0));
+    
+    }   // namespace helpers
 }   // namespace simbi
 
 #include "helpers.tpp"
