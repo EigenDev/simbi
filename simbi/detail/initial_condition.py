@@ -98,33 +98,32 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
     setup: dict[str, Any] = {}
     volume_factor: Union[float, NDArray[numpy_float]] = 1.0
     with h5py.File(filename, 'r') as hf:
-        ds = hf.get('sim_info')
-        nx = ds.attrs['nx'] or 1
-        ny = ds.attrs['ny'] if 'ny' in ds.attrs.keys() else 1
-        nz = ds.attrs['nz'] if 'nz' in ds.attrs.keys() else 1
+        ds = hf.get('sim_info').attrs
+        nx = ds['nx'] or 1
+        ny = ds['ny'] if 'ny' in ds.keys() else 1
+        nz = ds['nz'] if 'nz' in ds.keys() else 1
         try:
-            ndim = ds.attrs['dimensions']
+            ndim = ds['dimensions']
         except KeyError:
             ndim = 1 + (ny > 1) + (nz > 1)
 
-        setup['ad_gamma'] = ds.attrs['adiabatic_gamma']
-        setup['regime'] = ds.attrs['regime'].decode('utf-8')
-        setup['coord_system'] = ds.attrs['geometry'].decode('utf-8')
-        setup['mesh_motion'] = ds.attrs['mesh_motion']
-        setup['linspace'] = ds.attrs['linspace']
+        setup['ad_gamma'] = ds['adiabatic_gamma']
+        setup['regime'] = ds['regime'].decode('utf-8')
+        setup['coord_system'] = ds['geometry'].decode('utf-8')
+        setup['mesh_motion'] = ds['mesh_motion']
 
         # ------------------------
         # Generate Mesh
         # ------------------------
-        arr_gen: Any = np.linspace if setup['linspace'] else np.geomspace
-        funcs = [arr_gen, np.linspace, np.linspace]
+        arr_select: Callable[..., function] = lambda x: np.linspace if x == b'linear' else np.geomspace
+        funcs = [arr_select(val) for val, _ in zip([ds['x1_cell_spacing'], ds['x2_cell_spacing'], ds['x3_cell_spacing']], range(ndim))]
         mesh = {
             f'x{i+1}': hf.get(f'x{i+1}')[:] for i in range(ndim)
         }
 
-        if ds.attrs['x1max'] > mesh['x1'][-1]:
-            mesh['x1'] = arr_gen(
-                ds.attrs['x1min'], ds.attrs['x1max'], ds.attrs['xactive_zones'])
+        if ds['x1max'] > mesh['x1'][-1]:
+            mesh['x1'] = funcs[0](
+                ds['x1min'], ds['x1max'], ds['xactive_zones']) #type: ignore
 
         if setup['mesh_motion']:
             if ndim == 1 and setup['coord_system'] != 'cartesian':
@@ -139,17 +138,16 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
                     coord_system=setup['coord_system']
                 )
             elif ndim == 3:
-                raise NotImplementedError()
-                # volume_factor = helpers.calc_cell_volume3D(
-                #     x1=mesh['x1'],
-                #     x2=mesh['x2'],
-                #     x3=mesh['x3'],
-                #     coord_system=setup['coord_system']
-                # )
+                volume_factor = helpers.calc_cell_volume3D(
+                    x1=mesh['x1'],
+                    x2=mesh['x2'],
+                    x3=mesh['x3'],
+                    coord_system=setup['coord_system']
+                )
 
             if setup['coord_system'] != 'cartesian':
-                npad = tuple(tuple(val) for val in [[((ds.attrs['first_order'] ^ 1) + 1),
-                                                     ((ds.attrs['first_order'] ^ 1) + 1)]] * ndim)
+                npad = tuple(tuple(val) for val in [[((ds['first_order'] ^ 1) + 1),
+                                                     ((ds['first_order'] ^ 1) + 1)]] * ndim)
                 volume_factor = np.pad(volume_factor, npad, 'edge')
 
         rho = hf.get('rho')[:]
@@ -168,7 +166,7 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
         vsqr = np.sum(vel * vel for vel in v)  # type: ignore
         if setup['regime'] in ["srhd", "srmhd"]:
             try:
-                if ds.attrs['using_gamma_beta']:
+                if ds['using_gamma_beta']:
                     W = (1 + vsqr) ** 0.5
                     v = [vel / W for vel in v]
                     vsqr /= W**2
@@ -187,7 +185,7 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
             e = p / (setup['ad_gamma'] - 1.0) + 0.5 * rho * vsqr
 
         momentum = np.asarray([rho * W * W * h * vel for vel in v])
-        model.start_time = ds.attrs['current_time']
+        model.start_time = ds['current_time']
         model.x1 = mesh['x1']
         if ndim >= 2:
             model.x2 = mesh['x2']
@@ -200,7 +198,7 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
             model.u = np.array(
                 [rho * W, *momentum, e, rho * W * chi]) * volume_factor
 
-        model.chkpt_idx = ds.attrs['chkpt_idx']
+        model.chkpt_idx = ds['chkpt_idx']
 
 
 def initializeModel(model: Any, first_order: bool, volume_factor: Union[float, NDArray[Any]], passive_scalars: Union[npt.NDArray[Any], Any]) -> None:
