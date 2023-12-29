@@ -88,7 +88,7 @@ const std::map<Color, std::string> color_map = {
 
 namespace simbi {
     namespace util {
-
+        
         inline bool is_number(const std::string& s)
         {
             long double ld;

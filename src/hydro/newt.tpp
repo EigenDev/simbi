@@ -8,7 +8,10 @@ using namespace simbi;
 using namespace simbi::util;
 
 // Default Constructor
-template <int dim> Newtonian<dim>::Newtonian() {}
+template <int dim>
+Newtonian<dim>::Newtonian()
+{
+}
 
 // Overloaded Constructor
 template <int dim>
@@ -21,7 +24,10 @@ Newtonian<dim>::Newtonian(
 }
 
 // Destructor
-template <int dim> Newtonian<dim>::~Newtonian() {}
+template <int dim>
+Newtonian<dim>::~Newtonian()
+{
+}
 
 // Helpers
 template <int dim>
@@ -196,20 +202,19 @@ Newtonian<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real Newtonian<dim>::get_cell_volume(
-    const lint ii,
-    const lint jj,
-    const lint kk
-) const
+GPU_CALLABLE_MEMBER real
+Newtonian<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk)
+    const
 {
     if (geometry == Geometry::CARTESIAN) {
-        return 1;
+        return 1.0;
     }
     return get_x1_differential(ii) * get_x2_differential(jj) *
            get_x3_differential(kk);
 }
 
-template <int dim> void Newtonian<dim>::emit_troubled_cells() const
+template <int dim>
+void Newtonian<dim>::emit_troubled_cells() const
 {
     for (luint gid = 0; gid < total_zones; gid++) {
         if (troubled_cells[gid] != 0) {
@@ -235,12 +240,12 @@ template <int dim> void Newtonian<dim>::emit_troubled_cells() const
             const real m2 = cons[gid].momentum(2);
             const real m3 = cons[gid].momentum(3);
             const real s2 = m1 * m1 + m2 * m2 + m3 * m3;
-            const real v2 = s2 / cons[gid].rho;
+            const real v2 = s2 / cons[gid].den;
             if constexpr (dim == 1) {
                 printf(
                     "\nSimulation in bad state\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, iter: %" PRIu64 "\n",
-                    cons[gid].rho,
+                    cons[gid].den,
                     prims[gid].p,
                     v2,
                     x1mean,
@@ -254,7 +259,7 @@ template <int dim> void Newtonian<dim>::emit_troubled_cells() const
                     "Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: "
                     "%" PRIu64 "\n",
-                    cons[gid].rho,
+                    cons[gid].den,
                     prims[gid].p,
                     v2,
                     x1mean,
@@ -267,7 +272,7 @@ template <int dim> void Newtonian<dim>::emit_troubled_cells() const
                     "\nSimulation in bad state\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, "
                     "x3coord: %.2e, iter: %" PRIu64 "\n",
-                    cons[gid].rho,
+                    cons[gid].den,
                     prims[gid].p,
                     v2,
                     x1mean,
@@ -290,7 +295,8 @@ template <int dim> void Newtonian<dim>::emit_troubled_cells() const
  * @param  p executation policy class
  * @return none
  */
-template <int dim> void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
+template <int dim>
+void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
 {
     const auto* const cons_data = cons.data();
     auto* const prim_data       = prims.data();
@@ -347,13 +353,13 @@ template <int dim> void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
                     invdV         = 1.0 / dV;
                 }
             }
-            const real rho     = cons_data[gid].rho * invdV;
+            const real rho     = cons_data[gid].den * invdV;
             const real v1      = (cons_data[gid].momentum(1) / rho) * invdV;
             const real v2      = (cons_data[gid].momentum(2) / rho) * invdV;
             const real v3      = (cons_data[gid].momentum(3) / rho) * invdV;
             const real rho_chi = cons_data[gid].chi * invdV;
             const real pre =
-                (gamma - 1.0) * (cons_data[gid].e_dens -
+                (gamma - 1.0) * (cons_data[gid].nrg -
                                  0.5 * rho * (v1 * v1 + v2 * v2 + v3 * v3));
             if constexpr (dim == 1) {
                 prim_data[gid] = {rho, v1, pre, rho_chi / rho};
@@ -481,7 +487,8 @@ Newtonian<dim>::prims2cons(const Newtonian<dim>::primitive_t& prims) const
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
 // Adapt the cfl conditonal timestep
-template <int dim> void Newtonian<dim>::adapt_dt()
+template <int dim>
+void Newtonian<dim>::adapt_dt()
 {
     // singleton instance of thread pool. lazy-evaluated
     static auto& thread_pool =
@@ -491,11 +498,11 @@ template <int dim> void Newtonian<dim>::adapt_dt()
         .parallel_for(static_cast<luint>(0), total_zones, [&](luint gid) {
             real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
             const luint kk =
-                helpers::get_axis_index<dim, BlockAxis::K>(idx, xpg, ypg);
+                helpers::get_axis_index<dim, BlockAxis::K>(gid, nx, ny);
             const luint jj =
-                helpers::get_axis_index<dim, BlockAxis::J>(idx, xpg, ypg, kk);
+                helpers::get_axis_index<dim, BlockAxis::J>(gid, nx, ny, kk);
             const luint ii =
-                helpers::get_axis_index<dim, BlockAxis::I>(idx, xpg, ypg, kk);
+                helpers::get_axis_index<dim, BlockAxis::I>(gid, nx, ny, kk);
             const luint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
             // Left/Right wave speeds
             const real rho = prims[gid].rho;
@@ -625,7 +632,8 @@ template <int dim> void Newtonian<dim>::adapt_dt()
     dt = cfl * min_dt;
 };
 
-template <int dim> void Newtonian<dim>::adapt_dt(const ExecutionPolicy<>& p)
+template <int dim>
+void Newtonian<dim>::adapt_dt(const ExecutionPolicy<>& p)
 {
 #if GPU_CODE
     if constexpr (dim == 1) {
@@ -739,11 +747,11 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
     }();
 
     // Upwind the scalar concentration flux
-    if (net_flux.rho < 0) {
-        net_flux.chi = right_prims.chi * net_flux.rho;
+    if (net_flux.den < 0) {
+        net_flux.chi = right_prims.chi * net_flux.den;
     }
     else {
-        net_flux.chi = left_prims.chi * net_flux.rho;
+        net_flux.chi = left_prims.chi * net_flux.den;
     }
 
     return net_flux;
@@ -788,9 +796,9 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         if (vface <= aStar) {
             real pressure = left_prims.p;
             real v        = left_prims.v1;
-            real rho      = left_state.rho;
+            real rho      = left_state.den;
             real m        = left_state.m1;
-            real energy   = left_state.e_dens;
+            real energy   = left_state.nrg;
             real cofac    = 1 / (aL - aStar);
 
             real rhoStar = cofac * (aL - v) * rho;
@@ -807,9 +815,9 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         else {
             real pressure = right_prims.p;
             real v        = right_prims.v1;
-            real rho      = right_state.rho;
+            real rho      = right_state.den;
             real m        = right_state.m1;
-            real energy   = right_state.e_dens;
+            real energy   = right_state.nrg;
             real cofac    = 1. / (aR - aStar);
 
             real rhoStar = cofac * (aR - v) * rho;
@@ -835,11 +843,11 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 
         // --------------Compute the L Star State----------
         real pressure = left_prims.p;
-        real rho      = left_state.rho;
+        real rho      = left_state.den;
         real m1       = left_state.momentum(1);
         real m2       = left_state.momentum(2);
         real m3       = left_state.momentum(3);
-        real edens    = left_state.e_dens;
+        real edens    = left_state.nrg;
         real cofactor = 1 / (aL - aStar);
 
         const real vL = left_prims.vcomponent(nhat);
@@ -865,11 +873,11 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         }();
 
         pressure = right_prims.p;
-        rho      = right_state.rho;
+        rho      = right_state.den;
         m1       = right_state.momentum(1);
         m2       = right_state.momentum(2);
         m3       = right_state.momentum(3);
-        edens    = right_state.e_dens;
+        edens    = right_state.nrg;
         cofactor = 1 / (aR - aStar);
 
         rhostar = cofactor * (aR - vR) * rho;
@@ -905,11 +913,11 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
                         face_starState * vface;
 
         // upwind the concentration flux
-        if (net_flux.rho < 0) {
-            net_flux.chi = right_prims.chi * net_flux.rho;
+        if (net_flux.den < 0) {
+            net_flux.chi = right_prims.chi * net_flux.den;
         }
         else {
-            net_flux.chi = left_prims.chi * net_flux.rho;
+            net_flux.chi = left_prims.chi * net_flux.den;
         }
 
         return net_flux;
@@ -992,16 +1000,15 @@ void Newtonian<dim>::advance(
                     }
                 }
             }
-
             const luint ia  = ii + radius;
             const luint ja  = dim < 2 ? 0 : jj + radius;
             const luint ka  = dim < 3 ? 0 : kk + radius;
-            const luint tx  = (global::on_gpu) ? threadIdx.x : 0;
-            const luint ty  = dim < 2 ? 0 : (global::on_gpu) ? threadIdx.y : 0;
-            const luint tz  = dim < 3 ? 0 : (global::on_gpu) ? threadIdx.z : 0;
-            const luint txa = (global::on_gpu) ? tx + radius : ia;
-            const luint tya = dim < 2 ? 0 : (global::on_gpu) ? ty + radius : ja;
-            const luint tza = dim < 3 ? 0 : (global::on_gpu) ? tz + radius : ka;
+            const luint tx  = (global::on_sm) ? threadIdx.x : 0;
+            const luint ty  = dim < 2 ? 0 : (global::on_sm) ? threadIdx.y : 0;
+            const luint tz  = dim < 3 ? 0 : (global::on_sm) ? threadIdx.z : 0;
+            const luint txa = (global::on_sm) ? tx + radius : ia;
+            const luint tya = dim < 2 ? 0 : (global::on_sm) ? ty + radius : ja;
+            const luint tza = dim < 3 ? 0 : (global::on_sm) ? tz + radius : ka;
 
             nt::Conserved<dim> uxL, uxR, uyL, uyR, uzL, uzR;
             nt::Conserved<dim> fL, fR, gL, gR, hL, hR, frf, flf, grf, glf, hrf,
@@ -1011,99 +1018,27 @@ void Newtonian<dim>::advance(
 
             const luint aid = ka * nx * ny + ja * nx + ia;
 
-            if constexpr (global::on_gpu) {
-                if constexpr (dim == 1) {
-                    luint txl = p.blockSize.x;
-                    // Check if the active index exceeds the active zones
-                    // if it does, then this thread buffer will taken on the
-                    // ghost index at the very end and return
-                    prim_buff[txa] = prim_data[ia];
-                    if (threadIdx.x < radius) {
-                        if (blockIdx.x == p.gridSize.x - 1 &&
-                            (ia + p.blockSize.x > nx - radius + threadIdx.x)) {
-                            txl = nx - radius - ia + threadIdx.x;
-                        }
-                        prim_buff[txa - radius] = prim_data[ia - radius];
-                        prim_buff[txa + txl]    = prim_data[ia + txl];
-                    }
-                    simbi::gpu::api::synchronize();
-                }
-                else if constexpr (dim == 2) {
-                    luint txl = p.blockSize.x;
-                    luint tyl = p.blockSize.y;
-                    // Load Shared memory into buffer for active zones plus
-                    // ghosts
-                    prim_buff[tya * sx + txa * sy] = prim_data[aid];
-                    if (ty < radius) {
-                        if (blockIdx.y == p.gridSize.y - 1 &&
-                            (ja + p.blockSize.y > ny - radius + ty)) {
-                            tyl = ny - radius - ja + ty;
-                        }
-                        prim_buff[(tya - radius) * sx + txa] =
-                            prim_data[(ja - radius) * nx + ia];
-                        prim_buff[(tya + tyl) * sx + txa] =
-                            prim_data[(ja + tyl) * nx + ia];
-                    }
-                    if (tx < radius) {
-                        if (blockIdx.x == p.gridSize.x - 1 &&
-                            (ia + p.blockSize.x > nx - radius + tx)) {
-                            txl = nx - radius - ia + tx;
-                        }
-                        prim_buff[tya * sx + txa - radius] =
-                            prim_data[ja * nx + (ia - radius)];
-                        prim_buff[tya * sx + txa + txl] =
-                            prim_data[ja * nx + (ia + txl)];
-                    }
-                    simbi::gpu::api::synchronize();
-                }
-                else {
-                    luint txl = p.blockSize.x;
-                    luint tyl = p.blockSize.y;
-                    luint tzl = p.blockSize.z;
-                    // Load Shared memory into buffer for active zones plus
-                    // ghosts
-                    prim_buff[tza * sx * sy + tya * sx + txa] = prim_data[aid];
-                    if (tz == 0) {
-                        if ((blockIdx.z == p.gridSize.z - 1) &&
-                            (ka + p.blockSize.z > nz - radius + tz)) {
-                            tzl = nz - radius - ka + tz;
-                        }
-                        for (int q = 1; q < radius + 1; q++) {
-                            const auto re = tzl + q - 1;
-                            prim_buff[(tza - q) * sx * sy + tya * sx + txa] =
-                                prim_data[(ka - q) * nx * ny + ja * nx + ia];
-                            prim_buff[(tza + re) * sx * sy + tya * sx + txa] =
-                                prim_data[(ka + re) * nx * ny + ja * nx + ia];
-                        }
-                    }
-                    if (ty == 0) {
-                        if ((blockIdx.y == p.gridSize.y - 1) &&
-                            (ja + p.blockSize.y > ny - radius + ty)) {
-                            tyl = ny - radius - ja + ty;
-                        }
-                        for (int q = 1; q < radius + 1; q++) {
-                            const auto re = tyl + q - 1;
-                            prim_buff[tza * sx * sy + (tya - q) * sx + txa] =
-                                prim_data[ka * nx * ny + (ja - q) * nx + ia];
-                            prim_buff[tza * sx * sy + (tya + re) * sx + txa] =
-                                prim_data[ka * nx * ny + (ja + re) * nx + ia];
-                        }
-                    }
-                    if (tx == 0) {
-                        if ((blockIdx.x == p.gridSize.x - 1) &&
-                            (ia + p.blockSize.x > nx - radius + tx)) {
-                            txl = nx - radius - ia + tx;
-                        }
-                        for (int q = 1; q < radius + 1; q++) {
-                            const auto re = txl + q - 1;
-                            prim_buff[tza * sx * sy + tya * sx + txa - q] =
-                                prim_data[ka * nx * ny + ja * nx + ia - q];
-                            prim_buff[tza * sx * sy + tya * sx + txa + re] =
-                                prim_data[ka * nx * ny + ja * nx + ia + re];
-                        }
-                    }
-                    simbi::gpu::api::synchronize();
-                }
+            if constexpr (global::on_sm) {
+                helpers::load_shared_buffer<dim>(
+                    p,
+                    prim_buff,
+                    prim_data,
+                    nx,
+                    ny,
+                    nz,
+                    sx,
+                    sy,
+                    tx,
+                    ty,
+                    tz,
+                    txa,
+                    tya,
+                    tza,
+                    ia,
+                    ja,
+                    ka,
+                    radius
+                );
             }
 
             const bool object_to_left =
@@ -1891,7 +1826,7 @@ void Newtonian<dim>::advance(
 
             // Gravity
             const auto gm1_source =
-                zero_gravity1 ? 0 : grav1_source[real_loc] * cons_data[aid].rho;
+                zero_gravity1 ? 0 : grav1_source[real_loc] * cons_data[aid].den;
             const auto tid     = tza * sx * sy + tya * sx + txa;
             const auto gravity = [&] {
                 if constexpr (dim == 1) {
@@ -1902,7 +1837,7 @@ void Newtonian<dim>::advance(
                     const auto gm2_source =
                         zero_gravity2
                             ? 0
-                            : grav2_source[real_loc] * cons_data[aid].rho;
+                            : grav2_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gm1_source * prim_buff[tid].v1 +
                                            gm2_source * prim_buff[tid].v2;
                     return nt::Conserved<2>{
@@ -1916,11 +1851,11 @@ void Newtonian<dim>::advance(
                     const auto gm2_source =
                         zero_gravity2
                             ? 0
-                            : grav2_source[real_loc] * cons_data[aid].rho;
+                            : grav2_source[real_loc] * cons_data[aid].den;
                     const auto gm3_source =
                         zero_gravity3
                             ? 0
-                            : grav3_source[real_loc] * cons_data[aid].rho;
+                            : grav3_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gm1_source * prim_buff[tid].v1 +
                                            gm2_source * prim_buff[tid].v2 +
                                            gm3_source * prim_buff[tid].v3;
@@ -1933,7 +1868,6 @@ void Newtonian<dim>::advance(
                     };
                 }
             }();
-
             if constexpr (dim == 1) {
                 switch (geometry) {
                     case simbi::Geometry::CARTESIAN:
@@ -2456,24 +2390,26 @@ void Newtonian<dim>::simulate(
         zactive_grid > gpu_block_dimz ? gpu_block_dimz : zactive_grid;
     this->radius             = (first_order) ? 1 : 2;
     this->step               = (first_order) ? 1 : 0.5;
-    const luint xstride      = (global::on_gpu) ? xblockdim + 2 * radius : nx;
-    const luint ystride      = (dim < 3)          ? 1
-                               : (global::on_gpu) ? yblockdim + 2 * radius
-                                                  : ny;
+    const luint xstride      = (global::on_sm) ? xblockdim + 2 * radius : nx;
+    const luint ystride      = (dim < 3)         ? 1
+                               : (global::on_sm) ? yblockdim + 2 * radius
+                                                 : ny;
     const auto xblockspace   = xblockdim + 2 * radius;
     const auto yblockspace   = (dim < 2) ? 1 : yblockdim + 2 * radius;
     const auto zblockspace   = (dim < 3) ? 1 : zblockdim + 2 * radius;
     const luint shBlockSpace = xblockspace * yblockspace * zblockspace;
-    const luint shBlockBytes = shBlockSpace * sizeof(nt::Primitive<dim>);
+    const luint shBlockBytes =
+        shBlockSpace * sizeof(nt::Primitive<dim>) * global::on_sm;
     const auto fullP =
         simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
+
     const auto activeP = simbi::ExecutionPolicy(
         {xactive_grid, yactive_grid, zactive_grid},
         {xblockdim, yblockdim, zblockdim},
         shBlockBytes
     );
 
-    if constexpr (global::on_gpu) {
+    if constexpr (global::on_sm) {
         writeln("Requested shared memory: {} bytes", shBlockBytes);
     }
 
@@ -2540,7 +2476,7 @@ void Newtonian<dim>::simulate(
             );
         }
     }
-    
+
     this->n = 0;
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
