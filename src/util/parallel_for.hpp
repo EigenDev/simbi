@@ -22,9 +22,7 @@
 #include "thread_pool.hpp"        // for (anonymous), ThreadPool, get_nthreads
 #include "util/exec_policy.hpp"   // for ExecutionPolicy
 #include "util/launch.hpp"        // for launch
-#if GPU_CODE
-    #include "util/range.hpp"   // for range
-#endif
+#include "util/range.hpp"         // for range
 
 namespace simbi {
     template <typename index_type, typename F>
@@ -46,19 +44,18 @@ namespace simbi {
     )
     {
         simbi::launch(p, [=] GPU_LAMBDA() {
-#if GPU_CODE
-            for (auto idx : range(first, last, globalThreadCount()))
-                function(idx);
-#else	
-				if (global::use_omp) {
-    #pragma omp parallel for schedule(static) 
-					for(auto idx = first; idx < last; idx++) function(idx);
-				} else {
-					// singleton instance of thread pool. lazy-evaluated
-    				static auto &thread_pool = simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
-					thread_pool.parallel_for(first, last, function);
-				}
-#endif
+            if constexpr (global::on_gpu) {
+                for (auto idx : range(first, last, globalThreadCount())) {
+                    function(idx);
+                }
+            }
+            else {
+                // singleton instance of thread pool. lazy-evaluated
+                static auto& thread_pool = simbi::pooling::ThreadPool::instance(
+                    simbi::pooling::get_nthreads()
+                );
+                thread_pool.parallel_for(first, last, function);
+            }
         });
     }
 }   // namespace simbi

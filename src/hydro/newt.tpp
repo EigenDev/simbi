@@ -491,11 +491,11 @@ template <int dim> void Newtonian<dim>::adapt_dt()
         .parallel_for(static_cast<luint>(0), total_zones, [&](luint gid) {
             real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
             const luint kk =
-                helpers::get_axis_index<dim, BlockAxis::K>(idx, xpg, ypg);
+                helpers::get_axis_index<dim, BlockAxis::K>(gid, nx, ny);
             const luint jj =
-                helpers::get_axis_index<dim, BlockAxis::J>(idx, xpg, ypg, kk);
+                helpers::get_axis_index<dim, BlockAxis::J>(gid, nx, ny, kk);
             const luint ii =
-                helpers::get_axis_index<dim, BlockAxis::I>(idx, xpg, ypg, kk);
+                helpers::get_axis_index<dim, BlockAxis::I>(gid, nx, ny, kk);
             const luint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
             // Left/Right wave speeds
             const real rho = prims[gid].rho;
@@ -2540,7 +2540,7 @@ void Newtonian<dim>::simulate(
             );
         }
     }
-    
+
     this->n = 0;
     // Simulate :)
     simbi::detail::logger::with_logger(*this, tend, [&] {
