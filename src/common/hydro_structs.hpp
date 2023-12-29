@@ -34,11 +34,11 @@ struct DataWriteMembers {
     int nx, ny, nz;
     int xactive_zones, yactive_zones, zactive_zones;
     int chkpt_idx, dimensions;
-    bool linspace, first_order, using_fourvelocity, mesh_motion;
+    bool first_order, using_fourvelocity, mesh_motion;
     real t, ad_gamma;
     real x1min, x1max, x2min, x2max, x3min, x3max, dt;
-    std::string coord_system, regime, x1_cell_spacing, x2_cell_spacing,
-        x3_cell_spacing;
+    std::string coord_system, regime;
+    std::string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
     std::vector<real> x1, x2, x3;
     std::vector<std::string> boundary_conditions;
 
