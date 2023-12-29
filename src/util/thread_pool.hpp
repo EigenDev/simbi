@@ -230,7 +230,8 @@ namespace simbi {
             return std_thread::hardware_concurrency();
         });
 
-        template <typename T> T fetch_minimum(std::atomic<T>& a, T val)
+        template <typename T>
+        T fetch_minimum(std::atomic<T>& a, T val)
         {
             T old = a;
             while (old > val && !a.compare_exchange_weak(old, val)) {
