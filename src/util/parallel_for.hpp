@@ -43,7 +43,7 @@ namespace simbi {
         F function
     )
     {
-        simbi::launch(p, [=] GPU_LAMBDA() {
+        simbi::launch(p, [first, last, function] GPU_LAMBDA() {
             if constexpr (global::on_gpu) {
                 for (auto idx : range(first, last, globalThreadCount())) {
                     function(idx);
