@@ -10,6 +10,7 @@ conf_data.set10('FLOAT_PRECISION', get_option('float_precision'))
 conf_data.set10('FOUR_VELOCITY',   get_option('four_velocity'))
 conf_data.set10('COLUMN_MAJOR',    get_option('column_major'))
 conf_data.set10('PROGRESS_BAR',    get_option('progress_bar'))
+conf_data.set10('SHARED_MEMORY',   get_option('shared_memory'))
 configure_file(
     input:  'build_options.hpp.in',
     output: 'build_options.hpp',

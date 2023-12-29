@@ -51,3 +51,9 @@ option(
     type: 'boolean',
     value: true
 )
+
+option(
+    'shared_memory',
+    type: 'boolean',
+    value: true
+)

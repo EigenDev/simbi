@@ -17,6 +17,7 @@ default["install_mode"] = "default"
 default["dev_arch"] = 86
 default["build_dir"] = "builddir"
 default["four_velocity"] = False
+default["shared_memory"] = True
 
 YELLOW = "\033[0;33m"
 RST = "\033[0m"  # No Color
@@ -24,9 +25,10 @@ RST = "\033[0m"  # No Color
 flag_overrides = {}
 flag_overrides["float_precision"] = ["--double", "--float"]
 flag_overrides["gpu_compilation"] = ["--gpu-compilation", "--cpu-compilation"]
-flag_overrides["column_major"] = ["--row-major", "--column-major"]
+flag_overrides["column_major"]  = ["--row-major", "--column-major"]
 flag_overrides["four_velocity"] = ["--four-velocity", "--no-four-velocity"]
 flag_overrides["progress_bar"] = ["--progress-bar", "--no-progress-bar"]
+flag_overrides["shared_memory"] = ["--shared-memory", "--no-shared-memory"]
 flag_overrides["install_mode"] = ["develop", "default"]
 
 
@@ -116,7 +118,7 @@ def configure(
     -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
     -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} -Dfour_velocity={args.four_velocity} \
     -Dcpp_std={args.cpp_version} -Dbuildtype={args.build_type} {reconfigure} \
-    -Dprogress_bar={args.progress_bar}""".split()
+    -Dprogress_bar={args.progress_bar} -Dshared_memory={args.shared_memory}""".split()
     return command
 
 
@@ -186,6 +188,12 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     install_parser.add_argument(
         "--progress-bar",
         help="flag to show / hide progress bar",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    install_parser.add_argument(
+        "--shared-memory",
+        help="flag to enable / disable shared memory for gpu builds",
         action=argparse.BooleanOptionalAction,
         default=True,
     )

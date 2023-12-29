@@ -1232,23 +1232,46 @@ namespace simbi {
         template <typename T, typename index_type>
         GPU_CALLABLE void quickSort(T arr[], index_type low, index_type high);
 
-            template <typename T, typename U>
-    GPU_SHARED T* shared_memory_proxy(U object = nullptr);
+        template <typename T, typename U>
+        GPU_SHARED T* shared_memory_proxy(const U object);
 
-    template <typename index_type, typename T>
-    GPU_CALLABLE
-    index_type flattened_index(
-        index_type ii,
-        index_type jj,
-        index_type kk,
-        T ni,
-        T nj,
-        T nk
-    );
+        template <typename index_type, typename T>
+        GPU_CALLABLE
+        index_type flattened_index(
+            index_type ii,
+            index_type jj,
+            index_type kk,
+            T ni,
+            T nj,
+            T nk
+        );
 
-    template <int dim, BlockAxis axis, typename T>
-    GPU_CALLABLE
-    T get_axis_index(T idx, T ni, T nj, T kk = T(0));
+        template <int dim, BlockAxis axis, typename T>
+        GPU_CALLABLE
+        T get_axis_index(T idx, T ni, T nj, T kk = T(0));
+
+        template <int dim, typename T, typename U, typename V>
+        GPU_CALLABLE
+        void load_shared_buffer(
+            const ExecutionPolicy<> &p, 
+            T &buffer, 
+            const U &data, 
+            const V ni, 
+            const V nj, 
+            const V nk,  
+            const V sx,
+            const V sy,
+            const V tx,
+            const V ty,
+            const V tz,
+            const V txa,
+            const V tya,
+            const V tza,
+            const V ia, 
+            const V ja, 
+            const V ka, 
+            const V radius
+        );
     
     }   // namespace helpers
 }   // namespace simbi

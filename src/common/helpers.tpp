@@ -1,4 +1,5 @@
 
+#include "util/device_api.hpp"
 #include "util/parallel_for.hpp"
 
 namespace simbi {
@@ -1731,9 +1732,9 @@ namespace simbi {
         {
 #if GPU_CODE
             real cfl_dt;
-            const luint ii  = blockDim.x * blockIdx.x + threadIdx.x;
-            const luint jj  = blockDim.y * blockIdx.y + threadIdx.y;
-            const luint kk  = blockDim.z * blockIdx.z + threadIdx.z;
+            const luint ii = blockDim.x * blockIdx.x + threadIdx.x;
+            const luint jj = blockDim.y * blockIdx.y + threadIdx.y;
+            const luint kk = blockDim.z * blockIdx.z + threadIdx.z;
             const luint gid =
                 flattened_index(ii, jj, kk, self->nx, self->ny, self->nz);
             if ((ii < self->nx) && (jj < self->ny) && (kk < self->nz)) {
@@ -2361,7 +2362,8 @@ namespace simbi {
             }
         }
 
-        template <typename T> GPU_CALLABLE T cubic(T b, T c, T d)
+        template <typename T>
+        GPU_CALLABLE T cubic(T b, T c, T d)
         {
             T p = c - b * b / 3.0;
             T q = 2.0 * b * b * b / 27.0 - b * c / 3.0 + d;
@@ -2450,7 +2452,8 @@ namespace simbi {
         }
 
         // Function to swap two elements
-        template <typename T> GPU_CALLABLE void myswap(T& a, T& b)
+        template <typename T>
+        GPU_CALLABLE void myswap(T& a, T& b)
         {
             T temp = a;
             a      = b;
@@ -2489,20 +2492,24 @@ namespace simbi {
         }
 
         template <typename T, typename U>
-        GPU_SHARED T* shared_memory_proxy(U object)
+        GPU_SHARED T* shared_memory_proxy(const U object)
         {
 #if GPU_CODE
-            // do we need an __align__() here? I don't think so...
-            GPU_EXTERN_SHARED unsigned char memory[];
-            return reinterpret_cast<T*>(memory);
+            if constexpr (global::on_sm) {
+                // do we need an __align__() here? I don't think so...
+                GPU_EXTERN_SHARED unsigned char memory[];
+                return reinterpret_cast<T*>(memory);
+            }
+            else {
+                return object;
+            }
 #else
             return object;
 #endif
         }
 
         template <typename index_type, typename T>
-        GPU_CALLABLE
-        index_type flattened_index(
+        GPU_CALLABLE index_type flattened_index(
             index_type ii,
             index_type jj,
             index_type kk,
@@ -2520,8 +2527,7 @@ namespace simbi {
         }
 
         template <int dim, BlockAxis axis, typename T>
-        GPU_CALLABLE
-        T get_axis_index(T idx, T ni, T nj, T kk)
+        GPU_CALLABLE T get_axis_index(T idx, T ni, T nj, T kk)
         {
             if constexpr (dim == 1) {
                 if constexpr (axis != BlockAxis::I) {
@@ -2585,6 +2591,122 @@ namespace simbi {
                 (total_zones - real_zones) * sizeof(T);
             return (advance_contr + cons2prim_contr + ghost_conf_contr) /
                    (delta_t * 1e9);
+        }
+
+        template <int dim, typename T, typename U, typename V>
+        GPU_CALLABLE void load_shared_buffer(
+            const ExecutionPolicy<>& p,
+            T& buffer,
+            const U& data,
+            const V ni,
+            const V nj,
+            const V nk,
+            const V sx,
+            const V sy,
+            const V tx,
+            const V ty,
+            const V tz,
+            const V txa,
+            const V tya,
+            const V tza,
+            const V ia,
+            const V ja,
+            const V ka,
+            const V radius
+        )
+        {
+
+            const V aid = ka * nj * ni + ja * ni + ia;
+            if constexpr (dim == 1) {
+                V txl = p.blockSize.x;
+                // Check if the active index exceeds the active zones
+                // if it does, then this thread buffer will taken on the
+                // ghost index at the very end and return
+                buffer[txa] = data[ia];
+                if (tx < radius) {
+                    if (blockIdx.x == p.gridSize.x - 1 &&
+                        (ia + p.blockSize.x > ni - radius + tx)) {
+                        txl = ni - radius - ia + tx;
+                    }
+                    buffer[txa - radius] = data[ia - radius];
+                    buffer[txa + txl]    = data[ia + txl];
+                }
+                gpu::api::synchronize();
+            }
+            else if constexpr (dim == 2) {
+                V txl = p.blockSize.x;
+                V tyl = p.blockSize.y;
+                // Load Shared memory into buffer for active zones plus
+                // ghosts
+                buffer[tya * sx + txa * sy] = data[aid];
+                if (ty < radius) {
+                    if (blockIdx.y == p.gridSize.y - 1 &&
+                        (ja + p.blockSize.y > nj - radius + ty)) {
+                        tyl = nj - radius - ja + ty;
+                    }
+                    buffer[(tya - radius) * sx + txa] =
+                        data[(ja - radius) * ni + ia];
+                    buffer[(tya + tyl) * sx + txa] = data[(ja + tyl) * ni + ia];
+                }
+                if (tx < radius) {
+                    if (blockIdx.x == p.gridSize.x - 1 &&
+                        (ia + p.blockSize.x > ni - radius + tx)) {
+                        txl = ni - radius - ia + tx;
+                    }
+                    buffer[tya * sx + txa - radius] =
+                        data[ja * ni + (ia - radius)];
+                    buffer[tya * sx + txa + txl] = data[ja * ni + (ia + txl)];
+                }
+                gpu::api::synchronize();
+            }
+            else {
+                V txl = p.blockSize.x;
+                V tyl = p.blockSize.y;
+                V tzl = p.blockSize.z;
+                // Load Shared memory into buffer for active zones plus
+                // ghosts
+                buffer[tza * sx * sy + tya * sx + txa] = data[aid];
+                if (tz == 0) {
+                    if ((blockIdx.z == p.gridSize.z - 1) &&
+                        (ka + p.blockSize.z > nk - radius + tz)) {
+                        tzl = nk - radius - ka + tz;
+                    }
+                    for (int q = 1; q < radius + 1; q++) {
+                        const auto re = tzl + q - 1;
+                        buffer[(tza - q) * sx * sy + tya * sx + txa] =
+                            data[(ka - q) * ni * nj + ja * ni + ia];
+                        buffer[(tza + re) * sx * sy + tya * sx + txa] =
+                            data[(ka + re) * ni * nj + ja * ni + ia];
+                    }
+                }
+                if (ty == 0) {
+                    if ((blockIdx.y == p.gridSize.y - 1) &&
+                        (ja + p.blockSize.y > nj - radius + ty)) {
+                        tyl = nj - radius - ja + ty;
+                    }
+                    for (int q = 1; q < radius + 1; q++) {
+                        const auto re = tyl + q - 1;
+                        buffer[tza * sx * sy + (tya - q) * sx + txa] =
+                            data[ka * ni * nj + (ja - q) * ni + ia];
+                        buffer[tza * sx * sy + (tya + re) * sx + txa] =
+                            data[ka * ni * nj + (ja + re) * ni + ia];
+                    }
+                }
+                if (tx == 0) {
+                    if ((blockIdx.x == p.gridSize.x - 1) &&
+                        (ia + p.blockSize.x > ni - radius + tx)) {
+                        txl = ni - radius - ia + tx;
+                    }
+                    for (int q = 1; q < radius + 1; q++) {
+                        const auto re = txl + q - 1;
+                        buffer[tza * sx * sy + tya * sx + txa - q] =
+                            data[ka * ni * nj + ja * ni + ia - q];
+                        buffer[tza * sx * sy + tya * sx + txa + re] =
+                            data[ka * ni * nj + ja * ni + ia + re];
+                    }
+                }
+                gpu::api::synchronize();
+            }
         }
     }   // namespace helpers
 }   // namespace simbi
