@@ -18,6 +18,7 @@ AllowShortIfStatementsOnASingleLine: false
 AlignTrailingComments: true
 AllowAllArgumentsOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
+AlwaysBreakTemplateDeclarations: Yes
 SpacesBeforeTrailingComments: 3
 AlignAfterOpenBracket: BlockIndent
 #  #define SHORT_NAME       42
@@ -37,7 +38,7 @@ ReflowComments: true
 PointerAlignment: Left
 PackConstructorInitializers: NextLine
 
-IndentPPDirectives: BeforeHash
+# IndentPPDirectives: BeforeHash
 InsertBraces: true
 BinPackArguments: false
 BinPackParameters: false
