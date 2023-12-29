@@ -75,8 +75,8 @@ namespace simbi {
             const std::string filename,
             const PrimData prims,
             const DataWriteMembers setup,
-            const int dim  = 2,
-            const int size = 1
+            const int dim,
+            const int size
         )
         {
             std::string filePath = data_directory;
@@ -131,192 +131,63 @@ namespace simbi {
             else {
                 real_type = H5::PredType::NATIVE_FLOAT;
             }
-            switch (dim) {
-                case 1:
-                    {
-                        H5::DataSet dataset =
-                            file.createDataSet("rho", real_type, dataspace);
 
-                        // Write the Primitives
-                        dataset.write(prims.rho.data(), real_type);
-                        dataset.close();
+            // Save the hydro date
+            H5::DataSet dataset =
+                file.createDataSet("rho", real_type, dataspace);
 
-                        dataset =
-                            file.createDataSet("v1", real_type, dataspace);
-                        dataset.write(prims.v1.data(), real_type);
-                        dataset.close();
+            // Write the Primitives
+            dataset.write(prims.rho.data(), real_type);
+            dataset.close();
 
-                        dataset = file.createDataSet("p", real_type, dataspace);
-                        dataset.write(prims.p.data(), real_type);
-                        dataset.close();
+            dataset = file.createDataSet("v1", real_type, dataspace);
+            dataset.write(prims.v1.data(), real_type);
+            dataset.close();
 
-                        dataset =
-                            file.createDataSet("chi", real_type, dataspace);
-                        dataset.write(prims.chi.data(), real_type);
-                        dataset.close();
+            if (dim > 1) {
+                dataset = file.createDataSet("v2", real_type, dataspace);
+                dataset.write(prims.v2.data(), real_type);
+                dataset.close();
 
-                        dataset =
-                            file.createDataSet("x1", real_type, dataspacex1);
-                        dataset.write(setup.x1.data(), real_type);
-                        dataset.close();
+                dataset = file.createDataSet("x2", real_type, dataspacex2);
+                dataset.write(setup.x2.data(), real_type);
+                dataset.close();
+            }
+            if (dim > 2) {
+                dataset = file.createDataSet("v3", real_type, dataspace);
+                dataset.write(prims.v3.data(), real_type);
+                dataset.close();
 
-                        if (setup.regime == "srmhd") {
-                            dataset =
-                                file.createDataSet("v2", real_type, dataspace);
-                            dataset.write(prims.v2.data(), real_type);
-                            dataset.close();
+                dataset = file.createDataSet("x3", real_type, dataspacex3);
+                dataset.write(setup.x3.data(), real_type);
+                dataset.close();
+            }
 
-                            dataset =
-                                file.createDataSet("v3", real_type, dataspace);
-                            dataset.write(prims.v3.data(), real_type);
-                            dataset.close();
+            dataset = file.createDataSet("p", real_type, dataspace);
+            dataset.write(prims.p.data(), real_type);
+            dataset.close();
 
-                            dataset =
-                                file.createDataSet("b1", real_type, dataspace);
-                            dataset.write(prims.b1.data(), real_type);
-                            dataset.close();
+            dataset = file.createDataSet("chi", real_type, dataspace);
+            dataset.write(prims.chi.data(), real_type);
+            dataset.close();
 
-                            dataset =
-                                file.createDataSet("b2", real_type, dataspace);
-                            dataset.write(prims.b2.data(), real_type);
-                            dataset.close();
+            dataset = file.createDataSet("x1", real_type, dataspacex1);
+            dataset.write(setup.x1.data(), real_type);
+            dataset.close();
 
-                            dataset =
-                                file.createDataSet("b3", real_type, dataspace);
-                            dataset.write(prims.b3.data(), real_type);
-                            dataset.close();
-                        }
-                        break;
-                    }
-                case 2:
-                    {
-                        H5::DataSet dataset =
-                            file.createDataSet("rho", real_type, dataspace);
+            if (setup.regime == "srmhd") {
+                dataset = file.createDataSet("b1", real_type, dataspace);
+                dataset.write(prims.b1.data(), real_type);
+                dataset.close();
 
-                        // Write the Primitives
-                        dataset.write(prims.rho.data(), real_type);
-                        dataset.close();
+                dataset = file.createDataSet("b2", real_type, dataspace);
+                dataset.write(prims.b2.data(), real_type);
+                dataset.close();
 
-                        dataset =
-                            file.createDataSet("v1", real_type, dataspace);
-                        dataset.write(prims.v1.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("v2", real_type, dataspace);
-                        dataset.write(prims.v2.data(), real_type);
-                        dataset.close();
-
-                        dataset = file.createDataSet("p", real_type, dataspace);
-                        dataset.write(prims.p.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("chi", real_type, dataspace);
-                        dataset.write(prims.chi.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("x1", real_type, dataspacex1);
-                        dataset.write(setup.x1.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("x2", real_type, dataspacex2);
-                        dataset.write(setup.x2.data(), real_type);
-                        dataset.close();
-
-                        if (setup.regime == "srmhd") {
-
-                            dataset =
-                                file.createDataSet("v3", real_type, dataspace);
-                            dataset.write(prims.v3.data(), real_type);
-                            dataset.close();
-
-                            dataset =
-                                file.createDataSet("b1", real_type, dataspace);
-                            dataset.write(prims.b1.data(), real_type);
-                            dataset.close();
-
-                            dataset =
-                                file.createDataSet("b2", real_type, dataspace);
-                            dataset.write(prims.b2.data(), real_type);
-                            dataset.close();
-
-                            dataset =
-                                file.createDataSet("b3", real_type, dataspace);
-                            dataset.write(prims.b3.data(), real_type);
-                            dataset.close();
-                        }
-                        break;
-                    }
-                case 3:
-                    {
-                        H5::DataSet dataset =
-                            file.createDataSet("rho", real_type, dataspace);
-
-                        // Write the Primitives
-                        dataset.write(prims.rho.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("v1", real_type, dataspace);
-                        dataset.write(prims.v1.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("v2", real_type, dataspace);
-                        dataset.write(prims.v2.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("v3", real_type, dataspace);
-                        dataset.write(prims.v3.data(), real_type);
-                        dataset.close();
-
-                        dataset = file.createDataSet("p", real_type, dataspace);
-                        dataset.write(prims.p.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("chi", real_type, dataspace);
-                        dataset.write(prims.chi.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("x1", real_type, dataspacex1);
-                        dataset.write(setup.x1.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("x2", real_type, dataspacex2);
-                        dataset.write(setup.x2.data(), real_type);
-                        dataset.close();
-
-                        dataset =
-                            file.createDataSet("x3", real_type, dataspacex3);
-                        dataset.write(setup.x3.data(), real_type);
-                        dataset.close();
-
-                        if (setup.regime == "srmhd") {
-                            dataset =
-                                file.createDataSet("b1", real_type, dataspace);
-                            dataset.write(prims.b1.data(), real_type);
-                            dataset.close();
-
-                            dataset =
-                                file.createDataSet("b2", real_type, dataspace);
-                            dataset.write(prims.b2.data(), real_type);
-                            dataset.close();
-
-                            dataset =
-                                file.createDataSet("b3", real_type, dataspace);
-                            dataset.write(prims.b3.data(), real_type);
-                            dataset.close();
-                        }
-                        break;
-                    }
-            }   // end switch
+                dataset = file.createDataSet("b3", real_type, dataspace);
+                dataset.write(prims.b3.data(), real_type);
+                dataset.close();
+            }
 
             // Write Datset Attributesauto real_type(real_type);
             H5::DataType int_type(H5::PredType::NATIVE_INT);
@@ -336,10 +207,6 @@ namespace simbi {
 
             att = sim_info.createAttribute("time_step", real_type, att_space);
             att.write(real_type, &setup.dt);
-            att.close();
-
-            att = sim_info.createAttribute("linspace", bool_type, att_space);
-            att.write(bool_type, &setup.linspace);
             att.close();
 
             att = sim_info.createAttribute("first_order", bool_type, att_space);
