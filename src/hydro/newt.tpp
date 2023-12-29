@@ -50,14 +50,14 @@ Newtonian<dim>::get_x1face(const lint ii, const int side) const
         default:
             {
                 const real x1l = helpers::my_max<real>(
-                    x1min * std::pow(10, (ii - 0.5) * dlogx1),
+                    x1min * std::pow(10.0, (ii - 0.5) * dlogx1),
                     x1min
                 );
                 if (side == 0) {
                     return x1l;
                 }
                 return helpers::my_min<real>(
-                    x1l * std::pow(10, dlogx1 * (ii == 0 ? 0.5 : 1.0)),
+                    x1l * std::pow(10.0, dlogx1 * (ii == 0 ? 0.5 : 1.0)),
                     x1max
                 );
             }
@@ -84,14 +84,14 @@ Newtonian<dim>::get_x2face(const lint ii, const int side) const
         default:
             {
                 const real x2l = helpers::my_max<real>(
-                    x2min * std::pow(10, (ii - 0.5) * dlogx2),
+                    x2min * std::pow(10.0, (ii - 0.5) * dlogx2),
                     x2min
                 );
                 if (side == 0) {
                     return x2l;
                 }
                 return helpers::my_min<real>(
-                    x2l * std::pow(10, dlogx2 * (ii == 0 ? 0.5 : 1.0)),
+                    x2l * std::pow(10.0, dlogx2 * (ii == 0 ? 0.5 : 1.0)),
                     x2max
                 );
             }
@@ -118,14 +118,14 @@ Newtonian<dim>::get_x3face(const lint ii, const int side) const
         default:
             {
                 const real x3l = helpers::my_max<real>(
-                    x3min * std::pow(10, (ii - 0.5) * dlogx3),
+                    x3min * std::pow(10.0, (ii - 0.5) * dlogx3),
                     x3min
                 );
                 if (side == 0) {
                     return x3l;
                 }
                 return helpers::my_min<real>(
-                    x3l * std::pow(10, dlogx3 * (ii == 0 ? 0.5 : 1.0)),
+                    x3l * std::pow(10.0, dlogx3 * (ii == 0 ? 0.5 : 1.0)),
                     x3max
                 );
             }

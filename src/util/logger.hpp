@@ -74,7 +74,8 @@ namespace simbi {
                 }
             }
 
-            template <typename T> void recordEvent(T& stamp)
+            template <typename T>
+            void recordEvent(T& stamp)
             {
                 if constexpr (std::is_same_v<
                                   T,
@@ -355,7 +356,7 @@ namespace simbi {
                             );
                             if (sim_state.dlogt != 0) {
                                 sim_state.t_interval *=
-                                    std::pow(10, sim_state.dlogt);
+                                    std::pow(10.0, sim_state.dlogt);
                             }
                             else {
                                 sim_state.t_interval +=
@@ -382,7 +383,7 @@ namespace simbi {
                 print_avg_speed(logger);
             };
         }   // namespace logger
-    }       // namespace detail
+    }   // namespace detail
 
 }   // namespace simbi
 #endif

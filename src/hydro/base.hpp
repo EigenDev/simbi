@@ -20,7 +20,7 @@
 
 #include "build_options.hpp"   // for real, luint, global::managed_memory, use...
 #include "common/enums.hpp"    // for Cellspacing, BoundaryCondition (...
-#include "common/helpers.hpp"     // for geometry_map, solver_map
+#include "common/helpers.hpp"         // for geometry_map, solver_map
 #include "common/hydro_structs.hpp"   // for InitialConditions, DataWriteMembers
 #include "util/managed.hpp"           // for Managed
 #include "util/ndarray.hpp"           // for ndarray
@@ -132,7 +132,7 @@ namespace simbi {
         {
             real round_place = 1 / chkpt_interval;
             t_interval       = dlogt != 0
-                                   ? tstart * std::pow(10, dlogt)
+                                   ? tstart * std::pow(10.0, dlogt)
                                    : floor(tstart * round_place + 0.5) / round_place +
                                    chkpt_interval;
         }
