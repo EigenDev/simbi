@@ -80,10 +80,10 @@ namespace generic_hydro {
         real rho, v1, p, chi;
 
         // Default Destructor
-        GPU_CALLABLE_MEMBER ~Primitive() = default;
+        ~Primitive() = default;
 
         // Default Constructor
-        GPU_CALLABLE_MEMBER Primitive() = default;
+        Primitive() = default;
 
         // Copy-Assignment Constructor
         GPU_CALLABLE_MEMBER
@@ -151,10 +151,10 @@ namespace generic_hydro {
         real rho, v1, v2, p, chi;
 
         // Default Constructor
-        GPU_CALLABLE_MEMBER Primitive() = default;
+        Primitive() = default;
 
         // Default Destructor
-        GPU_CALLABLE_MEMBER ~Primitive() = default;
+        ~Primitive() = default;
 
         // Copy-Assignment Constructor
         GPU_CALLABLE_MEMBER
@@ -236,10 +236,10 @@ namespace generic_hydro {
         real rho, v1, v2, v3, p, chi;
 
         // Default Constructor
-        GPU_CALLABLE_MEMBER Primitive() = default;
+        Primitive() = default;
 
         // Default Destructor
-        GPU_CALLABLE_MEMBER ~Primitive() = default;
+        ~Primitive() = default;
 
         // Copy-Assignment Constructor
         GPU_CALLABLE_MEMBER
@@ -325,10 +325,10 @@ namespace generic_hydro {
         real den, m1, nrg, chi;
 
         // Default Destructor
-        GPU_CALLABLE_MEMBER ~Conserved() = default;
+        ~Conserved() = default;
 
         // Default Constructor
-        GPU_CALLABLE_MEMBER Conserved() = default;
+        Conserved() = default;
 
         // Copy-Assignment Constructor
         GPU_CALLABLE_MEMBER
@@ -410,10 +410,10 @@ namespace generic_hydro {
         real den, m1, m2, nrg, chi;
 
         // Default Constructor
-        GPU_CALLABLE_MEMBER Conserved() = default;
+        Conserved() = default;
 
         // Default Destructor
-        GPU_CALLABLE_MEMBER ~Conserved() = default;
+        ~Conserved() = default;
 
         // Copy-Assignment Constructor
         GPU_CALLABLE_MEMBER
@@ -506,10 +506,10 @@ namespace generic_hydro {
         real den, m1, m2, m3, nrg, chi;
 
         // Default Constructor
-        GPU_CALLABLE_MEMBER Conserved() = default;
+        Conserved() = default;
 
         // Default Destructor
-        GPU_CALLABLE_MEMBER ~Conserved() = default;
+        ~Conserved() = default;
 
         // Copy-Assignment Constructor
         GPU_CALLABLE_MEMBER
@@ -1344,9 +1344,9 @@ namespace rmhd {
     struct AnyPrimitive {
         real rho, v1, v2, v3, p, b1, b2, b3, chi;
 
-        GPU_CALLABLE_MEMBER AnyPrimitive() = default;
+        AnyPrimitive() = default;
 
-        GPU_CALLABLE_MEMBER ~AnyPrimitive() = default;
+        ~AnyPrimitive() = default;
 
         GPU_CALLABLE_MEMBER
         AnyPrimitive& operator=(const AnyPrimitive& other
