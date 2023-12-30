@@ -2592,7 +2592,7 @@ namespace simbi {
         }
 
         template <int dim, typename T, typename U, typename V>
-        GPU_CALLABLE void load_shared_buffer(
+        GPU_DEV void load_shared_buffer(
             const ExecutionPolicy<>& p,
             T& buffer,
             const U& data,

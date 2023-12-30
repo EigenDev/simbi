@@ -274,7 +274,8 @@ namespace simbi {
          * @param val values
          * @return sign of val
          */
-        template <typename T> GPU_CALLABLE_INLINE constexpr int sgn(T val)
+        template <typename T>
+        GPU_CALLABLE_INLINE constexpr int sgn(T val)
         {
             return (T(0) < val) - (val < T(0));
         }
@@ -1100,9 +1101,9 @@ namespace simbi {
             // Adapted from https://stackoverflow.com/a/59883722/13874039
             // to work with older cuda versions
             int mask;
-    #if __CUDA_ARCH__ >= 700
+#if __CUDA_ARCH__ >= 700
             mask = __match_any_sync(__activemask(), val);
-    #else
+#else
             unsigned tmask = __activemask();
             for (int i = 0; i < global::WARP_SIZE; i++) {
                 unsigned long long tval =
@@ -1113,7 +1114,7 @@ namespace simbi {
                     mask = my_mask;
                 }
             }
-    #endif
+#endif
             for (int offset = global::WARP_SIZE / 2; offset > 0; offset /= 2) {
                 real next_val = __shfl_down_sync(mask, val, offset);
                 val           = (val < next_val) ? val : next_val;
@@ -1214,14 +1215,16 @@ namespace simbi {
         // https://stackoverflow.com/a/50747781/13874039
 
         // solve the cubic equation
-        template <typename T> GPU_CALLABLE T cubic(T b, T c, T d);
+        template <typename T>
+        GPU_CALLABLE T cubic(T b, T c, T d);
 
         // solve the quartic queation
         template <typename T>
         GPU_CALLABLE int quartic(T b, T c, T d, T e, T res[4]);
 
         // swap any two values
-        template <typename T> GPU_CALLABLE void swap(T& a, T& b);
+        template <typename T>
+        GPU_CALLABLE void swap(T& a, T& b);
 
         // Partition the array and return the pivot index
         template <typename T, typename index_type>
@@ -1236,8 +1239,7 @@ namespace simbi {
         GPU_SHARED T* shared_memory_proxy(const U object);
 
         template <typename index_type, typename T>
-        GPU_CALLABLE
-        index_type flattened_index(
+        GPU_CALLABLE index_type flattened_index(
             index_type ii,
             index_type jj,
             index_type kk,
@@ -1247,18 +1249,16 @@ namespace simbi {
         );
 
         template <int dim, BlockAxis axis, typename T>
-        GPU_CALLABLE
-        T get_axis_index(T idx, T ni, T nj, T kk = T(0));
+        GPU_CALLABLE T get_axis_index(T idx, T ni, T nj, T kk = T(0));
 
         template <int dim, typename T, typename U, typename V>
-        GPU_CALLABLE
-        void load_shared_buffer(
-            const ExecutionPolicy<> &p, 
-            T &buffer, 
-            const U &data, 
-            const V ni, 
-            const V nj, 
-            const V nk,  
+        GPU_DEV void load_shared_buffer(
+            const ExecutionPolicy<>& p,
+            T& buffer,
+            const U& data,
+            const V ni,
+            const V nj,
+            const V nk,
             const V sx,
             const V sy,
             const V tx,
@@ -1267,12 +1267,12 @@ namespace simbi {
             const V txa,
             const V tya,
             const V tza,
-            const V ia, 
-            const V ja, 
-            const V ka, 
+            const V ia,
+            const V ja,
+            const V ka,
             const V radius
         );
-    
+
     }   // namespace helpers
 }   // namespace simbi
 
