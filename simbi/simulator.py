@@ -167,11 +167,14 @@ class Hydro:
                 )
             self.dimensionality = np.asanyarray(initial_state[0]).ndim
 
-        ngeom = len(self.geometry)
+        if not tuple_of_tuples(self.geometry):
+            ngeom = 1
+        else:
+            ngeom = len(self.geometry)
         nres = len(self.resolution)
 
-        # if len(self.geometry) != self.dimensionality:
-        #     raise ValueError(f"Detecing a {self.dimensionality}D run, but only {ngeom} geometry tuples")
+        if ngeom != self.dimensionality:
+            raise ValueError(f"Detecing a {self.dimensionality}D run, but only {ngeom} geometry tuple(s)")
 
         if len(self.resolution) != self.dimensionality:
             raise ValueError(
