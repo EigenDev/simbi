@@ -143,9 +143,9 @@ namespace simbi {
         }
 
       protected:
-        HydroBase() {}
+        HydroBase() = default;
 
-        ~HydroBase() {}
+        ~HydroBase() = default;
 
         HydroBase(
             std::vector<std::vector<real>> state,

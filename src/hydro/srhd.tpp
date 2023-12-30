@@ -9,9 +9,7 @@ using namespace simbi::util;
 
 // Default Constructor
 template <int dim>
-SRHD<dim>::SRHD()
-{
-}
+SRHD<dim>::SRHD() = default;
 
 // Overloaded Constructor
 template <int dim>
@@ -25,9 +23,7 @@ SRHD<dim>::SRHD(
 
 // Destructor
 template <int dim>
-SRHD<dim>::~SRHD()
-{
-}
+SRHD<dim>::~SRHD() = default;
 
 // Helpers
 template <int dim>

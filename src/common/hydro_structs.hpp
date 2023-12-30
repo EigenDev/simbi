@@ -643,9 +643,9 @@ namespace hydro1d {
     };
 
     struct PrimitiveSOA {
-        PrimitiveSOA() {}
+        PrimitiveSOA() = default;
 
-        ~PrimitiveSOA() {}
+        ~PrimitiveSOA() = default;
 
         std::vector<real> rho, v1, p, chi;
     };
@@ -653,9 +653,9 @@ namespace hydro1d {
     struct Eigenvals {
         real aL, aR, aStar, pStar;
 
-        GPU_CALLABLE_MEMBER Eigenvals() {}
+        Eigenvals() = default;
 
-        GPU_CALLABLE_MEMBER ~Eigenvals() {}
+        ~Eigenvals() = default;
 
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
 
@@ -710,17 +710,17 @@ namespace hydro2d {
     };
 
     struct PrimitiveSOA {
-        PrimitiveSOA() {}
+        PrimitiveSOA() = default;
 
-        ~PrimitiveSOA() {}
+        ~PrimitiveSOA() = default;
 
         std::vector<real> rho, v1, v2, p, chi;
     };
 
     struct Eigenvals {
-        GPU_CALLABLE_MEMBER Eigenvals() {}
+        Eigenvals() = default;
 
-        GPU_CALLABLE_MEMBER ~Eigenvals() {}
+        ~Eigenvals() = default;
 
         real aL, aR, csL, csR, aStar, pStar;
 
@@ -774,17 +774,17 @@ namespace hydro3d {
     };
 
     struct PrimitiveSOA {
-        PrimitiveSOA() {}
+        PrimitiveSOA() = default;
 
-        ~PrimitiveSOA() {}
+        ~PrimitiveSOA() = default;
 
         std::vector<real> rho, v1, v2, v3, p, chi;
     };
 
     struct Eigenvals {
-        GPU_CALLABLE_MEMBER Eigenvals() {}
+        Eigenvals() = default;
 
-        GPU_CALLABLE_MEMBER ~Eigenvals() {}
+        ~Eigenvals() = default;
 
         real aL, aR, csL, csR, aStar, pStar;
 
@@ -860,9 +860,9 @@ namespace sr1d {
     };
 
     struct PrimitiveSOA {
-        PrimitiveSOA() {}
+        PrimitiveSOA() = default;
 
-        ~PrimitiveSOA() {}
+        ~PrimitiveSOA() = default;
 
         std::vector<real> rho, v1, p, chi;
     };
@@ -870,9 +870,9 @@ namespace sr1d {
     struct Eigenvals {
         real aL, aR, csL, csR;
 
-        GPU_CALLABLE_MEMBER Eigenvals() {}
+        Eigenvals() = default;
 
-        GPU_CALLABLE_MEMBER ~Eigenvals() {}
+        ~Eigenvals() = default;
 
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR)
             : aL(aL), aR(aR), csL(0), csR(0)
@@ -958,17 +958,17 @@ namespace sr2d {
     };
 
     struct PrimitiveSOA {
-        PrimitiveSOA() {}
+        PrimitiveSOA() = default;
 
-        ~PrimitiveSOA() {}
+        ~PrimitiveSOA() = default;
 
         std::vector<real> rho, v1, v2, p, chi;
     };
 
     struct Eigenvals {
-        GPU_CALLABLE_MEMBER Eigenvals() {}
+        Eigenvals() = default;
 
-        GPU_CALLABLE_MEMBER ~Eigenvals() {}
+        ~Eigenvals() = default;
 
         real aL, aR, csL, csR;
 
@@ -1054,17 +1054,17 @@ namespace sr3d {
     };
 
     struct PrimitiveSOA {
-        PrimitiveSOA() {}
+        PrimitiveSOA() = default;
 
-        ~PrimitiveSOA() {}
+        ~PrimitiveSOA() = default;
 
         std::vector<real> rho, v1, v2, v3, p, chi;
     };
 
     struct Eigenvals {
-        GPU_CALLABLE_MEMBER Eigenvals() {}
+        Eigenvals() = default;
 
-        GPU_CALLABLE_MEMBER ~Eigenvals() {}
+        ~Eigenvals() = default;
 
         real aL, aR, csL, csR;
 
@@ -1089,9 +1089,9 @@ namespace rmhd {
     struct AnyConserved {
         real den, m1, m2, m3, nrg, b1, b2, b3, chi;
 
-        GPU_CALLABLE_MEMBER AnyConserved() {}
+        AnyConserved() = default;
 
-        GPU_CALLABLE_MEMBER ~AnyConserved() {}
+        ~AnyConserved() = default;
 
         GPU_CALLABLE_MEMBER AnyConserved(real den, real m1, real nrg, real b1)
             : den(den),
@@ -1683,9 +1683,9 @@ namespace rmhd {
       public:
         real zero, one, two, three;
 
-        GPU_CALLABLE_MEMBER mag_four_vec() {}
+        mag_four_vec() = default;
 
-        GPU_CALLABLE_MEMBER ~mag_four_vec() {}
+        ~mag_four_vec() = default;
 
         GPU_CALLABLE_MEMBER mag_four_vec(const AnyPrimitive<dim>& prim)
             : lorentz(prim.lorentz_factor()),
@@ -1719,9 +1719,9 @@ namespace rmhd {
     };
 
     struct PrimitiveSOA {
-        PrimitiveSOA() {}
+        PrimitiveSOA() = default;
 
-        ~PrimitiveSOA() {}
+        ~PrimitiveSOA() = default;
 
         std::vector<real> rho, v1, v2, v3, p, b1, b2, b3, chi;
     };
@@ -1729,9 +1729,9 @@ namespace rmhd {
     struct Eigenvals {
         real afL, afR, csL, csR;
 
-        GPU_CALLABLE_MEMBER Eigenvals() {}
+        Eigenvals() = default;
 
-        GPU_CALLABLE_MEMBER ~Eigenvals() {}
+        ~Eigenvals() = default;
 
         GPU_CALLABLE_MEMBER Eigenvals(real afL, real afR) : afL(afL), afR(afR)
         {

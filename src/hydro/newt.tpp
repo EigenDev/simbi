@@ -9,9 +9,7 @@ using namespace simbi::util;
 
 // Default Constructor
 template <int dim>
-Newtonian<dim>::Newtonian()
-{
-}
+Newtonian<dim>::Newtonian() = default;
 
 // Overloaded Constructor
 template <int dim>
@@ -25,9 +23,7 @@ Newtonian<dim>::Newtonian(
 
 // Destructor
 template <int dim>
-Newtonian<dim>::~Newtonian()
-{
-}
+Newtonian<dim>::~Newtonian() = default;
 
 // Helpers
 template <int dim>
@@ -202,9 +198,11 @@ Newtonian<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real
-Newtonian<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk)
-    const
+GPU_CALLABLE_MEMBER real Newtonian<dim>::get_cell_volume(
+    const lint ii,
+    const lint jj,
+    const lint kk
+) const
 {
     if (geometry == Geometry::CARTESIAN) {
         return 1.0;

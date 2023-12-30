@@ -30,12 +30,15 @@ struct ExecutionException : public std::exception {
 
 namespace simbi {
 
-    template <typename T = luint, typename U = luint> struct ExecutionPolicy {
+    template <typename T = luint, typename U = luint>
+    struct ExecutionPolicy {
         T nzones;
         dim3 gridSize;
         dim3 blockSize;
         size_t sharedMemBytes;
         simbiStream_t stream;
+
+        ~ExecutionPolicy() = default;
 
         ExecutionPolicy(const T nzones, const U blockSize)
             : blockSize(dim3(blockSize)), sharedMemBytes(0), stream(0)
@@ -127,8 +130,6 @@ namespace simbi {
             }
             build_grid(glist, blist);
         }
-
-        GPU_CALLABLE_MEMBER ~ExecutionPolicy() {}
 
         T compute_blocks(const T nzones, const luint nThreads) const
         {

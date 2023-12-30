@@ -127,7 +127,7 @@ namespace simbi {
                       speed(0),
                       zu_avg(0),
                       delta_t(0){};
-                ~Logger(){};
+                ~Logger() = default;
             };
 
             inline void print_avg_speed(Logger& logger)
@@ -383,7 +383,7 @@ namespace simbi {
                 print_avg_speed(logger);
             };
         }   // namespace logger
-    }   // namespace detail
+    }       // namespace detail
 
 }   // namespace simbi
 #endif

@@ -3,7 +3,8 @@
 
 using namespace simbi;
 
-template <typename F> std::optional<F> optional_wrapper(F func)
+template <typename F>
+std::optional<F> optional_wrapper(F func)
 {
     if (func) {
         return func;
@@ -11,9 +12,9 @@ template <typename F> std::optional<F> optional_wrapper(F func)
     return {};
 }
 
-Driver::Driver() {}
+Driver::Driver() = default;
 
-Driver::~Driver() {}
+Driver::~Driver() = default;
 
 template <typename Func>
 void Driver::run(
