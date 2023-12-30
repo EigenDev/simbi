@@ -44,18 +44,17 @@ namespace simbi {
     )
     {
         simbi::launch(p, [first, last, function] GPU_LAMBDA() {
-            if constexpr (global::on_gpu) {
-                for (auto idx : range(first, last, globalThreadCount())) {
-                    function(idx);
-                }
+#if GPU_CODE
+            for (auto idx : range(first, last, globalThreadCount())) {
+                function(idx);
             }
-            else {
-                // singleton instance of thread pool. lazy-evaluated
-                static auto& thread_pool = simbi::pooling::ThreadPool::instance(
-                    simbi::pooling::get_nthreads()
-                );
-                thread_pool.parallel_for(first, last, function);
-            }
+#else
+            // singleton instance of thread pool. lazy-evaluated
+            static auto& thread_pool = simbi::pooling::ThreadPool::instance(
+                simbi::pooling::get_nthreads()
+            );
+            thread_pool.parallel_for(first, last, function);
+#endif
         });
     }
 }   // namespace simbi
