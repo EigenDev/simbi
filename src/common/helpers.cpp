@@ -188,7 +188,7 @@ namespace simbi {
                 dataset.close();
             }
 
-            // Write Datset Attributesauto real_type(real_type);
+            // Write Dataset Attribute
             H5::DataType int_type(H5::PredType::NATIVE_INT);
 
             H5::DataType bool_type(H5::PredType::NATIVE_HBOOL);
