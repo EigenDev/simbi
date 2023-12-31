@@ -1041,10 +1041,7 @@ void Newtonian<dim>::advance(
                 dim < 2 ? false
                         : object_data
                               [kk * xpg * ypg + jj * xpg +
-                               helpers::my_max(
-                                   static_cast<lint>(ii - 1),
-                                   static_cast<lint>(0)
-                               )];
+                               helpers::my_max<lint>(ii - 1, 0)];
             const bool object_to_right =
                 dim < 2 ? false
                         : object_data
@@ -1055,29 +1052,21 @@ void Newtonian<dim>::advance(
                         : object_data
                               [kk * xpg * ypg +
                                helpers::my_min(jj + 1, ypg - 1) * xpg + ii];
-            const bool object_behind = dim < 2
-                                           ? false
-                                           : object_data
-                                                 [kk * xpg * ypg +
-                                                  helpers::my_max(
-                                                      static_cast<lint>(jj - 1),
-                                                      static_cast<lint>(0)
-                                                  ) * xpg +
-                                                  ii];
+            const bool object_behind =
+                dim < 2 ? false
+                        : object_data
+                              [kk * xpg * ypg +
+                               helpers::my_max<lint>(jj - 1, 0) * xpg + ii];
             const bool object_above =
                 dim < 3 ? false
                         : object_data
                               [helpers::my_min(kk + 1, zpg - 1) * xpg * ypg +
                                jj * xpg + ii];
-            const bool object_below = dim < 3
-                                          ? false
-                                          : object_data
-                                                [helpers::my_max(
-                                                     static_cast<lint>(kk - 1),
-                                                     static_cast<lint>(0)
-                                                 ) * xpg *
-                                                     ypg +
-                                                 jj * xpg + ii];
+            const bool object_below =
+                dim < 3 ? false
+                        : object_data
+                              [helpers::my_max<lint>(kk - 1, 0) * xpg * ypg +
+                               jj * xpg + ii];
 
             const real x1l    = get_x1face(ii, 0);
             const real x1r    = get_x1face(ii, 1);
