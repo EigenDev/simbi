@@ -18,10 +18,10 @@
 #ifndef SRHD_HPP
 #define SRHD_HPP
 
-#include "base.hpp"            // for HydroBase
-#include "build_options.hpp"   // for real, GPU_CALLABLE_MEMBER, lint, luint
-#include "common/enums.hpp"    // for TIMESTEP_TYPE
-#include "common/helpers.hpp"     // for my_min, my_max, ...
+#include "base.hpp"             // for HydroBase
+#include "build_options.hpp"    // for real, GPU_CALLABLE_MEMBER, lint, luint
+#include "common/enums.hpp"     // for TIMESTEP_TYPE
+#include "common/helpers.hpp"   // for my_min, my_max, ...
 #include "common/hydro_structs.hpp"   // for Conserved, Primitive
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
 #include "util/ndarray.hpp"           // for ndarray
@@ -31,7 +31,8 @@
 #include <vector>                     // for vector
 
 namespace simbi {
-    template <int dim> struct SRHD : public HydroBase {
+    template <int dim>
+    struct SRHD : public HydroBase {
         // set the primitive and conservative types at compile time
         using primitive_t = typename std::conditional_t<
             dim == 1,
@@ -172,15 +173,6 @@ namespace simbi {
     };
 
     namespace sr {
-        // Primitive<dim> template alias
-        template <int dim> using Primitive = typename SRHD<dim>::primitive_t;
-
-        // Conservative template alias
-        template <int dim> using Conserved = typename SRHD<dim>::conserved_t;
-
-        // Eigenvalue template alias
-        template <int dim> using Eigenvals = typename SRHD<dim>::eigenvals_t;
-
         // file writer template alias
         template <int dim>
         constexpr auto write2file = helpers::
@@ -189,15 +181,18 @@ namespace simbi {
     }   // namespace sr
 }   // namespace simbi
 
-template <> struct is_relativistic<simbi::SRHD<1>> {
+template <>
+struct is_relativistic<simbi::SRHD<1>> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic<simbi::SRHD<2>> {
+template <>
+struct is_relativistic<simbi::SRHD<2>> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic<simbi::SRHD<3>> {
+template <>
+struct is_relativistic<simbi::SRHD<3>> {
     static constexpr bool value = true;
 };
 

@@ -19,10 +19,10 @@
 #ifndef RMHD_HPP
 #define RMHD_HPP
 
-#include "base.hpp"            // for HydroBase
-#include "build_options.hpp"   // for real, GPU_CALLABLE_MEMBER, lint, luint
-#include "common/enums.hpp"    // for TIMESTEP_TYPE
-#include "common/helpers.hpp"     // for my_min, my_max, ...
+#include "base.hpp"             // for HydroBase
+#include "build_options.hpp"    // for real, GPU_CALLABLE_MEMBER, lint, luint
+#include "common/enums.hpp"     // for TIMESTEP_TYPE
+#include "common/helpers.hpp"   // for my_min, my_max, ...
 #include "common/hydro_structs.hpp"   // for Conserved, Primitive
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
 #include "util/ndarray.hpp"           // for ndarray
@@ -32,7 +32,8 @@
 #include <vector>                     // for vector
 
 namespace simbi {
-    template <int dim> struct RMHD : public HydroBase {
+    template <int dim>
+    struct RMHD : public HydroBase {
         // set the primitive and conservative types at compile time
         using primitive_t     = rmhd::AnyPrimitive<dim>;
         using conserved_t     = rmhd::AnyConserved<dim>;
@@ -193,34 +194,29 @@ namespace simbi {
     };
 
     namespace rm {
-        // Primitive<dim> template alias
-        template <int dim> using Primitive = typename RMHD<dim>::primitive_t;
-
-        // Conservative template alias
-        template <int dim> using Conserved = typename RMHD<dim>::conserved_t;
-
-        // Eigenvalue template alias
-        template <int dim> using Eigenvals = typename RMHD<dim>::eigenvals_t;
-
         // file writer template alias
         template <int dim>
         constexpr auto write2file = helpers::
             write_to_file<typename RMHD<dim>::primitive_soa_t, dim, RMHD<dim>>;
 
-        template <int dim> using MagFourVec = typename RMHD<dim>::mag_fourvec_t;
+        template <int dim>
+        using MagFourVec = typename RMHD<dim>::mag_fourvec_t;
 
     }   // namespace rm
 }   // namespace simbi
 
-template <> struct is_relativistic_mhd<simbi::RMHD<1>> {
+template <>
+struct is_relativistic_mhd<simbi::RMHD<1>> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic_mhd<simbi::RMHD<2>> {
+template <>
+struct is_relativistic_mhd<simbi::RMHD<2>> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic_mhd<simbi::RMHD<3>> {
+template <>
+struct is_relativistic_mhd<simbi::RMHD<3>> {
     static constexpr bool value = true;
 };
 

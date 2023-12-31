@@ -904,22 +904,21 @@ void RMHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
 {
 #if GPU_CODE
     if constexpr (dim == 1) {
-        // LAUNCH_ASYNC((helpers::compute_dt<rm::Primitive<1>,dt_type>),
+        // LAUNCH_ASYNC((helpers::compute_dt<primitive_t,dt_type>),
         // p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
-        helpers::compute_dt<rm::Primitive<1>, dt_type>
+        helpers::compute_dt<primitive_t, dt_type>
             <<<p.gridSize, p.blockSize>>>(this, prims.data(), dt_min.data());
     }
     else {
-        // LAUNCH_ASYNC((helpers::compute_dt<rm::Primitive<dim>,dt_type>),
+        // LAUNCH_ASYNC((helpers::compute_dt<primitive_t,dt_type>),
         // p.gridSize, p.blockSize, this, prims.data(), dt_min.data(),
         // geometry);
-        helpers::compute_dt<rm::Primitive<dim>, dt_type>
-            <<<p.gridSize, p.blockSize>>>(
-                this,
-                prims.data(),
-                dt_min.data(),
-                geometry
-            );
+        helpers::compute_dt<primitive_t, dt_type><<<p.gridSize, p.blockSize>>>(
+            this,
+            prims.data(),
+            dt_min.data(),
+            geometry
+        );
     }
     // LAUNCH_ASYNC((helpers::deviceReduceWarpAtomicKernel<dim>), p.gridSize,
     // p.blockSize, this, dt_min.data(), active_zones);
@@ -1052,7 +1051,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
                                          const real bnorm,
                                          const real bt1,
                                          const real bt2) {
-        rm::Conserved<dim> u;
+        conserved_t u;
         u.den              = d;
         u.momentum(nhat)   = mnorm;
         u.momentum(np1)    = mt1;
@@ -1257,8 +1256,8 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const real vface,
     const luint gid
 ) const {
-  // rm::Conserved<dim> ua, uc;
-  // const rm::Eigenvals<dim> lambda = calc_eigenvals(left_prims, right_prims,
+  // conserved_t ua, uc;
+  // const auto lambda = calc_eigenvals(left_prims, right_prims,
   // nhat); const real aL  = lambda.afL; const real aR  = lambda.afR; const
   // real
   // aLm = aL < 0 ? aL : 0; const real aRp = aR > 0 ? aR : 0;
@@ -1292,13 +1291,13 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
   // //==================================================================
   // // Helper functions to ease repetition
   // //==================================================================
-  // const real qfunc = [](const rm::Conserved<dim> &r, const luint nhat,
+  // const real qfunc = [](const conserved_t &r, const luint nhat,
   // const
   // real a, const real p) {
   //     return r.total_energy() * a + p * (1 - a * a);
   // };
   // const real gfunc =[](const luint np1, const luint np2, const
-  // rm::Conserved<dim> &r) {
+  // conserved_t &r) {
   //     if constexpr(dim == 1) {
   //         return 0;
   //     } else if constexpr(dim == 2) {
@@ -1310,7 +1309,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
   //     }
   // };
   // const real yfunc = [](const luint np1, const luint np2, const
-  // rm::Conserved<dim> &r) {
+  // conserved_t &r) {
   //     if constexpr(dim == 1) {
   //         return 0;
   //     } else if constexpr(dim == 2) {
@@ -1385,7 +1384,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
   //     return x1 *x1 + x2 * x2 + x3 * x3;
   // };
 
-  // const rm::Conserved<dim> construct_the_state = [](
+  // const conserved_t construct_the_state = [](
   //     const luint nhat,
   //     const luint np1,
   //     const luint np2
@@ -1401,7 +1400,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
   //     const real vp1,
   //     const real vp2
   // ) {
-  //     rm::Conserved<dim> u;
+  //     conserved_t u;
   //     u.den= d * vfac;
   //     u.momentum(nhat) = (et + p) * vn - vdb * bn;
   //     if constexpr(dim > 1) {
@@ -1487,7 +1486,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
   // const auto etaL = - helpers::sgn(bn) * std::sqrt(wL);
   // const auto etaR =   helpers::sgn(bn) * std::sqrt(wR);
   // const auto calc_kcomp = (const int nhat, const int ehat, const
-  // rm::Conserved<dim> &r, const real p, const real a, const real eta) {
+  // conserved_t &r, const real p, const real a, const real eta) {
   //     return (r.momentum(nhat) + p * helpers::kronecker(ehat, nhat) +
   //     r.bcomponent(ehat) * eta) / (a * p + r.total_energy() + bn * eta);
   // }
@@ -1697,7 +1696,7 @@ void RMHD<dim>::advance(
          zpg,
          this] GPU_LAMBDA(const luint idx) {
             auto prim_buff =
-                helpers::shared_memory_proxy<rm::Primitive<dim>>(prim_data);
+                helpers::shared_memory_proxy<primitive_t>(prim_data);
 
             const luint kk =
                 helpers::get_axis_index<dim, BlockAxis::K>(idx, xpg, ypg);
@@ -1734,11 +1733,9 @@ void RMHD<dim>::advance(
             const luint tya = dim < 2 ? 0 : (global::on_sm) ? ty + radius : ja;
             const luint tza = dim < 3 ? 0 : (global::on_sm) ? tz + radius : ka;
 
-            rm::Conserved<dim> uxL, uxR, uyL, uyR, uzL, uzR;
-            rm::Conserved<dim> fL, fR, gL, gR, hL, hR, frf, flf, grf, glf, hrf,
-                hlf;
-            rm::Primitive<dim> xprimsL, xprimsR, yprimsL, yprimsR, zprimsL,
-                zprimsR;
+            conserved_t uxL, uxR, uyL, uyR, uzL, uzR;
+            conserved_t fL, fR, gL, gR, hL, hR, frf, flf, grf, glf, hrf, hlf;
+            primitive_t xprimsL, xprimsR, yprimsL, yprimsR, zprimsL, zprimsR;
 
             const luint aid = ka * nx * ny + ja * nx + ia;
             if constexpr (global::on_sm) {
@@ -2321,21 +2318,19 @@ void RMHD<dim>::advance(
             }
             else {
                 // Coordinate X
-                const rm::Primitive<dim> xleft_most =
+                const primitive_t xleft_most =
                     prim_buff[tza * sx * sy + tya * sx + (txa - 2)];
-                const rm::Primitive<dim> xleft_mid =
+                const primitive_t xleft_mid =
                     prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
-                const rm::Primitive<dim> center =
+                const primitive_t center =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
-                const rm::Primitive<dim> xright_mid =
+                const primitive_t xright_mid =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
-                const rm::Primitive<dim> xright_most =
+                const primitive_t xright_most =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 2)];
-                rm::Primitive<dim> yleft_most, yleft_mid, yright_mid,
-                    yright_most;
-                rm::Primitive<dim> zleft_most, zleft_mid, zright_mid,
-                    zright_most;
-                // Reconstructed left X rm::Primitive<dim> vector at the i+1/2
+                primitive_t yleft_most, yleft_mid, yright_mid, yright_most;
+                primitive_t zleft_most, zleft_mid, zright_mid, zright_most;
+                // Reconstructed left X primitive_t vector at the i+1/2
                 // interface
                 xprimsL = center + helpers::plm_gradient(
                                        center,
@@ -2938,7 +2933,7 @@ void RMHD<dim>::advance(
                     mag2_source_all_zeros ? 0.0 : mag2_source[real_loc];
                 const real b3_source =
                     mag3_source_all_zeros ? 0.0 : mag3_source[real_loc];
-                return rm::Conserved<dim>{
+                return conserved_t{
                          d_source,
                          s1_source,
                          s2_source,
@@ -2965,7 +2960,7 @@ void RMHD<dim>::advance(
                 const auto ge_source = gs1_source * prim_buff[tid].v1 +
                                        gs2_source * prim_buff[tid].v2 +
                                        gs3_source * prim_buff[tid].v3;
-                return rm::Conserved<dim>{
+                return conserved_t{
                   0,
                   gs1_source,
                   gs2_source,
@@ -3000,7 +2995,7 @@ void RMHD<dim>::advance(
                             const real factor = (mesh_motion) ? dV : 1;
                             const real pc     = prim_buff[txa].total_pressure();
                             const real invdV  = 1 / dV;
-                            const auto geom_sources = rm::Conserved<1>{
+                            const auto geom_sources = conserved_t{
                               0.0,
                               pc * (sR - sL) * invdV,
                               0.0,
@@ -3063,7 +3058,7 @@ void RMHD<dim>::advance(
                                 rm::MagFourVec<dim>(prim_buff[tid]);
                             const real gam2 = 1 / (1 - (uc * uc + vc * vc));
 
-                            const rm::Conserved<2> geom_source = {
+                            const conserved_t geom_source = {
                               0,
                               (rhoc * hc * gam2 * vc * vc - bmuc.two * bmuc.two
                               ) / rmean +
@@ -3113,7 +3108,7 @@ void RMHD<dim>::advance(
 
                             const real hc = prim_buff[tid].gas_enthalpy(gamma);
                             const real gam2 = 1 / (1 - (uc * uc + vc * vc));
-                            const rm::Conserved<2> geom_source = {
+                            const conserved_t geom_source = {
                               0,
                               (rhoc * hc * gam2 * vc * vc - bmuc.two * bmuc.two
                               ) / rmean +
@@ -3151,7 +3146,7 @@ void RMHD<dim>::advance(
                             const real pc = prim_buff[tid].total_pressure();
                             const auto bmuc =
                                 rm::MagFourVec<dim>(prim_buff[tid]);
-                            const auto geom_source = rm::Conserved<2>{
+                            const auto geom_source = conserved_t{
                               0,
                               (-bmuc.two * bmuc.two) / rmean +
                                   pc * (s1R - s1L) * invdV,
@@ -3218,7 +3213,7 @@ void RMHD<dim>::advance(
                             const real gam2 =
                                 1 / (1 - (uc * uc + vc * vc + wc * wc));
 
-                            const auto geom_source = rm::Conserved<3>{
+                            const auto geom_source = conserved_t{
                               0,
                               (rhoc * hc * gam2 * (vc * vc + wc * wc) -
                                bmuc.two * bmuc.two - bmuc.three * bmuc.three) /
@@ -3282,7 +3277,7 @@ void RMHD<dim>::advance(
                             const real gam2 =
                                 1 / (1 - (uc * uc + vc * vc + wc * wc));
 
-                            const auto geom_source = rm::Conserved<3>{
+                            const auto geom_source = conserved_t{
                               0,
                               (rhoc * hc * gam2 * (vc * vc) -
                                bmuc.two * bmuc.two - bmuc.three * bmuc.three) /
@@ -3429,7 +3424,7 @@ void RMHD<dim>::simulate(
     for (int i = 0; i < 2 * dim; i++) {
         this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]
         ));
-        this->inflow_zones[i] = rm::Conserved<dim>{
+        this->inflow_zones[i] = conserved_t{
           boundary_sources[i][0],
           boundary_sources[i][1],
           boundary_sources[i][2],
@@ -3514,7 +3509,7 @@ void RMHD<dim>::simulate(
         const real c   = msq - 2.0 * et * bsq + bsq * bsq;
         const real qq  = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
         edens_guess[i] = qq;
-        cons[i] = rm::Conserved<dim>{d, m1, m2, m3, tau, b1, b2, b3, dchi};
+        cons[i]        = conserved_t{d, m1, m2, m3, tau, b1, b2, b3, dchi};
     }
     cons.copyToGpu();
     prims.copyToGpu();
@@ -3576,7 +3571,7 @@ void RMHD<dim>::simulate(
     const auto zblockspace   = (dim < 3) ? 1 : zblockdim + 2 * radius;
     const luint shBlockSpace = xblockspace * yblockspace * zblockspace;
     const luint shBlockBytes =
-        shBlockSpace * sizeof(rm::Primitive<dim>) * global::on_sm;
+        shBlockSpace * sizeof(primitive_t) * global::on_sm;
     const auto fullP =
         simbi::ExecutionPolicy({nx, ny, nz}, {xblockdim, yblockdim, zblockdim});
     const auto activeP = simbi::ExecutionPolicy(
