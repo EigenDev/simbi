@@ -150,7 +150,7 @@ Newtonian<dim>::get_x2_differential(const lint ii) const
     if constexpr (dim == 1) {
         switch (geometry) {
             case Geometry::SPHERICAL:
-                return 2;
+                return 2.0;
             default:
                 return (2.0 * M_PI);
         }

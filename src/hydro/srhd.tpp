@@ -150,7 +150,7 @@ GPU_CALLABLE_MEMBER constexpr real SRHD<dim>::get_x2_differential(const lint ii
     if constexpr (dim == 1) {
         switch (geometry) {
             case Geometry::SPHERICAL:
-                return 2;
+                return 2.0;
             default:
                 return 2.0 * M_PI;
         }
@@ -630,15 +630,15 @@ void SRHD<dim>::adapt_dt()
                 }
             }
             else {
-                v1p = 1;
-                v1m = 1;
+                v1p = 1.0;
+                v1m = 1.0;
                 if constexpr (dim > 1) {
-                    v2p = 1;
-                    v2m = 1;
+                    v2p = 1.0;
+                    v2m = 1.0;
                 }
                 if constexpr (dim > 2) {
-                    v3p = 1;
-                    v3m = 1;
+                    v3p = 1.0;
+                    v3m = 1.0;
                 }
             }
 

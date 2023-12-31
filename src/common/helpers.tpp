@@ -1520,8 +1520,8 @@ namespace simbi {
                         vMinus  = (v - cs) / (1 - v * cs);
                     }
                     else {
-                        vPlus  = 1;
-                        vMinus = 1;
+                        vPlus  = 1.0;
+                        vMinus = 1.0;
                     }
                 }
                 else {
@@ -1584,10 +1584,10 @@ namespace simbi {
                         minus_v2 = (v2 - cs) / (1 - v2 * cs);
                     }
                     else {
-                        plus_v1  = 1;
-                        plus_v2  = 1;
-                        minus_v1 = 1;
-                        minus_v2 = 1;
+                        plus_v1  = 1.0;
+                        plus_v2  = 1.0;
+                        minus_v1 = 1.0;
+                        minus_v2 = 1.0;
                     }
                 }
                 else {
@@ -1757,12 +1757,12 @@ namespace simbi {
                         minus_v3 = (v3 - cs) / (1 - v3 * cs);
                     }
                     else {
-                        plus_v1  = 1;
-                        plus_v2  = 1;
-                        plus_v3  = 1;
-                        minus_v1 = 1;
-                        minus_v2 = 1;
-                        minus_v3 = 1;
+                        plus_v1  = 1.0;
+                        plus_v2  = 1.0;
+                        plus_v3  = 1.0;
+                        minus_v1 = 1.0;
+                        minus_v2 = 1.0;
+                        minus_v3 = 1.0;
                     }
                 }
                 else {
@@ -1896,8 +1896,8 @@ namespace simbi {
                         vMinus = std::abs(speeds[0]);
                     }
                     else {
-                        vPlus  = 1;
-                        vMinus = 1;
+                        vPlus  = 1.0;
+                        vMinus = 1.0;
                     }
                 }
                 else {
@@ -1969,10 +1969,10 @@ namespace simbi {
                         minus_v2 = std::abs(speeds[0]);
                     }
                     else {
-                        plus_v1  = 1;
-                        plus_v2  = 1;
-                        minus_v1 = 1;
-                        minus_v2 = 1;
+                        plus_v1  = 1.0;
+                        plus_v2  = 1.0;
+                        minus_v1 = 1.0;
+                        minus_v2 = 1.0;
                     }
                 }
                 else {
@@ -2150,12 +2150,12 @@ namespace simbi {
                         minus_v3 = std::abs(speeds[0]);
                     }
                     else {
-                        plus_v1  = 1;
-                        plus_v2  = 1;
-                        plus_v3  = 1;
-                        minus_v1 = 1;
-                        minus_v2 = 1;
-                        minus_v3 = 1;
+                        plus_v1  = 1.0;
+                        plus_v2  = 1.0;
+                        plus_v3  = 1.0;
+                        minus_v1 = 1.0;
+                        minus_v2 = 1.0;
+                        minus_v3 = 1.0;
                     }
                 }
                 else {

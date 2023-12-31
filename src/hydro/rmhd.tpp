@@ -150,7 +150,7 @@ GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x2_differential(const lint ii
     if constexpr (dim == 1) {
         switch (geometry) {
             case Geometry::SPHERICAL:
-                return 2;
+                return 2.0;
             default:
                 return (2.0 * M_PI);
         }
@@ -465,7 +465,7 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons, const luint gid)
         if constexpr (dim == 1) {
             const auto ireal = helpers::get_real_idx(gid, radius, active_zones);
             const real dV    = get_cell_volume(ireal);
-            invdV            = 1 / dV;
+            invdV            = 1.0 / dV;
         }
         else if constexpr (dim == 2) {
             const luint ii   = gid % nx;
@@ -473,7 +473,7 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons, const luint gid)
             const auto ireal = helpers::get_real_idx(ii, radius, xactive_grid);
             const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid);
             const real dV    = get_cell_volume(ireal, jreal);
-            invdV            = 1 / dV;
+            invdV            = 1.0 / dV;
         }
         else {
             const luint kk =
@@ -486,7 +486,7 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons, const luint gid)
             const auto jreal = helpers::get_real_idx(jj, radius, yactive_grid);
             const auto kreal = helpers::get_real_idx(kk, radius, zactive_grid);
             const real dV    = get_cell_volume(ireal, jreal, kreal);
-            invdV            = 1 / dV;
+            invdV            = 1.0 / dV;
         }
     }
 
@@ -566,7 +566,7 @@ GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
 ) const
 {
     /*
-    evaluate the full quartic if the simplfying conditions are not met.
+    evaluate the full quartic if the simplifying conditions are not met.
     Polynomial coefficients were calculated using sympy in the following way:
 
     In [1]: import sympy
@@ -777,15 +777,15 @@ void RMHD<dim>::adapt_dt()
                 }
             }
             else {
-                v1p = 1;
-                v1m = 1;
+                v1p = 1.0;
+                v1m = 1.0;
                 if constexpr (dim > 1) {
-                    v2p = 1;
-                    v2m = 1;
+                    v2p = 1.0;
+                    v2m = 1.0;
                 }
                 if constexpr (dim > 2) {
-                    v3p = 1;
-                    v3m = 1;
+                    v3p = 1.0;
+                    v3m = 1.0;
                 }
             }
 
