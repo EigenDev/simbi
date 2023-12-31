@@ -93,7 +93,7 @@ namespace simbi {
             dimsf2[0] = setup.x2.capacity();
             dimsf3[0] = setup.x3.capacity();
             int rank  = 1;
-            H5::DataSpace dataspace(rank, dimsf);
+            H5::DataSpace hydro_dataspace(rank, dimsf);
             H5::DataSpace dataspacex1(rank, dimsf1);
             H5::DataSpace dataspacex2(rank, dimsf2);
             H5::DataSpace dataspacex3(rank, dimsf3);
@@ -132,20 +132,19 @@ namespace simbi {
                 real_type = H5::PredType::NATIVE_FLOAT;
             }
 
-            // Save the hydro date
-            H5::DataSet dataset =
-                file.createDataSet("rho", real_type, dataspace);
-
             // Write the Primitives
+            H5::DataSet dataset =
+                file.createDataSet("rho", real_type, hydro_dataspace);
+
             dataset.write(prims.rho.data(), real_type);
             dataset.close();
 
-            dataset = file.createDataSet("v1", real_type, dataspace);
+            dataset = file.createDataSet("v1", real_type, hydro_dataspace);
             dataset.write(prims.v1.data(), real_type);
             dataset.close();
 
             if (dim > 1) {
-                dataset = file.createDataSet("v2", real_type, dataspace);
+                dataset = file.createDataSet("v2", real_type, hydro_dataspace);
                 dataset.write(prims.v2.data(), real_type);
                 dataset.close();
 
@@ -154,7 +153,7 @@ namespace simbi {
                 dataset.close();
             }
             if (dim > 2) {
-                dataset = file.createDataSet("v3", real_type, dataspace);
+                dataset = file.createDataSet("v3", real_type, hydro_dataspace);
                 dataset.write(prims.v3.data(), real_type);
                 dataset.close();
 
@@ -163,11 +162,11 @@ namespace simbi {
                 dataset.close();
             }
 
-            dataset = file.createDataSet("p", real_type, dataspace);
+            dataset = file.createDataSet("p", real_type, hydro_dataspace);
             dataset.write(prims.p.data(), real_type);
             dataset.close();
 
-            dataset = file.createDataSet("chi", real_type, dataspace);
+            dataset = file.createDataSet("chi", real_type, hydro_dataspace);
             dataset.write(prims.chi.data(), real_type);
             dataset.close();
 
@@ -176,15 +175,15 @@ namespace simbi {
             dataset.close();
 
             if (setup.regime == "srmhd") {
-                dataset = file.createDataSet("b1", real_type, dataspace);
+                dataset = file.createDataSet("b1", real_type, hydro_dataspace);
                 dataset.write(prims.b1.data(), real_type);
                 dataset.close();
 
-                dataset = file.createDataSet("b2", real_type, dataspace);
+                dataset = file.createDataSet("b2", real_type, hydro_dataspace);
                 dataset.write(prims.b2.data(), real_type);
                 dataset.close();
 
-                dataset = file.createDataSet("b3", real_type, dataspace);
+                dataset = file.createDataSet("b3", real_type, hydro_dataspace);
                 dataset.write(prims.b3.data(), real_type);
                 dataset.close();
             }
