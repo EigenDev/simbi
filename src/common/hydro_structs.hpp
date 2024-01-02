@@ -613,7 +613,7 @@ namespace hydro1d {
 
         GPU_CALLABLE_MEMBER constexpr real get_v() const { return v1; }
 
-        GPU_CALLABLE_MEMBER constexpr real vcomponent(const int nhat) const
+        GPU_CALLABLE_MEMBER constexpr real vcomponent(const luint nhat) const
         {
             if (nhat > 1) {
                 return 0;
@@ -633,7 +633,7 @@ namespace hydro1d {
 
         GPU_CALLABLE_MEMBER constexpr real& momentum() { return m1; }
 
-        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const
+        GPU_CALLABLE_MEMBER constexpr real momentum(const luint nhat) const
         {
             if (nhat == 1) {
                 return m1;
@@ -672,7 +672,7 @@ namespace hydro2d {
     struct Conserved : generic_hydro::Conserved<2, Conserved> {
         using generic_hydro::Conserved<2, Conserved>::Conserved;
 
-        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const
+        GPU_CALLABLE_MEMBER constexpr real momentum(const luint nhat) const
         {
             if (nhat > 2) {
                 return 0;
@@ -680,7 +680,7 @@ namespace hydro2d {
             return (nhat == 1 ? m1 : m2);
         }
 
-        GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat)
+        GPU_CALLABLE_MEMBER constexpr real& momentum(const luint nhat)
         {
             return (nhat == 1 ? m1 : m2);
         }
@@ -694,7 +694,7 @@ namespace hydro2d {
         GPU_CALLABLE_MEMBER constexpr real get_v2() const { return v2; }
 
         GPU_CALLABLE_MEMBER
-        constexpr real vcomponent(const unsigned nhat) const
+        constexpr real vcomponent(const luint nhat) const
         {
             if (nhat > 2) {
                 return 0;
@@ -739,12 +739,12 @@ namespace hydro3d {
     struct Conserved : generic_hydro::Conserved<3, Conserved> {
         using generic_hydro::Conserved<3, Conserved>::Conserved;
 
-        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const
+        GPU_CALLABLE_MEMBER constexpr real momentum(const luint nhat) const
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
 
-        GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat)
+        GPU_CALLABLE_MEMBER constexpr real& momentum(const luint nhat)
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
@@ -760,7 +760,7 @@ namespace hydro3d {
         GPU_CALLABLE_MEMBER constexpr real get_v3() const { return v3; }
 
         GPU_CALLABLE_MEMBER
-        constexpr real vcomponent(const unsigned nhat) const
+        constexpr real vcomponent(const luint nhat) const
         {
             return (nhat == 1 ? v1 : (nhat == 2) ? v2 : v3);
         }
@@ -838,7 +838,7 @@ namespace sr1d {
         }
 
         GPU_CALLABLE_MEMBER
-        constexpr real vcomponent(const int nhat) const
+        constexpr real vcomponent(const luint nhat) const
         {
             if (nhat == 1) {
                 return get_v();
@@ -860,7 +860,7 @@ namespace sr1d {
         constexpr real& momentum() { return m1; }
 
         GPU_CALLABLE_MEMBER
-        constexpr real momentum(const int nhat) const
+        constexpr real momentum(const luint nhat) const
         {
             if (nhat == 1) {
                 return m1;
@@ -901,7 +901,7 @@ namespace sr2d {
         using generic_hydro::Conserved<2, Conserved>::Conserved;
 
         GPU_CALLABLE_MEMBER
-        constexpr real momentum(const int nhat) const
+        constexpr real momentum(const luint nhat) const
         {
             if (nhat > 2) {
                 return 0;
@@ -910,7 +910,7 @@ namespace sr2d {
         }
 
         GPU_CALLABLE_MEMBER
-        constexpr real& momentum(const int nhat)
+        constexpr real& momentum(const luint nhat)
         {
             return (nhat == 1 ? m1 : m2);
         }
@@ -920,7 +920,7 @@ namespace sr2d {
         using generic_hydro::Primitive<2, Primitive>::Primitive;
 
         GPU_CALLABLE_MEMBER
-        constexpr real vcomponent(const unsigned nhat) const
+        constexpr real vcomponent(const luint nhat) const
         {
             if (nhat > 2) {
                 return 0.0;
@@ -1008,12 +1008,12 @@ namespace sr3d {
     struct Conserved : generic_hydro::Conserved<3, Conserved> {
         using generic_hydro::Conserved<3, Conserved>::Conserved;
 
-        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const
+        GPU_CALLABLE_MEMBER constexpr real momentum(const luint nhat) const
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
 
-        GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat)
+        GPU_CALLABLE_MEMBER constexpr real& momentum(const luint nhat)
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
@@ -1023,7 +1023,7 @@ namespace sr3d {
         using generic_hydro::Primitive<3, Primitive>::Primitive;
 
         GPU_CALLABLE_MEMBER
-        constexpr real vcomponent(const unsigned nhat) const
+        constexpr real vcomponent(const luint nhat) const
         {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
         }
@@ -1351,24 +1351,24 @@ namespace rmhd {
 
         GPU_CALLABLE_MEMBER real total_energy() { return den + nrg; }
 
-        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const
+        GPU_CALLABLE_MEMBER constexpr real momentum(const luint nhat) const
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
 
-        GPU_CALLABLE_MEMBER constexpr real& momentum(const int nhat)
+        GPU_CALLABLE_MEMBER constexpr real& momentum(const luint nhat)
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
 
         GPU_CALLABLE_MEMBER constexpr real& momentum() { return m1; }
 
-        GPU_CALLABLE_MEMBER constexpr real bcomponent(const int nhat) const
+        GPU_CALLABLE_MEMBER constexpr real bcomponent(const luint nhat) const
         {
             return (nhat == 1 ? b1 : (nhat == 2) ? b2 : b3);
         }
 
-        GPU_CALLABLE_MEMBER constexpr real& bcomponent(const int nhat)
+        GPU_CALLABLE_MEMBER constexpr real& bcomponent(const luint nhat)
         {
             return (nhat == 1 ? b1 : (nhat == 2) ? b2 : b3);
         }
@@ -1626,13 +1626,13 @@ namespace rmhd {
         }
 
         GPU_CALLABLE_MEMBER
-        constexpr real vcomponent(const unsigned nhat) const
+        constexpr real vcomponent(const luint nhat) const
         {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
         }
 
         GPU_CALLABLE_MEMBER
-        constexpr real bcomponent(const unsigned nhat) const
+        constexpr real bcomponent(const luint nhat) const
         {
             return nhat == 1 ? b1 : (nhat == 2) ? b2 : b3;
         }
