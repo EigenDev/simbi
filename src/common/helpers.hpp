@@ -1236,7 +1236,7 @@ namespace simbi {
         GPU_CALLABLE void quickSort(T arr[], index_type low, index_type high);
 
         template <typename T, typename U>
-        GPU_SHARED T* shared_memory_proxy(const U object);
+        GPU_SHARED T* sm_proxy(const U object);
 
         template <typename index_type, typename T>
         GPU_CALLABLE index_type flattened_index(
@@ -1248,8 +1248,8 @@ namespace simbi {
             T nk
         );
 
-        template <int dim, BlockAxis axis, typename T>
-        GPU_CALLABLE T get_axis_index(T idx, T ni, T nj, T kk = T(0));
+        template <int dim, BlkAx axis, typename T>
+        GPU_CALLABLE T axid(T idx, T ni, T nj, T kk = T(0));
 
         template <int dim, typename T, typename U, typename V>
         GPU_DEV void load_shared_buffer(

@@ -70,7 +70,7 @@ namespace simbi {
             engine_duration, invdx1, invdx2, invdx3;
         bool first_order, linspace, mesh_motion, adaptive_mesh_motion,
             half_sphere, quirk_smoothing, constant_sources, all_outer_bounds,
-            changing_volume;
+            homolog;
         bool null_den, null_mom1, null_mom2, null_mom3, null_nrg;
         bool mag1_source_all_zeros, mag2_source_all_zeros,
             mag3_source_all_zeros;

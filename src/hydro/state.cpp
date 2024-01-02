@@ -1,7 +1,8 @@
 /**
- * the srhd and newtonian headers can only be included here since
- * they are templated and cython cannot switch to the gpu compiler
- * when externing from state.hpp
+ * the hydro headers can only be included here since
+ * they are templated and cython is unaware of the gpu-specific
+ * code present throughout the simulation calls since it
+ * is forced to use the host compiler there
  */
 #include "state.hpp"
 #include "newt.hpp"   // for Newtonian

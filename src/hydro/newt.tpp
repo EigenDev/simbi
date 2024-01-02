@@ -306,7 +306,7 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
         [cons_data, prim_data, troubled_data, this] GPU_LAMBDA(const luint gid
         ) {
             real invdV = 1.0;
-            if (changing_volume) {
+            if (homolog) {
                 if constexpr (dim == 1) {
                     const auto ireal =
                         helpers::get_real_idx(gid, radius, active_zones);
@@ -495,12 +495,9 @@ void Newtonian<dim>::adapt_dt()
     thread_pool
         .parallel_for(static_cast<luint>(0), total_zones, [&](luint gid) {
             real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
-            const luint kk =
-                helpers::get_axis_index<dim, BlockAxis::K>(gid, nx, ny);
-            const luint jj =
-                helpers::get_axis_index<dim, BlockAxis::J>(gid, nx, ny, kk);
-            const luint ii =
-                helpers::get_axis_index<dim, BlockAxis::I>(gid, nx, ny, kk);
+            const luint kk    = helpers::axid<dim, BlkAx::K>(gid, nx, ny);
+            const luint jj    = helpers::axid<dim, BlkAx::J>(gid, nx, ny, kk);
+            const luint ii    = helpers::axid<dim, BlkAx::I>(gid, nx, ny, kk);
             const luint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
             // Left/Right wave speeds
             const real rho = prims[gid].rho;
@@ -973,15 +970,10 @@ void Newtonian<dim>::advance(
          ypg,
          zpg,
          this] GPU_LAMBDA(const luint idx) {
-            auto prim_buff =
-                helpers::shared_memory_proxy<primitive_t>(prim_data);
-
-            const luint kk =
-                helpers::get_axis_index<dim, BlockAxis::K>(idx, xpg, ypg);
-            const luint jj =
-                helpers::get_axis_index<dim, BlockAxis::J>(idx, xpg, ypg, kk);
-            const luint ii =
-                helpers::get_axis_index<dim, BlockAxis::I>(idx, xpg, ypg, kk);
+            auto prim_buff = helpers::sm_proxy<primitive_t>(prim_data);
+            const luint kk = helpers::axid<dim, BlkAx::K>(idx, xpg, ypg);
+            const luint jj = helpers::axid<dim, BlkAx::J>(idx, xpg, ypg, kk);
+            const luint ii = helpers::axid<dim, BlkAx::I>(idx, xpg, ypg, kk);
 
             if constexpr (global::on_gpu) {
                 if constexpr (dim == 1) {
@@ -1075,12 +1067,10 @@ void Newtonian<dim>::advance(
                               [helpers::my_max<lint>(kk - 1, 0) * xpg * ypg +
                                jj * xpg + ii];
 
-            const real x1l = get_x1face(ii, 0);
-            const real x1r = get_x1face(ii, 1);
-            const real vfaceL =
-                (changing_volume) ? x1l * hubble_param : hubble_param;
-            const real vfaceR =
-                (changing_volume) ? x1r * hubble_param : hubble_param;
+            const real x1l    = get_x1face(ii, 0);
+            const real x1r    = get_x1face(ii, 1);
+            const real vfaceL = (homolog) ? x1l * hubble_param : hubble_param;
+            const real vfaceR = (homolog) ? x1r * hubble_param : hubble_param;
 
             if (first_order) [[unlikely]] {
                 xprimsL = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
@@ -1231,12 +1221,12 @@ void Newtonian<dim>::advance(
                 xprimsL = prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
                 xprimsR = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
                 if constexpr (dim > 1) {
-                    // j+1/2
+                    // j-1/2
                     yprimsL = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
                     yprimsR = prim_buff[tza * sx * sy + (tya + 0) * sx + txa];
                 }
                 if constexpr (dim > 2) {
-                    // k+1/2
+                    // k-1/2
                     zprimsL = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
                     zprimsR = prim_buff[(tza - 0) * sx * sy + tya * sx + txa];
                 }
@@ -1875,12 +1865,12 @@ void Newtonian<dim>::advance(
                             const real pc   = prim_buff[tid].p;
 
                             const conserved_t geom_source = {
-                              0,
+                              0.0,
                               (rhoc * vc * vc) / rmean +
                                   pc * (s1R - s1L) * invdV,
                               -(rhoc * uc * vc) / rmean +
                                   pc * (s2R - s2L) * invdV,
-                              0
+                              0.0
                             };
 
                             cons_data[aid] -=
@@ -1917,11 +1907,11 @@ void Newtonian<dim>::advance(
                             const real pc   = prim_buff[tid].p;
 
                             const conserved_t geom_source = {
-                              0,
+                              0.0,
                               (rhoc * vc * vc) / rmean +
                                   pc * (s1R - s1L) * invdV,
                               -(rhoc * uc * vc) / rmean,
-                              0
+                              0.0
                             };
                             cons_data[aid] -=
                                 ((frf * s1R - flf * s1L) * invdV +
@@ -1947,9 +1937,13 @@ void Newtonian<dim>::advance(
                             const real s2L   = rmean * (rr - rl);
 
                             // Grab central primitives
-                            const real pc = prim_buff[tid].p;
-                            const auto geom_source =
-                                conserved_t{0, pc * (s1R - s1L) * invdV, 0, 0};
+                            const real pc          = prim_buff[tid].p;
+                            const auto geom_source = conserved_t{
+                              0.0,
+                              pc * (s1R - s1L) * invdV,
+                              0.0,
+                              0.0
+                            };
                             cons_data[aid] -=
                                 ((frf * s1R - flf * s1L) * invdV +
                                  (grf * s2R - glf * s2L) * invdV - geom_source -
@@ -2002,13 +1996,13 @@ void Newtonian<dim>::advance(
                             const real pc   = prim_buff[tid].p;
 
                             const auto geom_source = conserved_t{
-                              0,
+                              0.0,
                               (rhoc * (vc * vc + wc * wc)) / rmean +
                                   pc * (s1R - s1L) / dV1,
                               rhoc * (wc * wc * cot - uc * vc) / rmean +
                                   pc * (s2R - s2L) / dV2,
                               -rhoc * wc * (uc + vc * cot) / rmean,
-                              0
+                              0.0
                             };
                             cons_data[aid] -= ((frf * s1R - flf * s1L) / dV1 +
                                                (grf * s2R - glf * s2L) / dV2 +
@@ -2049,12 +2043,12 @@ void Newtonian<dim>::advance(
                             const real pc = prim_buff[tid].p;
 
                             const auto geom_source = conserved_t{
-                              0,
+                              0.0,
                               (rhoc * (vc * vc)) / rmean +
                                   pc * (s1R - s1L) * invdV,
                               -(rhoc * uc * vc) / rmean,
-                              0,
-                              0
+                              0.0,
+                              0.0
                             };
                             cons_data[aid] -= ((frf * s1R - flf * s1L) * invdV +
                                                (grf * s2R - glf * s2L) * invdV +
@@ -2110,8 +2104,7 @@ void Newtonian<dim>::simulate(
     // Stuff for moving mesh
     this->hubble_param = adot(t) / a(t);
     this->mesh_motion  = (hubble_param != 0);
-    this->changing_volume =
-        mesh_motion && geometry != simbi::Geometry::CARTESIAN;
+    this->homolog      = mesh_motion && geometry != simbi::Geometry::CARTESIAN;
 
     if (mesh_motion && all_outer_bounds) {
         if constexpr (dim == 1) {
@@ -2457,6 +2450,14 @@ void Newtonian<dim>::simulate(
         time_constant =
             helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
         t += step * dt;
+        if (mesh_motion) {
+            // update x1 endpoints
+            const real vmin = (homolog) ? x1min * hubble_param : hubble_param;
+            const real vmax = (homolog) ? x1max * hubble_param : hubble_param;
+            x1max += step * dt * vmax;
+            x1min += step * dt * vmin;
+            hubble_param = adot(t) / a(t);
+        }
     });
 
     if (inFailureState) {

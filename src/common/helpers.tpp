@@ -444,16 +444,8 @@ namespace simbi {
             const int sx     = (global::col_maj) ? 1 : x1grid_size;
             const int sy     = (global::col_maj) ? x2grid_size : 1;
             simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA(const int gid) {
-                const int ii = get_axis_index<2, BlockAxis::I>(
-                    gid,
-                    x1grid_size,
-                    x2grid_size
-                );
-                const int jj = get_axis_index<2, BlockAxis::J>(
-                    gid,
-                    x1grid_size,
-                    x2grid_size
-                );
+                const int ii = axid<2, BlkAx::I>(gid, x1grid_size, x2grid_size);
+                const int jj = axid<2, BlkAx::J>(gid, x1grid_size, x2grid_size);
                 if (first_order) {
                     if (jj < x2grid_size - 2) {
                         switch (boundary_conditions[0]) {
@@ -800,23 +792,11 @@ namespace simbi {
             const int sx     = x1grid_size;
             const int sy     = x2grid_size;
             simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA(const int gid) {
-                const int kk = get_axis_index<3, BlockAxis::K>(
-                    gid,
-                    x1grid_size,
-                    x2grid_size
-                );
-                const int jj = get_axis_index<3, BlockAxis::J>(
-                    gid,
-                    x1grid_size,
-                    x2grid_size,
-                    kk
-                );
-                const int ii = get_axis_index<3, BlockAxis::I>(
-                    gid,
-                    x1grid_size,
-                    x2grid_size,
-                    kk
-                );
+                const int kk = axid<3, BlkAx::K>(gid, x1grid_size, x2grid_size);
+                const int jj =
+                    axid<3, BlkAx::J>(gid, x1grid_size, x2grid_size, kk);
+                const int ii =
+                    axid<3, BlkAx::I>(gid, x1grid_size, x2grid_size, kk);
 
                 if (first_order) {
                     if (jj < x2grid_size - 2 && kk < x3grid_size - 2) {
@@ -2490,7 +2470,7 @@ namespace simbi {
         }
 
         template <typename T, typename U>
-        GPU_SHARED T* shared_memory_proxy(const U object)
+        GPU_SHARED T* sm_proxy(const U object)
         {
 #if GPU_CODE
             if constexpr (global::on_sm) {
@@ -2524,23 +2504,23 @@ namespace simbi {
             }
         }
 
-        template <int dim, BlockAxis axis, typename T>
-        GPU_CALLABLE T get_axis_index(T idx, T ni, T nj, T kk)
+        template <int dim, BlkAx axis, typename T>
+        GPU_CALLABLE T axid(T idx, T ni, T nj, T kk)
         {
             if constexpr (dim == 1) {
-                if constexpr (axis != BlockAxis::I) {
+                if constexpr (axis != BlkAx::I) {
                     return 0;
                 }
                 return idx;
             }
             else if constexpr (dim == 2) {
-                if constexpr (axis == BlockAxis::I) {
+                if constexpr (axis == BlkAx::I) {
                     if constexpr (global::on_gpu) {
                         return blockDim.x * blockIdx.x + threadIdx.x;
                     }
                     return idx % ni;
                 }
-                else if constexpr (axis == BlockAxis::J) {
+                else if constexpr (axis == BlkAx::J) {
                     if constexpr (global::on_gpu) {
                         return blockDim.y * blockIdx.y + threadIdx.y;
                     }
@@ -2551,13 +2531,13 @@ namespace simbi {
                 }
             }
             else {
-                if constexpr (axis == BlockAxis::I) {
+                if constexpr (axis == BlkAx::I) {
                     if constexpr (global::on_gpu) {
                         return blockDim.x * blockIdx.x + threadIdx.x;
                     }
                     return get_column(idx, ni, nj, kk);
                 }
-                else if constexpr (axis == BlockAxis::J) {
+                else if constexpr (axis == BlkAx::J) {
                     if constexpr (global::on_gpu) {
                         return blockDim.y * blockIdx.y + threadIdx.y;
                     }
