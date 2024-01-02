@@ -90,7 +90,7 @@ namespace simbi {
 
         void swap(ndarray& rhs);
 
-        // Initilizer list constructor
+        // Initializer list constructor
         ndarray(std::initializer_list<DT> list);
 
         // Zero-initialize the array with defined size
@@ -110,10 +110,10 @@ namespace simbi {
         // function that returns the popped element
         constexpr void pop_back();
 
-        // fucntion to resize ndarray
+        // function to resize ndarray
         constexpr void resize(size_type new_size);
 
-        // fucntion to resize ndarray
+        // function to resize ndarray
         constexpr void resize(size_type new_size, const DT new_value);
 
         // Function that return the size of array
@@ -122,10 +122,12 @@ namespace simbi {
         constexpr size_type ndim() const;
 
         // Access operator (mutable)
-        template <typename IndexType> constexpr DT& operator[](IndexType);
+        template <typename IndexType>
+        constexpr DT& operator[](IndexType);
 
         // Const-access operator (read-only)
-        template <typename IndexType> constexpr DT operator[](IndexType) const;
+        template <typename IndexType>
+        constexpr DT operator[](IndexType) const;
 
         // Some math operator overloads
         constexpr ndarray& operator*(real);
@@ -137,7 +139,7 @@ namespace simbi {
         // Check if ndarray is empty
         bool empty() const;
 
-        // get pointers to underlying data ambigiously, on host, or on gpu
+        // get pointers to underlying data ambiguously, on host, or on gpu
         DT* data();
         DT* host_data();
         DT* dev_data();
@@ -199,7 +201,7 @@ namespace simbi {
         DT front() const;
         DT& front();
 
-        // GPU memeory copy helpers
+        // GPU memory copy helpers
         void copyToGpu();
         void copyFromGpu();
         void copyBetweenGpu(const ndarray& rhs);
@@ -209,31 +211,38 @@ namespace simbi {
 }   // namespace simbi
 
 // Type trait
-template <typename T> struct is_ndarray {
+template <typename T>
+struct is_ndarray {
     static constexpr bool value = false;
 };
 
-template <typename T> struct is_2darray {
+template <typename T>
+struct is_2darray {
     static constexpr bool value = false;
 };
 
-template <typename T> struct is_3darray {
+template <typename T>
+struct is_3darray {
     static constexpr bool value = false;
 };
 
-template <typename T> struct is_1darray {
+template <typename T>
+struct is_1darray {
     static constexpr bool value = false;
 };
 
-template <typename U> struct is_ndarray<simbi::ndarray<U>> {
+template <typename U>
+struct is_ndarray<simbi::ndarray<U>> {
     static constexpr bool value = true;
 };
 
-template <typename U> struct is_1darray<simbi::ndarray<U>> {
+template <typename U>
+struct is_1darray<simbi::ndarray<U>> {
     static constexpr bool value = true;
 };
 
-template <typename U> struct is_2darray<simbi::ndarray<simbi::ndarray<U>>> {
+template <typename U>
+struct is_2darray<simbi::ndarray<simbi::ndarray<U>>> {
     static constexpr bool value = true;
 };
 

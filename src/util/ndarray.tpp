@@ -1,6 +1,6 @@
 #include <typeinfo>
 
-// Initilizer list constructor
+// Initializer list constructor
 template <typename DT, global::Platform build_mode>
 simbi::ndarray<DT, build_mode>::ndarray(std::initializer_list<DT> list)
     : simbi::ndarray<DT, build_mode>(list.size())

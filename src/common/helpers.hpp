@@ -181,7 +181,7 @@ namespace simbi {
           {"cartesian", simbi::Geometry::CARTESIAN},
           {"planar_cylindrical", simbi::Geometry::PLANAR_CYLINDRICAL},
           {"axis_cylindrical", simbi::Geometry::AXIS_CYLINDRICAL},
-          {"cylindtical", simbi::Geometry::CYLINDRICAL}
+          {"cylindrical", simbi::Geometry::CYLINDRICAL}
         };
 
         // map boundary condition string to simbi::BoundaryCondition enum class
@@ -698,7 +698,7 @@ namespace simbi {
         /**
          * @brief  Evaluate the sigmoid function at a time t
          * @param t current time
-         * @param tdutation drop-off location of function
+         * @param tduration drop-off location of function
          * @param time_step time step
          * @param constant_sources flag to check if the source terms are
          * constant
@@ -932,7 +932,7 @@ namespace simbi {
         //              HELPER OVERLOADS
         //======================================
         /**
-         * @brief check if left and right pressures meet the Qurik (1994)
+         * @brief check if left and right pressures meet the Quirk (1994)
          * criterion
          *
          * @param pl left pressure
@@ -1014,7 +1014,7 @@ namespace simbi {
          *
          * @param xr left coordinates
          * @param xl right coordinate
-         * @param geometry geometriy of state
+         * @param geometry geometry of state
          * @return cell centroid
          */
         GPU_CALLABLE_INLINE
@@ -1178,9 +1178,9 @@ namespace simbi {
         void anyDisplayProps();
 
         /**
-         * @brief Get the Flops countin GB / s
+         * @brief Get the Flops count in GB / s
          *
-         * @tparam T Consrved type
+         * @tparam T Conserved type
          * @tparam U Primitive type
          * @param radius halo radius
          * @param total_zones total number of zones in sim
@@ -1207,7 +1207,7 @@ namespace simbi {
         }
 #endif
 
-        // separae values in a string using custom delimiter
+        // separate values in a string using custom delimiter
         template <const unsigned num, const char separator>
         void separate(std::string& input);
 
@@ -1218,7 +1218,7 @@ namespace simbi {
         template <typename T>
         GPU_CALLABLE T cubic(T b, T c, T d);
 
-        // solve the quartic queation
+        // solve the quartic equation
         template <typename T>
         GPU_CALLABLE int quartic(T b, T c, T d, T e, T res[4]);
 

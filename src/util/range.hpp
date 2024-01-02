@@ -22,10 +22,11 @@
 #include "device_api.hpp"      // for globalThreadIdx
 #include <iterator>            // for input_iterator_tag
 
-template <typename T> struct range_t {
+template <typename T>
+struct range_t {
     struct iter {
-        // inheriting from std::iterator deperecated
-        // must include explicity category and value_type
+        // inheriting from std::iterator deprecated
+        // must include explicit category and value_type
         // Note: there are three other types one could include
         // such as difference_type, pointer, reference
         using iterator_category = std::input_iterator_tag;
@@ -55,7 +56,7 @@ template <typename T> struct range_t {
             return copy;
         }
 
-        // Loses commutativity. Terator-based ranges are simply broken. :-(
+        // Loses commutativity. Iterator-based ranges are simply broken. :-(
         GPU_CALLABLE
         bool operator==(iter const& other) const
         {

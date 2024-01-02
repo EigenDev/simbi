@@ -1,7 +1,7 @@
 /**
  * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
  * @file       build_options.hpp.in
- * @brief      file to configure build mode for various cpu / gpu archiectures
+ * @brief      file to configure build mode for various cpu / gpu architectures
  *
  * @note
  * @history:
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marus DuPont**********************
+ * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
  */
 #ifndef BUILD_OPTIONS_HPP
 #define BUILD_OPTIONS_HPP
@@ -51,7 +51,7 @@ namespace global {
         FourVelocity = 1
     };
 
-// enum to check the relativisitc primitive velocity type (beta, or gamma-beta)
+// enum to check the relativistic primitive velocity type (beta, or gamma-beta)
 #if FOUR_VELOCITY
     constexpr Velocity VelocityType = Velocity::FourVelocity;
 #else

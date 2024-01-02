@@ -1,7 +1,7 @@
 /**
  * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
  * @file       newt.hpp
- * @brief      single header for 1, 2, adn 3D Newtonain calculations
+ * @brief      single header for 1, 2, adn 3D Newtonian calculations
  *
  * @note
  * @history:

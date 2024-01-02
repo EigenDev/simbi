@@ -1,7 +1,7 @@
 /**
  * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
  * @file       hydro_structs.hpp
- * @brief      the data structs for states, primtives, and sim configuration
+ * @brief      the data structs for states, primitives, and sim configuration
  *
  * @note
  * @history:

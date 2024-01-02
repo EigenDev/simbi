@@ -290,7 +290,7 @@ void Newtonian<dim>::emit_troubled_cells() const
  * Return the primitive
  * variables density , three-velocity, pressure
  *
- * @param  p executation policy class
+ * @param  p execution policy class
  * @return none
  */
 template <int dim>
@@ -484,7 +484,7 @@ Newtonian<dim>::prims2cons(const Newtonian<dim>::primitive_t& prims) const
 //---------------------------------------------------------------------
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
-// Adapt the cfl conditonal timestep
+// Adapt the cfl conditional timestep
 template <int dim>
 void Newtonian<dim>::adapt_dt()
 {
@@ -805,7 +805,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 
             auto star_state = conserved_t{rhoStar, mstar, eStar};
 
-            // Compute the luintermediate left flux
+            // Compute the intermediate left flux
             return left_flux + (star_state - left_state) * aL -
                    star_state * vface;
         }
@@ -824,7 +824,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 
             auto star_state = conserved_t{rhoStar, mstar, eStar};
 
-            // Compute the luintermediate right flux
+            // Compute the intermediate right flux
             return right_flux + (star_state - right_state) * aR -
                    star_state * vface;
         }
@@ -2078,7 +2078,7 @@ void Newtonian<dim>::simulate(
 )
 {
     helpers::anyDisplayProps();
-    // set the primtive functionals
+    // set the primitive functionals
     this->dens_outer = d_outer.value_or(nullptr);
     this->mom1_outer = m1_outer.value_or(nullptr);
     this->mom2_outer = m2_outer.value_or(nullptr);

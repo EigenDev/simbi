@@ -114,8 +114,6 @@ namespace simbi {
             void getDeviceProperties(anyGpuProp_t* props, int i);
             void gpuMemset(void* obj, int val, size_t bytes);
 
-            // void deviceSynch();
-
             template <global::Platform P = global::BuildPlatform>
             inline void deviceSynch()
             {

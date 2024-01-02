@@ -296,7 +296,7 @@ void RMHD<dim>::emit_troubled_cells() const
  * Return the primitive
  * variables density , three-velocity, pressure
  *
- * @param  p executation policy class
+ * @param  p execution policy class
  * @return none
  */
 template <int dim>
@@ -737,7 +737,7 @@ RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t& prims) const
 //---------------------------------------------------------------------
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
-// Adapt the cfl conditonal timestep
+// Adapt the cfl conditional timestep
 template <int dim>
 template <TIMESTEP_TYPE dt_type>
 void RMHD<dim>::adapt_dt()
@@ -1095,7 +1095,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const auto np2 = helpers::next_perm(nhat, 2);
 
     // the normal component of the magnetic field is assumed to
-    // be continuos across the interace, so bnL = bnR = bnStar
+    // be continuos across the interface, so bnL = bnR = bnStar
     const real bnStar  = hll_state.bcomponent(nhat);
     const real bt1Star = hll_state.bcomponent(np1);
     const real bt2Star = hll_state.bcomponent(np2);

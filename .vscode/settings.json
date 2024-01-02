@@ -107,7 +107,7 @@
         "",
         "==============================================================================",
         "@endverbatim",
-        "***********************(C) COPYRIGHT {year} Marus DuPont**********************",
+        "***********************(C) COPYRIGHT {year} Marcus DuPont**********************",
     ],
     "doxdocgen.file.versionTag": "@version 0.8",
     "doxdocgen.generic.dateFormat": "MMM-DD-YYYY",
@@ -134,4 +134,38 @@
     "doxdocgen.generic.paramTemplate": "@param[in/out/in,out]{indent:17}{param}:",
     "doxdocgen.generic.briefTemplate": "@brief{indent:17}",
     "doxdocgen.generic.returnTemplate": "@return{indent:17}{type}",
+    "cSpell.languageSettings": [
+        // This one works with Python
+        {
+            "languageId": "python",
+            "includeRegExpList": [
+                "/#.*/",
+                "/('''|\"\"\")[^\\1]+?\\1/g",
+                "strings"
+            ]
+        },
+        // This one works with JavaScript, Typescript, etc
+        {
+            "languageId": "javascript,typescript",
+            "includeRegExpList": [
+                "CStyleComment",
+                "strings"
+            ]
+        },
+        // Use with cpp or c files
+        {
+            "languageId": "cpp,c",
+            // Turn off compound words, because it is only checking strings.
+            "allowCompoundWords": false,
+            // Only check comments and strings
+            "includeRegExpList": [
+                "CStyleComment",
+                "string"
+            ],
+            // Exclude includes, because they are also strings.
+            "ignoreRegExpList": [
+                "/#include.*/"
+            ]
+        }
+    ],
 }

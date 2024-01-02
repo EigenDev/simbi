@@ -288,7 +288,7 @@ void SRHD<dim>::emit_troubled_cells() const
  * Return the primitive
  * variables density , three-velocity, pressure
  *
- * @param  p executation policy class
+ * @param  p execution policy class
  * @return none
  */
 template <int dim>
@@ -480,7 +480,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
     const real csL = std::sqrt(gamma * pL / (hL * rhoL));
 
     switch (comp_wave_speed) {
-        //-----------Calculate wave speeds based on Shneider et al. 1993
+        //-----------Calculate wave speeds based on Schneider et al. 1993
         case simbi::WaveSpeeds::SCHNEIDER_ET_AL_93:
             {
                 const real vbar = 0.5 * (vL + vR);
@@ -590,7 +590,7 @@ SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t& prims) const
 //---------------------------------------------------------------------
 //                  ADAPT THE TIMESTEP
 //---------------------------------------------------------------------
-// Adapt the cfl conditonal timestep
+// Adapt the cfl conditional time step
 template <int dim>
 template <TIMESTEP_TYPE dt_type>
 void SRHD<dim>::adapt_dt()
@@ -2492,7 +2492,7 @@ void SRHD<dim>::simulate(
 )
 {
     helpers::anyDisplayProps();
-    // set the primtive functionals
+    // set the primitive functionals
     this->dens_outer = d_outer.value_or(nullptr);
     this->mom1_outer = s1_outer.value_or(nullptr);
     this->mom2_outer = s2_outer.value_or(nullptr);

@@ -55,129 +55,160 @@ namespace sr3d {
 }
 
 namespace rmhd {
-    template <int dim> struct AnyConserved;
+    template <int dim>
+    struct AnyConserved;
 }
 
 namespace rmhd {
-    template <int dim> struct AnyPrimitive;
+    template <int dim>
+    struct AnyPrimitive;
 }
 
 //==========================================================================
-//                  PRIMTIIVE TYPE TRAITS
+//                  PRIMITIVE TYPE TRAITS
 //==========================================================================
-template <typename T> struct is_1D_primitive {
+template <typename T>
+struct is_1D_primitive {
     static const bool value = false;
 };
 
-template <> struct is_1D_primitive<hydro1d::Primitive> {
+template <>
+struct is_1D_primitive<hydro1d::Primitive> {
     static constexpr bool value = true;
 };
 
-template <> struct is_1D_primitive<sr1d::Primitive> {
+template <>
+struct is_1D_primitive<sr1d::Primitive> {
     static constexpr bool value = true;
 };
 
-template <typename T> struct is_2D_primitive {
+template <typename T>
+struct is_2D_primitive {
     static const bool value = false;
 };
 
-template <> struct is_2D_primitive<hydro2d::Primitive> {
+template <>
+struct is_2D_primitive<hydro2d::Primitive> {
     static constexpr bool value = true;
 };
 
-template <> struct is_2D_primitive<sr2d::Primitive> {
+template <>
+struct is_2D_primitive<sr2d::Primitive> {
     static constexpr bool value = true;
 };
 
-template <typename T> struct is_3D_primitive {
+template <typename T>
+struct is_3D_primitive {
     static const bool value = false;
 };
 
-template <> struct is_3D_primitive<hydro3d::Primitive> {
+template <>
+struct is_3D_primitive<hydro3d::Primitive> {
     static constexpr bool value = true;
 };
 
-template <> struct is_3D_primitive<sr3d::Primitive> {
+template <>
+struct is_3D_primitive<sr3d::Primitive> {
     static constexpr bool value = true;
 };
 
-template <typename T> struct is_relativistic {
+template <typename T>
+struct is_relativistic {
     static const bool value = false;
 };
 
-template <> struct is_relativistic<sr1d::Primitive> {
+template <>
+struct is_relativistic<sr1d::Primitive> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic<sr1d::Conserved> {
+template <>
+struct is_relativistic<sr1d::Conserved> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic<sr2d::Primitive> {
+template <>
+struct is_relativistic<sr2d::Primitive> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic<sr2d::Conserved> {
+template <>
+struct is_relativistic<sr2d::Conserved> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic<sr3d::Primitive> {
+template <>
+struct is_relativistic<sr3d::Primitive> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic<sr3d::Conserved> {
+template <>
+struct is_relativistic<sr3d::Conserved> {
     static constexpr bool value = true;
 };
 
-template <typename T> struct is_relativistic_mhd {
+template <typename T>
+struct is_relativistic_mhd {
     static const bool value = false;
 };
 
-template <> struct is_relativistic_mhd<rmhd::AnyConserved<1>> {
+template <>
+struct is_relativistic_mhd<rmhd::AnyConserved<1>> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic_mhd<rmhd::AnyPrimitive<1>> {
+template <>
+struct is_relativistic_mhd<rmhd::AnyPrimitive<1>> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic_mhd<rmhd::AnyConserved<2>> {
+template <>
+struct is_relativistic_mhd<rmhd::AnyConserved<2>> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic_mhd<rmhd::AnyPrimitive<2>> {
+template <>
+struct is_relativistic_mhd<rmhd::AnyPrimitive<2>> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic_mhd<rmhd::AnyConserved<3>> {
+template <>
+struct is_relativistic_mhd<rmhd::AnyConserved<3>> {
     static constexpr bool value = true;
 };
 
-template <> struct is_relativistic_mhd<rmhd::AnyPrimitive<3>> {
+template <>
+struct is_relativistic_mhd<rmhd::AnyPrimitive<3>> {
     static constexpr bool value = true;
 };
 
-template <typename T> struct is_1D_mhd_primitive {
+template <typename T>
+struct is_1D_mhd_primitive {
     static const bool value = false;
 };
 
-template <> struct is_1D_mhd_primitive<rmhd::AnyPrimitive<1>> {
+template <>
+struct is_1D_mhd_primitive<rmhd::AnyPrimitive<1>> {
     static const bool value = true;
 };
 
-template <typename T> struct is_2D_mhd_primitive {
+template <typename T>
+struct is_2D_mhd_primitive {
     static const bool value = false;
 };
 
-template <> struct is_2D_mhd_primitive<rmhd::AnyPrimitive<2>> {
+template <>
+struct is_2D_mhd_primitive<rmhd::AnyPrimitive<2>> {
     static const bool value = true;
 };
 
-template <typename T> struct is_3D_mhd_primitive {
+template <typename T>
+struct is_3D_mhd_primitive {
     static const bool value = false;
 };
 
-template <> struct is_3D_mhd_primitive<rmhd::AnyPrimitive<3>> {
+template <>
+struct is_3D_mhd_primitive<rmhd::AnyPrimitive<3>> {
     static const bool value = true;
 };
 
