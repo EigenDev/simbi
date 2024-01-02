@@ -97,7 +97,7 @@ namespace generic_hydro {
         }
 
         GPU_CALLABLE_MEMBER Primitive(real rho, real v1, real p)
-            : rho(rho), v1(v1), p(p), chi(0)
+            : rho(rho), v1(v1), p(p), chi(0.0)
         {
         }
 
@@ -170,7 +170,7 @@ namespace generic_hydro {
 
         GPU_CALLABLE_MEMBER
         Primitive(real rho, real v1, real v2, real p)
-            : rho(rho), v1(v1), v2(v2), p(p), chi(0)
+            : rho(rho), v1(v1), v2(v2), p(p), chi(0.0)
         {
         }
 
@@ -256,7 +256,7 @@ namespace generic_hydro {
 
         GPU_CALLABLE_MEMBER
         Primitive(real rho, real v1, real v2, real v3, real p)
-            : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(0)
+            : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(0.0)
         {
         }
 
@@ -342,7 +342,7 @@ namespace generic_hydro {
         }
 
         GPU_CALLABLE_MEMBER Conserved(real den, real m1, real nrg)
-            : den(den), m1(m1), nrg(nrg), chi(0)
+            : den(den), m1(m1), nrg(nrg), chi(0.0)
         {
         }
 
@@ -429,7 +429,7 @@ namespace generic_hydro {
 
         GPU_CALLABLE_MEMBER
         Conserved(real den, real m1, real m2, real nrg)
-            : den(den), m1(m1), m2(m2), nrg(nrg), chi(0)
+            : den(den), m1(m1), m2(m2), nrg(nrg), chi(0.0)
         {
         }
 
@@ -774,21 +774,18 @@ namespace hydro3d {
     };
 
     struct PrimitiveSOA {
-        PrimitiveSOA() = default;
-
-        ~PrimitiveSOA() = default;
-
         std::vector<real> rho, v1, v2, v3, p, chi;
+        PrimitiveSOA()  = default;
+        ~PrimitiveSOA() = default;
     };
 
     struct Eigenvals {
-        Eigenvals() = default;
-
+        real aL, aR, csL, csR, aStar, pStar;
+        Eigenvals()  = default;
         ~Eigenvals() = default;
 
-        real aL, aR, csL, csR, aStar, pStar;
-
-        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
+        GPU_CALLABLE_MEMBER
+        Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
 
         GPU_CALLABLE_MEMBER
         Eigenvals(real aL, real aR, real csL, real csR, real aStar, real pStar)
@@ -830,6 +827,17 @@ namespace sr1d {
         }
 
         GPU_CALLABLE_MEMBER
+        constexpr real lorentz_factor_squared() const
+        {
+            if constexpr (global::VelocityType == global::Velocity::Beta) {
+                return 1.0 / (1.0 - v1 * v1);
+            }
+            else {
+                return (1.0 + v1 * v1);
+            }
+        }
+
+        GPU_CALLABLE_MEMBER
         constexpr real vcomponent(const int nhat) const
         {
             if (nhat == 1) {
@@ -848,9 +856,11 @@ namespace sr1d {
     struct Conserved : generic_hydro::Conserved<1, Conserved> {
         using generic_hydro::Conserved<1, Conserved>::Conserved;
 
-        GPU_CALLABLE_MEMBER constexpr real& momentum() { return m1; }
+        GPU_CALLABLE_MEMBER
+        constexpr real& momentum() { return m1; }
 
-        GPU_CALLABLE_MEMBER constexpr real momentum(const int nhat) const
+        GPU_CALLABLE_MEMBER
+        constexpr real momentum(const int nhat) const
         {
             if (nhat == 1) {
                 return m1;
@@ -874,12 +884,11 @@ namespace sr1d {
 
         ~Eigenvals() = default;
 
-        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR)
-            : aL(aL), aR(aR), csL(0), csR(0)
-        {
-        }
+        GPU_CALLABLE_MEMBER
+        Eigenvals(real aL, real aR) : aL(aL), aR(aR), csL(0.0), csR(0.0) {}
 
-        GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR, real csL, real csR)
+        GPU_CALLABLE_MEMBER
+        Eigenvals(real aL, real aR, real csL, real csR)
             : aL(aL), aR(aR), csL(csL), csR(csR)
         {
         }
@@ -930,7 +939,19 @@ namespace sr2d {
             }
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v1() const
+        GPU_CALLABLE_MEMBER
+        real lorentz_factor_squared() const
+        {
+            if constexpr (global::VelocityType == global::Velocity::Beta) {
+                return 1.0 / (1.0 - (v1 * v1 + v2 * v2));
+            }
+            else {
+                return (1.0 + (v1 * v1 + v2 * v2));
+            }
+        }
+
+        GPU_CALLABLE_MEMBER
+        constexpr real get_v1() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v1;
@@ -940,7 +961,8 @@ namespace sr2d {
             }
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v2() const
+        GPU_CALLABLE_MEMBER
+        constexpr real get_v2() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v2;
@@ -1006,7 +1028,8 @@ namespace sr3d {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
         }
 
-        GPU_CALLABLE_MEMBER real lorentz_factor() const
+        GPU_CALLABLE_MEMBER
+        real lorentz_factor() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
@@ -1016,7 +1039,19 @@ namespace sr3d {
             }
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v1() const
+        GPU_CALLABLE_MEMBER
+        real lorentz_factor_squared() const
+        {
+            if constexpr (global::VelocityType == global::Velocity::Beta) {
+                return 1.0 / (1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
+            }
+            else {
+                return (1.0 + (v1 * v1 + v2 * v2 + v3 * v3));
+            }
+        }
+
+        GPU_CALLABLE_MEMBER
+        constexpr real get_v1() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v1;
@@ -1026,7 +1061,8 @@ namespace sr3d {
             }
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v2() const
+        GPU_CALLABLE_MEMBER
+        constexpr real get_v2() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v2;
@@ -1036,7 +1072,8 @@ namespace sr3d {
             }
         }
 
-        GPU_CALLABLE_MEMBER constexpr real get_v3() const
+        GPU_CALLABLE_MEMBER
+        constexpr real get_v3() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v3;
@@ -1054,22 +1091,19 @@ namespace sr3d {
     };
 
     struct PrimitiveSOA {
-        PrimitiveSOA() = default;
-
+        PrimitiveSOA()  = default;
         ~PrimitiveSOA() = default;
 
         std::vector<real> rho, v1, v2, v3, p, chi;
     };
 
     struct Eigenvals {
-        Eigenvals() = default;
-
+        real aL, aR, csL, csR;
+        Eigenvals()  = default;
         ~Eigenvals() = default;
 
-        real aL, aR, csL, csR;
-
         GPU_CALLABLE_MEMBER Eigenvals(real aL, real aR)
-            : aL(aL), aR(aR), csL(0), csR(0)
+            : aL(aL), aR(aR), csL(0.0), csR(0.0)
         {
         }
 
@@ -1096,13 +1130,13 @@ namespace rmhd {
         GPU_CALLABLE_MEMBER AnyConserved(real den, real m1, real nrg, real b1)
             : den(den),
               m1(m1),
-              m2(0),
-              m3(0),
+              m2(0.0),
+              m3(0.0),
               nrg(nrg),
               b1(b1),
-              b2(0),
-              b3(0),
-              chi(0)
+              b2(0.0),
+              b3(0.0),
+              chi(0.0)
         {
         }
 
@@ -1110,12 +1144,12 @@ namespace rmhd {
         AnyConserved(real den, real m1, real nrg, real b1, real chi)
             : den(den),
               m1(m1),
-              m2(0),
-              m3(0),
+              m2(0.0),
+              m3(0.0),
               nrg(nrg),
               b1(b1),
-              b2(0),
-              b3(0),
+              b2(0.0),
+              b3(0.0),
               chi(chi)
         {
         }
@@ -1125,12 +1159,12 @@ namespace rmhd {
             : den(den),
               m1(m1),
               m2(m2),
-              m3(0),
+              m3(0.0),
               nrg(nrg),
               b1(b1),
               b2(b2),
-              b3(0),
-              chi(0)
+              b3(0.0),
+              chi(0.0)
         {
         }
 
@@ -1146,11 +1180,11 @@ namespace rmhd {
             : den(den),
               m1(m1),
               m2(m2),
-              m3(0),
+              m3(0.0),
               nrg(nrg),
               b1(b1),
               b2(b2),
-              b3(0),
+              b3(0.0),
               chi(chi)
         {
         }
@@ -1173,7 +1207,7 @@ namespace rmhd {
               b1(b1),
               b2(b2),
               b3(b3),
-              chi(0)
+              chi(0.0)
         {
         }
 
@@ -1370,7 +1404,15 @@ namespace rmhd {
         }
 
         GPU_CALLABLE_MEMBER AnyPrimitive(real rho, real v1, real p, real b1)
-            : rho(rho), v1(v1), v2(0), v3(0), p(p), b1(b1), b2(0), b3(0), chi(0)
+            : rho(rho),
+              v1(v1),
+              v2(0.0),
+              v3(0.0),
+              p(p),
+              b1(b1),
+              b2(0.0),
+              b3(0.0),
+              chi(0.0)
         {
         }
 
@@ -1378,12 +1420,12 @@ namespace rmhd {
         AnyPrimitive(real rho, real v1, real p, real b1, real chi)
             : rho(rho),
               v1(v1),
-              v2(0),
-              v3(0),
+              v2(0.0),
+              v3(0.0),
               p(p),
               b1(b1),
-              b2(0),
-              b3(0),
+              b2(0.0),
+              b3(0.0),
               chi(chi)
         {
         }
@@ -1393,12 +1435,12 @@ namespace rmhd {
             : rho(rho),
               v1(v1),
               v2(v2),
-              v3(0),
+              v3(0.0),
               p(p),
               b1(b1),
               b2(b2),
-              b3(0),
-              chi(0)
+              b3(0.0),
+              chi(0.0)
         {
         }
 
@@ -1414,11 +1456,11 @@ namespace rmhd {
             : rho(rho),
               v1(v1),
               v2(v2),
-              v3(0),
+              v3(0.0),
               p(p),
               b1(b1),
               b2(b2),
-              b3(0),
+              b3(0.0),
               chi(chi)
         {
         }
@@ -1441,7 +1483,7 @@ namespace rmhd {
               b1(b1),
               b2(b2),
               b3(b3),
-              chi(0)
+              chi(0.0)
         {
         }
 

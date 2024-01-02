@@ -71,8 +71,7 @@ namespace simbi {
         bool first_order, linspace, mesh_motion, adaptive_mesh_motion,
             half_sphere, quirk_smoothing, constant_sources, all_outer_bounds,
             changing_volume;
-        bool den_source_all_zeros, mom1_source_all_zeros, mom2_source_all_zeros,
-            mom3_source_all_zeros, energy_source_all_zeros;
+        bool null_den, null_mom1, null_mom2, null_mom3, null_nrg;
         bool mag1_source_all_zeros, mag2_source_all_zeros,
             mag3_source_all_zeros;
         bool zero_gravity1, zero_gravity2, zero_gravity3;
@@ -309,24 +308,24 @@ namespace simbi {
                     return i == real(0);
                 });
 
-            this->den_source_all_zeros = std::all_of(
+            this->null_den = std::all_of(
                 density_source.begin(),
                 density_source.end(),
                 [](real i) { return i == real(0); }
             );
-            this->mom1_source_all_zeros =
+            this->null_mom1 =
                 std::all_of(m1_source.begin(), m1_source.end(), [](real i) {
                     return i == real(0);
                 });
-            this->mom2_source_all_zeros =
+            this->null_mom2 =
                 std::all_of(m2_source.begin(), m2_source.end(), [](real i) {
                     return i == real(0);
                 });
-            this->mom3_source_all_zeros =
+            this->null_mom3 =
                 std::all_of(m3_source.begin(), m3_source.end(), [](real i) {
                     return i == real(0);
                 });
-            this->energy_source_all_zeros = std::all_of(
+            this->null_nrg = std::all_of(
                 energy_source.begin(),
                 energy_source.end(),
                 [](real i) { return i == real(0); }

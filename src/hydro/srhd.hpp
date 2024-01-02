@@ -111,7 +111,7 @@ namespace simbi {
             const primitive_t& left_prims,
             const primitive_t& right_prims,
             const luint nhat,
-            const real vface
+            const real vface = 0.0
         ) const;
 
         GPU_CALLABLE_MEMBER
@@ -127,7 +127,7 @@ namespace simbi {
             const primitive_t& left_prims,
             const primitive_t& right_prims,
             const luint nhat,
-            const real vface
+            const real vface = 0.0
         ) const;
 
         template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>

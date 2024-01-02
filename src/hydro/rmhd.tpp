@@ -290,7 +290,7 @@ void RMHD<dim>::emit_troubled_cells() const
 }
 
 //-----------------------------------------------------------------------------------------
-//                          GET THE rm::Primitive
+//                          GET THE Primitive
 //-----------------------------------------------------------------------------------------
 /**
  * Return the primitive
@@ -597,7 +597,7 @@ GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
     const real rho  = prims.rho;
     const real h    = prims.gas_enthalpy(gamma);
     cs2             = (gamma * prims.p / (rho * h));
-    const auto bmu  = rm::MagFourVec<dim>(prims);
+    const auto bmu  = mag_fourvec_t(prims);
     const real b4sq = bmu.inner_product();
     const real bn   = prims.bcomponent(nhat);
     const real bn2  = bn * bn;
@@ -725,8 +725,8 @@ RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t& prims) const
       (ed + bsq) * v1 - vdotb * b1,
       (ed + bsq) * v2 - vdotb * b2,
       (ed + bsq) * v3 - vdotb * b3,
-      ed - pg - d + static_cast<real>(0.5) * bsq +
-          static_cast<real>(0.5) * (vsq * bsq - vdotb * vdotb),
+      ed - pg - d +
+          static_cast<real>(0.5) * (bsq + (vsq * bsq - vdotb * vdotb)),
       b1,
       b2,
       b3,
@@ -957,7 +957,7 @@ RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
     const real m2             = (ed + bsq) * v2 - vdotb * b2;
     const real m3             = (ed + bsq) * v3 - vdotb * b3;
     const real mn             = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
-    const auto bmu            = rm::MagFourVec<dim>(prims);
+    const auto bmu            = mag_fourvec_t(prims);
     return {
       d * vn,
       m1 * vn + helpers::kronecker(nhat, 1) * p - bn * bmu.one / lorentz_factor,
@@ -1086,6 +1086,12 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const auto hll_flux = (left_flux * aRp - right_flux * aLm +
                            (right_state - left_state) * aRp * aLm) /
                           (aRp - aLm);
+
+    if (quirk_smoothing) {
+        if (helpers::quirk_strong_shock(left_prims.p, right_prims.p)) {
+            return hll_flux;
+        }
+    }
 
     // get the perpendicular directional unit vectors
     const auto np1 = helpers::next_perm(nhat, 1);
@@ -1253,391 +1259,391 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const RMHD<dim>::primitive_t& left_prims,
     const RMHD<dim>::primitive_t& right_prims,
     const luint nhat,
-    const real vface,
-    const luint gid
+    const luint gid,
+    const real vface
 ) const {
-    // conserved_t ua, uc;
-    // const auto lambda = calc_eigenvals(left_prims, right_prims,
-    // nhat); const real aL  = lambda.afL; const real aR  = lambda.afR; const
-    // real
-    // aLm = aL < 0 ? aL : 0; const real aRp = aR > 0 ? aR : 0;
+  // conserved_t ua, uc;
+  // const auto lambda = calc_eigenvals(left_prims, right_prims,
+  // nhat); const real aL  = lambda.afL; const real aR  = lambda.afR; const
+  // real
+  // aLm = aL < 0 ? aL : 0; const real aRp = aR > 0 ? aR : 0;
 
-    // //---- Check wave speeds before wasting computations
-    // if (vface <= aLm) {
-    //     return left_flux - left_state * vface;
-    // } else if (vface >= aRp) {
-    //     return right_flux - right_state * vface;
-    // }
+  // //---- Check wave speeds before wasting computations
+  // if (vface <= aLm) {
+  //     return left_flux - left_state * vface;
+  // } else if (vface >= aRp) {
+  //     return right_flux - right_state * vface;
+  // }
 
-    //  //-------------------Calculate the HLL Intermediate State
-    // const auto hll_state =
-    //     (right_state * aRp - left_state * aLm - right_flux + left_flux) /
-    //     (aRp
-    //     - aLm);
+  //  //-------------------Calculate the HLL Intermediate State
+  // const auto hll_state =
+  //     (right_state * aRp - left_state * aLm - right_flux + left_flux) /
+  //     (aRp
+  //     - aLm);
 
-    // //------------------Calculate the RHLLE Flux---------------
-    // const auto hll_flux
-    //     = (left_flux * aRp - right_flux * aLm + (right_state - left_state) *
-    //     aRp * aLm)
-    //         / (aRp - aLm);
+  // //------------------Calculate the RHLLE Flux---------------
+  // const auto hll_flux
+  //     = (left_flux * aRp - right_flux * aLm + (right_state - left_state) *
+  //     aRp * aLm)
+  //         / (aRp - aLm);
 
-    // // define the magnetic field normal to the zone
-    // const auto bn = hll_state.bcomponent(nhat);
+  // // define the magnetic field normal to the zone
+  // const auto bn = hll_state.bcomponent(nhat);
 
-    // // Eq. (12)
-    // const auto rL = left_state * aLm - left_flux;
-    // const auto rR = right_state * aRp - right_flux;
+  // // Eq. (12)
+  // const auto rL = left_state * aLm - left_flux;
+  // const auto rR = right_state * aRp - right_flux;
 
-    // //==================================================================
-    // // Helper functions to ease repetition
-    // //==================================================================
-    // const real qfunc = [](const conserved_t &r, const luint nhat,
-    // const
-    // real a, const real p) {
-    //     return r.total_energy() * a + p * (1 - a * a);
-    // };
-    // const real gfunc =[](const luint np1, const luint np2, const
-    // conserved_t &r) {
-    //     if constexpr(dim == 1) {
-    //         return 0;
-    //     } else if constexpr(dim == 2) {
-    //         return (r.bcomponent(np1) * r.bcomponent(np1));
-    //     } else {
-    //         return (r.bcomponent(np1) * r.bcomponent(np1) + r.bcomponent(np2)
-    //         *
-    //         r.bcomponent(np2));
-    //     }
-    // };
-    // const real yfunc = [](const luint np1, const luint np2, const
-    // conserved_t &r) {
-    //     if constexpr(dim == 1) {
-    //         return 0;
-    //     } else if constexpr(dim == 2) {
-    //         return r.bcomponent(np1) * r.momentum(np1);
-    //     } else {
-    //         return r.bcomponent(np1) * r.momentum(np1) + r.bcomponent(np2) *
-    //         r.momentum(np2);
-    //     }
-    // };
-    // const real ofunc = [](const real q, const real g, const real bn, const
-    // real
-    // a) {
-    //     return q - g + bn * bn * (1 - a * a);
-    // };
-    // const real xfunc = [](const real q, const real y, const real g, const
-    // real
-    // bn, const real a, const real p, const real et) {
-    //     return bn * (q * a * bn + y) - (q + g) * (a * p + et);
-    // };
-    // const real vnfunc = [](const real bn, const real q, const real a, const
-    // real y, const real g, const real p, const real mn, const real x) {
-    //     return (bn * (q* bn + a * y) - (q + g) * (p + mn)) / x;
-    // };
-    // const real vt1func = [](const real o, const real mt1, const real bt1,
-    // const
-    // real y, const real bn, const real a, const real mn, const real et, const
-    // real x) {
-    //     if constexpr(dim == 1) {
-    //         return 0;
-    //     };
-    //     return (o * mt1 + bt1 * (y + bn * (a * mn - et))) / x;
-    // };
-    // const real vt2func = [](const real o, const real mt2, const real bt2,
-    // const
-    // real y, const real bn, const real a, const real mn, const real et, const
-    // real x) {
-    //     if constexpr(dim < 3) {
-    //         return 0;
-    //     };
-    //     return (o * mt1 + bt2 * (y + bn * (a * mn - et))) / x;
-    // };
-    // const real btanfunc = [](const real rbk, const real bn, const real vn,
-    // const real a) {
-    //     if constexpr(dim == 1) {
-    //         return 0;
-    //     };
-    //     return (rbk - bn * vn) / (a - vn);
-    // };
+  // //==================================================================
+  // // Helper functions to ease repetition
+  // //==================================================================
+  // const real qfunc = [](const conserved_t &r, const luint nhat,
+  // const
+  // real a, const real p) {
+  //     return r.total_energy() * a + p * (1 - a * a);
+  // };
+  // const real gfunc =[](const luint np1, const luint np2, const
+  // conserved_t &r) {
+  //     if constexpr(dim == 1) {
+  //         return 0;
+  //     } else if constexpr(dim == 2) {
+  //         return (r.bcomponent(np1) * r.bcomponent(np1));
+  //     } else {
+  //         return (r.bcomponent(np1) * r.bcomponent(np1) + r.bcomponent(np2)
+  //         *
+  //         r.bcomponent(np2));
+  //     }
+  // };
+  // const real yfunc = [](const luint np1, const luint np2, const
+  // conserved_t &r) {
+  //     if constexpr(dim == 1) {
+  //         return 0;
+  //     } else if constexpr(dim == 2) {
+  //         return r.bcomponent(np1) * r.momentum(np1);
+  //     } else {
+  //         return r.bcomponent(np1) * r.momentum(np1) + r.bcomponent(np2) *
+  //         r.momentum(np2);
+  //     }
+  // };
+  // const real ofunc = [](const real q, const real g, const real bn, const
+  // real
+  // a) {
+  //     return q - g + bn * bn * (1 - a * a);
+  // };
+  // const real xfunc = [](const real q, const real y, const real g, const
+  // real
+  // bn, const real a, const real p, const real et) {
+  //     return bn * (q * a * bn + y) - (q + g) * (a * p + et);
+  // };
+  // const real vnfunc = [](const real bn, const real q, const real a, const
+  // real y, const real g, const real p, const real mn, const real x) {
+  //     return (bn * (q* bn + a * y) - (q + g) * (p + mn)) / x;
+  // };
+  // const real vt1func = [](const real o, const real mt1, const real bt1,
+  // const
+  // real y, const real bn, const real a, const real mn, const real et, const
+  // real x) {
+  //     if constexpr(dim == 1) {
+  //         return 0;
+  //     };
+  //     return (o * mt1 + bt1 * (y + bn * (a * mn - et))) / x;
+  // };
+  // const real vt2func = [](const real o, const real mt2, const real bt2,
+  // const
+  // real y, const real bn, const real a, const real mn, const real et, const
+  // real x) {
+  //     if constexpr(dim < 3) {
+  //         return 0;
+  //     };
+  //     return (o * mt1 + bt2 * (y + bn * (a * mn - et))) / x;
+  // };
+  // const real btanfunc = [](const real rbk, const real bn, const real vn,
+  // const real a) {
+  //     if constexpr(dim == 1) {
+  //         return 0;
+  //     };
+  //     return (rbk - bn * vn) / (a - vn);
+  // };
 
-    // const real total_enthalpy(const real p, const real et, const real vdr,
-    // const real a, const real vn) {
-    //     return p + (et - vdr) / (a - vn);
-    // };
+  // const real total_enthalpy(const real p, const real et, const real vdr,
+  // const real a, const real vn) {
+  //     return p + (et - vdr) / (a - vn);
+  // };
 
-    // const real bkc = [](const real bkL, const real bkR, const real vaL, const
-    // real vaR, const real vnL, const real vnR, const real bn, const real vkL,
-    // const real vkR) {
-    //     return (
-    //           bkR * (vaR - vnR)
-    //         - bkL * (vaL - vnL)
-    //         + bn  * (vkR - vkL)
-    //     ) / (vaR - vaL);
-    // };
+  // const real bkc = [](const real bkL, const real bkR, const real vaL, const
+  // real vaR, const real vnL, const real vnR, const real bn, const real vkL,
+  // const real vkR) {
+  //     return (
+  //           bkR * (vaR - vnR)
+  //         - bkL * (vaL - vnL)
+  //         + bn  * (vkR - vkL)
+  //     ) / (vaR - vaL);
+  // };
 
-    // const real vec_dot = [](const real x1, const real x2, const real x3,
-    // const
-    // real y1, const real y2, const real y3) {
-    //     x1 * y1 + x2 * y2 + x3 * y3;
-    // };
+  // const real vec_dot = [](const real x1, const real x2, const real x3,
+  // const
+  // real y1, const real y2, const real y3) {
+  //     x1 * y1 + x2 * y2 + x3 * y3;
+  // };
 
-    // const real vec_sq = [](const real x1, const real x2, const real x3) {
-    //     return x1 *x1 + x2 * x2 + x3 * x3;
-    // };
+  // const real vec_sq = [](const real x1, const real x2, const real x3) {
+  //     return x1 *x1 + x2 * x2 + x3 * x3;
+  // };
 
-    // const conserved_t construct_the_state = [](
-    //     const luint nhat,
-    //     const luint np1,
-    //     const luint np2
-    //     const real d,
-    //     const real vfac,
-    //     const real et,
-    //     const real p,
-    //     const real vn,
-    //     const real vdb,
-    //     const real bn,
-    //     const real bp1,
-    //     const real bp2,
-    //     const real vp1,
-    //     const real vp2
-    // ) {
-    //     conserved_t u;
-    //     u.den= d * vfac;
-    //     u.momentum(nhat) = (et + p) * vn - vdb * bn;
-    //     if constexpr(dim > 1) {
-    //         u.momentum(np1 > dim ? 1 : np1) = (et + p) * vp1 - vdb * bp1;
-    //     }
-    //     if constexpr(dim > 2) {
-    //         u.momentum(np2) = (et + p) * vp2 - vdb * bp2;
-    //     }
-    //     u.nrg = et - u.den;
-    //     u.bcomponent(nhat) = bn;
-    //     if constexpr(dim > 1) {
-    //         u.bcomponent(np1 > dim ? 1 : np1) = bp1;
-    //     }
-    //     if constexpr(dim > 2) {
-    //         u.bcomponent(np2) = bp2;
-    //     }
-    //     return u;
-    // };
+  // const conserved_t construct_the_state = [](
+  //     const luint nhat,
+  //     const luint np1,
+  //     const luint np2
+  //     const real d,
+  //     const real vfac,
+  //     const real et,
+  //     const real p,
+  //     const real vn,
+  //     const real vdb,
+  //     const real bn,
+  //     const real bp1,
+  //     const real bp2,
+  //     const real vp1,
+  //     const real vp2
+  // ) {
+  //     conserved_t u;
+  //     u.den= d * vfac;
+  //     u.momentum(nhat) = (et + p) * vn - vdb * bn;
+  //     if constexpr(dim > 1) {
+  //         u.momentum(np1 > dim ? 1 : np1) = (et + p) * vp1 - vdb * bp1;
+  //     }
+  //     if constexpr(dim > 2) {
+  //         u.momentum(np2) = (et + p) * vp2 - vdb * bp2;
+  //     }
+  //     u.nrg = et - u.den;
+  //     u.bcomponent(nhat) = bn;
+  //     if constexpr(dim > 1) {
+  //         u.bcomponent(np1 > dim ? 1 : np1) = bp1;
+  //     }
+  //     if constexpr(dim > 2) {
+  //         u.bcomponent(np2) = bp2;
+  //     }
+  //     return u;
+  // };
 
-    // //==============================================================================
-    // // initial pressure guess
-    // real p0 = 0;
-    // if (bn * bn / (pguess * pguess) < 0.01) {
-    //     const real a = aRp - aLm;
-    //     const real b = rR.total_energy() - rL.total_energy() + aRp * rL - aLm
-    //     *
-    //     rR; const real c = rL.momentum(nhat) * rR.total_energy() -
-    //     rR.momentum(nhat) * rL.total_energy(); const real quad =
-    //     std::max((0.0), b * b - 4 * a * c); p0 = 0.5 * (-b + std::sqrt(quad))
-    //     /
-    //     (aRp - aLm);
-    // } else {
-    //     const auto phll = cons2prim(hll_state, gid);
-    //     p0 = phll.total_pressure();
-    // }
-    // //----------------- Jump conditions across the fast waves (section 3.1)
-    // const auto np1  = helpers::next_perm(nhat, 1);
-    // const auto np2  = helpers::next_perm(nhat, 2);
+  // //==============================================================================
+  // // initial pressure guess
+  // real p0 = 0;
+  // if (bn * bn / (pguess * pguess) < 0.01) {
+  //     const real a = aRp - aLm;
+  //     const real b = rR.total_energy() - rL.total_energy() + aRp * rL - aLm
+  //     *
+  //     rR; const real c = rL.momentum(nhat) * rR.total_energy() -
+  //     rR.momentum(nhat) * rL.total_energy(); const real quad =
+  //     std::max((0.0), b * b - 4 * a * c); p0 = 0.5 * (-b + std::sqrt(quad))
+  //     /
+  //     (aRp - aLm);
+  // } else {
+  //     const auto phll = cons2prim(hll_state, gid);
+  //     p0 = phll.total_pressure();
+  // }
+  // //----------------- Jump conditions across the fast waves (section 3.1)
+  // const auto np1  = helpers::next_perm(nhat, 1);
+  // const auto np2  = helpers::next_perm(nhat, 2);
 
-    // // left side
-    // const auto pL   = left_prims.total_pressure();
-    // const auto qL   = qfunc(rL, nhat, aLm, pL);;
-    // const auto gL   = gfunc(np1, np2, rL);
-    // const auto yL   = yfunc(np1, np2, rL);
-    // const auto oL   = ofunc(qL, gL, bn, aLm);
-    // const auto xL   = xfunc(qL, yL, gL, bn, aLm, pL, rL.total_energ());
-    // // velocity components
-    // const auto vnL   = vnfunc(bn, qL, aLm, yL, gL, pL, mnL, xL);
-    // const auto vt1L  = vt1func(oL, rL.momentum(np1), rL.bcomponent(np1), yL,
-    // bn, aLm, rL.momentum(nhat), rL.total_energy(), xL); const auto vt2L  =
-    // vt2func(oL, rL.momentum(np2), rL.bcomponent(np2), yL, bn, aLm,
-    // rL.momentum(nhat), rL.total_energy(), xL); const auto bp1L  =
-    // btanfunc(rL.bcomponent(np1), bn, vnL, vt1L, aLm); const auto bp2L  =
-    // btanfunc(rL.bcomponent(np2), bn, vnL, vt2L, aLm); const auto vdrL  = vnL
-    // *
-    // rL.momentum(nhat) + vt1L * rL.momentum(np1) + vt2L * rL.momentum(np2);
-    // const auto wL    = total_enthalpy(pL, rL.total_energy(), vdr, aLm, vnL);
-    // const auto vdbL  = (vnL * bn + vnL1 * bp1 + vnL2 * bp2);
-    // const auto vfacL = 1 / (aLm - vnL);
+  // // left side
+  // const auto pL   = left_prims.total_pressure();
+  // const auto qL   = qfunc(rL, nhat, aLm, pL);;
+  // const auto gL   = gfunc(np1, np2, rL);
+  // const auto yL   = yfunc(np1, np2, rL);
+  // const auto oL   = ofunc(qL, gL, bn, aLm);
+  // const auto xL   = xfunc(qL, yL, gL, bn, aLm, pL, rL.total_energ());
+  // // velocity components
+  // const auto vnL   = vnfunc(bn, qL, aLm, yL, gL, pL, mnL, xL);
+  // const auto vt1L  = vt1func(oL, rL.momentum(np1), rL.bcomponent(np1), yL,
+  // bn, aLm, rL.momentum(nhat), rL.total_energy(), xL); const auto vt2L  =
+  // vt2func(oL, rL.momentum(np2), rL.bcomponent(np2), yL, bn, aLm,
+  // rL.momentum(nhat), rL.total_energy(), xL); const auto bp1L  =
+  // btanfunc(rL.bcomponent(np1), bn, vnL, vt1L, aLm); const auto bp2L  =
+  // btanfunc(rL.bcomponent(np2), bn, vnL, vt2L, aLm); const auto vdrL  = vnL
+  // *
+  // rL.momentum(nhat) + vt1L * rL.momentum(np1) + vt2L * rL.momentum(np2);
+  // const auto wL    = total_enthalpy(pL, rL.total_energy(), vdr, aLm, vnL);
+  // const auto vdbL  = (vnL * bn + vnL1 * bp1 + vnL2 * bp2);
+  // const auto vfacL = 1 / (aLm - vnL);
 
-    // // right side
-    // const auto pR   = right_prims.total_pressure();
-    // const auto qR   = qfunc(rR, nhat, aRm, pR);;
-    // const auto gR   = gfunc(np1, np2, rR);
-    // const auto yR   = yfunc(np1, np2, rR);
-    // const auto oR   = ofunc(qR, gR, bn, aRm);
-    // const auto xR   = xfunc(qR, yR, gR, bn, aRm, pR, rR.total_energ());
-    // // velocity components
-    // const auto vnR   = vnfunc(bn, qR, aRm, yR, gR, pR, mnR, xR);
-    // const auto vt1R  = vt1func(oR, rR.momentum(np1), rR.bcomponent(np1), yR,
-    // bn, aRm, rR.momentum(nhat), rR.total_energy(), xR); const auto vt2R  =
-    // vt2func(oR, rR.momentum(np2), rR.bcomponent(np2), yR, bn, aRm,
-    // rR.momentum(nhat), rR.total_energy(), xR); const auto bp1R  =
-    // btanfunc(rR.bcomponent(np1), bn, vnR, vt1R, aRm); const auto bp2R  =
-    // btanfunc(rR.bcomponent(np2), bn, vnR, vt2R, aRm); const auto vdrR  = vnR
-    // *
-    // rR.momentum(nhat) + vt1R * rR.momentum(np1) + vt2R * rR.momentum(np2);
-    // const auto wR    = total_enthalpy(pR, rR.total_energy(), vdr, aRm, vnR);
-    // const auto vdbR  = (vnR * bn + vnR1 * bp1 + vnR2 * bp2);
-    // const auto vfacR = 1 / (aRm - vnR);
+  // // right side
+  // const auto pR   = right_prims.total_pressure();
+  // const auto qR   = qfunc(rR, nhat, aRm, pR);;
+  // const auto gR   = gfunc(np1, np2, rR);
+  // const auto yR   = yfunc(np1, np2, rR);
+  // const auto oR   = ofunc(qR, gR, bn, aRm);
+  // const auto xR   = xfunc(qR, yR, gR, bn, aRm, pR, rR.total_energ());
+  // // velocity components
+  // const auto vnR   = vnfunc(bn, qR, aRm, yR, gR, pR, mnR, xR);
+  // const auto vt1R  = vt1func(oR, rR.momentum(np1), rR.bcomponent(np1), yR,
+  // bn, aRm, rR.momentum(nhat), rR.total_energy(), xR); const auto vt2R  =
+  // vt2func(oR, rR.momentum(np2), rR.bcomponent(np2), yR, bn, aRm,
+  // rR.momentum(nhat), rR.total_energy(), xR); const auto bp1R  =
+  // btanfunc(rR.bcomponent(np1), bn, vnR, vt1R, aRm); const auto bp2R  =
+  // btanfunc(rR.bcomponent(np2), bn, vnR, vt2R, aRm); const auto vdrR  = vnR
+  // *
+  // rR.momentum(nhat) + vt1R * rR.momentum(np1) + vt2R * rR.momentum(np2);
+  // const auto wR    = total_enthalpy(pR, rR.total_energy(), vdr, aRm, vnR);
+  // const auto vdbR  = (vnR * bn + vnR1 * bp1 + vnR2 * bp2);
+  // const auto vfacR = 1 / (aRm - vnR);
 
-    // //--------------Jump conditions across the Alfven waves (section 3.2)
-    // const auto etaL = - helpers::sgn(bn) * std::sqrt(wL);
-    // const auto etaR =   helpers::sgn(bn) * std::sqrt(wR);
-    // const auto calc_kcomp = (const int nhat, const int ehat, const
-    // conserved_t &r, const real p, const real a, const real eta) {
-    //     return (r.momentum(nhat) + p * helpers::kronecker(ehat, nhat) +
-    //     r.bcomponent(ehat) * eta) / (a * p + r.total_energy() + bn * eta);
-    // }
-    // const auto knL  = calc_kcomp(nhat, nhat, rL, pL, aLm, etaL);
-    // const auto knR  = calc_kcomp(nhat, nhat, rR, pR, aRm, etaR);
-    // const auto kt1L = calc_kcomp(nhat, np1, rL,  pL, aLm, etaL);
-    // const auto kt1R = calc_kcomp(nhat, np1, rR,  pR, aRm, etaR);
-    // const auto kt2L = calc_kcomp(nhat, np2, rL,  pL, aLm, etaL);
-    // const auto kt2R = calc_kcomp(nhat, np2, rR,  pR, aRp, etaR);
-    // // the k-normal is the Alfven wave speed
-    // const auto vaL = knL;
-    // const auto vaR = knR;
-    // if (aLm - vaL < vface) { // return FaL
-    //     ua = construct_the_state(
-    //         nhat,
-    //         np1,
-    //         np2,
-    //         rL.d,
-    //         vfacL,
-    //         rL.total_energy(),
-    //         pL,
-    //         vnL,
-    //         vdbL,
-    //         bn,
-    //         bp1L,
-    //         bp2L,
-    //         vt1L,
-    //         vt2L
-    //     );
-    //     return left_flux + (ua - left_state) * vaL - ua * vface;
-    // } else if (vaR - aRp < vface) { // return FaR
-    //     ua = construct_the_state(
-    //         nhat,
-    //         np1,
-    //         np2,
-    //         rR.d,
-    //         vfacR,
-    //         rR.total_energy(),
-    //         pR,
-    //         vnR,
-    //         vdbR,
-    //         bn,
-    //         bp1R,
-    //         bp2R,
-    //         vt1R,
-    //         vt2R
-    //     );
+  // //--------------Jump conditions across the Alfven waves (section 3.2)
+  // const auto etaL = - helpers::sgn(bn) * std::sqrt(wL);
+  // const auto etaR =   helpers::sgn(bn) * std::sqrt(wR);
+  // const auto calc_kcomp = (const int nhat, const int ehat, const
+  // conserved_t &r, const real p, const real a, const real eta) {
+  //     return (r.momentum(nhat) + p * helpers::kronecker(ehat, nhat) +
+  //     r.bcomponent(ehat) * eta) / (a * p + r.total_energy() + bn * eta);
+  // }
+  // const auto knL  = calc_kcomp(nhat, nhat, rL, pL, aLm, etaL);
+  // const auto knR  = calc_kcomp(nhat, nhat, rR, pR, aRm, etaR);
+  // const auto kt1L = calc_kcomp(nhat, np1, rL,  pL, aLm, etaL);
+  // const auto kt1R = calc_kcomp(nhat, np1, rR,  pR, aRm, etaR);
+  // const auto kt2L = calc_kcomp(nhat, np2, rL,  pL, aLm, etaL);
+  // const auto kt2R = calc_kcomp(nhat, np2, rR,  pR, aRp, etaR);
+  // // the k-normal is the Alfven wave speed
+  // const auto vaL = knL;
+  // const auto vaR = knR;
+  // if (aLm - vaL < vface) { // return FaL
+  //     ua = construct_the_state(
+  //         nhat,
+  //         np1,
+  //         np2,
+  //         rL.d,
+  //         vfacL,
+  //         rL.total_energy(),
+  //         pL,
+  //         vnL,
+  //         vdbL,
+  //         bn,
+  //         bp1L,
+  //         bp2L,
+  //         vt1L,
+  //         vt2L
+  //     );
+  //     return left_flux + (ua - left_state) * vaL - ua * vface;
+  // } else if (vaR - aRp < vface) { // return FaR
+  //     ua = construct_the_state(
+  //         nhat,
+  //         np1,
+  //         np2,
+  //         rR.d,
+  //         vfacR,
+  //         rR.total_energy(),
+  //         pR,
+  //         vnR,
+  //         vdbR,
+  //         bn,
+  //         bp1R,
+  //         bp2R,
+  //         vt1R,
+  //         vt2R
+  //     );
 
-    //     return right_flux + (ua - right_state) * vaR - ua * vface;
-    // } else {
-    //     dK  = 1 / (vaR - vaL);
-    //     //---------------Jump conditions across the contact wave
-    //     (section 3.3)
-    //     const auto bkxn  = bn;
-    //     const auto bkc1  = bkc(uaL.bcomponent(np1), uaR.bcomponent(np1), vaL,
-    //     vaR, vnL, vnR, vt1L, vt1R) * dK; const auto bkc2  =
-    //     bkc(uaL.bcomponent(np2), uaR.bcomponent(np2), vaL, vaR, vnL, vnR,
-    //     vt2L,
-    //     vt2R) * dK; const auto kdbL  = vec_dot(bkxn, bkc1, bkc2, knL, kt1L,
-    //     kt2L); const auto kdbR  = vec_dot(bkxn, bkc1, bkc2, knR, kt1R, kt2R);
-    //     const auto ksqL  = vec_sq(knL, kt1L, kt2L);
-    //     const auto ksqR  = vec_sq(knR, kt1R, kt2R);
-    //     const auto kfacL = (1 - ksqL) / (etaL - kdbL);
-    //     const auto kfacR = (1 - ksqR) / (etaR - kdbR);
-    //     const auto vanL  = knL  -  bn * kfacL;
-    //     const auto vat1L = kt1L - bkc1 * kfacL;
-    //     const auto vat2L = kt2L - bkc2 * kfacL;
-    //     const auto vanR  = knR  -  bn * kfacR;
-    //     const auto vat1R = kt1R - bkc1 * kfacR;
-    //     const auto vat2R = kt2R - bkc2 * kfacR;
-    //     const auto vakn = 0.5 * (vanL + vanR);
-    //     const auto vat1 = 0.5 * (vat1L + vat1R);
-    //     const auto vat2 = 0.5 * (vat2L + vat2R);
-    //     const auto vdbc = vec_dot(vakn, vat1, vat2, bkxn, bkc1, bkc2);
-    //     if (vakn > 0) {
-    //         ua = construct_the_state(
-    //             nhat,
-    //             np1,
-    //             np2,
-    //             rL.d,
-    //             vfacL,
-    //             rL.total_energy(),
-    //             pL,
-    //             vnL,
-    //             vdbL,
-    //             bn,
-    //             bp1L,
-    //             bp2L,
-    //             vt1L,
-    //             vt2L
-    //         );
-    //         const real etc  = (vaL * ua.total_energy() - ua.momentum(nhat) +
-    //         pL
-    //         * vakn - vdbc * bn) / (vaL - vakn); uc = construct_the_state(
-    //             nhat,
-    //             np1,
-    //             np2,
-    //             ua.d,
-    //             (vaL - vnL) / (vaL - vakn),
-    //             etc,
-    //             pL,
-    //             vnL,
-    //             vdbc,
-    //             bn,
-    //             bkc1,
-    //             bkc2,
-    //             vat1L,
-    //             vat2L
-    //         );
+  //     return right_flux + (ua - right_state) * vaR - ua * vface;
+  // } else {
+  //     dK  = 1 / (vaR - vaL);
+  //     //---------------Jump conditions across the contact wave
+  //     (section 3.3)
+  //     const auto bkxn  = bn;
+  //     const auto bkc1  = bkc(uaL.bcomponent(np1), uaR.bcomponent(np1), vaL,
+  //     vaR, vnL, vnR, vt1L, vt1R) * dK; const auto bkc2  =
+  //     bkc(uaL.bcomponent(np2), uaR.bcomponent(np2), vaL, vaR, vnL, vnR,
+  //     vt2L,
+  //     vt2R) * dK; const auto kdbL  = vec_dot(bkxn, bkc1, bkc2, knL, kt1L,
+  //     kt2L); const auto kdbR  = vec_dot(bkxn, bkc1, bkc2, knR, kt1R, kt2R);
+  //     const auto ksqL  = vec_sq(knL, kt1L, kt2L);
+  //     const auto ksqR  = vec_sq(knR, kt1R, kt2R);
+  //     const auto kfacL = (1 - ksqL) / (etaL - kdbL);
+  //     const auto kfacR = (1 - ksqR) / (etaR - kdbR);
+  //     const auto vanL  = knL  -  bn * kfacL;
+  //     const auto vat1L = kt1L - bkc1 * kfacL;
+  //     const auto vat2L = kt2L - bkc2 * kfacL;
+  //     const auto vanR  = knR  -  bn * kfacR;
+  //     const auto vat1R = kt1R - bkc1 * kfacR;
+  //     const auto vat2R = kt2R - bkc2 * kfacR;
+  //     const auto vakn = 0.5 * (vanL + vanR);
+  //     const auto vat1 = 0.5 * (vat1L + vat1R);
+  //     const auto vat2 = 0.5 * (vat2L + vat2R);
+  //     const auto vdbc = vec_dot(vakn, vat1, vat2, bkxn, bkc1, bkc2);
+  //     if (vakn > 0) {
+  //         ua = construct_the_state(
+  //             nhat,
+  //             np1,
+  //             np2,
+  //             rL.d,
+  //             vfacL,
+  //             rL.total_energy(),
+  //             pL,
+  //             vnL,
+  //             vdbL,
+  //             bn,
+  //             bp1L,
+  //             bp2L,
+  //             vt1L,
+  //             vt2L
+  //         );
+  //         const real etc  = (vaL * ua.total_energy() - ua.momentum(nhat) +
+  //         pL
+  //         * vakn - vdbc * bn) / (vaL - vakn); uc = construct_the_state(
+  //             nhat,
+  //             np1,
+  //             np2,
+  //             ua.d,
+  //             (vaL - vnL) / (vaL - vakn),
+  //             etc,
+  //             pL,
+  //             vnL,
+  //             vdbc,
+  //             bn,
+  //             bkc1,
+  //             bkc2,
+  //             vat1L,
+  //             vat2L
+  //         );
 
-    //         const auto fa = left_flux + (ua - left_state) * vaL;
-    //         return fa + (uc - ua) * vakn - uc * vface;
-    //     } else {
-    //         ua = construct_the_state(
-    //             nhat,
-    //             np1,
-    //             np2,
-    //             rL.d,
-    //             vfacR,
-    //             rR.total_energy(),
-    //             pR,
-    //             vnR,
-    //             vdbR,
-    //             bn,
-    //             bp1R,
-    //             bp2R,
-    //             vt1R,
-    //             vt2R
-    //         );
-    //         const real etc  = (vaR * uaR.total_energy() - uaR.momentum(nhat)
-    //         +
-    //         pR * vakn - vdbc * bnR) / (vaR - vakn); uc = construct_the_state(
-    //             nhat,
-    //             np1,
-    //             np2,
-    //             ua.d,
-    //             (vaR - vnR) / (vaR - vakn),
-    //             etc,
-    //             pR,
-    //             vnR,
-    //             vdbc,
-    //             bn,
-    //             bkc1,
-    //             bkc2,
-    //             vat1R,
-    //             vat2R
-    //         );
-    //         const auto fa = right_flux + (ua - right_state) * vaR;
-    //         return fa + (uc - ua) * vakn - uc * vface;
-    //     }
-    // }
+  //         const auto fa = left_flux + (ua - left_state) * vaL;
+  //         return fa + (uc - ua) * vakn - uc * vface;
+  //     } else {
+  //         ua = construct_the_state(
+  //             nhat,
+  //             np1,
+  //             np2,
+  //             rL.d,
+  //             vfacR,
+  //             rR.total_energy(),
+  //             pR,
+  //             vnR,
+  //             vdbR,
+  //             bn,
+  //             bp1R,
+  //             bp2R,
+  //             vt1R,
+  //             vt2R
+  //         );
+  //         const real etc  = (vaR * uaR.total_energy() - uaR.momentum(nhat)
+  //         +
+  //         pR * vakn - vdbc * bnR) / (vaR - vakn); uc = construct_the_state(
+  //             nhat,
+  //             np1,
+  //             np2,
+  //             ua.d,
+  //             (vaR - vnR) / (vaR - vakn),
+  //             etc,
+  //             pR,
+  //             vnR,
+  //             vdbc,
+  //             bn,
+  //             bkc1,
+  //             bkc2,
+  //             vat1R,
+  //             vat2R
+  //         );
+  //         const auto fa = right_flux + (ua - right_state) * vaR;
+  //         return fa + (uc - ua) * vakn - uc * vface;
+  //     }
+  // }
 };
 
 //===================================================================================================================
@@ -1654,21 +1660,21 @@ void RMHD<dim>::advance(
     const luint ypg = this->yactive_grid;
     const luint zpg = this->zactive_grid;
 
-    const luint extent             = p.get_full_extent();
-    auto* const cons_data          = cons.data();
-    const auto* const prim_data    = prims.data();
-    const auto* const dens_source  = density_source.data();
-    const auto* const mom1_source  = m1_source.data();
-    const auto* const mom2_source  = m2_source.data();
-    const auto* const mom3_source  = m3_source.data();
-    const auto* const mag1_source  = sourceB1.data();
-    const auto* const mag2_source  = sourceB2.data();
-    const auto* const mag3_source  = sourceB3.data();
-    const auto* const erg_source   = energy_source.data();
-    const auto* const object_data  = object_pos.data();
-    const auto* const grav1_source = sourceG1.data();
-    const auto* const grav2_source = sourceG2.data();
-    const auto* const grav3_source = sourceG3.data();
+    const luint extent            = p.get_full_extent();
+    auto* const cons_data         = cons.data();
+    const auto* const prim_data   = prims.data();
+    const auto* const dens_source = density_source.data();
+    const auto* const mom1_source = m1_source.data();
+    const auto* const mom2_source = m2_source.data();
+    const auto* const mom3_source = m3_source.data();
+    const auto* const mag1_source = sourceB1.data();
+    const auto* const mag2_source = sourceB2.data();
+    const auto* const mag3_source = sourceB3.data();
+    const auto* const erg_source  = energy_source.data();
+    const auto* const object_data = object_pos.data();
+    const auto* const g1_source   = sourceG1.data();
+    const auto* const g2_source   = sourceG2.data();
+    const auto* const g3_source   = sourceG3.data();
 
     simbi::parallel_for(
         p,
@@ -1688,9 +1694,9 @@ void RMHD<dim>::advance(
          mag3_source,
          erg_source,
          object_data,
-         grav1_source,
-         grav2_source,
-         grav3_source,
+         g1_source,
+         g2_source,
+         g3_source,
          xpg,
          ypg,
          zpg,
@@ -1792,14 +1798,12 @@ void RMHD<dim>::advance(
                               [helpers::my_max<lint>(kk - 1, 0) * xpg * ypg +
                                jj * xpg + ii];
 
-            const real x1l    = get_x1face(ii, 0);
-            const real x1r    = get_x1face(ii, 1);
-            const real vfaceL = (geometry == simbi::Geometry::CARTESIAN)
-                                    ? hubble_param
-                                    : x1l * hubble_param;
-            const real vfaceR = (geometry == simbi::Geometry::CARTESIAN)
-                                    ? hubble_param
-                                    : x1r * hubble_param;
+            const real x1l = get_x1face(ii, 0);
+            const real x1r = get_x1face(ii, 1);
+            const real vfaceL =
+                (changing_volume) ? x1l * hubble_param : hubble_param;
+            const real vfaceR =
+                (changing_volume) ? x1r * hubble_param : hubble_param;
 
             if (first_order) [[unlikely]] {
                 xprimsL = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
@@ -1890,130 +1894,38 @@ void RMHD<dim>::advance(
                             break;
                         }
                         else {
-                            if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(
-                                        xprimsL.p,
-                                        xprimsR.p
-                                    )) {
-                                    frf = calc_hll_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceR
-                                    );
-                                }
-                                else {
-                                    frf = calc_hllc_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceR
-                                    );
-                                }
+                            frf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceR
+                            );
+                            grf = calc_hllc_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2
+                            );
 
-                                if (helpers::quirk_strong_shock(
-                                        yprimsL.p,
-                                        yprimsR.p
-                                    )) {
-                                    grf = calc_hll_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-                                else {
-                                    grf = calc_hllc_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-
-                                if constexpr (dim > 2) {
-                                    if (helpers::quirk_strong_shock(
-                                            zprimsL.p,
-                                            zprimsR.p
-                                        )) {
-                                        hrf = calc_hll_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                    else {
-                                        hrf = calc_hllc_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                }
-                                break;
-                            }
-                            else {
-                                frf = calc_hllc_flux(
-                                    uxL,
-                                    uxR,
-                                    fL,
-                                    fR,
-                                    xprimsL,
-                                    xprimsR,
-                                    1,
-                                    vfaceR
+                            if constexpr (dim > 2) {
+                                hrf = calc_hllc_flux(
+                                    uzL,
+                                    uzR,
+                                    hL,
+                                    hR,
+                                    zprimsL,
+                                    zprimsR,
+                                    3
                                 );
-                                grf = calc_hllc_flux(
-                                    uyL,
-                                    uyR,
-                                    gL,
-                                    gR,
-                                    yprimsL,
-                                    yprimsR,
-                                    2,
-                                    0
-                                );
-
-                                if constexpr (dim > 2) {
-                                    hrf = calc_hllc_flux(
-                                        uzL,
-                                        uzR,
-                                        hL,
-                                        hR,
-                                        zprimsL,
-                                        zprimsR,
-                                        3,
-                                        0
-                                    );
-                                }
-                                break;
                             }
+                            break;
                         }
                     default:
                         frf = calc_hll_flux(
@@ -2034,8 +1946,7 @@ void RMHD<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -2046,8 +1957,7 @@ void RMHD<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -2057,12 +1967,12 @@ void RMHD<dim>::advance(
                 xprimsL = prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
                 xprimsR = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
                 if constexpr (dim > 1) {
-                    // j+1/2
+                    // j-1/2
                     yprimsL = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
                     yprimsR = prim_buff[tza * sx * sy + (tya + 0) * sx + txa];
                 }
                 if constexpr (dim > 2) {
-                    // k+1/2
+                    // k-1/2
                     zprimsL = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
                     zprimsR = prim_buff[(tza - 0) * sx * sy + tya * sx + txa];
                 }
@@ -2142,130 +2052,38 @@ void RMHD<dim>::advance(
                             break;
                         }
                         else {
-                            if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(
-                                        xprimsL.p,
-                                        xprimsR.p
-                                    )) {
-                                    flf = calc_hll_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceL
-                                    );
-                                }
-                                else {
-                                    flf = calc_hllc_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceL
-                                    );
-                                }
+                            flf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceL
+                            );
+                            glf = calc_hllc_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2
+                            );
 
-                                if (helpers::quirk_strong_shock(
-                                        yprimsL.p,
-                                        yprimsR.p
-                                    )) {
-                                    glf = calc_hll_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-                                else {
-                                    glf = calc_hllc_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-
-                                if constexpr (dim > 2) {
-                                    if (helpers::quirk_strong_shock(
-                                            zprimsL.p,
-                                            zprimsR.p
-                                        )) {
-                                        hlf = calc_hll_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                    else {
-                                        hlf = calc_hllc_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                }
-                                break;
-                            }
-                            else {
-                                flf = calc_hllc_flux(
-                                    uxL,
-                                    uxR,
-                                    fL,
-                                    fR,
-                                    xprimsL,
-                                    xprimsR,
-                                    1,
-                                    vfaceL
+                            if constexpr (dim > 2) {
+                                hlf = calc_hllc_flux(
+                                    uzL,
+                                    uzR,
+                                    hL,
+                                    hR,
+                                    zprimsL,
+                                    zprimsR,
+                                    3
                                 );
-                                glf = calc_hllc_flux(
-                                    uyL,
-                                    uyR,
-                                    gL,
-                                    gR,
-                                    yprimsL,
-                                    yprimsR,
-                                    2,
-                                    0
-                                );
-
-                                if constexpr (dim > 2) {
-                                    hlf = calc_hllc_flux(
-                                        uzL,
-                                        uzR,
-                                        hL,
-                                        hR,
-                                        zprimsL,
-                                        zprimsR,
-                                        3,
-                                        0
-                                    );
-                                }
-                                break;
                             }
+                            break;
                         }
                     default:
                         flf = calc_hll_flux(
@@ -2286,8 +2104,7 @@ void RMHD<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -2298,8 +2115,7 @@ void RMHD<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -2307,77 +2123,57 @@ void RMHD<dim>::advance(
             }
             else {
                 // Coordinate X
-                const primitive_t xleft_most =
+                const primitive_t xlm =
                     prim_buff[tza * sx * sy + tya * sx + (txa - 2)];
-                const primitive_t xleft_mid =
+                const primitive_t xlc =
                     prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
                 const primitive_t center =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
-                const primitive_t xright_mid =
+                const primitive_t xrc =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
-                const primitive_t xright_most =
+                const primitive_t xrm =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 2)];
-                primitive_t yleft_most, yleft_mid, yright_mid, yright_most;
-                primitive_t zleft_most, zleft_mid, zright_mid, zright_most;
+                primitive_t ylm, ylc, yrc, yrm;
+                primitive_t zlm, zlc, zrc, zrm;
                 // Reconstructed left X primitive_t vector at the i+1/2
                 // interface
-                xprimsL = center + helpers::plm_gradient(
-                                       center,
-                                       xleft_mid,
-                                       xright_mid,
-                                       plm_theta
-                                   ) * 0.5;
-                xprimsR = xright_mid - helpers::plm_gradient(
-                                           xright_mid,
-                                           center,
-                                           xright_most,
-                                           plm_theta
-                                       ) * 0.5;
+                xprimsL =
+                    center +
+                    helpers::plm_gradient(center, xlc, xrc, plm_theta) * 0.5;
+                xprimsR =
+                    xrc -
+                    helpers::plm_gradient(xrc, center, xrm, plm_theta) * 0.5;
 
                 // Coordinate Y
                 if constexpr (dim > 1) {
-                    yleft_most =
-                        prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
-                    yleft_mid = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
-                    yright_mid =
-                        prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
-                    yright_most =
-                        prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
-                    yprimsL = center + helpers::plm_gradient(
-                                           center,
-                                           yleft_mid,
-                                           yright_mid,
-                                           plm_theta
-                                       ) * 0.5;
-                    yprimsR = yright_mid - helpers::plm_gradient(
-                                               yright_mid,
-                                               center,
-                                               yright_most,
-                                               plm_theta
-                                           ) * 0.5;
+                    ylm = prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
+                    ylc = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
+                    yrc = prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
+                    yrm = prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
+                    yprimsL =
+                        center +
+                        helpers::plm_gradient(center, ylc, yrc, plm_theta) *
+                            0.5;
+                    yprimsR =
+                        yrc -
+                        helpers::plm_gradient(yrc, center, yrm, plm_theta) *
+                            0.5;
                 }
 
                 // Coordinate z
                 if constexpr (dim > 2) {
-                    zleft_most =
-                        prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
-                    zleft_mid = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
-                    zright_mid =
-                        prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
-                    zright_most =
-                        prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
-                    zprimsL = center + helpers::plm_gradient(
-                                           center,
-                                           zleft_mid,
-                                           zright_mid,
-                                           plm_theta
-                                       ) * 0.5;
-                    zprimsR = zright_mid - helpers::plm_gradient(
-                                               zright_mid,
-                                               center,
-                                               zright_most,
-                                               plm_theta
-                                           ) * 0.5;
+                    zlm = prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
+                    zlc = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
+                    zrc = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
+                    zrm = prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
+                    zprimsL =
+                        center +
+                        helpers::plm_gradient(center, zlc, zrc, plm_theta) *
+                            0.5;
+                    zprimsR =
+                        zrc -
+                        helpers::plm_gradient(zrc, center, zrm, plm_theta) *
+                            0.5;
                 }
 
                 if (object_to_right) {
@@ -2418,7 +2214,7 @@ void RMHD<dim>::advance(
                 }
 
                 // Calculate the left and right states using the reconstructed
-                // PLM rm::Primitive
+                // PLM Primitive
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
                 if constexpr (dim > 1) {
@@ -2457,130 +2253,40 @@ void RMHD<dim>::advance(
                             break;
                         }
                         else {
-                            if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(
-                                        xprimsL.p,
-                                        xprimsR.p
-                                    )) {
-                                    frf = calc_hll_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceR
-                                    );
-                                }
-                                else {
-                                    frf = calc_hllc_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceR
-                                    );
-                                }
+                            frf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceR
+                            );
+                            grf = calc_hllc_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2,
+                                0.0
+                            );
 
-                                if (helpers::quirk_strong_shock(
-                                        yprimsL.p,
-                                        yprimsR.p
-                                    )) {
-                                    grf = calc_hll_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-                                else {
-                                    grf = calc_hllc_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-
-                                if constexpr (dim > 2) {
-                                    if (helpers::quirk_strong_shock(
-                                            zprimsL.p,
-                                            zprimsR.p
-                                        )) {
-                                        hrf = calc_hll_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                    else {
-                                        hrf = calc_hllc_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                }
-                                break;
-                            }
-                            else {
-                                frf = calc_hllc_flux(
-                                    uxL,
-                                    uxR,
-                                    fL,
-                                    fR,
-                                    xprimsL,
-                                    xprimsR,
-                                    1,
-                                    vfaceR
+                            if constexpr (dim > 2) {
+                                hrf = calc_hllc_flux(
+                                    uzL,
+                                    uzR,
+                                    hL,
+                                    hR,
+                                    zprimsL,
+                                    zprimsR,
+                                    3,
+                                    0.0
                                 );
-                                grf = calc_hllc_flux(
-                                    uyL,
-                                    uyR,
-                                    gL,
-                                    gR,
-                                    yprimsL,
-                                    yprimsR,
-                                    2,
-                                    0
-                                );
-
-                                if constexpr (dim > 2) {
-                                    hrf = calc_hllc_flux(
-                                        uzL,
-                                        uzR,
-                                        hL,
-                                        hR,
-                                        zprimsL,
-                                        zprimsR,
-                                        3,
-                                        0
-                                    );
-                                }
-                                break;
                             }
+                            break;
                         }
                     default:
                         frf = calc_hll_flux(
@@ -2621,45 +2327,31 @@ void RMHD<dim>::advance(
                 }
 
                 // Do the same thing, but for the left side interface [i - 1/2]
-                xprimsL = xleft_mid + helpers::plm_gradient(
-                                          xleft_mid,
-                                          xleft_most,
-                                          center,
-                                          plm_theta
-                                      ) * 0.5;
-                xprimsR = center - helpers::plm_gradient(
-                                       center,
-                                       xleft_mid,
-                                       xright_mid,
-                                       plm_theta
-                                   ) * 0.5;
+                xprimsL =
+                    xlc +
+                    helpers::plm_gradient(xlc, xlm, center, plm_theta) * 0.5;
+                xprimsR =
+                    center -
+                    helpers::plm_gradient(center, xlc, xrc, plm_theta) * 0.5;
                 if constexpr (dim > 1) {
-                    yprimsL = yleft_mid + helpers::plm_gradient(
-                                              yleft_mid,
-                                              yleft_most,
-                                              center,
-                                              plm_theta
-                                          ) * 0.5;
-                    yprimsR = center - helpers::plm_gradient(
-                                           center,
-                                           yleft_mid,
-                                           yright_mid,
-                                           plm_theta
-                                       ) * 0.5;
+                    yprimsL =
+                        ylc +
+                        helpers::plm_gradient(ylc, ylm, center, plm_theta) *
+                            0.5;
+                    yprimsR =
+                        center -
+                        helpers::plm_gradient(center, ylc, yrc, plm_theta) *
+                            0.5;
                 }
                 if constexpr (dim > 2) {
-                    zprimsL = zleft_mid + helpers::plm_gradient(
-                                              zleft_mid,
-                                              zleft_most,
-                                              center,
-                                              plm_theta
-                                          ) * 0.5;
-                    zprimsR = center - helpers::plm_gradient(
-                                           center,
-                                           zleft_mid,
-                                           zright_mid,
-                                           plm_theta
-                                       ) * 0.5;
+                    zprimsL =
+                        zlc +
+                        helpers::plm_gradient(zlc, zlm, center, plm_theta) *
+                            0.5;
+                    zprimsR =
+                        center -
+                        helpers::plm_gradient(center, zlc, zrc, plm_theta) *
+                            0.5;
                 }
 
                 if (object_to_left) {
@@ -2700,7 +2392,7 @@ void RMHD<dim>::advance(
                 }
 
                 // Calculate the left and right states using the reconstructed
-                // PLM rm::Primitive
+                // PLM Primitive
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
                 if constexpr (dim > 1) {
@@ -2738,130 +2430,40 @@ void RMHD<dim>::advance(
                             break;
                         }
                         else {
-                            if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(
-                                        xprimsL.p,
-                                        xprimsR.p
-                                    )) {
-                                    flf = calc_hll_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceL
-                                    );
-                                }
-                                else {
-                                    flf = calc_hllc_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceL
-                                    );
-                                }
+                            flf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceL
+                            );
+                            glf = calc_hllc_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2,
+                                0
+                            );
 
-                                if (helpers::quirk_strong_shock(
-                                        yprimsL.p,
-                                        yprimsR.p
-                                    )) {
-                                    glf = calc_hll_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-                                else {
-                                    glf = calc_hllc_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-
-                                if constexpr (dim > 2) {
-                                    if (helpers::quirk_strong_shock(
-                                            zprimsL.p,
-                                            zprimsR.p
-                                        )) {
-                                        hlf = calc_hll_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                    else {
-                                        hlf = calc_hllc_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                }
-                                break;
-                            }
-                            else {
-                                flf = calc_hllc_flux(
-                                    uxL,
-                                    uxR,
-                                    fL,
-                                    fR,
-                                    xprimsL,
-                                    xprimsR,
-                                    1,
-                                    vfaceL
-                                );
-                                glf = calc_hllc_flux(
-                                    uyL,
-                                    uyR,
-                                    gL,
-                                    gR,
-                                    yprimsL,
-                                    yprimsR,
-                                    2,
+                            if constexpr (dim > 2) {
+                                hlf = calc_hllc_flux(
+                                    uzL,
+                                    uzR,
+                                    hL,
+                                    hR,
+                                    zprimsL,
+                                    zprimsR,
+                                    3,
                                     0
                                 );
-
-                                if constexpr (dim > 2) {
-                                    hlf = calc_hllc_flux(
-                                        uzL,
-                                        uzR,
-                                        hL,
-                                        hR,
-                                        zprimsL,
-                                        zprimsR,
-                                        3,
-                                        0
-                                    );
-                                }
-                                break;
                             }
+                            break;
                         }
 
                     default:
@@ -2904,20 +2506,15 @@ void RMHD<dim>::advance(
             }   // end else
 
             const luint real_loc = kk * xpg * ypg + jj * xpg + ii;
-            const real d_source =
-                den_source_all_zeros ? 0.0 : dens_source[real_loc];
-            const real s1_source =
-                mom1_source_all_zeros ? 0.0 : mom1_source[real_loc];
-            const real e_source =
-                energy_source_all_zeros ? 0.0 : erg_source[real_loc];
+            const real d_source  = null_den ? 0.0 : dens_source[real_loc];
+            const real s1_source = null_mom1 ? 0.0 : mom1_source[real_loc];
+            const real e_source  = null_nrg ? 0.0 : erg_source[real_loc];
             const real b1_source =
                 mag1_source_all_zeros ? 0.0 : mag1_source[real_loc];
 
             const auto source_terms = [&] {
-                const real s2_source =
-                    mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
-                const real s3_source =
-                    mom3_source_all_zeros ? 0.0 : mom3_source[real_loc];
+                const real s2_source = null_mom2 ? 0.0 : mom2_source[real_loc];
+                const real s3_source = null_mom3 ? 0.0 : mom3_source[real_loc];
                 const real b2_source =
                     mag2_source_all_zeros ? 0.0 : mag2_source[real_loc];
                 const real b3_source =
@@ -2937,15 +2534,15 @@ void RMHD<dim>::advance(
 
             // Gravity
             const auto gs1_source =
-                zero_gravity1 ? 0 : grav1_source[real_loc] * cons_data[aid].den;
+                zero_gravity1 ? 0 : g1_source[real_loc] * cons_data[aid].den;
             const auto tid     = tza * sx * sy + tya * sx + txa;
             const auto gravity = [&] {
                 const auto gs2_source =
                     zero_gravity2 ? 0
-                                  : grav2_source[real_loc] * cons_data[aid].den;
+                                  : g2_source[real_loc] * cons_data[aid].den;
                 const auto gs3_source =
                     zero_gravity3 ? 0
-                                  : grav3_source[real_loc] * cons_data[aid].den;
+                                  : g3_source[real_loc] * cons_data[aid].den;
                 const auto ge_source = gs1_source * prim_buff[tid].v1 +
                                        gs2_source * prim_buff[tid].v2 +
                                        gs3_source * prim_buff[tid].v3;
@@ -2981,9 +2578,9 @@ void RMHD<dim>::advance(
                             const real sL = 4.0 * M_PI * rlf * rlf;
                             const real dV =
                                 4.0 * M_PI * rmean * rmean * (rrf - rlf);
-                            const real factor = (mesh_motion) ? dV : 1;
+                            const real factor = (mesh_motion) ? dV : 1.0;
                             const real pc     = prim_buff[txa].total_pressure();
-                            const real invdV  = 1 / dV;
+                            const real invdV  = 1.0 / dV;
                             const auto geom_sources = conserved_t{
                               0.0,
                               pc * (sR - sL) * invdV,
@@ -3035,7 +2632,7 @@ void RMHD<dim>::advance(
                                              (rr * rr - rl * rl) * std::sin(tr);
                             const real s2L = 2.0 * M_PI * 0.5 *
                                              (rr * rr - rl * rl) * std::sin(tl);
-                            const real factor = (mesh_motion) ? dV : 1;
+                            const real factor = (mesh_motion) ? dV : 1.0;
 
                             // Grab central primitives
                             const real rhoc = prim_buff[tid].rho;
@@ -3043,21 +2640,21 @@ void RMHD<dim>::advance(
                             const real vc   = prim_buff[tid].get_v2();
                             const real pc   = prim_buff[tid].total_pressure();
                             const real hc = prim_buff[tid].gas_enthalpy(gamma);
-                            const auto bmuc =
-                                rm::MagFourVec<dim>(prim_buff[tid]);
-                            const real gam2 = 1 / (1 - (uc * uc + vc * vc));
+                            const auto bmuc = mag_fourvec_t(prim_buff[tid]);
+                            const real gam2 =
+                                prim_buff[tid].lorentz_factor_squared();
 
                             const conserved_t geom_source = {
-                              0,
+                              0.0,
                               (rhoc * hc * gam2 * vc * vc - bmuc.two * bmuc.two
                               ) / rmean +
                                   pc * (s1R - s1L) * invdV,
                               -(rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two
                               ) / rmean +
                                   pc * (s2R - s2L) * invdV,
-                              0,
-                              0,
-                              0
+                              0.0,
+                              0.0,
+                              0.0
                             };
 
                             cons_data[aid] -=
@@ -3092,21 +2689,21 @@ void RMHD<dim>::advance(
                             const real uc   = prim_buff[tid].get_v1();
                             const real vc   = prim_buff[tid].get_v2();
                             const real pc   = prim_buff[tid].total_pressure();
-                            const auto bmuc =
-                                rm::MagFourVec<dim>(prim_buff[tid]);
+                            const auto bmuc = mag_fourvec_t(prim_buff[tid]);
 
                             const real hc = prim_buff[tid].gas_enthalpy(gamma);
-                            const real gam2 = 1 / (1 - (uc * uc + vc * vc));
+                            const real gam2 =
+                                prim_buff[tid].lorentz_factor_squared();
                             const conserved_t geom_source = {
-                              0,
+                              0.0,
                               (rhoc * hc * gam2 * vc * vc - bmuc.two * bmuc.two
                               ) / rmean +
                                   pc * (s1R - s1L) * invdV,
                               -(rhoc * hc * gam2 * uc * vc - bmuc.one * bmuc.two
                               ) / rmean,
-                              0,
-                              0,
-                              0
+                              0.0,
+                              0.0,
+                              0.0
                             };
                             cons_data[aid] -=
                                 ((frf * s1R - flf * s1L) * invdV +
@@ -3132,17 +2729,16 @@ void RMHD<dim>::advance(
                             const real s2L   = rmean * (rr - rl);
 
                             // Grab central primitives
-                            const real pc = prim_buff[tid].total_pressure();
-                            const auto bmuc =
-                                rm::MagFourVec<dim>(prim_buff[tid]);
+                            const real pc   = prim_buff[tid].total_pressure();
+                            const auto bmuc = mag_fourvec_t(prim_buff[tid]);
                             const auto geom_source = conserved_t{
-                              0,
+                              0.0,
                               (-bmuc.two * bmuc.two) / rmean +
                                   pc * (s1R - s1L) * invdV,
                               (+bmuc.one * bmuc.two) / rmean,
-                              0,
-                              0,
-                              0
+                              0.0,
+                              0.0,
+                              0.0
                             };
 
                             cons_data[aid] -=
@@ -3195,15 +2791,14 @@ void RMHD<dim>::advance(
                             const real vc   = prim_buff[tid].get_v2();
                             const real wc   = prim_buff[tid].get_v3();
                             const real pc   = prim_buff[tid].total_pressure();
-                            const auto bmuc =
-                                rm::MagFourVec<dim>(prim_buff[tid]);
+                            const auto bmuc = mag_fourvec_t(prim_buff[tid]);
 
                             const real hc = prim_buff[tid].gas_enthalpy(gamma);
                             const real gam2 =
-                                1 / (1 - (uc * uc + vc * vc + wc * wc));
+                                prim_buff[tid].lorentz_factor_squared();
 
                             const auto geom_source = conserved_t{
-                              0,
+                              0.0,
                               (rhoc * hc * gam2 * (vc * vc + wc * wc) -
                                bmuc.two * bmuc.two - bmuc.three * bmuc.three) /
                                       rmean +
@@ -3217,10 +2812,10 @@ void RMHD<dim>::advance(
                                 bmuc.three * bmuc.one -
                                 bmuc.three * bmuc.two * cot) /
                                   rmean,
-                              0,
-                              0,
-                              0,
-                              0
+                              0.0,
+                              0.0,
+                              0.0,
+                              0.0
                             };
                             cons_data[aid] -= ((frf * s1R - flf * s1L) / dV1 +
                                                (grf * s2R - glf * s2L) / dV2 +
@@ -3257,14 +2852,13 @@ void RMHD<dim>::advance(
                             const real rhoc = prim_buff[tid].rho;
                             const real uc   = prim_buff[tid].get_v1();
                             const real vc   = prim_buff[tid].get_v2();
-                            const real wc   = prim_buff[tid].get_v3();
+                            // const real wc   = prim_buff[tid].get_v3();
                             const real pc   = prim_buff[tid].total_pressure();
-                            const auto bmuc =
-                                rm::MagFourVec<dim>(prim_buff[tid]);
+                            const auto bmuc = mag_fourvec_t(prim_buff[tid]);
 
                             const real hc = prim_buff[tid].gas_enthalpy(gamma);
                             const real gam2 =
-                                1 / (1 - (uc * uc + vc * vc + wc * wc));
+                                prim_buff[tid].lorentz_factor_squared();
 
                             const auto geom_source = conserved_t{
                               0,
@@ -3550,7 +3144,7 @@ void RMHD<dim>::simulate(
     const luint zblockdim =
         zactive_grid > gpu_block_dimz ? gpu_block_dimz : zactive_grid;
     this->radius             = (first_order) ? 1 : 2;
-    this->step               = (first_order) ? 1 : 0.5;
+    this->step               = (first_order) ? 1.0 : 0.5;
     const luint xstride      = (global::on_sm) ? xblockdim + 2 * radius : nx;
     const luint ystride      = (dim < 3)         ? 1
                                : (global::on_sm) ? yblockdim + 2 * radius

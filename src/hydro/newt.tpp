@@ -198,9 +198,11 @@ Newtonian<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real
-Newtonian<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk)
-    const
+GPU_CALLABLE_MEMBER real Newtonian<dim>::get_cell_volume(
+    const lint ii,
+    const lint jj,
+    const lint kk
+) const
 {
     if (geometry == Geometry::CARTESIAN) {
         return 1.0;
@@ -282,7 +284,7 @@ void Newtonian<dim>::emit_troubled_cells() const
 }
 
 //-----------------------------------------------------------------------------------------
-//                          GET THE nt::Primitive
+//                          GET THE Primitive
 //-----------------------------------------------------------------------------------------
 /**
  * Return the primitive
@@ -780,11 +782,13 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     if constexpr (dim == 1) {
         const real aStar = lambda.aStar;
         const real pStar = lambda.pStar;
-        const real ap    = helpers::my_max<real>(0, aR);
-        const real am    = helpers::my_min<real>(0, aL);
-        auto hll_flux    = (left_flux * ap + right_flux * am -
+        const real am    = aL < 0.0 ? aL : 0.0;
+        const real ap    = aR > 0.0 ? aR : 0.0;
+
+        auto hll_flux = (left_flux * ap + right_flux * am -
                          (right_state - left_state) * am * ap) /
                         (am + ap);
+
         auto hll_state =
             (right_state * aR - left_state * aL - right_flux + left_flux) /
             (aR - aL);
@@ -795,7 +799,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             real rho      = left_state.den;
             real m        = left_state.m1;
             real energy   = left_state.nrg;
-            real cofac    = 1 / (aL - aStar);
+            real cofac    = 1.0 / (aL - aStar);
 
             real rhoStar = cofac * (aL - v) * rho;
             real mstar   = cofac * (m * (aL - v) - pressure + pStar);
@@ -814,7 +818,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             real rho      = right_state.den;
             real m        = right_state.m1;
             real energy   = right_state.nrg;
-            real cofac    = 1. / (aR - aStar);
+            real cofac    = 1.0 / (aR - aStar);
 
             real rhoStar = cofac * (aR - v) * rho;
             real mstar   = cofac * (m * (aR - v) - pressure + pStar);
@@ -844,7 +848,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         real m2       = left_state.momentum(2);
         real m3       = left_state.momentum(3);
         real edens    = left_state.nrg;
-        real cofactor = 1 / (aL - aStar);
+        real cofactor = 1.0 / (aL - aStar);
 
         const real vL = left_prims.vcomponent(nhat);
         const real vR = right_prims.vcomponent(nhat);
@@ -874,7 +878,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         m2       = right_state.momentum(2);
         m3       = right_state.momentum(3);
         edens    = right_state.nrg;
-        cofactor = 1 / (aR - aStar);
+        cofactor = 1.0 / (aR - aStar);
 
         rhostar = cofactor * (aR - vR) * rho;
         m1star  = cofactor * (m1 * (aR - vR) +
@@ -934,18 +938,18 @@ void Newtonian<dim>::advance(
     const luint ypg = this->yactive_grid;
     const luint zpg = this->zactive_grid;
 
-    const luint extent             = p.get_full_extent();
-    auto* const cons_data          = cons.data();
-    const auto* const prim_data    = prims.data();
-    const auto* const dens_source  = density_source.data();
-    const auto* const mom1_source  = m1_source.data();
-    const auto* const mom2_source  = m2_source.data();
-    const auto* const mom3_source  = m3_source.data();
-    const auto* const erg_source   = energy_source.data();
-    const auto* const object_data  = object_pos.data();
-    const auto* const grav1_source = sourceG1.data();
-    const auto* const grav2_source = sourceG2.data();
-    const auto* const grav3_source = sourceG3.data();
+    const luint extent            = p.get_full_extent();
+    auto* const cons_data         = cons.data();
+    const auto* const prim_data   = prims.data();
+    const auto* const dens_source = density_source.data();
+    const auto* const mom1_source = m1_source.data();
+    const auto* const mom2_source = m2_source.data();
+    const auto* const mom3_source = m3_source.data();
+    const auto* const erg_source  = energy_source.data();
+    const auto* const object_data = object_pos.data();
+    const auto* const g1_source   = sourceG1.data();
+    const auto* const g2_source   = sourceG2.data();
+    const auto* const g3_source   = sourceG3.data();
 
     simbi::parallel_for(
         p,
@@ -962,9 +966,9 @@ void Newtonian<dim>::advance(
          mom3_source,
          erg_source,
          object_data,
-         grav1_source,
-         grav2_source,
-         grav3_source,
+         g1_source,
+         g2_source,
+         g3_source,
          xpg,
          ypg,
          zpg,
@@ -1066,14 +1070,12 @@ void Newtonian<dim>::advance(
                               [helpers::my_max<lint>(kk - 1, 0) * xpg * ypg +
                                jj * xpg + ii];
 
-            const real x1l    = get_x1face(ii, 0);
-            const real x1r    = get_x1face(ii, 1);
-            const real vfaceL = (geometry == simbi::Geometry::CARTESIAN)
-                                    ? hubble_param
-                                    : x1l * hubble_param;
-            const real vfaceR = (geometry == simbi::Geometry::CARTESIAN)
-                                    ? hubble_param
-                                    : x1r * hubble_param;
+            const real x1l = get_x1face(ii, 0);
+            const real x1r = get_x1face(ii, 1);
+            const real vfaceL =
+                (changing_volume) ? x1l * hubble_param : hubble_param;
+            const real vfaceR =
+                (changing_volume) ? x1r * hubble_param : hubble_param;
 
             if (first_order) [[unlikely]] {
                 xprimsL = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
@@ -1168,8 +1170,7 @@ void Newtonian<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -1180,8 +1181,7 @@ void Newtonian<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -1205,8 +1205,7 @@ void Newtonian<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -1217,8 +1216,7 @@ void Newtonian<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -1317,8 +1315,7 @@ void Newtonian<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -1329,8 +1326,7 @@ void Newtonian<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -1354,8 +1350,7 @@ void Newtonian<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -1366,8 +1361,7 @@ void Newtonian<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -1375,77 +1369,57 @@ void Newtonian<dim>::advance(
             }
             else {
                 // Coordinate X
-                const primitive_t xleft_most =
+                const primitive_t xlm =
                     prim_buff[tza * sx * sy + tya * sx + (txa - 2)];
-                const primitive_t xleft_mid =
+                const primitive_t xlc =
                     prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
                 const primitive_t center =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
-                const primitive_t xright_mid =
+                const primitive_t xrc =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
-                const primitive_t xright_most =
+                const primitive_t xrm =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 2)];
-                primitive_t yleft_most, yleft_mid, yright_mid, yright_most;
-                primitive_t zleft_most, zleft_mid, zright_mid, zright_most;
+                primitive_t ylm, ylc, yrc, yrm;
+                primitive_t zlm, zlc, zrc, zrm;
                 // Reconstructed left X primitive_t vector at the i+1/2
                 // interface
-                xprimsL = center + helpers::plm_gradient(
-                                       center,
-                                       xleft_mid,
-                                       xright_mid,
-                                       plm_theta
-                                   ) * 0.5;
-                xprimsR = xright_mid - helpers::plm_gradient(
-                                           xright_mid,
-                                           center,
-                                           xright_most,
-                                           plm_theta
-                                       ) * 0.5;
+                xprimsL =
+                    center +
+                    helpers::plm_gradient(center, xlc, xrc, plm_theta) * 0.5;
+                xprimsR =
+                    xrc -
+                    helpers::plm_gradient(xrc, center, xrm, plm_theta) * 0.5;
 
                 // Coordinate Y
                 if constexpr (dim > 1) {
-                    yleft_most =
-                        prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
-                    yleft_mid = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
-                    yright_mid =
-                        prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
-                    yright_most =
-                        prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
-                    yprimsL = center + helpers::plm_gradient(
-                                           center,
-                                           yleft_mid,
-                                           yright_mid,
-                                           plm_theta
-                                       ) * 0.5;
-                    yprimsR = yright_mid - helpers::plm_gradient(
-                                               yright_mid,
-                                               center,
-                                               yright_most,
-                                               plm_theta
-                                           ) * 0.5;
+                    ylm = prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
+                    ylc = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
+                    yrc = prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
+                    yrm = prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
+                    yprimsL =
+                        center +
+                        helpers::plm_gradient(center, ylc, yrc, plm_theta) *
+                            0.5;
+                    yprimsR =
+                        yrc -
+                        helpers::plm_gradient(yrc, center, yrm, plm_theta) *
+                            0.5;
                 }
 
                 // Coordinate z
                 if constexpr (dim > 2) {
-                    zleft_most =
-                        prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
-                    zleft_mid = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
-                    zright_mid =
-                        prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
-                    zright_most =
-                        prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
-                    zprimsL = center + helpers::plm_gradient(
-                                           center,
-                                           zleft_mid,
-                                           zright_mid,
-                                           plm_theta
-                                       ) * 0.5;
-                    zprimsR = zright_mid - helpers::plm_gradient(
-                                               zright_mid,
-                                               center,
-                                               zright_most,
-                                               plm_theta
-                                           ) * 0.5;
+                    zlm = prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
+                    zlc = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
+                    zrc = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
+                    zrm = prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
+                    zprimsL =
+                        center +
+                        helpers::plm_gradient(center, zlc, zrc, plm_theta) *
+                            0.5;
+                    zprimsR =
+                        zrc -
+                        helpers::plm_gradient(zrc, center, zrm, plm_theta) *
+                            0.5;
                 }
 
                 if (object_to_right) {
@@ -1486,7 +1460,7 @@ void Newtonian<dim>::advance(
                 }
 
                 // Calculate the left and right states using the reconstructed
-                // PLM nt::Primitive
+                // PLM Primitive
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
                 if constexpr (dim > 1) {
@@ -1529,8 +1503,7 @@ void Newtonian<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -1541,8 +1514,7 @@ void Newtonian<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -1566,8 +1538,7 @@ void Newtonian<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -1578,53 +1549,38 @@ void Newtonian<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
                 }
 
                 // Do the same thing, but for the left side interface [i - 1/2]
-                xprimsL = xleft_mid + helpers::plm_gradient(
-                                          xleft_mid,
-                                          xleft_most,
-                                          center,
-                                          plm_theta
-                                      ) * 0.5;
-                xprimsR = center - helpers::plm_gradient(
-                                       center,
-                                       xleft_mid,
-                                       xright_mid,
-                                       plm_theta
-                                   ) * 0.5;
+                xprimsL =
+                    xlc +
+                    helpers::plm_gradient(xlc, xlm, center, plm_theta) * 0.5;
+                xprimsR =
+                    center -
+                    helpers::plm_gradient(center, xlc, xrc, plm_theta) * 0.5;
                 if constexpr (dim > 1) {
-                    yprimsL = yleft_mid + helpers::plm_gradient(
-                                              yleft_mid,
-                                              yleft_most,
-                                              center,
-                                              plm_theta
-                                          ) * 0.5;
-                    yprimsR = center - helpers::plm_gradient(
-                                           center,
-                                           yleft_mid,
-                                           yright_mid,
-                                           plm_theta
-                                       ) * 0.5;
+                    yprimsL =
+                        ylc +
+                        helpers::plm_gradient(ylc, ylm, center, plm_theta) *
+                            0.5;
+                    yprimsR =
+                        center -
+                        helpers::plm_gradient(center, ylc, yrc, plm_theta) *
+                            0.5;
                 }
                 if constexpr (dim > 2) {
-                    zprimsL = zleft_mid + helpers::plm_gradient(
-                                              zleft_mid,
-                                              zleft_most,
-                                              center,
-                                              plm_theta
-                                          ) * 0.5;
-                    zprimsR = center - helpers::plm_gradient(
-                                           center,
-                                           zleft_mid,
-                                           zright_mid,
-                                           plm_theta
-                                       ) * 0.5;
+                    zprimsL =
+                        zlc +
+                        helpers::plm_gradient(zlc, zlm, center, plm_theta) *
+                            0.5;
+                    zprimsR =
+                        center -
+                        helpers::plm_gradient(center, zlc, zrc, plm_theta) *
+                            0.5;
                 }
 
                 if (object_to_left) {
@@ -1665,7 +1621,7 @@ void Newtonian<dim>::advance(
                 }
 
                 // Calculate the left and right states using the reconstructed
-                // PLM nt::Primitive
+                // PLM Primitive
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
                 if constexpr (dim > 1) {
@@ -1707,8 +1663,7 @@ void Newtonian<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -1719,8 +1674,7 @@ void Newtonian<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -1744,8 +1698,7 @@ void Newtonian<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -1756,8 +1709,7 @@ void Newtonian<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -1766,21 +1718,18 @@ void Newtonian<dim>::advance(
 
             // Advance depending on geometry
             const luint real_loc = kk * xpg * ypg + jj * xpg + ii;
-            const real d_source =
-                den_source_all_zeros ? 0.0 : dens_source[real_loc];
-            const real m1_source =
-                mom1_source_all_zeros ? 0.0 : mom1_source[real_loc];
-            const real e_source =
-                energy_source_all_zeros ? 0.0 : erg_source[real_loc];
+            const real d_source  = null_den ? 0.0 : dens_source[real_loc];
+            const real m1_source = null_mom1 ? 0.0 : mom1_source[real_loc];
+            const real e_source  = null_nrg ? 0.0 : erg_source[real_loc];
 
-            const auto source_terms = [&] {
+            const conserved_t source_terms = [&] {
                 if constexpr (dim == 1) {
                     return conserved_t{d_source, m1_source, e_source} *
                            time_constant;
                 }
                 else if constexpr (dim == 2) {
                     const real m2_source =
-                        mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
+                        null_mom2 ? 0.0 : mom2_source[real_loc];
                     return conserved_t{
                              d_source,
                              m1_source,
@@ -1791,9 +1740,9 @@ void Newtonian<dim>::advance(
                 }
                 else {
                     const real m2_source =
-                        mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
+                        null_mom2 ? 0.0 : mom2_source[real_loc];
                     const real m3_source =
-                        mom3_source_all_zeros ? 0.0 : mom3_source[real_loc];
+                        null_mom3 ? 0.0 : mom3_source[real_loc];
                     return conserved_t{
                              d_source,
                              m1_source,
@@ -1807,36 +1756,36 @@ void Newtonian<dim>::advance(
 
             // Gravity
             const auto gm1_source =
-                zero_gravity1 ? 0 : grav1_source[real_loc] * cons_data[aid].den;
-            const auto tid     = tza * sx * sy + tya * sx + txa;
-            const auto gravity = [&] {
+                zero_gravity1 ? 0 : g1_source[real_loc] * cons_data[aid].den;
+            const auto tid            = tza * sx * sy + tya * sx + txa;
+            const conserved_t gravity = [&] {
                 if constexpr (dim == 1) {
                     const auto ge_source = gm1_source * prim_buff[tid].v1;
-                    return conserved_t{0, gm1_source, ge_source};
+                    return conserved_t{0.0, gm1_source, ge_source};
                 }
                 else if constexpr (dim == 2) {
                     const auto gm2_source =
                         zero_gravity2
                             ? 0
-                            : grav2_source[real_loc] * cons_data[aid].den;
+                            : g2_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gm1_source * prim_buff[tid].v1 +
                                            gm2_source * prim_buff[tid].v2;
-                    return conserved_t{0, gm1_source, gm2_source, ge_source};
+                    return conserved_t{0.0, gm1_source, gm2_source, ge_source};
                 }
                 else {
                     const auto gm2_source =
                         zero_gravity2
                             ? 0
-                            : grav2_source[real_loc] * cons_data[aid].den;
+                            : g2_source[real_loc] * cons_data[aid].den;
                     const auto gm3_source =
                         zero_gravity3
                             ? 0
-                            : grav3_source[real_loc] * cons_data[aid].den;
+                            : g3_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gm1_source * prim_buff[tid].v1 +
                                            gm2_source * prim_buff[tid].v2 +
                                            gm3_source * prim_buff[tid].v3;
                     return conserved_t{
-                      0,
+                      0.0,
                       gm1_source,
                       gm2_source,
                       gm3_source,

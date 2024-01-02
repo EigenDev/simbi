@@ -282,7 +282,7 @@ void SRHD<dim>::emit_troubled_cells() const
 }
 
 //-----------------------------------------------------------------------------------------
-//                          GET THE sr::Primitive
+//                          GET THE Primitive
 //-----------------------------------------------------------------------------------------
 /**
  * Return the primitive
@@ -465,7 +465,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
     const luint nhat
 ) const
 {
-    // Separate the left and right sr::Primitive
+    // Separate the left and right Primitive
     const real rhoL = primsL.rho;
     const real vL   = primsL.vcomponent(nhat);
     const real pL   = primsL.p;
@@ -919,6 +919,11 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                            (right_state - left_state) * aRp * aLm) /
                           (aRp - aLm);
 
+    if (quirk_smoothing) {
+        if (helpers::quirk_strong_shock(left_prims.p, right_prims.p)) {
+            return hll_flux;
+        }
+    }
     const real uhlld   = hll_state.den;
     const real uhlls1  = hll_state.momentum(1);
     const real uhlls2  = hll_state.momentum(2);
@@ -1266,18 +1271,18 @@ void SRHD<dim>::advance(
     const luint ypg = this->yactive_grid;
     const luint zpg = this->zactive_grid;
 
-    const luint extent             = p.get_full_extent();
-    auto* const cons_data          = cons.data();
-    const auto* const prim_data    = prims.data();
-    const auto* const dens_source  = density_source.data();
-    const auto* const mom1_source  = m1_source.data();
-    const auto* const mom2_source  = m2_source.data();
-    const auto* const mom3_source  = m3_source.data();
-    const auto* const erg_source   = energy_source.data();
-    const auto* const object_data  = object_pos.data();
-    const auto* const grav1_source = sourceG1.data();
-    const auto* const grav2_source = sourceG2.data();
-    const auto* const grav3_source = sourceG3.data();
+    const luint extent            = p.get_full_extent();
+    auto* const cons_data         = cons.data();
+    const auto* const prim_data   = prims.data();
+    const auto* const dens_source = density_source.data();
+    const auto* const mom1_source = m1_source.data();
+    const auto* const mom2_source = m2_source.data();
+    const auto* const mom3_source = m3_source.data();
+    const auto* const erg_source  = energy_source.data();
+    const auto* const object_data = object_pos.data();
+    const auto* const g1_source   = sourceG1.data();
+    const auto* const g2_source   = sourceG2.data();
+    const auto* const g3_source   = sourceG3.data();
 
     simbi::parallel_for(
         p,
@@ -1294,9 +1299,9 @@ void SRHD<dim>::advance(
          mom3_source,
          erg_source,
          object_data,
-         grav1_source,
-         grav2_source,
-         grav3_source,
+         g1_source,
+         g2_source,
+         g3_source,
          xpg,
          ypg,
          zpg,
@@ -1398,14 +1403,12 @@ void SRHD<dim>::advance(
                               [helpers::my_max<lint>(kk - 1, 0) * xpg * ypg +
                                jj * xpg + ii];
 
-            const real x1l    = get_x1face(ii, 0);
-            const real x1r    = get_x1face(ii, 1);
-            const real vfaceL = (geometry == simbi::Geometry::CARTESIAN)
-                                    ? hubble_param
-                                    : x1l * hubble_param;
-            const real vfaceR = (geometry == simbi::Geometry::CARTESIAN)
-                                    ? hubble_param
-                                    : x1r * hubble_param;
+            const real x1l = get_x1face(ii, 0);
+            const real x1r = get_x1face(ii, 1);
+            const real vfaceL =
+                (changing_volume) ? x1l * hubble_param : hubble_param;
+            const real vfaceR =
+                (changing_volume) ? x1r * hubble_param : hubble_param;
 
             if (first_order) [[unlikely]] {
                 xprimsL = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
@@ -1496,130 +1499,38 @@ void SRHD<dim>::advance(
                             break;
                         }
                         else {
-                            if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(
-                                        xprimsL.p,
-                                        xprimsR.p
-                                    )) {
-                                    frf = calc_hll_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceR
-                                    );
-                                }
-                                else {
-                                    frf = calc_hllc_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceR
-                                    );
-                                }
+                            frf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceR
+                            );
+                            grf = calc_hllc_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2
+                            );
 
-                                if (helpers::quirk_strong_shock(
-                                        yprimsL.p,
-                                        yprimsR.p
-                                    )) {
-                                    grf = calc_hll_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-                                else {
-                                    grf = calc_hllc_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-
-                                if constexpr (dim > 2) {
-                                    if (helpers::quirk_strong_shock(
-                                            zprimsL.p,
-                                            zprimsR.p
-                                        )) {
-                                        hrf = calc_hll_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                    else {
-                                        hrf = calc_hllc_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                }
-                                break;
-                            }
-                            else {
-                                frf = calc_hllc_flux(
-                                    uxL,
-                                    uxR,
-                                    fL,
-                                    fR,
-                                    xprimsL,
-                                    xprimsR,
-                                    1,
-                                    vfaceR
+                            if constexpr (dim > 2) {
+                                hrf = calc_hllc_flux(
+                                    uzL,
+                                    uzR,
+                                    hL,
+                                    hR,
+                                    zprimsL,
+                                    zprimsR,
+                                    3
                                 );
-                                grf = calc_hllc_flux(
-                                    uyL,
-                                    uyR,
-                                    gL,
-                                    gR,
-                                    yprimsL,
-                                    yprimsR,
-                                    2,
-                                    0
-                                );
-
-                                if constexpr (dim > 2) {
-                                    hrf = calc_hllc_flux(
-                                        uzL,
-                                        uzR,
-                                        hL,
-                                        hR,
-                                        zprimsL,
-                                        zprimsR,
-                                        3,
-                                        0
-                                    );
-                                }
-                                break;
                             }
+                            break;
                         }
                     default:
                         frf = calc_hll_flux(
@@ -1640,8 +1551,7 @@ void SRHD<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -1652,8 +1562,7 @@ void SRHD<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -1748,130 +1657,38 @@ void SRHD<dim>::advance(
                             break;
                         }
                         else {
-                            if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(
-                                        xprimsL.p,
-                                        xprimsR.p
-                                    )) {
-                                    flf = calc_hll_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceL
-                                    );
-                                }
-                                else {
-                                    flf = calc_hllc_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceL
-                                    );
-                                }
+                            flf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceL
+                            );
+                            glf = calc_hllc_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2
+                            );
 
-                                if (helpers::quirk_strong_shock(
-                                        yprimsL.p,
-                                        yprimsR.p
-                                    )) {
-                                    glf = calc_hll_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-                                else {
-                                    glf = calc_hllc_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-
-                                if constexpr (dim > 2) {
-                                    if (helpers::quirk_strong_shock(
-                                            zprimsL.p,
-                                            zprimsR.p
-                                        )) {
-                                        hlf = calc_hll_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                    else {
-                                        hlf = calc_hllc_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                }
-                                break;
-                            }
-                            else {
-                                flf = calc_hllc_flux(
-                                    uxL,
-                                    uxR,
-                                    fL,
-                                    fR,
-                                    xprimsL,
-                                    xprimsR,
-                                    1,
-                                    vfaceL
+                            if constexpr (dim > 2) {
+                                hlf = calc_hllc_flux(
+                                    uzL,
+                                    uzR,
+                                    hL,
+                                    hR,
+                                    zprimsL,
+                                    zprimsR,
+                                    3
                                 );
-                                glf = calc_hllc_flux(
-                                    uyL,
-                                    uyR,
-                                    gL,
-                                    gR,
-                                    yprimsL,
-                                    yprimsR,
-                                    2,
-                                    0
-                                );
-
-                                if constexpr (dim > 2) {
-                                    hlf = calc_hllc_flux(
-                                        uzL,
-                                        uzR,
-                                        hL,
-                                        hR,
-                                        zprimsL,
-                                        zprimsR,
-                                        3,
-                                        0
-                                    );
-                                }
-                                break;
                             }
+                            break;
                         }
                     default:
                         flf = calc_hll_flux(
@@ -1892,8 +1709,7 @@ void SRHD<dim>::advance(
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
-                                0
+                                2
                             );
                         }
                         if constexpr (dim > 2) {
@@ -1904,8 +1720,7 @@ void SRHD<dim>::advance(
                                 hR,
                                 zprimsL,
                                 zprimsR,
-                                3,
-                                0
+                                3
                             );
                         }
                         break;
@@ -1913,77 +1728,57 @@ void SRHD<dim>::advance(
             }
             else {
                 // Coordinate X
-                const primitive_t xleft_most =
+                const primitive_t xlm =
                     prim_buff[tza * sx * sy + tya * sx + (txa - 2)];
-                const primitive_t xleft_mid =
+                const primitive_t xlc =
                     prim_buff[tza * sx * sy + tya * sx + (txa - 1)];
                 const primitive_t center =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
-                const primitive_t xright_mid =
+                const primitive_t xrc =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
-                const primitive_t xright_most =
+                const primitive_t xrm =
                     prim_buff[tza * sx * sy + tya * sx + (txa + 2)];
-                primitive_t yleft_most, yleft_mid, yright_mid, yright_most;
-                primitive_t zleft_most, zleft_mid, zright_mid, zright_most;
+                primitive_t ylm, ylc, yrc, yrm;
+                primitive_t zlm, zlc, zrc, zrm;
                 // Reconstructed left X primitive_t vector at the i+1/2
                 // interface
-                xprimsL = center + helpers::plm_gradient(
-                                       center,
-                                       xleft_mid,
-                                       xright_mid,
-                                       plm_theta
-                                   ) * 0.5;
-                xprimsR = xright_mid - helpers::plm_gradient(
-                                           xright_mid,
-                                           center,
-                                           xright_most,
-                                           plm_theta
-                                       ) * 0.5;
+                xprimsL =
+                    center +
+                    helpers::plm_gradient(center, xlc, xrc, plm_theta) * 0.5;
+                xprimsR =
+                    xrc -
+                    helpers::plm_gradient(xrc, center, xrm, plm_theta) * 0.5;
 
                 // Coordinate Y
                 if constexpr (dim > 1) {
-                    yleft_most =
-                        prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
-                    yleft_mid = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
-                    yright_mid =
-                        prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
-                    yright_most =
-                        prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
-                    yprimsL = center + helpers::plm_gradient(
-                                           center,
-                                           yleft_mid,
-                                           yright_mid,
-                                           plm_theta
-                                       ) * 0.5;
-                    yprimsR = yright_mid - helpers::plm_gradient(
-                                               yright_mid,
-                                               center,
-                                               yright_most,
-                                               plm_theta
-                                           ) * 0.5;
+                    ylm = prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
+                    ylc = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
+                    yrc = prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
+                    yrm = prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
+                    yprimsL =
+                        center +
+                        helpers::plm_gradient(center, ylc, yrc, plm_theta) *
+                            0.5;
+                    yprimsR =
+                        yrc -
+                        helpers::plm_gradient(yrc, center, yrm, plm_theta) *
+                            0.5;
                 }
 
                 // Coordinate z
                 if constexpr (dim > 2) {
-                    zleft_most =
-                        prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
-                    zleft_mid = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
-                    zright_mid =
-                        prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
-                    zright_most =
-                        prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
-                    zprimsL = center + helpers::plm_gradient(
-                                           center,
-                                           zleft_mid,
-                                           zright_mid,
-                                           plm_theta
-                                       ) * 0.5;
-                    zprimsR = zright_mid - helpers::plm_gradient(
-                                               zright_mid,
-                                               center,
-                                               zright_most,
-                                               plm_theta
-                                           ) * 0.5;
+                    zlm = prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
+                    zlc = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
+                    zrc = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
+                    zrm = prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
+                    zprimsL =
+                        center +
+                        helpers::plm_gradient(center, zlc, zrc, plm_theta) *
+                            0.5;
+                    zprimsR =
+                        zrc -
+                        helpers::plm_gradient(zrc, center, zrm, plm_theta) *
+                            0.5;
                 }
 
                 if (object_to_right) {
@@ -2024,7 +1819,7 @@ void SRHD<dim>::advance(
                 }
 
                 // Calculate the left and right states using the reconstructed
-                // PLM sr::Primitive
+                // PLM Primitive
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
                 if constexpr (dim > 1) {
@@ -2063,130 +1858,40 @@ void SRHD<dim>::advance(
                             break;
                         }
                         else {
-                            if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(
-                                        xprimsL.p,
-                                        xprimsR.p
-                                    )) {
-                                    frf = calc_hll_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceR
-                                    );
-                                }
-                                else {
-                                    frf = calc_hllc_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceR
-                                    );
-                                }
+                            frf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceR
+                            );
+                            grf = calc_hllc_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2,
+                                0
+                            );
 
-                                if (helpers::quirk_strong_shock(
-                                        yprimsL.p,
-                                        yprimsR.p
-                                    )) {
-                                    grf = calc_hll_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-                                else {
-                                    grf = calc_hllc_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-
-                                if constexpr (dim > 2) {
-                                    if (helpers::quirk_strong_shock(
-                                            zprimsL.p,
-                                            zprimsR.p
-                                        )) {
-                                        hrf = calc_hll_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                    else {
-                                        hrf = calc_hllc_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                }
-                                break;
-                            }
-                            else {
-                                frf = calc_hllc_flux(
-                                    uxL,
-                                    uxR,
-                                    fL,
-                                    fR,
-                                    xprimsL,
-                                    xprimsR,
-                                    1,
-                                    vfaceR
-                                );
-                                grf = calc_hllc_flux(
-                                    uyL,
-                                    uyR,
-                                    gL,
-                                    gR,
-                                    yprimsL,
-                                    yprimsR,
-                                    2,
+                            if constexpr (dim > 2) {
+                                hrf = calc_hllc_flux(
+                                    uzL,
+                                    uzR,
+                                    hL,
+                                    hR,
+                                    zprimsL,
+                                    zprimsR,
+                                    3,
                                     0
                                 );
-
-                                if constexpr (dim > 2) {
-                                    hrf = calc_hllc_flux(
-                                        uzL,
-                                        uzR,
-                                        hL,
-                                        hR,
-                                        zprimsL,
-                                        zprimsR,
-                                        3,
-                                        0
-                                    );
-                                }
-                                break;
                             }
+                            break;
                         }
                     default:
                         frf = calc_hll_flux(
@@ -2227,45 +1932,31 @@ void SRHD<dim>::advance(
                 }
 
                 // Do the same thing, but for the left side interface [i - 1/2]
-                xprimsL = xleft_mid + helpers::plm_gradient(
-                                          xleft_mid,
-                                          xleft_most,
-                                          center,
-                                          plm_theta
-                                      ) * 0.5;
-                xprimsR = center - helpers::plm_gradient(
-                                       center,
-                                       xleft_mid,
-                                       xright_mid,
-                                       plm_theta
-                                   ) * 0.5;
+                xprimsL =
+                    xlc +
+                    helpers::plm_gradient(xlc, xlm, center, plm_theta) * 0.5;
+                xprimsR =
+                    center -
+                    helpers::plm_gradient(center, xlc, xrc, plm_theta) * 0.5;
                 if constexpr (dim > 1) {
-                    yprimsL = yleft_mid + helpers::plm_gradient(
-                                              yleft_mid,
-                                              yleft_most,
-                                              center,
-                                              plm_theta
-                                          ) * 0.5;
-                    yprimsR = center - helpers::plm_gradient(
-                                           center,
-                                           yleft_mid,
-                                           yright_mid,
-                                           plm_theta
-                                       ) * 0.5;
+                    yprimsL =
+                        ylc +
+                        helpers::plm_gradient(ylc, ylm, center, plm_theta) *
+                            0.5;
+                    yprimsR =
+                        center -
+                        helpers::plm_gradient(center, ylc, yrc, plm_theta) *
+                            0.5;
                 }
                 if constexpr (dim > 2) {
-                    zprimsL = zleft_mid + helpers::plm_gradient(
-                                              zleft_mid,
-                                              zleft_most,
-                                              center,
-                                              plm_theta
-                                          ) * 0.5;
-                    zprimsR = center - helpers::plm_gradient(
-                                           center,
-                                           zleft_mid,
-                                           zright_mid,
-                                           plm_theta
-                                       ) * 0.5;
+                    zprimsL =
+                        zlc +
+                        helpers::plm_gradient(zlc, zlm, center, plm_theta) *
+                            0.5;
+                    zprimsR =
+                        center -
+                        helpers::plm_gradient(center, zlc, zrc, plm_theta) *
+                            0.5;
                 }
 
                 if (object_to_left) {
@@ -2306,7 +1997,7 @@ void SRHD<dim>::advance(
                 }
 
                 // Calculate the left and right states using the reconstructed
-                // PLM sr::Primitive
+                // PLM Primitive
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
                 if constexpr (dim > 1) {
@@ -2344,130 +2035,40 @@ void SRHD<dim>::advance(
                             break;
                         }
                         else {
-                            if (quirk_smoothing) {
-                                if (helpers::quirk_strong_shock(
-                                        xprimsL.p,
-                                        xprimsR.p
-                                    )) {
-                                    flf = calc_hll_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceL
-                                    );
-                                }
-                                else {
-                                    flf = calc_hllc_flux(
-                                        uxL,
-                                        uxR,
-                                        fL,
-                                        fR,
-                                        xprimsL,
-                                        xprimsR,
-                                        1,
-                                        vfaceL
-                                    );
-                                }
+                            flf = calc_hllc_flux(
+                                uxL,
+                                uxR,
+                                fL,
+                                fR,
+                                xprimsL,
+                                xprimsR,
+                                1,
+                                vfaceL
+                            );
+                            glf = calc_hllc_flux(
+                                uyL,
+                                uyR,
+                                gL,
+                                gR,
+                                yprimsL,
+                                yprimsR,
+                                2,
+                                0
+                            );
 
-                                if (helpers::quirk_strong_shock(
-                                        yprimsL.p,
-                                        yprimsR.p
-                                    )) {
-                                    glf = calc_hll_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-                                else {
-                                    glf = calc_hllc_flux(
-                                        uyL,
-                                        uyR,
-                                        gL,
-                                        gR,
-                                        yprimsL,
-                                        yprimsR,
-                                        2,
-                                        0.0
-                                    );
-                                }
-
-                                if constexpr (dim > 2) {
-                                    if (helpers::quirk_strong_shock(
-                                            zprimsL.p,
-                                            zprimsR.p
-                                        )) {
-                                        hlf = calc_hll_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                    else {
-                                        hlf = calc_hllc_flux(
-                                            uzL,
-                                            uzR,
-                                            hL,
-                                            hR,
-                                            zprimsL,
-                                            zprimsR,
-                                            3,
-                                            0.0
-                                        );
-                                    }
-                                }
-                                break;
-                            }
-                            else {
-                                flf = calc_hllc_flux(
-                                    uxL,
-                                    uxR,
-                                    fL,
-                                    fR,
-                                    xprimsL,
-                                    xprimsR,
-                                    1,
-                                    vfaceL
-                                );
-                                glf = calc_hllc_flux(
-                                    uyL,
-                                    uyR,
-                                    gL,
-                                    gR,
-                                    yprimsL,
-                                    yprimsR,
-                                    2,
+                            if constexpr (dim > 2) {
+                                hlf = calc_hllc_flux(
+                                    uzL,
+                                    uzR,
+                                    hL,
+                                    hR,
+                                    zprimsL,
+                                    zprimsR,
+                                    3,
                                     0
                                 );
-
-                                if constexpr (dim > 2) {
-                                    hlf = calc_hllc_flux(
-                                        uzL,
-                                        uzR,
-                                        hL,
-                                        hR,
-                                        zprimsL,
-                                        zprimsR,
-                                        3,
-                                        0
-                                    );
-                                }
-                                break;
                             }
+                            break;
                         }
 
                     default:
@@ -2511,12 +2112,9 @@ void SRHD<dim>::advance(
 
             // Advance depending on geometry
             const luint real_loc = kk * xpg * ypg + jj * xpg + ii;
-            const real d_source =
-                den_source_all_zeros ? 0.0 : dens_source[real_loc];
-            const real s1_source =
-                mom1_source_all_zeros ? 0.0 : mom1_source[real_loc];
-            const real e_source =
-                energy_source_all_zeros ? 0.0 : erg_source[real_loc];
+            const real d_source  = null_den ? 0.0 : dens_source[real_loc];
+            const real s1_source = null_mom1 ? 0.0 : mom1_source[real_loc];
+            const real e_source  = null_nrg ? 0.0 : erg_source[real_loc];
 
             const auto source_terms = [&] {
                 if constexpr (dim == 1) {
@@ -2525,7 +2123,7 @@ void SRHD<dim>::advance(
                 }
                 else if constexpr (dim == 2) {
                     const real s2_source =
-                        mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
+                        null_mom2 ? 0.0 : mom2_source[real_loc];
                     return conserved_t{
                              d_source,
                              s1_source,
@@ -2536,9 +2134,9 @@ void SRHD<dim>::advance(
                 }
                 else {
                     const real s2_source =
-                        mom2_source_all_zeros ? 0.0 : mom2_source[real_loc];
+                        null_mom2 ? 0.0 : mom2_source[real_loc];
                     const real s3_source =
-                        mom3_source_all_zeros ? 0.0 : mom3_source[real_loc];
+                        null_mom3 ? 0.0 : mom3_source[real_loc];
                     return conserved_t{
                              d_source,
                              s1_source,
@@ -2552,7 +2150,7 @@ void SRHD<dim>::advance(
 
             // Gravity
             const auto gs1_source =
-                zero_gravity1 ? 0 : grav1_source[real_loc] * cons_data[aid].den;
+                zero_gravity1 ? 0 : g1_source[real_loc] * cons_data[aid].den;
             const auto tid     = tza * sx * sy + tya * sx + txa;
             const auto gravity = [&] {
                 if constexpr (dim == 1) {
@@ -2563,7 +2161,7 @@ void SRHD<dim>::advance(
                     const auto gs2_source =
                         zero_gravity2
                             ? 0
-                            : grav2_source[real_loc] * cons_data[aid].den;
+                            : g2_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gs1_source * prim_buff[tid].v1 +
                                            gs2_source * prim_buff[tid].v2;
                     return conserved_t{0, gs1_source, gs2_source, ge_source};
@@ -2572,11 +2170,11 @@ void SRHD<dim>::advance(
                     const auto gs2_source =
                         zero_gravity2
                             ? 0
-                            : grav2_source[real_loc] * cons_data[aid].den;
+                            : g2_source[real_loc] * cons_data[aid].den;
                     const auto gs3_source =
                         zero_gravity3
                             ? 0
-                            : grav3_source[real_loc] * cons_data[aid].den;
+                            : g3_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gs1_source * prim_buff[tid].v1 +
                                            gs2_source * prim_buff[tid].v2 +
                                            gs3_source * prim_buff[tid].v3;
@@ -2668,7 +2266,8 @@ void SRHD<dim>::advance(
                             const real vc   = prim_buff[tid].get_v2();
                             const real pc   = prim_buff[tid].p;
                             const real hc = prim_buff[tid].get_enthalpy(gamma);
-                            const real gam2 = 1 / (1 - (uc * uc + vc * vc));
+                            const real gam2 =
+                                prim_buff[tid].lorentz_factor_squared();
 
                             const conserved_t geom_source = {
                               0,
@@ -2713,7 +2312,8 @@ void SRHD<dim>::advance(
                             const real pc   = prim_buff[tid].p;
 
                             const real hc = prim_buff[tid].get_enthalpy(gamma);
-                            const real gam2 = 1 / (1 - (uc * uc + vc * vc));
+                            const real gam2 =
+                                prim_buff[tid].lorentz_factor_squared();
 
                             const conserved_t geom_source = {
                               0,
@@ -2802,7 +2402,7 @@ void SRHD<dim>::advance(
 
                             const real hc = prim_buff[tid].get_enthalpy(gamma);
                             const real gam2 =
-                                1 / (1 - (uc * uc + vc * vc + wc * wc));
+                                prim_buff[tid].lorentz_factor_squared();
 
                             const auto geom_source = conserved_t{
                               0,
@@ -2849,12 +2449,12 @@ void SRHD<dim>::advance(
                             const real rhoc = prim_buff[tid].rho;
                             const real uc   = prim_buff[tid].get_v1();
                             const real vc   = prim_buff[tid].get_v2();
-                            const real wc   = prim_buff[tid].get_v3();
-                            const real pc   = prim_buff[tid].p;
+                            // const real wc   = prim_buff[tid].get_v3();
+                            const real pc = prim_buff[tid].p;
 
                             const real hc = prim_buff[tid].get_enthalpy(gamma);
                             const real gam2 =
-                                1 / (1 - (uc * uc + vc * vc + wc * wc));
+                                prim_buff[tid].lorentz_factor_squared();
 
                             const auto geom_source = conserved_t{
                               0,

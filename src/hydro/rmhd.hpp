@@ -119,7 +119,7 @@ namespace simbi {
             const primitive_t& left_prims,
             const primitive_t& right_prims,
             const luint nhat,
-            const real vface
+            const real vface = 0.0
         ) const;
 
         GPU_CALLABLE_MEMBER
@@ -131,8 +131,8 @@ namespace simbi {
             const primitive_t& left_prims,
             const primitive_t& right_prims,
             const luint nhat,
-            const real vface,
-            const luint gid
+            const luint gid,
+            const real vface = 0.0
         ) const;
 
         GPU_CALLABLE_MEMBER
@@ -148,7 +148,7 @@ namespace simbi {
             const primitive_t& left_prims,
             const primitive_t& right_prims,
             const luint nhat,
-            const real vface
+            const real vface = 0.0
         ) const;
 
         template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
@@ -198,9 +198,6 @@ namespace simbi {
         template <int dim>
         constexpr auto write2file = helpers::
             write_to_file<typename RMHD<dim>::primitive_soa_t, dim, RMHD<dim>>;
-
-        template <int dim>
-        using MagFourVec = typename RMHD<dim>::mag_fourvec_t;
 
     }   // namespace rm
 }   // namespace simbi
