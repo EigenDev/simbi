@@ -130,9 +130,11 @@ namespace global {
 namespace global {
 #if SHARED_MEMORY
 #define GPU_SHARED __device__
+    // shorthand flag for using gpu shared memory
     constexpr bool on_sm = true;
 #else
 #define GPU_SHARED __device__ const
+    // shorthand flag for using gpu shared memory
     constexpr bool on_sm = false;
 #endif
     constexpr Platform BuildPlatform = Platform::GPU;
@@ -250,7 +252,8 @@ using simbiStream_t                       = hipStream_t;
 namespace global {
     constexpr auto BuildPlatform = Platform::CPU;
     constexpr int WARP_SIZE      = 32;
-    constexpr bool on_sm         = false;
+    // shorthand flag for using gpu shared memory
+    constexpr bool on_sm = false;
 }   // namespace global
 
 #define CUDA_CODE 0
@@ -350,6 +353,7 @@ namespace simbi {
 #endif
 
 namespace global {
+    // shorthand flag for gpu compilation check
     constexpr bool on_gpu = BuildPlatform == Platform::GPU;
 }   // namespace global
 #endif
