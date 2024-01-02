@@ -1739,9 +1739,14 @@ void RMHD<dim>::advance(
             const luint tya = dim < 2 ? 0 : (global::on_sm) ? ty + radius : ja;
             const luint tza = dim < 3 ? 0 : (global::on_sm) ? tz + radius : ka;
 
-            conserved_t uxL, uxR, uyL, uyR, uzL, uzR;
-            conserved_t fL, fR, gL, gR, hL, hR, frf, flf, grf, glf, hrf, hlf;
-            primitive_t xprimsL, xprimsR, yprimsL, yprimsR, zprimsL, zprimsR;
+            conserved_t uxL, uxR, fL, fR, flf, frf;
+            primitive_t xprimsL, xprimsR;
+            // Compiler optimizes these out if unused since they are of trivial
+            // type
+            [[maybe_unused]] conserved_t uyL, uyR, gL, gR, glf, grf;
+            [[maybe_unused]] conserved_t uzL, uzR, hL, hR, hlf, hrf;
+            [[maybe_unused]] primitive_t yprimsL, yprimsR;
+            [[maybe_unused]] primitive_t zprimsL, zprimsR;
 
             const luint aid = ka * nx * ny + ja * nx + ia;
             if constexpr (global::on_sm) {
