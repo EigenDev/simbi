@@ -181,13 +181,13 @@ Newtonian<dim>::get_x3_differential(const lint ii) const
             case Geometry::SPHERICAL:
                 return (2.0 * M_PI);
             default:
-                return 1;
+                return 1.0;
         }
     }
     else if constexpr (dim == 2) {
         switch (geometry) {
             case Geometry::PLANAR_CYLINDRICAL:
-                return 1;
+                return 1.0;
             default:
                 return (2.0 * M_PI);
         }
