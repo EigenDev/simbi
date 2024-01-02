@@ -198,11 +198,9 @@ Newtonian<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real Newtonian<dim>::get_cell_volume(
-    const lint ii,
-    const lint jj,
-    const lint kk
-) const
+GPU_CALLABLE_MEMBER real
+Newtonian<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk)
+    const
 {
     if (geometry == Geometry::CARTESIAN) {
         return 1.0;
@@ -745,7 +743,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
     }();
 
     // Upwind the scalar concentration flux
-    if (net_flux.den < 0) {
+    if (net_flux.den < 0.0) {
         net_flux.chi = right_prims.chi * net_flux.den;
     }
     else {
@@ -911,7 +909,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
                         face_starState * vface;
 
         // upwind the concentration flux
-        if (net_flux.den < 0) {
+        if (net_flux.den < 0.0) {
             net_flux.chi = right_prims.chi * net_flux.den;
         }
         else {

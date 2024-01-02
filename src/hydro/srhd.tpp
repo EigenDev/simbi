@@ -872,7 +872,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
         }
     }();
     // Upwind the scalar concentration flux
-    if (net_flux.den < 0) {
+    if (net_flux.den < 0.0) {
         net_flux.chi = right_prims.chi * net_flux.den;
     }
     else {
@@ -1103,7 +1103,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                         face_starState * vface;
 
                     // upwind the concentration flux
-                    if (net_flux.den < 0) {
+                    if (net_flux.den < 0.0) {
                         net_flux.chi = right_prims.chi * net_flux.den;
                     }
                     else {
@@ -1172,7 +1172,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                                          starStateL * vface;
 
                         // upwind the concentration flux
-                        if (hllc_flux.den < 0) {
+                        if (hllc_flux.den < 0.0) {
                             hllc_flux.chi = right_prims.chi * hllc_flux.den;
                         }
                         else {
@@ -1238,7 +1238,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                                          starStateR * vface;
 
                         // upwind the concentration flux
-                        if (hllc_flux.den < 0) {
+                        if (hllc_flux.den < 0.0) {
                             hllc_flux.chi = right_prims.chi * hllc_flux.den;
                         }
                         else {
