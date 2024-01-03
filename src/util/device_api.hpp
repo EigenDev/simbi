@@ -38,7 +38,11 @@ namespace simbi {
 
             inline ::std::string describe(status_t status)
             {
+#if GPU_CODE
                 return anyGpuGetErrorString(anyGpuError_t(status));
+#else
+                return "there was a problem with the mainframe";
+#endif
             }
 
             class runtime_error : public ::std::runtime_error
@@ -113,29 +117,9 @@ namespace simbi {
             void getDeviceCount(int* devCount);
             void getDeviceProperties(anyGpuProp_t* props, int i);
             void gpuMemset(void* obj, int val, size_t bytes);
+            void synchronize();
+            void deviceSynch();
 
-            template <global::Platform P = global::BuildPlatform>
-            inline void deviceSynch()
-            {
-                if constexpr (P == global::Platform::GPU) {
-                    auto status = error::status_t(anyGpuDeviceSynchronize());
-                    error::check_err(status, "Failed to synch device(s)");
-                }
-                else {
-                    return;
-                }
-            }
-
-            template <global::Platform P = global::BuildPlatform>
-            GPU_DEV_INLINE void synchronize()
-            {
-                if constexpr (P == global::Platform::GPU) {
-                    __syncthreads();
-                }
-                else {
-                    return;
-                }
-            }
         }   // namespace api
 
     }   // namespace gpu
