@@ -84,7 +84,12 @@
         "semaphore": "cpp",
         "__nullptr": "cpp",
         "span": "cpp",
-        "complex": "cpp"
+        "complex": "cpp",
+        "__hash_table": "cpp",
+        "__node_handle": "cpp",
+        "__tree": "cpp",
+        "queue": "cpp",
+        "stack": "cpp"
     },
     "doxdocgen.generic.authorEmail": "md4469@nyu.edu",
     "doxdocgen.generic.authorName": "Marcus DuPont",
