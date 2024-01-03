@@ -165,6 +165,7 @@ namespace simbi {
 #endif
             };
 
+            GPU_DEV_INLINE
             void synchronize()
             {
 #if GPU_CODE
