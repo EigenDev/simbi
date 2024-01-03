@@ -117,6 +117,7 @@ namespace simbi {
             void getDeviceCount(int* devCount);
             void getDeviceProperties(anyGpuProp_t* props, int i);
             void gpuMemset(void* obj, int val, size_t bytes);
+            GPU_DEV_INLINE
             void synchronize();
             void deviceSynch();
 
@@ -207,14 +208,6 @@ namespace simbi {
         else {
             return std::hash<std::thread::id>{}(std::this_thread::get_id());
         }
-#endif
-    }
-
-    GPU_DEV_INLINE
-    void synchronize()
-    {
-#if GPU_CODE
-        __syncthreads();
 #endif
     }
 }   // namespace simbi
