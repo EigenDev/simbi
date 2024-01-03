@@ -165,14 +165,6 @@ namespace simbi {
 #endif
             };
 
-            GPU_DEV_INLINE
-            void synchronize()
-            {
-#if GPU_CODE
-                __syncthreads();
-#endif
-            };
-
             void deviceSynch()
             {
 #if GPU_CODE
