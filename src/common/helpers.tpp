@@ -1494,10 +1494,10 @@ namespace simbi {
                         const real p   = prim_buffer[ii].p;
                         const real v   = prim_buffer[ii].get_v();
                         real h =
-                            1 + self->gamma * p / (rho * (self->gamma - 1));
+                            1.0 + self->gamma * p / (rho * (self->gamma - 1));
                         real cs = std::sqrt(self->gamma * p / (rho * h));
-                        vPlus   = (v + cs) / (1 + v * cs);
-                        vMinus  = (v - cs) / (1 - v * cs);
+                        vPlus   = (v + cs) / (1.0 + v * cs);
+                        vMinus  = (v - cs) / (1.0 - v * cs);
                     }
                     else {
                         vPlus  = 1.0;
@@ -1556,12 +1556,12 @@ namespace simbi {
                         const real v1  = prim_buffer[gid].get_v1();
                         const real v2  = prim_buffer[gid].get_v2();
                         real h =
-                            1 + self->gamma * p / (rho * (self->gamma - 1));
+                            1.0 + self->gamma * p / (rho * (self->gamma - 1));
                         real cs  = std::sqrt(self->gamma * p / (rho * h));
-                        plus_v1  = (v1 + cs) / (1 + v1 * cs);
-                        plus_v2  = (v2 + cs) / (1 + v2 * cs);
-                        minus_v1 = (v1 - cs) / (1 - v1 * cs);
-                        minus_v2 = (v2 - cs) / (1 - v2 * cs);
+                        plus_v1  = (v1 + cs) / (1.0 + v1 * cs);
+                        plus_v2  = (v2 + cs) / (1.0 + v2 * cs);
+                        minus_v1 = (v1 - cs) / (1.0 - v1 * cs);
+                        minus_v2 = (v2 - cs) / (1.0 - v2 * cs);
                     }
                     else {
                         plus_v1  = 1.0;
@@ -1727,14 +1727,14 @@ namespace simbi {
                         const real v3  = prim_buffer[gid].get_v3();
 
                         real h =
-                            1 + self->gamma * p / (rho * (self->gamma - 1));
+                            1.0 + self->gamma * p / (rho * (self->gamma - 1));
                         real cs  = std::sqrt(self->gamma * p / (rho * h));
-                        plus_v1  = (v1 + cs) / (1 + v1 * cs);
-                        plus_v2  = (v2 + cs) / (1 + v2 * cs);
-                        plus_v3  = (v3 + cs) / (1 + v3 * cs);
-                        minus_v1 = (v1 - cs) / (1 - v1 * cs);
-                        minus_v2 = (v2 - cs) / (1 - v2 * cs);
-                        minus_v3 = (v3 - cs) / (1 - v3 * cs);
+                        plus_v1  = (v1 + cs) / (1.0 + v1 * cs);
+                        plus_v2  = (v2 + cs) / (1.0 + v2 * cs);
+                        plus_v3  = (v3 + cs) / (1.0 + v3 * cs);
+                        minus_v1 = (v1 - cs) / (1.0 - v1 * cs);
+                        minus_v2 = (v2 - cs) / (1.0 - v2 * cs);
+                        minus_v3 = (v3 - cs) / (1.0 - v3 * cs);
                     }
                     else {
                         plus_v1  = 1.0;
@@ -2561,9 +2561,9 @@ namespace simbi {
             const float delta_t
         )
         {
-            // the advance step does one write plus 1 + dim * 2 * radius reads
+            // the advance step does one write plus 1.0 + dim * 2 * radius reads
             const float advance_contr =
-                real_zones * sizeof(T) * (1 + (1 + dim * 2 * radius));
+                real_zones * sizeof(T) * (1.0 + (1.0 + dim * 2 * radius));
             const float cons2prim_contr = total_zones * sizeof(U);
             const float ghost_conf_contr =
                 (total_zones - real_zones) * sizeof(T);

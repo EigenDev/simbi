@@ -242,7 +242,7 @@ void RMHD<dim>::emit_troubled_cells() const
             const real m   = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
             const real vsq = (m * m) / (et * et);
             const real bsq = (b1 * b1 + b2 * b2 + b3 * b3);
-            const real w   = 1 / std::sqrt(1 - vsq);
+            const real w   = 1.0 / std::sqrt(1.0 - vsq);
             if constexpr (dim == 1) {
                 printf(
                     "\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
@@ -330,7 +330,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                         const auto ireal =
                             helpers::get_real_idx(gid, radius, active_zones);
                         const real dV = get_cell_volume(ireal);
-                        invdV         = 1 / dV;
+                        invdV         = 1.0 / dV;
                     }
                     else if constexpr (dim == 2) {
                         const luint ii = gid % nx;
@@ -340,7 +340,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                         const auto jreal =
                             helpers::get_real_idx(jj, radius, yactive_grid);
                         const real dV = get_cell_volume(ireal, jreal);
-                        invdV         = 1 / dV;
+                        invdV         = 1.0 / dV;
                     }
                     else {
                         const luint kk = simbi::helpers::get_height(
@@ -367,7 +367,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                         const auto kreal =
                             helpers::get_real_idx(kk, radius, zactive_grid);
                         const real dV = get_cell_volume(ireal, jreal, kreal);
-                        invdV         = 1 / dV;
+                        invdV         = 1.0 / dV;
                     }
                 }
 
@@ -537,7 +537,7 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons, const luint gid)
 
     const real w    = helpers::calc_rmhd_lorentz(ssq, bsq, msq, qq);
     const real pg   = helpers::calc_rmhd_pg(gr, d, w, qq);
-    const real fac  = 1 / (qq + bsq);
+    const real fac  = 1.0 / (qq + bsq);
     const real rat  = s / qq;
     const real v1   = fac * (m1 + rat * b1);
     const real v2   = fac * (m2 + rat * b2);
@@ -603,7 +603,7 @@ GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
     const real bn2  = bn * bn;
     const real vn   = prims.vcomponent(nhat);
     if (prims.vsquared() < global::tol_scale) {   // Eq.(57)
-        const real fac  = 1 / (rho * h + b4sq);
+        const real fac  = 1.0 / (rho * h + b4sq);
         const real a    = 1.0;
         const real b    = -(b4sq + rho * h * cs2 + bn2 * cs2) * fac;
         const real c    = cs2 * bn2 * fac;
@@ -616,8 +616,8 @@ GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
         const real vdbperp =
             prims.vdotb() - prims.vcomponent(nhat) * prims.bcomponent(nhat);
         const real q    = b4sq - cs2 * vdbperp * vdbperp;
-        const real a2   = rho * h * (cs2 + g2 * (1 - cs2)) + q;
-        const real a1   = -2 * rho * h * g2 * vn * (1 - cs2);
+        const real a2   = rho * h * (cs2 + g2 * (1.0 - cs2)) + q;
+        const real a1   = -2 * rho * h * g2 * vn * (1.0 - cs2);
         const real a0   = rho * h * (-cs2 + g2 * vn * vn * (1 - cs2)) - q;
         const real disq = a1 * a1 - 4 * a2 * a0;
         speeds[3]       = 0.5 * (-a1 + std::sqrt(disq)) / a2;
@@ -1130,7 +1130,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const real c = s - fdb2;
     const real quad =
         -0.5 * (b + helpers::sgn(b) * std::sqrt(b * b - 4.0 * a * c));
-    const real aStar   = c * (1 / quad);
+    const real aStar   = c * (1.0 / quad);
     const real vt1Star = (bt1Star * aStar - fpb1) / bnStar;   // Eq. (38)
     const real vt2Star = (bt2Star * aStar - fpb2) / bnStar;   // Eq. (38)
     const real invg2 =
@@ -1148,7 +1148,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const real tau = left_state.nrg;
         // const real chi      = left_state.chi;
         const real e        = tau + d;
-        const real cofactor = 1 / (aL - aStar);
+        const real cofactor = 1.0 / (aL - aStar);
         const real mnorm    = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
 
         const real vL = left_prims.vcomponent(nhat);
@@ -1201,7 +1201,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const real tau = right_state.nrg;
         // const real chi      = right_state.chi;
         const real e        = tau + d;
-        const real cofactor = 1 / (aR - aStar);
+        const real cofactor = 1.0 / (aR - aStar);
         const real mnorm    = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
 
         const real vR = right_prims.vcomponent(nhat);
@@ -1297,7 +1297,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
   // const real qfunc = [](const conserved_t &r, const luint nhat,
   // const
   // real a, const real p) {
-  //     return r.total_energy() * a + p * (1 - a * a);
+  //     return r.total_energy() * a + p * (1.0 - a * a);
   // };
   // const real gfunc =[](const luint np1, const luint np2, const
   // conserved_t &r) {
@@ -1325,7 +1325,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
   // const real ofunc = [](const real q, const real g, const real bn, const
   // real
   // a) {
-  //     return q - g + bn * bn * (1 - a * a);
+  //     return q - g + bn * bn * (1.0 - a * a);
   // };
   // const real xfunc = [](const real q, const real y, const real g, const
   // real
@@ -1462,7 +1462,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
   // rL.momentum(nhat) + vt1L * rL.momentum(np1) + vt2L * rL.momentum(np2);
   // const auto wL    = total_enthalpy(pL, rL.total_energy(), vdr, aLm, vnL);
   // const auto vdbL  = (vnL * bn + vnL1 * bp1 + vnL2 * bp2);
-  // const auto vfacL = 1 / (aLm - vnL);
+  // const auto vfacL = 1.0 /(aLm - vnL);
 
   // // right side
   // const auto pR   = right_prims.total_pressure();
@@ -1483,7 +1483,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
   // rR.momentum(nhat) + vt1R * rR.momentum(np1) + vt2R * rR.momentum(np2);
   // const auto wR    = total_enthalpy(pR, rR.total_energy(), vdr, aRm, vnR);
   // const auto vdbR  = (vnR * bn + vnR1 * bp1 + vnR2 * bp2);
-  // const auto vfacR = 1 / (aRm - vnR);
+  // const auto vfacR = 1.0 /(aRm - vnR);
 
   // //--------------Jump conditions across the Alfven waves (section 3.2)
   // const auto etaL = - helpers::sgn(bn) * std::sqrt(wL);
@@ -1540,7 +1540,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
 
   //     return right_flux + (ua - right_state) * vaR - ua * vface;
   // } else {
-  //     dK  = 1 / (vaR - vaL);
+  //     dK  = 1.0 /(vaR - vaL);
   //     //---------------Jump conditions across the contact wave
   //     (section 3.3)
   //     const auto bkxn  = bn;
@@ -1552,8 +1552,8 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
   //     kt2L); const auto kdbR  = vec_dot(bkxn, bkc1, bkc2, knR, kt1R, kt2R);
   //     const auto ksqL  = vec_sq(knL, kt1L, kt2L);
   //     const auto ksqR  = vec_sq(knR, kt1R, kt2R);
-  //     const auto kfacL = (1 - ksqL) / (etaL - kdbL);
-  //     const auto kfacR = (1 - ksqR) / (etaR - kdbR);
+  //     const auto kfacL = (1.0 - ksqL) / (etaL - kdbL);
+  //     const auto kfacR = (1.0 - ksqR) / (etaR - kdbR);
   //     const auto vanL  = knL  -  bn * kfacL;
   //     const auto vat1L = kt1L - bkc1 * kfacL;
   //     const auto vat2L = kt2L - bkc2 * kfacL;
@@ -2842,7 +2842,7 @@ void RMHD<dim>::advance(
                             // thmean       = 0.5 * (tl + tr);
                             const real dV =
                                 rmean * (rr - rl) * (zr - zl) * (qr - ql);
-                            const real invdV = 1 / dV;
+                            const real invdV = 1.0 / dV;
 
                             // Grab central primitives
                             const real rhoc = prim_buff[tid].rho;

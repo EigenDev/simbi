@@ -769,9 +769,10 @@ namespace simbi {
         {
             const auto et  = tau + d + p;
             const auto v2  = s * s / (et * et);
-            const auto w   = 1.0 / std::sqrt(1 - v2);
+            const auto w   = 1.0 / std::sqrt(1.0 - v2);
             const auto rho = d / w;
-            const auto eps = (tau + (1 - w) * d + (1 - w * w) * p) / (d * w);
+            const auto eps =
+                (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
             return (gamma - 1) * rho * eps - p;
         }
 
@@ -786,11 +787,12 @@ namespace simbi {
         GPU_CALLABLE_INLINE real
         newton_g(real gamma, real tau, real d, real s, real p)
         {
-            const auto et  = tau + d + p;
-            const auto v2  = s * s / (et * et);
-            const auto w   = 1.0 / std::sqrt(1 - v2);
-            const auto eps = (tau + (1 - w) * d + (1 - w * w) * p) / (d * w);
-            const auto c2  = (gamma - 1) * gamma * eps / (1 + gamma * eps);
+            const auto et = tau + d + p;
+            const auto v2 = s * s / (et * et);
+            const auto w  = 1.0 / std::sqrt(1.0 - v2);
+            const auto eps =
+                (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
+            const auto c2 = (gamma - 1) * gamma * eps / (1 + gamma * eps);
             return c2 * v2 - 1;
         }
 

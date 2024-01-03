@@ -81,8 +81,8 @@ namespace simbi {
                 }
                 static auto batch_size =
                     ((stop - start + nthreads - 1) / nthreads);
-                auto block_start = start - batch_size;
-                auto block_end   = start;
+                int block_start = start - batch_size;
+                int block_end   = start;
 
                 auto step = [&] {
                     block_start += batch_size;

@@ -129,7 +129,7 @@ namespace simbi {
             real chkpt_idx
         )
         {
-            real round_place = 1 / chkpt_interval;
+            real round_place = 1.0 / chkpt_interval;
             t_interval       = dlogt != 0
                                    ? tstart * std::pow(10.0, dlogt)
                                    : floor(tstart * round_place + 0.5) / round_place +
@@ -217,7 +217,7 @@ namespace simbi {
             else {
                 this->dx1 = (x1[xactive_grid - 1] - x1[0]) / (xactive_grid - 1);
             }
-            this->invdx1 = 1 / dx1;
+            this->invdx1 = 1.0 / dx1;
             // Define the source terms
             this->density_source = init_conditions.sources[0];
             this->m1_source      = init_conditions.sources[1];
@@ -248,7 +248,7 @@ namespace simbi {
                 else {
                     this->dx2 =
                         (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
-                    this->invdx2 = 1 / dx2;
+                    this->invdx2 = 1.0 / dx2;
                 }
                 if (x3_cell_spacing == simbi::Cellspacing::LOGSPACE) {
                     this->dlogx3 = std::log10(x3[zactive_grid - 1] / x3[0]) /
@@ -257,7 +257,7 @@ namespace simbi {
                 else {
                     this->dx3 =
                         (x3[zactive_grid - 1] - x3[0]) / (zactive_grid - 1);
-                    this->invdx3 = 1 / dx3;
+                    this->invdx3 = 1.0 / dx3;
                 }
             }
             else if ((ny > 1) && (nz == 1)) {   // 2D Check
@@ -277,7 +277,7 @@ namespace simbi {
                 else {
                     this->dx2 =
                         (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
-                    this->invdx2 = 1 / dx2;
+                    this->invdx2 = 1.0 / dx2;
                 }
             }
             else {

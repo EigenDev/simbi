@@ -238,7 +238,7 @@ void SRHD<dim>::emit_troubled_cells() const
             const real et = (cons[gid].den + cons[gid].nrg + prims[gid].p);
             const real s  = std::sqrt(s1 * s1 + s2 * s2 + s3 * s3);
             const real v2 = (s * s) / (et * et);
-            const real w  = 1 / std::sqrt(1 - v2);
+            const real w  = 1.0 / std::sqrt(1.0 - v2);
             if constexpr (dim == 1) {
                 printf(
                     "\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
@@ -321,7 +321,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                         const auto ireal =
                             helpers::get_real_idx(gid, radius, active_zones);
                         const real dV = get_cell_volume(ireal);
-                        invdV         = 1 / dV;
+                        invdV         = 1.0 / dV;
                     }
                     else if constexpr (dim == 2) {
                         const luint ii = gid % nx;
@@ -331,7 +331,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                         const auto jreal =
                             helpers::get_real_idx(jj, radius, yactive_grid);
                         const real dV = get_cell_volume(ireal, jreal);
-                        invdV         = 1 / dV;
+                        invdV         = 1.0 / dV;
                     }
                     else {
                         const luint kk = simbi::helpers::get_height(
@@ -358,7 +358,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                         const auto kreal =
                             helpers::get_real_idx(kk, radius, zactive_grid);
                         const real dV = get_cell_volume(ireal, jreal, kreal);
-                        invdV         = 1 / dV;
+                        invdV         = 1.0 / dV;
                     }
                 }
 
@@ -402,42 +402,42 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 
                 } while (std::abs(f / g) >= tol);
 
-                const real inv_et = 1 / (tau + d + peq);
+                const real inv_et = 1.0 / (tau + d + peq);
                 const real v1     = s1 * inv_et;
                 press_data[gid]   = peq;
 #if FOUR_VELOCITY
                 if constexpr (dim == 1) {
-                    const real w   = 1 / std::sqrt(1 - v1 * v1);
+                    const real w   = 1.0 / std::sqrt(1.0 - v1 * v1);
                     prim_data[gid] = {d / w, v1 * w, peq, dchi / d};
                 }
                 else if constexpr (dim == 2) {
                     const real v2  = s2 * inv_et;
-                    const real w   = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
+                    const real w   = 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2));
                     prim_data[gid] = {d / w, v1 * w, v2 * w, peq, dchi / d};
                 }
                 else {
                     const real v2 = s2 * inv_et;
                     const real v3 = s3 * inv_et;
                     const real w =
-                        1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
+                        1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
                     prim_data[gid] =
                         {d / w, v1 * w, v2 * w, v3 * w, peq, dchi / d};
                 }
 #else
                 if constexpr (dim == 1) {
-                    const real w   = 1 / std::sqrt(1 - (v1 * v1));
+                    const real w   = 1.0 / std::sqrt(1.0 - (v1 * v1));
                     prim_data[gid] = {d / w, v1, peq, dchi / d};
                 }
                 else if constexpr (dim == 2) {
                     const real v2  = s2 * inv_et;
-                    const real w   = 1 / std::sqrt(1 - (v1 * v1 + v2 * v2));
+                    const real w   = 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2));
                     prim_data[gid] = {d / w, v1, v2, peq, dchi / d};
                 }
                 else {
                     const real v2 = s2 * inv_et;
                     const real v3 = s3 * inv_et;
                     const real w =
-                        1 / std::sqrt(1 - (v1 * v1 + v2 * v2 + v3 * v3));
+                        1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
                     prim_data[gid] = {d / w, v1, v2, v3, peq, dchi / d};
                 }
 #endif
@@ -485,30 +485,30 @@ GPU_CALLABLE_MEMBER SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
             {
                 const real vbar = 0.5 * (vL + vR);
                 const real cbar = 0.5 * (csL + csR);
-                const real bl   = (vbar - cbar) / (1 - cbar * vbar);
-                const real br   = (vbar + cbar) / (1 + cbar * vbar);
+                const real bl   = (vbar - cbar) / (1.0 - cbar * vbar);
+                const real br   = (vbar + cbar) / (1.0 + cbar * vbar);
                 const real aL =
-                    helpers::my_min(bl, (vL - csL) / (1 - vL * csL));
+                    helpers::my_min(bl, (vL - csL) / (1.0 - vL * csL));
                 const real aR =
-                    helpers::my_max(br, (vR + csR) / (1 + vR * csR));
+                    helpers::my_max(br, (vR + csR) / (1.0 + vR * csR));
 
                 return {aL, aR, csL, csR};
             }
         //-----------Calculate wave speeds based on Mignone & Bodo 2005
         case simbi::WaveSpeeds::MIGNONE_AND_BODO_05:
             {
-                // Get Wave Speeds based on Mignone & Bodo Eqs. (21 - 23)
-                const real lorentzL = 1 / std::sqrt(1 - (vL * vL));
-                const real lorentzR = 1 / std::sqrt(1 - (vR * vR));
+                // Get Wave Speeds based on Mignone & Bodo Eqs. (21.0 - 23)
+                const real lorentzL = 1.0 / std::sqrt(1.0 - (vL * vL));
+                const real lorentzR = 1.0 / std::sqrt(1.0 - (vR * vR));
                 const real sL =
-                    csL * csL / (lorentzL * lorentzL * (1 - csL * csL));
+                    csL * csL / (lorentzL * lorentzL * (1.0 - csL * csL));
                 const real sR =
-                    csR * csR / (lorentzR * lorentzR * (1 - csR * csR));
+                    csR * csR / (lorentzR * lorentzR * (1.0 - csR * csR));
                 // Define temporaries to save computational cycles
-                const real qfL   = 1 / (1 + sL);
-                const real qfR   = 1 / (1 + sR);
-                const real sqrtR = std::sqrt(sR * (1 - vR * vR + sR));
-                const real sqrtL = std::sqrt(sL * (1 - vL * vL + sL));
+                const real qfL   = 1.0 / (1.0 + sL);
+                const real qfR   = 1.0 / (1.0 + sR);
+                const real sqrtR = std::sqrt(sR * (1.0 - vR * vR + sR));
+                const real sqrtL = std::sqrt(sL * (1.0 - vL * vL + sL));
 
                 const real lamLm = (vL - sqrtL) * qfL;
                 const real lamRm = (vR - sqrtR) * qfR;
@@ -523,18 +523,18 @@ GPU_CALLABLE_MEMBER SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
         //-----------Calculate wave speeds based on Huber & Kissmann 2021
         case simbi::WaveSpeeds::HUBER_AND_KISSMANN_2021:
             {
-                const real gammaL = 1 / std::sqrt(1 - (vL * vL));
-                const real gammaR = 1 / std::sqrt(1 - (vR * vR));
+                const real gammaL = 1.0 / std::sqrt(1.0 - (vL * vL));
+                const real gammaR = 1.0 / std::sqrt(1.0 - (vR * vR));
                 const real uL     = gammaL * vL;
                 const real uR     = gammaR * vR;
-                const real sL     = csL * csL / (1 - csL * csL);
-                const real sR     = csR * csR / (1 - csR * csR);
+                const real sL     = csL * csL / (1.0 - csL * csL);
+                const real sR     = csR * csR / (1.0 - csR * csR);
                 const real sqrtR =
                     std::sqrt(sR * (gammaR * gammaR - uR * uR + sR));
                 const real sqrtL =
                     std::sqrt(sL * (gammaL * gammaL - uL * uL + sL));
-                const real qfL = 1 / (gammaL * gammaL + sL);
-                const real qfR = 1 / (gammaR * gammaR + sR);
+                const real qfL = 1.0 / (gammaL * gammaL + sL);
+                const real qfR = 1.0 / (gammaR * gammaR + sR);
 
                 const real lamLm = (gammaL * uL - sqrtL) * qfL;
                 const real lamRm = (gammaR * uR - sqrtR) * qfR;
@@ -548,10 +548,10 @@ GPU_CALLABLE_MEMBER SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
             }
         default:   // NAIVE wave speeds
             {
-                const real aLm = (vL - csL) / (1 - vL * csL);
-                const real aLp = (vL + csL) / (1 + vL * csL);
-                const real aRm = (vR - csR) / (1 - vR * csR);
-                const real aRp = (vR + csR) / (1 + vR * csR);
+                const real aLm = (vL - csL) / (1.0 - vL * csL);
+                const real aLp = (vL + csL) / (1.0 + vL * csL);
+                const real aRm = (vR - csR) / (1.0 - vR * csR);
+                const real aRp = (vR + csR) / (1.0 + vR * csR);
 
                 const real aL = helpers::my_min(aLm, aRm);
                 const real aR = helpers::my_max(aLp, aRp);
@@ -615,15 +615,15 @@ void SRHD<dim>::adapt_dt()
                 const real pre = prims[gid].p;
                 const real h   = prims[gid].get_enthalpy(gamma);
                 const real cs  = std::sqrt(gamma * pre / (rho * h));
-                v1p            = std::abs(v1 + cs) / (1 + v1 * cs);
-                v1m            = std::abs(v1 - cs) / (1 - v1 * cs);
+                v1p            = std::abs(v1 + cs) / (1.0 + v1 * cs);
+                v1m            = std::abs(v1 - cs) / (1.0 - v1 * cs);
                 if constexpr (dim > 1) {
-                    v2p = std::abs(v2 + cs) / (1 + v2 * cs);
-                    v2m = std::abs(v2 - cs) / (1 - v2 * cs);
+                    v2p = std::abs(v2 + cs) / (1.0 + v2 * cs);
+                    v2m = std::abs(v2 - cs) / (1.0 - v2 * cs);
                 }
                 if constexpr (dim > 2) {
-                    v3p = std::abs(v3 + cs) / (1 + v3 * cs);
-                    v3m = std::abs(v3 - cs) / (1 - v3 * cs);
+                    v3p = std::abs(v3 + cs) / (1.0 + v3 * cs);
+                    v3m = std::abs(v3 - cs) / (1.0 - v3 * cs);
                 }
             }
             else {
@@ -942,7 +942,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
     const real c = s;
     const real quad =
         -0.5 * (b + helpers::sgn(b) * std::sqrt(b * b - 4.0 * a * c));
-    const real aStar = c * (1 / quad);
+    const real aStar = c * (1.0 / quad);
     const real pStar = -aStar * fe + fs;
 
     if constexpr (dim == 1) {
@@ -953,7 +953,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
             const real s        = left_state.m1;
             const real tau      = left_state.nrg;
             const real e        = tau + d;
-            const real cofactor = 1 / (aLm - aStar);
+            const real cofactor = 1.0 / (aLm - aStar);
 
             //--------------Compute the L Star State----------
             // Left Star State in x-direction of coordinate lattice
@@ -977,7 +977,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
             const real s        = right_state.m1;
             const real tau      = right_state.nrg;
             const real e        = tau + d;
-            const real cofactor = 1 / (aRp - aStar);
+            const real cofactor = 1.0 / (aRp - aStar);
 
             //--------------Compute the R Star State----------
             // Left Star State in x-direction of coordinate lattice
@@ -1013,7 +1013,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     real s3       = left_state.momentum(3);
                     real tau      = left_state.nrg;
                     real e        = tau + d;
-                    real cofactor = 1 / (aL - aStar);
+                    real cofactor = 1.0 / (aL - aStar);
 
                     const real vL = left_prims.vcomponent(nhat);
                     const real vR = right_prims.vcomponent(nhat);
@@ -1053,7 +1053,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     s3       = right_state.momentum(3);
                     tau      = right_state.nrg;
                     e        = tau + d;
-                    cofactor = 1 / (aR - aStar);
+                    cofactor = 1.0 / (aR - aStar);
 
                     dStar  = cofactor * (aR - vR) * d;
                     s1star = cofactor *
@@ -1083,9 +1083,11 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                         }
                     }();
                     const real ma_left =
-                        vL / csL * std::sqrt((1 - csL * csL) / (1 - vL * vL));
+                        vL / csL *
+                        std::sqrt((1.0 - csL * csL) / (1.0 - vL * vL));
                     const real ma_right =
-                        vR / csR * std::sqrt((1 - csR * csR) / (1 - vR * vR));
+                        vR / csR *
+                        std::sqrt((1.0 - csR * csR) / (1.0 - vR * vR));
                     const real ma_local =
                         helpers::my_max(std::abs(ma_left), std::abs(ma_right));
                     const real phi = std::sin(
@@ -1125,7 +1127,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                         const real tau      = left_state.nrg;
                         const real chi      = left_state.chi;
                         const real e        = tau + d;
-                        const real cofactor = 1 / (aL - aStar);
+                        const real cofactor = 1.0 / (aL - aStar);
 
                         const real vL = left_prims.vcomponent(nhat);
                         // Left Star State in x-direction of coordinate lattice
@@ -1192,7 +1194,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                         const real tau      = right_state.nrg;
                         const real chi      = right_state.chi;
                         const real e        = tau + d;
-                        const real cofactor = 1 / (aR - aStar);
+                        const real cofactor = 1.0 / (aR - aStar);
 
                         const real vR      = right_prims.vcomponent(nhat);
                         const real dStar   = cofactor * (aR - vR) * d;
@@ -2206,7 +2208,7 @@ void SRHD<dim>::advance(
                                 4.0 * M_PI * rmean * rmean * (rrf - rlf);
                             const real factor = (mesh_motion) ? dV : 1;
                             const real pc     = prim_buff[txa].p;
-                            const real invdV  = 1 / dV;
+                            const real invdV  = 1.0 / dV;
                             const auto geom_sources =
                                 conserved_t{0.0, pc * (sR - sL) * invdV, 0.0};
 
@@ -2443,7 +2445,7 @@ void SRHD<dim>::advance(
                             // thmean       = 0.5 * (tl + tr);
                             const real dV =
                                 rmean * (rr - rl) * (zr - zl) * (qr - ql);
-                            const real invdV = 1 / dV;
+                            const real invdV = 1.0 / dV;
 
                             // Grab central primitives
                             const real rhoc = prim_buff[tid].rho;

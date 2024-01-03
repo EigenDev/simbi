@@ -311,7 +311,7 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
                     const auto ireal =
                         helpers::get_real_idx(gid, radius, active_zones);
                     const real dV = get_cell_volume(ireal);
-                    invdV         = 1 / dV;
+                    invdV         = 1.0 / dV;
                 }
                 else if constexpr (dim == 2) {
                     const luint ii = gid % nx;
@@ -1809,7 +1809,7 @@ void Newtonian<dim>::advance(
                                 4.0 * M_PI * rmean * rmean * (rrf - rlf);
                             const real factor = (mesh_motion) ? dV : 1;
                             const real pc     = prim_buff[txa].p;
-                            const real invdV  = 1 / dV;
+                            const real invdV  = 1.0 / dV;
                             const auto geom_sources =
                                 conserved_t{0.0, pc * (sR - sL) * invdV, 0.0};
                             cons_data[ia] -=
@@ -2033,7 +2033,7 @@ void Newtonian<dim>::advance(
                             // thmean       = 0.5 * (tl + tr);
                             const real dV =
                                 rmean * (rr - rl) * (zr - zl) * (qr - ql);
-                            const real invdV = 1 / dV;
+                            const real invdV = 1.0 / dV;
 
                             // Grab central primitives
                             const real rhoc = prim_buff[tid].rho;
