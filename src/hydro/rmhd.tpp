@@ -985,8 +985,8 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
     // Grab the necessary wave speeds
     const real aL  = lambda.afL;
     const real aR  = lambda.afR;
-    const real aLm = aL < 0 ? aL : 0;
-    const real aRp = aR > 0 ? aR : 0;
+    const real aLm = aL < 0.0 ? aL : 0.0;
+    const real aRp = aR > 0.0 ? aR : 0.0;
 
     auto net_flux = [&] {
         // Compute the HLL Flux component-wise
@@ -1063,8 +1063,8 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
     const real aL     = lambda.afL;
     const real aR     = lambda.afR;
-    const real aLm    = aL < 0 ? aL : 0;
-    const real aRp    = aR > 0 ? aR : 0;
+    const real aLm    = aL < 0.0 ? aL : 0.0;
+    const real aRp    = aR > 0.0 ? aR : 0.0;
 
     //---- Check Wave Speeds before wasting computations
     if (vface <= aLm) {

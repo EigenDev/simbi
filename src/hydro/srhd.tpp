@@ -847,8 +847,8 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
     // Grab the necessary wave speeds
     const real aL  = lambda.aL;
     const real aR  = lambda.aR;
-    const real aLm = aL < 0 ? aL : 0;
-    const real aRp = aR > 0 ? aR : 0;
+    const real aLm = aL < 0.0 ? aL : 0.0;
+    const real aRp = aR > 0.0 ? aR : 0.0;
 
     auto net_flux = [&] {
         // Compute the HLL Flux component-wise
