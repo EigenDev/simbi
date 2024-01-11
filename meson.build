@@ -120,7 +120,7 @@ if get_option('gpu_compilation').enabled()
                 '--ptxas-options=-v', 
                 '--extended-lambda',
                 '--compiler-options', 
-                f'-fPIC,@max_errors@', '-O3', '-x=cu'
+                f'-fPIC', '-O3', '-x=cu'
             ]
         elif hip_platform == 'amd' 
             hip_runtime  = 'rocm'
