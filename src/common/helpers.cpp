@@ -327,7 +327,7 @@ namespace simbi {
             std::cout << "GPU Device(s): " << std::endl << std::endl;
 
             for (int i = 0; i < devCount; ++i) {
-                anyGpuProp_t props;
+                devProp_t props;
                 gpu::api::getDeviceProperties(&props, i);
                 std::cout << "  Device number:   " << i << std::endl;
                 std::cout << "  Device name:     " << props.name << ": "

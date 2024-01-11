@@ -8,7 +8,7 @@ namespace simbi {
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(
-                    anyGpuMemcpy(to, from, bytes, anyGpuMemcpyHostToDevice)
+                    devMemcpy(to, from, bytes, devMemcpyHostToDevice)
                 );
                 simbi::gpu::error::check_err(
                     status,
@@ -21,7 +21,7 @@ namespace simbi {
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(
-                    anyGpuMemcpy(to, from, bytes, anyGpuMemcpyDeviceToHost)
+                    devMemcpy(to, from, bytes, devMemcpyDeviceToHost)
                 );
                 simbi::gpu::error::check_err(
                     status,
@@ -34,7 +34,7 @@ namespace simbi {
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(
-                    anyGpuMemcpy(to, from, bytes, anyGpuMemcpyDeviceToDevice)
+                    devMemcpy(to, from, bytes, devMemcpyDeviceToDevice)
                 );
                 simbi::gpu::error::check_err(
                     status,
@@ -47,7 +47,7 @@ namespace simbi {
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(
-                    anyGpuMalloc((void**) obj, elements)
+                    devMalloc((void**) obj, elements)
                 );
                 simbi::gpu::error::check_err(
                     status,
@@ -60,7 +60,7 @@ namespace simbi {
             {
 #if GPU_CODE
                 auto status = simbi::gpu::error::status_t(
-                    anyGpuMallocManaged((void**) obj, elements)
+                    devMallocManaged((void**) obj, elements)
                 );
                 simbi::gpu::error::check_err(
                     status,
@@ -72,7 +72,7 @@ namespace simbi {
             void gpuFree(void* obj)
             {
 #if GPU_CODE
-                auto status = simbi::gpu::error::status_t(anyGpuFree(obj));
+                auto status = simbi::gpu::error::status_t(devFree(obj));
                 simbi::gpu::error::check_err(
                     status,
                     "Failed to free resources from device"
@@ -84,16 +84,16 @@ namespace simbi {
             {
 #if GPU_CODE
                 auto status =
-                    simbi::gpu::error::status_t(anyGpuMemset(obj, val, bytes));
+                    simbi::gpu::error::status_t(devMemset(obj, val, bytes));
                 simbi::gpu::error::check_err(status, "Failed to memset");
 #endif
             };
 
-            void gpuEventSynchronize(anyGpuEvent_t a)
+            void gpuEventSynchronize(devEvent_t a)
             {
 #if GPU_CODE
                 auto status =
-                    simbi::gpu::error::status_t(anyGpuEventSynchronize(a));
+                    simbi::gpu::error::status_t(devEventSynchronize(a));
                 simbi::gpu::error::check_err(
                     status,
                     "Failed to synchronize event"
@@ -101,38 +101,36 @@ namespace simbi {
 #endif
             };
 
-            void gpuEventCreate(anyGpuEvent_t* a)
+            void gpuEventCreate(devEvent_t* a)
             {
 #if GPU_CODE
-                auto status = simbi::gpu::error::status_t(anyGpuEventCreate(a));
+                auto status = simbi::gpu::error::status_t(devEventCreate(a));
                 simbi::gpu::error::check_err(status, "Failed to create event");
 #endif
             };
 
-            void gpuEventDestroy(anyGpuEvent_t a)
+            void gpuEventDestroy(devEvent_t a)
             {
 #if GPU_CODE
-                auto status =
-                    simbi::gpu::error::status_t(anyGpuEventDestroy(a));
+                auto status = simbi::gpu::error::status_t(devEventDestroy(a));
                 simbi::gpu::error::check_err(status, "Failed to destroy event");
 #endif
             };
 
-            void gpuEventRecord(anyGpuEvent_t a)
+            void gpuEventRecord(devEvent_t a)
             {
 #if GPU_CODE
-                auto status = simbi::gpu::error::status_t(anyGpuEventRecord(a));
+                auto status = simbi::gpu::error::status_t(devEventRecord(a));
                 simbi::gpu::error::check_err(status, "Failed to record event");
 #endif
             };
 
-            void
-            gpuEventElapsedTime(float* time, anyGpuEvent_t a, anyGpuEvent_t b)
+            void gpuEventElapsedTime(float* time, devEvent_t a, devEvent_t b)
             {
 #if GPU_CODE
-                auto status = simbi::gpu::error::status_t(
-                    anyGpuEventElapsedTime(time, a, b)
-                );
+                auto status =
+                    simbi::gpu::error::status_t(devEventElapsedTime(time, a, b)
+                    );
                 simbi::gpu::error::check_err(
                     status,
                     "Failed to get event elapsed time"
@@ -144,7 +142,7 @@ namespace simbi {
             {
 #if GPU_CODE
                 auto status =
-                    simbi::gpu::error::status_t(anyGpuGetDeviceCount(devCount));
+                    simbi::gpu::error::status_t(devGetDeviceCount(devCount));
                 simbi::gpu::error::check_err(
                     status,
                     "Failed to get device count"
@@ -152,12 +150,12 @@ namespace simbi {
 #endif
             };
 
-            void getDeviceProperties(anyGpuProp_t* props, int i)
+            void getDeviceProperties(devProp_t* props, int i)
             {
 #if GPU_CODE
-                auto status = simbi::gpu::error::status_t(
-                    anyGpuGetDeviceProperties(props, i)
-                );
+                auto status =
+                    simbi::gpu::error::status_t(devGetDeviceProperties(props, i)
+                    );
                 simbi::gpu::error::check_err(
                     status,
                     "Failed to get device properties"
@@ -168,7 +166,7 @@ namespace simbi {
             void deviceSynch()
             {
 #if GPU_CODE
-                auto status = error::status_t(anyGpuDeviceSynchronize());
+                auto status = error::status_t(devDeviceSynchronize());
                 error::check_err(status, "Failed to synch device(s)");
 #endif
             };

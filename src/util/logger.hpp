@@ -36,7 +36,7 @@ namespace simbi {
         {
             using time_type = std::conditional_t<
                 global::on_gpu,
-                anyGpuEvent_t,
+                devEvent_t,
                 std::chrono::high_resolution_clock::time_point>;
             using duration_type =
                 std::conditional_t<global::on_gpu, float, double>;
@@ -383,7 +383,7 @@ namespace simbi {
                 print_avg_speed(logger);
             };
         }   // namespace logger
-    }       // namespace detail
+    }   // namespace detail
 
 }   // namespace simbi
 #endif

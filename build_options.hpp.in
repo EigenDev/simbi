@@ -159,44 +159,44 @@ namespace global {
 }   // namespace global
 
 template <typename T>
-constexpr auto anyGpuMalloc(T** devPtr, size_t size)
+constexpr auto devMalloc(T** devPtr, size_t size)
 {
     return cudaMalloc(devPtr, size);
 }
 
 template <typename T>
-constexpr auto anyGpuMallocManaged(T** devPtr, size_t size)
+constexpr auto devMallocManaged(T** devPtr, size_t size)
 {
     return cudaMallocManaged(devPtr, size);
 }
 
-inline auto anyGpuEventCreate(cudaEvent_t* stamp)
+inline auto devEventCreate(cudaEvent_t* stamp)
 {
     return cudaEventCreate(stamp);
 };
 
-inline auto anyGpuEventRecord(cudaEvent_t stamp)
+inline auto devEventRecord(cudaEvent_t stamp)
 {
     return cudaEventRecord(stamp);
 };
 
-constexpr auto anyGpuMemcpy               = cudaMemcpy;
-constexpr auto anyGpuFree                 = cudaFree;
-constexpr auto anyGpuMemset               = cudaMemset;
-constexpr auto anyGpuDeviceSynchronize    = cudaDeviceSynchronize;
-constexpr auto anyGpuMemcpyHostToDevice   = cudaMemcpyHostToDevice;
-constexpr auto anyGpuMemcpyDeviceToDevice = cudaMemcpyDeviceToDevice;
-constexpr auto anyGpuMemcpyDeviceToHost   = cudaMemcpyDeviceToHost;
-constexpr auto anyGpuGetErrorString       = cudaGetErrorString;
-constexpr auto anyGpuEventDestroy         = cudaEventDestroy;
-constexpr auto anyGpuEventSynchronize     = cudaEventSynchronize;
-constexpr auto anyGpuEventElapsedTime     = cudaEventElapsedTime;
-constexpr auto anyGpuGetDeviceProperties  = cudaGetDeviceProperties;
-constexpr auto anyGpuGetDeviceCount       = cudaGetDeviceCount;
-using anyGpuProp_t                        = cudaDeviceProp;
-using anyGpuError_t                       = cudaError_t;
-using anyGpuEvent_t                       = cudaEvent_t;
-using simbiStream_t                       = cudaStream_t;
+constexpr auto devMemcpy               = cudaMemcpy;
+constexpr auto devFree                 = cudaFree;
+constexpr auto devMemset               = cudaMemset;
+constexpr auto devDeviceSynchronize    = cudaDeviceSynchronize;
+constexpr auto devMemcpyHostToDevice   = cudaMemcpyHostToDevice;
+constexpr auto devMemcpyDeviceToDevice = cudaMemcpyDeviceToDevice;
+constexpr auto devMemcpyDeviceToHost   = cudaMemcpyDeviceToHost;
+constexpr auto devGetErrorString       = cudaGetErrorString;
+constexpr auto devEventDestroy         = cudaEventDestroy;
+constexpr auto devEventSynchronize     = cudaEventSynchronize;
+constexpr auto devEventElapsedTime     = cudaEventElapsedTime;
+constexpr auto devGetDeviceProperties  = cudaGetDeviceProperties;
+constexpr auto devGetDeviceCount       = cudaGetDeviceCount;
+using devProp_t                        = cudaDeviceProp;
+using devError_t                       = cudaError_t;
+using devEvent_t                       = cudaEvent_t;
+using simbiStream_t                    = cudaStream_t;
 #elif GPU_PLATFORM_AMD
 #include "hip/hip_runtime.h"
 #define HIP_CODE 1
@@ -206,44 +206,38 @@ namespace global {
 }   // namespace global
 
 template <typename T>
-constexpr auto anyGpuMalloc(T** devPtr, size_t size)
+constexpr auto devMalloc(T** devPtr, size_t size)
 {
     return hipMalloc(devPtr, size);
 }
 
 template <typename T>
-constexpr auto anyGpuMallocManaged(T** devPtr, size_t size)
+constexpr auto devMallocManaged(T** devPtr, size_t size)
 {
     return hipMallocManaged(devPtr, size);
 }
 
-inline auto anyGpuEventCreate(hipEvent_t* stamp)
-{
-    return hipEventCreate(stamp);
-};
+inline auto devEventCreate(hipEvent_t* stamp) { return hipEventCreate(stamp); };
 
-inline auto anyGpuEventRecord(hipEvent_t stamp)
-{
-    return hipEventRecord(stamp);
-};
+inline auto devEventRecord(hipEvent_t stamp) { return hipEventRecord(stamp); };
 
-constexpr auto anyGpuMemcpy               = hipMemcpy;
-constexpr auto anyGpuFree                 = hipFree;
-constexpr auto anyGpuMemset               = hipMemset;
-constexpr auto anyGpuDeviceSynchronize    = hipDeviceSynchronize;
-constexpr auto anyGpuMemcpyHostToDevice   = hipMemcpyHostToDevice;
-constexpr auto anyGpuMemcpyDeviceToDevice = hipMemcpyDeviceToDevice;
-constexpr auto anyGpuMemcpyDeviceToHost   = hipMemcpyDeviceToHost;
-constexpr auto anyGpuGetErrorString       = hipGetErrorString;
-constexpr auto anyGpuEventDestroy         = hipEventDestroy;
-constexpr auto anyGpuEventSynchronize     = hipEventSynchronize;
-constexpr auto anyGpuEventElapsedTime     = hipEventElapsedTime;
-constexpr auto anyGpuGetDeviceProperties  = hipGetDeviceProperties;
-constexpr auto anyGpuGetDeviceCount       = hipGetDeviceCount;
-using anyGpuProp_t                        = hipDeviceProp_t;
-using anyGpuError_t                       = hipError_t;
-using anyGpuEvent_t                       = hipEvent_t;
-using simbiStream_t                       = hipStream_t;
+constexpr auto devMemcpy               = hipMemcpy;
+constexpr auto devFree                 = hipFree;
+constexpr auto devMemset               = hipMemset;
+constexpr auto devDeviceSynchronize    = hipDeviceSynchronize;
+constexpr auto devMemcpyHostToDevice   = hipMemcpyHostToDevice;
+constexpr auto devMemcpyDeviceToDevice = hipMemcpyDeviceToDevice;
+constexpr auto devMemcpyDeviceToHost   = hipMemcpyDeviceToHost;
+constexpr auto devGetErrorString       = hipGetErrorString;
+constexpr auto devEventDestroy         = hipEventDestroy;
+constexpr auto devEventSynchronize     = hipEventSynchronize;
+constexpr auto devEventElapsedTime     = hipEventElapsedTime;
+constexpr auto devGetDeviceProperties  = hipGetDeviceProperties;
+constexpr auto devGetDeviceCount       = hipGetDeviceCount;
+using devProp_t                        = hipDeviceProp_t;
+using devError_t                       = hipError_t;
+using devEvent_t                       = hipEvent_t;
+using simbiStream_t                    = hipStream_t;
 #endif
 #else
 #define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...)                    \
@@ -288,9 +282,9 @@ namespace simbi {
     };
 
     using simbiStream_t = int;
-    using anyGpuError_t = int;
-    using anyGpuProp_t  = int;
-    using anyGpuEvent_t = std::chrono::high_resolution_clock::time_point;
+    using devError_t    = int;
+    using devProp_t     = int;
+    using devEvent_t    = std::chrono::high_resolution_clock::time_point;
 
     inline dim3 blockIdx(1, 1, 1);
     inline dim3 blockDim(1, 1, 1);

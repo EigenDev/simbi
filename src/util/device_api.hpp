@@ -39,7 +39,7 @@ namespace simbi {
             inline ::std::string describe(status_t status)
             {
 #if GPU_CODE
-                return anyGpuGetErrorString(anyGpuError_t(status));
+                return devGetErrorString(devError_t(status));
 #else
                 return "there was a problem with the mainframe";
 #endif
@@ -108,14 +108,13 @@ namespace simbi {
             void gpuMalloc(void* obj, size_t bytes);
             void gpuMallocManaged(void* obj, size_t bytes);
             void gpuFree(void* obj);
-            void gpuEventSynchronize(anyGpuEvent_t a);
-            void gpuEventCreate(anyGpuEvent_t* a);
-            void gpuEventDestroy(anyGpuEvent_t a);
-            void gpuEventRecord(anyGpuEvent_t a);
-            void
-            gpuEventElapsedTime(float* time, anyGpuEvent_t a, anyGpuEvent_t b);
+            void gpuEventSynchronize(devEvent_t a);
+            void gpuEventCreate(devEvent_t* a);
+            void gpuEventDestroy(devEvent_t a);
+            void gpuEventRecord(devEvent_t a);
+            void gpuEventElapsedTime(float* time, devEvent_t a, devEvent_t b);
             void getDeviceCount(int* devCount);
-            void getDeviceProperties(anyGpuProp_t* props, int i);
+            void getDeviceProperties(devProp_t* props, int i);
             void gpuMemset(void* obj, int val, size_t bytes);
             void deviceSynch();
 
