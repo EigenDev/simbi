@@ -2704,5 +2704,30 @@ namespace simbi {
                 lhs.chi = rhs.chi;
             }
         }
+
+        template <int dim, typename T, typename idx>
+        GPU_CALLABLE bool ib_check(
+            T& arr,
+            const idx ii,
+            const idx jj,
+            const idx kk,
+            const idx ni,
+            const idx nj,
+            const int side
+        )
+        {
+            if constexpr (dim == 1) {
+                return false;
+            }
+            else if constexpr (dim == 2) {
+                if (side == 3) {
+                    return false;
+                }
+                return arr[kk * nj * ni + jj * ni + ii];
+            }
+            else {
+                return arr[kk * nj * ni + jj * ni + ii];
+            }
+        }
     }   // namespace helpers
 }   // namespace simbi

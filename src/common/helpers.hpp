@@ -682,11 +682,11 @@ namespace simbi {
          * @param idx the global index
          * @param offset the halo radius
          * @param active_zones the number of real, active zones in the grid
-         * @return the nearest active index correspecting to the global index
+         * @return the nearest active index corresponding to the global index
          * given
          */
         GPU_CALLABLE_INLINE
-        constexpr lint
+        constexpr luint
         get_real_idx(const lint idx, const lint offset, const lint active_zones)
         {
             if (idx > active_zones - 1 + offset) {
@@ -1243,6 +1243,17 @@ namespace simbi {
         template <int dim, typename T, typename idx>
         GPU_CALLABLE void
         ib_modify(T& lhs, const T& rhs, const bool ib, const idx side);
+
+        template <int dim, typename T, typename idx>
+        GPU_CALLABLE bool ib_check(
+            T& arr,
+            const idx ii,
+            const idx jj,
+            const idx kk,
+            const idx ni,
+            const idx nj,
+            const int side
+        );
 
         template <typename index_type, typename T>
         GPU_CALLABLE index_type flattened_index(

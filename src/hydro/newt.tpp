@@ -1034,36 +1034,24 @@ void Newtonian<dim>::advance(
                 );
             }
 
+            const auto il = helpers::get_real_idx(ii - 1, 0, xpg);
+            const auto ir = helpers::get_real_idx(ii + 1, 0, xpg);
+            const auto jl = helpers::get_real_idx(jj - 1, 0, ypg);
+            const auto jr = helpers::get_real_idx(jj + 1, 0, ypg);
+            const auto kl = helpers::get_real_idx(kk - 1, 0, zpg);
+            const auto kr = helpers::get_real_idx(kk + 1, 0, zpg);
             const bool object_to_left =
-                dim < 2 ? false
-                        : object_data
-                              [kk * xpg * ypg + jj * xpg +
-                               helpers::my_max<lint>(ii - 1, 0)];
+                helpers::ib_check<dim>(object_data, il, jj, kk, xpg, ypg, 1);
             const bool object_to_right =
-                dim < 2 ? false
-                        : object_data
-                              [kk * xpg * ypg + jj * xpg +
-                               helpers::my_min(ii + 1, xpg - 1)];
+                helpers::ib_check<dim>(object_data, ir, jj, kk, xpg, ypg, 1);
             const bool object_in_front =
-                dim < 2 ? false
-                        : object_data
-                              [kk * xpg * ypg +
-                               helpers::my_min(jj + 1, ypg - 1) * xpg + ii];
+                helpers::ib_check<dim>(object_data, ii, jr, kk, xpg, ypg, 2);
             const bool object_behind =
-                dim < 2 ? false
-                        : object_data
-                              [kk * xpg * ypg +
-                               helpers::my_max<lint>(jj - 1, 0) * xpg + ii];
+                helpers::ib_check<dim>(object_data, ii, jl, kk, xpg, ypg, 2);
             const bool object_above =
-                dim < 3 ? false
-                        : object_data
-                              [helpers::my_min(kk + 1, zpg - 1) * xpg * ypg +
-                               jj * xpg + ii];
+                helpers::ib_check<dim>(object_data, ii, jj, kr, xpg, ypg, 3);
             const bool object_below =
-                dim < 3 ? false
-                        : object_data
-                              [helpers::my_max<lint>(kk - 1, 0) * xpg * ypg +
-                               jj * xpg + ii];
+                helpers::ib_check<dim>(object_data, ii, jj, kl, xpg, ypg, 3);
 
             const real x1l    = get_x1face(ii, 0);
             const real x1r    = get_x1face(ii, 1);
