@@ -1240,6 +1240,10 @@ namespace simbi {
         template <typename T, typename U>
         GPU_SHARED T* sm_proxy(const U object);
 
+        template <int dim, typename T, typename idx>
+        GPU_CALLABLE void
+        ib_modify(T& lhs, const T& rhs, const bool ib, const idx side);
+
         template <typename index_type, typename T>
         GPU_CALLABLE index_type flattened_index(
             index_type ii,

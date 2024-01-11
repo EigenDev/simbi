@@ -198,11 +198,9 @@ Newtonian<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real Newtonian<dim>::get_cell_volume(
-    const lint ii,
-    const lint jj,
-    const lint kk
-) const
+GPU_CALLABLE_MEMBER real
+Newtonian<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk)
+    const
 {
     if (geometry == Geometry::CARTESIAN) {
         return 1.0;
@@ -1086,42 +1084,9 @@ void Newtonian<dim>::advance(
                     zprimsR = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
                 }
 
-                if (object_to_right) {
-                    xprimsR.rho = xprimsL.rho;
-                    xprimsR.v1  = -xprimsL.v1;
-                    if constexpr (dim > 1) {
-                        xprimsR.v2 = xprimsL.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        xprimsR.v3 = xprimsL.v3;
-                    }
-                    xprimsR.p   = xprimsL.p;
-                    xprimsR.chi = xprimsL.chi;
-                }
-
-                if (object_in_front) {
-                    yprimsR.rho = yprimsL.rho;
-                    yprimsR.v1  = yprimsL.v1;
-                    if constexpr (dim > 1) {
-                        yprimsR.v2 = -yprimsL.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        yprimsR.v3 = yprimsL.v3;
-                    }
-                    yprimsR.p   = yprimsL.p;
-                    yprimsR.chi = yprimsL.chi;
-                }
-
-                if (object_above) {
-                    zprimsR.rho = zprimsL.rho;
-                    zprimsR.v1  = zprimsL.v1;
-                    if constexpr (dim == 3) {
-                        zprimsR.v2 = zprimsL.v2;
-                        zprimsR.v3 = -zprimsL.v3;
-                    }
-                    zprimsR.p   = zprimsL.p;
-                    zprimsR.chi = zprimsL.chi;
-                }
+                helpers::ib_modify<dim>(xprimsR, xprimsL, object_to_right, 1);
+                helpers::ib_modify<dim>(yprimsR, yprimsL, object_in_front, 2);
+                helpers::ib_modify<dim>(zprimsR, zprimsL, object_above, 3);
 
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
@@ -1231,42 +1196,9 @@ void Newtonian<dim>::advance(
                     zprimsR = prim_buff[(tza - 0) * sx * sy + tya * sx + txa];
                 }
 
-                if (object_to_left) {
-                    xprimsL.rho = xprimsR.rho;
-                    xprimsL.v1  = -xprimsR.v1;
-                    if constexpr (dim > 1) {
-                        xprimsL.v2 = xprimsR.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        xprimsL.v3 = xprimsR.v3;
-                    }
-                    xprimsL.p   = xprimsR.p;
-                    xprimsL.chi = xprimsR.chi;
-                }
-
-                if (object_behind) {
-                    yprimsL.rho = yprimsR.rho;
-                    yprimsL.v1  = yprimsR.v1;
-                    if constexpr (dim > 1) {
-                        yprimsL.v2 = -yprimsR.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        yprimsL.v3 = yprimsR.v3;
-                    }
-                    yprimsL.p   = yprimsR.p;
-                    yprimsL.chi = yprimsR.chi;
-                }
-
-                if (object_below) {
-                    zprimsL.rho = zprimsR.rho;
-                    zprimsL.v1  = zprimsR.v1;
-                    if constexpr (dim == 3) {
-                        zprimsL.v2 = zprimsR.v2;
-                        zprimsL.v3 = -zprimsR.v3;
-                    }
-                    zprimsL.p   = zprimsR.p;
-                    zprimsL.chi = zprimsR.chi;
-                }
+                helpers::ib_modify<dim>(xprimsL, xprimsR, object_to_left, 1);
+                helpers::ib_modify<dim>(yprimsL, yprimsR, object_behind, 2);
+                helpers::ib_modify<dim>(zprimsL, zprimsR, object_below, 3);
 
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
@@ -1417,42 +1349,9 @@ void Newtonian<dim>::advance(
                             0.5;
                 }
 
-                if (object_to_right) {
-                    xprimsR.rho = xprimsL.rho;
-                    xprimsR.v1  = -xprimsL.v1;
-                    if constexpr (dim > 1) {
-                        xprimsR.v2 = xprimsL.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        xprimsR.v3 = xprimsL.v3;
-                    }
-                    xprimsR.p   = xprimsL.p;
-                    xprimsR.chi = xprimsL.chi;
-                }
-
-                if (object_in_front) {
-                    yprimsR.rho = yprimsL.rho;
-                    yprimsR.v1  = yprimsL.v1;
-                    if constexpr (dim > 1) {
-                        yprimsR.v2 = -yprimsL.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        yprimsR.v3 = yprimsL.v3;
-                    }
-                    yprimsR.p   = yprimsL.p;
-                    yprimsR.chi = yprimsL.chi;
-                }
-
-                if (object_above) {
-                    zprimsR.rho = zprimsL.rho;
-                    zprimsR.v1  = zprimsL.v1;
-                    if constexpr (dim == 3) {
-                        zprimsR.v2 = zprimsL.v2;
-                        zprimsR.v3 = -zprimsL.v3;
-                    }
-                    zprimsR.p   = zprimsL.p;
-                    zprimsR.chi = zprimsL.chi;
-                }
+                helpers::ib_modify<dim>(xprimsR, xprimsL, object_to_right, 1);
+                helpers::ib_modify<dim>(yprimsR, yprimsL, object_in_front, 2);
+                helpers::ib_modify<dim>(zprimsR, zprimsL, object_above, 3);
 
                 // Calculate the left and right states using the reconstructed
                 // PLM Primitive
@@ -1578,42 +1477,9 @@ void Newtonian<dim>::advance(
                             0.5;
                 }
 
-                if (object_to_left) {
-                    xprimsL.rho = xprimsR.rho;
-                    xprimsL.v1  = -xprimsR.v1;
-                    if constexpr (dim > 1) {
-                        xprimsL.v2 = xprimsR.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        xprimsL.v3 = xprimsR.v3;
-                    }
-                    xprimsL.p   = xprimsR.p;
-                    xprimsL.chi = xprimsR.chi;
-                }
-
-                if (object_behind) {
-                    yprimsL.rho = yprimsR.rho;
-                    yprimsL.v1  = yprimsR.v1;
-                    if constexpr (dim > 1) {
-                        yprimsL.v2 = -yprimsR.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        yprimsL.v3 = yprimsR.v3;
-                    }
-                    yprimsL.p   = yprimsR.p;
-                    yprimsL.chi = yprimsR.chi;
-                }
-
-                if (object_below) {
-                    zprimsL.rho = zprimsR.rho;
-                    zprimsL.v1  = zprimsR.v1;
-                    if constexpr (dim == 3) {
-                        zprimsL.v2 = zprimsR.v2;
-                        zprimsL.v3 = -zprimsR.v3;
-                    }
-                    zprimsL.p   = zprimsR.p;
-                    zprimsL.chi = zprimsR.chi;
-                }
+                helpers::ib_modify<dim>(xprimsL, xprimsR, object_to_left, 1);
+                helpers::ib_modify<dim>(yprimsL, yprimsR, object_behind, 2);
+                helpers::ib_modify<dim>(zprimsL, zprimsR, object_below, 3);
 
                 // Calculate the left and right states using the reconstructed
                 // PLM Primitive

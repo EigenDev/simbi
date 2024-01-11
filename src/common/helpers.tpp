@@ -2686,5 +2686,23 @@ namespace simbi {
                 gpu::api::synchronize();
             }
         }
+
+        template <int dim, typename T, typename idx>
+        GPU_CALLABLE void
+        ib_modify(T& lhs, const T& rhs, const bool ib, const idx side)
+        {
+            if (ib) {
+                lhs.rho = rhs.rho;
+                lhs.v1  = (1 - 2 * (side == 1)) * rhs.v1;
+                if constexpr (dim > 1) {
+                    lhs.v2 = (1 - 2 * (side == 2)) * rhs.v2;
+                }
+                if constexpr (dim > 2) {
+                    lhs.v3 = (1 - 2 * (side == 3)) * rhs.v3;
+                }
+                lhs.p   = rhs.p;
+                lhs.chi = rhs.chi;
+            }
+        }
     }   // namespace helpers
 }   // namespace simbi

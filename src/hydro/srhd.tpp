@@ -567,15 +567,15 @@ template <int dim>
 GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t
 SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t& prims) const
 {
-    const real rho            = prims.rho;
-    const real v1             = prims.vcomponent(1);
-    const real v2             = prims.vcomponent(2);
-    const real v3             = prims.vcomponent(3);
-    const real pressure       = prims.p;
-    const real lorentz_factor = prims.lorentz_factor();
-    const real h              = prims.get_enthalpy(gamma);
-    const real d              = rho * lorentz_factor;
-    const real ed             = d * lorentz_factor * h;
+    const real rho      = prims.rho;
+    const real v1       = prims.vcomponent(1);
+    const real v2       = prims.vcomponent(2);
+    const real v3       = prims.vcomponent(3);
+    const real pressure = prims.p;
+    const real lf       = prims.lorentz_factor();
+    const real h        = prims.get_enthalpy(gamma);
+    const real d        = rho * lf;
+    const real ed       = d * lf * h;
     if constexpr (dim == 1) {
         return {d, ed * v1, ed - pressure - d};
     }
@@ -786,18 +786,18 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t
 SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t& prims, const luint nhat)
     const
 {
-    const real rho            = prims.rho;
-    const real v1             = prims.vcomponent(1);
-    const real v2             = prims.vcomponent(2);
-    const real v3             = prims.vcomponent(3);
-    const real pressure       = prims.p;
-    const real chi            = prims.chi;
-    const real vn             = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
-    const real lorentz_factor = prims.lorentz_factor();
+    const real rho      = prims.rho;
+    const real v1       = prims.vcomponent(1);
+    const real v2       = prims.vcomponent(2);
+    const real v3       = prims.vcomponent(3);
+    const real pressure = prims.p;
+    const real chi      = prims.chi;
+    const real vn       = (nhat == 1) ? v1 : (nhat == 2) ? v2 : v3;
+    const real lf       = prims.lorentz_factor();
 
     const real h  = prims.get_enthalpy(gamma);
-    const real d  = rho * lorentz_factor;
-    const real ed = d * lorentz_factor * h;
+    const real d  = rho * lf;
+    const real ed = d * lf * h;
     const real s1 = ed * v1;
     const real s2 = ed * v2;
     const real s3 = ed * v3;
@@ -1422,42 +1422,9 @@ void SRHD<dim>::advance(
                     zprimsR = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
                 }
 
-                if (object_to_right) {
-                    xprimsR.rho = xprimsL.rho;
-                    xprimsR.v1  = -xprimsL.v1;
-                    if constexpr (dim > 1) {
-                        xprimsR.v2 = xprimsL.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        xprimsR.v3 = xprimsL.v3;
-                    }
-                    xprimsR.p   = xprimsL.p;
-                    xprimsR.chi = xprimsL.chi;
-                }
-
-                if (object_in_front) {
-                    yprimsR.rho = yprimsL.rho;
-                    yprimsR.v1  = yprimsL.v1;
-                    if constexpr (dim > 1) {
-                        yprimsR.v2 = -yprimsL.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        yprimsR.v3 = yprimsL.v3;
-                    }
-                    yprimsR.p   = yprimsL.p;
-                    yprimsR.chi = yprimsL.chi;
-                }
-
-                if (object_above) {
-                    zprimsR.rho = zprimsL.rho;
-                    zprimsR.v1  = zprimsL.v1;
-                    if constexpr (dim == 3) {
-                        zprimsR.v2 = zprimsL.v2;
-                        zprimsR.v3 = -zprimsL.v3;
-                    }
-                    zprimsR.p   = zprimsL.p;
-                    zprimsR.chi = zprimsL.chi;
-                }
+                helpers::ib_modify<dim>(xprimsR, xprimsL, object_to_right, 1);
+                helpers::ib_modify<dim>(yprimsR, yprimsL, object_in_front, 2);
+                helpers::ib_modify<dim>(zprimsR, zprimsL, object_above, 3);
 
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
@@ -1580,42 +1547,9 @@ void SRHD<dim>::advance(
                     zprimsR = prim_buff[(tza - 0) * sx * sy + tya * sx + txa];
                 }
 
-                if (object_to_left) {
-                    xprimsL.rho = xprimsR.rho;
-                    xprimsL.v1  = -xprimsR.v1;
-                    if constexpr (dim > 1) {
-                        xprimsL.v2 = xprimsR.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        xprimsL.v3 = xprimsR.v3;
-                    }
-                    xprimsL.p   = xprimsR.p;
-                    xprimsL.chi = xprimsR.chi;
-                }
-
-                if (object_behind) {
-                    yprimsL.rho = yprimsR.rho;
-                    yprimsL.v1  = yprimsR.v1;
-                    if constexpr (dim > 1) {
-                        yprimsL.v2 = -yprimsR.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        yprimsL.v3 = yprimsR.v3;
-                    }
-                    yprimsL.p   = yprimsR.p;
-                    yprimsL.chi = yprimsR.chi;
-                }
-
-                if (object_below) {
-                    zprimsL.rho = zprimsR.rho;
-                    zprimsL.v1  = zprimsR.v1;
-                    if constexpr (dim == 3) {
-                        zprimsL.v2 = zprimsR.v2;
-                        zprimsL.v3 = -zprimsR.v3;
-                    }
-                    zprimsL.p   = zprimsR.p;
-                    zprimsL.chi = zprimsR.chi;
-                }
+                helpers::ib_modify<dim>(xprimsL, xprimsR, object_to_left, 1);
+                helpers::ib_modify<dim>(yprimsL, yprimsR, object_behind, 2);
+                helpers::ib_modify<dim>(zprimsL, zprimsR, object_below, 3);
 
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
@@ -1779,42 +1713,9 @@ void SRHD<dim>::advance(
                             0.5;
                 }
 
-                if (object_to_right) {
-                    xprimsR.rho = xprimsL.rho;
-                    xprimsR.v1  = -xprimsL.v1;
-                    if constexpr (dim > 1) {
-                        xprimsR.v2 = xprimsL.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        xprimsR.v3 = xprimsL.v3;
-                    }
-                    xprimsR.p   = xprimsL.p;
-                    xprimsR.chi = xprimsL.chi;
-                }
-
-                if (object_in_front) {
-                    yprimsR.rho = yprimsL.rho;
-                    yprimsR.v1  = yprimsL.v1;
-                    if constexpr (dim > 1) {
-                        yprimsR.v2 = -yprimsL.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        yprimsR.v3 = yprimsL.v3;
-                    }
-                    yprimsR.p   = yprimsL.p;
-                    yprimsR.chi = yprimsL.chi;
-                }
-
-                if (object_above) {
-                    zprimsR.rho = zprimsL.rho;
-                    zprimsR.v1  = zprimsL.v1;
-                    if constexpr (dim == 3) {
-                        zprimsR.v2 = zprimsL.v2;
-                        zprimsR.v3 = -zprimsL.v3;
-                    }
-                    zprimsR.p   = zprimsL.p;
-                    zprimsR.chi = zprimsL.chi;
-                }
+                helpers::ib_modify<dim>(xprimsR, xprimsL, object_to_right, 1);
+                helpers::ib_modify<dim>(yprimsR, yprimsL, object_in_front, 2);
+                helpers::ib_modify<dim>(zprimsR, zprimsL, object_above, 3);
 
                 // Calculate the left and right states using the reconstructed
                 // PLM Primitive
@@ -1957,42 +1858,9 @@ void SRHD<dim>::advance(
                             0.5;
                 }
 
-                if (object_to_left) {
-                    xprimsL.rho = xprimsR.rho;
-                    xprimsL.v1  = -xprimsR.v1;
-                    if constexpr (dim > 1) {
-                        xprimsL.v2 = xprimsR.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        xprimsL.v3 = xprimsR.v3;
-                    }
-                    xprimsL.p   = xprimsR.p;
-                    xprimsL.chi = xprimsR.chi;
-                }
-
-                if (object_behind) {
-                    yprimsL.rho = yprimsR.rho;
-                    yprimsL.v1  = yprimsR.v1;
-                    if constexpr (dim > 1) {
-                        yprimsL.v2 = -yprimsR.v2;
-                    }
-                    if constexpr (dim > 2) {
-                        yprimsL.v3 = yprimsR.v3;
-                    }
-                    yprimsL.p   = yprimsR.p;
-                    yprimsL.chi = yprimsR.chi;
-                }
-
-                if (object_below) {
-                    zprimsL.rho = zprimsR.rho;
-                    zprimsL.v1  = zprimsR.v1;
-                    if constexpr (dim == 3) {
-                        zprimsL.v2 = zprimsR.v2;
-                        zprimsL.v3 = -zprimsR.v3;
-                    }
-                    zprimsL.p   = zprimsR.p;
-                    zprimsL.chi = zprimsR.chi;
-                }
+                helpers::ib_modify<dim>(xprimsL, xprimsR, object_to_left, 1);
+                helpers::ib_modify<dim>(yprimsL, yprimsR, object_behind, 2);
+                helpers::ib_modify<dim>(zprimsL, zprimsR, object_below, 3);
 
                 // Calculate the left and right states using the reconstructed
                 // PLM Primitive
