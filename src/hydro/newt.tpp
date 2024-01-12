@@ -2103,7 +2103,7 @@ void Newtonian<dim>::simulate(
             }
             return state[3][i];
         }();
-        const real E = [&] {
+        const real e = [&] {
             if constexpr (dim == 1) {
                 return state[2][i];
             }
@@ -2114,14 +2114,27 @@ void Newtonian<dim>::simulate(
                 return state[4][i];
             }
         }();
+
+        const real rho_chi = [&] {
+            if constexpr (dim == 1) {
+                return state[3][i];
+            }
+            else if constexpr (dim == 2) {
+                return state[4][i];
+            }
+            else {
+                return state[5][i];
+            }
+        }();
+
         if constexpr (dim == 1) {
-            cons[i] = {rho, m1, E};
+            cons[i] = {rho, m1, e, rho_chi};
         }
         else if constexpr (dim == 2) {
-            cons[i] = {rho, m1, m2, E};
+            cons[i] = {rho, m1, m2, e, rho_chi};
         }
         else {
-            cons[i] = {rho, m1, m2, m3, E};
+            cons[i] = {rho, m1, m2, m3, e, rho_chi};
         }
     }
 
