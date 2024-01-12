@@ -104,6 +104,40 @@ namespace simbi {
                 waitUntilFinished();
             }
 
+            template <typename index_type, typename F>
+            void parallel_for(const index_type stop, const F& func)
+            {
+                if (global::use_omp) {
+#pragma omp parallel for schedule(static)
+                    for (auto idx = 0; idx < stop; idx++) {
+                        func(idx);
+                    }
+                    return;
+                }
+                static auto batch_size = ((stop - 0 + nthreads - 1) / nthreads);
+                int block_start        = 0 - batch_size;
+                int block_end          = 0;
+
+                auto step = [&] {
+                    block_start += batch_size;
+                    block_end += batch_size;
+                    block_end =
+                        ((index_type) block_end > stop) ? stop : block_end;
+                };
+                step();
+
+                for ([[gnu::unused]] auto& worker : threads) {
+                    queueUp([block_start, block_end, func] {
+                        for (auto q = block_start; q < block_end; q++) {
+                            func(q);
+                        }
+                    });
+                    step();
+                }
+
+                waitUntilFinished();
+            }
+
             bool poolBusy()
             {
                 bool poolbusy;

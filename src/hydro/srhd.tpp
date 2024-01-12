@@ -300,7 +300,6 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
     auto* const troubled_data   = troubled_cells.data();
     simbi::parallel_for(
         p,
-        (luint) 0,
         total_zones,
         [prim_data, cons_data, press_data, troubled_data, this] GPU_LAMBDA(
             luint gid
@@ -599,152 +598,150 @@ void SRHD<dim>::adapt_dt()
     static auto& thread_pool =
         simbi::pooling::ThreadPool::instance(simbi::pooling::get_nthreads());
     std::atomic<real> min_dt = INFINITY;
-    thread_pool
-        .parallel_for(static_cast<luint>(0), total_zones, [&](luint gid) {
-            real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
-            const luint kk    = helpers::axid<dim, BlkAx::K>(gid, nx, ny);
-            const luint jj    = helpers::axid<dim, BlkAx::J>(gid, nx, ny, kk);
-            const luint ii    = helpers::axid<dim, BlkAx::I>(gid, nx, ny, kk);
-            const luint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
-            // Left/Right wave speeds
-            if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
-                const real rho = prims[gid].rho;
-                const real v1  = prims[gid].vcomponent(1);
-                const real v2  = prims[gid].vcomponent(2);
-                const real v3  = prims[gid].vcomponent(3);
-                const real pre = prims[gid].p;
-                const real h   = prims[gid].get_enthalpy(gamma);
-                const real cs  = std::sqrt(gamma * pre / (rho * h));
-                v1p            = std::abs(v1 + cs) / (1.0 + v1 * cs);
-                v1m            = std::abs(v1 - cs) / (1.0 - v1 * cs);
-                if constexpr (dim > 1) {
-                    v2p = std::abs(v2 + cs) / (1.0 + v2 * cs);
-                    v2m = std::abs(v2 - cs) / (1.0 - v2 * cs);
-                }
-                if constexpr (dim > 2) {
-                    v3p = std::abs(v3 + cs) / (1.0 + v3 * cs);
-                    v3m = std::abs(v3 - cs) / (1.0 - v3 * cs);
-                }
+    thread_pool.parallel_for(total_zones, [&](luint gid) {
+        real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
+        const luint kk    = helpers::axid<dim, BlkAx::K>(gid, nx, ny);
+        const luint jj    = helpers::axid<dim, BlkAx::J>(gid, nx, ny, kk);
+        const luint ii    = helpers::axid<dim, BlkAx::I>(gid, nx, ny, kk);
+        const luint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
+        // Left/Right wave speeds
+        if constexpr (dt_type == TIMESTEP_TYPE::ADAPTIVE) {
+            const real rho = prims[gid].rho;
+            const real v1  = prims[gid].vcomponent(1);
+            const real v2  = prims[gid].vcomponent(2);
+            const real v3  = prims[gid].vcomponent(3);
+            const real pre = prims[gid].p;
+            const real h   = prims[gid].get_enthalpy(gamma);
+            const real cs  = std::sqrt(gamma * pre / (rho * h));
+            v1p            = std::abs(v1 + cs) / (1.0 + v1 * cs);
+            v1m            = std::abs(v1 - cs) / (1.0 - v1 * cs);
+            if constexpr (dim > 1) {
+                v2p = std::abs(v2 + cs) / (1.0 + v2 * cs);
+                v2m = std::abs(v2 - cs) / (1.0 - v2 * cs);
             }
-            else {
-                v1p = 1.0;
-                v1m = 1.0;
-                if constexpr (dim > 1) {
-                    v2p = 1.0;
-                    v2m = 1.0;
-                }
-                if constexpr (dim > 2) {
-                    v3p = 1.0;
-                    v3m = 1.0;
-                }
+            if constexpr (dim > 2) {
+                v3p = std::abs(v3 + cs) / (1.0 + v3 * cs);
+                v3m = std::abs(v3 - cs) / (1.0 - v3 * cs);
             }
+        }
+        else {
+            v1p = 1.0;
+            v1m = 1.0;
+            if constexpr (dim > 1) {
+                v2p = 1.0;
+                v2m = 1.0;
+            }
+            if constexpr (dim > 2) {
+                v3p = 1.0;
+                v3m = 1.0;
+            }
+        }
 
-            const real x1l = get_x1face(ireal, 0);
-            const real x1r = get_x1face(ireal, 1);
-            const real dx1 = x1r - x1l;
-            switch (geometry) {
-                case simbi::Geometry::CARTESIAN:
+        const real x1l = get_x1face(ireal, 0);
+        const real x1r = get_x1face(ireal, 1);
+        const real dx1 = x1r - x1l;
+        switch (geometry) {
+            case simbi::Geometry::CARTESIAN:
+                if constexpr (dim == 1) {
+                    cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
+                }
+                else if constexpr (dim == 2) {
+                    cfl_dt = std::min(
+                        {dx1 / (std::max(v1p, v1m)), dx2 / (std::max(v2p, v2m))}
+                    );
+                }
+                else {
+                    cfl_dt = std::min(
+                        {dx1 / (std::max(v1p, v1m)),
+                         dx2 / (std::max(v2p, v2m)),
+                         dx3 / (std::max(v3p, v3m))}
+                    );
+                }
+                break;
+
+            case simbi::Geometry::SPHERICAL:
+                {
                     if constexpr (dim == 1) {
                         cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
                     }
                     else if constexpr (dim == 2) {
+                        const real rmean = helpers::get_cell_centroid(
+                            x1r,
+                            x1l,
+                            simbi::Geometry::SPHERICAL
+                        );
                         cfl_dt = std::min(
                             {dx1 / (std::max(v1p, v1m)),
-                             dx2 / (std::max(v2p, v2m))}
+                             rmean * dx2 / (std::max(v2p, v2m))}
                         );
                     }
                     else {
+                        const real x2l   = get_x2face(jj, 0);
+                        const real x2r   = get_x2face(jj, 1);
+                        const real rmean = helpers::get_cell_centroid(
+                            x1r,
+                            x1l,
+                            simbi::Geometry::SPHERICAL
+                        );
+                        const real th    = 0.5 * (x2r + x2l);
+                        const real rproj = rmean * std::sin(th);
+                        cfl_dt           = std::min(
+                            {dx1 / (std::max(v1p, v1m)),
+                                       rmean * dx2 / (std::max(v2p, v2m)),
+                                       rproj * dx3 / (std::max(v3p, v3m))}
+                        );
+                    }
+                    break;
+                }
+            default:
+                {
+                    if constexpr (dim == 1) {
+                        cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
+                    }
+                    else if constexpr (dim == 2) {
+                        switch (geometry) {
+                            case Geometry::AXIS_CYLINDRICAL:
+                                {
+                                    cfl_dt = std::min(
+                                        {dx1 / (std::max(v1p, v1m)),
+                                         dx2 / (std::max(v2p, v2m))}
+                                    );
+                                    break;
+                                }
+
+                            default:
+                                {
+                                    const real rmean =
+                                        helpers::get_cell_centroid(
+                                            x1r,
+                                            x1l,
+                                            simbi::Geometry::CYLINDRICAL
+                                        );
+                                    cfl_dt = std::min(
+                                        {dx1 / (std::max(v1p, v1m)),
+                                         rmean * dx2 / (std::max(v2p, v2m))}
+                                    );
+                                    break;
+                                }
+                        }
+                    }
+                    else {
+                        const real rmean = helpers::get_cell_centroid(
+                            x1r,
+                            x1l,
+                            simbi::Geometry::CYLINDRICAL
+                        );
                         cfl_dt = std::min(
                             {dx1 / (std::max(v1p, v1m)),
-                             dx2 / (std::max(v2p, v2m)),
+                             rmean * dx2 / (std::max(v2p, v2m)),
                              dx3 / (std::max(v3p, v3m))}
                         );
                     }
                     break;
-
-                case simbi::Geometry::SPHERICAL:
-                    {
-                        if constexpr (dim == 1) {
-                            cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
-                        }
-                        else if constexpr (dim == 2) {
-                            const real rmean = helpers::get_cell_centroid(
-                                x1r,
-                                x1l,
-                                simbi::Geometry::SPHERICAL
-                            );
-                            cfl_dt = std::min(
-                                {dx1 / (std::max(v1p, v1m)),
-                                 rmean * dx2 / (std::max(v2p, v2m))}
-                            );
-                        }
-                        else {
-                            const real x2l   = get_x2face(jj, 0);
-                            const real x2r   = get_x2face(jj, 1);
-                            const real rmean = helpers::get_cell_centroid(
-                                x1r,
-                                x1l,
-                                simbi::Geometry::SPHERICAL
-                            );
-                            const real th    = 0.5 * (x2r + x2l);
-                            const real rproj = rmean * std::sin(th);
-                            cfl_dt           = std::min(
-                                {dx1 / (std::max(v1p, v1m)),
-                                           rmean * dx2 / (std::max(v2p, v2m)),
-                                           rproj * dx3 / (std::max(v3p, v3m))}
-                            );
-                        }
-                        break;
-                    }
-                default:
-                    {
-                        if constexpr (dim == 1) {
-                            cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
-                        }
-                        else if constexpr (dim == 2) {
-                            switch (geometry) {
-                                case Geometry::AXIS_CYLINDRICAL:
-                                    {
-                                        cfl_dt = std::min(
-                                            {dx1 / (std::max(v1p, v1m)),
-                                             dx2 / (std::max(v2p, v2m))}
-                                        );
-                                        break;
-                                    }
-
-                                default:
-                                    {
-                                        const real rmean =
-                                            helpers::get_cell_centroid(
-                                                x1r,
-                                                x1l,
-                                                simbi::Geometry::CYLINDRICAL
-                                            );
-                                        cfl_dt = std::min(
-                                            {dx1 / (std::max(v1p, v1m)),
-                                             rmean * dx2 / (std::max(v2p, v2m))}
-                                        );
-                                        break;
-                                    }
-                            }
-                        }
-                        else {
-                            const real rmean = helpers::get_cell_centroid(
-                                x1r,
-                                x1l,
-                                simbi::Geometry::CYLINDRICAL
-                            );
-                            cfl_dt = std::min(
-                                {dx1 / (std::max(v1p, v1m)),
-                                 rmean * dx2 / (std::max(v2p, v2m)),
-                                 dx3 / (std::max(v3p, v3m))}
-                            );
-                        }
-                        break;
-                    }
-            }
-            pooling::update_minimum(min_dt, cfl_dt);
-        });
+                }
+        }
+        pooling::update_minimum(min_dt, cfl_dt);
+    });
     dt = cfl * min_dt;
 };
 
@@ -1285,7 +1282,6 @@ void SRHD<dim>::advance(
 
     simbi::parallel_for(
         p,
-        (luint) 0,
         extent,
         [sx,
          sy,
