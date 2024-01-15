@@ -2671,72 +2671,82 @@ void SRHD<dim>::simulate(
 
     this->n = 0;
     // Simulate :)
-    simbi::detail::logger::with_logger(*this, tend, [&] {
-        if (inFailureState) {
-            return;
-        }
-        advance(activeP, xstride, ystride);
-        cons2prim(fullP);
-        if constexpr (dim == 1) {
-            helpers::config_ghosts1D(
-                fullP,
-                cons.data(),
-                nx,
-                first_order,
-                bcs.data(),
-                outer_zones.data(),
-                inflow_zones.data()
-            );
-        }
-        else if constexpr (dim == 2) {
-            helpers::config_ghosts2D(
-                fullP,
-                cons.data(),
-                nx,
-                ny,
-                first_order,
-                geometry,
-                bcs.data(),
-                outer_zones.data(),
-                inflow_zones.data(),
-                half_sphere
-            );
-        }
-        else {
-            helpers::config_ghosts3D(
-                fullP,
-                cons.data(),
-                nx,
-                ny,
-                nz,
-                first_order,
-                bcs.data(),
-                inflow_zones.data(),
-                half_sphere,
-                geometry
-            );
-        }
+    try {
+        simbi::detail::logger::with_logger(*this, tend, [&] {
+            if (inFailureState) {
+                throw helpers::SimulationFailureException();
+            }
+            advance(activeP, xstride, ystride);
+            cons2prim(fullP);
+            if constexpr (dim == 1) {
+                helpers::config_ghosts1D(
+                    fullP,
+                    cons.data(),
+                    nx,
+                    first_order,
+                    bcs.data(),
+                    outer_zones.data(),
+                    inflow_zones.data()
+                );
+            }
+            else if constexpr (dim == 2) {
+                helpers::config_ghosts2D(
+                    fullP,
+                    cons.data(),
+                    nx,
+                    ny,
+                    first_order,
+                    geometry,
+                    bcs.data(),
+                    outer_zones.data(),
+                    inflow_zones.data(),
+                    half_sphere
+                );
+            }
+            else {
+                helpers::config_ghosts3D(
+                    fullP,
+                    cons.data(),
+                    nx,
+                    ny,
+                    nz,
+                    first_order,
+                    bcs.data(),
+                    inflow_zones.data(),
+                    half_sphere,
+                    geometry
+                );
+            }
 
-        if constexpr (global::on_gpu) {
-            adapt_dt(fullP);
-        }
-        else {
-            adapt_dt();
-        }
-        time_constant =
-            helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
-        t += step * dt;
-        if (mesh_motion) {
-            // update x1 endpoints
-            const real vmin = (homolog) ? x1min * hubble_param : hubble_param;
-            const real vmax = (homolog) ? x1max * hubble_param : hubble_param;
-            x1max += step * dt * vmax;
-            x1min += step * dt * vmin;
-            hubble_param = adot(t) / a(t);
-        }
-    });
-
-    if (inFailureState) {
+            if constexpr (global::on_gpu) {
+                adapt_dt(fullP);
+            }
+            else {
+                adapt_dt();
+            }
+            time_constant = helpers::sigmoid(
+                t,
+                engine_duration,
+                step * dt,
+                constant_sources
+            );
+            t += step * dt;
+            if (mesh_motion) {
+                // update x1 endpoints
+                const real vmin =
+                    (homolog) ? x1min * hubble_param : hubble_param;
+                const real vmax =
+                    (homolog) ? x1max * hubble_param : hubble_param;
+                x1max += step * dt * vmax;
+                x1min += step * dt * vmin;
+                hubble_param = adot(t) / a(t);
+            }
+        });
+    }
+    catch (const helpers::SimulationFailureException& e) {
+        std::cout << std::string(80, '=') << "\n";
+        std::cerr << e.what() << '\n';
+        std::cout << std::string(80, '=') << "\n";
         troubled_cells.copyFromGpu();
         cons.copyFromGpu();
         prims.copyFromGpu();

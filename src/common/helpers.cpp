@@ -38,7 +38,8 @@ namespace simbi {
 
         const char* SimulationFailureException::what() const noexcept
         {
-            return "Simulation Crashed";
+            // crashed in bold red!
+            return "\033[1;31mSimulation Crashed\033[0m";
         }
 
         //====================================================================================================

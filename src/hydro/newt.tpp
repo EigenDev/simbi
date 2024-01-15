@@ -198,9 +198,11 @@ Newtonian<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real
-Newtonian<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk)
-    const
+GPU_CALLABLE_MEMBER real Newtonian<dim>::get_cell_volume(
+    const lint ii,
+    const lint jj,
+    const lint kk
+) const
 {
     if (geometry == Geometry::CARTESIAN) {
         return 1.0;
@@ -2265,7 +2267,7 @@ void Newtonian<dim>::simulate(
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
             if (inFailureState) {
-                throw helper::SimulationFailureException();
+                throw helpers::SimulationFailureException();
             }
 
             advance(activeP, xstride, ystride);
@@ -2336,7 +2338,9 @@ void Newtonian<dim>::simulate(
         });
     }
     catch (const helpers::SimulationFailureException& e) {
+        std::cout << std::string(80, '=') << "\n";
         std::cerr << e.what() << '\n';
+        std::cout << std::string(80, '=') << "\n";
         troubled_cells.copyFromGpu();
         cons.copyFromGpu();
         prims.copyFromGpu();
