@@ -241,7 +241,7 @@ void Newtonian<dim>::emit_troubled_cells() const
             const real v2 = s2 / cons[gid].den;
             if constexpr (dim == 1) {
                 printf(
-                    "\nSimulation in bad state\nDensity: %.2e, Pressure: "
+                    "\nPrimitives in bad  state\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, iter: %" PRIu64 "\n",
                     cons[gid].den,
                     prims[gid].p,
@@ -252,7 +252,7 @@ void Newtonian<dim>::emit_troubled_cells() const
             }
             else if constexpr (dim == 2) {
                 printf(
-                    "\nSimulation in bad state\n"
+                    "\nPrimitives in bad  state\n"
                     "Density: %.2e, "
                     "Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: "
@@ -267,7 +267,7 @@ void Newtonian<dim>::emit_troubled_cells() const
             }
             else {
                 printf(
-                    "\nSimulation in bad state\nDensity: %.2e, Pressure: "
+                    "\nPrimitives in bad  state\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, "
                     "x3coord: %.2e, iter: %" PRIu64 "\n",
                     cons[gid].den,
