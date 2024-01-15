@@ -34,13 +34,7 @@ namespace simbi {
             }
         }
 
-        SimulationFailureException::SimulationFailureException(
-            const char* reason,
-            const char* details
-        )
-            : reason(reason), details(details)
-        {
-        }
+        SimulationFailureException::SimulationFailureException() = default;
 
         const char* SimulationFailureException::what() const noexcept
         {

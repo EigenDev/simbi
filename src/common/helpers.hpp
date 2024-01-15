@@ -105,10 +105,8 @@ namespace simbi {
         class SimulationFailureException : public std::exception
         {
           public:
-            SimulationFailureException(const char* reason, const char* details);
+            SimulationFailureException();
             const char* what() const noexcept;
-            const std::string reason;
-            const std::string details;
         };
 
         /*
