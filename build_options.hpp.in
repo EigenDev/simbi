@@ -24,6 +24,7 @@
 #mesondefine PROGRESS_BAR
 #mesondefine SHARED_MEMORY
 
+#include <atomic>      // for atomic
 #include <chrono>      // for high_resolution_clock
 #include <cinttypes>   // for uint32_t, int64_t, uint64_t
 #include <csignal>     // for size_t

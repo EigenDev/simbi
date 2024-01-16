@@ -108,8 +108,10 @@ namespace simbi {
             void parallel_for(const index_type stop, const F& func)
             {
                 if (global::use_omp) {
-#pragma omp parallel for schedule(static)
-                    for (auto idx = 0; idx < stop; idx++) {
+                    // clang-format off
+                    #pragma omp parallel for schedule(static)
+                    // clang-format on
+                    for (index_type idx = 0; idx < stop; idx++) {
                         func(idx);
                     }
                     return;

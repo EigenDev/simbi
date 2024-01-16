@@ -84,12 +84,12 @@ namespace simbi {
                 status_t internal_code;
             };
 
-            constexpr inline bool is_err(status_t status)
+            constexpr bool is_err(status_t status)
             {
                 return status != status_t::success;
             }
 
-            inline void check_err(
+            constexpr void check_err(
                 status_t status,
                 const ::std::string& message
             ) noexcept(false)
