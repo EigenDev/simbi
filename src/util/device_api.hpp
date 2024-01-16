@@ -117,9 +117,9 @@ namespace simbi {
             void getDeviceProperties(devProp_t* props, int i);
             void gpuMemset(void* obj, int val, size_t bytes);
             void deviceSynch();
+            void threadFence();
 
-            GPU_DEV_INLINE
-            void synchronize()
+            GPU_DEV_INLINE void synchronize()
             {
 #if GPU_CODE
                 __syncthreads();

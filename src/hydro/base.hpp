@@ -55,7 +55,7 @@ namespace simbi {
         real gamma;
         real cfl;
         std::string coord_system;
-        volatile bool inFailureState;
+        sig_bool inFailureState;
         real hllc_z;
         luint nx, ny, nz, nzones;
         std::vector<real> x1, x2, x3;

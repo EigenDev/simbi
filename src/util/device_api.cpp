@@ -170,6 +170,14 @@ namespace simbi {
                 error::check_err(status, "Failed to synch device(s)");
 #endif
             };
+
+            void threadFence()
+            {
+#if GPU_CODE
+                auto status = error::status_t(__threadfence());
+                error::check_err(status, "Failed to set gpu thread fence");
+#endif
+            };
         }   // namespace api
 
     }   // namespace gpu

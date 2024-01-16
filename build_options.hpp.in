@@ -124,6 +124,7 @@ namespace global {
 
 //=========================== RUNTIME CHECK
 #if GPU_CODE
+using sig_bool = volatile bool;
 #define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...)                    \
     kernel_name<<<((gridsize), (blocksize))>>>(__VA_ARGS__);
 
@@ -240,6 +241,7 @@ using devEvent_t                       = hipEvent_t;
 using simbiStream_t                    = hipStream_t;
 #endif
 #else
+using sig_bool = std::atomic<bool>;
 #define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...)                    \
     kernel_name(__VA_ARGS__);
 
