@@ -240,7 +240,6 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
         shape=(model.nvars, *np.asanyarray(model.resolution).flatten()[::-1])
     )
 
-    srmhd = model.regime == "srmhd"
     if model.discontinuity:
         logger.info(
             f"Initializing Problem With a {str(model.dimensionality)}D Discontinuity..."
