@@ -2669,9 +2669,6 @@ void SRHD<dim>::simulate(
     // Simulate :)
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
-            if (inFailureState) {
-                throw helpers::SimulationFailureException();
-            }
             advance(activeP, xstride, ystride);
             cons2prim(fullP);
             if constexpr (dim == 1) {

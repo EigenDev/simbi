@@ -234,18 +234,18 @@ void Newtonian<dim>::emit_troubled_cells() const
                 helpers::calc_any_mean(x2l, x2r, x2_cell_spacing);
             const real x3mean =
                 helpers::calc_any_mean(x3l, x3r, x3_cell_spacing);
-            const real m1 = cons[gid].momentum(1);
-            const real m2 = cons[gid].momentum(2);
-            const real m3 = cons[gid].momentum(3);
-            const real s2 = m1 * m1 + m2 * m2 + m3 * m3;
-            const real v2 = s2 / cons[gid].den;
+            const real rho = cons[gid].den;
+            const real v1  = cons[gid].momentum(1) / rho;
+            const real v2  = (dim < 2) ? cons[gid].momentum(2) / rho : 0.0;
+            const real v3  = (dim < 3) ? cons[gid].momentum(3) / rho : 0.0;
+            const real vsq = v1 * v1 + v2 * v2 + v3 * v3;
             if constexpr (dim == 1) {
                 printf(
                     "\nPrimitives in bad  state\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, iter: %" PRIu64 "\n",
                     cons[gid].den,
                     prims[gid].p,
-                    v2,
+                    vsq,
                     x1mean,
                     n
                 );
@@ -259,7 +259,7 @@ void Newtonian<dim>::emit_troubled_cells() const
                     "%" PRIu64 "\n",
                     cons[gid].den,
                     prims[gid].p,
-                    v2,
+                    vsq,
                     x1mean,
                     x2mean,
                     n
@@ -272,7 +272,7 @@ void Newtonian<dim>::emit_troubled_cells() const
                     "x3coord: %.2e, iter: %" PRIu64 "\n",
                     cons[gid].den,
                     prims[gid].p,
-                    v2,
+                    vsq,
                     x1mean,
                     x2mean,
                     x3mean,
@@ -2126,6 +2126,13 @@ void Newtonian<dim>::simulate(
             }
         }();
 
+        const auto v1 = m1 / rho;
+        const auto v2 = m2 / rho;
+        const auto p  = e - 0.5 * rho * (v1 * v1 + v2 * v2);
+        if (p < 0.0) {
+            printf("negative pressure in initial conditions\n");
+        }
+
         if constexpr (dim == 1) {
             cons[i] = {rho, m1, e, rho_chi};
         }
@@ -2263,10 +2270,6 @@ void Newtonian<dim>::simulate(
     // Simulate :)
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
-            if (inFailureState) {
-                throw helpers::SimulationFailureException();
-            }
-
             advance(activeP, xstride, ystride);
             cons2prim(fullP);
             if constexpr (dim == 1) {

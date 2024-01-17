@@ -294,7 +294,6 @@ namespace simbi {
                             f();
                             delta_t = timer.get_duration();
                         }
-
                         //=================== Record Benchmarks
                         n++;
                         sim_state.n = n;
@@ -363,6 +362,10 @@ namespace simbi {
                                     sim_state.chkpt_interval;
                             }
                         }
+
+                        if (sim_state.inFailureState) {
+                            throw helpers::SimulationFailureException();
+                        }
                         // Listen to kill signals
                         helpers::catch_signals();
                     }
@@ -383,7 +386,7 @@ namespace simbi {
                 print_avg_speed(logger);
             };
         }   // namespace logger
-    }   // namespace detail
+    }       // namespace detail
 
 }   // namespace simbi
 #endif
