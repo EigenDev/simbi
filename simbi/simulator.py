@@ -675,13 +675,7 @@ class Hydro:
 
         state_contig = self.u.reshape(self.u.shape[0], -1)
         state = sim_state()
-
-        velocity = self.u[1:3] / self.u[0]
-        vsq = velocity**2
-        p = (self.gamma - 1.0) * (self.u[3] - 0.5 * self.u[0] * velocity**2)
-        print(p[p < 0])
-        print(vsq.max())
-        zzz = input("")
+        
         state.run(
             state=state_contig,
             dim=self.dimensionality,
