@@ -1604,7 +1604,7 @@ void Newtonian<dim>::advance(
 
             // Gravity
             const auto gm1_source =
-                zero_gravity1 ? 0 : g1_source[real_loc] * cons_data[aid].den;
+                nullg1 ? 0 : g1_source[real_loc] * cons_data[aid].den;
             const auto tid            = tza * sx * sy + tya * sx + txa;
             const conserved_t gravity = [&] {
                 if constexpr (dim == 1) {
@@ -1613,22 +1613,16 @@ void Newtonian<dim>::advance(
                 }
                 else if constexpr (dim == 2) {
                     const auto gm2_source =
-                        zero_gravity2
-                            ? 0
-                            : g2_source[real_loc] * cons_data[aid].den;
+                        nullg2 ? 0 : g2_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gm1_source * prim_buff[tid].v1 +
                                            gm2_source * prim_buff[tid].v2;
                     return conserved_t{0.0, gm1_source, gm2_source, ge_source};
                 }
                 else {
                     const auto gm2_source =
-                        zero_gravity2
-                            ? 0
-                            : g2_source[real_loc] * cons_data[aid].den;
+                        nullg2 ? 0 : g2_source[real_loc] * cons_data[aid].den;
                     const auto gm3_source =
-                        zero_gravity3
-                            ? 0
-                            : g3_source[real_loc] * cons_data[aid].den;
+                        nullg3 ? 0 : g3_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gm1_source * prim_buff[tid].v1 +
                                            gm2_source * prim_buff[tid].v2 +
                                            gm3_source * prim_buff[tid].v3;

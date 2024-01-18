@@ -2000,7 +2000,7 @@ void SRHD<dim>::advance(
 
             // Gravity
             const auto gs1_source =
-                zero_gravity1 ? 0 : g1_source[real_loc] * cons_data[aid].den;
+                nullg1 ? 0 : g1_source[real_loc] * cons_data[aid].den;
             const auto tid     = tza * sx * sy + tya * sx + txa;
             const auto gravity = [&] {
                 if constexpr (dim == 1) {
@@ -2009,22 +2009,16 @@ void SRHD<dim>::advance(
                 }
                 else if constexpr (dim == 2) {
                     const auto gs2_source =
-                        zero_gravity2
-                            ? 0
-                            : g2_source[real_loc] * cons_data[aid].den;
+                        nullg2 ? 0 : g2_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gs1_source * prim_buff[tid].v1 +
                                            gs2_source * prim_buff[tid].v2;
                     return conserved_t{0.0, gs1_source, gs2_source, ge_source};
                 }
                 else {
                     const auto gs2_source =
-                        zero_gravity2
-                            ? 0
-                            : g2_source[real_loc] * cons_data[aid].den;
+                        nullg2 ? 0 : g2_source[real_loc] * cons_data[aid].den;
                     const auto gs3_source =
-                        zero_gravity3
-                            ? 0
-                            : g3_source[real_loc] * cons_data[aid].den;
+                        nullg3 ? 0 : g3_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gs1_source * prim_buff[tid].v1 +
                                            gs2_source * prim_buff[tid].v2 +
                                            gs3_source * prim_buff[tid].v3;
