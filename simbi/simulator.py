@@ -183,7 +183,12 @@ class Hydro:
                 f"Detecing a {self.dimensionality}D run, but only {nres} resolution args"
             )
 
-        initial_state = helpers.pad_jagged_array(initial_state)
+        size = len(initial_state[0])
+        if not all(len(x) == size for x in initial_state):
+            initial_state = helpers.pad_jagged_array(initial_state)
+        else:
+            initial_state = np.asanyarray(initial_state)
+        
         nstates = len(initial_state)
         max_discont = 2**self.dimensionality
         self.number_of_non_em_terms = 2 + self.dimensionality if not self.mhd else 5
