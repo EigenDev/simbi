@@ -174,14 +174,21 @@ class Hydro:
         nres = len(self.resolution)
 
         if ngeom != self.dimensionality:
-            raise ValueError(f"Detecing a {self.dimensionality}D run, but only {ngeom} geometry tuple(s)")
+            raise ValueError(
+                f"Detecing a {self.dimensionality}D run, but only {ngeom} geometry tuple(s)"
+            )
 
         if len(self.resolution) != self.dimensionality:
             raise ValueError(
                 f"Detecing a {self.dimensionality}D run, but only {nres} resolution args"
             )
 
-        initial_state = helpers.pad_jagged_array(initial_state)
+        size = len(initial_state[0])
+        if not all(len(x) == size for x in initial_state):
+            initial_state = helpers.pad_jagged_array(initial_state)
+        else:
+            initial_state = np.asanyarray(initial_state)
+        
         nstates = len(initial_state)
         max_discont = 2**self.dimensionality
         self.number_of_non_em_terms = 2 + self.dimensionality if not self.mhd else 5
@@ -569,7 +576,7 @@ class Hydro:
         logger.info(
             f"Computing {'First' if first_order else 'Second'} Order Solution..."
         )
-        
+
         sources = (
             np.zeros(self.dimensionality + 2)
             if sources is None
@@ -673,7 +680,7 @@ class Hydro:
 
         state_contig = self.u.reshape(self.u.shape[0], -1)
         state = sim_state()
-
+        
         state.run(
             state=state_contig,
             dim=self.dimensionality,

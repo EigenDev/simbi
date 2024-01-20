@@ -1828,30 +1828,17 @@ void RMHD<dim>::advance(
                 // Calc HLL Flux at i+1/2 interface
                 switch (sim_solver) {
                     case Solver::HLLC:
-                        if constexpr (dim == 1) {
-                            frf = calc_hllc_flux(
-                                uxL,
-                                uxR,
-                                fL,
-                                fR,
-                                xprimsL,
-                                xprimsR,
-                                1,
-                                vfaceR
-                            );
-                            break;
-                        }
-                        else {
-                            frf = calc_hllc_flux(
-                                uxL,
-                                uxR,
-                                fL,
-                                fR,
-                                xprimsL,
-                                xprimsR,
-                                1,
-                                vfaceR
-                            );
+                        frf = calc_hllc_flux(
+                            uxL,
+                            uxR,
+                            fL,
+                            fR,
+                            xprimsL,
+                            xprimsR,
+                            1,
+                            vfaceR
+                        );
+                        if constexpr (dim > 1) {
                             grf = calc_hllc_flux(
                                 uyL,
                                 uyR,
@@ -1861,19 +1848,17 @@ void RMHD<dim>::advance(
                                 yprimsR,
                                 2
                             );
-
-                            if constexpr (dim > 2) {
-                                hrf = calc_hllc_flux(
-                                    uzL,
-                                    uzR,
-                                    hL,
-                                    hR,
-                                    zprimsL,
-                                    zprimsR,
-                                    3
-                                );
-                            }
-                            break;
+                        }
+                        if constexpr (dim > 2) {
+                            hrf = calc_hllc_flux(
+                                uzL,
+                                uzR,
+                                hL,
+                                hR,
+                                zprimsL,
+                                zprimsR,
+                                3
+                            );
                         }
                     default:
                         frf = calc_hll_flux(
@@ -1953,30 +1938,17 @@ void RMHD<dim>::advance(
                 // Calc HLL Flux at i-1/2 interface
                 switch (sim_solver) {
                     case Solver::HLLC:
-                        if constexpr (dim == 1) {
-                            flf = calc_hllc_flux(
-                                uxL,
-                                uxR,
-                                fL,
-                                fR,
-                                xprimsL,
-                                xprimsR,
-                                1,
-                                vfaceL
-                            );
-                            break;
-                        }
-                        else {
-                            flf = calc_hllc_flux(
-                                uxL,
-                                uxR,
-                                fL,
-                                fR,
-                                xprimsL,
-                                xprimsR,
-                                1,
-                                vfaceL
-                            );
+                        flf = calc_hllc_flux(
+                            uxL,
+                            uxR,
+                            fL,
+                            fR,
+                            xprimsL,
+                            xprimsR,
+                            1,
+                            vfaceL
+                        );
+                        if constexpr (dim > 1) {
                             glf = calc_hllc_flux(
                                 uyL,
                                 uyR,
@@ -1986,20 +1958,20 @@ void RMHD<dim>::advance(
                                 yprimsR,
                                 2
                             );
-
-                            if constexpr (dim > 2) {
-                                hlf = calc_hllc_flux(
-                                    uzL,
-                                    uzR,
-                                    hL,
-                                    hR,
-                                    zprimsL,
-                                    zprimsR,
-                                    3
-                                );
-                            }
-                            break;
                         }
+
+                        if constexpr (dim > 2) {
+                            hlf = calc_hllc_flux(
+                                uzL,
+                                uzR,
+                                hL,
+                                hR,
+                                zprimsL,
+                                zprimsR,
+                                3
+                            );
+                        }
+                        break;
                     default:
                         flf = calc_hll_flux(
                             uxL,
@@ -2121,55 +2093,41 @@ void RMHD<dim>::advance(
 
                 switch (sim_solver) {
                     case Solver::HLLC:
-                        if constexpr (dim == 1) {
-                            frf = calc_hllc_flux(
-                                uxL,
-                                uxR,
-                                fL,
-                                fR,
-                                xprimsL,
-                                xprimsR,
-                                1,
-                                vfaceR
-                            );
-                            break;
-                        }
-                        else {
-                            frf = calc_hllc_flux(
-                                uxL,
-                                uxR,
-                                fL,
-                                fR,
-                                xprimsL,
-                                xprimsR,
-                                1,
-                                vfaceR
-                            );
-                            grf = calc_hllc_flux(
+                        frf = calc_hllc_flux(
+                            uxL,
+                            uxR,
+                            fL,
+                            fR,
+                            xprimsL,
+                            xprimsR,
+                            1,
+                            vfaceR
+                        );
+                        if constexpr (dim > 1) {
+                            glf = calc_hllc_flux(
                                 uyL,
                                 uyR,
                                 gL,
                                 gR,
                                 yprimsL,
                                 yprimsR,
-                                2,
+                                2
+                            );
+                        }
+
+                        if constexpr (dim > 2) {
+                            hrf = calc_hllc_flux(
+                                uzL,
+                                uzR,
+                                hL,
+                                hR,
+                                zprimsL,
+                                zprimsR,
+                                3,
                                 0.0
                             );
-
-                            if constexpr (dim > 2) {
-                                hrf = calc_hllc_flux(
-                                    uzL,
-                                    uzR,
-                                    hL,
-                                    hR,
-                                    zprimsL,
-                                    zprimsR,
-                                    3,
-                                    0.0
-                                );
-                            }
-                            break;
                         }
+                        break;
                     default:
                         frf = calc_hll_flux(
                             uxL,
@@ -2265,30 +2223,17 @@ void RMHD<dim>::advance(
 
                 switch (sim_solver) {
                     case Solver::HLLC:
-                        if constexpr (dim == 1) {
-                            flf = calc_hllc_flux(
-                                uxL,
-                                uxR,
-                                fL,
-                                fR,
-                                xprimsL,
-                                xprimsR,
-                                1,
-                                vfaceL
-                            );
-                            break;
-                        }
-                        else {
-                            flf = calc_hllc_flux(
-                                uxL,
-                                uxR,
-                                fL,
-                                fR,
-                                xprimsL,
-                                xprimsR,
-                                1,
-                                vfaceL
-                            );
+                        flf = calc_hllc_flux(
+                            uxL,
+                            uxR,
+                            fL,
+                            fR,
+                            xprimsL,
+                            xprimsR,
+                            1,
+                            vfaceL
+                        );
+                        if constexpr (dim > 1) {
                             glf = calc_hllc_flux(
                                 uyL,
                                 uyR,
@@ -2299,22 +2244,20 @@ void RMHD<dim>::advance(
                                 2,
                                 0
                             );
-
-                            if constexpr (dim > 2) {
-                                hlf = calc_hllc_flux(
-                                    uzL,
-                                    uzR,
-                                    hL,
-                                    hR,
-                                    zprimsL,
-                                    zprimsR,
-                                    3,
-                                    0
-                                );
-                            }
-                            break;
                         }
-
+                        if constexpr (dim > 2) {
+                            hlf = calc_hllc_flux(
+                                uzL,
+                                uzR,
+                                hL,
+                                hR,
+                                zprimsL,
+                                zprimsR,
+                                3,
+                                0
+                            );
+                        }
+                        break;
                     default:
                         flf = calc_hll_flux(
                             uxL,
@@ -2358,16 +2301,13 @@ void RMHD<dim>::advance(
             const real d_source  = null_den ? 0.0 : dens_source[real_loc];
             const real s1_source = null_mom1 ? 0.0 : mom1_source[real_loc];
             const real e_source  = null_nrg ? 0.0 : erg_source[real_loc];
-            const real b1_source =
-                mag1_source_all_zeros ? 0.0 : mag1_source[real_loc];
+            const real b1_source = null_mag1 ? 0.0 : mag1_source[real_loc];
 
             const auto source_terms = [&] {
                 const real s2_source = null_mom2 ? 0.0 : mom2_source[real_loc];
                 const real s3_source = null_mom3 ? 0.0 : mom3_source[real_loc];
-                const real b2_source =
-                    mag2_source_all_zeros ? 0.0 : mag2_source[real_loc];
-                const real b3_source =
-                    mag3_source_all_zeros ? 0.0 : mag3_source[real_loc];
+                const real b2_source = null_mag2 ? 0.0 : mag2_source[real_loc];
+                const real b3_source = null_mag3 ? 0.0 : mag3_source[real_loc];
                 return conserved_t{
                          d_source,
                          s1_source,
@@ -2383,15 +2323,13 @@ void RMHD<dim>::advance(
 
             // Gravity
             const auto gs1_source =
-                zero_gravity1 ? 0 : g1_source[real_loc] * cons_data[aid].den;
+                nullg1 ? 0 : g1_source[real_loc] * cons_data[aid].den;
             const auto tid     = tza * sx * sy + tya * sx + txa;
             const auto gravity = [&] {
                 const auto gs2_source =
-                    zero_gravity2 ? 0
-                                  : g2_source[real_loc] * cons_data[aid].den;
+                    nullg2 ? 0 : g2_source[real_loc] * cons_data[aid].den;
                 const auto gs3_source =
-                    zero_gravity3 ? 0
-                                  : g3_source[real_loc] * cons_data[aid].den;
+                    nullg3 ? 0 : g3_source[real_loc] * cons_data[aid].den;
                 const auto ge_source = gs1_source * prim_buff[tid].v1 +
                                        gs2_source * prim_buff[tid].v2 +
                                        gs3_source * prim_buff[tid].v3;

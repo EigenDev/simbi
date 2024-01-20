@@ -57,7 +57,10 @@ def parse_plotting_arguments(
         type=float,
     )
     plot_parser.add_argument(
-        "--log", default=False, action=argparse.BooleanOptionalAction, help="logarithmic plotting scale"
+        "--log",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help="logarithmic plotting scale",
     )
     plot_parser.add_argument(
         "--kinetic",
@@ -335,7 +338,7 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace, *_) -> None:
                 "font.serif": "Times New Roman",
                 "font.size": BIGGER_SIZE,
                 "text.color": args.font_color,
-                'axes.labelcolor': args.font_color,
+                "axes.labelcolor": args.font_color,
                 "xtick.color": args.font_color,
                 "ytick.color": args.font_color,
                 "axes.edgecolor": args.font_color,
@@ -345,7 +348,7 @@ def main(parser: argparse.ArgumentParser, args: argparse.Namespace, *_) -> None:
         if args.print:
             plt.rcParams.update(
                 {
-                    "legend.fontsize": SMALL_SIZE,
+                    "legend.fontsize": DEFAULT_SIZE,
                 }
             )
 

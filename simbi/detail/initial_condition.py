@@ -93,7 +93,7 @@ def flatten_fully(x: Any) -> Any:
     if any(dim == 1 for dim in x.shape):
         x = np.vstack(x)
         if len(x.shape) == 2 and x.shape[0] == 1:
-            return x.flatten()
+            return x.flat
         return flatten_fully(x)
     else:
         return np.asanyarray(x)
@@ -236,11 +236,8 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
         model.nvars = 9
 
     # Initialize conserved u-array and flux arrays
-    model.u = np.zeros(
-        shape=(model.nvars, *np.asanyarray(model.resolution).flatten()[::-1])
-    )
+    model.u = np.zeros(shape=(model.nvars, *np.asanyarray(model.resolution).flat[::-1]))
 
-    srmhd = model.regime == "srmhd"
     if model.discontinuity:
         logger.info(
             f"Initializing Problem With a {str(model.dimensionality)}D Discontinuity..."

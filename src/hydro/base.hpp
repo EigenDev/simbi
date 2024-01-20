@@ -72,9 +72,8 @@ namespace simbi {
             half_sphere, quirk_smoothing, constant_sources, all_outer_bounds,
             homolog;
         bool null_den, null_mom1, null_mom2, null_mom3, null_nrg;
-        bool mag1_source_all_zeros, mag2_source_all_zeros,
-            mag3_source_all_zeros;
-        bool zero_gravity1, zero_gravity2, zero_gravity3;
+        bool null_mag1, null_mag2, null_mag3;
+        bool nullg1, nullg2, nullg3;
         luint active_zones, idx_active, total_zones, n, init_chkpt_idx, radius;
         luint xactive_grid, yactive_grid, zactive_grid;
         std::vector<std::string> boundary_conditions;
@@ -283,27 +282,27 @@ namespace simbi {
             else {
                 this->energy_source = init_conditions.sources[2];
             }
-            this->zero_gravity1 =
+            this->nullg1 =
                 std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {
                     return i == real(0);
                 });
-            this->zero_gravity2 =
+            this->nullg2 =
                 std::all_of(sourceG2.begin(), sourceG2.end(), [](real i) {
                     return i == real(0);
                 });
-            this->zero_gravity3 =
+            this->nullg3 =
                 std::all_of(sourceG3.begin(), sourceG3.end(), [](real i) {
                     return i == real(0);
                 });
-            this->mag1_source_all_zeros =
+            this->null_mag1 =
                 std::all_of(sourceB1.begin(), sourceB1.end(), [](real i) {
                     return i == real(0);
                 });
-            this->mag2_source_all_zeros =
+            this->null_mag2 =
                 std::all_of(sourceB2.begin(), sourceB2.end(), [](real i) {
                     return i == real(0);
                 });
-            this->mag3_source_all_zeros =
+            this->null_mag3 =
                 std::all_of(sourceB3.begin(), sourceB3.end(), [](real i) {
                     return i == real(0);
                 });
