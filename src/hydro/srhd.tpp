@@ -240,7 +240,8 @@ void SRHD<dim>::emit_troubled_cells() const
             const real v2 = (s * s) / (et * et);
             const real w  = 1.0 / std::sqrt(1.0 - v2);
             if constexpr (dim == 1) {
-                printf(
+                fprintf(
+                    stderr,
                     "\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, iter: %" PRIu64 "\n",
                     cons[gid].den / w,
@@ -251,7 +252,8 @@ void SRHD<dim>::emit_troubled_cells() const
                 );
             }
             else if constexpr (dim == 2) {
-                printf(
+                fprintf(
+                    stderr,
                     "\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, iter: "
                     "%" PRIu64 "\n",
@@ -264,7 +266,8 @@ void SRHD<dim>::emit_troubled_cells() const
                 );
             }
             else {
-                printf(
+                fprintf(
+                    stderr,
                     "\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, "
                     "x3coord: %.2e, iter: %" PRIu64 "\n",

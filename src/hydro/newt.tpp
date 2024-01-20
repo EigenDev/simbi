@@ -198,11 +198,9 @@ Newtonian<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real Newtonian<dim>::get_cell_volume(
-    const lint ii,
-    const lint jj,
-    const lint kk
-) const
+GPU_CALLABLE_MEMBER real
+Newtonian<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk)
+    const
 {
     if (geometry == Geometry::CARTESIAN) {
         return 1.0;
@@ -240,7 +238,8 @@ void Newtonian<dim>::emit_troubled_cells() const
             const real v3  = (dim < 3) ? cons[gid].momentum(3) / rho : 0.0;
             const real vsq = v1 * v1 + v2 * v2 + v3 * v3;
             if constexpr (dim == 1) {
-                printf(
+                fprintf(
+                    stderr,
                     "\nPrimitives in bad  state\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, iter: %" PRIu64 "\n",
                     cons[gid].den,
@@ -251,7 +250,8 @@ void Newtonian<dim>::emit_troubled_cells() const
                 );
             }
             else if constexpr (dim == 2) {
-                printf(
+                fprintf(
+                    stderr,
                     "\nPrimitives in bad  state\n"
                     "Density: %.2e, "
                     "Pressure: "
@@ -266,7 +266,8 @@ void Newtonian<dim>::emit_troubled_cells() const
                 );
             }
             else {
-                printf(
+                fprintf(
+                    stderr,
                     "\nPrimitives in bad  state\nDensity: %.2e, Pressure: "
                     "%.2e, Vsq: %.2e, x1coord: %.2e, x2coord: %.2e, "
                     "x3coord: %.2e, iter: %" PRIu64 "\n",
