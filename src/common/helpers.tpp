@@ -2425,7 +2425,12 @@ namespace simbi {
                 res[nroots++] = 0.5 * (sqrt_2m - delta) - 0.25 * b;
             }
 
-            quickSort(res, 0, nroots - 1);
+            if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                iterativeQuickSort(res, 0, 3);
+            }
+            else {
+                recursiveQuickSort(res, 0, nroots - 1);
+            }
             return nroots;
         }
 
@@ -2458,14 +2463,55 @@ namespace simbi {
 
         // Quick sort implementation
         template <typename T, typename index_type>
-        GPU_CALLABLE void quickSort(T arr[], index_type low, index_type high)
+        GPU_CALLABLE void
+        recursiveQuickSort(T arr[], index_type low, index_type high)
         {
             if (low < high) {
                 index_type pivotIndex = partition(arr, low, high);
 
                 // Recursively sort the left and right subarrays
-                quickSort(arr, low, pivotIndex - 1);
-                quickSort(arr, pivotIndex + 1, high);
+                recursiveQuickSort(arr, low, pivotIndex - 1);
+                recursiveQuickSort(arr, pivotIndex + 1, high);
+            }
+        }
+
+        template <typename T, typename index_type>
+        GPU_CALLABLE void
+        iterativeQuickSort(T arr[], index_type low, index_type high)
+        {
+            // Create an auxiliary stack
+            T stack[4];
+
+            // initialize top of stack
+            index_type top = -1;
+
+            // push initial values of l and h to stack
+            stack[++top] = low;
+            stack[++top] = high;
+
+            // Keep popping from stack while is not empty
+            while (top >= 0) {
+                // Pop h and l
+                high = stack[top--];
+                low  = stack[top--];
+
+                // Set pivot element at its correct position
+                // in sorted array
+                index_type pivotIndex = partition(arr, low, high);
+
+                // If there are elements on left side of pivot,
+                // then push left side to stack
+                if (pivotIndex - 1 > low) {
+                    stack[++top] = low;
+                    stack[++top] = pivotIndex - 1;
+                }
+
+                // If there are elements on right side of pivot,
+                // then push right side to stack
+                if (pivotIndex + 1 < high) {
+                    stack[++top] = pivotIndex + 1;
+                    stack[++top] = high;
+                }
             }
         }
 

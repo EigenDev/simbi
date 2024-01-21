@@ -1233,7 +1233,12 @@ namespace simbi {
 
         // Quick sort implementation
         template <typename T, typename index_type>
-        GPU_CALLABLE void quickSort(T arr[], index_type low, index_type high);
+        GPU_CALLABLE void
+        recursiveQuickSort(T arr[], index_type low, index_type high);
+
+        template <typename T, typename index_type>
+        GPU_CALLABLE void
+        iterativeQuickSort(T arr[], index_type low, index_type high);
 
         template <typename T, typename U>
         GPU_SHARED T* sm_proxy(const U object);
