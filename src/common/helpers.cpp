@@ -138,7 +138,7 @@ namespace simbi {
             dataset.write(prims.v1.data(), real_type);
             dataset.close();
 
-            if (dim > 1) {
+            if (dim > 1 || setup.regime == "srmhd") {
                 dataset = file.createDataSet("v2", real_type, hydro_dataspace);
                 dataset.write(prims.v2.data(), real_type);
                 dataset.close();
@@ -147,7 +147,7 @@ namespace simbi {
                 dataset.write(setup.x2.data(), real_type);
                 dataset.close();
             }
-            if (dim > 2) {
+            if (dim > 2 || setup.regime == "srmhd") {
                 dataset = file.createDataSet("v3", real_type, hydro_dataspace);
                 dataset.write(prims.v3.data(), real_type);
                 dataset.close();
