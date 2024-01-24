@@ -2626,11 +2626,11 @@ void RMHD<dim>::advance(
                             );
                             const real s1R = rr * (zr - zl) * (qr - ql);
                             const real s1L = rl * (zr - zl) * (qr - ql);
-                            const real s2R = (rr - rl) * (zr - rl);
-                            const real s2L = (rr - rl) * (zr - rl);
-                            // const real s3L          = rmean * (rr - rl) * (tr
-                            // - tl); const real s3R          = s3L; const real
-                            // thmean       = 0.5 * (tl + tr);
+                            const real s2R = (rr - rl) * (zr - zl);
+                            const real s2L = (rr - rl) * (zr - zl);
+                            const real s3L = rmean * (rr - rl) * (zr - zl);
+                            const real s3R = s3L;
+                            // const real thmean = 0.5 * (tl + tr);
                             const real dV =
                                 rmean * (rr - rl) * (zr - zl) * (qr - ql);
                             const real invdV = 1.0 / dV;
@@ -2663,7 +2663,7 @@ void RMHD<dim>::advance(
                             };
                             cons_data[aid] -= ((frf * s1R - flf * s1L) * invdV +
                                                (grf * s2R - glf * s2L) * invdV +
-                                               (hrf - hlf) * invdV -
+                                               (hrf * s3R - hlf * s3L) * invdV -
                                                geom_source - source_terms) *
                                               dt * step;
                             break;
@@ -2880,6 +2880,7 @@ void RMHD<dim>::simulate(
         edens_guess[i] = qq;
         cons[i]        = conserved_t{d, m1, m2, m3, tau, b1, b2, b3, dchi};
     }
+    deallocate_state();
     cons.copyToGpu();
     prims.copyToGpu();
     edens_guess.copyToGpu();

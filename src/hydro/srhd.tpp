@@ -2287,11 +2287,11 @@ void SRHD<dim>::advance(
                             );
                             const real s1R = rr * (zr - zl) * (qr - ql);
                             const real s1L = rl * (zr - zl) * (qr - ql);
-                            const real s2R = (rr - rl) * (zr - rl);
-                            const real s2L = (rr - rl) * (zr - rl);
-                            // const real s3L          = rmean * (rr - rl) * (tr
-                            // - tl); const real s3R          = s3L; const real
-                            // thmean       = 0.5 * (tl + tr);
+                            const real s2R = (rr - rl) * (zr - zl);
+                            const real s2L = (rr - rl) * (zr - zl);
+                            const real s3L = rmean * (rr - rl) * (zr - zl);
+                            const real s3R = s3L;
+                            // const real thmean = 0.5 * (tl + tr);
                             const real dV =
                                 rmean * (rr - rl) * (zr - zl) * (qr - ql);
                             const real invdV = 1.0 / dV;
@@ -2317,7 +2317,7 @@ void SRHD<dim>::advance(
                             };
                             cons_data[aid] -= ((frf * s1R - flf * s1L) * invdV +
                                                (grf * s2R - glf * s2L) * invdV +
-                                               (hrf - hlf) * invdV -
+                                               (hrf * s3R - hlf * s3L) * invdV -
                                                geom_source - source_terms) *
                                               dt * step;
                             break;
@@ -2539,7 +2539,7 @@ void SRHD<dim>::simulate(
         }
         pressure_guess[i] = std::abs(S - d - E);
     }
-
+    deallocate_state();
     cons.copyToGpu();
     prims.copyToGpu();
     pressure_guess.copyToGpu();

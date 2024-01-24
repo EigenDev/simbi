@@ -401,18 +401,17 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     switch (sim_solver) {
         case Solver::HLLC:
             {
-                const real cbar   = 0.5 * (csL + csR);
-                const real rhoBar = 0.5 * (rhoL + rhoR);
-                const real pStar =
-                    0.5 * (pL + pR) + 0.5 * (vL - vR) * cbar * rhoBar;
+                // const real cbar   = 0.5 * (csL + csR);
+                // const real rhoBar = 0.5 * (rhoL + rhoR);
+                // const real pStar =
+                //     0.5 * (pL + pR) + 0.5 * (vL - vR) * cbar * rhoBar;
 
                 // Steps to Compute HLLC as described in Toro et al. 2019
-                // const real num = csL + csR - (gamma - 1.0) * 0.5 * (vR - vL);
-                // const real denom =
-                //     csL * std::pow(pL, -hllc_z) + csR * std::pow(pR,
-                //     -hllc_z);
-                // const real p_term = num / denom;
-                // const real pStar  = std::pow(p_term, (1.0 / hllc_z));
+                const real num = csL + csR - (gamma - 1.0) * 0.5 * (vR - vL);
+                const real denom =
+                    csL * std::pow(pL, -hllc_z) + csR * std::pow(pR, -hllc_z);
+                const real p_term = num / denom;
+                const real pStar  = std::pow(p_term, (1.0 / hllc_z));
 
                 const real qL = (pStar <= pL)
                                     ? 1.0
@@ -1874,11 +1873,11 @@ void Newtonian<dim>::advance(
                             );
                             const real s1R = rr * (zr - zl) * (qr - ql);
                             const real s1L = rl * (zr - zl) * (qr - ql);
-                            const real s2R = (rr - rl) * (zr - rl);
-                            const real s2L = (rr - rl) * (zr - rl);
-                            // const real s3L          = rmean * (rr - rl) * (tr
-                            // - tl); const real s3R          = s3L; const real
-                            // thmean       = 0.5 * (tl + tr);
+                            const real s2R = (rr - rl) * (zr - zl);
+                            const real s2L = (rr - rl) * (zr - zl);
+                            const real s3L = rmean * (rr - rl) * (zr - zl);
+                            const real s3R = s3L;
+                            // const real thmean = 0.5 * (tl + tr);
                             const real dV =
                                 rmean * (rr - rl) * (zr - zl) * (qr - ql);
                             const real invdV = 1.0 / dV;
@@ -1900,7 +1899,7 @@ void Newtonian<dim>::advance(
                             };
                             cons_data[aid] -= ((frf * s1R - flf * s1L) * invdV +
                                                (grf * s2R - glf * s2L) * invdV +
-                                               (hrf - hlf) * invdV -
+                                               (hrf * s3R - hlf * s3L) * invdV -
                                                geom_source - source_terms) *
                                               dt * step;
                             break;
@@ -2120,14 +2119,6 @@ void Newtonian<dim>::simulate(
                 return state[5][i];
             }
         }();
-
-        const auto v1 = m1 / rho;
-        const auto v2 = m2 / rho;
-        const auto p  = e - 0.5 * rho * (v1 * v1 + v2 * v2);
-        if (p < 0.0) {
-            printf("negative pressure in initial conditions\n");
-        }
-
         if constexpr (dim == 1) {
             cons[i] = {rho, m1, e, rho_chi};
         }
@@ -2138,6 +2129,7 @@ void Newtonian<dim>::simulate(
             cons[i] = {rho, m1, m2, m3, e, rho_chi};
         }
     }
+    deallocate_state();
 
     cons.copyToGpu();
     prims.copyToGpu();
