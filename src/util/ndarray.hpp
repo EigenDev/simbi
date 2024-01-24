@@ -103,6 +103,9 @@ namespace simbi {
         ndarray(const ndarray& rhs);
         ndarray(const std::vector<DT>& rhs);
 
+        // Move-constructor for vector
+        ndarray(std::vector<DT>&& rhs);
+
         // Function that returns the number of
         // elements in array after pushing the data
         constexpr void push_back(const DT&);

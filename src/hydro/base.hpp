@@ -140,6 +140,8 @@ namespace simbi {
             init_chkpt_idx = chkpt_idx + (chkpt_idx > 0);
         }
 
+        void deallocate_state() { state = std::vector<std::vector<real>>(); }
+
       protected:
         HydroBase() = default;
 
@@ -149,7 +151,7 @@ namespace simbi {
             std::vector<std::vector<real>> state,
             const InitialConditions& init_conditions
         )
-            : state(state),
+            : state(std::move(state)),
               gamma(init_conditions.gamma),
               cfl(init_conditions.cfl),
               coord_system(init_conditions.coord_system),
@@ -175,7 +177,8 @@ namespace simbi {
               quirk_smoothing(init_conditions.quirk_smoothing),
               constant_sources(init_conditions.constant_sources),
               total_zones(nx * ny * nz),
-              boundary_conditions(init_conditions.boundary_conditions),
+              boundary_conditions(std::move(init_conditions.boundary_conditions)
+              ),
               sim_solver(helpers::solver_map.at(init_conditions.solver)),
               geometry(helpers::geometry_map.at(init_conditions.coord_system)),
               x1_cell_spacing(str2cell.at(init_conditions.x1_cell_spacing)),
@@ -183,7 +186,7 @@ namespace simbi {
               x3_cell_spacing(str2cell.at(init_conditions.x3_cell_spacing)),
               data_directory(init_conditions.data_directory),
               boundary_sources(init_conditions.boundary_sources),
-              object_pos(init_conditions.object_cells)
+              object_pos(std::move(init_conditions.object_cells))
         {
             initialize(init_conditions);
             if (std::getenv("USE_OMP")) {
@@ -218,11 +221,11 @@ namespace simbi {
             }
             this->invdx1 = 1.0 / dx1;
             // Define the source terms
-            this->density_source = init_conditions.sources[0];
-            this->m1_source      = init_conditions.sources[1];
-            this->sourceG1       = init_conditions.gsources[0];
+            this->density_source = std::move(init_conditions.sources[0]);
+            this->m1_source      = std::move(init_conditions.sources[1]);
+            this->sourceG1       = std::move(init_conditions.gsources[0]);
             if (init_conditions.regime == "rmhd") {
-                this->sourceB1 = init_conditions.bsources[0];
+                this->sourceB1 = std::move(init_conditions.bsources[0]);
             };
             if ((ny > 1) && (nz > 1)) {   // 3D check
                 this->x2min         = x2[0];
@@ -231,14 +234,14 @@ namespace simbi {
                 this->x3max         = x3[zactive_grid - 1];
                 this->dx3           = (x3max - x3min) / (zactive_grid - 1);
                 this->dx2           = (x2max - x2min) / (yactive_grid - 1);
-                this->m2_source     = init_conditions.sources[2];
-                this->m3_source     = init_conditions.sources[3];
-                this->energy_source = init_conditions.sources[4];
-                this->sourceG2      = init_conditions.gsources[1];
-                this->sourceG3      = init_conditions.gsources[2];
+                this->m2_source     = std::move(init_conditions.sources[2]);
+                this->m3_source     = std::move(init_conditions.sources[3]);
+                this->energy_source = std::move(init_conditions.sources[4]);
+                this->sourceG2      = std::move(init_conditions.gsources[1]);
+                this->sourceG3      = std::move(init_conditions.gsources[2]);
                 if (init_conditions.regime == "rmhd") {
-                    this->sourceB2 = init_conditions.bsources[1];
-                    this->sourceB3 = init_conditions.bsources[2];
+                    this->sourceB2 = std::move(init_conditions.bsources[1]);
+                    this->sourceB3 = std::move(init_conditions.bsources[2]);
                 };
                 if (x2_cell_spacing == simbi::Cellspacing::LOGSPACE) {
                     this->dlogx2 = std::log10(x2[yactive_grid - 1] / x2[0]) /
@@ -262,11 +265,11 @@ namespace simbi {
             else if ((ny > 1) && (nz == 1)) {   // 2D Check
                 this->x2min         = x2[0];
                 this->x2max         = x2[yactive_grid - 1];
-                this->m2_source     = init_conditions.sources[2];
-                this->energy_source = init_conditions.sources[3];
-                this->sourceG2      = init_conditions.gsources[1];
+                this->m2_source     = std::move(init_conditions.sources[2]);
+                this->energy_source = std::move(init_conditions.sources[3]);
+                this->sourceG2      = std::move(init_conditions.gsources[1]);
                 if (init_conditions.regime == "rmhd") {
-                    this->sourceB2 = init_conditions.bsources[1];
+                    this->sourceB2 = std::move(init_conditions.bsources[1]);
                 };
 
                 if (x2_cell_spacing == simbi::Cellspacing::LOGSPACE) {
@@ -280,7 +283,7 @@ namespace simbi {
                 }
             }
             else {
-                this->energy_source = init_conditions.sources[2];
+                this->energy_source = std::move(init_conditions.sources[2]);
             }
             this->nullg1 =
                 std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {

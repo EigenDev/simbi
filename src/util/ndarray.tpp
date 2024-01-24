@@ -64,6 +64,19 @@ simbi::ndarray<DT, build_mode>::ndarray(const std::vector<DT>& rhs)
     }
 };
 
+// Move-constructor for vector
+template <typename DT, global::Platform build_mode>
+simbi::ndarray<DT, build_mode>::ndarray(std::vector<DT>&& rhs)
+    : sz(rhs.size()),
+      nd_capacity(rhs.capacity() * sizeof(DT)),
+      dimensions(1),
+      arr(new DT[rhs.size()])
+{
+    for (size_type i = 0; i < sz; i++) {
+        arr.get()[i] = std::move(rhs[i]);
+    }
+};
+
 // Copy the arrays and deallocate the RHS
 template <typename DT, global::Platform build_mode>
 simbi::ndarray<DT, build_mode>&
