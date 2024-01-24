@@ -97,6 +97,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
     base_properties: dict[str, Any] = {}
     log_output = False
     log_directory: str = ""
+    trace_memory: bool = False
 
     def __init_subclass__(cls: Any, *args: Any, **kwargs: Any) -> None:
         """Check Child Behavior

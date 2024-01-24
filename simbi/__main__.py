@@ -3,10 +3,11 @@ import os
 import ast
 import sys
 import subprocess
+import tracemalloc
 import importlib
 from pathlib import Path
 from typing import List, Optional, Sequence
-from . import Hydro, logger
+from . import Hydro, logger, display_top
 from .detail import get_subparser, bcolors, max_thread_count
 
 try:
@@ -341,6 +342,12 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         type=str,
         default=None
     )
+    global_args.add_argument(
+        '--trace-mem',
+        help='flag to trace memory usage of python instance',
+        action=argparse.BooleanOptionalAction,
+        default=False
+    )
 
 
     return parser, parser.parse_known_args(
@@ -368,6 +375,9 @@ def configure_state(
     Configure the Hydro state based on the Config class that exists in the passed
     in setup script. Once configured, pass it back to main to be simulated
     """
+    if args.trace_mem:
+        tracemalloc.start()
+        
     script_dirname = Path(script).parent
     base_script = Path(script).stem
     sys.path.insert(1, f'{script_dirname}')
@@ -423,7 +433,9 @@ def configure_state(
         if args.log_output:
             static_config.log_output = True 
             static_config.set_logdir(args.log_directory or args.data_directory or config.data_directory)
-                
+        
+        config.trace_memory = args.trace_mem
+            
         if config.__doc__:
             state_docs += [f"{config.__doc__}"]
         else:

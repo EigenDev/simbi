@@ -6,10 +6,12 @@ import numpy as np
 import h5py
 import numpy.typing as npt
 from ..key_types import *
+from .mem import release_memory
 from . import helpers
 from .slogger import logger
 from itertools import product, permutations
-
+from multiprocessing import Process
+from typing import Any, Callable
 
 def dot_product(a: NDArray[Any], b: NDArray[Any]) -> Any:
     return np.sum([x * y for x, y in zip(a, b)], axis=0)
@@ -210,13 +212,14 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
 
         model.chkpt_idx = ds["chkpt_idx"]
 
-
+@release_memory
 def initializeModel(
     model: Any,
     first_order: bool,
     volume_factor: Union[float, NDArray[Any]],
     passive_scalars: Union[npt.NDArray[Any], Any],
 ) -> None:
+    model.u = np.insert(model.u, model.u.shape[0], 0.0, axis=0)
     if passive_scalars is not None:
         model.u[-1, ...] = passive_scalars * model.u[0]
 
@@ -229,6 +232,7 @@ def initializeModel(
     model.u = np.pad(model.u * volume_factor, npad, "edge")
 
 
+@release_memory
 def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None:
     if not model.mhd:
         model.nvars = 3 + model.dimensionality
@@ -236,7 +240,8 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
         model.nvars = 9
 
     # Initialize conserved u-array and flux arrays
-    model.u = np.zeros(shape=(model.nvars, *np.asanyarray(model.resolution).flat[::-1]))
+    model.u = np.zeros(shape=(model.nvars - 1, *np.asanyarray(model.resolution).flat[::-1]))
+    # model.u = initial_state
 
     if model.discontinuity:
         logger.info(
@@ -293,11 +298,11 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
             )
 
             if model.dimensionality == 1:
-                part[...] = np.array([dens, *mom, energy, *bfields, 0.0])[:, None]
+                part[...] = np.array([dens, *mom, energy, *bfields])[:, None]
             else:
                 part[...] = (
                     part[...].transpose()
-                    + np.array([dens, *mom, energy, *bfields, 0.0])
+                    + np.array([dens, *mom, energy, *bfields])
                 ).transpose()
     else:
         rho, *velocity, pressure = initial_state[: model.number_of_non_em_terms]
@@ -328,7 +333,6 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
                     *model.init_momentum,
                     model.init_energy,
                     *bfields,
-                    np.zeros_like(model.init_density),
                 ]
             )
         else:
@@ -338,6 +342,5 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
                     *model.init_momentum,
                     model.init_energy,
                     *bfields,
-                    np.zeros_like(model.init_density),
                 ]
             )

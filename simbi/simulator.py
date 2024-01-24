@@ -4,8 +4,13 @@
 # 06/10/2020
 import numpy as np
 import os
+import sys
 import inspect
 import importlib
+import tracemalloc
+import gc
+import simbi.detail as detail
+from multiprocessing import Process
 from itertools import chain, repeat
 from .detail import initial_condition as simbi_ic
 from .detail import helpers
@@ -52,6 +57,7 @@ class Hydro:
     geometry: Any
     u: NDArray[Any]
     resolution: Sequence[int]
+    trace_memory: bool = False
 
     def __init__(
         self,
@@ -113,7 +119,7 @@ class Hydro:
         self.coord_system = coord_system
         self.regime = regime
         self.gamma = gamma
-        self.mhd = self.regime in ["srmhd"]
+        self.mhd = self.regime in ["srmhd", "mhd"]
 
         tuple_of_tuples: Callable[..., bool] = lambda x: all(
             isinstance(a, Sequence) for a in x
@@ -175,28 +181,39 @@ class Hydro:
 
         if ngeom != self.dimensionality:
             raise ValueError(
-                f"Detecing a {self.dimensionality}D run, but only {ngeom} geometry tuple(s)"
+                f"Detecting a {self.dimensionality}D run, but only {ngeom} geometry tuple(s)"
             )
 
         if len(self.resolution) != self.dimensionality:
             raise ValueError(
-                f"Detecing a {self.dimensionality}D run, but only {nres} resolution args"
+                f"Detecting a {self.dimensionality}D run, but only {nres} resolution args"
             )
 
+        initial_state = np.asanyarray(initial_state)
         size = len(initial_state[0])
         if not all(len(x) == size for x in initial_state):
             initial_state = helpers.pad_jagged_array(initial_state)
-        else:
-            initial_state = np.asanyarray(initial_state)
+
+        # print("="*80)
+        # print("boutta construct the state")
+        # snapshot = tracemalloc.take_snapshot()
+        # helpers.display_top(snapshot)
+        # zzz = input('')
         
         nstates = len(initial_state)
         max_discont = 2**self.dimensionality
         self.number_of_non_em_terms = 2 + self.dimensionality if not self.mhd else 5
         max_prims = self.number_of_non_em_terms + 3 * self.mhd
         if nstates <= max_prims or (nstates < max_discont and self.discontinuity):
-            simbi_ic.construct_the_state(self, initial_state=initial_state)
+            detail.initial_condition.construct_the_state(self, initial_state=initial_state)
         else:
             raise ValueError("Initial State contains too many variables")
+        
+        # print("="*80)
+        # print("state constructed")
+        # snapshot = tracemalloc.take_snapshot()
+        # helpers.display_top(snapshot)
+        # zzz = input('')
 
     @classmethod
     def gen_from_setup(cls, setup: Any) -> Any:
@@ -467,13 +484,12 @@ class Hydro:
                 f"cell spacing for x3 should be one of: {available_cellspacings}"
             )
 
-        self.u = np.asanyarray(self.u)
         self.start_time: float = 0.0
         self.chkpt_idx: int = 0
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
         self._generate_the_grid(x1_cell_spacing, x2_cell_spacing, x3_cell_spacing)
-
+        
         mesh_motion = scale_factor_derivative(tstart) / scale_factor(tstart) != 0
         volume_factor: Union[float, NDArray[Any]] = 1.0
         if mesh_motion and self.coord_system != "cartesian":
@@ -564,7 +580,8 @@ class Hydro:
 
         logger.info("")
         # Loading bar to have chance to check params
-        helpers.print_progress()
+        if not self.trace_memory:
+            helpers.print_progress()
 
         # Create boolean masks for object immersed boundaries (impermeable)
         object_cells: NDArray[Any] = (
@@ -582,6 +599,7 @@ class Hydro:
             if sources is None
             else np.asanyarray(sources)
         )
+        
         sources = sources.reshape(sources.shape[0], -1)
         gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
         gsources = gsources.reshape(gsources.shape[0], -1)
@@ -677,7 +695,13 @@ class Hydro:
             importlib.import_module(f".{lib_mode}_ext", package="simbi.libs"),
             "SimState",
         )
-
+        
+        if self.trace_memory:
+            snapshot = tracemalloc.take_snapshot()
+            helpers.display_top(snapshot)
+            tracemalloc.stop()
+            helpers.print_progress()
+        
         state_contig = self.u.reshape(self.u.shape[0], -1)
         state = sim_state()
         
