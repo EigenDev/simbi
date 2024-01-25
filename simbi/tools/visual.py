@@ -286,10 +286,12 @@ class Visualizer:
         field_str = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
         refcount = 0
-        for ax in get_iterable(self.axs, func=list if self.nplots == 1 else iter):
+        for axidx, ax in enumerate(
+            ax_iter := get_iterable(self.axs, func=list if self.nplots == 1 else iter)
+        ):
             for fidx, file in enumerate(get_iterable(self.flist[self.current_frame])):
                 fields, setup, mesh = util.read_file(self, file, ndim=self.ndim)
-                for idx, field in enumerate(self.fields):
+                for idx, field in enumerate(get_iterable(self.fields[axidx])):
                     if field in derived:
                         var = util.prims2var(fields, field)
                     else:
@@ -304,7 +306,7 @@ class Visualizer:
                             var *= util.rho_scale.value
 
                     if not isinstance(field_str, str):
-                        label = field_str[idx]
+                        label = field_str[axidx]
                     else:
                         label = field_str
                     scale = next(scale_cycle)
@@ -336,7 +338,71 @@ class Visualizer:
                                     scale = yvar[shock_location]
                                 else:
                                     xvar = mesh["x1"]
-                                (line,) = ax.plot(xvar, yvar / scale, label=coord_label)
+                                s = ["0.1", "1", "10"]
+                                if idx == 0:
+                                    # d = rf"$v_{{\rm wind}} = {s[fidx]}$, $z={x2coord:.0f}$"
+                                    d = rf"$z={x2coord:.0f}$"
+                                else:
+                                    d = None
+
+                                # gamma = 5.0 / 3.0
+                                # beta = 0.5
+                                # rprime = beta * abs(x2coord) ** (beta - 1.0)
+                                # uxi_max = 2 / (gamma + 1.0)
+                                # uxi_min = 1 / gamma
+                                # uxi = np.linspace(uxi_min, uxi_max, xvar.size)
+                                # xi = np.sqrt(
+                                #     (4.0 / (gamma**2 - 1.0))
+                                #     * ((gamma - 1.0) / (gamma * (gamma + 1.0)))
+                                #     ** (1 / gamma)
+                                #     * ((uxi - 1 / gamma) ** (1.0 - 1 / gamma))
+                                #     / (uxi * (2 / gamma - uxi))
+                                # )
+                                # gxi = (
+                                #     (gamma + 1.0)
+                                #     / (gamma - 1.0)
+                                #     * (gamma * (gamma + 1.0) / (gamma - 1.0))
+                                #     ** (1 / gamma)
+                                #     * (gamma * (gamma - 1.0) / 2.0) ** (2 / (2 - gamma))
+                                #     * (uxi - 1 / gamma) ** (1 / gamma)
+                                #     * (((2 / gamma) - uxi) / (1 - uxi))
+                                #     ** (2 / (2 - gamma))
+                                # )
+                                # cxi = np.sqrt(
+                                #     (gamma - 1.0)
+                                #     * 0.5
+                                #     * (uxi**2 * (1.0 - uxi))
+                                #     / (uxi - 1.0 / gamma)
+                                # )
+                                # cs = rprime * xi * cxi
+                                # pxi = gxi * cs**2 / gamma
+                                # pxi = pxi[1:]
+                                # us = rprime * uxi * xi
+                                # if field == "rho" and fidx == 0:
+                                #     ax.plot(
+                                #         xi,
+                                #         gxi / gxi.max(),
+                                #         label="Analytic",
+                                #         color="black",
+                                #         linestyle="-.",
+                                #     )
+                                # if field == "p" and fidx == 1:
+                                #     ax.plot(
+                                #         xi[1:],
+                                #         pxi / pxi.max(),
+                                #         color="black",
+                                #         linestyle="-.",
+                                #     )
+                                # if field == "v1" and fidx == 2:
+                                #     ax.plot(
+                                #         xi, us / us.max(), color="black", linestyle="-."
+                                #     )
+                                (line,) = ax.plot(
+                                    xvar, yvar / scale, label=d
+                                )
+
+                                if self.nplots != 1:
+                                    ax.set_ylabel(label)
                     else:
                         x = mesh["x1"]
                         (line,) = ax.plot(mesh["x1"], var / scale, label=label)
@@ -369,7 +435,10 @@ class Visualizer:
         if len(self.fields) == 1:
             ax.set_ylabel(field_str)
         if self.legend:
-            ax.legend(loc=self.legend_loc)
+            if self.nplots == 1:
+                ax.legend(loc=self.legend_loc)
+            else:
+                self.axs[0].legend(loc=self.legend_loc)
 
         if any(self.xlims):
             ax.set_xlim(*self.xlims)
@@ -573,9 +642,9 @@ class Visualizer:
                                 divider = make_axes_locatable(ax)
                                 if setup["coord_system"] == "axis_cylindrical":
                                     side = "right" if idx == 0 else "left"
-                                    pad = 0.5 if idx == 0 else 0.5
+                                    # pad = 0.5 if idx == 0 else 0.5
                                     cbaxes = divider.append_axes(
-                                        side, size="5%", pad=pad
+                                        side, size="5%", pad=0.05
                                     )
                                 else:
                                     cbaxes = divider.append_axes(
@@ -724,6 +793,8 @@ class Visualizer:
             else:
                 ax.set_ylim(*self.ylims)
                 ax.set_aspect("equal")
+                ax.set_xlabel("$x$")
+                ax.set_ylabel("$z$")
 
             if self.xmax:
                 ax.set_rmax(self.xmax)
@@ -750,9 +821,9 @@ class Visualizer:
 
                 fields, setup, mesh = util.read_file(self, file, dims[idx])
                 time = setup["time"] * util.time_scale
-                if fields['rho'].ndim == 1:
+                if fields["rho"].ndim == 1:
                     dV = calc_cell_volume1D(x1=mesh["x1"])
-                elif fields['rho'].ndim == 2:
+                elif fields["rho"].ndim == 2:
                     dV = calc_cell_volume2D(x1=mesh["x1"], x2=mesh["x2"])
                     if mesh["x2"][-1] == 0.5 * np.pi:
                         dV *= 2.0
@@ -1229,9 +1300,9 @@ class Visualizer:
                 len(self.coords["x2"].split(",")) * len(self.coords["x3"].split(",")),
             )
         else:
-            nind_curves = len(self.files) // self.nplots
+            nind_curves = self.nplots // len(self.files)
 
-        colors = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
+        colors = np.array([colormap(k) for k in np.linspace(0.75, 0.9, nind_curves)])
         linestyles = [
             x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(len(self.fields)))
         ]
@@ -1265,7 +1336,9 @@ class Visualizer:
             if not self.square_plot:
                 raise NotImplementedError()
 
-            self.fig, self.axs = plt.subplots(2, 1, figsize=self.fig_dims, sharex=True)
+            self.fig, self.axs = plt.subplots(
+                self.nplots, 1, figsize=self.fig_dims, sharex=True
+            )
             for ax in self.axs:
                 ax.spines["top"].set_visible(False)
                 ax.spines["right"].set_visible(False)
