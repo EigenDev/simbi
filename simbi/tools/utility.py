@@ -16,8 +16,8 @@ SMALL_SIZE = 6
 DEFAULT_SIZE = 10
 BIGGER_SIZE = 12
 
-logically_curvlinear = ["spherical", "cylindrical", "planar_cylindrical"]
-logically_cartesian = ["cartesian", "axis_cylindrical"]
+logically_curvlinear = ["spherical", "planar_cylindrical"]
+logically_cartesian = ["cartesian", "axis_cylindrical", "cylindrical"]
 # ================================
 #   constants of nature
 # ================================
@@ -80,7 +80,7 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
                 if field == "energy":
                     field_str_list.append(r"$\tau/\tau_0$")
                 else:
-                    field_str_list.append(r"$p/p_0$")
+                    field_str_list.append(r"$p/p_{{\rm max}}$")
         elif field == "energy_rst":
             if args.units:
                 field_str_list.append(r"$E \  [\rm erg \ cm^{-3}]$")
@@ -89,7 +89,7 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
         elif field == "chi":
             field_str_list.append(r"$\chi$")
         elif field == "chi_dens":
-            field_str_list.append(r"$D \cdot \chi$")
+            field_str_list.append(r"$\rho \cdot \chi$")
         elif field == "T_eV":
             field_str_list.append("T [eV]")
         elif field == "temperature":
@@ -97,11 +97,11 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
         elif field == "mach":
             field_str_list.append("M")
         elif field == "v1" or field == "v":
-            field_str_list.append("$v / v_0$")
+            field_str_list.append(r"$u / u_{{\rm max}}$")
         elif field == "v2":
-            field_str_list.append("$v_2 / v_0$")
+            field_str_list.append(r"$v_2 / v_0$")
         elif field == "v3":
-            field_str_list.append("$v_3 / v_0$")
+            field_str_list.append(r"$v_3 / v_0$")
         elif field == "tau-s":
             field_str_list.append(r"$\tau_s$")
         elif field in ["b1", "b2", "b3"]:
@@ -124,7 +124,7 @@ def flatten_fully(x: NDArray[numpy_float]) -> Any:
     if any(dim == 1 for dim in x.shape):
         x = np.vstack(x)  # type: ignore
         if len(x.shape) == 2 and x.shape[0] == 1:
-            return x.flatten()
+            return x.flat
         return flatten_fully(x)
     else:
         return np.asanyarray(x)
@@ -136,6 +136,7 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     ndim: int = 0
     if isinstance(files, dict):
         import itertools
+
         files = list(itertools.chain(*files.values()))
 
     files = list(filter(bool, files))
@@ -310,8 +311,6 @@ def read_file(
             )
             for i in range(ndim)
         }
-
-        # print(any(v < 0 for v in fields['rho']))
         if setup["x1max"] > mesh["x1"][-1]:
             mesh["x1"] = funcs[0](setup["x1min"], setup["x1max"], setup["x1active"])
 
@@ -344,7 +343,7 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
         return T_eV
     elif var == "chi_dens":
         fields["chi"][fields["chi"] == 0] = 1.0e-10
-        return fields["chi"] * fields["rho"] * W
+        return fields["chi"] * fields["rho"] * W 
     elif var == "gamma_beta_1":
         return W * fields["v1"]
     elif var == "gamma_beta_2":
