@@ -24,7 +24,7 @@ cdef extern from "common/hydro_structs.hpp":
         vector[bool] object_cells
         string data_directory, coord_system, solver
         string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing
-        string space_order, time_order
+        string spatial_order, time_order
         vector[string] boundary_conditions
         vector[vector[real]] boundary_sources
         vector[real] x1, x2, x3

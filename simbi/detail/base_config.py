@@ -308,7 +308,7 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return None
     
     @simbi_property
-    def space_order(self) -> str:
+    def spatial_order(self) -> str:
         return "plm"
     
     @simbi_property

@@ -68,7 +68,7 @@ namespace simbi {
         real x1min, x1max, x2min, x2max, x3min, x3max, step;
         real dlogx1, dx1, dlogx2, dx2, dlogx3, dx3, dlogt, tstart,
             engine_duration, invdx1, invdx2, invdx3;
-        std::string space_order, time_order;
+        std::string spatial_order, time_order;
         bool use_pcm, use_rk1, linspace, mesh_motion, adaptive_mesh_motion;
         bool half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
         bool homolog;
@@ -174,9 +174,9 @@ namespace simbi {
               dlogt(init_conditions.dlogt),
               tstart(init_conditions.tstart),
               engine_duration(init_conditions.engine_duration),
-              space_order(init_conditions.space_order),
+              spatial_order(init_conditions.spatial_order),
               time_order(init_conditions.time_order),
-              use_pcm(space_order == "pcm"),
+              use_pcm(spatial_order == "pcm"),
               use_rk1(time_order == "rk1"),
               quirk_smoothing(init_conditions.quirk_smoothing),
               constant_sources(init_conditions.constant_sources),
@@ -205,16 +205,16 @@ namespace simbi {
         {
             // Define simulation params
             this->xactive_grid =
-                (init_conditions.space_order == "pcm") ? nx - 2 : nx - 4;
+                (init_conditions.spatial_order == "pcm") ? nx - 2 : nx - 4;
             this->yactive_grid = (ny == 1) ? 1
-                                 : (init_conditions.space_order == "pcm")
+                                 : (init_conditions.spatial_order == "pcm")
                                      ? ny - 2
                                      : ny - 4;
             this->zactive_grid = (nz == 1) ? 1
-                                 : (init_conditions.space_order == "pcm")
+                                 : (init_conditions.spatial_order == "pcm")
                                      ? nz - 2
                                      : nz - 4;
-            this->idx_active   = (init_conditions.space_order == "pcm") ? 1 : 2;
+            this->idx_active   = (init_conditions.spatial_order == "pcm") ? 1 : 2;
             this->active_zones = xactive_grid * yactive_grid * zactive_grid;
             this->x1min        = x1[0];
             this->x1max        = x1[xactive_grid - 1];

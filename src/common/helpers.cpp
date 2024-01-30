@@ -204,7 +204,7 @@ namespace simbi {
 
             att =
                 sim_info.createAttribute("spatial_order", str_type, att_space);
-            att.write(str_type, setup.space_order.c_str());
+            att.write(str_type, setup.spatial_order.c_str());
             att.close();
 
             att = sim_info.createAttribute("time_order", str_type, att_space);

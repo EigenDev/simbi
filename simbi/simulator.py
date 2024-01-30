@@ -282,7 +282,7 @@ class Hydro:
         logger.info("=" * 80)
 
     def _place_boundary_sources(
-        self, boundary_sources: Union[Sequence[Any], NDArray[Any]], space_order: str
+        self, boundary_sources: Union[Sequence[Any], NDArray[Any]], spatial_order: str
     ) -> NDArray[Any]:
         boundary_sources = [np.array([val]).flat for val in boundary_sources]
         max_len = np.max([len(a) for a in boundary_sources])
@@ -292,7 +292,7 @@ class Hydro:
                 for a in boundary_sources
             ]
         )
-        edges = [0, -1] if space_order == "pcm" else [0, 1, -1, -2]
+        edges = [0, -1] if spatial_order == "pcm" else [0, 1, -1, -2]
         view = self.u[: self.dimensionality + 2]
 
         slices: list[Any]
@@ -307,7 +307,7 @@ class Hydro:
                 + [np.s_[:, i, ...] for i in edges]
             )
 
-        order = 1 if space_order == "pcm" else 2
+        order = 1 if spatial_order == "pcm" else 2
         if self.dimensionality == 3:
             source_transform: Any = np.s_[:, None, None]
         elif self.dimensionality == 2:
@@ -431,7 +431,7 @@ class Hydro:
         edens_outer: Optional[Callable[..., float]] = None,
         object_positions: Optional[Union[Sequence[Any], NDArray[Any]]] = None,
         boundary_sources: Optional[Union[Sequence[Any], NDArray[Any]]] = None,
-        space_order: str = "plm",
+        spatial_order: str = "plm",
         time_order: str = "rk2",
     ) -> None:
         """
@@ -464,13 +464,13 @@ class Hydro:
             edens_outer    (Callable):   idem but for energy density
             object_positions (boolean array_lie): An optional boolean array that masks the immersed boundary
             boundary_source (array_like): An array of conserved quantities at the boundaries of the grid
-            space_order str: space order of integration [pcm or plm]
+            spatial_order str: space order of integration [pcm or plm]
             
 
         Returns:
             solution (array): The hydro solution containing the primitive variables
         """
-        if space_order not in ["pcm", "plm"]:
+        if spatial_order not in ["pcm", "plm"]:
             raise ValueError(f"Space order can only be one of {['pcm', 'plm']}")
         if time_order not in ["rk1", "rk2"]:
             raise ValueError(f"Time order can only be one of {['rk1', 'rk2']}")
@@ -514,7 +514,7 @@ class Hydro:
 
         self._check_boundary_conditions(boundary_conditions)
         if not chkpt:
-            simbi_ic.initializeModel(self, space_order == "pcm", volume_factor, passive_scalars)
+            simbi_ic.initializeModel(self, spatial_order == "pcm", volume_factor, passive_scalars)
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensionality, mesh_motion)
         if self.dimensionality == 1 and self.coord_system in [
@@ -534,7 +534,7 @@ class Hydro:
             )
         else:
             boundary_sources = self._place_boundary_sources(
-                boundary_sources=boundary_sources, space_order=space_order
+                boundary_sources=boundary_sources, spatial_order=spatial_order
             )
 
         for idx, bc in enumerate(self.boundary_conditions):
@@ -598,7 +598,7 @@ class Hydro:
         )
 
         logger.info(
-            f"Computing solution using {space_order.upper()} in space, {time_order.upper()} in time..."
+            f"Computing solution using {spatial_order.upper()} in space, {time_order.upper()} in time..."
         )
 
         sources = (
@@ -656,7 +656,7 @@ class Hydro:
             "chkpt_idx": self.chkpt_idx,
             "data_directory": cython_data_directory,
             "boundary_conditions": cython_boundary_conditions,
-            "space_order": space_order.encode("utf-8"),
+            "spatial_order": spatial_order.encode("utf-8"),
             "time_order": time_order.encode("utf-8"),
             "x1_cell_spacing": x1_cell_spacing.encode("utf-8"),
             "x2_cell_spacing": x2_cell_spacing.encode("utf-8"),

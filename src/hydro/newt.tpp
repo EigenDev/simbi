@@ -1957,7 +1957,7 @@ void Newtonian<dim>::simulate(
 
     if (mesh_motion && all_outer_bounds) {
         if constexpr (dim == 1) {
-            outer_zones.resize(space_order == "pcm" ? 1 : 2);
+            outer_zones.resize(spatial_order == "pcm" ? 1 : 2);
             const real dV = get_cell_volume(active_zones - 1);
             outer_zones[0] =
                 conserved_t{
@@ -2069,7 +2069,7 @@ void Newtonian<dim>::simulate(
     setup.x2_cell_spacing     = cell2str.at(x2_cell_spacing);
     setup.x3_cell_spacing     = cell2str.at(x3_cell_spacing);
     setup.ad_gamma            = gamma;
-    setup.space_order         = space_order;
+    setup.spatial_order         = spatial_order;
     setup.time_order          = time_order;
     setup.coord_system        = coord_system;
     setup.using_fourvelocity  = false;
@@ -2167,7 +2167,7 @@ void Newtonian<dim>::simulate(
         yactive_grid > gpu_block_dimy ? gpu_block_dimy : yactive_grid;
     const luint zblockdim =
         zactive_grid > gpu_block_dimz ? gpu_block_dimz : zactive_grid;
-    this->radius             = (space_order == "pcm") ? 1 : 2;
+    this->radius             = (spatial_order == "pcm") ? 1 : 2;
     this->step               = (time_order == "rk1") ? 1 : 0.5;
     const luint xstride      = (global::on_sm) ? xblockdim + 2 * radius : nx;
     const luint ystride      = (dim < 3)         ? 1
@@ -2220,7 +2220,7 @@ void Newtonian<dim>::simulate(
                 fullP,
                 cons.data(),
                 nx,
-                space_order == "pcm",
+                spatial_order == "pcm",
                 bcs.data(),
                 outer_zones.data(),
                 inflow_zones.data()
@@ -2232,7 +2232,7 @@ void Newtonian<dim>::simulate(
                 cons.data(),
                 nx,
                 ny,
-                space_order == "pcm",
+                spatial_order == "pcm",
                 geometry,
                 bcs.data(),
                 outer_zones.data(),
@@ -2247,7 +2247,7 @@ void Newtonian<dim>::simulate(
                 nx,
                 ny,
                 nz,
-                space_order == "pcm",
+                spatial_order == "pcm",
                 bcs.data(),
                 inflow_zones.data(),
                 half_sphere,
@@ -2267,7 +2267,7 @@ void Newtonian<dim>::simulate(
                     fullP,
                     cons.data(),
                     nx,
-                    space_order == "pcm",
+                    spatial_order == "pcm",
                     bcs.data(),
                     outer_zones.data(),
                     inflow_zones.data()
@@ -2279,7 +2279,7 @@ void Newtonian<dim>::simulate(
                     cons.data(),
                     nx,
                     ny,
-                    space_order == "pcm",
+                    spatial_order == "pcm",
                     geometry,
                     bcs.data(),
                     outer_zones.data(),
@@ -2294,7 +2294,7 @@ void Newtonian<dim>::simulate(
                     nx,
                     ny,
                     nz,
-                    space_order == "pcm",
+                    spatial_order == "pcm",
                     bcs.data(),
                     inflow_zones.data(),
                     half_sphere,

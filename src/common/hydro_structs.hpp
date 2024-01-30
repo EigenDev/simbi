@@ -39,7 +39,7 @@ struct DataWriteMembers {
     real x1min, x1max, x2min, x2max, x3min, x3max, dt;
     std::string coord_system, regime;
     std::string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
-    std::string space_order, time_order;
+    std::string spatial_order, time_order;
     std::vector<real> x1, x2, x3;
     std::vector<std::string> boundary_conditions;
 
@@ -66,7 +66,7 @@ struct InitialConditions {
     std::vector<bool> object_cells;
     std::string data_directory, coord_system, solver;
     std::string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing, regime;
-    std::string space_order, time_order;
+    std::string spatial_order, time_order;
     std::vector<std::string> boundary_conditions;
     std::vector<std::vector<real>> boundary_sources;
     std::vector<real> x1, x2, x3;

@@ -457,16 +457,16 @@ def configure_state(
         state: Hydro = Hydro.gen_from_setup(config)
         
         if config.order_of_integration == "first":
-            config.space_order = "pcm"
+            config.spatial_order = "pcm"
             config.time_order  = "rk1"
         elif config.order_of_integration == "second":
-            config.space_order = "plm"
+            config.spatial_order = "plm"
             config.time_order  = "rk2"
         elif config.order_of_integration is not None:
             raise ValueError("Order of integration must either be first or second")
             
         kwargs[idx] = {}
-        kwargs[idx]['space_order'] = config.space_order
+        kwargs[idx]['spatial_order'] = config.spatial_order
         kwargs[idx]['time_order']  = config.time_order
         kwargs[idx]['cfl'] = config.cfl_number
         kwargs[idx]['chkpt_interval'] = config.check_point_interval
