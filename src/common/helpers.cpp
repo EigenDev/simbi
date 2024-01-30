@@ -27,7 +27,6 @@ namespace simbi {
             };
             std::signal(SIGTERM, signal_handler);
             std::signal(SIGINT, signal_handler);
-            std::signal(SIGKILL, signal_handler);
             if (killsig_received) {
                 killsig_received = false;
                 throw helpers::InterruptException(1);
