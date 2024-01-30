@@ -304,8 +304,16 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return 0.1
 
     @simbi_property
-    def first_order(self) -> bool:
-        return False
+    def order_of_integration(self) -> str | None:
+        return None
+    
+    @simbi_property
+    def space_order(self) -> str:
+        return "plm"
+    
+    @simbi_property
+    def time_order(self) -> str:
+        return "rk2"
 
     @simbi_property
     def check_point_interval(self) -> float:

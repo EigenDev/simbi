@@ -283,7 +283,7 @@ namespace simbi {
                     }
                     try {
                         //============== Compute benchmarks
-                        if (sim_state.first_order) {
+                        if (sim_state.use_rk1) {
                             timer.startTimer();
                             f();
                             delta_t = timer.get_duration();

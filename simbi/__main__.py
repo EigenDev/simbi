@@ -273,6 +273,20 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         help='flag to indicate source terms provided are constant',
         default=None,
         action='store_true')
+    overridable.add_argument(
+        '--time-order',
+        help='set the order of time integration',
+        default=None,
+        type=str,
+        choices = ["rk1", "rk2"]
+    )
+    overridable.add_argument(
+        '--spatial-order',
+        help='set the order of spatial integration',
+        default=None,
+        type=str,
+        choices = ["pcm", "plm"]
+    )
     onthefly.add_argument(
         '--mode',
         help='execution mode for computation',
@@ -441,8 +455,19 @@ def configure_state(
         else:
             state_docs += [f"No docstring for problem class: {setup_class}"]
         state: Hydro = Hydro.gen_from_setup(config)
+        
+        if config.order_of_integration == "first":
+            config.space_order = "pcm"
+            config.time_order  = "rk1"
+        elif config.order_of_integration == "second":
+            config.space_order = "plm"
+            config.time_order  = "rk2"
+        elif config.order_of_integration is not None:
+            raise ValueError("Order of integration must either be first or second")
+            
         kwargs[idx] = {}
-        kwargs[idx]['first_order'] = config.first_order
+        kwargs[idx]['space_order'] = config.space_order
+        kwargs[idx]['time_order']  = config.time_order
         kwargs[idx]['cfl'] = config.cfl_number
         kwargs[idx]['chkpt_interval'] = config.check_point_interval
         kwargs[idx]['tstart'] = config.default_start_time

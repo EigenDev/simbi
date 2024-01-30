@@ -282,7 +282,7 @@ class Hydro:
         logger.info("=" * 80)
 
     def _place_boundary_sources(
-        self, boundary_sources: Union[Sequence[Any], NDArray[Any]], first_order: bool
+        self, boundary_sources: Union[Sequence[Any], NDArray[Any]], space_order: str
     ) -> NDArray[Any]:
         boundary_sources = [np.array([val]).flatten() for val in boundary_sources]
         max_len = np.max([len(a) for a in boundary_sources])
@@ -292,7 +292,7 @@ class Hydro:
                 for a in boundary_sources
             ]
         )
-        edges = [0, -1] if first_order else [0, 1, -1, -2]
+        edges = [0, -1] if space_order == "pcm" else [0, 1, -1, -2]
         view = self.u[: self.dimensionality + 2]
 
         slices: list[Any]
@@ -307,7 +307,7 @@ class Hydro:
                 + [np.s_[:, i, ...] for i in edges]
             )
 
-        order = 1 if first_order else 2
+        order = 1 if space_order == "pcm" else 2
         if self.dimensionality == 3:
             source_transform: Any = np.s_[:, None, None]
         elif self.dimensionality == 2:
@@ -405,7 +405,6 @@ class Hydro:
         tend: float = 0.1,
         dlogt: float = 0.0,
         plm_theta: float = 1.5,
-        first_order: bool = True,
         x1_cell_spacing: str = "linear",
         x2_cell_spacing: str = "linear",
         x3_cell_spacing: str = "linear",
@@ -432,6 +431,8 @@ class Hydro:
         edens_outer: Optional[Callable[..., float]] = None,
         object_positions: Optional[Union[Sequence[Any], NDArray[Any]]] = None,
         boundary_sources: Optional[Union[Sequence[Any], NDArray[Any]]] = None,
+        space_order: str = "plm",
+        time_order: str = "rk2",
     ) -> None:
         """
         Simulate the Hydro Setup
@@ -441,7 +442,6 @@ class Hydro:
             tend        (float):         The desired time to end the simulation
             dlogt       (float):         The desired logarithmic spacing in checkpoints
             plm_theta   (float):         The Piecewise Linear Reconstructed slope parameter
-            first_order (boolean):       First order RK1 or the RK2 PLM.
             x1_cell_spacing    (str):     Option for a linear or log-spaced mesh on x1
             x2_cell_spacing    (str):     Option for a linear or log-spaced mesh on x2
             x3_cell_spacing    (str):     Option for a linear or log-spaced mesh on x3
@@ -464,10 +464,17 @@ class Hydro:
             edens_outer    (Callable):   idem but for energy density
             object_positions (boolean array_lie): An optional boolean array that masks the immersed boundary
             boundary_source (array_like): An array of conserved quantities at the boundaries of the grid
+            space_order str: space order of integration [pcm or plm]
+            
 
         Returns:
             solution (array): The hydro solution containing the primitive variables
         """
+        if space_order not in ["pcm", "plm"]:
+            raise ValueError(f"Space order can only be one of {['pcm', 'plm']}")
+        if time_order not in ["rk1", "rk2"]:
+            raise ValueError(f"Time order can only be one of {['rk1', 'rk2']}")
+        
         self._print_params(inspect.currentframe())
         if x1_cell_spacing not in available_cellspacings:
             raise ValueError(
@@ -507,7 +514,7 @@ class Hydro:
 
         self._check_boundary_conditions(boundary_conditions)
         if not chkpt:
-            simbi_ic.initializeModel(self, first_order, volume_factor, passive_scalars)
+            simbi_ic.initializeModel(self, space_order == "pcm", volume_factor, passive_scalars)
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensionality, mesh_motion)
         if self.dimensionality == 1 and self.coord_system in [
@@ -527,7 +534,7 @@ class Hydro:
             )
         else:
             boundary_sources = self._place_boundary_sources(
-                boundary_sources=boundary_sources, first_order=first_order
+                boundary_sources=boundary_sources, space_order=space_order
             )
 
         for idx, bc in enumerate(self.boundary_conditions):
@@ -591,7 +598,7 @@ class Hydro:
         )
 
         logger.info(
-            f"Computing {'First' if first_order else 'Second'} Order Solution..."
+            f"Computing Solution for {space_order.capitalize()} in space, {time_order.capitalize()} in time..."
         )
 
         sources = (
@@ -649,7 +656,8 @@ class Hydro:
             "chkpt_idx": self.chkpt_idx,
             "data_directory": cython_data_directory,
             "boundary_conditions": cython_boundary_conditions,
-            "first_order": first_order,
+            "space_order": space_order.encode("utf-8"),
+            "time_order": time_order.encode("utf-8"),
             "x1_cell_spacing": x1_cell_spacing.encode("utf-8"),
             "x2_cell_spacing": x2_cell_spacing.encode("utf-8"),
             "x3_cell_spacing": x3_cell_spacing.encode("utf-8"),
@@ -667,6 +675,7 @@ class Hydro:
             "nz": self.nz,
             "object_cells": object_cells.flatten(),
         }
+        
         if self.mhd:
             init_conditions["bsources"] = bsources
 

@@ -286,12 +286,12 @@ class Visualizer:
         field_str = util.get_field_str(self)
         scale_cycle = cycle(self.scale_downs)
         refcount = 0
-        for axidx, ax in enumerate(
+        for ax in (
             ax_iter := get_iterable(self.axs, func=list if self.nplots == 1 else iter)
         ):
             for fidx, file in enumerate(get_iterable(self.flist[self.current_frame])):
                 fields, setup, mesh = util.read_file(self, file, ndim=self.ndim)
-                for idx, field in enumerate(get_iterable(self.fields[axidx])):
+                for idx, field in enumerate(get_iterable(self.fields)):
                     if field in derived:
                         var = util.prims2var(fields, field)
                     else:
@@ -305,13 +305,15 @@ class Visualizer:
                         elif field in ["rho", "D"]:
                             var *= util.rho_scale.value
 
-                    if not isinstance(field_str, str):
-                        label = field_str[axidx]
-                    else:
-                        label = field_str
+                    label = None
                     scale = next(scale_cycle)
-                    if scale != 1:
-                        label = label + f"/{int(scale)}"
+                    if len(self.fields) > 1:
+                        if not isinstance(field_str, str):
+                            label = field_str[idx]
+                        else:
+                            label = field_str
+                        if scale != 1:
+                            label = label + f"/{int(scale)}"
 
                     if self.labels:
                         label += f", {self.labels[fidx]}"
@@ -406,7 +408,7 @@ class Visualizer:
                     else:
                         x = mesh["x1"]
                         (line,) = ax.plot(mesh["x1"], var / scale, label=label)
-
+                        
                     self.frames += [line]
                     # BMK REF
                     if self.pictorial and refcount == 0:
@@ -434,7 +436,7 @@ class Visualizer:
 
         if len(self.fields) == 1:
             ax.set_ylabel(field_str)
-        if self.legend:
+        if label is not None and self.legend:
             if self.nplots == 1:
                 ax.legend(loc=self.legend_loc)
             else:
