@@ -597,6 +597,7 @@ class Hydro:
             else np.asanyarray(object_positions, dtype=bool)
         )
 
+        print("="*80)
         logger.info(
             f"Computing solution using {spatial_order.upper()} in space, {time_order.upper()} in time..."
         )
@@ -706,9 +707,11 @@ class Hydro:
         )
         
         if self.trace_memory:
+            print(r"-*"*40)
             snapshot = tracemalloc.take_snapshot()
             helpers.display_top(snapshot)
             tracemalloc.stop()
+            print(r"-*"*40)
             helpers.print_progress()
         
         state_contig = self.u.reshape(self.u.shape[0], -1)
