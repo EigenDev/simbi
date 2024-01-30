@@ -598,7 +598,7 @@ class Hydro:
         )
 
         logger.info(
-            f"Computing Solution for {space_order.capitalize()} in space, {time_order.capitalize()} in time..."
+            f"Computing solution using {space_order.upper()} in space, {time_order.upper()} in time..."
         )
 
         sources = (
