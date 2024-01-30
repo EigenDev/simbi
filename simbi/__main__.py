@@ -223,11 +223,6 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         default=None,
         type=float)
     overridable.add_argument(
-        '--first-order',
-        help='set flag if wanting first order accuracy in solution',
-        default=None,
-        action='store_true')
-    overridable.add_argument(
         '--cfl',
         help='Courant-Friedrichs-Lewy stability number',
         default=None,
@@ -287,6 +282,12 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         type=str,
         choices = ["pcm", "plm"]
     )
+    overridable.add_argument(
+        '--order',
+        help='order of time *and* space integrtion',
+        default=None,
+        type=str,
+        choices=['first', 'second'])
     onthefly.add_argument(
         '--mode',
         help='execution mode for computation',
@@ -456,10 +457,10 @@ def configure_state(
             state_docs += [f"No docstring for problem class: {setup_class}"]
         state: Hydro = Hydro.gen_from_setup(config)
         
-        if config.order_of_integration == "first":
+        if config.order_of_integration == "first" or args.order == "first":
             config.spatial_order = "pcm"
             config.time_order  = "rk1"
-        elif config.order_of_integration == "second":
+        elif config.order_of_integration == "second" or args.order == "second":
             config.spatial_order = "plm"
             config.time_order  = "rk2"
         elif config.order_of_integration is not None:
@@ -535,7 +536,10 @@ def run(parser: argparse.ArgumentParser, *_) -> None:
         for arg in vars(sim_args):
             if arg in overridable_args and getattr(args, arg) is None:
                 continue
-
+            
+            if arg == "order":
+                continue
+            
             kwargs[idx][arg] = getattr(args, arg)
         logger.info("=" * 80) # type: ignore
         logger.info(state_docs[idx]) # type: ignore
