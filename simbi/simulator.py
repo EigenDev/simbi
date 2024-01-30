@@ -284,7 +284,7 @@ class Hydro:
     def _place_boundary_sources(
         self, boundary_sources: Union[Sequence[Any], NDArray[Any]], space_order: str
     ) -> NDArray[Any]:
-        boundary_sources = [np.array([val]).flatten() for val in boundary_sources]
+        boundary_sources = [np.array([val]).flat for val in boundary_sources]
         max_len = np.max([len(a) for a in boundary_sources])
         boundary_sources = np.asanyarray(
             [
@@ -673,7 +673,7 @@ class Hydro:
             "nx": self.nx,
             "ny": self.ny,
             "nz": self.nz,
-            "object_cells": object_cells.flatten(),
+            "object_cells": object_cells.flat,
         }
         
         if self.mhd:

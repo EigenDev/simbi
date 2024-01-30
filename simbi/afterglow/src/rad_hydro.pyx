@@ -80,15 +80,15 @@ def py_log_events(
     data_dim:       int):
 
     flattened_fields = np.array(
-        [fields['rho'].flatten(),
-        fields['gamma_beta'].flatten(),
-        fields['p'].flatten()], dtype=float
+        [fields['rho'].flat,
+        fields['gamma_beta'].flat,
+        fields['p'].flat], dtype=float
     )
 
     flattened_mesh = np.asanyarray(
-        [mesh['x1'].flatten(),
-         mesh['x2'].flatten(),
-         mesh['x3'].flatten()], dtype=object
+        [mesh['x1'].flat,
+         mesh['x2'].flat,
+         mesh['x3'].flat], dtype=object
     )
 
     cdef sim_conditions sim_cond 
