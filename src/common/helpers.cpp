@@ -92,9 +92,9 @@ namespace simbi {
             H5::DataSpace dataspacex2(rank, dimsf2);
             H5::DataSpace dataspacex3(rank, dimsf3);
 
-            hid_t dtype_str = H5Tcopy(H5T_C_S1);
+            hid_t str_type  = H5Tcopy(H5T_C_S1);
             size_t size_str = 100;
-            H5Tset_size(dtype_str, size_str);
+            H5Tset_size(str_type, size_str);
 
             // HDF5 only understands vector of char* :-(
             std::vector<const char*> arr_c_str;
@@ -202,8 +202,13 @@ namespace simbi {
             att.write(real_type, &setup.dt);
             att.close();
 
-            att = sim_info.createAttribute("first_order", bool_type, att_space);
-            att.write(bool_type, &setup.first_order);
+            att =
+                sim_info.createAttribute("spatial_order", str_type, att_space);
+            att.write(str_type, setup.space_order.c_str());
+            att.close();
+
+            att = sim_info.createAttribute("time_order", str_type, att_space);
+            att.write(str_type, setup.time_order.c_str());
             att.close();
 
             att = sim_info.createAttribute(
@@ -278,12 +283,12 @@ namespace simbi {
             att.write(int_type, &setup.zactive_zones);
             att.close();
 
-            att = sim_info.createAttribute("geometry", dtype_str, att_space);
-            att.write(dtype_str, setup.coord_system.c_str());
+            att = sim_info.createAttribute("geometry", str_type, att_space);
+            att.write(str_type, setup.coord_system.c_str());
             att.close();
 
-            att = sim_info.createAttribute("regime", dtype_str, att_space);
-            att.write(dtype_str, setup.regime.c_str());
+            att = sim_info.createAttribute("regime", str_type, att_space);
+            att.write(str_type, setup.regime.c_str());
             att.close();
 
             att = sim_info.createAttribute("dimensions", int_type, att_space);
@@ -291,18 +296,18 @@ namespace simbi {
             att.close();
 
             att = sim_info
-                      .createAttribute("x1_cell_spacing", dtype_str, att_space);
-            att.write(dtype_str, setup.x1_cell_spacing.c_str());
+                      .createAttribute("x1_cell_spacing", str_type, att_space);
+            att.write(str_type, setup.x1_cell_spacing.c_str());
             att.close();
 
             att = sim_info
-                      .createAttribute("x2_cell_spacing", dtype_str, att_space);
-            att.write(dtype_str, setup.x2_cell_spacing.c_str());
+                      .createAttribute("x2_cell_spacing", str_type, att_space);
+            att.write(str_type, setup.x2_cell_spacing.c_str());
             att.close();
 
             att = sim_info
-                      .createAttribute("x3_cell_spacing", dtype_str, att_space);
-            att.write(dtype_str, setup.x3_cell_spacing.c_str());
+                      .createAttribute("x3_cell_spacing", str_type, att_space);
+            att.write(str_type, setup.x3_cell_spacing.c_str());
             att.close();
 
             sim_info.close();

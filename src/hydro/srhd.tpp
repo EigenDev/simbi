@@ -1395,7 +1395,7 @@ void SRHD<dim>::advance(
             const real vfaceL = (homolog) ? x1l * hubble_param : hubble_param;
             const real vfaceR = (homolog) ? x1r * hubble_param : hubble_param;
 
-            if (first_order) [[unlikely]] {
+            if (use_pcm) [[unlikely]] {
                 xprimsL = prim_buff[tza * sx * sy + tya * sx + (txa + 0)];
                 xprimsR = prim_buff[tza * sx * sy + tya * sx + (txa + 1)];
                 if constexpr (dim > 1) {
@@ -2374,7 +2374,7 @@ void SRHD<dim>::simulate(
 
     if (mesh_motion && all_outer_bounds) {
         if constexpr (dim == 1) {
-            outer_zones.resize(first_order ? 1 : 2);
+            outer_zones.resize(space_order == "pcm" ? 1 : 2);
             const real dV = get_cell_volume(active_zones - 1);
             outer_zones[0] =
                 conserved_t{
@@ -2475,6 +2475,7 @@ void SRHD<dim>::simulate(
         setup.x3min = x3[0];
         setup.x3    = x3;
     }
+
     setup.nx              = nx;
     setup.ny              = ny;
     setup.nz              = nz;
@@ -2485,7 +2486,8 @@ void SRHD<dim>::simulate(
     setup.x2_cell_spacing = cell2str.at(x2_cell_spacing);
     setup.x3_cell_spacing = cell2str.at(x3_cell_spacing);
     setup.ad_gamma        = gamma;
-    setup.first_order     = first_order;
+    setup.space_order     = space_order;
+    setup.time_order      = time_order;
     setup.coord_system    = coord_system;
     setup.using_fourvelocity =
         (global::VelocityType == global::Velocity::FourVelocity);
@@ -2574,8 +2576,8 @@ void SRHD<dim>::simulate(
         yactive_grid > gpu_block_dimy ? gpu_block_dimy : yactive_grid;
     const luint zblockdim =
         zactive_grid > gpu_block_dimz ? gpu_block_dimz : zactive_grid;
-    this->radius             = (first_order) ? 1 : 2;
-    this->step               = (first_order) ? 1 : 0.5;
+    this->radius             = (space_order == "pcm") ? 1 : 2;
+    this->step               = (time_order == "rk1") ? 1 : 0.5;
     const luint xstride      = (global::on_sm) ? xblockdim + 2 * radius : nx;
     const luint ystride      = (dim < 3)         ? 1
                                : (global::on_sm) ? yblockdim + 2 * radius
@@ -2626,7 +2628,7 @@ void SRHD<dim>::simulate(
                 fullP,
                 cons.data(),
                 nx,
-                first_order,
+                space_order == "pcm",
                 bcs.data(),
                 outer_zones.data(),
                 inflow_zones.data()
@@ -2638,7 +2640,7 @@ void SRHD<dim>::simulate(
                 cons.data(),
                 nx,
                 ny,
-                first_order,
+                space_order == "pcm",
                 geometry,
                 bcs.data(),
                 outer_zones.data(),
@@ -2653,7 +2655,7 @@ void SRHD<dim>::simulate(
                 nx,
                 ny,
                 nz,
-                first_order,
+                space_order == "pcm",
                 bcs.data(),
                 inflow_zones.data(),
                 half_sphere,
@@ -2673,7 +2675,7 @@ void SRHD<dim>::simulate(
                     fullP,
                     cons.data(),
                     nx,
-                    first_order,
+                    space_order == "pcm",
                     bcs.data(),
                     outer_zones.data(),
                     inflow_zones.data()
@@ -2685,7 +2687,7 @@ void SRHD<dim>::simulate(
                     cons.data(),
                     nx,
                     ny,
-                    first_order,
+                    space_order == "pcm",
                     geometry,
                     bcs.data(),
                     outer_zones.data(),
@@ -2700,7 +2702,7 @@ void SRHD<dim>::simulate(
                     nx,
                     ny,
                     nz,
-                    first_order,
+                    space_order == "pcm",
                     bcs.data(),
                     inflow_zones.data(),
                     half_sphere,

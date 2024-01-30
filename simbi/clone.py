@@ -161,8 +161,8 @@ class {setup_name}(BaseConfig):
         return 0.1
 
     @simbi_property
-    def first_order(self) -> bool:
-        return False
+    def order_of_integration(self) -> str:
+        return "second"
 
     @simbi_property
     def check_point_interval(self) -> float:

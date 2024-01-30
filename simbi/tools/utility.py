@@ -80,7 +80,7 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
                 if field == "energy":
                     field_str_list.append(r"$\tau/\tau_0$")
                 else:
-                    field_str_list.append(r"$p/p_{{\rm max}}$")
+                    field_str_list.append(r"$p/p_0$")
         elif field == "energy_rst":
             if args.units:
                 field_str_list.append(r"$E \  [\rm erg \ cm^{-3}]$")
@@ -97,7 +97,7 @@ def get_field_str(args: argparse.Namespace) -> Union[str, list[str]]:
         elif field == "mach":
             field_str_list.append("M")
         elif field == "v1" or field == "v":
-            field_str_list.append(r"$u / u_{{\rm max}}$")
+            field_str_list.append(r"$v_1 / v_0$")
         elif field == "v2":
             field_str_list.append(r"$v_2 / v_0$")
         elif field == "v3":
@@ -198,7 +198,10 @@ def read_file(
         p = hf.get("p")[:]
         chi = (hf.get("chi") or np.zeros_like(rho))[:]
 
-        setup["first_order"] = try_read(ds, key="first_order", fall_back=False)
+        try:
+            setup["first_order"] = ds["spatial_order"] == "pcm"
+        except KeyError:
+            setup["first_order"] = try_read(ds, key="first_order", fall_back=False)
         nx = ds["nx"] if "nx" in ds.keys() else 1
         ny = ds["ny"] if "ny" in ds.keys() else 1
         nz = ds["nz"] if "nz" in ds.keys() else 1

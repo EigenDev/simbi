@@ -19,10 +19,12 @@ cdef extern from "common/hydro_structs.hpp":
     cdef cppclass InitialConditions:
         real tstart, chkpt_interval, dlogt, plm_theta, engine_duration, gamma, cfl, tend
         int nx, ny, nz, chkpt_idx
-        bool first_order, quirk_smoothing, constant_sources
+        bool quirk_smoothing, constant_sources
         vector[vector[real]] sources, gsources
         vector[bool] object_cells
-        string data_directory, coord_system, solver, x1_cell_spacing, x2_cell_spacing, x3_cell_spacing
+        string data_directory, coord_system, solver
+        string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing
+        string space_order, time_order
         vector[string] boundary_conditions
         vector[vector[real]] boundary_sources
         vector[real] x1, x2, x3
