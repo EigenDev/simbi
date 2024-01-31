@@ -1304,7 +1304,7 @@ class Visualizer:
         else:
             nind_curves = self.nplots // len(self.files)
 
-        colors = np.array([colormap(k) for k in np.linspace(0.75, 0.9, nind_curves)])
+        colors = np.array([colormap(k) for k in np.linspace(0.1, 0.9, nind_curves)])
         linestyles = [
             x[0] for x in zip(cycle(["-", "--", ":", "-."]), range(len(self.fields)))
         ]
