@@ -6,6 +6,7 @@
 
 using namespace simbi;
 using namespace simbi::util;
+using namespace simbi::helpers;
 
 // Default Constructor
 template <int dim>
@@ -33,26 +34,22 @@ Newtonian<dim>::get_x1face(const lint ii, const int side) const
     switch (x1_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
             {
-                const real x1l =
-                    helpers::my_max<real>(x1min + (ii - 0.5) * dx1, x1min);
+                const real x1l = my_max<real>(x1min + (ii - 0.5) * dx1, x1min);
                 if (side == 0) {
                     return x1l;
                 }
-                return helpers::my_min<real>(
-                    x1l + dx1 * (ii == 0 ? 0.5 : 1.0),
-                    x1max
-                );
+                return my_min<real>(x1l + dx1 * (ii == 0 ? 0.5 : 1.0), x1max);
             }
         default:
             {
-                const real x1l = helpers::my_max<real>(
+                const real x1l = my_max<real>(
                     x1min * std::pow(10.0, (ii - 0.5) * dlogx1),
                     x1min
                 );
                 if (side == 0) {
                     return x1l;
                 }
-                return helpers::my_min<real>(
+                return my_min<real>(
                     x1l * std::pow(10.0, dlogx1 * (ii == 0 ? 0.5 : 1.0)),
                     x1max
                 );
@@ -67,26 +64,22 @@ Newtonian<dim>::get_x2face(const lint ii, const int side) const
     switch (x2_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
             {
-                const real x2l =
-                    helpers::my_max<real>(x2min + (ii - 0.5) * dx2, x2min);
+                const real x2l = my_max<real>(x2min + (ii - 0.5) * dx2, x2min);
                 if (side == 0) {
                     return x2l;
                 }
-                return helpers::my_min<real>(
-                    x2l + dx2 * (ii == 0 ? 0.5 : 1.0),
-                    x2max
-                );
+                return my_min<real>(x2l + dx2 * (ii == 0 ? 0.5 : 1.0), x2max);
             }
         default:
             {
-                const real x2l = helpers::my_max<real>(
+                const real x2l = my_max<real>(
                     x2min * std::pow(10.0, (ii - 0.5) * dlogx2),
                     x2min
                 );
                 if (side == 0) {
                     return x2l;
                 }
-                return helpers::my_min<real>(
+                return my_min<real>(
                     x2l * std::pow(10.0, dlogx2 * (ii == 0 ? 0.5 : 1.0)),
                     x2max
                 );
@@ -101,26 +94,22 @@ Newtonian<dim>::get_x3face(const lint ii, const int side) const
     switch (x3_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
             {
-                const real x3l =
-                    helpers::my_max<real>(x3min + (ii - 0.5) * dx3, x3min);
+                const real x3l = my_max<real>(x3min + (ii - 0.5) * dx3, x3min);
                 if (side == 0) {
                     return x3l;
                 }
-                return helpers::my_min<real>(
-                    x3l + dx3 * (ii == 0 ? 0.5 : 1.0),
-                    x3max
-                );
+                return my_min<real>(x3l + dx3 * (ii == 0 ? 0.5 : 1.0), x3max);
             }
         default:
             {
-                const real x3l = helpers::my_max<real>(
+                const real x3l = my_max<real>(
                     x3min * std::pow(10.0, (ii - 0.5) * dlogx3),
                     x3min
                 );
                 if (side == 0) {
                     return x3l;
                 }
-                return helpers::my_min<real>(
+                return my_min<real>(
                     x3l * std::pow(10.0, dlogx3 * (ii == 0 ? 0.5 : 1.0)),
                     x3max
                 );
@@ -134,7 +123,7 @@ Newtonian<dim>::get_x1_differential(const lint ii) const
 {
     const real x1l   = get_x1face(ii, 0);
     const real x1r   = get_x1face(ii, 1);
-    const real xmean = helpers::get_cell_centroid(x1r, x1l, geometry);
+    const real xmean = get_cell_centroid(x1r, x1l, geometry);
     switch (geometry) {
         case Geometry::SPHERICAL:
             return xmean * xmean * (x1r - x1l);
@@ -216,29 +205,26 @@ void Newtonian<dim>::emit_troubled_cells() const
 {
     for (luint gid = 0; gid < total_zones; gid++) {
         if (troubled_cells[gid] != 0) {
-            const luint kk   = helpers::get_height(gid, nx, ny);
-            const luint jj   = helpers::get_row(gid, nx, ny, kk);
-            const luint ii   = helpers::get_column(gid, nx, ny, kk);
-            const lint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
-            const lint jreal = helpers::get_real_idx(jj, radius, yactive_grid);
-            const lint kreal = helpers::get_real_idx(kk, radius, zactive_grid);
-            const real x1l   = get_x1face(ireal, 0);
-            const real x1r   = get_x1face(ireal, 1);
-            const real x2l   = get_x2face(jreal, 0);
-            const real x2r   = get_x2face(jreal, 1);
-            const real x3l   = get_x3face(kreal, 0);
-            const real x3r   = get_x3face(kreal, 1);
-            const real x1mean =
-                helpers::calc_any_mean(x1l, x1r, x1_cell_spacing);
-            const real x2mean =
-                helpers::calc_any_mean(x2l, x2r, x2_cell_spacing);
-            const real x3mean =
-                helpers::calc_any_mean(x3l, x3r, x3_cell_spacing);
-            const real rho = cons[gid].den;
-            const real v1  = cons[gid].momentum(1) / rho;
-            const real v2  = (dim < 2) ? cons[gid].momentum(2) / rho : 0.0;
-            const real v3  = (dim < 3) ? cons[gid].momentum(3) / rho : 0.0;
-            const real vsq = v1 * v1 + v2 * v2 + v3 * v3;
+            const luint kk    = get_height(gid, nx, ny);
+            const luint jj    = get_row(gid, nx, ny, kk);
+            const luint ii    = get_column(gid, nx, ny, kk);
+            const lint ireal  = get_real_idx(ii, radius, xactive_grid);
+            const lint jreal  = get_real_idx(jj, radius, yactive_grid);
+            const lint kreal  = get_real_idx(kk, radius, zactive_grid);
+            const real x1l    = get_x1face(ireal, 0);
+            const real x1r    = get_x1face(ireal, 1);
+            const real x2l    = get_x2face(jreal, 0);
+            const real x2r    = get_x2face(jreal, 1);
+            const real x3l    = get_x3face(kreal, 0);
+            const real x3r    = get_x3face(kreal, 1);
+            const real x1mean = calc_any_mean(x1l, x1r, x1_cell_spacing);
+            const real x2mean = calc_any_mean(x2l, x2r, x2_cell_spacing);
+            const real x3mean = calc_any_mean(x3l, x3r, x3_cell_spacing);
+            const real rho    = cons[gid].den;
+            const real v1     = cons[gid].momentum(1) / rho;
+            const real v2     = (dim < 2) ? cons[gid].momentum(2) / rho : 0.0;
+            const real v3     = (dim < 3) ? cons[gid].momentum(3) / rho : 0.0;
+            const real vsq    = v1 * v1 + v2 * v2 + v3 * v3;
             if constexpr (dim == 1) {
                 fprintf(
                     stderr,
@@ -310,47 +296,30 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
             real invdV = 1.0;
             if (homolog) {
                 if constexpr (dim == 1) {
-                    const auto ireal =
-                        helpers::get_real_idx(gid, radius, active_zones);
-                    const real dV = get_cell_volume(ireal);
-                    invdV         = 1.0 / dV;
+                    const auto ireal = get_real_idx(gid, radius, active_zones);
+                    const real dV    = get_cell_volume(ireal);
+                    invdV            = 1.0 / dV;
                 }
                 else if constexpr (dim == 2) {
-                    const luint ii = gid % nx;
-                    const luint jj = gid / nx;
-                    const auto ireal =
-                        helpers::get_real_idx(ii, radius, xactive_grid);
-                    const auto jreal =
-                        helpers::get_real_idx(jj, radius, yactive_grid);
-                    const real dV = get_cell_volume(ireal, jreal);
-                    invdV         = 1.0 / dV;
+                    const luint ii   = gid % nx;
+                    const luint jj   = gid / nx;
+                    const auto ireal = get_real_idx(ii, radius, xactive_grid);
+                    const auto jreal = get_real_idx(jj, radius, yactive_grid);
+                    const real dV    = get_cell_volume(ireal, jreal);
+                    invdV            = 1.0 / dV;
                 }
                 else {
-                    const luint kk = simbi::helpers::get_height(
-                        gid,
-                        xactive_grid,
-                        yactive_grid
-                    );
-                    const luint jj = simbi::helpers::get_row(
-                        gid,
-                        xactive_grid,
-                        yactive_grid,
-                        kk
-                    );
-                    const luint ii = simbi::helpers::get_column(
-                        gid,
-                        xactive_grid,
-                        yactive_grid,
-                        kk
-                    );
-                    const auto ireal =
-                        helpers::get_real_idx(ii, radius, xactive_grid);
-                    const auto jreal =
-                        helpers::get_real_idx(jj, radius, yactive_grid);
-                    const auto kreal =
-                        helpers::get_real_idx(kk, radius, zactive_grid);
-                    const real dV = get_cell_volume(ireal, jreal, kreal);
-                    invdV         = 1.0 / dV;
+                    const luint kk =
+                        get_height(gid, xactive_grid, yactive_grid);
+                    const luint jj =
+                        get_row(gid, xactive_grid, yactive_grid, kk);
+                    const luint ii =
+                        get_column(gid, xactive_grid, yactive_grid, kk);
+                    const auto ireal = get_real_idx(ii, radius, xactive_grid);
+                    const auto jreal = get_real_idx(jj, radius, yactive_grid);
+                    const auto kreal = get_real_idx(kk, radius, zactive_grid);
+                    const real dV    = get_cell_volume(ireal, jreal, kreal);
+                    invdV            = 1.0 / dV;
                 }
             }
             const real rho     = cons_data[gid].den * invdV;
@@ -446,14 +415,10 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
 
         default:
             {
-                const real aR = helpers::my_max<real>(
-                    helpers::my_max<real>(vL + csL, vR + csR),
-                    0.0
-                );
-                const real aL = helpers::my_min<real>(
-                    helpers::my_min<real>(vL - csL, vR - csR),
-                    0.0
-                );
+                const real aR =
+                    my_max<real>(my_max<real>(vL + csL, vR + csR), 0.0);
+                const real aL =
+                    my_min<real>(my_min<real>(vL - csL, vR - csR), 0.0);
                 return {aL, aR};
             }
     }
@@ -495,10 +460,10 @@ void Newtonian<dim>::adapt_dt()
     std::atomic<real> min_dt = INFINITY;
     thread_pool.parallel_for(total_zones, [&](luint gid) {
         real v1p, v1m, v2p, v2m, v3p, v3m, cfl_dt;
-        const luint kk    = helpers::axid<dim, BlkAx::K>(gid, nx, ny);
-        const luint jj    = helpers::axid<dim, BlkAx::J>(gid, nx, ny, kk);
-        const luint ii    = helpers::axid<dim, BlkAx::I>(gid, nx, ny, kk);
-        const luint ireal = helpers::get_real_idx(ii, radius, xactive_grid);
+        const luint kk    = axid<dim, BlkAx::K>(gid, nx, ny);
+        const luint jj    = axid<dim, BlkAx::J>(gid, nx, ny, kk);
+        const luint ii    = axid<dim, BlkAx::I>(gid, nx, ny, kk);
+        const luint ireal = get_real_idx(ii, radius, xactive_grid);
         // Left/Right wave speeds
         const real rho = prims[gid].rho;
         const real v1  = prims[gid].vcomponent(1);
@@ -546,7 +511,7 @@ void Newtonian<dim>::adapt_dt()
                         cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
                     }
                     else if constexpr (dim == 2) {
-                        const real rmean = helpers::get_cell_centroid(
+                        const real rmean = get_cell_centroid(
                             x1r,
                             x1l,
                             simbi::Geometry::SPHERICAL
@@ -559,7 +524,7 @@ void Newtonian<dim>::adapt_dt()
                     else {
                         const real x2l   = get_x2face(jj, 0);
                         const real x2r   = get_x2face(jj, 1);
-                        const real rmean = helpers::get_cell_centroid(
+                        const real rmean = get_cell_centroid(
                             x1r,
                             x1l,
                             simbi::Geometry::SPHERICAL
@@ -592,12 +557,11 @@ void Newtonian<dim>::adapt_dt()
 
                             default:
                                 {
-                                    const real rmean =
-                                        helpers::get_cell_centroid(
-                                            x1r,
-                                            x1l,
-                                            simbi::Geometry::CYLINDRICAL
-                                        );
+                                    const real rmean = get_cell_centroid(
+                                        x1r,
+                                        x1l,
+                                        simbi::Geometry::CYLINDRICAL
+                                    );
                                     cfl_dt = std::min(
                                         {dx1 / (std::max(v1p, v1m)),
                                          rmean * dx2 / (std::max(v2p, v2m))}
@@ -607,7 +571,7 @@ void Newtonian<dim>::adapt_dt()
                         }
                     }
                     else {
-                        const real rmean = helpers::get_cell_centroid(
+                        const real rmean = get_cell_centroid(
                             x1r,
                             x1l,
                             simbi::Geometry::CYLINDRICAL
@@ -631,25 +595,25 @@ void Newtonian<dim>::adapt_dt(const ExecutionPolicy<>& p)
 {
 #if GPU_CODE
     if constexpr (dim == 1) {
-        // LAUNCH_ASYNC((helpers::compute_dt<primitive_t,dt_type>),
+        // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
         // p.gridSize, p.blockSize, this, prims.data(), dt_min.data());
-        helpers::compute_dt<primitive_t>
+        compute_dt<primitive_t>
             <<<p.gridSize, p.blockSize>>>(this, prims.data(), dt_min.data());
     }
     else {
-        // LAUNCH_ASYNC((helpers::compute_dt<primitive_t,dt_type>),
+        // LAUNCH_ASYNC((compute_dt<primitive_t,dt_type>),
         // p.gridSize, p.blockSize, this, prims.data(), dt_min.data(),
         // geometry);
-        helpers::compute_dt<primitive_t><<<p.gridSize, p.blockSize>>>(
+        compute_dt<primitive_t><<<p.gridSize, p.blockSize>>>(
             this,
             prims.data(),
             dt_min.data(),
             geometry
         );
     }
-    // LAUNCH_ASYNC((helpers::deviceReduceWarpAtomicKernel<dim>), p.gridSize,
+    // LAUNCH_ASYNC((deviceReduceWarpAtomicKernel<dim>), p.gridSize,
     // p.blockSize, this, dt_min.data(), active_zones);
-    helpers::deviceReduceWarpAtomicKernel<dim>
+    deviceReduceWarpAtomicKernel<dim>
         <<<p.gridSize, p.blockSize>>>(this, dt_min.data(), total_zones);
     gpu::api::deviceSynch();
 #endif
@@ -676,7 +640,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
     if constexpr (dim == 1) {
         return {
           rho * vn,
-          m1 * vn + helpers::kronecker(nhat, 1) * pressure,
+          m1 * vn + kronecker(nhat, 1) * pressure,
           (et + pressure) * vn,
           rho * vn * chi
         };
@@ -685,8 +649,8 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
         const real m2 = rho * v2;
         return {
           rho * vn,
-          m1 * vn + helpers::kronecker(nhat, 1) * pressure,
-          m2 * vn + helpers::kronecker(nhat, 2) * pressure,
+          m1 * vn + kronecker(nhat, 1) * pressure,
+          m2 * vn + kronecker(nhat, 2) * pressure,
           (et + pressure) * vn,
           rho * vn * chi
         };
@@ -696,9 +660,9 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
         const real m3 = rho * v3;
         return {
           rho * vn,
-          m1 * vn + helpers::kronecker(nhat, 1) * pressure,
-          m2 * vn + helpers::kronecker(nhat, 2) * pressure,
-          m3 * vn + helpers::kronecker(nhat, 3) * pressure,
+          m1 * vn + kronecker(nhat, 1) * pressure,
+          m2 * vn + kronecker(nhat, 2) * pressure,
+          m3 * vn + kronecker(nhat, 3) * pressure,
           (et + pressure) * vn,
           rho * vn * chi
         };
@@ -740,7 +704,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
         }
     }();
 
-    // Upwind the scalar concentration flux
+    // Upwind the scalar concentration
     if (net_flux.den < 0.0) {
         net_flux.chi = right_prims.chi * net_flux.den;
     }
@@ -851,12 +815,12 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
 
         // Left Star State in x-direction of coordinate lattice
         real rhostar = cofactor * (aL - vL) * rho;
-        real m1star = cofactor * (m1 * (aL - vL) + helpers::kronecker(nhat, 1) *
-                                                       (-pressure + pStar));
-        real m2star = cofactor * (m2 * (aL - vL) + helpers::kronecker(nhat, 2) *
-                                                       (-pressure + pStar));
-        real m3star = cofactor * (m3 * (aL - vL) + helpers::kronecker(nhat, 3) *
-                                                       (-pressure + pStar));
+        real m1star  = cofactor * (m1 * (aL - vL) +
+                                  kronecker(nhat, 1) * (-pressure + pStar));
+        real m2star  = cofactor * (m2 * (aL - vL) +
+                                  kronecker(nhat, 2) * (-pressure + pStar));
+        real m3star  = cofactor * (m3 * (aL - vL) +
+                                  kronecker(nhat, 3) * (-pressure + pStar));
         real estar =
             cofactor * (edens * (aL - vL) + pStar * aStar - pressure * vL);
         const auto starStateL = [=] {
@@ -877,12 +841,12 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         cofactor = 1.0 / (aR - aStar);
 
         rhostar = cofactor * (aR - vR) * rho;
-        m1star  = cofactor * (m1 * (aR - vR) +
-                             helpers::kronecker(nhat, 1) * (-pressure + pStar));
-        m2star  = cofactor * (m2 * (aR - vR) +
-                             helpers::kronecker(nhat, 2) * (-pressure + pStar));
-        m3star  = cofactor * (m3 * (aR - vR) +
-                             helpers::kronecker(nhat, 3) * (-pressure + pStar));
+        m1star  = cofactor *
+                 (m1 * (aR - vR) + kronecker(nhat, 1) * (-pressure + pStar));
+        m2star = cofactor *
+                 (m2 * (aR - vR) + kronecker(nhat, 2) * (-pressure + pStar));
+        m3star = cofactor *
+                 (m3 * (aR - vR) + kronecker(nhat, 3) * (-pressure + pStar));
         estar = cofactor * (edens * (aR - vR) + pStar * aStar - pressure * vR);
         const auto starStateR = [=] {
             if constexpr (dim == 2) {
@@ -893,11 +857,9 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             }
         }();
 
-        const real ma_local =
-            helpers::my_max(std::abs(vL / cL), std::abs(vR / cR));
-        const real phi = std::sin(
-            helpers::my_min<real>(1.0, ma_local / ma_lim) * M_PI * 0.5
-        );
+        const real ma_local = my_max(std::abs(vL / cL), std::abs(vR / cR));
+        const real phi =
+            std::sin(my_min<real>(1.0, ma_local / ma_lim) * M_PI * 0.5);
         const real aL_lm          = phi * aL;
         const real aR_lm          = phi * aR;
         const auto face_starState = (aStar <= 0) ? starStateR : starStateL;
@@ -908,7 +870,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
                             0.5 -
                         face_starState * vface;
 
-        // upwind the concentration flux
+        // upwind the concentration
         if (net_flux.den < 0.0) {
             net_flux.chi = right_prims.chi * net_flux.den;
         }
@@ -969,10 +931,10 @@ void Newtonian<dim>::advance(
          ypg,
          zpg,
          this] GPU_LAMBDA(const luint idx) {
-            auto prim_buff = helpers::sm_proxy<primitive_t>(prim_data);
-            const luint kk = helpers::axid<dim, BlkAx::K>(idx, xpg, ypg);
-            const luint jj = helpers::axid<dim, BlkAx::J>(idx, xpg, ypg, kk);
-            const luint ii = helpers::axid<dim, BlkAx::I>(idx, xpg, ypg, kk);
+            auto prim_buff = sm_proxy<primitive_t>(prim_data);
+            const luint kk = axid<dim, BlkAx::K>(idx, xpg, ypg);
+            const luint jj = axid<dim, BlkAx::J>(idx, xpg, ypg, kk);
+            const luint ii = axid<dim, BlkAx::I>(idx, xpg, ypg, kk);
 
             if constexpr (global::on_gpu) {
                 if constexpr (dim == 1) {
@@ -1013,7 +975,7 @@ void Newtonian<dim>::advance(
             const luint aid = ka * nx * ny + ja * nx + ia;
 
             if constexpr (global::on_sm) {
-                helpers::load_shared_buffer<dim>(
+                load_shared_buffer<dim>(
                     p,
                     prim_buff,
                     prim_data,
@@ -1035,24 +997,24 @@ void Newtonian<dim>::advance(
                 );
             }
 
-            const auto il = helpers::get_real_idx(ii - 1, 0, xpg);
-            const auto ir = helpers::get_real_idx(ii + 1, 0, xpg);
-            const auto jl = helpers::get_real_idx(jj - 1, 0, ypg);
-            const auto jr = helpers::get_real_idx(jj + 1, 0, ypg);
-            const auto kl = helpers::get_real_idx(kk - 1, 0, zpg);
-            const auto kr = helpers::get_real_idx(kk + 1, 0, zpg);
+            const auto il = get_real_idx(ii - 1, 0, xpg);
+            const auto ir = get_real_idx(ii + 1, 0, xpg);
+            const auto jl = get_real_idx(jj - 1, 0, ypg);
+            const auto jr = get_real_idx(jj + 1, 0, ypg);
+            const auto kl = get_real_idx(kk - 1, 0, zpg);
+            const auto kr = get_real_idx(kk + 1, 0, zpg);
             const bool object_to_left =
-                helpers::ib_check<dim>(object_data, il, jj, kk, xpg, ypg, 1);
+                ib_check<dim>(object_data, il, jj, kk, xpg, ypg, 1);
             const bool object_to_right =
-                helpers::ib_check<dim>(object_data, ir, jj, kk, xpg, ypg, 1);
+                ib_check<dim>(object_data, ir, jj, kk, xpg, ypg, 1);
             const bool object_in_front =
-                helpers::ib_check<dim>(object_data, ii, jr, kk, xpg, ypg, 2);
+                ib_check<dim>(object_data, ii, jr, kk, xpg, ypg, 2);
             const bool object_behind =
-                helpers::ib_check<dim>(object_data, ii, jl, kk, xpg, ypg, 2);
+                ib_check<dim>(object_data, ii, jl, kk, xpg, ypg, 2);
             const bool object_above =
-                helpers::ib_check<dim>(object_data, ii, jj, kr, xpg, ypg, 3);
+                ib_check<dim>(object_data, ii, jj, kr, xpg, ypg, 3);
             const bool object_below =
-                helpers::ib_check<dim>(object_data, ii, jj, kl, xpg, ypg, 3);
+                ib_check<dim>(object_data, ii, jj, kl, xpg, ypg, 3);
 
             const real x1l    = get_x1face(ii, 0);
             const real x1r    = get_x1face(ii, 1);
@@ -1073,9 +1035,9 @@ void Newtonian<dim>::advance(
                     zprimsR = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
                 }
 
-                helpers::ib_modify<dim>(xprimsR, xprimsL, object_to_right, 1);
-                helpers::ib_modify<dim>(yprimsR, yprimsL, object_in_front, 2);
-                helpers::ib_modify<dim>(zprimsR, zprimsL, object_above, 3);
+                ib_modify<dim>(xprimsR, xprimsL, object_to_right, 1);
+                ib_modify<dim>(yprimsR, yprimsL, object_in_front, 2);
+                ib_modify<dim>(zprimsR, zprimsL, object_above, 3);
 
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
@@ -1185,9 +1147,9 @@ void Newtonian<dim>::advance(
                     zprimsR = prim_buff[(tza - 0) * sx * sy + tya * sx + txa];
                 }
 
-                helpers::ib_modify<dim>(xprimsL, xprimsR, object_to_left, 1);
-                helpers::ib_modify<dim>(yprimsL, yprimsR, object_behind, 2);
-                helpers::ib_modify<dim>(zprimsL, zprimsR, object_below, 3);
+                ib_modify<dim>(xprimsL, xprimsR, object_to_left, 1);
+                ib_modify<dim>(yprimsL, yprimsR, object_behind, 2);
+                ib_modify<dim>(zprimsL, zprimsR, object_below, 3);
 
                 uxL = prims2cons(xprimsL);
                 uxR = prims2cons(xprimsR);
@@ -1300,47 +1262,36 @@ void Newtonian<dim>::advance(
                 // Reconstructed left X primitive_t vector at the i+1/2
                 // interface
                 xprimsL =
-                    center +
-                    helpers::plm_gradient(center, xlc, xrc, plm_theta) * 0.5;
-                xprimsR =
-                    xrc -
-                    helpers::plm_gradient(xrc, center, xrm, plm_theta) * 0.5;
+                    center + plm_gradient(center, xlc, xrc, plm_theta) * 0.5;
+                xprimsR = xrc - plm_gradient(xrc, center, xrm, plm_theta) * 0.5;
 
                 // Coordinate Y
                 if constexpr (dim > 1) {
-                    ylm = prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
-                    ylc = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
-                    yrc = prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
-                    yrm = prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
-                    yprimsL =
-                        center +
-                        helpers::plm_gradient(center, ylc, yrc, plm_theta) *
-                            0.5;
+                    ylm     = prim_buff[tza * sx * sy + (tya - 2) * sx + txa];
+                    ylc     = prim_buff[tza * sx * sy + (tya - 1) * sx + txa];
+                    yrc     = prim_buff[tza * sx * sy + (tya + 1) * sx + txa];
+                    yrm     = prim_buff[tza * sx * sy + (tya + 2) * sx + txa];
+                    yprimsL = center +
+                              plm_gradient(center, ylc, yrc, plm_theta) * 0.5;
                     yprimsR =
-                        yrc -
-                        helpers::plm_gradient(yrc, center, yrm, plm_theta) *
-                            0.5;
+                        yrc - plm_gradient(yrc, center, yrm, plm_theta) * 0.5;
                 }
 
                 // Coordinate z
                 if constexpr (dim > 2) {
-                    zlm = prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
-                    zlc = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
-                    zrc = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
-                    zrm = prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
-                    zprimsL =
-                        center +
-                        helpers::plm_gradient(center, zlc, zrc, plm_theta) *
-                            0.5;
+                    zlm     = prim_buff[(tza - 2) * sx * sy + tya * sx + txa];
+                    zlc     = prim_buff[(tza - 1) * sx * sy + tya * sx + txa];
+                    zrc     = prim_buff[(tza + 1) * sx * sy + tya * sx + txa];
+                    zrm     = prim_buff[(tza + 2) * sx * sy + tya * sx + txa];
+                    zprimsL = center +
+                              plm_gradient(center, zlc, zrc, plm_theta) * 0.5;
                     zprimsR =
-                        zrc -
-                        helpers::plm_gradient(zrc, center, zrm, plm_theta) *
-                            0.5;
+                        zrc - plm_gradient(zrc, center, zrm, plm_theta) * 0.5;
                 }
 
-                helpers::ib_modify<dim>(xprimsR, xprimsL, object_to_right, 1);
-                helpers::ib_modify<dim>(yprimsR, yprimsL, object_in_front, 2);
-                helpers::ib_modify<dim>(zprimsR, zprimsL, object_above, 3);
+                ib_modify<dim>(xprimsR, xprimsL, object_to_right, 1);
+                ib_modify<dim>(yprimsR, yprimsL, object_in_front, 2);
+                ib_modify<dim>(zprimsR, zprimsL, object_above, 3);
 
                 // Calculate the left and right states using the reconstructed
                 // PLM Primitive
@@ -1439,36 +1390,25 @@ void Newtonian<dim>::advance(
                 }
 
                 // Do the same thing, but for the left side interface [i - 1/2]
-                xprimsL =
-                    xlc +
-                    helpers::plm_gradient(xlc, xlm, center, plm_theta) * 0.5;
+                xprimsL = xlc + plm_gradient(xlc, xlm, center, plm_theta) * 0.5;
                 xprimsR =
-                    center -
-                    helpers::plm_gradient(center, xlc, xrc, plm_theta) * 0.5;
+                    center - plm_gradient(center, xlc, xrc, plm_theta) * 0.5;
                 if constexpr (dim > 1) {
                     yprimsL =
-                        ylc +
-                        helpers::plm_gradient(ylc, ylm, center, plm_theta) *
-                            0.5;
-                    yprimsR =
-                        center -
-                        helpers::plm_gradient(center, ylc, yrc, plm_theta) *
-                            0.5;
+                        ylc + plm_gradient(ylc, ylm, center, plm_theta) * 0.5;
+                    yprimsR = center -
+                              plm_gradient(center, ylc, yrc, plm_theta) * 0.5;
                 }
                 if constexpr (dim > 2) {
                     zprimsL =
-                        zlc +
-                        helpers::plm_gradient(zlc, zlm, center, plm_theta) *
-                            0.5;
-                    zprimsR =
-                        center -
-                        helpers::plm_gradient(center, zlc, zrc, plm_theta) *
-                            0.5;
+                        zlc + plm_gradient(zlc, zlm, center, plm_theta) * 0.5;
+                    zprimsR = center -
+                              plm_gradient(center, zlc, zrc, plm_theta) * 0.5;
                 }
 
-                helpers::ib_modify<dim>(xprimsL, xprimsR, object_to_left, 1);
-                helpers::ib_modify<dim>(yprimsL, yprimsR, object_behind, 2);
-                helpers::ib_modify<dim>(zprimsL, zprimsR, object_below, 3);
+                ib_modify<dim>(xprimsL, xprimsR, object_to_left, 1);
+                ib_modify<dim>(yprimsL, yprimsR, object_behind, 2);
+                ib_modify<dim>(zprimsL, zprimsR, object_below, 3);
 
                 // Calculate the left and right states using the reconstructed
                 // PLM Primitive
@@ -1651,7 +1591,7 @@ void Newtonian<dim>::advance(
                             const real rlf = x1l + vfaceL * step * dt;
                             const real rrf = x1r + vfaceR * step * dt;
                             const real rmean =
-                                helpers::get_cell_centroid(rrf, rlf, geometry);
+                                get_cell_centroid(rrf, rlf, geometry);
                             const real sR = 4.0 * M_PI * rrf * rrf;
                             const real sL = 4.0 * M_PI * rlf * rlf;
                             const real dV =
@@ -1685,12 +1625,10 @@ void Newtonian<dim>::advance(
                             const real rl = x1l + vfaceL * step * dt;
                             const real rr = x1r + vfaceR * step * dt;
                             const real rmean =
-                                helpers::get_cell_centroid(rr, rl, geometry);
-                            const real tl = helpers::my_max<real>(
-                                x2min + (jj - 0.5) * dx2,
-                                x2min
-                            );
-                            const real tr = helpers::my_min<real>(
+                                get_cell_centroid(rr, rl, geometry);
+                            const real tl =
+                                my_max<real>(x2min + (jj - 0.5) * dx2, x2min);
+                            const real tr = my_min<real>(
                                 tl + dx2 * (jj == 0 ? 0.5 : 1.0),
                                 x2max
                             );
@@ -1733,14 +1671,14 @@ void Newtonian<dim>::advance(
                         {
                             const real rl    = x1l + vfaceL * step * dt;
                             const real rr    = x1r + vfaceR * step * dt;
-                            const real rmean = helpers::get_cell_centroid(
+                            const real rmean = get_cell_centroid(
                                 rr,
                                 rl,
                                 simbi::Geometry::PLANAR_CYLINDRICAL
                             );
-                            // const real tl           = helpers::my_max(x2min +
+                            // const real tl           = my_max(x2min +
                             // (jj - 0.5) * dx2 , x2min); const real tr =
-                            // helpers::my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0),
+                            // my_min(tl + dx2 * (jj == 0 ? 0.5 : 1.0),
                             // x2max);
                             const real dV    = rmean * (rr - rl) * dx2;
                             const real invdV = 1.0 / dV;
@@ -1773,7 +1711,7 @@ void Newtonian<dim>::advance(
                         {
                             const real rl    = x1l + vfaceL * step * dt;
                             const real rr    = x1r + vfaceR * step * dt;
-                            const real rmean = helpers::get_cell_centroid(
+                            const real rmean = get_cell_centroid(
                                 rl,
                                 rr,
                                 simbi::Geometry::AXIS_CYLINDRICAL
@@ -1821,7 +1759,7 @@ void Newtonian<dim>::advance(
                             const real tr    = get_x2face(jj, 1);
                             const real ql    = get_x3face(kk, 0);
                             const real qr    = get_x3face(kk, 1);
-                            const real rmean = helpers::get_cell_centroid(
+                            const real rmean = get_cell_centroid(
                                 rr,
                                 rl,
                                 simbi::Geometry::SPHERICAL
@@ -1868,7 +1806,7 @@ void Newtonian<dim>::advance(
                             const real qr    = get_x2face(jj, 1);
                             const real zl    = get_x3face(kk, 0);
                             const real zr    = get_x3face(kk, 1);
-                            const real rmean = helpers::get_cell_centroid(
+                            const real rmean = get_cell_centroid(
                                 rr,
                                 rl,
                                 simbi::Geometry::CYLINDRICAL
@@ -1926,7 +1864,7 @@ void Newtonian<dim>::simulate(
     std::optional<Newtonian<dim>::function_t> const& e_outer
 )
 {
-    helpers::anyDisplayProps();
+    anyDisplayProps();
     // set the primitive functionals
     this->dens_outer = d_outer.value_or(nullptr);
     this->mom1_outer = m1_outer.value_or(nullptr);
@@ -1971,9 +1909,8 @@ void Newtonian<dim>::simulate(
         else if constexpr (dim == 2) {
             outer_zones.resize(ny);
             for (luint jj = 0; jj < ny; jj++) {
-                const auto jreal =
-                    helpers::get_real_idx(jj, radius, yactive_grid);
-                const real dV = get_cell_volume(xactive_grid - 1, jreal);
+                const auto jreal = get_real_idx(jj, radius, yactive_grid);
+                const real dV    = get_cell_volume(xactive_grid - 1, jreal);
                 outer_zones[jj] =
                     conserved_t{
                       dens_outer(x1max, x2[jreal]),
@@ -1988,11 +1925,9 @@ void Newtonian<dim>::simulate(
         else {
             outer_zones.resize(ny * nz);
             for (luint kk = 0; kk < nz; kk++) {
-                const auto kreal =
-                    helpers::get_real_idx(kk, radius, zactive_grid);
+                const auto kreal = get_real_idx(kk, radius, zactive_grid);
                 for (luint jj = 0; jj < ny; jj++) {
-                    const auto jreal =
-                        helpers::get_real_idx(jj, radius, yactive_grid);
+                    const auto jreal = get_real_idx(jj, radius, yactive_grid);
                     const real dV =
                         get_cell_volume(xactive_grid - 1, jreal, kreal);
                     outer_zones[kk * ny + jj] =
@@ -2016,8 +1951,7 @@ void Newtonian<dim>::simulate(
 
     inflow_zones.resize(dim * 2);
     for (int i = 0; i < 2 * dim; i++) {
-        this->bcs.push_back(helpers::boundary_cond_map.at(boundary_conditions[i]
-        ));
+        this->bcs.push_back(boundary_cond_map.at(boundary_conditions[i]));
         if constexpr (dim == 1) {
             this->inflow_zones[i] = conserved_t{
               boundary_sources[i][0],
@@ -2069,7 +2003,7 @@ void Newtonian<dim>::simulate(
     setup.x2_cell_spacing     = cell2str.at(x2_cell_spacing);
     setup.x3_cell_spacing     = cell2str.at(x3_cell_spacing);
     setup.ad_gamma            = gamma;
-    setup.spatial_order         = spatial_order;
+    setup.spatial_order       = spatial_order;
     setup.time_order          = time_order;
     setup.coord_system        = coord_system;
     setup.using_fourvelocity  = false;
@@ -2202,8 +2136,7 @@ void Newtonian<dim>::simulate(
 
     // Using a sigmoid decay function to represent when the source terms turn
     // off.
-    time_constant =
-        helpers::sigmoid(t, engine_duration, step * dt, constant_sources);
+    time_constant = sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
     if (t == 0 || init_chkpt_idx == 0) {
         nt::write2file<dim>(
@@ -2216,7 +2149,7 @@ void Newtonian<dim>::simulate(
             checkpoint_zones
         );
         if constexpr (dim == 1) {
-            helpers::config_ghosts1D(
+            config_ghosts1D(
                 fullP,
                 cons.data(),
                 nx,
@@ -2227,7 +2160,7 @@ void Newtonian<dim>::simulate(
             );
         }
         else if constexpr (dim == 2) {
-            helpers::config_ghosts2D(
+            config_ghosts2D(
                 fullP,
                 cons.data(),
                 nx,
@@ -2241,7 +2174,7 @@ void Newtonian<dim>::simulate(
             );
         }
         else {
-            helpers::config_ghosts3D(
+            config_ghosts3D(
                 fullP,
                 cons.data(),
                 nx,
@@ -2263,7 +2196,7 @@ void Newtonian<dim>::simulate(
             advance(activeP, xstride, ystride);
             cons2prim(fullP);
             if constexpr (dim == 1) {
-                helpers::config_ghosts1D(
+                config_ghosts1D(
                     fullP,
                     cons.data(),
                     nx,
@@ -2274,7 +2207,7 @@ void Newtonian<dim>::simulate(
                 );
             }
             else if constexpr (dim == 2) {
-                helpers::config_ghosts2D(
+                config_ghosts2D(
                     fullP,
                     cons.data(),
                     nx,
@@ -2288,7 +2221,7 @@ void Newtonian<dim>::simulate(
                 );
             }
             else {
-                helpers::config_ghosts3D(
+                config_ghosts3D(
                     fullP,
                     cons.data(),
                     nx,
@@ -2308,12 +2241,8 @@ void Newtonian<dim>::simulate(
             else {
                 adapt_dt();
             }
-            time_constant = helpers::sigmoid(
-                t,
-                engine_duration,
-                step * dt,
-                constant_sources
-            );
+            time_constant =
+                sigmoid(t, engine_duration, step * dt, constant_sources);
             t += step * dt;
             if (mesh_motion) {
                 // update x1 endpoints
@@ -2327,7 +2256,7 @@ void Newtonian<dim>::simulate(
             }
         });
     }
-    catch (const helpers::SimulationFailureException& e) {
+    catch (const SimulationFailureException& e) {
         std::cout << std::string(80, '=') << "\n";
         std::cerr << e.what() << '\n';
         std::cout << std::string(80, '=') << "\n";
