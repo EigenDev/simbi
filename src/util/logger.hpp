@@ -145,20 +145,16 @@ namespace simbi {
             template <typename sim_state_t, typename F>
             void with_logger(sim_state_t& sim_state, real end_time, F&& f)
             {
-                auto timer                = Timer();
-                auto logger               = Logger();
-                using conserved_t         = typename sim_state_t::conserved_t;
-                using primitive_t         = typename sim_state_t::primitive_t;
-                auto& n                   = logger.n;
-                auto& nfold               = logger.nfold;
-                auto& ncheck              = logger.ncheck;
-                auto& speed               = logger.speed;
-                auto& zu_avg              = logger.zu_avg;
-                auto& delta_t             = logger.delta_t;
-                constexpr auto write2file = helpers::write_to_file<
-                    typename sim_state_t::primitive_soa_t,
-                    sim_state_t::dimensions,
-                    sim_state_t>;
+                auto timer        = Timer();
+                auto logger       = Logger();
+                using conserved_t = typename sim_state_t::conserved_t;
+                using primitive_t = typename sim_state_t::primitive_t;
+                auto& n           = logger.n;
+                auto& nfold       = logger.nfold;
+                auto& ncheck      = logger.ncheck;
+                auto& speed       = logger.speed;
+                auto& zu_avg      = logger.zu_avg;
+                auto& delta_t     = logger.delta_t;
 
                 while ((sim_state.t < end_time) && (!sim_state.inFailureState)
                 ) {
@@ -344,15 +340,7 @@ namespace simbi {
                         // Write to a file at every checkpoint interval
                         if (sim_state.t >= sim_state.t_interval &&
                             sim_state.t != INFINITY) {
-                            write2file(
-                                sim_state,
-                                sim_state.setup,
-                                sim_state.data_directory,
-                                sim_state.t,
-                                sim_state.t_interval,
-                                sim_state.chkpt_interval,
-                                sim_state.checkpoint_zones
-                            );
+                            helpers::write_to_file(sim_state);
                             if (sim_state.dlogt != 0) {
                                 sim_state.t_interval *=
                                     std::pow(10.0, sim_state.dlogt);
@@ -372,15 +360,7 @@ namespace simbi {
                     catch (helpers::InterruptException& e) {
                         util::writeln("Interrupt Exception: {}", e.what());
                         sim_state.inFailureState = true;
-                        write2file(
-                            sim_state,
-                            sim_state.setup,
-                            sim_state.data_directory,
-                            sim_state.t,
-                            INFINITY,
-                            sim_state.chkpt_interval,
-                            sim_state.checkpoint_zones
-                        );
+                        helpers::write_to_file(sim_state);
                     }
                 }
                 print_avg_speed(logger);

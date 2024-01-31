@@ -262,70 +262,72 @@ namespace simbi {
             return sprims;
         }
 
-        template <typename Prim_type, int Ndim, typename Sim_type>
-        void write_to_file(
-            Sim_type& sim_state_host,
-            DataWriteMembers& setup,
-            const std::string data_directory,
-            const real t,
-            const real t_interval,
-            const real chkpt_interval,
-            const luint chkpt_zone_label
-        )
+        template <typename Sim_type>
+        void write_to_file(Sim_type& sim_state)
         {
-            sim_state_host.prims.copyFromGpu();
-            sim_state_host.cons.copyFromGpu();
-            setup.x1max = sim_state_host.x1max;
-            setup.x1min = sim_state_host.x1min;
+            sim_state.prims.copyFromGpu();
+            sim_state.cons.copyFromGpu();
+            sim_state.setup.x1max = sim_state.x1max;
+            sim_state.setup.x1min = sim_state.x1min;
 
             PrimData prods;
-            static auto step                = sim_state_host.init_chkpt_idx;
-            static auto tbefore             = sim_state_host.tstart;
+            static auto data_directory      = sim_state.data_directory;
+            static auto step                = sim_state.init_chkpt_idx;
+            static auto tbefore             = sim_state.tstart;
             static lint tchunk_order_of_mag = 2;
-            const auto time_order_of_mag    = std::floor(std::log10(t));
+            const auto t_interval           = [&] {
+                if (sim_state.t == 0) {
+                    return static_cast<real>(0.0);
+                }
+                else if (sim_state.dlogt != 0.0 && sim_state.init_chkpt_idx == 0) {
+                    return static_cast<real>(0.0);
+                }
+                return sim_state.t_interval;
+            }();
+            const auto time_order_of_mag = std::floor(std::log10(sim_state.t));
             if (time_order_of_mag > tchunk_order_of_mag) {
                 tchunk_order_of_mag += 1;
             }
 
             // Transform vector of primitive structs to struct of primitive
             // vectors
-            auto transfer_prims =
-                vec2struct<Prim_type, typename Sim_type::primitive_t>(
-                    sim_state_host.prims
-                );
-            writeToProd<Prim_type, typename Sim_type::primitive_t>(
-                &transfer_prims,
-                &prods
-            );
+            auto transfer_prims = vec2struct<
+                typename Sim_type::primitive_soa_t,
+                typename Sim_type::primitive_t>(sim_state.prims);
+            writeToProd<
+                typename Sim_type::primitive_soa_t,
+                typename Sim_type::primitive_t>(&transfer_prims, &prods);
             std::string tnow;
-            if (sim_state_host.dlogt != 0) {
+            if (sim_state.dlogt != 0) {
                 const auto time_order_of_mag = std::floor(std::log10(step));
                 if (time_order_of_mag > tchunk_order_of_mag) {
                     tchunk_order_of_mag += 1;
                 }
                 tnow = create_step_str(step, tchunk_order_of_mag);
             }
-            else if (t_interval != INFINITY) {
+            else if (!sim_state.inFailureState) {
                 tnow = create_step_str(t_interval, tchunk_order_of_mag);
             }
             else {
                 tnow = "interrupted";
             }
-            const auto filename =
-                string_format("%d.chkpt." + tnow + ".h5", chkpt_zone_label);
+            const auto filename = string_format(
+                "%d.chkpt." + tnow + ".h5",
+                sim_state.checkpoint_zones
+            );
 
-            setup.t         = t;
-            setup.dt        = t - tbefore;
-            setup.chkpt_idx = step;
-            tbefore         = t;
+            sim_state.setup.t         = sim_state.t;
+            sim_state.setup.dt        = sim_state.t - tbefore;
+            sim_state.setup.chkpt_idx = step;
+            tbefore                   = sim_state.t;
             step++;
             write_hdf5(
                 data_directory,
                 filename,
                 prods,
-                setup,
-                Ndim,
-                sim_state_host.total_zones
+                sim_state.setup,
+                sim_state.dimensions,
+                sim_state.total_zones
             );
         }
 

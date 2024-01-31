@@ -171,14 +171,6 @@ namespace simbi {
 
         void emit_troubled_cells() const;
     };
-
-    namespace sr {
-        // file writer template alias
-        template <int dim>
-        constexpr auto write2file = helpers::
-            write_to_file<typename SRHD<dim>::primitive_soa_t, dim, SRHD<dim>>;
-
-    }   // namespace sr
 }   // namespace simbi
 
 template <>

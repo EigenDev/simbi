@@ -177,16 +177,6 @@ namespace simbi {
 
         void emit_troubled_cells() const;
     };
-
-    namespace nt {
-        // file writer template alias
-        template <int dim>
-        constexpr auto write2file = helpers::write_to_file<
-            typename Newtonian<dim>::primitive_soa_t,
-            dim,
-            Newtonian<dim>>;
-
-    }   // namespace nt
 }   // namespace simbi
 
 template <>

@@ -2556,15 +2556,7 @@ void SRHD<dim>::simulate(
     time_constant = sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
     if (t == 0 || init_chkpt_idx == 0) {
-        sr::write2file<dim>(
-            *this,
-            setup,
-            data_directory,
-            t,
-            0,
-            chkpt_interval,
-            checkpoint_zones
-        );
+        write_to_file(*this);
         if constexpr (dim == 1) {
             config_ghosts1D(
                 fullP,

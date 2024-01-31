@@ -292,16 +292,8 @@ namespace simbi {
          * @param chkpt_zone_label the zone label for the checkpoint
          * <zone>.chkpt.<time>.h5
          */
-        template <typename Prim_type, int Ndim, typename Sim_type>
-        void write_to_file(
-            Sim_type& sim_state_host,
-            DataWriteMembers& setup,
-            const std::string data_directory,
-            const real t,
-            const real t_interval,
-            const real chkpt_interval,
-            const luint chkpt_zone_label
-        );
+        template <typename Sim_type>
+        void write_to_file(Sim_type& sim_state);
 
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-METHODS
