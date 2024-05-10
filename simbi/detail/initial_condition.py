@@ -326,21 +326,11 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
             rho, lorentz_factor, total_enthalpy, pressure, velocity, bfields
         )
 
-        if model.dimensionality == 1:
-            model.u[...] = np.array(
-                [
-                    model.init_density,
-                    *model.init_momentum,
-                    model.init_energy,
-                    *bfields,
-                ]
-            )
-        else:
-            model.u[...] = np.array(
-                [
-                    model.init_density,
-                    *model.init_momentum,
-                    model.init_energy,
-                    *bfields,
-                ]
-            )
+        model.u[...] = np.array(
+            [
+                model.init_density,
+                *model.init_momentum,
+                model.init_energy,
+                *bfields,
+            ]
+        )

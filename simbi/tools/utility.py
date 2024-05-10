@@ -210,7 +210,10 @@ def read_file(
         setup["x2active"] = ny - 2 * (1 + (setup["first_order"] ^ 1)) * (ny - 2 > 0)
         setup["x3active"] = nz - 2 * (1 + (setup["first_order"] ^ 1)) * (nz - 2 > 0)
         setup["time"] = ds["current_time"]
-        setup["x1_cell_spacing"] = ds["x1_cell_spacing"]
+        try:
+            setup["x1_cell_spacing"] = ds["x1_cell_spacing"]
+        except KeyError:
+            setup["x1_cell_spacing"] = False
         setup["ad_gamma"] = ds["adiabatic_gamma"]
         setup["x1min"] = try_read(ds, "x1min", fall_back_key="xmin", fall_back=0.0)
         setup["x1max"] = try_read(ds, "x1max", fall_back_key="xmax", fall_back=0.0)
