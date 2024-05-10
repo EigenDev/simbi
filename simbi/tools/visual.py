@@ -340,12 +340,12 @@ class Visualizer:
                                     scale = yvar[shock_location]
                                 else:
                                     xvar = mesh["x1"]
-                                s = ["0.1", "1", "10"]
-                                if idx == 0:
-                                    # d = rf"$v_{{\rm wind}} = {s[fidx]}$, $z={x2coord:.0f}$"
-                                    d = rf"$z={x2coord:.0f}$"
-                                else:
-                                    d = None
+                                # s = ["0.1", "1", "10"]
+                                # if idx == 0:
+                                #     # d = rf"$v_{{\rm wind}} = {s[fidx]}$, $z={x2coord:.0f}$"
+                                #     d = rf"$z={x2coord:.0f}$"
+                                # else:
+                                #     d = None
 
                                 # gamma = 5.0 / 3.0
                                 # beta = 0.5
@@ -380,6 +380,7 @@ class Visualizer:
                                 # pxi = gxi * cs**2 / gamma
                                 # pxi = pxi[1:]
                                 # us = rprime * uxi * xi
+                                
                                 # if field == "rho" and fidx == 0:
                                 #     ax.plot(
                                 #         xi,
@@ -427,7 +428,8 @@ class Visualizer:
                         refcount += 1
 
         if self.setup:
-            ax.set_title(f'{self.setup} t = {setup["time"]:.1f}')
+            ...
+            # ax.set_title(f'{self.setup} t = {setup["time"]:.1f}')
         if self.log:
             ax.set_xscale("log")
             ax.set_yscale("log")
@@ -475,8 +477,10 @@ class Visualizer:
         patches = len(self.fields)
 
         theta_cycle = cycle([0, -np.pi * 0.5, -np.pi, np.pi * 0.5])
-        if patches == 1:
-            patches += 1
+        
+        patches += patches == 1
+        if self.bipolar and patches == 2:
+            patches *= 2
 
         the_fields = cycle(self.fields)
         if any(self.xlims) and not self.cartesian:
@@ -586,6 +590,8 @@ class Visualizer:
                                 self.axs.set_thetamin(-180)
                                 self.axs.set_thetamax(+180)
                             xx = xx[:: theta_sign(idx)] + next(theta_cycle)
+                            if idx in [2,3]:
+                                xx = xx[::-1]
                         elif (
                             max_angle > 0.5 * np.pi and max_angle < 2.0 * np.pi
                         ) and patches > 1:
@@ -627,6 +633,7 @@ class Visualizer:
                             )
                         }
 
+                    print(var.min())
                     self.frames += [
                         ax.pcolormesh(
                             xx,
