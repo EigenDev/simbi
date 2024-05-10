@@ -271,7 +271,7 @@ void SRHD<dim>::emit_troubled_cells() const
 }
 
 //-----------------------------------------------------------------------------------------
-//                          GET THE Primitive
+//                          Get The Primitive
 //-----------------------------------------------------------------------------------------
 /**
  * Return the primitive
@@ -805,17 +805,17 @@ SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t& prims, const luint nhat)
 
 template <int dim>
 GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
-    const SRHD<dim>::conserved_t& left_state,
-    const SRHD<dim>::conserved_t& right_state,
-    const SRHD<dim>::conserved_t& left_flux,
-    const SRHD<dim>::conserved_t& right_flux,
-    const SRHD<dim>::primitive_t& left_prims,
-    const SRHD<dim>::primitive_t& right_prims,
+    const SRHD<dim>::conserved_t& uL,
+    const SRHD<dim>::conserved_t& uR,
+    const SRHD<dim>::conserved_t& fL,
+    const SRHD<dim>::conserved_t& fR,
+    const SRHD<dim>::primitive_t& prL,
+    const SRHD<dim>::primitive_t& prR,
     const luint nhat,
     const real vface
 ) const
 {
-    const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const auto lambda = calc_eigenvals(prL, prR, nhat);
     // Grab the necessary wave speeds
     const real aL  = lambda.aL;
     const real aR  = lambda.aR;
@@ -825,27 +825,24 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
     auto net_flux = [&] {
         // Compute the HLL Flux component-wise
         if (vface <= aLm) {
-            return left_flux - left_state * vface;
+            return fL - uL * vface;
         }
         else if (vface >= aRp) {
-            return right_flux - right_state * vface;
+            return fR - uR * vface;
         }
         else {
-            const auto f_hll = (left_flux * aRp - right_flux * aLm +
-                                (right_state - left_state) * aLm * aRp) /
-                               (aRp - aLm);
-            const auto u_hll = (right_state * aRp - left_state * aLm -
-                                right_flux + left_flux) /
-                               (aRp - aLm);
+            const auto f_hll =
+                (fL * aRp - fR * aLm + (uR - uL) * aLm * aRp) / (aRp - aLm);
+            const auto u_hll = (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
             return f_hll - u_hll * vface;
         }
     }();
     // Upwind the scalar concentration
     if (net_flux.den < 0.0) {
-        net_flux.chi = right_prims.chi * net_flux.den;
+        net_flux.chi = prR.chi * net_flux.den;
     }
     else {
-        net_flux.chi = left_prims.chi * net_flux.den;
+        net_flux.chi = prL.chi * net_flux.den;
     }
 
     // Compute the HLL Flux component-wise
@@ -854,17 +851,17 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
 
 template <int dim>
 GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
-    const SRHD<dim>::conserved_t& left_state,
-    const SRHD<dim>::conserved_t& right_state,
-    const SRHD<dim>::conserved_t& left_flux,
-    const SRHD<dim>::conserved_t& right_flux,
-    const SRHD<dim>::primitive_t& left_prims,
-    const SRHD<dim>::primitive_t& right_prims,
+    const SRHD<dim>::conserved_t& uL,
+    const SRHD<dim>::conserved_t& uR,
+    const SRHD<dim>::conserved_t& fL,
+    const SRHD<dim>::conserved_t& fR,
+    const SRHD<dim>::primitive_t& prL,
+    const SRHD<dim>::primitive_t& prR,
     const luint nhat,
     const real vface
 ) const
 {
-    const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const auto lambda = calc_eigenvals(prL, prR, nhat);
     const real aL     = lambda.aL;
     const real aR     = lambda.aR;
     const real aLm    = aL < 0 ? aL : 0;
@@ -872,24 +869,21 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
 
     //---- Check Wave Speeds before wasting computations
     if (vface <= aLm) {
-        return left_flux - left_state * vface;
+        return fL - uL * vface;
     }
     else if (vface >= aRp) {
-        return right_flux - right_state * vface;
+        return fR - uR * vface;
     }
 
     //-------------------Calculate the HLL Intermediate State
-    const auto hll_state =
-        (right_state * aRp - left_state * aLm - right_flux + left_flux) /
-        (aRp - aLm);
+    const auto hll_state = (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
 
     //------------------Calculate the RHLLE Flux---------------
-    const auto hll_flux = (left_flux * aRp - right_flux * aLm +
-                           (right_state - left_state) * aRp * aLm) /
-                          (aRp - aLm);
+    const auto hll_flux =
+        (fL * aRp - fR * aLm + (uR - uL) * aRp * aLm) / (aRp - aLm);
 
     if (quirk_smoothing) {
-        if (quirk_strong_shock(left_prims.p, right_prims.p)) {
+        if (quirk_strong_shock(prL.p, prR.p)) {
             return hll_flux;
         }
     }
@@ -918,11 +912,11 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
 
     if constexpr (dim == 1) {
         if (vface <= aStar) {
-            const real v        = left_prims.get_v();
-            const real pressure = left_prims.p;
-            const real d        = left_state.den;
-            const real s        = left_state.m1;
-            const real tau      = left_state.nrg;
+            const real v        = prL.get_v();
+            const real pressure = prL.p;
+            const real d        = uL.den;
+            const real s        = uL.m1;
+            const real tau      = uL.nrg;
             const real e        = tau + d;
             const real cofactor = 1.0 / (aLm - aStar);
 
@@ -938,15 +932,15 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
 
             //---------Compute the L Star Flux
             // Compute the HLL Flux component-wise
-            auto hllc_flux = left_flux + (star_stateL - left_state) * aLm;
+            auto hllc_flux = fL + (star_stateL - uL) * aLm;
             return hllc_flux - star_stateL * vface;
         }
         else {
-            const real v        = right_prims.get_v();
-            const real pressure = right_prims.p;
-            const real d        = right_state.den;
-            const real s        = right_state.m1;
-            const real tau      = right_state.nrg;
+            const real v        = prR.get_v();
+            const real pressure = prR.p;
+            const real d        = uR.den;
+            const real s        = uR.m1;
+            const real tau      = uR.nrg;
             const real e        = tau + d;
             const real cofactor = 1.0 / (aRp - aStar);
 
@@ -961,7 +955,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
             const auto star_stateR = conserved_t{dStar, sStar, tauStar};
 
             //---------Compute the R Star Flux
-            auto hllc_flux = right_flux + (star_stateR - right_state) * aRp;
+            auto hllc_flux = fR + (star_stateR - uR) * aRp;
             return hllc_flux - star_stateR * vface;
         }
     }
@@ -977,17 +971,17 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     constexpr real ma_lim = 5.0;
 
                     // --------------Compute the L Star State----------
-                    real pressure = left_prims.p;
-                    real d        = left_state.den;
-                    real s1       = left_state.momentum(1);
-                    real s2       = left_state.momentum(2);
-                    real s3       = left_state.momentum(3);
-                    real tau      = left_state.nrg;
+                    real pressure = prL.p;
+                    real d        = uL.den;
+                    real s1       = uL.momentum(1);
+                    real s2       = uL.momentum(2);
+                    real s3       = uL.momentum(3);
+                    real tau      = uL.nrg;
                     real e        = tau + d;
                     real cofactor = 1.0 / (aL - aStar);
 
-                    const real vL = left_prims.vcomponent(nhat);
-                    const real vR = right_prims.vcomponent(nhat);
+                    const real vL = prL.vcomponent(nhat);
+                    const real vR = prR.vcomponent(nhat);
                     // Left Star State in x-direction of coordinate lattice
                     real dStar = cofactor * (aL - vL) * d;
                     real s1star =
@@ -1017,12 +1011,12 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                         }
                     }();
 
-                    pressure = right_prims.p;
-                    d        = right_state.den;
-                    s1       = right_state.momentum(1);
-                    s2       = right_state.momentum(2);
-                    s3       = right_state.momentum(3);
-                    tau      = right_state.nrg;
+                    pressure = prR.p;
+                    d        = uR.den;
+                    s1       = uR.momentum(1);
+                    s2       = uR.momentum(2);
+                    s3       = uR.momentum(3);
+                    tau      = uR.nrg;
                     e        = tau + d;
                     cofactor = 1.0 / (aR - aStar);
 
@@ -1070,19 +1064,19 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                     const auto face_starState =
                         (aStar <= 0) ? starStateR : starStateL;
                     auto net_flux =
-                        (left_flux + right_flux) * 0.5 +
-                        ((starStateL - left_state) * aL_lm +
+                        (fL + fR) * 0.5 +
+                        ((starStateL - uL) * aL_lm +
                          (starStateL - starStateR) * std::abs(aStar) +
-                         (starStateR - right_state) * aR_lm) *
+                         (starStateR - uR) * aR_lm) *
                             0.5 -
                         face_starState * vface;
 
                     // upwind the concentration
                     if (net_flux.den < 0.0) {
-                        net_flux.chi = right_prims.chi * net_flux.den;
+                        net_flux.chi = prR.chi * net_flux.den;
                     }
                     else {
-                        net_flux.chi = left_prims.chi * net_flux.den;
+                        net_flux.chi = prL.chi * net_flux.den;
                     }
                     return net_flux;
                 }
@@ -1090,17 +1084,17 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
             default:
                 {
                     if (vface <= aStar) {
-                        const real pressure = left_prims.p;
-                        const real d        = left_state.den;
-                        const real s1       = left_state.momentum(1);
-                        const real s2       = left_state.momentum(2);
-                        const real s3       = left_state.momentum(3);
-                        const real tau      = left_state.nrg;
-                        const real chi      = left_state.chi;
+                        const real pressure = prL.p;
+                        const real d        = uL.den;
+                        const real s1       = uL.momentum(1);
+                        const real s2       = uL.momentum(2);
+                        const real s3       = uL.momentum(3);
+                        const real tau      = uL.nrg;
+                        const real chi      = uL.chi;
                         const real e        = tau + d;
                         const real cofactor = 1.0 / (aL - aStar);
 
-                        const real vL = left_prims.vcomponent(nhat);
+                        const real vL = prL.vcomponent(nhat);
                         // Left Star State in x-direction of coordinate lattice
                         const real dStar   = cofactor * (aL - vL) * d;
                         const real chistar = cofactor * (aL - vL) * chi;
@@ -1142,32 +1136,31 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                             }
                         }();
 
-                        auto hllc_flux = left_flux +
-                                         (starStateL - left_state) * aL -
-                                         starStateL * vface;
+                        auto hllc_flux =
+                            fL + (starStateL - uL) * aL - starStateL * vface;
 
                         // upwind the concentration
                         if (hllc_flux.den < 0.0) {
-                            hllc_flux.chi = right_prims.chi * hllc_flux.den;
+                            hllc_flux.chi = prR.chi * hllc_flux.den;
                         }
                         else {
-                            hllc_flux.chi = left_prims.chi * hllc_flux.den;
+                            hllc_flux.chi = prL.chi * hllc_flux.den;
                         }
 
                         return hllc_flux;
                     }
                     else {
-                        const real pressure = right_prims.p;
-                        const real d        = right_state.den;
-                        const real s1       = right_state.momentum(1);
-                        const real s2       = right_state.momentum(2);
-                        const real s3       = right_state.momentum(3);
-                        const real tau      = right_state.nrg;
-                        const real chi      = right_state.chi;
+                        const real pressure = prR.p;
+                        const real d        = uR.den;
+                        const real s1       = uR.momentum(1);
+                        const real s2       = uR.momentum(2);
+                        const real s3       = uR.momentum(3);
+                        const real tau      = uR.nrg;
+                        const real chi      = uR.chi;
                         const real e        = tau + d;
                         const real cofactor = 1.0 / (aR - aStar);
 
-                        const real vR      = right_prims.vcomponent(nhat);
+                        const real vR      = prR.vcomponent(nhat);
                         const real dStar   = cofactor * (aR - vR) * d;
                         const real chistar = cofactor * (aR - vR) * chi;
                         const real s1star =
@@ -1208,16 +1201,15 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
                             }
                         }();
 
-                        auto hllc_flux = right_flux +
-                                         (starStateR - right_state) * aR -
-                                         starStateR * vface;
+                        auto hllc_flux =
+                            fR + (starStateR - uR) * aR - starStateR * vface;
 
                         // upwind the concentration
                         if (hllc_flux.den < 0.0) {
-                            hllc_flux.chi = right_prims.chi * hllc_flux.den;
+                            hllc_flux.chi = prR.chi * hllc_flux.den;
                         }
                         else {
-                            hllc_flux.chi = left_prims.chi * hllc_flux.den;
+                            hllc_flux.chi = prL.chi * hllc_flux.den;
                         }
 
                         return hllc_flux;

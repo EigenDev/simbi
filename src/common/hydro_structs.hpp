@@ -1374,6 +1374,46 @@ namespace rmhd {
         {
             return (nhat == 1 ? b1 : (nhat == 2) ? b2 : b3);
         }
+
+        GPU_CALLABLE_MEMBER
+        void calc_induction(const luint nhat)
+        {
+            if (nhat == 1) {
+                b1 = 0.0;
+                std::swap(b2, b3);
+                b2 *= -1;
+            }
+            else if (nhat == 2) {
+                b2 = 0.0;
+                std::swap(b1, b3);
+                b3 *= -1;
+            }
+            else {
+                b3 = 0.0;
+                std::swap(b1, b2);
+                b1 *= -1;
+            }
+        }
+
+        GPU_CALLABLE_MEMBER
+        void calc_electric_field(const luint nhat)
+        {
+            if (nhat == 1) {
+                b1 = 0.0;
+                std::swap(b2, b3);
+                b3 *= -1;
+            }
+            else if (nhat == 2) {
+                b2 = 0.0;
+                std::swap(b1, b3);
+                b1 *= -1;
+            }
+            else {
+                b3 = 0.0;
+                std::swap(b1, b2);
+                b2 *= -1;
+            }
+        }
     };
 
     template <int dim>

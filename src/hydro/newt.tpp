@@ -273,7 +273,7 @@ void Newtonian<dim>::emit_troubled_cells() const
 }
 
 //-----------------------------------------------------------------------------------------
-//                          GET THE Primitive
+//                          Get The Primitive
 //-----------------------------------------------------------------------------------------
 /**
  * Return the primitive
@@ -671,45 +671,42 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
 
 template <int dim>
 GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
-    const Newtonian<dim>::conserved_t& left_state,
-    const Newtonian<dim>::conserved_t& right_state,
-    const Newtonian<dim>::conserved_t& left_flux,
-    const Newtonian<dim>::conserved_t& right_flux,
-    const Newtonian<dim>::primitive_t& left_prims,
-    const Newtonian<dim>::primitive_t& right_prims,
+    const Newtonian<dim>::conserved_t& uL,
+    const Newtonian<dim>::conserved_t& uR,
+    const Newtonian<dim>::conserved_t& fL,
+    const Newtonian<dim>::conserved_t& fR,
+    const Newtonian<dim>::primitive_t& prL,
+    const Newtonian<dim>::primitive_t& prR,
     const luint nhat,
     const real vface
 ) const
 {
-    const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const auto lambda = calc_eigenvals(prL, prR, nhat);
     const real aL     = lambda.aL;
     const real aR     = lambda.aR;
 
     auto net_flux = [&] {
         // Compute the HLL Flux component-wise
         if (vface <= aL) {
-            return left_flux - left_state * vface;
+            return fL - uL * vface;
         }
         else if (vface >= aR) {
-            return right_flux - right_state * vface;
+            return fR - uR * vface;
         }
         else {
-            const auto f_hll = (left_flux * aR - right_flux * aL +
-                                (right_state - left_state) * aR * aL) /
-                               (aR - aL);
-            const auto u_hll =
-                (right_state * aR - left_state * aL - right_flux + left_flux) /
-                (aR - aL);
+            const auto f_hll =
+                (fL * aR - fR * aL + (uR - uL) * aR * aL) / (aR - aL);
+            const auto u_hll = (uR * aR - uL * aL - fR + fL) / (aR - aL);
             return f_hll - u_hll * vface;
         }
     }();
 
     // Upwind the scalar concentration
     if (net_flux.den < 0.0) {
-        net_flux.chi = right_prims.chi * net_flux.den;
+        net_flux.chi = prR.chi * net_flux.den;
     }
     else {
-        net_flux.chi = left_prims.chi * net_flux.den;
+        net_flux.chi = prL.chi * net_flux.den;
     }
 
     return net_flux;
@@ -717,26 +714,26 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
 
 template <int dim>
 GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
-    const Newtonian<dim>::conserved_t& left_state,
-    const Newtonian<dim>::conserved_t& right_state,
-    const Newtonian<dim>::conserved_t& left_flux,
-    const Newtonian<dim>::conserved_t& right_flux,
-    const Newtonian<dim>::primitive_t& left_prims,
-    const Newtonian<dim>::primitive_t& right_prims,
+    const Newtonian<dim>::conserved_t& uL,
+    const Newtonian<dim>::conserved_t& uR,
+    const Newtonian<dim>::conserved_t& fL,
+    const Newtonian<dim>::conserved_t& fR,
+    const Newtonian<dim>::primitive_t& prL,
+    const Newtonian<dim>::primitive_t& prR,
     const luint nhat,
     const real vface
 ) const
 {
-    const auto lambda = calc_eigenvals(left_prims, right_prims, nhat);
+    const auto lambda = calc_eigenvals(prL, prR, nhat);
     const real aL     = lambda.aL;
     const real aR     = lambda.aR;
 
     // Quick checks before moving on with rest of computation
     if (vface <= aL) {
-        return left_flux - left_state * vface;
+        return fL - uL * vface;
     }
     else if (vface >= aR) {
-        return right_flux - right_state * vface;
+        return fR - uR * vface;
     }
 
     if constexpr (dim == 1) {
@@ -745,20 +742,16 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         const real am    = aL < 0.0 ? aL : 0.0;
         const real ap    = aR > 0.0 ? aR : 0.0;
 
-        auto hll_flux = (left_flux * ap + right_flux * am -
-                         (right_state - left_state) * am * ap) /
-                        (am + ap);
+        auto hll_flux = (fL * ap + fR * am - (uR - uL) * am * ap) / (am + ap);
 
-        auto hll_state =
-            (right_state * aR - left_state * aL - right_flux + left_flux) /
-            (aR - aL);
+        auto hll_state = (uR * aR - uL * aL - fR + fL) / (aR - aL);
 
         if (vface <= aStar) {
-            real pressure = left_prims.p;
-            real v        = left_prims.v1;
-            real rho      = left_state.den;
-            real m        = left_state.m1;
-            real energy   = left_state.nrg;
+            real pressure = prL.p;
+            real v        = prL.v1;
+            real rho      = uL.den;
+            real m        = uL.m1;
+            real energy   = uL.nrg;
             real cofac    = 1.0 / (aL - aStar);
 
             real rhoStar = cofac * (aL - v) * rho;
@@ -769,15 +762,14 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             auto star_state = conserved_t{rhoStar, mstar, eStar};
 
             // Compute the intermediate left flux
-            return left_flux + (star_state - left_state) * aL -
-                   star_state * vface;
+            return fL + (star_state - uL) * aL - star_state * vface;
         }
         else {
-            real pressure = right_prims.p;
-            real v        = right_prims.v1;
-            real rho      = right_state.den;
-            real m        = right_state.m1;
-            real energy   = right_state.nrg;
+            real pressure = prR.p;
+            real v        = prR.v1;
+            real rho      = uR.den;
+            real m        = uR.m1;
+            real energy   = uR.nrg;
             real cofac    = 1.0 / (aR - aStar);
 
             real rhoStar = cofac * (aR - v) * rho;
@@ -788,8 +780,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             auto star_state = conserved_t{rhoStar, mstar, eStar};
 
             // Compute the intermediate right flux
-            return right_flux + (star_state - right_state) * aR -
-                   star_state * vface;
+            return fR + (star_state - uR) * aR - star_state * vface;
         }
     }
     else {
@@ -802,16 +793,16 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         constexpr real ma_lim = 0.10;
 
         // --------------Compute the L Star State----------
-        real pressure = left_prims.p;
-        real rho      = left_state.den;
-        real m1       = left_state.momentum(1);
-        real m2       = left_state.momentum(2);
-        real m3       = left_state.momentum(3);
-        real edens    = left_state.nrg;
+        real pressure = prL.p;
+        real rho      = uL.den;
+        real m1       = uL.momentum(1);
+        real m2       = uL.momentum(2);
+        real m3       = uL.momentum(3);
+        real edens    = uL.nrg;
         real cofactor = 1.0 / (aL - aStar);
 
-        const real vL = left_prims.vcomponent(nhat);
-        const real vR = right_prims.vcomponent(nhat);
+        const real vL = prL.vcomponent(nhat);
+        const real vR = prR.vcomponent(nhat);
 
         // Left Star State in x-direction of coordinate lattice
         real rhostar = cofactor * (aL - vL) * rho;
@@ -832,12 +823,12 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
             }
         }();
 
-        pressure = right_prims.p;
-        rho      = right_state.den;
-        m1       = right_state.momentum(1);
-        m2       = right_state.momentum(2);
-        m3       = right_state.momentum(3);
-        edens    = right_state.nrg;
+        pressure = prR.p;
+        rho      = uR.den;
+        m1       = uR.momentum(1);
+        m2       = uR.momentum(2);
+        m3       = uR.momentum(3);
+        edens    = uR.nrg;
         cofactor = 1.0 / (aR - aStar);
 
         rhostar = cofactor * (aR - vR) * rho;
@@ -863,19 +854,19 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
         const real aL_lm          = phi * aL;
         const real aR_lm          = phi * aR;
         const auto face_starState = (aStar <= 0) ? starStateR : starStateL;
-        auto net_flux             = (left_flux + right_flux) * 0.5 +
-                        ((starStateL - left_state) * aL_lm +
+        auto net_flux             = (fL + fR) * 0.5 +
+                        ((starStateL - uL) * aL_lm +
                          (starStateL - starStateR) * std::abs(aStar) +
-                         (starStateR - right_state) * aR_lm) *
+                         (starStateR - uR) * aR_lm) *
                             0.5 -
                         face_starState * vface;
 
         // upwind the concentration
         if (net_flux.den < 0.0) {
-            net_flux.chi = right_prims.chi * net_flux.den;
+            net_flux.chi = prR.chi * net_flux.den;
         }
         else {
-            net_flux.chi = left_prims.chi * net_flux.den;
+            net_flux.chi = prL.chi * net_flux.den;
         }
 
         return net_flux;

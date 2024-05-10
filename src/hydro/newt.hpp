@@ -113,12 +113,12 @@ namespace simbi {
 
         GPU_CALLABLE_MEMBER
         conserved_t calc_hllc_flux(
-            const conserved_t& left_state,
-            const conserved_t& right_state,
-            const conserved_t& left_flux,
-            const conserved_t& right_flux,
-            const primitive_t& left_prims,
-            const primitive_t& right_prims,
+            const conserved_t& uL,
+            const conserved_t& uR,
+            const conserved_t& fL,
+            const conserved_t& fR,
+            const primitive_t& prL,
+            const primitive_t& prR,
             const luint nhat,
             const real vface = 0.0
         ) const;
@@ -129,12 +129,12 @@ namespace simbi {
 
         GPU_CALLABLE_MEMBER
         conserved_t calc_hll_flux(
-            const conserved_t& left_state,
-            const conserved_t& right_state,
-            const conserved_t& left_flux,
-            const conserved_t& right_flux,
-            const primitive_t& left_prims,
-            const primitive_t& right_prims,
+            const conserved_t& uL,
+            const conserved_t& uR,
+            const conserved_t& fL,
+            const conserved_t& fR,
+            const primitive_t& prL,
+            const primitive_t& prR,
             const luint nhat,
             const real vface = 0.0
         ) const;

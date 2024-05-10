@@ -710,12 +710,11 @@ namespace simbi {
          * @brief Calculate the RMHD Lorentz factor according to Mignone and
          * Bodo (2006)
          *
-         * @param gr reduced adiabatic index
          * @param ssq s-squared
          * @param bsq b-squared
          * @param msq m-squared
          * @param qq  variational parameter
-         * @return gas pressure from Eq.(19)
+         * @return Lorentz factor from Eq.(18)
          */
         GPU_CALLABLE_INLINE real calc_rmhd_lorentz(
             const real ssq,
@@ -810,7 +809,7 @@ namespace simbi {
             const auto w  = calc_rmhd_lorentz(ssq, bsq, msq, qq);
             const auto pg = calc_rmhd_pg(gr, d, w, qq);
             return qq - pg + (1.0 - 0.5 / (w * w)) * bsq -
-                   ssq / (2.0 * qq * qq) - et;
+                   0.5 * ssq / (qq * qq) - et;
         }
 
         /**
