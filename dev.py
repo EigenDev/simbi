@@ -323,24 +323,25 @@ def install_simbi(args: argparse.Namespace) -> None:
     except IndexError:
         gpu_include = "" 
     
-    h5cc_show = get_output(["h5cc", "-show"]).split()
+    # h5cc_show = get_output(["h5cc", "-show"]).split()
+    h5pkg = get_output(['pkg-config', '--cflags', 'hdf5']).split()
     hdf5_include = " ".join(
         [
             include_dir[2:]
-            for include_dir in filter(lambda x: x.startswith("-I"), h5cc_show)
+            for include_dir in filter(lambda x: x.startswith("-I"), h5pkg)
         ]
     )
 
-    if not hdf5_include:
-        hdf5_libpath = Path(
-            " ".join(
-                [
-                    lib_dir[2:]
-                    for lib_dir in filter(lambda x: x.startswith("-L"), h5cc_show)
-                ]
-            )
-        )
-        hdf5_include = hdf5_libpath.parents[0].resolve() / "include"
+    # if not hdf5_include:
+    #     hdf5_libpath = Path(
+    #         " ".join(
+    #             [
+    #                 lib_dir[2:]
+    #                 for lib_dir in filter(lambda x: x.startswith("-L"), h5cc_show)
+    #             ]
+    #         )
+    #     )
+    #     hdf5_include = hdf5_libpath.parents[0].resolve() / "include"
 
     config_command = configure(args, reconfigure_flag, hdf5_include, gpu_include)
     subprocess.run(config_command, env=simbi_env, check=True)
