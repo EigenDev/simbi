@@ -25,7 +25,7 @@ RST = "\033[0m"  # No Color
 flag_overrides = {}
 flag_overrides["float_precision"] = ["--double", "--float"]
 flag_overrides["gpu_compilation"] = ["--gpu-compilation", "--cpu-compilation"]
-flag_overrides["column_major"]  = ["--row-major", "--column-major"]
+flag_overrides["column_major"] = ["--row-major", "--column-major"]
 flag_overrides["four_velocity"] = ["--four-velocity", "--no-four-velocity"]
 flag_overrides["progress_bar"] = ["--progress-bar", "--no-progress-bar"]
 flag_overrides["shared_memory"] = ["--shared-memory", "--no-shared-memory"]
@@ -33,15 +33,18 @@ flag_overrides["install_mode"] = ["develop", "default"]
 
 
 def get_tool(name: str) -> Optional[str]:
-    import platform 
+    import platform
     from shutil import which
-    if name in ['cc', 'c++']:
-        if platform.system() == 'Darwin':
-            homebrew = Path('/opt/homebrew/')
+
+    if name in ["cc", "c++"]:
+        if platform.system() == "Darwin":
+            homebrew = Path("/opt/homebrew/")
             if not homebrew.is_dir():
-                print(f"{YELLOW}WRN{RST}no homebrew found. running Apple's default compiler might raise issues")
+                print(
+                    f"{YELLOW}WRN{RST}no homebrew found. running Apple's default compiler might raise issues"
+                )
                 cont = input("Continue anyway? [y/N]")
-                if cont == 'N':
+                if cont == "N":
                     sys.exit(0)
         return which(name)
     return which(name)
@@ -299,12 +302,12 @@ def install_simbi(args: argparse.Namespace) -> None:
         simbi_env["CC"] = get_tool("cc")
         print(f"{YELLOW}WRN{RST}: C compiler not set")
         print(f"Using symbolic link {simbi_env['CC']} as default")
-        
+
     if "CXX" not in simbi_env:
         simbi_env["CXX"] = get_tool("c++")
         print(f"{YELLOW}WRN{RST}: C++ compiler not set")
         print(f"Using symbolic link {simbi_env['CXX']} as default")
-    
+
     gpu_runtime_dir = ""
     if is_tool("nvcc"):
         which_cuda = Path(get_tool("nvcc"))
@@ -321,15 +324,12 @@ def install_simbi(args: argparse.Namespace) -> None:
     try:
         gpu_include = f"{gpu_runtime_dir.split()[0]}/include"
     except IndexError:
-        gpu_include = "" 
-    
+        gpu_include = ""
+
     # h5cc_show = get_output(["h5cc", "-show"]).split()
-    h5pkg = get_output(['pkg-config', '--cflags', 'hdf5']).split()
+    h5pkg = get_output(["pkg-config", "--cflags", "hdf5"]).split()
     hdf5_include = " ".join(
-        [
-            include_dir[2:]
-            for include_dir in filter(lambda x: x.startswith("-I"), h5pkg)
-        ]
+        [include_dir[2:] for include_dir in filter(lambda x: x.startswith("-I"), h5pkg)]
     )
 
     # if not hdf5_include:
@@ -361,9 +361,16 @@ def install_simbi(args: argparse.Namespace) -> None:
             ["meson", "install"], cwd=f"{args.build_dir}"
         ).wait()
         if compile_child == install_child == 0:
-            subprocess.Popen(
-                [sys.executable, "-m", "pip", "install", install_mode]
-            ).wait()
+            p1 = subprocess.Popen(
+                [sys.executable, "-m", "pip", "install", install_mode],
+                stdout=subprocess.PIPE,
+            )
+            p2 = subprocess.Popen(
+                ("grep", "-v", "Requirement already satisfied"),
+                stdin=p1.stdout,
+            )
+            p1.stdout.close()
+            p2.communicate()[0]
             subprocess.run(["rm", "-rf", f"{egg_dir}", f"{build_dir}"], check=True)
 
 
@@ -374,10 +381,12 @@ def uninstall_simbi(args: argparse.Namespace) -> None:
     if exts:
         subprocess.run(["rm", "-ri", *exts], check=True)
 
+
 def main() -> int:
     _, args = parse_the_arguments()
     args.func(args)
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())
