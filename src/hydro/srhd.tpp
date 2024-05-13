@@ -1333,6 +1333,10 @@ void SRHD<dim>::advance(
                     radius
                 );
             }
+            else {
+                // cast away lambda capture;
+                (void) p;
+            }
 
             const auto il = get_real_idx(ii - 1, 0, xpg);
             const auto ir = get_real_idx(ii + 1, 0, xpg);
@@ -1912,10 +1916,15 @@ void SRHD<dim>::advance(
 
             const auto source_terms = [&] {
                 if constexpr (dim == 1) {
+                    // cast away unused lambda capture
+                    (void) mom2_source;
+                    (void) mom3_source;
                     return conserved_t{d_source, s1_source, e_source} *
                            time_constant;
                 }
                 else if constexpr (dim == 2) {
+                    // cast away unused lambda capture
+                    (void) mom3_source;
                     const real s2_source =
                         null_mom2 ? 0.0 : mom2_source[real_loc];
                     return conserved_t{
@@ -1948,10 +1957,15 @@ void SRHD<dim>::advance(
             const auto tid     = tza * sx * sy + tya * sx + txa;
             const auto gravity = [&] {
                 if constexpr (dim == 1) {
+                    // cast away unused lambda capture
+                    (void) g2_source;
+                    (void) g3_source;
                     const auto ge_source = gs1_source * prim_buff[tid].v1;
                     return conserved_t{0.0, gs1_source, ge_source};
                 }
                 else if constexpr (dim == 2) {
+                    // cast away unused lambda capture
+                    (void) g3_source;
                     const auto gs2_source =
                         nullg2 ? 0 : g2_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gs1_source * prim_buff[tid].v1 +

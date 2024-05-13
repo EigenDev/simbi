@@ -739,13 +739,6 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     if constexpr (dim == 1) {
         const real aStar = lambda.aStar;
         const real pStar = lambda.pStar;
-        const real am    = aL < 0.0 ? aL : 0.0;
-        const real ap    = aR > 0.0 ? aR : 0.0;
-
-        auto hll_flux = (fL * ap + fR * am - (uR - uL) * am * ap) / (am + ap);
-
-        auto hll_state = (uR * aR - uL * aL - fR + fL) / (aR - aL);
-
         if (vface <= aStar) {
             real pressure = prL.p;
             real v        = prL.v1;
@@ -986,6 +979,10 @@ void Newtonian<dim>::advance(
                     ka,
                     radius
                 );
+            }
+            else {
+                // cast away unused lambda capture
+                (void) p;
             }
 
             const auto il = get_real_idx(ii - 1, 0, xpg);
@@ -1505,10 +1502,15 @@ void Newtonian<dim>::advance(
 
             const conserved_t source_terms = [&] {
                 if constexpr (dim == 1) {
+                    // cast away unused lambda capture
+                    (void) mom2_source;
+                    (void) mom3_source;
                     return conserved_t{d_source, m1_source, e_source} *
                            time_constant;
                 }
                 else if constexpr (dim == 2) {
+                    // cast away unused lambda capture
+                    (void) mom3_source;
                     const real m2_source =
                         null_mom2 ? 0.0 : mom2_source[real_loc];
                     return conserved_t{
@@ -1541,10 +1543,15 @@ void Newtonian<dim>::advance(
             const auto tid            = tza * sx * sy + tya * sx + txa;
             const conserved_t gravity = [&] {
                 if constexpr (dim == 1) {
+                    // cast away unused lambda captures
+                    (void) g2_source;
+                    (void) g3_source;
                     const auto ge_source = gm1_source * prim_buff[tid].v1;
                     return conserved_t{0.0, gm1_source, ge_source};
                 }
                 else if constexpr (dim == 2) {
+                    // cast away unused lambda capture
+                    (void) g3_source;
                     const auto gm2_source =
                         nullg2 ? 0 : g2_source[real_loc] * cons_data[aid].den;
                     const auto ge_source = gm1_source * prim_buff[tid].v1 +
