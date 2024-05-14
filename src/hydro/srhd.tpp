@@ -2678,6 +2678,8 @@ void SRHD<dim>::simulate(
         troubled_cells.copyFromGpu();
         cons.copyFromGpu();
         prims.copyFromGpu();
+        hasCrashed = true;
+        write_to_file(*this);
         emit_troubled_cells();
     }
 };

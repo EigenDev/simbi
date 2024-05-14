@@ -71,7 +71,7 @@ namespace simbi {
         std::string spatial_order, time_order;
         bool use_pcm, use_rk1, linspace, mesh_motion, adaptive_mesh_motion;
         bool half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
-        bool homolog;
+        bool homolog, hasCrashed;
         bool null_den, null_mom1, null_mom2, null_mom3, null_nrg;
         bool null_mag1, null_mag2, null_mag3;
         bool nullg1, nullg2, nullg3;
@@ -214,7 +214,7 @@ namespace simbi {
                                  : (init_conditions.spatial_order == "pcm")
                                      ? nz - 2
                                      : nz - 4;
-            this->idx_active   = (init_conditions.spatial_order == "pcm") ? 1 : 2;
+            this->idx_active = (init_conditions.spatial_order == "pcm") ? 1 : 2;
             this->active_zones = xactive_grid * yactive_grid * zactive_grid;
             this->x1min        = x1[0];
             this->x1max        = x1[xactive_grid - 1];

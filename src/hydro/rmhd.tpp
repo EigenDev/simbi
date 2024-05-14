@@ -977,30 +977,21 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
             return fR - uR * vface;
         }
         else {
-            auto fLa = fL;
-            auto fRa = fR;
-            fLa.calc_induction(nhat);
-            fRa.calc_induction(nhat);
             auto f_hll =
-                (fLa * aRp - fRa * aLm + (uR - uL) * aLm * aRp) / (aRp - aLm);
-            const auto u_hll = (uR * aRp - uL * aLm - fRa + fLa) / (aRp - aLm);
-
-            // f_hll.calc_electric_field(nhat);
-#if !GPU_CODE
-            printf(
-                "aL: %.2e, aR: %.2e, fhll_Bx: %.2e, fhll_By: %.2e, fhll_Bz: "
-                "%.2e \n ",
-                aLm,
-                aRp,
-                f_hll.b1,
-                f_hll.b2,
-                f_hll.b3
-                // u_hll.b1,
-                // u_hll.b2,
-                // u_hll.b3
-            );
-            // std::cin.get();
-#endif
+                (fL * aRp - fR * aLm + (uR - uL) * aLm * aRp) / (aRp - aLm);
+            const auto u_hll = (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
+            f_hll.calc_electric_field(nhat);
+            // #if !GPU_CODE
+            //             printf(
+            //                 "aL: %.2e, aR: %.2e, Ex: %.2e, Ey: %.2e, Ez: "
+            //                 "%.2e \n ",
+            //                 aLm,
+            //                 aRp,
+            //                 f_hll.e1(),
+            //                 f_hll.e2(),
+            //                 f_hll.e3()
+            //             );
+            // #endif
             return f_hll - u_hll * vface;
         }
     }();
@@ -3042,6 +3033,8 @@ void RMHD<dim>::simulate(
         troubled_cells.copyFromGpu();
         cons.copyFromGpu();
         prims.copyFromGpu();
+        hasCrashed = true;
+        write_to_file(*this);
         emit_troubled_cells();
     }
 };

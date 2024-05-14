@@ -279,7 +279,8 @@ namespace simbi {
                 if (sim_state.t == 0) {
                     return static_cast<real>(0.0);
                 }
-                else if (sim_state.dlogt != 0.0 && sim_state.init_chkpt_idx == 0) {
+                else if (sim_state.dlogt != 0.0 &&
+                         sim_state.init_chkpt_idx == 0) {
                     return static_cast<real>(0.0);
                 }
                 return sim_state.t_interval;
@@ -309,7 +310,12 @@ namespace simbi {
                 tnow = create_step_str(t_interval, tchunk_order_of_mag);
             }
             else {
-                tnow = "interrupted";
+                if (sim_state.hasCrashed) {
+                    tnow = "crashed";
+                }
+                else {
+                    tnow = "interrupted";
+                }
             }
             const auto filename = string_format(
                 "%d.chkpt." + tnow + ".h5",
