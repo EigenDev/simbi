@@ -160,7 +160,10 @@ class Hydro:
                     raise ValueError(
                         "Too many variables across discontinuity for non-mhd run"
                     )
-                self.dimensionality = np.asanyarray(initial_state[0]).ndim
+                if tuple_of_tuples(self.geometry):
+                    self.dimensionality = len(self.geometry)
+                else:
+                    self.dimensionality = 1
                 self.discontinuity = True
             else:
                 raise ValueError(
@@ -179,6 +182,7 @@ class Hydro:
             ngeom = len(self.geometry)
         nres = len(self.resolution)
 
+        
         if ngeom != self.dimensionality:
             raise ValueError(
                 f"Detecting a {self.dimensionality}D run, but only {ngeom} geometry tuple(s)"
