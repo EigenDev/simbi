@@ -1375,43 +1375,36 @@ namespace rmhd {
             return (nhat == 1 ? b1 : (nhat == 2) ? b2 : b3);
         }
 
+        //-------- E-field accessors ---------
+        // constexpr real e1() { return b1; }
         GPU_CALLABLE_MEMBER
-        void calc_induction(const luint nhat)
-        {
-            if (nhat == 1) {
-                b1 = 0.0;
-                std::swap(b2, b3);
-                b2 *= -1;
-            }
-            else if (nhat == 2) {
-                b2 = 0.0;
-                std::swap(b1, b3);
-                b3 *= -1;
-            }
-            else {
-                b3 = 0.0;
-                std::swap(b1, b2);
-                b1 *= -1;
-            }
-        }
+        constexpr real& e1() { return b1; }
+
+        // constexpr real e2() { return b2; }
+        GPU_CALLABLE_MEMBER
+        constexpr real& e2() { return b2; }
+
+        // constexpr real e3() { return b3; }
+        GPU_CALLABLE_MEMBER
+        constexpr real& e3() { return b3; }
 
         GPU_CALLABLE_MEMBER
         void calc_electric_field(const luint nhat)
         {
             if (nhat == 1) {
-                b1 = 0.0;
-                std::swap(b2, b3);
-                b3 *= -1;
+                e1() = 0.0;
+                std::swap(e2(), e3());
+                e3() *= -1.0;
             }
             else if (nhat == 2) {
-                b2 = 0.0;
-                std::swap(b1, b3);
-                b1 *= -1;
+                e2() = 0.0;
+                std::swap(e1(), e3());
+                e1() *= -1.0;
             }
             else {
-                b3 = 0.0;
-                std::swap(b1, b2);
-                b2 *= -1;
+                e3() = 0.0;
+                std::swap(e2(), e1());
+                e2() *= -1.0;
             }
         }
     };
