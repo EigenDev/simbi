@@ -322,7 +322,7 @@ class Visualizer:
                         x = mesh[self.oned_slice]
                         for x3coord in map(float, self.coords["x3"].split(",")):
                             for x2coord in map(float, self.coords["x2"].split(",")):
-                                coord_label = label + f", $x_2={x2coord:.1f}$"
+                                coord_label = label or '' + f", $x_2={x2coord:.1f}$"
                                 if not self.cartesian:
                                     x2coord = np.deg2rad(x2coord)
                                 yidx = find_nearest(mesh["x2"], x2coord)[0]
@@ -401,7 +401,7 @@ class Visualizer:
                                 #         xi, us / us.max(), color="black", linestyle="-."
                                 #     )
                                 (line,) = ax.plot(
-                                    xvar, yvar / scale, label=d
+                                    xvar, yvar / scale, label=label
                                 )
 
                                 if self.nplots != 1:
