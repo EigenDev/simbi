@@ -530,11 +530,12 @@ class Hydro:
         self.start_time = self.start_time or tstart
 
         #######################################################################
-        # Check if boundary source terms given. If given as a jagged array, pad the missing members with zeros
+        # Check if boundary source terms given. If given as a jagged array, 
+        # pad the missing members with zeros
         #######################################################################
         if boundary_sources is None:
             boundary_sources = np.zeros(
-                (2 * self.dimensionality, self.dimensionality + 2)
+                (2 * self.dimensionality, len(self.u[:,0]))
             )
         else:
             boundary_sources = self._place_boundary_sources(

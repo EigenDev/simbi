@@ -64,7 +64,7 @@ namespace simbi {
         global::Platform P = global::BuildPlatform>
     void parallel_for(const ExecutionPolicy<>& p, index_type last, F function)
     {
-        static auto first = static_cast<index_type>(0);
+        const auto first = static_cast<index_type>(0);
         simbi::launch(p, [=] GPU_LAMBDA() {
 #if GPU_CODE
             for (auto idx : range(first, last, globalThreadCount())) {
