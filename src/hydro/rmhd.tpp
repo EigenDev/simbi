@@ -363,26 +363,14 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                 const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
                 const real et   = tau + d;
 
-                // Perform modified Newton Raphson based on
-                // https://www.sciencedirect.com/science/article/pii/S0893965913002930
-                // so far, the convergence rate is the same, but perhaps I need
-                // a slight tweak
-
-                // compute f(x_0)
-                // f = newton_f(gamma, tau, d, S, peq);
                 int iter       = 0;
                 real qq        = edens_data[gid];
                 const real tol = d * global::tol_scale;
                 real f, g;
                 do {
-                    // compute x_[k+1]
                     f = newton_f_mhd(gr, et, d, ssq, bsq, msq, qq);
                     g = newton_g_mhd(gr, d, ssq, bsq, msq, qq);
                     qq -= f / g;
-
-                    // compute x*_k
-                    // f     = newton_f(gamma, tau, d, S, qq);
-                    // pstar = qq - f / g;
 
                     if (iter >= global::MAX_ITER || std::isnan(qq)) {
                         troubled_data[gid] = 1;
@@ -479,26 +467,14 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons, const luint gid)
     const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
     const real et   = tau + d;
 
-    // Perform modified Newton Raphson based on
-    // https://www.sciencedirect.com/science/article/pii/S0893965913002930
-    // so far, the convergence rate is the same, but perhaps I need a slight
-    // tweak
-
-    // compute f(x_0)
-    // f = newton_f(gamma, tau, d, S, peq);
     int iter       = 0;
     real qq        = edens_data[gid];
     const real tol = d * global::tol_scale;
     real f, g;
     do {
-        // compute x_[k+1]
         f = newton_f_mhd(gr, et, d, ssq, bsq, msq, qq);
         g = newton_g_mhd(gr, d, ssq, bsq, msq, qq);
         qq -= f / g;
-
-        // compute x*_k
-        // f     = newton_f(gamma, tau, d, S, qq);
-        // pstar = qq - f / g;
 
         if (iter >= global::MAX_ITER || std::isnan(qq)) {
             dt             = INFINITY;
@@ -984,7 +960,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
             auto f_hll =
                 (fL * aRp - fR * aLm + (uR - uL) * aLm * aRp) / (aRp - aLm);
             const auto u_hll = (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
-            f_hll.calc_electric_field(nhat);
+            // f_hll.calc_electric_field(nhat);
             // #if !GPU_CODE
             //             printf(
             //                 "aL: %.2e, aR: %.2e, Ex: %.2e, Ey: %.2e, Ez: "
