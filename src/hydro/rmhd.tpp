@@ -389,7 +389,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 
                 } while (std::abs(dqq) >= tol);
 
-                const auto qqd = qq + d;
+                const real qqd = qq + d;
                 const real rat = s / qqd;
                 const real fac = 1.0 / (qqd + bsq);
                 const real v1  = fac * (m1 + rat * b1);
@@ -480,11 +480,12 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons, const luint gid)
     int iter       = 0;
     real qq        = edens_data[gid];
     const real tol = d * global::tol_scale;
-    real f, g;
+    real f, g, dqq;
     do {
-        f = newton_f_mhd(gr, et, d, ssq, bsq, msq, qq);
-        g = newton_g_mhd(gr, d, ssq, bsq, msq, qq);
-        qq -= f / g;
+        f   = newton_f_mhd(gr, et, d, ssq, bsq, msq, qq);
+        g   = newton_g_mhd(gr, d, ssq, bsq, msq, qq);
+        dqq = f / g;
+        qq -= dqq;
 
         if (iter >= global::MAX_ITER || std::isnan(qq)) {
             dt             = INFINITY;
@@ -493,16 +494,19 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons, const luint gid)
         }
         iter++;
 
-    } while (std::abs(f / g) >= tol);
+    } while (std::abs(dqq) >= tol);
 
-    const real w    = calc_rmhd_lorentz(ssq, bsq, msq, qq);
-    const real pg   = calc_rmhd_pg(gr, d, w, qq);
-    const real fac  = 1.0 / (qq + bsq);
-    const real rat  = s / qq;
-    const real v1   = fac * (m1 + rat * b1);
-    const real v2   = fac * (m2 + rat * b2);
-    const real v3   = fac * (m3 + rat * b3);
-    edens_data[gid] = qq;
+    const real qqd = qq + d;
+    const real rat = s / qqd;
+    const real fac = 1.0 / (qqd + bsq);
+    const real v1  = fac * (m1 + rat * b1);
+    const real v2  = fac * (m2 + rat * b2);
+    const real v3  = fac * (m3 + rat * b3);
+    const real vsq = v1 * v2 + v2 * v2 + v3 * v3;
+    const real w   = std::sqrt(1.0 / (1.0 - vsq));
+    const real usq = w * w * vsq;
+    const real chi = qq / (w * w) - (d * usq) / (w * w * (1.0 + w));
+    const real pg  = (1.0 / gr) * chi;
 #if FOUR_VELOCITY
     return {d / w, v1 * w, v2 * w, v3 * w, pg, b1, b2, b3, dchi / d};
 #else
@@ -731,9 +735,6 @@ void RMHD<dim>::adapt_dt()
             calc_max_wave_speeds(prims[gid], 1, speeds, cs);
             v1p = std::abs(speeds[3]);
             v1m = std::abs(speeds[0]);
-#if DEBUG_MODE
-            printf("v1p: %.2e, v1m: %.2e\n", v1p, v1m);
-#endif
             if constexpr (dim > 1) {
                 calc_max_wave_speeds(prims[gid], 2, speeds, cs);
                 v2p = std::abs(speeds[3]);
