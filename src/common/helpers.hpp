@@ -786,9 +786,9 @@ namespace simbi {
         }
 
         /**
-         * @brief calculate relativistic mhd f(q) from Mignone and Bodo (2006)
+         * @brief calculate relativistic mhd f(q) from Mignone & McKinney (200t)
          * @param gr adiabatic index reduced (gamma / (gamma - 1))
-         * @param et total energy density
+         * @param tau energy density
          * @param d lab frame density
          * @param ssq s-squared
          * @param bsq b-squared
@@ -798,7 +798,7 @@ namespace simbi {
          */
         GPU_CALLABLE_INLINE real newton_f_mhd(
             real gr,
-            real et,
+            real tau,
             real d,
             real ssq,
             real bsq,
@@ -806,14 +806,27 @@ namespace simbi {
             real qq
         )
         {
-            const auto w  = calc_rmhd_lorentz(ssq, bsq, msq, qq);
-            const auto pg = calc_rmhd_pg(gr, d, w, qq);
-            return qq - pg + (1.0 - 0.5 / (w * w)) * bsq -
-                   0.5 * ssq / (qq * qq) - et;
+            //==============================
+            const auto qqf = qq + d;
+            const auto q2  = qqf * qqf;
+            const auto rat = ssq / q2;
+            const auto y1  = 1.0 / (qqf + bsq);
+            const auto y2  = y1 * y1;
+            // Equation (A3)
+            const auto v2  = rat * y1 * (y1 * qqf + 1.0) + msq * y2;
+            const auto ig2 = 1.0 - v2;
+            const auto g2  = 1.0 / ig2;
+            const auto g   = std::sqrt(g2);
+            const auto chi = qq / g2 - d * v2 / (g + 1.0);
+            //====== IDEAL EOS
+            const auto dp_dchi = 1.0 / gr;
+            const auto pg      = chi * dp_dchi;
+            return qq - pg - tau + 0.5 * (bsq + (bsq * msq - ssq) * y2);
         }
 
         /**
-         * @brief calculate relativistic mhd df/dq from Mignone and Bodo (2006)
+         * @brief calculate relativistic mhd df/dq from Mignone & McKinney
+         * (2007)
          * @param gr adiabatic index reduced (gamma / (gamma - 1))
          * @param et total energy density
          * @param d lab frame density
@@ -826,17 +839,32 @@ namespace simbi {
         GPU_CALLABLE_INLINE real
         newton_g_mhd(real gr, real d, real ssq, real bsq, real msq, real qq)
         {
-            const auto w    = calc_rmhd_lorentz(ssq, bsq, msq, qq);
-            const auto term = qq * (qq + bsq);
-            const auto dg_dq =
-                -(w * w * w) *
-                (2.0 * ssq * (3.0 * qq * qq + 3.0 * qq * bsq + bsq * bsq) +
-                 msq * (qq * qq * qq)) /
-                (2.0 * term * term * term);
-            const auto dpg_dq =
-                (w * (1.0 + d * dg_dq) - 2.0 * qq * dg_dq) / (gr * w * w * w);
-            return 1.0 - dpg_dq + bsq / (w * w * w) * dg_dq +
-                   ssq / (qq * qq * qq);
+            const auto qqf = qq + d;
+            const auto q2  = qqf * qqf;
+            const auto rat = ssq / q2;
+            const auto y1  = 1.0 / (qq + d + bsq);
+            const auto y2  = y1 * y1;
+            const auto v2  = rat * y1 * (y1 * qqf + 1.0) + msq * y2;
+            const auto ig2 = 1.0 - v2;
+            const auto g2  = 1.0 / ig2;
+            const auto g   = std::sqrt(g2);
+            const auto chi = qq / g2 - d * v2 / (g + 1.0);
+            const auto dv2_dq =
+                -2.0 * y2 * (3.0 * rat + y1 * (rat * bsq * bsq / qqf + msq));
+
+            //===== kinematical and thermodynamics expressions terms section A2
+            const auto dchi_dq = ig2 - 0.5 * g * (d + 2.0 * chi * g) * dv2_dq;
+            const auto drho_dq = -0.5 * d * g * dv2_dq;
+
+            //====== IDEAL EOS
+            const auto dp_dchi = 1.0 / gr;
+            const auto dp_drho = 0.0;
+
+            //========= TODO: include Taub Adiabat
+            //======================================
+
+            const auto dp = dp_dchi * dchi_dq + dp_drho * drho_dq;
+            return 1.0 - dp - (bsq * msq - ssq) * y1 * y2;
         }
 
         //======================================
@@ -1212,6 +1240,14 @@ namespace simbi {
         // solve the quartic equation
         template <typename T>
         GPU_CALLABLE int quartic(T b, T c, T d, T e, T res[4]);
+
+        // solve the cubic equation
+        template <typename T>
+        GPU_CALLABLE int cubicPluto(T b, T c, T d, T z[]);
+
+        // solve the quartic equation
+        template <typename T>
+        GPU_CALLABLE int quarticPluto(T b, T c, T d, T e, T res[4]);
 
         // swap any two values
         template <typename T>

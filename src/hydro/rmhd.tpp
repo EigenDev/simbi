@@ -366,11 +366,17 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                 int iter       = 0;
                 real qq        = edens_data[gid];
                 const real tol = d * global::tol_scale;
-                real f, g;
+                real f, g, dqq;
                 do {
-                    f = newton_f_mhd(gr, et, d, ssq, bsq, msq, qq);
-                    g = newton_g_mhd(gr, d, ssq, bsq, msq, qq);
-                    qq -= f / g;
+                    // compute x_[k+1]
+                    f   = newton_f_mhd(gr, et, d, ssq, bsq, msq, qq);
+                    g   = newton_g_mhd(gr, d, ssq, bsq, msq, qq);
+                    dqq = f / g;
+                    qq -= dqq;
+
+                    // compute x*_k
+                    // f     = newton_f(gamma, tau, d, S, qq);
+                    // pstar = qq - f / g;
 
                     if (iter >= global::MAX_ITER || std::isnan(qq)) {
                         troubled_data[gid] = 1;
@@ -381,15 +387,19 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                     }
                     iter++;
 
-                } while (std::abs(f / g) >= tol);
+                } while (std::abs(dqq) >= tol);
 
-                const real w    = calc_rmhd_lorentz(ssq, bsq, msq, qq);
-                const real pg   = calc_rmhd_pg(gr, d, w, qq);
-                const real fac  = 1.0 / (qq + bsq);
-                const real rat  = s / qq;
-                const real v1   = fac * (m1 + rat * b1);
-                const real v2   = fac * (m2 + rat * b2);
-                const real v3   = fac * (m3 + rat * b3);
+                const auto qqd = qq + d;
+                const real rat = s / qqd;
+                const real fac = 1.0 / (qqd + bsq);
+                const real v1  = fac * (m1 + rat * b1);
+                const real v2  = fac * (m2 + rat * b2);
+                const real v3  = fac * (m3 + rat * b3);
+                const real vsq = v1 * v2 + v2 * v2 + v3 * v3;
+                const real w   = std::sqrt(1.0 / (1.0 - vsq));
+                const real usq = w * w * vsq;
+                const real chi = qq / (w * w) - (d * usq) / (w * w * (1.0 + w));
+                const real pg  = (1.0 / gr) * chi;
                 edens_data[gid] = qq;
 #if FOUR_VELOCITY
                 prim_data[gid] =
@@ -609,6 +619,45 @@ GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
                    cs2 * w2 * w2 * h * rho * vn2 * vn2 -
                    cs2 * w2 * h * rho * vn2 + w2 * w2 * h * rho * vn2 * vn2);
 
+        // const auto u02   = prims.lorentz_factor_squared();
+        // const auto vdB   = prims.vdotb();
+        // const auto scrh1 = bn / u02 + vdB * vn; /* -- this is bx/u0 -- */
+        // const auto scrh2 = scrh1 * scrh1;
+
+        // const auto vB2 = vdB * vdB;
+        // const auto b2  = bmusq;
+        // const auto w_1 = 1.0 / (rho * h + b2);
+        // const auto vx  = vn;
+        // const auto vx2 = vx * vx;
+
+        // const auto a2_w       = cs2 * w_1;
+        // const auto eps2       = (cs2 * rho * h + b2) * w_1;
+        // const auto one_m_eps2 = u02 * rho * h * (1.0 - cs2) * w_1;
+
+        // /* ---------------------------------------
+        //      Define coefficients for the quartic
+        //    --------------------------------------- */
+
+        // auto scrh = 2.0 * (a2_w * vdB * scrh1 - eps2 * vx);
+        // auto a4   = one_m_eps2 - a2_w * vB2 + eps2;
+        // auto a3   = -4.0 * vx * one_m_eps2 + scrh;
+        // auto a2 =
+        //     6.0 * vx2 * one_m_eps2 + a2_w * (vB2 - scrh2) + eps2 * (vx2
+        //     - 1.0);
+        // auto a1 = -4.0 * vx * vx2 * one_m_eps2 - scrh;
+        // auto a0 = vx2 * vx2 * one_m_eps2 + a2_w * scrh2 - eps2 * vx2;
+
+        // if (a4 < 1.e-12) {
+        //     printf("! Magnetosonic: cannot divide by a4\n");
+        //     // return 1;
+        // }
+
+        // scrh = 1.0 / a4;
+
+        // a3 *= scrh;
+        // a2 *= scrh;
+        // a1 *= scrh;
+        // a0 *= scrh;
         [[maybe_unused]] const auto nroots = quartic(a3, a2, a1, a0, speeds);
 
 #if DEBUG_MODE
@@ -755,7 +804,7 @@ void RMHD<dim>::adapt_dt()
         switch (geometry) {
             case simbi::Geometry::CARTESIAN:
                 if constexpr (dim == 1) {
-                    cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
+                    cfl_dt = dx1 / (std::max(v1p, v1m));
                 }
                 else if constexpr (dim == 2) {
                     cfl_dt = std::min(
@@ -774,7 +823,7 @@ void RMHD<dim>::adapt_dt()
             case simbi::Geometry::SPHERICAL:
                 {
                     if constexpr (dim == 1) {
-                        cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
+                        cfl_dt = dx1 / (std::max(v1p, v1m));
                     }
                     else if constexpr (dim == 2) {
                         const real rmean = get_cell_centroid(
@@ -808,7 +857,7 @@ void RMHD<dim>::adapt_dt()
             default:
                 {
                     if constexpr (dim == 1) {
-                        cfl_dt = std::min({dx1 / (std::max(v1p, v1m))});
+                        cfl_dt = dx1 / (std::max(v1p, v1m));
                     }
                     else if constexpr (dim == 2) {
                         switch (geometry) {
@@ -1211,388 +1260,388 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const luint gid,
     const real vface
 ) const {
-  // conserved_t ua, uc;
-  // const auto lambda = calc_eigenvals(prL, prR,
-  // nhat); const real aL  = lambda.afL; const real aR  = lambda.afR; const
-  // real
-  // aLm = aL < 0 ? aL : 0; const real aRp = aR > 0 ? aR : 0;
+    // conserved_t ua, uc;
+    // const auto lambda = calc_eigenvals(prL, prR,
+    // nhat); const real aL  = lambda.afL; const real aR  = lambda.afR; const
+    // real
+    // aLm = aL < 0 ? aL : 0; const real aRp = aR > 0 ? aR : 0;
 
-  // //---- Check wave speeds before wasting computations
-  // if (vface <= aLm) {
-  //     return fL - uL * vface;
-  // } else if (vface >= aRp) {
-  //     return fR - uR * vface;
-  // }
+    // //---- Check wave speeds before wasting computations
+    // if (vface <= aLm) {
+    //     return fL - uL * vface;
+    // } else if (vface >= aRp) {
+    //     return fR - uR * vface;
+    // }
 
-  //  //-------------------Calculate the HLL Intermediate State
-  // const auto hll_state =
-  //     (uR * aRp - uL * aLm - fR + fL) /
-  //     (aRp
-  //     - aLm);
+    //  //-------------------Calculate the HLL Intermediate State
+    // const auto hll_state =
+    //     (uR * aRp - uL * aLm - fR + fL) /
+    //     (aRp
+    //     - aLm);
 
-  // //------------------Calculate the RHLLE Flux---------------
-  // const auto hll_flux
-  //     = (fL * aRp - fR * aLm + (uR - uL) *
-  //     aRp * aLm)
-  //         / (aRp - aLm);
+    // //------------------Calculate the RHLLE Flux---------------
+    // const auto hll_flux
+    //     = (fL * aRp - fR * aLm + (uR - uL) *
+    //     aRp * aLm)
+    //         / (aRp - aLm);
 
-  // // define the magnetic field normal to the zone
-  // const auto bn = hll_state.bcomponent(nhat);
+    // // define the magnetic field normal to the zone
+    // const auto bn = hll_state.bcomponent(nhat);
 
-  // // Eq. (12)
-  // const auto rL = uL * aLm - fL;
-  // const auto rR = uR * aRp - fR;
+    // // Eq. (12)
+    // const auto rL = uL * aLm - fL;
+    // const auto rR = uR * aRp - fR;
 
-  // //==================================================================
-  // // Helper functions to ease repetition
-  // //==================================================================
-  // const real qfunc = [](const conserved_t &r, const luint nhat,
-  // const
-  // real a, const real p) {
-  //     return r.total_energy() * a + p * (1.0 - a * a);
-  // };
-  // const real gfunc =[](const luint np1, const luint np2, const
-  // conserved_t &r) {
-  //     if constexpr(dim == 1) {
-  //         return 0;
-  //     } else if constexpr(dim == 2) {
-  //         return (r.bcomponent(np1) * r.bcomponent(np1));
-  //     } else {
-  //         return (r.bcomponent(np1) * r.bcomponent(np1) + r.bcomponent(np2)
-  //         *
-  //         r.bcomponent(np2));
-  //     }
-  // };
-  // const real yfunc = [](const luint np1, const luint np2, const
-  // conserved_t &r) {
-  //     if constexpr(dim == 1) {
-  //         return 0;
-  //     } else if constexpr(dim == 2) {
-  //         return r.bcomponent(np1) * r.momentum(np1);
-  //     } else {
-  //         return r.bcomponent(np1) * r.momentum(np1) + r.bcomponent(np2) *
-  //         r.momentum(np2);
-  //     }
-  // };
-  // const real ofunc = [](const real q, const real g, const real bn, const
-  // real
-  // a) {
-  //     return q - g + bn * bn * (1.0 - a * a);
-  // };
-  // const real xfunc = [](const real q, const real y, const real g, const
-  // real
-  // bn, const real a, const real p, const real et) {
-  //     return bn * (q * a * bn + y) - (q + g) * (a * p + et);
-  // };
-  // const real vnfunc = [](const real bn, const real q, const real a, const
-  // real y, const real g, const real p, const real mn, const real x) {
-  //     return (bn * (q* bn + a * y) - (q + g) * (p + mn)) / x;
-  // };
-  // const real vt1func = [](const real o, const real mt1, const real bt1,
-  // const
-  // real y, const real bn, const real a, const real mn, const real et, const
-  // real x) {
-  //     if constexpr(dim == 1) {
-  //         return 0;
-  //     };
-  //     return (o * mt1 + bt1 * (y + bn * (a * mn - et))) / x;
-  // };
-  // const real vt2func = [](const real o, const real mt2, const real bt2,
-  // const
-  // real y, const real bn, const real a, const real mn, const real et, const
-  // real x) {
-  //     if constexpr(dim < 3) {
-  //         return 0;
-  //     };
-  //     return (o * mt1 + bt2 * (y + bn * (a * mn - et))) / x;
-  // };
-  // const real btanfunc = [](const real rbk, const real bn, const real vn,
-  // const real a) {
-  //     if constexpr(dim == 1) {
-  //         return 0;
-  //     };
-  //     return (rbk - bn * vn) / (a - vn);
-  // };
+    // //==================================================================
+    // // Helper functions to ease repetition
+    // //==================================================================
+    // const real qfunc = [](const conserved_t &r, const luint nhat,
+    // const
+    // real a, const real p) {
+    //     return r.total_energy() * a + p * (1.0 - a * a);
+    // };
+    // const real gfunc =[](const luint np1, const luint np2, const
+    // conserved_t &r) {
+    //     if constexpr(dim == 1) {
+    //         return 0;
+    //     } else if constexpr(dim == 2) {
+    //         return (r.bcomponent(np1) * r.bcomponent(np1));
+    //     } else {
+    //         return (r.bcomponent(np1) * r.bcomponent(np1) + r.bcomponent(np2)
+    //         *
+    //         r.bcomponent(np2));
+    //     }
+    // };
+    // const real yfunc = [](const luint np1, const luint np2, const
+    // conserved_t &r) {
+    //     if constexpr(dim == 1) {
+    //         return 0;
+    //     } else if constexpr(dim == 2) {
+    //         return r.bcomponent(np1) * r.momentum(np1);
+    //     } else {
+    //         return r.bcomponent(np1) * r.momentum(np1) + r.bcomponent(np2) *
+    //         r.momentum(np2);
+    //     }
+    // };
+    // const real ofunc = [](const real q, const real g, const real bn, const
+    // real
+    // a) {
+    //     return q - g + bn * bn * (1.0 - a * a);
+    // };
+    // const real xfunc = [](const real q, const real y, const real g, const
+    // real
+    // bn, const real a, const real p, const real et) {
+    //     return bn * (q * a * bn + y) - (q + g) * (a * p + et);
+    // };
+    // const real vnfunc = [](const real bn, const real q, const real a, const
+    // real y, const real g, const real p, const real mn, const real x) {
+    //     return (bn * (q* bn + a * y) - (q + g) * (p + mn)) / x;
+    // };
+    // const real vt1func = [](const real o, const real mt1, const real bt1,
+    // const
+    // real y, const real bn, const real a, const real mn, const real et, const
+    // real x) {
+    //     if constexpr(dim == 1) {
+    //         return 0;
+    //     };
+    //     return (o * mt1 + bt1 * (y + bn * (a * mn - et))) / x;
+    // };
+    // const real vt2func = [](const real o, const real mt2, const real bt2,
+    // const
+    // real y, const real bn, const real a, const real mn, const real et, const
+    // real x) {
+    //     if constexpr(dim < 3) {
+    //         return 0;
+    //     };
+    //     return (o * mt1 + bt2 * (y + bn * (a * mn - et))) / x;
+    // };
+    // const real btanfunc = [](const real rbk, const real bn, const real vn,
+    // const real a) {
+    //     if constexpr(dim == 1) {
+    //         return 0;
+    //     };
+    //     return (rbk - bn * vn) / (a - vn);
+    // };
 
-  // const real total_enthalpy(const real p, const real et, const real vdr,
-  // const real a, const real vn) {
-  //     return p + (et - vdr) / (a - vn);
-  // };
+    // const real total_enthalpy(const real p, const real et, const real vdr,
+    // const real a, const real vn) {
+    //     return p + (et - vdr) / (a - vn);
+    // };
 
-  // const real bkc = [](const real bkL, const real bkR, const real vaL, const
-  // real vaR, const real vnL, const real vnR, const real bn, const real vkL,
-  // const real vkR) {
-  //     return (
-  //           bkR * (vaR - vnR)
-  //         - bkL * (vaL - vnL)
-  //         + bn  * (vkR - vkL)
-  //     ) / (vaR - vaL);
-  // };
+    // const real bkc = [](const real bkL, const real bkR, const real vaL, const
+    // real vaR, const real vnL, const real vnR, const real bn, const real vkL,
+    // const real vkR) {
+    //     return (
+    //           bkR * (vaR - vnR)
+    //         - bkL * (vaL - vnL)
+    //         + bn  * (vkR - vkL)
+    //     ) / (vaR - vaL);
+    // };
 
-  // const real vec_dot = [](const real x1, const real x2, const real x3,
-  // const
-  // real y1, const real y2, const real y3) {
-  //     x1 * y1 + x2 * y2 + x3 * y3;
-  // };
+    // const real vec_dot = [](const real x1, const real x2, const real x3,
+    // const
+    // real y1, const real y2, const real y3) {
+    //     x1 * y1 + x2 * y2 + x3 * y3;
+    // };
 
-  // const real vec_sq = [](const real x1, const real x2, const real x3) {
-  //     return x1 *x1 + x2 * x2 + x3 * x3;
-  // };
+    // const real vec_sq = [](const real x1, const real x2, const real x3) {
+    //     return x1 *x1 + x2 * x2 + x3 * x3;
+    // };
 
-  // const conserved_t construct_the_state = [](
-  //     const luint nhat,
-  //     const luint np1,
-  //     const luint np2
-  //     const real d,
-  //     const real vfac,
-  //     const real et,
-  //     const real p,
-  //     const real vn,
-  //     const real vdb,
-  //     const real bn,
-  //     const real bp1,
-  //     const real bp2,
-  //     const real vp1,
-  //     const real vp2
-  // ) {
-  //     conserved_t u;
-  //     u.den= d * vfac;
-  //     u.momentum(nhat) = (et + p) * vn - vdb * bn;
-  //     if constexpr(dim > 1) {
-  //         u.momentum(np1 > dim ? 1 : np1) = (et + p) * vp1 - vdb * bp1;
-  //     }
-  //     if constexpr(dim > 2) {
-  //         u.momentum(np2) = (et + p) * vp2 - vdb * bp2;
-  //     }
-  //     u.nrg = et - u.den;
-  //     u.bcomponent(nhat) = bn;
-  //     if constexpr(dim > 1) {
-  //         u.bcomponent(np1 > dim ? 1 : np1) = bp1;
-  //     }
-  //     if constexpr(dim > 2) {
-  //         u.bcomponent(np2) = bp2;
-  //     }
-  //     return u;
-  // };
+    // const conserved_t construct_the_state = [](
+    //     const luint nhat,
+    //     const luint np1,
+    //     const luint np2
+    //     const real d,
+    //     const real vfac,
+    //     const real et,
+    //     const real p,
+    //     const real vn,
+    //     const real vdb,
+    //     const real bn,
+    //     const real bp1,
+    //     const real bp2,
+    //     const real vp1,
+    //     const real vp2
+    // ) {
+    //     conserved_t u;
+    //     u.den= d * vfac;
+    //     u.momentum(nhat) = (et + p) * vn - vdb * bn;
+    //     if constexpr(dim > 1) {
+    //         u.momentum(np1 > dim ? 1 : np1) = (et + p) * vp1 - vdb * bp1;
+    //     }
+    //     if constexpr(dim > 2) {
+    //         u.momentum(np2) = (et + p) * vp2 - vdb * bp2;
+    //     }
+    //     u.nrg = et - u.den;
+    //     u.bcomponent(nhat) = bn;
+    //     if constexpr(dim > 1) {
+    //         u.bcomponent(np1 > dim ? 1 : np1) = bp1;
+    //     }
+    //     if constexpr(dim > 2) {
+    //         u.bcomponent(np2) = bp2;
+    //     }
+    //     return u;
+    // };
 
-  // //==============================================================================
-  // // initial pressure guess
-  // real p0 = 0;
-  // if (bn * bn / (pguess * pguess) < 0.01) {
-  //     const real a = aRp - aLm;
-  //     const real b = rR.total_energy() - rL.total_energy() + aRp * rL - aLm
-  //     *
-  //     rR; const real c = rL.momentum(nhat) * rR.total_energy() -
-  //     rR.momentum(nhat) * rL.total_energy(); const real quad =
-  //     std::max((0.0), b * b - 4 * a * c); p0 = 0.5 * (-b + std::sqrt(quad))
-  //     /
-  //     (aRp - aLm);
-  // } else {
-  //     const auto phll = cons2prim(hll_state, gid);
-  //     p0 = phll.total_pressure();
-  // }
-  // //----------------- Jump conditions across the fast waves (section 3.1)
-  // const auto np1  = next_perm(nhat, 1);
-  // const auto np2  = next_perm(nhat, 2);
+    // //==============================================================================
+    // // initial pressure guess
+    // real p0 = 0;
+    // if (bn * bn / (pguess * pguess) < 0.01) {
+    //     const real a = aRp - aLm;
+    //     const real b = rR.total_energy() - rL.total_energy() + aRp * rL - aLm
+    //     *
+    //     rR; const real c = rL.momentum(nhat) * rR.total_energy() -
+    //     rR.momentum(nhat) * rL.total_energy(); const real quad =
+    //     std::max((0.0), b * b - 4 * a * c); p0 = 0.5 * (-b + std::sqrt(quad))
+    //     /
+    //     (aRp - aLm);
+    // } else {
+    //     const auto phll = cons2prim(hll_state, gid);
+    //     p0 = phll.total_pressure();
+    // }
+    // //----------------- Jump conditions across the fast waves (section 3.1)
+    // const auto np1  = next_perm(nhat, 1);
+    // const auto np2  = next_perm(nhat, 2);
 
-  // // left side
-  // const auto pL   = prL.total_pressure();
-  // const auto qL   = qfunc(rL, nhat, aLm, pL);;
-  // const auto gL   = gfunc(np1, np2, rL);
-  // const auto yL   = yfunc(np1, np2, rL);
-  // const auto oL   = ofunc(qL, gL, bn, aLm);
-  // const auto xL   = xfunc(qL, yL, gL, bn, aLm, pL, rL.total_energ());
-  // // velocity components
-  // const auto vnL   = vnfunc(bn, qL, aLm, yL, gL, pL, mnL, xL);
-  // const auto vt1L  = vt1func(oL, rL.momentum(np1), rL.bcomponent(np1), yL,
-  // bn, aLm, rL.momentum(nhat), rL.total_energy(), xL); const auto vt2L  =
-  // vt2func(oL, rL.momentum(np2), rL.bcomponent(np2), yL, bn, aLm,
-  // rL.momentum(nhat), rL.total_energy(), xL); const auto bp1L  =
-  // btanfunc(rL.bcomponent(np1), bn, vnL, vt1L, aLm); const auto bp2L  =
-  // btanfunc(rL.bcomponent(np2), bn, vnL, vt2L, aLm); const auto vdrL  = vnL
-  // *
-  // rL.momentum(nhat) + vt1L * rL.momentum(np1) + vt2L * rL.momentum(np2);
-  // const auto wL    = total_enthalpy(pL, rL.total_energy(), vdr, aLm, vnL);
-  // const auto vdbL  = (vnL * bn + vnL1 * bp1 + vnL2 * bp2);
-  // const auto vfacL = 1.0 /(aLm - vnL);
+    // // left side
+    // const auto pL   = prL.total_pressure();
+    // const auto qL   = qfunc(rL, nhat, aLm, pL);;
+    // const auto gL   = gfunc(np1, np2, rL);
+    // const auto yL   = yfunc(np1, np2, rL);
+    // const auto oL   = ofunc(qL, gL, bn, aLm);
+    // const auto xL   = xfunc(qL, yL, gL, bn, aLm, pL, rL.total_energ());
+    // // velocity components
+    // const auto vnL   = vnfunc(bn, qL, aLm, yL, gL, pL, mnL, xL);
+    // const auto vt1L  = vt1func(oL, rL.momentum(np1), rL.bcomponent(np1), yL,
+    // bn, aLm, rL.momentum(nhat), rL.total_energy(), xL); const auto vt2L  =
+    // vt2func(oL, rL.momentum(np2), rL.bcomponent(np2), yL, bn, aLm,
+    // rL.momentum(nhat), rL.total_energy(), xL); const auto bp1L  =
+    // btanfunc(rL.bcomponent(np1), bn, vnL, vt1L, aLm); const auto bp2L  =
+    // btanfunc(rL.bcomponent(np2), bn, vnL, vt2L, aLm); const auto vdrL  = vnL
+    // *
+    // rL.momentum(nhat) + vt1L * rL.momentum(np1) + vt2L * rL.momentum(np2);
+    // const auto wL    = total_enthalpy(pL, rL.total_energy(), vdr, aLm, vnL);
+    // const auto vdbL  = (vnL * bn + vnL1 * bp1 + vnL2 * bp2);
+    // const auto vfacL = 1.0 /(aLm - vnL);
 
-  // // right side
-  // const auto pR   = prR.total_pressure();
-  // const auto qR   = qfunc(rR, nhat, aRm, pR);;
-  // const auto gR   = gfunc(np1, np2, rR);
-  // const auto yR   = yfunc(np1, np2, rR);
-  // const auto oR   = ofunc(qR, gR, bn, aRm);
-  // const auto xR   = xfunc(qR, yR, gR, bn, aRm, pR, rR.total_energ());
-  // // velocity components
-  // const auto vnR   = vnfunc(bn, qR, aRm, yR, gR, pR, mnR, xR);
-  // const auto vt1R  = vt1func(oR, rR.momentum(np1), rR.bcomponent(np1), yR,
-  // bn, aRm, rR.momentum(nhat), rR.total_energy(), xR); const auto vt2R  =
-  // vt2func(oR, rR.momentum(np2), rR.bcomponent(np2), yR, bn, aRm,
-  // rR.momentum(nhat), rR.total_energy(), xR); const auto bp1R  =
-  // btanfunc(rR.bcomponent(np1), bn, vnR, vt1R, aRm); const auto bp2R  =
-  // btanfunc(rR.bcomponent(np2), bn, vnR, vt2R, aRm); const auto vdrR  = vnR
-  // *
-  // rR.momentum(nhat) + vt1R * rR.momentum(np1) + vt2R * rR.momentum(np2);
-  // const auto wR    = total_enthalpy(pR, rR.total_energy(), vdr, aRm, vnR);
-  // const auto vdbR  = (vnR * bn + vnR1 * bp1 + vnR2 * bp2);
-  // const auto vfacR = 1.0 /(aRm - vnR);
+    // // right side
+    // const auto pR   = prR.total_pressure();
+    // const auto qR   = qfunc(rR, nhat, aRm, pR);;
+    // const auto gR   = gfunc(np1, np2, rR);
+    // const auto yR   = yfunc(np1, np2, rR);
+    // const auto oR   = ofunc(qR, gR, bn, aRm);
+    // const auto xR   = xfunc(qR, yR, gR, bn, aRm, pR, rR.total_energ());
+    // // velocity components
+    // const auto vnR   = vnfunc(bn, qR, aRm, yR, gR, pR, mnR, xR);
+    // const auto vt1R  = vt1func(oR, rR.momentum(np1), rR.bcomponent(np1), yR,
+    // bn, aRm, rR.momentum(nhat), rR.total_energy(), xR); const auto vt2R  =
+    // vt2func(oR, rR.momentum(np2), rR.bcomponent(np2), yR, bn, aRm,
+    // rR.momentum(nhat), rR.total_energy(), xR); const auto bp1R  =
+    // btanfunc(rR.bcomponent(np1), bn, vnR, vt1R, aRm); const auto bp2R  =
+    // btanfunc(rR.bcomponent(np2), bn, vnR, vt2R, aRm); const auto vdrR  = vnR
+    // *
+    // rR.momentum(nhat) + vt1R * rR.momentum(np1) + vt2R * rR.momentum(np2);
+    // const auto wR    = total_enthalpy(pR, rR.total_energy(), vdr, aRm, vnR);
+    // const auto vdbR  = (vnR * bn + vnR1 * bp1 + vnR2 * bp2);
+    // const auto vfacR = 1.0 /(aRm - vnR);
 
-  // //--------------Jump conditions across the Alfven waves (section 3.2)
-  // const auto etaL = - sgn(bn) * std::sqrt(wL);
-  // const auto etaR =   sgn(bn) * std::sqrt(wR);
-  // const auto calc_kcomp = (const int nhat, const int ehat, const
-  // conserved_t &r, const real p, const real a, const real eta) {
-  //     return (r.momentum(nhat) + p * kronecker(ehat, nhat) +
-  //     r.bcomponent(ehat) * eta) / (a * p + r.total_energy() + bn * eta);
-  // }
-  // const auto knL  = calc_kcomp(nhat, nhat, rL, pL, aLm, etaL);
-  // const auto knR  = calc_kcomp(nhat, nhat, rR, pR, aRm, etaR);
-  // const auto kt1L = calc_kcomp(nhat, np1, rL,  pL, aLm, etaL);
-  // const auto kt1R = calc_kcomp(nhat, np1, rR,  pR, aRm, etaR);
-  // const auto kt2L = calc_kcomp(nhat, np2, rL,  pL, aLm, etaL);
-  // const auto kt2R = calc_kcomp(nhat, np2, rR,  pR, aRp, etaR);
-  // // the k-normal is the Alfven wave speed
-  // const auto vaL = knL;
-  // const auto vaR = knR;
-  // if (aLm - vaL < vface) { // return FaL
-  //     ua = construct_the_state(
-  //         nhat,
-  //         np1,
-  //         np2,
-  //         rL.d,
-  //         vfacL,
-  //         rL.total_energy(),
-  //         pL,
-  //         vnL,
-  //         vdbL,
-  //         bn,
-  //         bp1L,
-  //         bp2L,
-  //         vt1L,
-  //         vt2L
-  //     );
-  //     return fL + (ua - uL) * vaL - ua * vface;
-  // } else if (vaR - aRp < vface) { // return FaR
-  //     ua = construct_the_state(
-  //         nhat,
-  //         np1,
-  //         np2,
-  //         rR.d,
-  //         vfacR,
-  //         rR.total_energy(),
-  //         pR,
-  //         vnR,
-  //         vdbR,
-  //         bn,
-  //         bp1R,
-  //         bp2R,
-  //         vt1R,
-  //         vt2R
-  //     );
+    // //--------------Jump conditions across the Alfven waves (section 3.2)
+    // const auto etaL = - sgn(bn) * std::sqrt(wL);
+    // const auto etaR =   sgn(bn) * std::sqrt(wR);
+    // const auto calc_kcomp = (const int nhat, const int ehat, const
+    // conserved_t &r, const real p, const real a, const real eta) {
+    //     return (r.momentum(nhat) + p * kronecker(ehat, nhat) +
+    //     r.bcomponent(ehat) * eta) / (a * p + r.total_energy() + bn * eta);
+    // }
+    // const auto knL  = calc_kcomp(nhat, nhat, rL, pL, aLm, etaL);
+    // const auto knR  = calc_kcomp(nhat, nhat, rR, pR, aRm, etaR);
+    // const auto kt1L = calc_kcomp(nhat, np1, rL,  pL, aLm, etaL);
+    // const auto kt1R = calc_kcomp(nhat, np1, rR,  pR, aRm, etaR);
+    // const auto kt2L = calc_kcomp(nhat, np2, rL,  pL, aLm, etaL);
+    // const auto kt2R = calc_kcomp(nhat, np2, rR,  pR, aRp, etaR);
+    // // the k-normal is the Alfven wave speed
+    // const auto vaL = knL;
+    // const auto vaR = knR;
+    // if (aLm - vaL < vface) { // return FaL
+    //     ua = construct_the_state(
+    //         nhat,
+    //         np1,
+    //         np2,
+    //         rL.d,
+    //         vfacL,
+    //         rL.total_energy(),
+    //         pL,
+    //         vnL,
+    //         vdbL,
+    //         bn,
+    //         bp1L,
+    //         bp2L,
+    //         vt1L,
+    //         vt2L
+    //     );
+    //     return fL + (ua - uL) * vaL - ua * vface;
+    // } else if (vaR - aRp < vface) { // return FaR
+    //     ua = construct_the_state(
+    //         nhat,
+    //         np1,
+    //         np2,
+    //         rR.d,
+    //         vfacR,
+    //         rR.total_energy(),
+    //         pR,
+    //         vnR,
+    //         vdbR,
+    //         bn,
+    //         bp1R,
+    //         bp2R,
+    //         vt1R,
+    //         vt2R
+    //     );
 
-  //     return fR + (ua - uR) * vaR - ua * vface;
-  // } else {
-  //     dK  = 1.0 /(vaR - vaL);
-  //     //---------------Jump conditions across the contact wave
-  //     (section 3.3)
-  //     const auto bkxn  = bn;
-  //     const auto bkc1  = bkc(uaL.bcomponent(np1), uaR.bcomponent(np1), vaL,
-  //     vaR, vnL, vnR, vt1L, vt1R) * dK; const auto bkc2  =
-  //     bkc(uaL.bcomponent(np2), uaR.bcomponent(np2), vaL, vaR, vnL, vnR,
-  //     vt2L,
-  //     vt2R) * dK; const auto kdbL  = vec_dot(bkxn, bkc1, bkc2, knL, kt1L,
-  //     kt2L); const auto kdbR  = vec_dot(bkxn, bkc1, bkc2, knR, kt1R, kt2R);
-  //     const auto ksqL  = vec_sq(knL, kt1L, kt2L);
-  //     const auto ksqR  = vec_sq(knR, kt1R, kt2R);
-  //     const auto kfacL = (1.0 - ksqL) / (etaL - kdbL);
-  //     const auto kfacR = (1.0 - ksqR) / (etaR - kdbR);
-  //     const auto vanL  = knL  -  bn * kfacL;
-  //     const auto vat1L = kt1L - bkc1 * kfacL;
-  //     const auto vat2L = kt2L - bkc2 * kfacL;
-  //     const auto vanR  = knR  -  bn * kfacR;
-  //     const auto vat1R = kt1R - bkc1 * kfacR;
-  //     const auto vat2R = kt2R - bkc2 * kfacR;
-  //     const auto vakn = 0.5 * (vanL + vanR);
-  //     const auto vat1 = 0.5 * (vat1L + vat1R);
-  //     const auto vat2 = 0.5 * (vat2L + vat2R);
-  //     const auto vdbc = vec_dot(vakn, vat1, vat2, bkxn, bkc1, bkc2);
-  //     if (vakn > 0) {
-  //         ua = construct_the_state(
-  //             nhat,
-  //             np1,
-  //             np2,
-  //             rL.d,
-  //             vfacL,
-  //             rL.total_energy(),
-  //             pL,
-  //             vnL,
-  //             vdbL,
-  //             bn,
-  //             bp1L,
-  //             bp2L,
-  //             vt1L,
-  //             vt2L
-  //         );
-  //         const real etc  = (vaL * ua.total_energy() - ua.momentum(nhat) +
-  //         pL
-  //         * vakn - vdbc * bn) / (vaL - vakn); uc = construct_the_state(
-  //             nhat,
-  //             np1,
-  //             np2,
-  //             ua.d,
-  //             (vaL - vnL) / (vaL - vakn),
-  //             etc,
-  //             pL,
-  //             vnL,
-  //             vdbc,
-  //             bn,
-  //             bkc1,
-  //             bkc2,
-  //             vat1L,
-  //             vat2L
-  //         );
+    //     return fR + (ua - uR) * vaR - ua * vface;
+    // } else {
+    //     dK  = 1.0 /(vaR - vaL);
+    //     //---------------Jump conditions across the contact wave
+    //     (section 3.3)
+    //     const auto bkxn  = bn;
+    //     const auto bkc1  = bkc(uaL.bcomponent(np1), uaR.bcomponent(np1), vaL,
+    //     vaR, vnL, vnR, vt1L, vt1R) * dK; const auto bkc2  =
+    //     bkc(uaL.bcomponent(np2), uaR.bcomponent(np2), vaL, vaR, vnL, vnR,
+    //     vt2L,
+    //     vt2R) * dK; const auto kdbL  = vec_dot(bkxn, bkc1, bkc2, knL, kt1L,
+    //     kt2L); const auto kdbR  = vec_dot(bkxn, bkc1, bkc2, knR, kt1R, kt2R);
+    //     const auto ksqL  = vec_sq(knL, kt1L, kt2L);
+    //     const auto ksqR  = vec_sq(knR, kt1R, kt2R);
+    //     const auto kfacL = (1.0 - ksqL) / (etaL - kdbL);
+    //     const auto kfacR = (1.0 - ksqR) / (etaR - kdbR);
+    //     const auto vanL  = knL  -  bn * kfacL;
+    //     const auto vat1L = kt1L - bkc1 * kfacL;
+    //     const auto vat2L = kt2L - bkc2 * kfacL;
+    //     const auto vanR  = knR  -  bn * kfacR;
+    //     const auto vat1R = kt1R - bkc1 * kfacR;
+    //     const auto vat2R = kt2R - bkc2 * kfacR;
+    //     const auto vakn = 0.5 * (vanL + vanR);
+    //     const auto vat1 = 0.5 * (vat1L + vat1R);
+    //     const auto vat2 = 0.5 * (vat2L + vat2R);
+    //     const auto vdbc = vec_dot(vakn, vat1, vat2, bkxn, bkc1, bkc2);
+    //     if (vakn > 0) {
+    //         ua = construct_the_state(
+    //             nhat,
+    //             np1,
+    //             np2,
+    //             rL.d,
+    //             vfacL,
+    //             rL.total_energy(),
+    //             pL,
+    //             vnL,
+    //             vdbL,
+    //             bn,
+    //             bp1L,
+    //             bp2L,
+    //             vt1L,
+    //             vt2L
+    //         );
+    //         const real etc  = (vaL * ua.total_energy() - ua.momentum(nhat) +
+    //         pL
+    //         * vakn - vdbc * bn) / (vaL - vakn); uc = construct_the_state(
+    //             nhat,
+    //             np1,
+    //             np2,
+    //             ua.d,
+    //             (vaL - vnL) / (vaL - vakn),
+    //             etc,
+    //             pL,
+    //             vnL,
+    //             vdbc,
+    //             bn,
+    //             bkc1,
+    //             bkc2,
+    //             vat1L,
+    //             vat2L
+    //         );
 
-  //         const auto fa = fL + (ua - uL) * vaL;
-  //         return fa + (uc - ua) * vakn - uc * vface;
-  //     } else {
-  //         ua = construct_the_state(
-  //             nhat,
-  //             np1,
-  //             np2,
-  //             rL.d,
-  //             vfacR,
-  //             rR.total_energy(),
-  //             pR,
-  //             vnR,
-  //             vdbR,
-  //             bn,
-  //             bp1R,
-  //             bp2R,
-  //             vt1R,
-  //             vt2R
-  //         );
-  //         const real etc  = (vaR * uaR.total_energy() - uaR.momentum(nhat)
-  //         +
-  //         pR * vakn - vdbc * bnR) / (vaR - vakn); uc = construct_the_state(
-  //             nhat,
-  //             np1,
-  //             np2,
-  //             ua.d,
-  //             (vaR - vnR) / (vaR - vakn),
-  //             etc,
-  //             pR,
-  //             vnR,
-  //             vdbc,
-  //             bn,
-  //             bkc1,
-  //             bkc2,
-  //             vat1R,
-  //             vat2R
-  //         );
-  //         const auto fa = fR + (ua - uR) * vaR;
-  //         return fa + (uc - ua) * vakn - uc * vface;
-  //     }
-  // }
+    //         const auto fa = fL + (ua - uL) * vaL;
+    //         return fa + (uc - ua) * vakn - uc * vface;
+    //     } else {
+    //         ua = construct_the_state(
+    //             nhat,
+    //             np1,
+    //             np2,
+    //             rL.d,
+    //             vfacR,
+    //             rR.total_energy(),
+    //             pR,
+    //             vnR,
+    //             vdbR,
+    //             bn,
+    //             bp1R,
+    //             bp2R,
+    //             vt1R,
+    //             vt2R
+    //         );
+    //         const real etc  = (vaR * uaR.total_energy() - uaR.momentum(nhat)
+    //         +
+    //         pR * vakn - vdbc * bnR) / (vaR - vakn); uc = construct_the_state(
+    //             nhat,
+    //             np1,
+    //             np2,
+    //             ua.d,
+    //             (vaR - vnR) / (vaR - vakn),
+    //             etc,
+    //             pR,
+    //             vnR,
+    //             vdbc,
+    //             bn,
+    //             bkc1,
+    //             bkc2,
+    //             vat1R,
+    //             vat2R
+    //         );
+    //         const auto fa = fR + (ua - uR) * vaR;
+    //         return fa + (uc - ua) * vakn - uc * vface;
+    //     }
+    // }
 };
 
 //===================================================================================================================
@@ -2807,7 +2856,7 @@ void RMHD<dim>::simulate(
         const real b   = -4.0 * (et - bsq);
         const real c   = msq - 2.0 * et * bsq + bsq * bsq;
         const real qq  = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
-        edens_guess[i] = qq;
+        edens_guess[i] = qq - d;
         cons[i]        = conserved_t{d, m1, m2, m3, tau, b1, b2, b3, dchi};
     }
 
