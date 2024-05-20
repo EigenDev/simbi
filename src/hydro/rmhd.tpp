@@ -618,46 +618,6 @@ GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
             fac * (-bmusq * w2 * vn2 + bmun * bmun * cs2 -
                    cs2 * w2 * w2 * h * rho * vn2 * vn2 -
                    cs2 * w2 * h * rho * vn2 + w2 * w2 * h * rho * vn2 * vn2);
-
-        // const auto u02   = prims.lorentz_factor_squared();
-        // const auto vdB   = prims.vdotb();
-        // const auto scrh1 = bn / u02 + vdB * vn; /* -- this is bx/u0 -- */
-        // const auto scrh2 = scrh1 * scrh1;
-
-        // const auto vB2 = vdB * vdB;
-        // const auto b2  = bmusq;
-        // const auto w_1 = 1.0 / (rho * h + b2);
-        // const auto vx  = vn;
-        // const auto vx2 = vx * vx;
-
-        // const auto a2_w       = cs2 * w_1;
-        // const auto eps2       = (cs2 * rho * h + b2) * w_1;
-        // const auto one_m_eps2 = u02 * rho * h * (1.0 - cs2) * w_1;
-
-        // /* ---------------------------------------
-        //      Define coefficients for the quartic
-        //    --------------------------------------- */
-
-        // auto scrh = 2.0 * (a2_w * vdB * scrh1 - eps2 * vx);
-        // auto a4   = one_m_eps2 - a2_w * vB2 + eps2;
-        // auto a3   = -4.0 * vx * one_m_eps2 + scrh;
-        // auto a2 =
-        //     6.0 * vx2 * one_m_eps2 + a2_w * (vB2 - scrh2) + eps2 * (vx2
-        //     - 1.0);
-        // auto a1 = -4.0 * vx * vx2 * one_m_eps2 - scrh;
-        // auto a0 = vx2 * vx2 * one_m_eps2 + a2_w * scrh2 - eps2 * vx2;
-
-        // if (a4 < 1.e-12) {
-        //     printf("! Magnetosonic: cannot divide by a4\n");
-        //     // return 1;
-        // }
-
-        // scrh = 1.0 / a4;
-
-        // a3 *= scrh;
-        // a2 *= scrh;
-        // a1 *= scrh;
-        // a0 *= scrh;
         [[maybe_unused]] const auto nroots = quartic(a3, a2, a1, a0, speeds);
 
 #if DEBUG_MODE
