@@ -368,15 +368,10 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                 const real tol = d * global::tol_scale;
                 real f, g, dqq;
                 do {
-                    // compute x_[k+1]
                     f   = newton_f_mhd(gr, et, d, ssq, bsq, msq, qq);
                     g   = newton_g_mhd(gr, d, ssq, bsq, msq, qq);
                     dqq = f / g;
                     qq -= dqq;
-
-                    // compute x*_k
-                    // f     = newton_f(gamma, tau, d, S, qq);
-                    // pstar = qq - f / g;
 
                     if (iter >= global::MAX_ITER || std::isnan(qq)) {
                         troubled_data[gid] = 1;
