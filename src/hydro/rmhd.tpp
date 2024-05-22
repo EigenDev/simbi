@@ -361,14 +361,13 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                 const real ssq  = s * s;
                 const real msq  = (m1 * m1 + m2 * m2 + m3 * m3);
                 const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
-                const real et   = tau + d;
 
                 int iter       = 0;
                 real qq        = edens_data[gid];
                 const real tol = d * global::tol_scale;
                 real f, g, dqq;
                 do {
-                    f   = newton_f_mhd(gr, et, d, ssq, bsq, msq, qq);
+                    f   = newton_f_mhd(gr, tau, d, ssq, bsq, msq, qq);
                     g   = newton_g_mhd(gr, d, ssq, bsq, msq, qq);
                     dqq = f / g;
                     qq -= dqq;
@@ -384,17 +383,18 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 
                 } while (std::abs(dqq) >= tol);
 
-                const real qqd = qq + d;
-                const real rat = s / qqd;
-                const real fac = 1.0 / (qqd + bsq);
-                const real v1  = fac * (m1 + rat * b1);
-                const real v2  = fac * (m2 + rat * b2);
-                const real v3  = fac * (m3 + rat * b3);
-                const real vsq = v1 * v2 + v2 * v2 + v3 * v3;
-                const real w   = std::sqrt(1.0 / (1.0 - vsq));
-                const real usq = w * w * vsq;
-                const real chi = qq / (w * w) - (d * usq) / (w * w * (1.0 + w));
-                const real pg  = (1.0 / gr) * chi;
+                const real qqd  = qq + d;
+                const real rat  = s / qqd;
+                const real fac  = 1.0 / (qqd + bsq);
+                const real v1   = fac * (m1 + rat * b1);
+                const real v2   = fac * (m2 + rat * b2);
+                const real v3   = fac * (m3 + rat * b3);
+                const real vsq  = v1 * v2 + v2 * v2 + v3 * v3;
+                const real wsq  = 1.0 / (1.0 - vsq);
+                const real w    = std::sqrt(wsq);
+                const real usq  = wsq * vsq;
+                const real chi  = qq / wsq - d * usq / (wsq * (1.0 + w));
+                const real pg   = (1.0 / gr) * chi;
                 edens_data[gid] = qq;
 #if FOUR_VELOCITY
                 prim_data[gid] =
@@ -617,28 +617,29 @@ GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
             fac * (-bmusq * w2 * vn2 + bmun * bmun * cs2 -
                    cs2 * w2 * w2 * h * rho * vn2 * vn2 -
                    cs2 * w2 * h * rho * vn2 + w2 * w2 * h * rho * vn2 * vn2);
+
         [[maybe_unused]] const auto nroots = quartic(a3, a2, a1, a0, speeds);
 
-#if DEBUG_MODE
-        if (nroots != 4) {
-            printf(
-                "\n number of quartic roots less than 4, nroots: %d."
-                "fastest wave"
-                ": % .2e, slowest_wave"
-                ": % .2e\n ",
-                nroots,
-                speeds[3],
-                speeds[0]
-            );
+        if constexpr (global::debug_mode) {
+            if (nroots != 4) {
+                printf(
+                    "\n number of quartic roots less than 4, nroots: %d."
+                    "fastest wave"
+                    ": % .2e, slowest_wave"
+                    ": % .2e\n ",
+                    nroots,
+                    speeds[3],
+                    speeds[0]
+                );
+            }
+            else {
+                printf(
+                    "slowest wave: %.2e, fastest wave: %.2e\n",
+                    speeds[0],
+                    speeds[3]
+                );
+            }
         }
-        else {
-            printf(
-                "\slowest wave: %.2e, fastest wave: %.2e\n",
-                speeds[0],
-                speeds[3]
-            );
-        }
-#endif
     }
 }
 
@@ -687,7 +688,7 @@ RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t& prims) const
     const real b3    = prims.bcomponent(3);
     const real lf    = prims.lorentz_factor();
     const real h     = prims.gas_enthalpy(gamma);
-    const real vdotb = prims.vdotb();
+    const real vdotb = (v1 * b1 + v2 * b2 + v3 * b3);
     const real bsq   = (b1 * b1 + b2 * b2 + b3 * b3);
     const real vsq   = (v1 * v1 + v2 * v2 + v3 * v3);
     const real d     = rho * lf;
@@ -921,11 +922,12 @@ RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
     const real m3    = (ed + bsq) * v3 - vdotb * b3;
     const real mn    = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
     const auto bmu   = mag_fourvec_t(prims);
+    const auto invlf = 1.0 / lf;
     return {
       d * vn,
-      m1 * vn + kronecker(nhat, 1) * p - bn * bmu.one / lf,
-      m2 * vn + kronecker(nhat, 2) * p - bn * bmu.two / lf,
-      m3 * vn + kronecker(nhat, 3) * p - bn * bmu.three / lf,
+      m1 * vn + kronecker(nhat, 1) * p - bn * bmu.one * invlf,
+      m2 * vn + kronecker(nhat, 2) * p - bn * bmu.two * invlf,
+      m3 * vn + kronecker(nhat, 3) * p - bn * bmu.three * invlf,
       mn - d * vn,
       vn * b1 - v1 * bn,
       vn * b2 - v2 * bn,
@@ -962,7 +964,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
             return fR - uR * vface;
         }
         else {
-            auto f_hll =
+            const auto f_hll =
                 (fL * aRp - fR * aLm + (uR - uL) * aLm * aRp) / (aRp - aLm);
             const auto u_hll = (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
             // f_hll.calc_electric_field(nhat);
@@ -2812,7 +2814,7 @@ void RMHD<dim>::simulate(
         const real b   = -4.0 * (et - bsq);
         const real c   = msq - 2.0 * et * bsq + bsq * bsq;
         const real qq  = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
-        edens_guess[i] = qq - d;
+        edens_guess[i] = std::max(qq - d, d);
         cons[i]        = conserved_t{d, m1, m2, m3, tau, b1, b2, b3, dchi};
     }
 
