@@ -2503,7 +2503,7 @@ namespace simbi {
             recursiveQuickSort(z, 0, 3);
             // SortArray(z, 4);
 
-            if (true) {
+            if constexpr (global::debug_mode) {
                 printf(
                     "Quartic roots = %f  %f  %f  %f; q = %8.3e\n",
                     z[0],

@@ -828,7 +828,6 @@ namespace simbi {
          * @brief calculate relativistic mhd df/dq from Mignone & McKinney
          * (2007)
          * @param gr adiabatic index reduced (gamma / (gamma - 1))
-         * @param et total energy density
          * @param d lab frame density
          * @param ssq s-squared
          * @param bsq b-squared
@@ -839,18 +838,18 @@ namespace simbi {
         GPU_CALLABLE_INLINE real
         newton_g_mhd(real gr, real d, real ssq, real bsq, real msq, real qq)
         {
-            const auto qqf = qq + d;
-            const auto q2  = qqf * qqf;
+            const auto qqd = qq + d;
+            const auto q2  = qqd * qqd;
             const auto rat = ssq / q2;
             const auto y1  = 1.0 / (qq + d + bsq);
             const auto y2  = y1 * y1;
-            const auto v2  = rat * y1 * (y1 * qqf + 1.0) + msq * y2;
+            const auto v2  = rat * y1 * (y1 * qqd + 1.0) + msq * y2;
             const auto ig2 = 1.0 - v2;
             const auto g2  = 1.0 / ig2;
             const auto g   = std::sqrt(g2);
             const auto chi = qq / g2 - d * v2 / (g + 1.0);
             const auto dv2_dq =
-                -2.0 * y2 * (3.0 * rat + y1 * (rat * bsq * bsq / qqf + msq));
+                -2.0 * y2 * (3.0 * rat + y1 * (rat * bsq * bsq / qqd + msq));
 
             //===== kinematical and thermodynamics expressions terms section A2
             const auto dchi_dq = ig2 - 0.5 * g * (d + 2.0 * chi * g) * dv2_dq;
