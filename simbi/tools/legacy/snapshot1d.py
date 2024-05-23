@@ -1,7 +1,3 @@
-#! /usr/bin/env python
-
-# Read in a File and Plot it
-
 import numpy as np 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tkr

@@ -1,5 +1,3 @@
-#! /usr/bin/env python
-
 import numpy as np
 from astropy import units, constants
 import matplotlib.pyplot as plt

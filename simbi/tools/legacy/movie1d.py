@@ -1,7 +1,7 @@
 # Tool for making movies from h5 files in directory
 
 import numpy as np 
-import matplotlib.pyplot as plt #! /usr/bin/env python
+import matplotlib.pyplot as plt 
 import matplotlib.ticker as tkr
 import utility as util
 import matplotlib.colors as colors
