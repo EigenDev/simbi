@@ -26,6 +26,8 @@ try:
 except ImportError:
     pass
 
+ 
+
 derived = [
     "D",
     "momentum",
@@ -316,7 +318,7 @@ class Visualizer:
                             label = label + f"/{int(scale)}"
 
                     if self.labels:
-                        label += f", {self.labels[fidx]}"
+                        label = f"{self.labels[fidx]}"
 
                     if self.oned_slice:
                         x = mesh[self.oned_slice]

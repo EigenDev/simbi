@@ -123,8 +123,8 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
         # ------------------------
         # Generate Mesh
         # ------------------------
-        arr_select: Callable[..., function] = (
-            lambda x: np.linspace if x == b"linear" else np.geomspace
+        arr_select: Callable[..., function] = lambda x: (
+            np.linspace if x == b"linear" else np.geomspace
         )
         funcs = [
             arr_select(val)
@@ -212,6 +212,7 @@ def load_checkpoint(model: Any, filename: str, dim: int, mesh_motion: bool) -> N
 
         model.chkpt_idx = ds["chkpt_idx"]
 
+
 @release_memory
 def initializeModel(
     model: Any,
@@ -240,7 +241,9 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
         model.nvars = 9
 
     # Initialize conserved u-array and flux arrays
-    model.u = np.zeros(shape=(model.nvars - 1, *np.asanyarray(model.resolution).flat[::-1]))
+    model.u = np.zeros(
+        shape=(model.nvars - 1, *np.asanyarray(model.resolution).flat[::-1])
+    )
     # model.u = initial_state
 
     if model.discontinuity:
@@ -279,7 +282,7 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
             rho, *velocity, pressure = state[: model.number_of_non_em_terms]
             velocity = np.asanyarray(velocity)
             # check if there are any bfields
-            bfields = state[model.number_of_non_em_terms :]
+            mean_bfields = state[model.number_of_non_em_terms :]
 
             vsqr = dot_product(velocity, velocity)
             lorentz_factor = calc_lorentz_factor(vsqr, model.regime)
@@ -290,25 +293,25 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
             )
 
             energy = calc_labframe_energy(
-                rho, lorentz_factor, total_enthalpy, pressure, velocity, bfields
+                rho, lorentz_factor, total_enthalpy, pressure, velocity, mean_bfields
             )
             dens = calc_labframe_densiity(rho, lorentz_factor)
             mom = calc_labframe_momentum(
-                rho, lorentz_factor, enthalpy_limit, velocity, bfields
+                rho, lorentz_factor, enthalpy_limit, velocity, mean_bfields
             )
 
             if model.dimensionality == 1:
-                part[...] = np.array([dens, *mom, energy, *bfields])[:, None]
+                part[...] = np.array([dens, *mom, energy, *mean_bfields])[:, None]
             else:
                 part[...] = (
                     part[...].transpose()
-                    + np.array([dens, *mom, energy, *bfields])
+                    + np.array([dens, *mom, energy, *mean_bfields])
                 ).transpose()
     else:
         rho, *velocity, pressure = initial_state[: model.number_of_non_em_terms]
         velocity = np.asanyarray(velocity)
         # check if there are any bfields
-        bfields = initial_state[model.number_of_non_em_terms :]
+        mean_bfields = initial_state[model.number_of_non_em_terms :]
 
         vsqr = dot_product(velocity, velocity)
         lorentz_factor = calc_lorentz_factor(vsqr, model.regime)
@@ -320,10 +323,10 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
 
         model.init_density = calc_labframe_densiity(rho, lorentz_factor)
         model.init_momentum = calc_labframe_momentum(
-            rho, lorentz_factor, enthalpy_limit, velocity, bfields
+            rho, lorentz_factor, enthalpy_limit, velocity, mean_bfields
         )
         model.init_energy = calc_labframe_energy(
-            rho, lorentz_factor, total_enthalpy, pressure, velocity, bfields
+            rho, lorentz_factor, total_enthalpy, pressure, velocity, mean_bfields
         )
 
         model.u[...] = np.array(
@@ -331,6 +334,6 @@ def construct_the_state(model: Any, initial_state: NDArray[numpy_float]) -> None
                 model.init_density,
                 *model.init_momentum,
                 model.init_energy,
-                *bfields,
+                *mean_bfields,
             ]
         )

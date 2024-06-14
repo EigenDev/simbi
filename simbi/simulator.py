@@ -4,13 +4,10 @@
 # 06/10/2020
 import numpy as np
 import os
-import sys
 import inspect
 import importlib
 import tracemalloc
-import gc
 import simbi.detail as detail
-from multiprocessing import Process
 from itertools import chain, repeat
 from .detail import initial_condition as simbi_ic
 from .detail import helpers
@@ -57,6 +54,7 @@ class Hydro:
     geometry: Any
     u: NDArray[Any]
     resolution: Sequence[int]
+    bfield: NDArray[numpy_float]
     trace_memory: bool = False
 
     def __init__(
@@ -120,6 +118,7 @@ class Hydro:
         self.regime = regime
         self.gamma = gamma
         self.mhd = self.regime in ["srmhd", "mhd"]
+        self.initial_state = initial_state
 
         tuple_of_tuples: Callable[..., bool] = lambda x: all(
             isinstance(a, Sequence) for a in x
@@ -182,7 +181,6 @@ class Hydro:
             ngeom = len(self.geometry)
         nres = len(self.resolution)
 
-        
         if ngeom != self.dimensionality:
             raise ValueError(
                 f"Detecting a {self.dimensionality}D run, but only {ngeom} geometry tuple(s)"
@@ -203,16 +201,18 @@ class Hydro:
         # snapshot = tracemalloc.take_snapshot()
         # helpers.display_top(snapshot)
         # zzz = input('')
-        
+
         nstates = len(initial_state)
         max_discont = 2**self.dimensionality
         self.number_of_non_em_terms = 2 + self.dimensionality if not self.mhd else 5
         max_prims = self.number_of_non_em_terms + 3 * self.mhd
         if nstates <= max_prims or (nstates < max_discont and self.discontinuity):
-            detail.initial_condition.construct_the_state(self, initial_state=initial_state)
+            detail.initial_condition.construct_the_state(
+                self, initial_state=initial_state
+            )
         else:
             raise ValueError("Initial State contains too many variables")
-        
+
         # print("="*80)
         # print("state constructed")
         # snapshot = tracemalloc.take_snapshot()
@@ -469,7 +469,7 @@ class Hydro:
             object_positions (boolean array_lie): An optional boolean array that masks the immersed boundary
             boundary_source (array_like): An array of conserved quantities at the boundaries of the grid
             spatial_order str: space order of integration [pcm or plm]
-            
+
 
         Returns:
             solution (array): The hydro solution containing the primitive variables
@@ -478,7 +478,7 @@ class Hydro:
             raise ValueError(f"Space order can only be one of {['pcm', 'plm']}")
         if time_order not in ["rk1", "rk2"]:
             raise ValueError(f"Time order can only be one of {['rk1', 'rk2']}")
-        
+
         self._print_params(inspect.currentframe())
         if x1_cell_spacing not in available_cellspacings:
             raise ValueError(
@@ -500,7 +500,6 @@ class Hydro:
         scale_factor = scale_factor or (lambda t: 1.0)
         scale_factor_derivative = scale_factor_derivative or (lambda t: 0.0)
         self._generate_the_grid(x1_cell_spacing, x2_cell_spacing, x3_cell_spacing)
-        
         mesh_motion = scale_factor_derivative(tstart) / scale_factor(tstart) != 0
         volume_factor: Union[float, NDArray[Any]] = 1.0
         if mesh_motion and self.coord_system != "cartesian":
@@ -518,7 +517,9 @@ class Hydro:
 
         self._check_boundary_conditions(boundary_conditions)
         if not chkpt:
-            simbi_ic.initializeModel(self, spatial_order == "pcm", volume_factor, passive_scalars)
+            simbi_ic.initializeModel(
+                self, spatial_order == "pcm", volume_factor, passive_scalars
+            )
         else:
             simbi_ic.load_checkpoint(self, chkpt, self.dimensionality, mesh_motion)
         if self.dimensionality == 1 and self.coord_system in [
@@ -530,13 +531,11 @@ class Hydro:
         self.start_time = self.start_time or tstart
 
         #######################################################################
-        # Check if boundary source terms given. If given as a jagged array, 
+        # Check if boundary source terms given. If given as a jagged array,
         # pad the missing members with zeros
         #######################################################################
         if boundary_sources is None:
-            boundary_sources = np.zeros(
-                (2 * self.dimensionality, len(self.u[:,0]))
-            )
+            boundary_sources = np.zeros((2 * self.dimensionality, len(self.u[:, 0])))
         else:
             boundary_sources = self._place_boundary_sources(
                 boundary_sources=boundary_sources, spatial_order=spatial_order
@@ -602,7 +601,7 @@ class Hydro:
             else np.asanyarray(object_positions, dtype=bool)
         )
 
-        print("="*80)
+        print("=" * 80)
         logger.info(
             f"Computing solution using {spatial_order.upper()} in space, {time_order.upper()} in time..."
         )
@@ -612,7 +611,7 @@ class Hydro:
             if sources is None
             else np.asanyarray(sources)
         )
-        
+
         sources = sources.reshape(sources.shape[0], -1)
         gsources = np.zeros(3) if gsources is None else np.asanyarray(gsources)
         gsources = gsources.reshape(gsources.shape[0], -1)
@@ -639,16 +638,23 @@ class Hydro:
                 if "GPUZBLOCK_SIZE" not in os.environ:
                     os.environ["GPUZBLOCK_SIZE"] = "4"
 
+        extra_edges: int = 2 if spatial_order == "pcm" else 4
         if len(self.resolution) == 1:
-            self.nx = self.u[0].shape[0]
+            self.nx = self.resolution[0] + extra_edges
             self.ny = 1
             self.nz = 1
         elif len(self.resolution) == 2:
-            self.ny, self.nx = self.u[0].shape
+            self.nx = self.resolution[0] + extra_edges
+            self.ny = self.resolution[1] + extra_edges
             self.nz = 1
         else:
-            self.nz, self.ny, self.nx = self.u[0].shape
+            self.nx = self.resolution[0] + extra_edges
+            self.ny = self.resolution[1] + extra_edges
+            self.nz = self.resolution[2] + extra_edges
 
+        nxp = self.nx - extra_edges
+        nyp = self.ny - extra_edges
+        nzp = self.nz - extra_edges
         init_conditions = {
             "gamma": self.gamma,
             "sources": sources,
@@ -680,11 +686,32 @@ class Hydro:
             "ny": self.ny,
             "nz": self.nz,
             "object_cells": object_cells.flat,
+            "nxv": nxp + 1,
+            "nyv": nyp + 1,
+            "nzv": nzp + 1,
+            "bfield": [[0], [0], [0]],
         }
-        
+
         if self.mhd:
             init_conditions["bsources"] = bsources
-
+            if self.discontinuity:
+                b1 = np.zeros(shape=(nzp + 2, nyp + 2, init_conditions["nxv"]))
+                b2 = np.zeros(shape=(nzp + 2, init_conditions["nyv"], nxp + 2))
+                b3 = np.zeros(shape=(init_conditions["nzv"], nyp + 2, nxp + 2))
+                x1v = helpers.calc_vertices(
+                    arr=self.x1, direction=1, cell_spacing=x1_cell_spacing
+                )
+                region_one = x1v < self.geometry[0][2]
+                region_two = np.logical_not(region_one)
+                a = np.pad(self.x1, 1, mode='edge') < self.geometry[0][2]
+                b = np.logical_not(a)
+                b1[..., region_one] = self.initial_state[0][5]
+                b1[..., region_two] = self.initial_state[1][5]
+                b2[..., a] = self.initial_state[0][6]
+                b2[..., b] = self.initial_state[1][6]
+                b3[..., a] = self.initial_state[0][7]
+                b3[..., b] = self.initial_state[1][7]
+            init_conditions["bfield"] = [b1.flat, b2.flat, b3.flat]
         lambdas: dict[str, Optional[Callable[..., float]]] = {
             "dens_lambda": None,
             "mom1_lambda": None,
@@ -710,19 +737,18 @@ class Hydro:
             importlib.import_module(f".{lib_mode}_ext", package="simbi.libs"),
             "SimState",
         )
-        
+
         if self.trace_memory:
-            print(r"-*"*40)
+            print(r"-*" * 40)
             snapshot = tracemalloc.take_snapshot()
             helpers.display_top(snapshot)
             tracemalloc.stop()
-            print(r"-*"*40)
+            print(r"-*" * 40)
             helpers.print_progress()
-        
+
         state_contig = self.u.reshape(self.u.shape[0], -1)
-        state = sim_state()
-        
-        state.run(
+
+        sim_state().run(
             state=state_contig,
             dim=self.dimensionality,
             regime=self.regime.encode("utf-8"),

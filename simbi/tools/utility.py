@@ -333,11 +333,31 @@ def prims2var(fields: dict[str, NDArray[numpy_float]], var: str) -> Any:
         # Lab frame momentum density
         return fields["rho"] * W**2 * calc_enthalpy(fields) * fields["v"]
     elif var == "energy":
+        bsquared = 0.0
+        vsquared = 0.0
+        vdb = 0.0
+        # check for bfield 
+        if 'b1' in fields:
+            bvec = np.array([fields['b1'], fields['b2'], fields['b3']])
+            vvec = np.array([fields['v1'], fields['v2'], fields['v3']])
+            bsquared = np.sum([b ** 2 for b in bvec], axis=0)
+            vsquared = np.sum([v ** 2 for v in vvec], axis=0)
+            vdb      = np.sum([x * y for x, y in zip(bvec, vvec)], axis=0)
         # Energy minus rest mass energy
-        return fields["rho"] * h * W**2 - fields["p"] - fields["rho"] * W
+        return fields["rho"] * h * W**2 - fields["p"] - fields["rho"] * W + 0.5 * (bsquared + vsquared * bsquared - vdb**2)
     elif var == "energy_rst":
+        bsquared = 0.0
+        vsquared = 0.0
+        vdb = 0.0
+        # check for bfield 
+        if 'b1' in fields:
+            bvec = np.array([fields['b1'], fields['b2'], fields['b3']])
+            vvec = np.array([fields['v1'], fields['v2'], fields['v3']])
+            bsquared = np.sum([b ** 2 for b in bvec], axis=0)
+            vsquared = np.sum([v ** 2 for v in vvec], axis=0)
+            vdb      = np.sum([x * y for x, y in zip(bvec, vvec)], axis=0)
         # Total Energy
-        return fields["rho"] * h * W**2 - fields["p"]
+        return fields["rho"] * h * W**2 - fields["p"] + 0.5 * (bsquared + vsquared * bsquared - vdb**2)
     elif var == "temperature":
         a = 4.0 * const.sigma_sb.cgs / c
         T = (3.0 * fields["p"] * edens_scale / a) ** 0.25
