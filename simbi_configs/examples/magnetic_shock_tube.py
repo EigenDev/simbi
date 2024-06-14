@@ -25,8 +25,8 @@ class MagneticShockTube(BaseConfig):
                     (1.0, -0.999, 0.0, 0.0, 0.1, 10.0, -7.0, -7.0))
     
     @simbi_property
-    def geometry(self) -> Sequence[float]:
-        return ((0.0, 1.0, 0.5))
+    def geometry(self) -> Sequence[Sequence[float]]:
+        return ((0.0, 1.0, 0.5), (0.0, 1.0), (0.0, 1.0))
 
     @simbi_property
     def x1_cell_spacing(self) -> str:
@@ -37,8 +37,8 @@ class MagneticShockTube(BaseConfig):
         return "cartesian"
 
     @simbi_property
-    def resolution(self) -> Sequence[DynamicArg]:
-        return (self.nzones,) 
+    def resolution(self) -> Sequence[DynamicArg | int]:
+        return (self.nzones, 1, 1) 
     
     @simbi_property
     def gamma(self) -> DynamicArg:
