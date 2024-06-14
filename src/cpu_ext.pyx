@@ -50,7 +50,7 @@ cdef class SimState:
         sim_cond.nx               = sim_info['nx']
         sim_cond.ny               = sim_info['ny']
         sim_cond.nz               = sim_info['nz']
-        sim_cond.spatial_order      = sim_info['spatial_order']
+        sim_cond.spatial_order    = sim_info['spatial_order']
         sim_cond.time_order       = sim_info['time_order']
         sim_cond.x1_cell_spacing  = sim_info['x1_cell_spacing']
         sim_cond.x2_cell_spacing  = sim_info['x2_cell_spacing']
@@ -69,6 +69,7 @@ cdef class SimState:
         sim_cond.chkpt_idx           = sim_info['chkpt_idx']
         sim_cond.constant_sources    = sim_info['constant_sources']
         sim_cond.quirk_smoothing     = sim_info['quirk_smoothing']
+        sim_cond.bfield              = sim_info["bfield"]
 
         if dim > 1:
             sim_cond.x2 = sim_info['x2']

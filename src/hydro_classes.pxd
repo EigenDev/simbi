@@ -20,7 +20,7 @@ cdef extern from "common/hydro_structs.hpp":
         real tstart, chkpt_interval, dlogt, plm_theta, engine_duration, gamma, cfl, tend
         int nx, ny, nz, chkpt_idx
         bool quirk_smoothing, constant_sources
-        vector[vector[real]] sources, gsources
+        vector[vector[real]] sources, gsources, bfield
         vector[bool] object_cells
         string data_directory, coord_system, solver
         string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing
