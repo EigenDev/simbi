@@ -159,10 +159,7 @@ class Hydro:
                     raise ValueError(
                         "Too many variables across discontinuity for non-mhd run"
                     )
-                if tuple_of_tuples(self.geometry):
-                    self.dimensionality = len(self.geometry)
-                else:
-                    self.dimensionality = 1
+                self.dimensionality = 3
                 self.discontinuity = True
             else:
                 raise ValueError(
@@ -359,18 +356,16 @@ class Hydro:
                     self.geometry[1][0], self.geometry[1][1], self.resolution[1]
                 )
         else:
+            x2_vertices = self.resolution[1] + (self.resolution[1] == 1)
+            x3_vertices = self.resolution[2] + (self.resolution[2] == 1)
             if self.x1 is None:
                 self.x1 = x1_func(
                     self.geometry[0][0], self.geometry[0][1], self.resolution[0]
                 )
             if self.x2 is None:
-                self.x2 = x2_func(
-                    self.geometry[1][0], self.geometry[1][1], self.resolution[1]
-                )
+                self.x2 = x2_func(self.geometry[1][0], self.geometry[1][1], x2_vertices)
             if self.x3 is None:
-                self.x3 = x3_func(
-                    self.geometry[2][0], self.geometry[2][1], self.resolution[2]
-                )
+                self.x3 = x3_func(self.geometry[2][0], self.geometry[2][1], x3_vertices)
 
         self.x1 = np.asanyarray(self.x1)
         self.x2 = np.asanyarray(self.x2)
@@ -703,7 +698,7 @@ class Hydro:
                 )
                 region_one = x1v < self.geometry[0][2]
                 region_two = np.logical_not(region_one)
-                a = np.pad(self.x1, 1, mode='edge') < self.geometry[0][2]
+                a = np.pad(self.x1, 1, mode="edge") < self.geometry[0][2]
                 b = np.logical_not(a)
                 b1[..., region_one] = self.initial_state[0][5]
                 b1[..., region_two] = self.initial_state[1][5]
