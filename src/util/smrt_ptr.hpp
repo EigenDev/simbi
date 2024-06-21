@@ -1,3 +1,21 @@
+/**
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ * @file       smrt_ptr.hpp
+ * @brief      custom smart pointer implementation
+ *
+ * @note       adapted from:
+ * https://www.experts-exchange.com/articles/1959/C-Smart-pointers.html
+ * @history:
+ *   Version   Date            Author          Modification    Email
+ *   V0.8.0    Jun-21-2024     Marcus DuPont                   md4469@nyu.edu
+ *
+ * @verbatim
+ * ==============================================================================
+ *
+ * ==============================================================================
+ * @endverbatim
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
+ */
 #ifndef SMRT_PTR_HPP
 #define SMRT_PTR_HPP
 
