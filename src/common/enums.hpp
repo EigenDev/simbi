@@ -86,7 +86,77 @@ namespace simbi {
         I
     };
 
+    enum class Pos {
+        center,
+        left_face,
+        right_face,
+    };
+
+    enum class Dir {
+        N,
+        E,
+        S,
+        W,
+        SW,
+        SE,
+        NW,
+        NE
+    };
+
+    enum class Corner {
+        NE,
+        SE,
+        SW,
+        NW
+    };
+
+    enum class Face {
+        N,
+        E,
+        S,
+        W
+    };
+
+    enum class Plane {
+        IJ,
+        IK,
+        JK
+    };
+
+    enum Interface {
+        LF,
+        RF
+    };
+
+    enum IJ {
+        IPJP,
+        IPJM,
+        IMJM,
+        IMJP
+    };
+
+    enum IK {
+        IPKP,
+        IPKM,
+        IMKM,
+        IMKP
+    };
+
+    enum JK {
+        JPKP,
+        JPKM,
+        JMKM,
+        JMKP
+    };
+
+    enum class CTTYPE {
+        ZERO,
+        UPWIND,
+        ALPHA
+    };
+
     constexpr auto comp_wave_speed = WaveSpeeds::MIGNONE_AND_BODO_05;
+    constexpr auto comp_ct_type    = CTTYPE::UPWIND;
     constexpr auto comp_hllc_type  = HLLCTYPE::CLASSICAL;
 }   // namespace simbi
 #endif
