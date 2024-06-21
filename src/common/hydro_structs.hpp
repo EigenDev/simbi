@@ -62,7 +62,7 @@ struct InitialConditions {
     real plm_theta, engine_duration, gamma, cfl, tend;
     luint nx, ny, nz, chkpt_idx;
     bool quirk_smoothing, constant_sources;
-    std::vector<std::vector<real>> sources, gsources, bsources;
+    std::vector<std::vector<real>> sources, gsources, bsources, bfield;
     std::vector<bool> object_cells;
     std::string data_directory, coord_system, solver;
     std::string x1_cell_spacing, x2_cell_spacing, x3_cell_spacing, regime;
@@ -1330,9 +1330,9 @@ namespace rmhd {
             m2 -= cons.m2;
             m3 -= cons.m3;
             nrg -= cons.nrg;
-            b1 -= cons.b1;
-            b2 -= cons.b2;
-            b3 -= cons.b3;
+            // b1 -= cons.b1;
+            // b2 -= cons.b2;
+            // b3 -= cons.b3;
             chi -= cons.chi;
             return *this;
         }
@@ -1387,6 +1387,19 @@ namespace rmhd {
         // constexpr real e3() { return b3; }
         GPU_CALLABLE_MEMBER
         constexpr real& e3() { return b3; }
+
+        constexpr real ecomponent(luint nhat) const
+        {
+            if (nhat == 1) {
+                return b1;
+            }
+            else if (nhat == 2) {
+                return b2;
+            }
+            else {
+                return b3;
+            }
+        }
 
         GPU_CALLABLE_MEMBER
         void calc_electric_field(const luint nhat)
@@ -1705,7 +1718,7 @@ namespace rmhd {
         GPU_CALLABLE_MEMBER constexpr real lorentz_factor() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
-                return 1 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
+                return 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
             }
             else {
                 return std::sqrt(1.0 + (v1 * v1 + v2 * v2 + v3 * v3));
@@ -1750,6 +1763,18 @@ namespace rmhd {
 
         GPU_CALLABLE_MEMBER
         real vsquared() const { return v1 * v1 + v2 * v2 + v3 * v3; }
+
+        GPU_CALLABLE_MEMBER
+        real ecomponent(luint nhat) const
+        {
+            if (nhat == 1) {
+                return v3 * b2 - v2 * b3;
+            }
+            else if (nhat == 2) {
+                return v1 * b3 - v3 * b1;
+            }
+            return v2 * b1 - v1 * b2;
+        }
     };
 
     template <int dim>
