@@ -347,6 +347,19 @@ namespace simbi {
         };
 
         /**
+         * @brief compute the minmod slope limiter
+         *
+         * @param x
+         * @param y
+         * @return minmod value between x and y
+         */
+        GPU_CALLABLE_INLINE real minmod(const real x, const real y)
+        {
+            return 0.5 * std::abs(sgn(x) + sgn(y)) * sgn(x) *
+                   my_min(std::abs(x), std::abs(y));
+        };
+
+        /**
          * @brief calculate the mean between any two values based on cell
          * spacing
          *
@@ -1011,7 +1024,7 @@ namespace simbi {
          * @return row-major or column-major index for 3D array
          */
         GPU_CALLABLE_INLINE
-        auto get_2d_idx(
+        auto idx3(
             const luint ii,
             const luint jj,
             const luint kk,
@@ -1064,6 +1077,21 @@ namespace simbi {
         {
             return ((nhat - 1) + step) % 3 + 1;
         };
+
+        /**
+         * @brief           get the index of the direction neighbor
+         * @param[in/out/in,out]ii:
+         * @param[in/out/in,out]jj:
+         * @param[in/out/in,out]kk:
+         * @param[in/out/in,out]ni:
+         * @param[in/out/in,out]nj:
+         * @param[in/out/in,out]nk:
+         * @return          GPU_CALLABLE
+         * @retval
+         */
+        template <Plane P, Corner C, Dir s>
+        GPU_CALLABLE lint
+        cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk);
 
         // configure the ghost zones in 1D hydro
         template <typename T, typename U>
