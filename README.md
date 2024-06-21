@@ -117,7 +117,7 @@ $ CC=<your_c_compiler> CXX=<your_cpp_compiler> meson setup <build_dir> -Dcpp_std
 
     You can plot the above output by running 
     ``` bash
-    $ simbi plot data/1000.chkpt.000_100.h5 "Marti \& Muller Problem 1" --field rho v p --tex
+    $ simbi plot data/1000.chkpt.000_100.h5 "Marti \& Muller Problem 1" --field rho v p
     ```
 
     The usual formula for plotting a checkpoint file is like so:
