@@ -126,7 +126,7 @@ namespace simbi {
                       ncheck(0),
                       speed(0),
                       zu_avg(0),
-                      delta_t(0){};
+                      delta_t(0) {};
                 ~Logger() = default;
             };
 
@@ -188,10 +188,10 @@ namespace simbi {
                                     const auto jreal = helpers::get_real_idx(
                                         jj,
                                         sim_state.radius,
-                                        sim_state.yactive_grid
+                                        sim_state.yag
                                     );
                                     const real dV = sim_state.get_cell_volume(
-                                        sim_state.xactive_grid - 1,
+                                        sim_state.xag - 1,
                                         jreal
                                     );
                                     sim_state.outer_zones[jj] =
@@ -225,7 +225,7 @@ namespace simbi {
                                     const auto kreal = helpers::get_real_idx(
                                         kk,
                                         sim_state.radius,
-                                        sim_state.zactive_grid
+                                        sim_state.zag
                                     );
                                     for (luint jj = 0; jj < sim_state.ny;
                                          jj++) {
@@ -233,11 +233,11 @@ namespace simbi {
                                             helpers::get_real_idx(
                                                 jj,
                                                 sim_state.radius,
-                                                sim_state.yactive_grid
+                                                sim_state.yag
                                             );
                                         const real dV =
                                             sim_state.get_cell_volume(
-                                                sim_state.xactive_grid - 1,
+                                                sim_state.xag - 1,
                                                 jreal,
                                                 kreal
                                             );
@@ -366,7 +366,7 @@ namespace simbi {
                 print_avg_speed(logger);
             };
         }   // namespace logger
-    }       // namespace detail
+    }   // namespace detail
 
 }   // namespace simbi
 #endif
