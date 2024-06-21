@@ -76,7 +76,7 @@ namespace simbi {
         bool null_mag1, null_mag2, null_mag3;
         bool nullg1, nullg2, nullg3;
         luint active_zones, idx_active, total_zones, n, init_chkpt_idx, radius;
-        luint xactive_grid, yactive_grid, zactive_grid;
+        luint xag, yag, zag;
         std::vector<std::string> boundary_conditions;
         simbi::Solver sim_solver;
         ndarray<simbi::BoundaryCondition> bcs;
@@ -88,11 +88,16 @@ namespace simbi {
         simbi::Geometry geometry;
         simbi::Cellspacing x1_cell_spacing, x2_cell_spacing, x3_cell_spacing;
         luint blockSize, checkpoint_zones;
-        std::vector<std::vector<real>> sources;
+        std::vector<std::vector<real>> sources, bfield;
         std::vector<bool> object_cells;
         std::string data_directory;
         std::vector<std::vector<real>> boundary_sources;
         ndarray<bool> object_pos;
+        luint xblockdim, yblockdim, zblockdim, sx, sy, sz;
+        luint xblockspace, yblockspace, zblockspace;
+        luint shBlockSpace, shBlockBytes;
+        luint nxv, nyv, nzv, nv;
+        ExecutionPolicy<> fullP, activeP;
 
         //=========================== GPU Threads Per Dimension
         std::string readGpuEnvVar(std::string const& key) const
@@ -141,7 +146,45 @@ namespace simbi {
             init_chkpt_idx = chkpt_idx + (chkpt_idx > 0);
         }
 
-        void deallocate_state() { state = std::vector<std::vector<real>>(); }
+        void deallocate_state()
+        {
+            state  = std::vector<std::vector<real>>();
+            bfield = std::vector<std::vector<real>>();
+        }
+
+        void print_shared_mem()
+        {
+            if constexpr (global::on_sm) {
+                printf("Requested shared memory: %llu bytes", shBlockBytes);
+            }
+        }
+
+        template <typename P>
+        void compute_bytes_and_strides(int dim)
+        {
+            xblockdim = xag > gpu_block_dimx ? gpu_block_dimx : xag;
+            yblockdim = yag > gpu_block_dimy ? gpu_block_dimy : yag;
+            zblockdim = zag > gpu_block_dimz ? gpu_block_dimz : zag;
+            radius    = (spatial_order == "pcm") ? 1 : 2;
+            step      = (time_order == "rk1") ? 1.0 : 0.5;
+            sx        = (global::on_sm) ? xblockdim + 2 * radius : nx;
+            sy = (dim < 3) ? 1 : (global::on_sm) ? yblockdim + 2 * radius : ny;
+            sz = (dim < 3) ? 1 : (global::on_sm) ? zblockdim + 2 * radius : nz;
+            xblockspace  = xblockdim + 2 * radius;
+            yblockspace  = (dim < 2) ? 1 : yblockdim + 2 * radius;
+            zblockspace  = (dim < 3) ? 1 : zblockdim + 2 * radius;
+            shBlockSpace = xblockspace * yblockspace * zblockspace;
+            shBlockBytes = shBlockSpace * sizeof(P) * global::on_sm;
+            fullP        = simbi::ExecutionPolicy(
+                {nx, ny, nz},
+                {xblockdim, yblockdim, zblockdim}
+            );
+            activeP = simbi::ExecutionPolicy(
+                {xag, yag, zag},
+                {xblockdim, yblockdim, zblockdim},
+                shBlockBytes
+            );
+        }
 
       protected:
         HydroBase() = default;
@@ -204,149 +247,142 @@ namespace simbi {
         void initialize(const InitialConditions& init_conditions)
         {
             // Define simulation params
-            this->xactive_grid =
-                (init_conditions.spatial_order == "pcm") ? nx - 2 : nx - 4;
-            this->yactive_grid = (ny == 1) ? 1
-                                 : (init_conditions.spatial_order == "pcm")
-                                     ? ny - 2
-                                     : ny - 4;
-            this->zactive_grid = (nz == 1) ? 1
-                                 : (init_conditions.spatial_order == "pcm")
-                                     ? nz - 2
-                                     : nz - 4;
-            this->idx_active = (init_conditions.spatial_order == "pcm") ? 1 : 2;
-            this->active_zones = xactive_grid * yactive_grid * zactive_grid;
-            this->x1min        = x1[0];
-            this->x1max        = x1[xactive_grid - 1];
+            xag = (init_conditions.spatial_order == "pcm") ? nx - 2 : nx - 4;
+            yag = (ny == 1)                                  ? 1
+                  : (init_conditions.spatial_order == "pcm") ? ny - 2
+                                                             : ny - 4;
+            zag = (nz == 1)                                  ? 1
+                  : (init_conditions.spatial_order == "pcm") ? nz - 2
+                                                             : nz - 4;
+
+            nxv          = xag + 1;
+            nyv          = yag + 1;
+            nzv          = zag + 1;
+            nv           = nxv * nyv * nzv;
+            idx_active   = (init_conditions.spatial_order == "pcm") ? 1 : 2;
+            active_zones = xag * yag * zag;
+            x1min        = x1[0];
+            x1max        = x1[xag - 1];
             if (x1_cell_spacing == simbi::Cellspacing::LOGSPACE) {
-                this->dlogx1 = std::log10(x1[xactive_grid - 1] / x1[0]) /
-                               (xactive_grid - 1);
+                dlogx1 = std::log10(x1[xag - 1] / x1[0]) / (xag - 1);
             }
             else {
-                this->dx1 = (x1[xactive_grid - 1] - x1[0]) / (xactive_grid - 1);
+                dx1 = (x1[xag - 1] - x1[0]) / (xag - 1);
             }
-            this->invdx1 = 1.0 / dx1;
+            invdx1 = 1.0 / dx1;
             // Define the source terms
-            this->density_source = std::move(init_conditions.sources[0]);
-            this->m1_source      = std::move(init_conditions.sources[1]);
-            this->sourceG1       = std::move(init_conditions.gsources[0]);
+            density_source = std::move(init_conditions.sources[0]);
+            m1_source      = std::move(init_conditions.sources[1]);
+            sourceG1       = std::move(init_conditions.gsources[0]);
+            bfield         = std::move(init_conditions.bfield);
             if (init_conditions.regime == "rmhd") {
-                this->sourceB1 = std::move(init_conditions.bsources[0]);
+                sourceB1 = std::move(init_conditions.bsources[0]);
             };
             if ((ny > 1) && (nz > 1)) {   // 3D check
-                this->x2min         = x2[0];
-                this->x2max         = x2[yactive_grid - 1];
-                this->x3min         = x3[0];
-                this->x3max         = x3[zactive_grid - 1];
-                this->dx3           = (x3max - x3min) / (zactive_grid - 1);
-                this->dx2           = (x2max - x2min) / (yactive_grid - 1);
-                this->m2_source     = std::move(init_conditions.sources[2]);
-                this->m3_source     = std::move(init_conditions.sources[3]);
-                this->energy_source = std::move(init_conditions.sources[4]);
-                this->sourceG2      = std::move(init_conditions.gsources[1]);
-                this->sourceG3      = std::move(init_conditions.gsources[2]);
+                x2min         = x2[0];
+                x2max         = x2[nyv - 1];
+                x3min         = x3[0];
+                x3max         = x3[nzv - 1];
+                dx3           = (x3max - x3min) / (nzv - 1);
+                dx2           = (x2max - x2min) / (nyv - 1);
+                m2_source     = std::move(init_conditions.sources[2]);
+                m3_source     = std::move(init_conditions.sources[3]);
+                energy_source = std::move(init_conditions.sources[4]);
+                sourceG2      = std::move(init_conditions.gsources[1]);
+                sourceG3      = std::move(init_conditions.gsources[2]);
                 if (init_conditions.regime == "rmhd") {
-                    this->sourceB2 = std::move(init_conditions.bsources[1]);
-                    this->sourceB3 = std::move(init_conditions.bsources[2]);
+                    sourceB2 = std::move(init_conditions.bsources[1]);
+                    sourceB3 = std::move(init_conditions.bsources[2]);
                 };
                 if (x2_cell_spacing == simbi::Cellspacing::LOGSPACE) {
-                    this->dlogx2 = std::log10(x2[yactive_grid - 1] / x2[0]) /
-                                   (yactive_grid - 1);
+                    dlogx2 = std::log10(x2[nyv - 1] / x2[0]) / (nyv - 1);
                 }
                 else {
-                    this->dx2 =
-                        (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
-                    this->invdx2 = 1.0 / dx2;
+                    dx2    = (x2[nyv - 1] - x2[0]) / (nyv - 1);
+                    invdx2 = 1.0 / dx2;
                 }
                 if (x3_cell_spacing == simbi::Cellspacing::LOGSPACE) {
-                    this->dlogx3 = std::log10(x3[zactive_grid - 1] / x3[0]) /
-                                   (zactive_grid - 1);
+                    dlogx3 = std::log10(x3[nzv - 1] / x3[0]) / (nzv - 1);
                 }
                 else {
-                    this->dx3 =
-                        (x3[zactive_grid - 1] - x3[0]) / (zactive_grid - 1);
-                    this->invdx3 = 1.0 / dx3;
+                    dx3    = (x3[nzv - 1] - x3[0]) / (nzv - 1);
+                    invdx3 = 1.0 / dx3;
                 }
             }
             else if ((ny > 1) && (nz == 1)) {   // 2D Check
-                this->x2min         = x2[0];
-                this->x2max         = x2[yactive_grid - 1];
-                this->m2_source     = std::move(init_conditions.sources[2]);
-                this->energy_source = std::move(init_conditions.sources[3]);
-                this->sourceG2      = std::move(init_conditions.gsources[1]);
+                x2min         = x2[0];
+                x2max         = x2[nyv - 1];
+                m2_source     = std::move(init_conditions.sources[2]);
+                energy_source = std::move(init_conditions.sources[3]);
+                sourceG2      = std::move(init_conditions.gsources[1]);
                 if (init_conditions.regime == "rmhd") {
-                    this->sourceB2 = std::move(init_conditions.bsources[1]);
+                    sourceB2 = std::move(init_conditions.bsources[1]);
                 };
 
                 if (x2_cell_spacing == simbi::Cellspacing::LOGSPACE) {
-                    this->dlogx2 = std::log10(x2[yactive_grid - 1] / x2[0]) /
-                                   (yactive_grid - 1);
+                    dlogx2 = std::log10(x2[yag - 1] / x2[0]) / (yag - 1);
                 }
                 else {
-                    this->dx2 =
-                        (x2[yactive_grid - 1] - x2[0]) / (yactive_grid - 1);
-                    this->invdx2 = 1.0 / dx2;
+                    dx2    = (x2[yag - 1] - x2[0]) / (yag - 1);
+                    invdx2 = 1.0 / dx2;
                 }
             }
             else {
-                this->energy_source = std::move(init_conditions.sources[2]);
+                energy_source = std::move(init_conditions.sources[2]);
             }
-            this->nullg1 =
-                std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {
-                    return i == real(0);
-                });
-            this->nullg2 =
-                std::all_of(sourceG2.begin(), sourceG2.end(), [](real i) {
-                    return i == real(0);
-                });
-            this->nullg3 =
-                std::all_of(sourceG3.begin(), sourceG3.end(), [](real i) {
-                    return i == real(0);
-                });
-            this->null_mag1 =
+            nullg1 = std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {
+                return i == real(0);
+            });
+            nullg2 = std::all_of(sourceG2.begin(), sourceG2.end(), [](real i) {
+                return i == real(0);
+            });
+            nullg3 = std::all_of(sourceG3.begin(), sourceG3.end(), [](real i) {
+                return i == real(0);
+            });
+            null_mag1 =
                 std::all_of(sourceB1.begin(), sourceB1.end(), [](real i) {
                     return i == real(0);
                 });
-            this->null_mag2 =
+            null_mag2 =
                 std::all_of(sourceB2.begin(), sourceB2.end(), [](real i) {
                     return i == real(0);
                 });
-            this->null_mag3 =
+            null_mag3 =
                 std::all_of(sourceB3.begin(), sourceB3.end(), [](real i) {
                     return i == real(0);
                 });
 
-            this->null_den = std::all_of(
+            null_den = std::all_of(
                 density_source.begin(),
                 density_source.end(),
                 [](real i) { return i == real(0); }
             );
-            this->null_mom1 =
+            null_mom1 =
                 std::all_of(m1_source.begin(), m1_source.end(), [](real i) {
                     return i == real(0);
                 });
-            this->null_mom2 =
+            null_mom2 =
                 std::all_of(m2_source.begin(), m2_source.end(), [](real i) {
                     return i == real(0);
                 });
-            this->null_mom3 =
+            null_mom3 =
                 std::all_of(m3_source.begin(), m3_source.end(), [](real i) {
                     return i == real(0);
                 });
-            this->null_nrg = std::all_of(
+            null_nrg = std::all_of(
                 energy_source.begin(),
                 energy_source.end(),
                 [](real i) { return i == real(0); }
             );
 
             if (nz > 1) {
-                this->checkpoint_zones = zactive_grid;
+                checkpoint_zones = zag;
             }
             else if (ny > 1) {
-                this->checkpoint_zones = yactive_grid;
+                checkpoint_zones = yag;
             }
             else {
-                this->checkpoint_zones = xactive_grid;
+                checkpoint_zones = xag;
             }
 
             define_tinterval(
