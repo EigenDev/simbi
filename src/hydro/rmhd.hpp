@@ -34,20 +34,20 @@
 namespace simbi {
     template <int dim>
     struct RMHD : public HydroBase {
+
         // set the primitive and conservative types at compile time
         using primitive_t     = rmhd::AnyPrimitive<dim>;
         using conserved_t     = rmhd::AnyConserved<dim>;
         using primitive_soa_t = rmhd::PrimitiveSOA;
         using eigenvals_t     = rmhd::Eigenvals;
         using mag_fourvec_t   = rmhd::mag_four_vec<dim>;
-
-        using function_t = typename std::conditional_t<
-            dim == 1,
-            std::function<real(real)>,
-            std::conditional_t<
-                dim == 2,
-                std::function<real(real, real)>,
-                std::function<real(real, real, real)>>>;
+        using function_t      = typename std::conditional_t<
+                 dim == 1,
+                 std::function<real(real)>,
+                 std::conditional_t<
+                     dim == 2,
+                     std::function<real(real, real)>,
+                     std::function<real(real, real, real)>>>;
 
         function_t dens_outer;
         function_t mom1_outer;
@@ -65,6 +65,7 @@ namespace simbi {
         ndarray<conserved_t> cons, outer_zones, inflow_zones;
         ndarray<real> edens_guess, dt_min, bstag1, bstag2, bstag3;
         bool scalar_all_zeros;
+        luint nzone_edges;
 
         /* Methods */
         RMHD();
@@ -84,13 +85,9 @@ namespace simbi {
          * @param gid  current global index
          * @return none
          */
-        primitive_t cons2prim(const conserved_t& cons, const luint gid);
+        primitive_t cons2prim(const conserved_t& cons);
 
-        void advance(
-            const ExecutionPolicy<>& p,
-            const luint xstride,
-            const luint ystride
-        );
+        void advance(const ExecutionPolicy<>& p);
 
         GPU_CALLABLE_MEMBER
         void calc_max_wave_speeds(
@@ -109,6 +106,18 @@ namespace simbi {
 
         GPU_CALLABLE_MEMBER
         conserved_t prims2cons(const primitive_t& prims) const;
+
+        GPU_CALLABLE_MEMBER
+        conserved_t calc_hll_flux(
+            const conserved_t& uL,
+            const conserved_t& uR,
+            const conserved_t& fL,
+            const conserved_t& fR,
+            const primitive_t& prL,
+            const primitive_t& prR,
+            const luint nhat,
+            const real vface = 0.0
+        ) const;
 
         GPU_CALLABLE_MEMBER
         conserved_t calc_hllc_flux(
@@ -131,16 +140,11 @@ namespace simbi {
             const primitive_t& prL,
             const primitive_t& prR,
             const luint nhat,
-            const luint gid,
             const real vface = 0.0
         ) const;
 
         GPU_CALLABLE_MEMBER
-        conserved_t
-        prims2flux(const primitive_t& prims, const luint nhat) const;
-
-        GPU_CALLABLE_MEMBER
-        conserved_t calc_hll_flux(
+        conserved_t (RMHD<dim>::*riemann_solve)(
             const conserved_t& uL,
             const conserved_t& uR,
             const conserved_t& fL,
@@ -148,8 +152,12 @@ namespace simbi {
             const primitive_t& prL,
             const primitive_t& prR,
             const luint nhat,
-            const real vface = 0.0
+            const real vface
         ) const;
+
+        GPU_CALLABLE_MEMBER
+        conserved_t
+        prims2flux(const primitive_t& prims, const luint nhat) const;
 
         template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
         void adapt_dt();
@@ -190,7 +198,84 @@ namespace simbi {
         get_cell_volume(const lint ii, const lint jj = 0, const lint kk = 0)
             const;
 
+        GPU_CALLABLE_MEMBER real curl_e(
+            const luint nhat,
+            const real e1l,
+            const real e1r,
+            const real e2l,
+            const real e2r,
+            const real e3l,
+            const real e3r
+        ) const;
+
+        /**
+         * @brief
+         * @retval
+         */
+        template <Plane P, Corner C>
+        GPU_CALLABLE_MEMBER real calc_edge_emf(
+            const conserved_t& fw,
+            const conserved_t& fe,
+            const conserved_t& fs,
+            const conserved_t& fn,
+            const ndarray<real>& bstagp1,
+            const ndarray<real>& bstagp2,
+            const primitive_t* prims,
+            const luint ii,
+            const luint jj,
+            const luint kk,
+            const luint ia,
+            const luint ja,
+            const luint ka,
+            const luint nhat
+        ) const;
+
         void emit_troubled_cells() const;
+
+        void offload()
+        {
+            cons.copyToGpu();
+            prims.copyToGpu();
+            edens_guess.copyToGpu();
+            dt_min.copyToGpu();
+            density_source.copyToGpu();
+            m1_source.copyToGpu();
+            if constexpr (dim > 1) {
+                m2_source.copyToGpu();
+            }
+            if constexpr (dim > 2) {
+                m3_source.copyToGpu();
+            }
+            if constexpr (dim > 1) {
+                object_pos.copyToGpu();
+            }
+            energy_source.copyToGpu();
+            inflow_zones.copyToGpu();
+            bcs.copyToGpu();
+            troubled_cells.copyToGpu();
+            sourceG1.copyToGpu();
+            if constexpr (dim > 1) {
+                sourceG2.copyToGpu();
+            }
+            if constexpr (dim > 2) {
+                sourceG3.copyToGpu();
+            }
+            sourceB1.copyToGpu();
+            if constexpr (dim > 1) {
+                sourceB2.copyToGpu();
+            }
+            if constexpr (dim > 2) {
+                sourceB3.copyToGpu();
+            }
+
+            if constexpr (dim > 1) {
+                bstag1.copyToGpu();
+                bstag2.copyToGpu();
+                if constexpr (dim > 2) {
+                    bstag3.copyToGpu();
+                }
+            }
+        }
     };
 }   // namespace simbi
 
