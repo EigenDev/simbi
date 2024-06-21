@@ -2540,10 +2540,10 @@ namespace simbi {
                 return reinterpret_cast<T*>(memory);
             }
             else {
-                return object.data();
+                return object;
             }
 #else
-            return object.data();
+            return object;
 #endif
         }
 
