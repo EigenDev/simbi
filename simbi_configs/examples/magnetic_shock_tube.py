@@ -12,8 +12,8 @@ class MagneticShockTube(BaseConfig):
     def initial_state(self) -> Sequence[Sequence[float]]:
         # defined as (rho, v1, v2, v3, pg, b1, b2, b3)
         if self.problem == 1:
-            return ((1.0,   0.0, 0.0, 0.0, 1.0, 0.5, +1.0, 0.0), 
-                    (0.125, 0.0, 0.0, 0.0, 0.1, 0.5, -1.0, 0.0))
+            return ((1.0,   0.0, 0.0, 0.0, 1.0, 0.50, +1.0, 0.0), 
+                    (0.125, 0.0, 0.0, 0.0, 0.1, 0.50, -1.0, 0.0))
         elif self.problem == 2:
             return ((1.0, 0.0, 0.0, 0.0, 30.0, 5.0, 6.0, 6.0), 
                     (1.0, 0.0, 0.0, 0.0,  1.0, 5.0, 0.7, 0.7))
