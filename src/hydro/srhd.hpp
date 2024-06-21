@@ -86,11 +86,7 @@ namespace simbi {
 
         void cons2prim(const ExecutionPolicy<>& p);
 
-        void advance(
-            const ExecutionPolicy<>& p,
-            const luint xstride,
-            const luint ystride
-        );
+        void advance(const ExecutionPolicy<>& p);
 
         GPU_CALLABLE_MEMBER
         eigenvals_t calc_eigenvals(
@@ -145,6 +141,36 @@ namespace simbi {
             std::optional<function_t> const& s3_outer = nullptr,
             std::optional<function_t> const& e_outer  = nullptr
         );
+
+        void offload()
+        {
+            cons.copyToGpu();
+            prims.copyToGpu();
+            pressure_guess.copyToGpu();
+            dt_min.copyToGpu();
+            density_source.copyToGpu();
+            m1_source.copyToGpu();
+            if constexpr (dim > 1) {
+                m2_source.copyToGpu();
+            }
+            if constexpr (dim > 2) {
+                m3_source.copyToGpu();
+            }
+            if constexpr (dim > 1) {
+                object_pos.copyToGpu();
+            }
+            energy_source.copyToGpu();
+            inflow_zones.copyToGpu();
+            bcs.copyToGpu();
+            troubled_cells.copyToGpu();
+            sourceG1.copyToGpu();
+            if constexpr (dim > 1) {
+                sourceG2.copyToGpu();
+            }
+            if constexpr (dim > 2) {
+                sourceG3.copyToGpu();
+            }
+        }
 
         GPU_CALLABLE_MEMBER
         constexpr real get_x1face(const lint ii, const int side) const;
