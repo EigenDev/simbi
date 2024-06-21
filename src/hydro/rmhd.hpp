@@ -85,7 +85,7 @@ namespace simbi {
          * @param gid  current global index
          * @return none
          */
-        primitive_t cons2prim(const conserved_t& cons);
+        primitive_t cons2prim(const conserved_t& cons, const luint gid);
 
         void advance(const ExecutionPolicy<>& p);
 
@@ -218,8 +218,8 @@ namespace simbi {
             const conserved_t& fe,
             const conserved_t& fs,
             const conserved_t& fn,
-            const ndarray<real>& bstagp1,
-            const ndarray<real>& bstagp2,
+            const real* const bstagp1,
+            const real* const bstagp2,
             const primitive_t* prims,
             const luint ii,
             const luint jj,
