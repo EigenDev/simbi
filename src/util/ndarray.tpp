@@ -196,9 +196,12 @@ constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
     // if given index is greater than the
     // size of array print Error
     if ((size_t) index >= sz) {
-        std::cout << "Error: Array index: " << index
-                  << " out of bounds for ndarray of size: " << sz << "\n";
-        exit(0);
+        printf(
+            "Error: array index: %llu out of bounds for ndarray of size: %zu "
+            "\n",
+            (luint) index,
+            sz
+        );
     }
     // else return value at that index
     return arr[index];
@@ -430,13 +433,40 @@ DT* simbi::ndarray<DT, build_mode>::host_data()
 };
 
 template <typename DT, global::Platform build_mode>
+DT* simbi::ndarray<DT, build_mode>::host_data() const
+{
+    return arr.get();
+};
+
+template <typename DT, global::Platform build_mode>
 DT* simbi::ndarray<DT, build_mode>::dev_data()
 {
     return dev_arr.get();
 };
 
 template <typename DT, global::Platform build_mode>
+DT* simbi::ndarray<DT, build_mode>::dev_data() const
+{
+    return dev_arr.get();
+};
+
+template <typename DT, global::Platform build_mode>
 DT* simbi::ndarray<DT, build_mode>::data()
+{
+    if (sz == 0) {
+        return nullptr;
+    }
+
+    if constexpr (global::on_gpu) {
+        return dev_arr.get();
+    }
+    else {
+        return arr.get();
+    }
+};
+
+template <typename DT, global::Platform build_mode>
+DT* simbi::ndarray<DT, build_mode>::data() const
 {
     if (sz == 0) {
         return nullptr;

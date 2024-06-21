@@ -20,6 +20,7 @@
 
 #include "build_options.hpp"   // for Platform, global::BuildPlatform
 #include "device_api.hpp"      // for gpuFree, gpuMalloc, gpuMallocManaged
+#include "smrt_ptr.hpp"        // for smart_ptr
 #include <cstddef>             // for size_t
 #include <initializer_list>    // for initializer_list
 #include <iterator>            // for forward_iterator_tag
@@ -35,7 +36,7 @@ namespace simbi {
     class ndarray
     {
         template <typename Deleter>
-        using unique_p = std::unique_ptr<DT[], Deleter>;
+        using unique_p = util::smart_ptr<DT[], Deleter>;
 
       private:
         // Variable to store the size of the
@@ -48,7 +49,7 @@ namespace simbi {
 
         size_type dimensions;
 
-        std::unique_ptr<DT[]> arr;
+        util::smart_ptr<DT[]> arr;
 
         // Device-side array
         void* myGpuMalloc(size_type size)
@@ -146,6 +147,10 @@ namespace simbi {
         DT* data();
         DT* host_data();
         DT* dev_data();
+
+        DT* data() const;
+        DT* host_data() const;
+        DT* dev_data() const;
 
         // Iterator Class
         class iterator
