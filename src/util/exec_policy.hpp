@@ -39,6 +39,7 @@ namespace simbi {
         simbiStream_t stream;
 
         ~ExecutionPolicy() = default;
+        ExecutionPolicy()  = default;
 
         ExecutionPolicy(const T nzones, const U blockSize)
             : blockSize(dim3(blockSize)), sharedMemBytes(0), stream(0)
