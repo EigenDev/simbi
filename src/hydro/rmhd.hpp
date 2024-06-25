@@ -109,48 +109,36 @@ namespace simbi {
 
         GPU_CALLABLE_MEMBER
         conserved_t calc_hll_flux(
-            const conserved_t& uL,
-            const conserved_t& uR,
-            const conserved_t& fL,
-            const conserved_t& fR,
-            const primitive_t& prL,
-            const primitive_t& prR,
+            primitive_t& prL,
+            primitive_t& prR,
+            const real bface,
             const luint nhat,
             const real vface = 0.0
         ) const;
 
         GPU_CALLABLE_MEMBER
         conserved_t calc_hllc_flux(
-            const conserved_t& uL,
-            const conserved_t& uR,
-            const conserved_t& fL,
-            const conserved_t& fR,
-            const primitive_t& prL,
-            const primitive_t& prR,
+            primitive_t& prL,
+            primitive_t& prR,
+            const real bface,
             const luint nhat,
             const real vface = 0.0
         ) const;
 
         GPU_CALLABLE_MEMBER
         conserved_t calc_hlld_flux(
-            const conserved_t& uL,
-            const conserved_t& uR,
-            const conserved_t& fL,
-            const conserved_t& fR,
-            const primitive_t& prL,
-            const primitive_t& prR,
+            primitive_t& prL,
+            primitive_t& prR,
+            const real bface,
             const luint nhat,
             const real vface = 0.0
         ) const;
 
         GPU_CALLABLE_MEMBER
         conserved_t (RMHD<dim>::*riemann_solve)(
-            const conserved_t& uL,
-            const conserved_t& uR,
-            const conserved_t& fL,
-            const conserved_t& fR,
-            const primitive_t& prL,
-            const primitive_t& prR,
+            primitive_t& prL,
+            primitive_t& prR,
+            const real bface,
             const luint nhat,
             const real vface
         ) const;
@@ -200,12 +188,10 @@ namespace simbi {
 
         GPU_CALLABLE_MEMBER real curl_e(
             const luint nhat,
-            const real e1l,
-            const real e1r,
-            const real e2l,
-            const real e2r,
-            const real e3l,
-            const real e3r
+            const real ejl,
+            const real ejr,
+            const real ekl,
+            const real ekr
         ) const;
 
         /**
@@ -218,8 +204,8 @@ namespace simbi {
             const conserved_t& fe,
             const conserved_t& fs,
             const conserved_t& fn,
-            const real* const bstagp1,
-            const real* const bstagp2,
+            const ndarray<real>& bstagp1,
+            const ndarray<real>& bstagp2,
             const primitive_t* prims,
             const luint ii,
             const luint jj,
