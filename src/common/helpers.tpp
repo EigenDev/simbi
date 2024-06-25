@@ -2547,6 +2547,13 @@ namespace simbi {
 #endif
         }
 
+        template <typename T, typename U>
+        GPU_SHARED T* identity(const U& object)
+        {
+            static auto objPtr = object.data();
+            return objPtr;
+        }
+
         template <typename index_type, typename T>
         GPU_CALLABLE index_type flattened_index(
             index_type ii,
