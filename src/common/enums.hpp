@@ -151,12 +151,12 @@ namespace simbi {
 
     enum class CTTYPE {
         ZERO,
-        UPWIND,
+        CONTACT,
         ALPHA
     };
 
     constexpr auto comp_wave_speed = WaveSpeeds::MIGNONE_AND_BODO_05;
-    constexpr auto comp_ct_type    = CTTYPE::UPWIND;
+    constexpr auto comp_ct_type    = CTTYPE::CONTACT;
     constexpr auto comp_hllc_type  = HLLCTYPE::CLASSICAL;
 }   // namespace simbi
 #endif
