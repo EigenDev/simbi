@@ -799,8 +799,9 @@ namespace simbi {
         }
 
         /**
-         * @brief calculate relativistic mhd f(q) from Mignone & McKinney (200t)
-         * @param gr adiabatic index reduced (gamma / (gamma - 1))
+         * @brief calculate relativistic mhd f(q) & df/dq from Mignone &
+         * McKinney (2007)
+         * @param gr adiabatic index coeff (gamma / (gamma - 1))
          * @param tau energy density
          * @param d lab frame density
          * @param ssq s-squared
@@ -809,7 +810,7 @@ namespace simbi {
          * @param qq energy density
          * @return Eq.(20)
          */
-        GPU_CALLABLE_INLINE real newton_f_mhd(
+        GPU_CALLABLE_INLINE std::tuple<real, real> newton_fg_mhd(
             real gr,
             real tau,
             real d,
@@ -820,47 +821,18 @@ namespace simbi {
         )
         {
             //==============================
-            const auto qqf = qq + d;
-            const auto q2  = qqf * qqf;
-            const auto rat = ssq / q2;
-            const auto y1  = 1.0 / (qqf + bsq);
-            const auto y2  = y1 * y1;
-            // Equation (A3)
-            const auto v2  = rat * y1 * (y1 * qqf + 1.0) + msq * y2;
-            const auto ig2 = 1.0 - v2;
-            const auto g2  = 1.0 / ig2;
-            const auto g   = std::sqrt(g2);
-            const auto chi = qq / g2 - d * v2 / (g + 1.0);
-            //====== IDEAL EOS
-            const auto dp_dchi = 1.0 / gr;
-            const auto pg      = chi * dp_dchi;
-            return qq - pg - tau + 0.5 * (bsq + (bsq * msq - ssq) * y2);
-        }
-
-        /**
-         * @brief calculate relativistic mhd df/dq from Mignone & McKinney
-         * (2007)
-         * @param gr adiabatic index reduced (gamma / (gamma - 1))
-         * @param d lab frame density
-         * @param ssq s-squared
-         * @param bsq b-squared
-         * @param msq m-squared
-         * @param qq energy density
-         * @return Eq.(21)
-         */
-        GPU_CALLABLE_INLINE real
-        newton_g_mhd(real gr, real d, real ssq, real bsq, real msq, real qq)
-        {
             const auto qqd = qq + d;
             const auto q2  = qqd * qqd;
             const auto rat = ssq / q2;
-            const auto y1  = 1.0 / (qq + d + bsq);
+            const auto y1  = 1.0 / (qqd + bsq);
             const auto y2  = y1 * y1;
+            // Equation (A3)
             const auto v2  = rat * y1 * (y1 * qqd + 1.0) + msq * y2;
             const auto ig2 = 1.0 - v2;
             const auto g2  = 1.0 / ig2;
             const auto g   = std::sqrt(g2);
             const auto chi = qq / g2 - d * v2 / (g + 1.0);
+
             const auto dv2_dq =
                 -2.0 * y2 * (3.0 * rat + y1 * (rat * bsq * bsq / qqd + msq));
 
@@ -871,12 +843,16 @@ namespace simbi {
             //====== IDEAL EOS
             const auto dp_dchi = 1.0 / gr;
             const auto dp_drho = 0.0;
+            const auto pg      = chi * dp_dchi;
 
             //========= TODO: include Taub Adiabat
             //======================================
 
             const auto dp = dp_dchi * dchi_dq + dp_drho * drho_dq;
-            return 1.0 - dp - (bsq * msq - ssq) * y1 * y2;
+            return {
+              qq - pg - tau + 0.5 * (bsq + (bsq * msq - ssq) * y2),
+              1.0 - dp - (bsq * msq - ssq) * y1 * y2
+            };
         }
 
         //======================================
@@ -1296,6 +1272,9 @@ namespace simbi {
 
         template <typename T, typename U>
         GPU_SHARED T* sm_proxy(const U object);
+
+        template <typename T, typename U>
+        GPU_SHARED T* identity(const U& object);
 
         template <int dim, typename T, typename idx>
         GPU_CALLABLE void
