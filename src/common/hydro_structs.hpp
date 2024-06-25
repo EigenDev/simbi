@@ -73,6 +73,7 @@ struct InitialConditions {
 };
 
 namespace generic_hydro {
+    // implementing curiously recurring template pattern (CRTP)
     template <int dim, typename Derived>
     struct Primitive {
     };
@@ -1681,6 +1682,12 @@ namespace rmhd {
 
         GPU_CALLABLE_MEMBER
         constexpr real bcomponent(const luint nhat) const
+        {
+            return nhat == 1 ? b1 : (nhat == 2) ? b2 : b3;
+        }
+
+        GPU_CALLABLE_MEMBER
+        constexpr real& bcomponent(const luint nhat)
         {
             return nhat == 1 ? b1 : (nhat == 2) ? b2 : b3;
         }
