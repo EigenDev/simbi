@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       progress.hpp
  * @brief      implements a custom, portable progress bar
  *
@@ -13,19 +13,19 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 #ifndef PROGRESS_HPP
 #define PROGRESS_HPP
 
 #include <iostream>
 #if defined(_WIN32)
-    #define WIN32_LEAN_AND_MEAN
-    #define VC_EXTRALEAN
-    #include <Windows.h>
+#define WIN32_LEAN_AND_MEAN
+#define VC_EXTRALEAN
+#include <Windows.h>
 #elif defined(__linux__) || defined(__APPLE__)
-    #include <sys/ioctl.h>
-    #include <unistd.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 #endif   // Windows/Linux/Apple
 
 namespace simbi {

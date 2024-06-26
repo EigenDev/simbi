@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       hydro_structs.hpp
  * @brief      the data structs for states, primitives, and sim configuration
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 #ifndef HYDRO_STRUCTS_HPP
 #define HYDRO_STRUCTS_HPP
@@ -1352,7 +1352,7 @@ namespace rmhd {
             return *this;
         }
 
-        GPU_CALLABLE_MEMBER real total_energy() { return den + nrg; }
+        GPU_CALLABLE_MEMBER real total_energy() const { return den + nrg; }
 
         GPU_CALLABLE_MEMBER constexpr real momentum(const luint nhat) const
         {
@@ -1678,6 +1678,12 @@ namespace rmhd {
         constexpr real vcomponent(const luint nhat) const
         {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
+        }
+
+        GPU_CALLABLE_MEMBER
+        constexpr real& vcomponent(const luint nhat)
+        {
+            return nhat == 1 ? v1 : (nhat == 2) ? v2 : v3;
         }
 
         GPU_CALLABLE_MEMBER

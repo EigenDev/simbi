@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       exec_policy.hpp
  * @brief      houses the execution policy object for gpu-specific runs
  *
@@ -14,7 +14,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 #ifndef EXEC_POLICY_HPP
 #define EXEC_POLICY_HPP

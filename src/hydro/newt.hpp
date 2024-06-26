@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       newt.hpp
  * @brief      single header for 1, 2, adn 3D Newtonian calculations
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 
 #ifndef NEWT_HPP
@@ -219,5 +219,5 @@ struct is_relativistic<simbi::Newtonian<3>> {
     static constexpr bool value = false;
 };
 
-#include "newt.tpp"
+#include "newt.ipp"
 #endif

@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       helpers.hpp
  * @brief      home to all helper functions used throughout library
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
@@ -194,7 +194,8 @@ namespace simbi {
         // map solver string to simbi::Solver enum class
         const std::map<std::string, simbi::Solver> solver_map = {
           {"hllc", simbi::Solver::HLLC},
-          {"hlle", simbi::Solver::HLLE}
+          {"hlle", simbi::Solver::HLLE},
+          {"hlld", simbi::Solver::HLLD}
         };
         //---------------------------------------------------------------------------------------------------------
         //  HELPER-TEMPLATES
@@ -329,8 +330,7 @@ namespace simbi {
             const int size
         );
 
-        //-------------------Inline for
-        // Speed--------------------------------------
+        //-------------------Inline for Speed -------------------------
         /**
          * @brief compute the minmod slope limiter
          *
@@ -357,6 +357,21 @@ namespace simbi {
         {
             return 0.5 * std::abs(sgn(x) + sgn(y)) * sgn(x) *
                    my_min(std::abs(x), std::abs(y));
+        };
+
+        /**
+         * @brief compute the van Leer slope limiter (van Leer 1977)
+         *
+         * @param x
+         * @param y
+         * @return van Leer value between x and y
+         */
+        GPU_CALLABLE_INLINE real vanLeer(const real x, const real y)
+        {
+            if (x * y > 0.0) {
+                return static_cast<real>(2.0) * (x * y) / (x + y);
+            }
+            return static_cast<real>(0.0);
         };
 
         /**
@@ -502,7 +517,15 @@ namespace simbi {
             return T{rho, v1, pre, chi};
         }
 
-        // the plm gradient in 3D MHD
+        /**
+         * @brief
+         * @param[in/out/in,out]a: center
+         * @param[in/out/in,out]b: left of center
+         * @param[in/out/in,out]c: right of center
+         * @param[in/out/in,out]plm_theta:
+         * @return          GPU_CALLABLE_INLINE
+         * @retval
+         */
         template <typename T>
         GPU_CALLABLE_INLINE
             typename std::enable_if<is_3D_mhd_primitive<T>::value, T>::type
@@ -513,52 +536,71 @@ namespace simbi {
                 const real plm_theta
             )
         {
-            const real rho = minmod(
-                (a - b).rho * plm_theta,
-                (c - b).rho * 0.5,
-                (c - a).rho * plm_theta
-            );
-            const real v1 = minmod(
-                (a - b).v1 * plm_theta,
-                (c - b).v1 * 0.5,
-                (c - a).v1 * plm_theta
-            );
-            const real v2 = minmod(
-                (a - b).v2 * plm_theta,
-                (c - b).v2 * 0.5,
-                (c - a).v2 * plm_theta
-            );
-            const real v3 = minmod(
-                (a - b).v3 * plm_theta,
-                (c - b).v3 * 0.5,
-                (c - a).v3 * plm_theta
-            );
-            const real pre = minmod(
-                (a - b).p * plm_theta,
-                (c - b).p * 0.5,
-                (c - a).p * plm_theta
-            );
-            const real b1 = minmod(
-                (a - b).b1 * plm_theta,
-                (c - b).b1 * 0.5,
-                (c - a).b1 * plm_theta
-            );
-            const real b2 = minmod(
-                (a - b).b2 * plm_theta,
-                (c - b).b2 * 0.5,
-                (c - a).b2 * plm_theta
-            );
-            const real b3 = minmod(
-                (a - b).b3 * plm_theta,
-                (c - b).b3 * 0.5,
-                (c - a).b3 * plm_theta
-            );
-            const real chi = minmod(
-                (a - b).chi * plm_theta,
-                (c - b).chi * 0.5,
-                (c - a).chi * plm_theta
-            );
-            return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
+            switch (comp_slope_limiter) {
+                case LIMITER::MINMOD:
+                    {
+                        const real rho = minmod(
+                            (a - b).rho * plm_theta,
+                            (c - b).rho * 0.5,
+                            (c - a).rho * plm_theta
+                        );
+                        const real v1 = minmod(
+                            (a - b).v1 * plm_theta,
+                            (c - b).v1 * 0.5,
+                            (c - a).v1 * plm_theta
+                        );
+                        const real v2 = minmod(
+                            (a - b).v2 * plm_theta,
+                            (c - b).v2 * 0.5,
+                            (c - a).v2 * plm_theta
+                        );
+                        const real v3 = minmod(
+                            (a - b).v3 * plm_theta,
+                            (c - b).v3 * 0.5,
+                            (c - a).v3 * plm_theta
+                        );
+                        const real pre = minmod(
+                            (a - b).p * plm_theta,
+                            (c - b).p * 0.5,
+                            (c - a).p * plm_theta
+                        );
+                        const real b1 = minmod(
+                            (a - b).b1 * plm_theta,
+                            (c - b).b1 * 0.5,
+                            (c - a).b1 * plm_theta
+                        );
+                        const real b2 = minmod(
+                            (a - b).b2 * plm_theta,
+                            (c - b).b2 * 0.5,
+                            (c - a).b2 * plm_theta
+                        );
+                        const real b3 = minmod(
+                            (a - b).b3 * plm_theta,
+                            (c - b).b3 * 0.5,
+                            (c - a).b3 * plm_theta
+                        );
+                        const real chi = minmod(
+                            (a - b).chi * plm_theta,
+                            (c - b).chi * 0.5,
+                            (c - a).chi * plm_theta
+                        );
+                        return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
+                    }
+
+                default:
+                    {
+                        const real rho = vanLeer((c - a).rho, -(b - a).rho);
+                        const real v1  = vanLeer((c - a).v1, -(b - a).v1);
+                        const real v2  = vanLeer((c - a).v2, -(b - a).v2);
+                        const real v3  = vanLeer((c - a).v3, -(b - a).v3);
+                        const real pre = vanLeer((c - a).p, -(b - a).p);
+                        const real b1  = vanLeer((c - a).b1, -(b - a).b1);
+                        const real b2  = vanLeer((c - a).b2, -(b - a).b2);
+                        const real b3  = vanLeer((c - a).b3, -(b - a).b3);
+                        const real chi = vanLeer((c - a).chi, -(b - a).chi);
+                        return T{rho, v1, v2, v3, pre, b1, b2, b3, chi};
+                    }
+            }
         }
 
         // the plm gradient in 2D MHD
@@ -1329,5 +1371,5 @@ namespace simbi {
     }   // namespace helpers
 }   // namespace simbi
 
-#include "helpers.tpp"
+#include "helpers.ipp"
 #endif

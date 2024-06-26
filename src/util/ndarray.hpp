@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       ndarray.hpp
  * @brief      implementation of custom cpu-gpu translatable array class
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 #ifndef NDARRAY_HPP
 #define NDARRAY_HPP
@@ -36,7 +36,7 @@ namespace simbi {
     class ndarray
     {
         template <typename Deleter>
-        using unique_p = util::smart_ptr<DT[], Deleter>;
+        using unique_p = std::unique_ptr<DT[], Deleter>;
 
       private:
         // Variable to store the size of the
@@ -49,7 +49,7 @@ namespace simbi {
 
         size_type dimensions;
 
-        util::smart_ptr<DT[]> arr;
+        std::unique_ptr<DT[]> arr;
 
         // Device-side array
         void* myGpuMalloc(size_type size)
@@ -259,5 +259,5 @@ struct is_3darray<simbi::ndarray<simbi::ndarray<simbi::ndarray<U>>>> {
     static constexpr bool value = true;
 };
 
-#include "ndarray.tpp"
+#include "ndarray.ipp"
 #endif

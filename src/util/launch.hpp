@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       launch.hpp
  * @brief      houses calls for arch-specific calls on generic functors
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 #ifndef LAUNCH_HPP
 #define LAUNCH_HPP
@@ -30,5 +30,5 @@ namespace simbi {
     void launch(const ExecutionPolicy<>& p, Function f, Arguments... args);
 }   // namespace simbi
 
-#include "launch.tpp"
+#include "launch.ipp"
 #endif

@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       enums.hpp
  * @brief A place to house compilation enums for context switching in a sim
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 
 #ifndef ENUMS_HPP
@@ -155,8 +155,14 @@ namespace simbi {
         ALPHA
     };
 
-    constexpr auto comp_wave_speed = WaveSpeeds::MIGNONE_AND_BODO_05;
-    constexpr auto comp_ct_type    = CTTYPE::CONTACT;
-    constexpr auto comp_hllc_type  = HLLCTYPE::CLASSICAL;
+    enum class LIMITER {
+        MINMOD,
+        VAN_LEER
+    };
+
+    constexpr auto comp_wave_speed    = WaveSpeeds::MIGNONE_AND_BODO_05;
+    constexpr auto comp_ct_type       = CTTYPE::CONTACT;
+    constexpr auto comp_slope_limiter = LIMITER::MINMOD;
+    constexpr auto comp_hllc_type     = HLLCTYPE::CLASSICAL;
 }   // namespace simbi
 #endif

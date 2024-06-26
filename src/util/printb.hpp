@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       printb.hpp
  * @brief      implementation of custom rust-like print functions w/ formatting
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 #ifndef PRINTB_HPP
 #define PRINTB_HPP
@@ -88,7 +88,7 @@ const std::map<Color, std::string> color_map = {
 
 namespace simbi {
     namespace util {
-        
+
         inline bool is_number(const std::string& s)
         {
             long double ld;
@@ -107,5 +107,5 @@ namespace simbi {
 
 }   // namespace simbi
 
-#include "printb.tpp"
+#include "printb.ipp"
 #endif

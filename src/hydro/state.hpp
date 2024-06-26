@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       state.hpp
  * @brief      key namespace for context switching to correct sim state for run
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 #ifndef STATE_HPP
 #define STATE_HPP
@@ -28,19 +28,23 @@ struct InitialConditions;
 
 namespace simbi {
     namespace hydrostate {
-        template <int dim> struct func_type {
+        template <int dim>
+        struct func_type {
             using type = int;
         };
 
-        template <> struct func_type<1> {
+        template <>
+        struct func_type<1> {
             using type = std::function<real(real)>;
         };
 
-        template <> struct func_type<2> {
+        template <>
+        struct func_type<2> {
             using type = std::function<real(real, real)>;
         };
 
-        template <> struct func_type<3> {
+        template <>
+        struct func_type<3> {
             using type = std::function<real(real, real, real)>;
         };
 

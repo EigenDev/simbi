@@ -1,13 +1,13 @@
 /**
  * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       smrt_ptr.hpp
- * @brief      custom smart pointer implementation
+ * @brief
  *
- * @note       adapted from:
+ * @note adapted from:
  * https://www.experts-exchange.com/articles/1959/C-Smart-pointers.html
  * @history:
  *   Version   Date            Author          Modification    Email
- *   V0.8.0    Jun-21-2024     Marcus DuPont                   md4469@nyu.edu
+ *   V0.8.0    Jun-26-2024     Marcus DuPont                   md4469@nyu.edu
  *
  * @verbatim
  * ==============================================================================
@@ -19,35 +19,36 @@
 #ifndef SMRT_PTR_HPP
 #define SMRT_PTR_HPP
 
+#include <atomic>
+
 namespace simbi {
     namespace util {
         struct refcnt {
+            std::atomic<int> count;
+
             refcnt() : count(0) {}
 
             refcnt(int c) : count(c) {}
 
-            refcnt(const refcnt& o) : count(o.count) {}
+            refcnt(const refcnt& o) : count(o.count.load()) {}
 
             refcnt& operator=(const refcnt& o)
             {
-                count = o.count;
+                count.store(o.count.load());
                 return *this;
             }
 
-            ~refcnt() { count = 0; }
+            ~refcnt() { count.store(0); }
 
-            int get() const { return count; }
+            int get() const { return count.load(); }
 
-            void inc() { ++count; }
+            void inc() { count.fetch_add(1); }
 
-            void dec() { --count; }
+            void dec() { count.fetch_sub(1); }
 
-            int release() { return --count; }
+            int release() { return count.fetch_sub(1) - 1; }
 
-            bool is_zero() const { return count == 0; }
-
-          private:
-            int count;
+            bool is_zero() const { return count.load() == 0; }
         };
 
         // Default deleter for scalar types
@@ -73,6 +74,7 @@ namespace simbi {
         // This is the smart pointer template, which takes pointer type and
         // a destruct policy, which it uses to destruct object(s) pointed to
         // when the reference counter for the object becomes zero.
+
         template <typename ptrT, typename delete_policy = default_delete<ptrT>>
         class smart_ptr
         {
