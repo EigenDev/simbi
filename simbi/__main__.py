@@ -231,7 +231,7 @@ def parse_run_arguments(parser: argparse.ArgumentParser):
         '--solver',
         help='flag for hydro solver',
         default=None,
-        choices=['hllc', 'hlle'],
+        choices=['hllc', 'hlle', 'hlld'],
     )
     overridable.add_argument(
         '--chkpt-interval',
