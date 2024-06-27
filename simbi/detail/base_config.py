@@ -280,16 +280,16 @@ class BaseConfig(metaclass=abc.ABCMeta):
         return False
 
     @simbi_property
-    def x1(self) -> ArrayOrNone:
-        return None
+    def x1(self) -> list[Any] | NDArray[Any]:
+        return []
 
     @simbi_property
-    def x2(self) -> ArrayOrNone:
-        return None
+    def x2(self) -> list[Any] | NDArray[Any]:
+        return []
 
     @simbi_property
-    def x3(self) -> ArrayOrNone:
-        return None
+    def x3(self) -> list[Any] | NDArray[Any]:
+        return []
 
     @simbi_property
     def object_zones(self) -> Optional[Union[NDArray[Any], Sequence[Any]]]:
