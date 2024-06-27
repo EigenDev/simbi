@@ -5,9 +5,10 @@ option(
 )
 
 option(
-    'float_precision',
-    type: 'boolean', 
-    value: false
+    'precision',
+    type: 'combo', 
+    choices: ['single', 'double'],
+    value: 'double',
 )
 
 option(

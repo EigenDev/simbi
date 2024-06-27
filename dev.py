@@ -12,7 +12,7 @@ default = {}
 default["gpu_compilation"] = "disabled"
 default["progress_bar"] = True
 default["column_major"] = False
-default["float_precision"] = False
+default["precision"] = 'double'
 default["install_mode"] = "default"
 default["dev_arch"] = 86
 default["build_dir"] = "builddir"
@@ -23,7 +23,7 @@ YELLOW = "\033[0;33m"
 RST = "\033[0m"  # No Color
 
 flag_overrides = {}
-flag_overrides["float_precision"] = ["--double", "--float"]
+flag_overrides["precision"] = ["--double", "--float"]
 flag_overrides["gpu_compilation"] = ["--gpu-compilation", "--cpu-compilation"]
 flag_overrides["column_major"] = ["--row-major", "--column-major"]
 flag_overrides["four_velocity"] = ["--four-velocity", "--no-four-velocity"]
@@ -118,7 +118,7 @@ def configure(
 ) -> list[str]:
     command = f"""meson setup {args.build_dir} -Dgpu_compilation={args.gpu_compilation}  
     -Dhdf5_include_dir={hdf5_include} -Dgpu_include_dir={gpu_include} \
-    -Dcolumn_major={args.column_major} -Dfloat_precision={args.float_precision} \
+    -Dcolumn_major={args.column_major} -Dprecision={args.precision} \
     -Dprofile={args.install_mode} -Dgpu_arch={args.dev_arch} -Dfour_velocity={args.four_velocity} \
     -Dcpp_std={args.cpp_version} -Dbuildtype={args.build_type} {reconfigure} \
     -Dprogress_bar={args.progress_bar} -Dshared_memory={args.shared_memory}""".split()
@@ -230,10 +230,10 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     )
     precision = install_parser.add_mutually_exclusive_group()
     precision.add_argument(
-        "--double", action="store_const", dest="float_precision", const=False
+        "--double", action="store_const", dest="precision", const='double'
     )
     precision.add_argument(
-        "--float", action="store_const", dest="float_precision", const=True
+        "--float", action="store_const", dest="precision", const='single'
     )
     major = install_parser.add_mutually_exclusive_group()
     major.add_argument(
@@ -243,7 +243,7 @@ def parse_the_arguments() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
         "--column-major", action="store_const", dest="column_major", const=True
     )
     install_parser.set_defaults(
-        float_precision=False,
+        precision='double',
         column_major=False,
         gpu_compilation="disabled",
         build_type="release",

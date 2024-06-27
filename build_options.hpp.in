@@ -88,11 +88,6 @@ using atomic_cast = int;
 #define __int_as_real __int_as_float
 #define __real_as_int __float_as_int
 using real = float;
-
-namespace global {
-    // newton-raphson tolerance scale
-    constexpr real tol_scale = 1e-6;
-}   // namespace global
 #else
 #if defined(GPU_PLATFORM_AMD)
 using atomic_cast = unsigned long long;
@@ -105,7 +100,7 @@ using real = double;
 
 namespace global {
     // newton-raphson tolerance scale
-    constexpr real tol_scale = 1e-12;
+    // constexpr real tol_scale = 1e-12;
 }   // namespace global
 #endif
 
@@ -118,6 +113,10 @@ namespace global {
     // column major flag
     constexpr bool col_maj = false;
 #endif
+
+    // float or double precision tolerance scale
+    constexpr real tol_scale = std::numeric_limits<real>::epsilon() * 1e3;
+
 
 //======================== Managed Memory Check
 #ifdef MANAGED_MEMORY

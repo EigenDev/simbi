@@ -6,7 +6,7 @@ project('simbi', 'c', 'cpp', 'cython',
 
 # BUILD CONFIG
 conf_data = configuration_data()
-conf_data.set10('FLOAT_PRECISION', get_option('float_precision'))
+conf_data.set10('FLOAT_PRECISION', get_option('precision') == 'single')
 conf_data.set10('FOUR_VELOCITY',   get_option('four_velocity'))
 conf_data.set10('COLUMN_MAJOR',    get_option('column_major'))
 conf_data.set10('PROGRESS_BAR',    get_option('progress_bar'))
