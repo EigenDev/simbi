@@ -8,6 +8,7 @@ movies/
 scripts/
 simbi/tools/extras/*
 version.py
+.vscode/
 call_obj.*
 *.h5
 *.pdf
