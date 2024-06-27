@@ -8,8 +8,8 @@ import argparse
 import matplotlib.pyplot as plt
 from typing import Union, Any, Callable, Optional
 from numpy.typing import NDArray
-from numpy import int64 as numpy_int, float64 as numpy_float, cast
-from ..detail.helpers import find_nearest
+from numpy import float64 as numpy_float
+from ..detail.helpers import find_nearest, calc_centroid
 
 # FONT SIZES
 SMALL_SIZE = 6
@@ -308,18 +308,18 @@ def read_file(
                 else:
                     funcs += [np.linspace]
         mesh = {
-            f"x{i+1}": try_read(
-                hf,
-                f"x{i+1}",
-                fall_back=funcs[i](
-                    setup[f"x{i+1}min"], setup[f"x{i+1}max"], setup[f"x{i+1}active"]
-                ),
-            )
+            f"x{i+1}": hf[f"x{i+1}"][:]
             for i in range(ndim)
         }
+        
+        # if loading in vertices, convert to cell centers
+        for key in mesh.keys():
+            if len(mesh[key] > setup[f"{key}active"]):
+                mesh[key] = calc_centroid(mesh[key], coord_system=setup["coord_system"])
+        
         if setup["x1max"] > mesh["x1"][-1]:
             mesh["x1"] = funcs[0](setup["x1min"], setup["x1max"], setup["x1active"])
-
+            
     return fields, setup, mesh
 
 
