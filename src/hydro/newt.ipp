@@ -118,8 +118,7 @@ Newtonian<dim>::get_x3face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real
-Newtonian<dim>::get_x1_differential(const lint ii) const
+HD constexpr real Newtonian<dim>::get_x1_differential(const lint ii) const
 {
     const real x1l   = get_x1face(ii, 0);
     const real x1r   = get_x1face(ii, 1);
@@ -133,8 +132,7 @@ Newtonian<dim>::get_x1_differential(const lint ii) const
 }
 
 template <int dim>
-HD constexpr real
-Newtonian<dim>::get_x2_differential(const lint ii) const
+HD constexpr real Newtonian<dim>::get_x2_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -162,8 +160,7 @@ Newtonian<dim>::get_x2_differential(const lint ii) const
 }
 
 template <int dim>
-HD constexpr real
-Newtonian<dim>::get_x3_differential(const lint ii) const
+HD constexpr real Newtonian<dim>::get_x3_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -291,8 +288,7 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
     simbi::parallel_for(
         p,
         total_zones,
-        [cons_data, prim_data, troubled_data, this] DEV(const luint gid
-        ) {
+        [cons_data, prim_data, troubled_data, this] DEV(const luint gid) {
             real invdV = 1.0;
             if (homolog) {
                 if constexpr (dim == 1) {

@@ -29,8 +29,7 @@ RMHD<dim>::~RMHD() = default;
 
 // Helpers
 template <int dim>
-HD constexpr real
-RMHD<dim>::get_x1face(const lint ii, const int side) const
+HD constexpr real RMHD<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -59,8 +58,7 @@ RMHD<dim>::get_x1face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real
-RMHD<dim>::get_x2face(const lint ii, const int side) const
+HD constexpr real RMHD<dim>::get_x2face(const lint ii, const int side) const
 {
     switch (x2_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -89,8 +87,7 @@ RMHD<dim>::get_x2face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real
-RMHD<dim>::get_x3face(const lint ii, const int side) const
+HD constexpr real RMHD<dim>::get_x3face(const lint ii, const int side) const
 {
     switch (x3_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -447,8 +444,7 @@ HD real RMHD<dim>::curl_e(
 }
 
 template <int dim>
-HD constexpr real RMHD<dim>::get_x1_differential(const lint ii
-) const
+HD constexpr real RMHD<dim>::get_x1_differential(const lint ii) const
 {
     const real x1l   = get_x1face(ii, 0);
     const real x1r   = get_x1face(ii, 1);
@@ -462,8 +458,7 @@ HD constexpr real RMHD<dim>::get_x1_differential(const lint ii
 }
 
 template <int dim>
-HD constexpr real RMHD<dim>::get_x2_differential(const lint ii
-) const
+HD constexpr real RMHD<dim>::get_x2_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -491,8 +486,7 @@ HD constexpr real RMHD<dim>::get_x2_differential(const lint ii
 }
 
 template <int dim>
-HD constexpr real RMHD<dim>::get_x3_differential(const lint ii
-) const
+HD constexpr real RMHD<dim>::get_x3_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {

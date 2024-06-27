@@ -28,8 +28,7 @@ SRHD<dim>::~SRHD() = default;
 
 // Helpers
 template <int dim>
-HD constexpr real
-SRHD<dim>::get_x1face(const lint ii, const int side) const
+HD constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -58,8 +57,7 @@ SRHD<dim>::get_x1face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real
-SRHD<dim>::get_x2face(const lint ii, const int side) const
+HD constexpr real SRHD<dim>::get_x2face(const lint ii, const int side) const
 {
     switch (x2_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -88,8 +86,7 @@ SRHD<dim>::get_x2face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real
-SRHD<dim>::get_x3face(const lint ii, const int side) const
+HD constexpr real SRHD<dim>::get_x3face(const lint ii, const int side) const
 {
     switch (x3_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -118,8 +115,7 @@ SRHD<dim>::get_x3face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real SRHD<dim>::get_x1_differential(const lint ii
-) const
+HD constexpr real SRHD<dim>::get_x1_differential(const lint ii) const
 {
     const real x1l   = get_x1face(ii, 0);
     const real x1r   = get_x1face(ii, 1);
@@ -133,8 +129,7 @@ HD constexpr real SRHD<dim>::get_x1_differential(const lint ii
 }
 
 template <int dim>
-HD constexpr real SRHD<dim>::get_x2_differential(const lint ii
-) const
+HD constexpr real SRHD<dim>::get_x2_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -162,8 +157,7 @@ HD constexpr real SRHD<dim>::get_x2_differential(const lint ii
 }
 
 template <int dim>
-HD constexpr real SRHD<dim>::get_x3_differential(const lint ii
-) const
+HD constexpr real SRHD<dim>::get_x3_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -290,9 +284,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
     simbi::parallel_for(
         p,
         total_zones,
-        [prim_data, cons_data, press_data, troubled_data, this] DEV(
-            luint gid
-        ) {
+        [prim_data, cons_data, press_data, troubled_data, this] DEV(luint gid) {
             bool workLeftToDo = true;
             volatile __shared__ bool found_failure;
 
