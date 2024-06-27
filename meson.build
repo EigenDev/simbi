@@ -211,24 +211,11 @@ headers = [
     'src/util/range.hpp',
 ]
 
-templates = [
-    'src/common/helpers.ipp',
-
-    'src/hydro/driver.ipp',
-    'src/hydro/srhd.ipp',
-    'src/hydro/newt.ipp',
-    'src/hydro/rmhd.ipp',
-
-    'src/util/launch.ipp',
-    'src/util/ndarray.ipp',
-    'src/util/printb.ipp',
-]
-
 
 run_command('python', '-m', 'cython', '--cplus', 'src/call_obj.pyx', check: true)
 cpu_ext = py3.extension_module(
     'cpu_ext',
-    ['src/cpu_ext.pyx', 'src/call_obj.pyx'] + sources + headers + templates,
+    ['src/cpu_ext.pyx', 'src/call_obj.pyx'] + sources + headers,
     include_directories: all_inc,
     cpp_args: ['-DGPU_CODE=0'],
     dependencies: depends,
@@ -262,7 +249,7 @@ if get_option('gpu_compilation').enabled()
                 input : source,
                 output : '@BASENAME@.o',
                 build_by_default: true,
-                depend_files: headers + templates,
+                depend_files: headers,
             )
             gpu_objs += [gpu_trg]
         endforeach

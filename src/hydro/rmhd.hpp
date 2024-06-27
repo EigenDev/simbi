@@ -421,5 +421,5 @@ struct is_relativistic_mhd<simbi::RMHD<3>> {
     static constexpr bool value = true;
 };
 
-#include "rmhd.ipp"
+#include "rmhd.ixx"
 #endif

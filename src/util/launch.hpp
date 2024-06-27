@@ -30,5 +30,5 @@ namespace simbi {
     void launch(const ExecutionPolicy<>& p, Function f, Arguments... args);
 }   // namespace simbi
 
-#include "launch.ipp"
+#include "launch.ixx"
 #endif

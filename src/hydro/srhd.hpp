@@ -204,5 +204,5 @@ struct is_relativistic<simbi::SRHD<3>> {
     static constexpr bool value = true;
 };
 
-#include "srhd.ipp"
+#include "srhd.ixx"
 #endif
