@@ -161,7 +161,7 @@ namespace simbi {
 
           public:
             using iterator_category = std::forward_iterator_tag;
-            ;
+
             using value_type      = DT;
             using difference_type = void;
             using pointer         = void;
