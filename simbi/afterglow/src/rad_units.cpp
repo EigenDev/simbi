@@ -14,10 +14,10 @@ namespace sogbo_rad {
     /*
     The Doppler Boost Factor
     */
-    const double calc_delta_doppler(
+    double calc_delta_doppler(
         const double lorentz_factor,
-        const std::vector<double> beta_vec,
-        const std::vector<double> nhat
+        const std::vector<double>& beta_vec,
+        const std::vector<double>& nhat
     )
     {
         return 1.0 /
@@ -27,7 +27,7 @@ namespace sogbo_rad {
     /*
     The velocity of the flow in dimensions of speed of ligt
     */
-    constexpr double calc_beta(const double gamma_beta)
+    double calc_beta(const double gamma_beta)
     {
         return gamma_beta / std::sqrt(1 + gamma_beta * gamma_beta);
     }
@@ -35,7 +35,7 @@ namespace sogbo_rad {
     /*
     The Lorentz factor
     */
-    constexpr double calc_lorentz_factor(const double gamma_beta)
+    double calc_lorentz_factor(const double gamma_beta)
     {
         return std::sqrt(1.0 + gamma_beta * gamma_beta);
     }
@@ -43,7 +43,7 @@ namespace sogbo_rad {
     /*
     The magnetic field behind the shock
     */
-    constexpr units::mag_field
+    units::mag_field
     calc_shock_bfield(const units::edens rho_e, const double eps_b)
     {
         return units::math::sqrt(8.0 * M_PI * eps_b * rho_e);
@@ -52,12 +52,11 @@ namespace sogbo_rad {
     /*
     The canonical gyration frequency for a particle in a magnetic field
     */
-    constexpr units::frequency
-    calc_gyration_frequency(const units::mag_field bfield)
+    units::frequency calc_gyration_frequency(const units::mag_field bfield)
     {
-        constexpr auto frequency_for_unit_field =
-            (3.0 / 4.0 / M_PI) * (constants::e_charge) /
-            (constants::m_e * constants::c_light);
+        auto frequency_for_unit_field = (3.0 / 4.0 / M_PI) *
+                                        (constants::e_charge) /
+                                        (constants::m_e * constants::c_light);
         return frequency_for_unit_field * bfield;
     }
 
@@ -74,7 +73,7 @@ namespace sogbo_rad {
         --------------------------------------
         Total synchrotron power
     */
-    constexpr units::power calc_total_synch_power(
+    units::power calc_total_synch_power(
         const double lorentz_factor,
         const units::edens ub,
         const double beta
@@ -101,7 +100,7 @@ namespace sogbo_rad {
         ------------------------------------------
         number of photons per energy bin
     */
-    const double calc_nphotons_per_bin(
+    double calc_nphotons_per_bin(
         units::volume volume,
         units::ndens n_e,
         units::frequency nu_g,
@@ -133,7 +132,7 @@ namespace sogbo_rad {
     -------------------------------------
     calculate the number of photons emitted per electron in some energy bin
     */
-    constexpr double calc_nphotons_other(
+    double calc_nphotons_other(
         const units::power power,
         const units::frequency nu_c,
         const units::mytime dt
@@ -143,7 +142,7 @@ namespace sogbo_rad {
     }
 
     //  Power-law generator for pdf(x) ~ x^{g-1} for a<=x<=b
-    const double
+    double
     gen_random_from_powerlaw(double a, double b, double p, double random_number)
     {
         const double g  = 1 - p;
@@ -153,7 +152,7 @@ namespace sogbo_rad {
     }
 
     // calculate magnitude of vector
-    const double vector_magnitude(const std::vector<double> a)
+    double vector_magnitude(const std::vector<double> a)
     {
         double mag = 0;
         for (const auto val : a) {
@@ -163,8 +162,10 @@ namespace sogbo_rad {
     }
 
     // calculate vector dot product
-    const double
-    vector_dotproduct(const std::vector<double> a, const std::vector<double> b)
+    double vector_dotproduct(
+        const std::vector<double>& a,
+        const std::vector<double>& b
+    )
     {
         double mag = 0;
         for (size_t ii = 0; ii < a.size(); ii++) {
@@ -186,7 +187,7 @@ namespace sogbo_rad {
         -------------------------------------
         number density of electrons at a given energy
     */
-    constexpr units::ndens calc_nelectrons_at_gamma_e(
+    units::ndens calc_nelectrons_at_gamma_e(
         const units::ndens n_e,
         const double gamma_e,
         const double p
@@ -196,15 +197,14 @@ namespace sogbo_rad {
     }
 
     // Calculate the synchrotron frequency as function of lorentz_factor
-    constexpr units::frequency
-    calc_nu(const double gamma_e, const units::frequency nu_g)
+    units::frequency calc_nu(const double gamma_e, const units::frequency nu_g)
     {
         return nu_g * gamma_e * gamma_e;
     }
 
     // Calculate the critical Lorentz factor as function of time and magnetic
     // field
-    constexpr double calc_critical_lorentz(
+    double calc_critical_lorentz(
         const units::mag_field bfield,
         const units::mytime time_emitter
     )
@@ -215,8 +215,7 @@ namespace sogbo_rad {
 
     // Calculate the maximum power per frequency as Eq. (5) in Sari, Piran.
     // Narayan(1999)
-    constexpr units::energy calc_max_power_per_frequency(units::mag_field bfield
-    )
+    units::energy calc_max_power_per_frequency(units::mag_field bfield)
     {
         return (constants::m_e * constants::c_light * constants::c_light *
                 constants::sigmaT) /
@@ -227,7 +226,7 @@ namespace sogbo_rad {
      *  Calculate the peak emissivity per frequency per equation (A3) in
         https://iopscience.iop.org/article/10.1088/0004-637X/749/1/44/pdf
     */
-    const units::emissivity calc_emissivity(
+    units::emissivity calc_emissivity(
         const units::mag_field bfield,
         const units::ndens n,
         const double p
@@ -254,7 +253,7 @@ namespace sogbo_rad {
         ------------------------------
         Minimum lorentz factor of electrons
     */
-    constexpr double calc_minimum_lorentz(
+    double calc_minimum_lorentz(
         const double eps_e,
         const units::edens e_thermal,
         const units::ndens n,
@@ -265,7 +264,7 @@ namespace sogbo_rad {
                (n * constants::m_e * constants::c_light * constants::c_light);
     }
 
-    const std::vector<double>
+    std::vector<double>
     vector_multiply(const std::vector<double>& a, const std::vector<double>& b)
     {
         std::vector<double> v(a.size());
@@ -279,7 +278,7 @@ namespace sogbo_rad {
         return v;
     };
 
-    const std::vector<double>
+    std::vector<double>
     vector_subtract(const std::vector<double>& a, const std::vector<double>& b)
     {
         std::vector<double> v(a.size());
@@ -293,7 +292,7 @@ namespace sogbo_rad {
         return v;
     };
 
-    const std::vector<double>
+    std::vector<double>
     vector_add(const std::vector<double>& a, const std::vector<double>& b)
     {
         std::vector<double> v(a.size());
@@ -307,7 +306,7 @@ namespace sogbo_rad {
         return v;
     };
 
-    const std::vector<double>
+    std::vector<double>
     scale_vector(const std::vector<double>& a, const double scalar)
     {
         std::vector<double> v = a;
@@ -322,7 +321,7 @@ namespace sogbo_rad {
     ~Compute the flux according to https://arxiv.org/abs/astro-ph/9712005
     ~---------------------------------------
     */
-    const units::spec_power calc_powerlaw_flux(
+    units::spec_power calc_powerlaw_flux(
         const units::spec_power& power_max,
         const double p,
         const units::frequency nu_prime,
@@ -380,7 +379,7 @@ namespace sogbo_rad {
      * calculartions
      *
      */
-    const void log_events(
+    void log_events(
         const sim_conditions args,
         const quant_scales qscales,
         std::vector<std::vector<double>>& fields,
@@ -396,10 +395,10 @@ namespace sogbo_rad {
         );   // Standard mersenne_twister_engine seeded with rd()
         std::uniform_real_distribution<> dis(0.0, 1.0);
 
-        constexpr int ng = 100;
-        const auto rho   = fields[0];   // fluid frame density
-        const auto gb    = fields[1];   // four-velocity
-        const auto pre   = fields[2];   // pressure
+        int ng         = 100;
+        const auto rho = fields[0];   // fluid frame density
+        const auto gb  = fields[1];   // four-velocity
+        const auto pre = fields[2];   // pressure
 
         // Extract the geomtry of the mesh
         const auto x1     = mesh[0];
@@ -601,7 +600,7 @@ namespace sogbo_rad {
      * @param chkpt_idx  the integer index of the checkpoint file
      *
      */
-    const void calc_fnu(
+    void calc_fnu(
         const sim_conditions args,
         const quant_scales qscales,
         const std::vector<double>& rho,

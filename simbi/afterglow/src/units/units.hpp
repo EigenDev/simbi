@@ -693,7 +693,7 @@ namespace units {
         Irradiance_t I  = Irradiance_t::ErgCM2P2,   // Luminous Intensity unit
                                                     // type
         Angle_t A = Angle_t::Radian>                // Angle unit type
-    const auto operator-(
+    constexpr auto operator-(
         const quantity<
             P,
             m1,
