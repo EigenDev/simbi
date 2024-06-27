@@ -43,10 +43,10 @@ class Hydro:
     discontinuity: bool = False
     dens_outer: CallableOrNone = None
     edens_outer: CallableOrNone = None
+    x1: Any = []
+    x2: Any = []
+    x3: Any = []
     mom_outer: Optional[Union[Sequence[Callable[..., Any]], Callable[..., Any]]] = None
-    x1: Any = None
-    x2: Any = None
-    x3: Any = None
     boundary_conditions: list[str]
     coord_system: str
     regime: str
@@ -120,11 +120,7 @@ class Hydro:
         self.mhd = self.regime in ["srmhd", "mhd"]
         self.initial_state = initial_state
 
-        tuple_of_tuples: Callable[..., bool] = lambda x: all(
-            isinstance(a, Sequence) for a in x
-        )
-
-        if tuple_of_tuples(initial_state):
+        if helpers.tuple_of_tuples(initial_state):
             # check if given simple nested sequence to split across the grid
             if all(len(v) == 3 for v in initial_state):
                 if self.mhd:
@@ -172,7 +168,7 @@ class Hydro:
                 )
             self.dimensionality = np.asanyarray(initial_state[0]).ndim
 
-        if not tuple_of_tuples(self.geometry):
+        if not helpers.tuple_of_tuples(self.geometry):
             ngeom = 1
         else:
             ngeom = len(self.geometry)
@@ -193,12 +189,6 @@ class Hydro:
         if not all(len(x) == size for x in initial_state):
             initial_state = helpers.pad_jagged_array(initial_state)
 
-        # print("="*80)
-        # print("boutta construct the state")
-        # snapshot = tracemalloc.take_snapshot()
-        # helpers.display_top(snapshot)
-        # zzz = input('')
-
         nstates = len(initial_state)
         max_discont = 2**self.dimensionality
         self.number_of_non_em_terms = 2 + self.dimensionality if not self.mhd else 5
@@ -210,6 +200,8 @@ class Hydro:
         else:
             raise ValueError("Initial State contains too many variables")
 
+        if nres < 3:
+            self.resolution += (1,) * (3 - self.dimensionality)
         # print("="*80)
         # print("state constructed")
         # snapshot = tracemalloc.take_snapshot()
@@ -325,48 +317,44 @@ class Hydro:
     def _generate_the_grid(
         self, x1_cell_spacing: str, x2_cell_spacing: str, x3_cell_spacing: str
     ) -> None:
-        x1_func: Callable[..., Any]
-        if x1_cell_spacing == "log":
-            x1_func = np.geomspace
-        elif x1_cell_spacing == "linear":
-            x1_func = np.linspace
-
-        x2_func: Callable[..., Any]
-        if x2_cell_spacing == "log":
-            x2_func = np.geomspace
-        elif x2_cell_spacing == "linear":
-            x2_func = np.linspace
-
-        x3_func: Callable[..., Any]
-        if x3_cell_spacing == "log":
-            x3_func = np.geomspace
-        elif x3_cell_spacing == "linear":
-            x3_func = np.linspace
-
-        if self.dimensionality == 1:
-            if self.x1 is None:
-                self.x1 = x1_func(*self.geometry[:2], *self.resolution)
-        elif self.dimensionality == 2:
-            if self.x1 is None:
-                self.x1 = x1_func(
-                    self.geometry[0][0], self.geometry[0][1], self.resolution[0]
-                )
-            if self.x2 is None:
-                self.x2 = x2_func(
-                    self.geometry[1][0], self.geometry[1][1], self.resolution[1]
-                )
-        else:
-            x2_vertices = self.resolution[1] + (self.resolution[1] == 1)
-            x3_vertices = self.resolution[2] + (self.resolution[2] == 1)
-            if self.x1 is None:
-                self.x1 = x1_func(
-                    self.geometry[0][0], self.geometry[0][1], self.resolution[0]
-                )
-            if self.x2 is None:
-                self.x2 = x2_func(self.geometry[1][0], self.geometry[1][1], x2_vertices)
-            if self.x3 is None:
-                self.x3 = x3_func(self.geometry[2][0], self.geometry[2][1], x3_vertices)
-
+        dim = self.dimensionality
+        vfunc: dict[str, Callable[..., Any]] = {
+            'log': np.geomspace,
+            'linear': np.linspace
+        }
+        
+        csp = [
+            x1_cell_spacing,
+            x2_cell_spacing,
+            x3_cell_spacing
+        ]
+        verts = [   
+            self.resolution[0] + 1,
+            2 if dim < 2 else self.resolution[1] + 1,
+            2 if dim < 3 else self.resolution[2] + 1
+        ]
+        
+        cgeom = list(self.geometry)
+        
+        # ensure geometry is a tuple of tuples
+        # for 1D runs
+        if not helpers.tuple_of_tuples(cgeom):
+            cgeom = [cgeom]
+            
+        # if there is a breakpoint in the geometry
+        # ignore it for now
+        for idx, val in enumerate(cgeom):
+            if isinstance(val, tuple):
+                cgeom[idx] = val[:2]
+            elif len(val) == 3:
+                cgeom[idx] = val[:2]
+                
+        for didx, dir in zip(range(self.dimensionality), [self.x1, self.x2, self.x3]):
+            if not dir:
+                dir[:] = vfunc[csp[didx]](*cgeom[didx], verts[didx])
+            elif dir.shape[0] != verts[didx]:
+                raise ValueError(f"x{didx+1} vertices does not match the x{didx+1}-resolution + 1")
+            
         self.x1 = np.asanyarray(self.x1)
         self.x2 = np.asanyarray(self.x2)
         self.x3 = np.asanyarray(self.x3)
@@ -395,7 +383,6 @@ class Hydro:
                 raise ValueError(
                     "Please include at a number of boundary conditions equal to at least half the number of cell faces"
                 )
-
         self.boundary_conditions = boundary_conditions
 
     def simulate(
@@ -543,6 +530,10 @@ class Hydro:
             ]:
                 self.boundary_conditions[idx] = str("outflow")
 
+        if solver == 'hlld' and not self.mhd:
+            logger.info("HLLD solver not available for non-MHD runs. Switching to HLLC solver")
+            solver = 'hllc'
+            
         # Convert strings to byte arrays
         cython_data_directory = os.path.join(data_directory, "").encode("utf-8")
         cython_coordinates = self.coord_system.encode("utf-8")
@@ -634,22 +625,13 @@ class Hydro:
                     os.environ["GPUZBLOCK_SIZE"] = "4"
 
         extra_edges: int = 2 if spatial_order == "pcm" else 4
-        if len(self.resolution) == 1:
-            self.nx = self.resolution[0] + extra_edges
-            self.ny = 1
-            self.nz = 1
-        elif len(self.resolution) == 2:
-            self.nx = self.resolution[0] + extra_edges
-            self.ny = self.resolution[1] + extra_edges
-            self.nz = 1
-        else:
-            self.nx = self.resolution[0] + extra_edges
-            self.ny = self.resolution[1] + extra_edges
-            self.nz = self.resolution[2] + extra_edges
+        nxp = self.resolution[0]
+        nyp = self.resolution[1]
+        nzp = self.resolution[2]
+        self.nx = nxp + extra_edges
+        self.ny = nyp + extra_edges * (self.dimensionality > 1)
+        self.nz = nzp + extra_edges * (self.dimensionality > 2)
 
-        nxp = self.nx - extra_edges
-        nyp = self.ny - extra_edges
-        nzp = self.nz - extra_edges
         init_conditions = {
             "gamma": self.gamma,
             "sources": sources,
@@ -693,12 +675,11 @@ class Hydro:
                 b1 = np.zeros(shape=(nzp + 2, nyp + 2, init_conditions["nxv"]))
                 b2 = np.zeros(shape=(nzp + 2, init_conditions["nyv"], nxp + 2))
                 b3 = np.zeros(shape=(init_conditions["nzv"], nyp + 2, nxp + 2))
-                x1v = helpers.calc_vertices(
-                    arr=self.x1, direction=1, cell_spacing=x1_cell_spacing
-                )
-                region_one = x1v < self.geometry[0][2]
+                
+                region_one = self.x1 < self.geometry[0][2]
                 region_two = np.logical_not(region_one)
-                a = np.pad(self.x1, 1, mode="edge") < self.geometry[0][2]
+                xc = helpers.calc_centroid(self.x1, coord_system=self.coord_system)
+                a = np.pad(xc, 1, mode="edge") < self.geometry[0][2]
                 b = np.logical_not(a)
                 b1[..., region_one] = self.initial_state[0][5]
                 b1[..., region_two] = self.initial_state[1][5]
