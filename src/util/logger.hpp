@@ -191,7 +191,7 @@ namespace simbi {
                                         sim_state.yag
                                     );
                                     const real dV = sim_state.get_cell_volume(
-                                        sim_state.xag - 1,
+                                        sim_state.nxv - 1,
                                         jreal
                                     );
                                     sim_state.outer_zones[jj] =
@@ -237,7 +237,7 @@ namespace simbi {
                                             );
                                         const real dV =
                                             sim_state.get_cell_volume(
-                                                sim_state.xag - 1,
+                                                sim_state.nxv - 1,
                                                 jreal,
                                                 kreal
                                             );

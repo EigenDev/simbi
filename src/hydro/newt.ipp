@@ -1891,7 +1891,7 @@ void Newtonian<dim>::simulate(
             outer_zones.resize(ny);
             for (luint jj = 0; jj < ny; jj++) {
                 const auto jreal = get_real_idx(jj, radius, yag);
-                const real dV    = get_cell_volume(xag - 1, jreal);
+                const real dV    = get_cell_volume(nxv - 1, jreal);
                 outer_zones[jj] =
                     conserved_t{
                       dens_outer(x1max, x2[jreal]),
@@ -1909,7 +1909,7 @@ void Newtonian<dim>::simulate(
                 const auto kreal = get_real_idx(kk, radius, zag);
                 for (luint jj = 0; jj < ny; jj++) {
                     const auto jreal = get_real_idx(jj, radius, yag);
-                    const real dV    = get_cell_volume(xag - 1, jreal, kreal);
+                    const real dV    = get_cell_volume(nxv - 1, jreal, kreal);
                     outer_zones[kk * ny + jj] =
                         conserved_t{
                           dens_outer(x1max, x2[jreal], x3[kreal]),
@@ -1930,8 +1930,9 @@ void Newtonian<dim>::simulate(
     }
 
     inflow_zones.resize(dim * 2);
+    bcs.resize(dim * 2);
     for (int i = 0; i < 2 * dim; i++) {
-        this->bcs.push_back(boundary_cond_map.at(boundary_conditions[i]));
+        this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
         if constexpr (dim == 1) {
             this->inflow_zones[i] = conserved_t{
               boundary_sources[i][0],
@@ -1959,16 +1960,16 @@ void Newtonian<dim>::simulate(
     }
 
     // Write some info about the setup for writeup later
-    setup.x1max = x1[xag - 1];
+    setup.x1max = x1[nxv - 1];
     setup.x1min = x1[0];
     setup.x1    = x1;
     if constexpr (dim > 1) {
-        setup.x2max = x2[yag - 1];
+        setup.x2max = x2[nyv - 1];
         setup.x2min = x2[0];
         setup.x2    = x2;
     }
     if constexpr (dim > 2) {
-        setup.x3max = x3[zag - 1];
+        setup.x3max = x3[nzv - 1];
         setup.x3min = x3[0];
         setup.x3    = x3;
     }

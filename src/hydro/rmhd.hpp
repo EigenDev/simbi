@@ -1,5 +1,5 @@
 /**
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  * @file       rmhd.hpp
  * @brief      Single header for 1, 2, and 3D RMHD calculations
  *
@@ -13,7 +13,7 @@
  *
  * ==============================================================================
  * @endverbatim
- * ***********************(C) COPYRIGHT 2023 Marcus DuPont**********************
+ * ***********************(C) COPYRIGHT 2024 Marcus DuPont**********************
  */
 
 #ifndef RMHD_HPP
@@ -85,7 +85,7 @@ namespace simbi {
          * @param gid  current global index
          * @return none
          */
-        primitive_t cons2prim(const conserved_t& cons, const luint gid);
+        primitive_t cons2prim(const conserved_t& cons) const;
 
         void advance(const ExecutionPolicy<>& p);
 
@@ -262,6 +262,161 @@ namespace simbi {
                 }
             }
         }
+
+        GPU_CALLABLE_MEMBER
+        std::tuple<real, primitive_t, primitive_t, primitive_t> hlld_vdiff(
+            const real p,
+            const conserved_t r[2],
+            const real lam[2],
+            const real bn,
+            const luint nhat
+        ) const
+        {
+            static real eta[2];
+            static real kv[2][3], bv[2][3], vv[2][3];
+
+            // store the left and right prims (rotational)
+            // and the contact prims
+            primitive_t prims[3];
+            const auto np1 = next_perm(nhat, 1);
+            const auto np2 = next_perm(nhat, 2);
+            // compute Alfven terms
+            for (int ii = 0; ii < 2; ii++) {
+                const auto aS   = lam[ii];
+                const auto rS   = r[ii];
+                const auto rmn  = rS.momentum(nhat);
+                const auto ret  = rS.total_energy();
+                const auto rmp1 = rS.momentum(np1);
+                const auto rmp2 = rS.momentum(np2);
+                const auto rbn  = rS.bcomponent(nhat);
+                const auto rbp1 = rS.bcomponent(np1);
+                const auto rbp2 = rS.bcomponent(np2);
+
+                // Eqs (26) - (30)
+                const real a = rmn - aS * ret + p * (1.0 - aS * aS);
+                const real g = rbp1 * rbp1 + rbp2 * rbp2;
+                const real c = rbp1 * rmp1 + rbp2 * rmp2;
+                const real q = -a - g + bn * bn * (1.0 - aS * aS);
+                real x = bn * (a * aS * bn + c) - (a + g) * (aS * p + ret);
+
+                // Eqs (23) - (25)
+                real vn  = (bn * (a * bn + aS * c) - (a + g) * (p + rmn)) / x;
+                real vp1 = (q * rmp1 + rbp1 * (c + bn * (aS * rmn - ret))) / x;
+                real vp2 = (q * rmp2 + rbp2 * (c + bn * (aS * rmn - ret))) / x;
+
+                // Equation (21)
+                const real var1 = 1.0 / (aS - vn);
+                const real bp1  = (rbp1 - bn * vp1) * var1;
+                const real bp2  = (rbp2 - bn * vp2) * var1;
+
+                // Equation (31)
+                const real wt =
+                    p + (ret - (vn * rmn + vp1 * rmp1 + vp2 * rmp2)) * var1;
+
+                // Equation (43)
+                eta[ii] = (ii < 1 ? -1.0 : 1.0) * sgn(bn) * std::sqrt(wt);
+                const real var2 = 1.0 / (aS * p + ret + bn * eta[ii]);
+                const real kn   = (rmn + p + rbn * eta[ii]) * var2;
+                const real kp1  = (rmp1 + rbp1 * eta[ii]) * var2;
+                const real kp2  = (rmp2 + rbp2 * eta[ii]) * var2;
+
+                vv[ii][0] = vn;
+                vv[ii][1] = vp1;
+                vv[ii][2] = vp2;
+
+                // the normal component of the k-vector is the Alfven speed
+                kv[ii][0] = kn;
+                kv[ii][1] = kp1;
+                kv[ii][2] = kp2;
+
+                bv[ii][0] = bn;
+                bv[ii][1] = bp1;
+                bv[ii][2] = bp2;
+            }
+
+            // Load left and right states
+            const auto kL = kv[LF];
+            const auto kR = kv[RF];
+            const auto bL = bv[LF];
+            const auto bR = bv[RF];
+            const auto vL = vv[LF];
+            const auto vR = vv[RF];
+
+            auto bterm = [bn](real b, real a, real vn, real v) {
+                return b * (a - vn) + bn * v;
+            };
+
+            // Compute contact terms
+            // Equation (45)
+            const real dkn  = (kR[0] - kL[0]);
+            const real var3 = 1.0 / dkn;
+            const real bcn  = (bterm(bR[0], kR[0], vR[0], vR[0]) -
+                              bterm(bL[0], kL[0], vL[0], vL[0])) *
+                             var3;
+            const real bcp1 = (bterm(bR[1], kR[0], vR[0], vR[1]) -
+                               bterm(bL[1], kL[0], vL[0], vL[1])) *
+                              var3;
+            const real bcp2 = (bterm(bR[2], kR[0], vR[0], vR[2]) -
+                               bterm(bL[2], kL[0], vL[0], vL[2])) *
+                              var3;
+
+            // Left side Eq.(49)
+            real kcn      = kL[0];
+            real kcp1     = kL[1];
+            real kcp2     = kL[2];
+            auto ksq      = kcn * kcn + kcp1 * kcp1 + kcp2 * kcp2;
+            auto kdb      = kcn * bcn + kcp1 * bcp1 + kcp2 * bcp2;
+            auto bhc      = kdb * dkn;
+            auto reg      = (1.0 - ksq) / (eta[LF] - kdb);
+            const real yL = (1.0 - ksq) / (eta[LF] * dkn - bhc);
+
+            const real vncL  = kcn - bcn * reg;
+            const real vpc1L = kcp1 - bcp1 * reg;
+            const real vpc2L = kcp2 - bcp2 * reg;
+
+            // Right side Eq. (49)
+            kcn           = kR[0];
+            kcp1          = kR[1];
+            kcp2          = kR[2];
+            ksq           = kcn * kcn + kcp1 * kcp1 + kcp2 * kcp2;
+            kdb           = kcn * bcn + kcp1 * bcp1 + kcp2 * bcp2;
+            bhc           = kdb * dkn;
+            reg           = (1.0 - ksq) / (eta[RF] - kdb);
+            const real yR = (1.0 - ksq) / (eta[RF] * dkn - bhc);
+
+            const real vncR  = kcn - bcn * reg;
+            const real vpc1R = kcp1 - bcp1 * reg;
+            const real vpc2R = kcp2 - bcp2 * reg;
+
+            // Equation (48)
+            const real f = dkn * (1.0 - bn * (yR - yL));
+
+            // Return prims for later computation
+            prims[0].vcomponent(nhat) = vv[LF][0];
+            prims[0].vcomponent(np1)  = vv[LF][1];
+            prims[0].vcomponent(np2)  = vv[LF][2];
+            prims[0].bcomponent(nhat) = bv[LF][0];
+            prims[0].bcomponent(np1)  = bv[LF][1];
+            prims[0].bcomponent(np2)  = bv[LF][2];
+            prims[0].p                = kL[0];   // store the Alfven speed
+
+            prims[1].vcomponent(nhat) = vv[RF][0];
+            prims[1].vcomponent(np1)  = vv[RF][1];
+            prims[1].vcomponent(np2)  = vv[RF][2];
+            prims[1].bcomponent(nhat) = bv[RF][0];
+            prims[1].bcomponent(np1)  = bv[RF][1];
+            prims[1].bcomponent(np2)  = bv[RF][2];
+            prims[1].p                = kR[0];   // store the Alfven speed
+
+            prims[2].vcomponent(nhat) = 0.5 * (vncL + vncR);
+            prims[2].vcomponent(np1)  = 0.5 * (vpc1L + vpc1R);
+            prims[2].vcomponent(np2)  = 0.5 * (vpc2L + vpc2R);
+            prims[2].bcomponent(nhat) = bcn;
+            prims[2].bcomponent(np1)  = bcp1;
+            prims[2].bcomponent(np2)  = bcp2;
+
+            return {f, prims[0], prims[1], prims[2]};
+        }
     };
 }   // namespace simbi
 
@@ -280,5 +435,5 @@ struct is_relativistic_mhd<simbi::RMHD<3>> {
     static constexpr bool value = true;
 };
 
-#include "rmhd.tpp"
+#include "rmhd.ipp"
 #endif

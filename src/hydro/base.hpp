@@ -262,12 +262,12 @@ namespace simbi {
             idx_active   = (init_conditions.spatial_order == "pcm") ? 1 : 2;
             active_zones = xag * yag * zag;
             x1min        = x1[0];
-            x1max        = x1[xag - 1];
+            x1max        = x1[nxv - 1];
             if (x1_cell_spacing == simbi::Cellspacing::LOGSPACE) {
-                dlogx1 = std::log10(x1[xag - 1] / x1[0]) / (xag - 1);
+                dlogx1 = std::log10(x1[nxv - 1] / x1[0]) / (nxv - 1);
             }
             else {
-                dx1 = (x1[xag - 1] - x1[0]) / (xag - 1);
+                dx1 = (x1[nxv - 1] - x1[0]) / (nxv - 1);
             }
             invdx1 = 1.0 / dx1;
             // Define the source terms
@@ -278,22 +278,16 @@ namespace simbi {
             if (init_conditions.regime == "rmhd") {
                 sourceB1 = std::move(init_conditions.bsources[0]);
             };
-            if ((ny > 1) && (nz > 1)) {   // 3D check
-                x2min         = x2[0];
-                x2max         = x2[nyv - 1];
-                x3min         = x3[0];
-                x3max         = x3[nzv - 1];
-                dx3           = (x3max - x3min) / (nzv - 1);
-                dx2           = (x2max - x2min) / (nyv - 1);
-                m2_source     = std::move(init_conditions.sources[2]);
-                m3_source     = std::move(init_conditions.sources[3]);
-                energy_source = std::move(init_conditions.sources[4]);
-                sourceG2      = std::move(init_conditions.gsources[1]);
-                sourceG3      = std::move(init_conditions.gsources[2]);
+
+            if (ny > 1) {   // 2D check
+                x2min     = x2[0];
+                x2max     = x2[nyv - 1];
+                m2_source = std::move(init_conditions.sources[2]);
+                sourceG2  = std::move(init_conditions.gsources[1]);
                 if (init_conditions.regime == "rmhd") {
                     sourceB2 = std::move(init_conditions.bsources[1]);
-                    sourceB3 = std::move(init_conditions.bsources[2]);
                 };
+
                 if (x2_cell_spacing == simbi::Cellspacing::LOGSPACE) {
                     dlogx2 = std::log10(x2[nyv - 1] / x2[0]) / (nyv - 1);
                 }
@@ -301,35 +295,32 @@ namespace simbi {
                     dx2    = (x2[nyv - 1] - x2[0]) / (nyv - 1);
                     invdx2 = 1.0 / dx2;
                 }
-                if (x3_cell_spacing == simbi::Cellspacing::LOGSPACE) {
-                    dlogx3 = std::log10(x3[nzv - 1] / x3[0]) / (nzv - 1);
-                }
-                else {
-                    dx3    = (x3[nzv - 1] - x3[0]) / (nzv - 1);
-                    invdx3 = 1.0 / dx3;
-                }
-            }
-            else if ((ny > 1) && (nz == 1)) {   // 2D Check
-                x2min         = x2[0];
-                x2max         = x2[nyv - 1];
-                m2_source     = std::move(init_conditions.sources[2]);
-                energy_source = std::move(init_conditions.sources[3]);
-                sourceG2      = std::move(init_conditions.gsources[1]);
-                if (init_conditions.regime == "rmhd") {
-                    sourceB2 = std::move(init_conditions.bsources[1]);
-                };
 
-                if (x2_cell_spacing == simbi::Cellspacing::LOGSPACE) {
-                    dlogx2 = std::log10(x2[yag - 1] / x2[0]) / (yag - 1);
+                if (nz > 1) {   // 3D Check
+                    x3min         = x3[0];
+                    x3max         = x3[nzv - 1];
+                    m3_source     = std::move(init_conditions.sources[3]);
+                    energy_source = std::move(init_conditions.sources[4]);
+                    sourceG3      = std::move(init_conditions.gsources[2]);
+                    if (init_conditions.regime == "rmhd") {
+                        sourceB3 = std::move(init_conditions.bsources[2]);
+                    };
+                    if (x3_cell_spacing == simbi::Cellspacing::LOGSPACE) {
+                        dlogx3 = std::log10(x3[nzv - 1] / x3[0]) / (nzv - 1);
+                    }
+                    else {
+                        dx3    = (x3[nzv - 1] - x3[0]) / (nzv - 1);
+                        invdx3 = 1.0 / dx3;
+                    }
                 }
                 else {
-                    dx2    = (x2[yag - 1] - x2[0]) / (yag - 1);
-                    invdx2 = 1.0 / dx2;
+                    energy_source = std::move(init_conditions.sources[3]);
                 }
             }
             else {
                 energy_source = std::move(init_conditions.sources[2]);
             }
+
             nullg1 = std::all_of(sourceG1.begin(), sourceG1.end(), [](real i) {
                 return i == real(0);
             });
