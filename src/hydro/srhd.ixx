@@ -448,8 +448,8 @@ HD SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
                 const real cbar = 0.5 * (csL + csR);
                 const real bl   = (vbar - cbar) / (1.0 - cbar * vbar);
                 const real br   = (vbar + cbar) / (1.0 + cbar * vbar);
-                const real aL   = my_min(bl, (vL - csL) / (1.0 - vL * csL));
-                const real aR   = my_max(br, (vR + csR) / (1.0 + vR * csR));
+                const real aL = my_min<real>(bl, (vL - csL) / (1.0 - vL * csL));
+                const real aR = my_max<real>(br, (vR + csR) / (1.0 + vR * csR));
 
                 return {aL, aR, csL, csR};
             }

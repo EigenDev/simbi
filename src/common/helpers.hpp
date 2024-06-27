@@ -848,11 +848,10 @@ namespace simbi {
             const auto pg      = chi * dp_dchi;
 
             //========= TODO: include Taub Adiabat
-            //======================================
 
             const auto dp = dp_dchi * dchi_dq + dp_drho * drho_dq;
             return {
-              qq - pg - tau + 0.5 * (bsq + (bsq * msq - ssq) * y2),
+              qq - (pg + tau) + 0.5 * (bsq + (bsq * msq - ssq) * y2),
               1.0 - dp - (bsq * msq - ssq) * y1 * y2
             };
         }
@@ -1297,6 +1296,12 @@ namespace simbi {
 
         template <int dim, BlkAx axis, typename T>
         HD T axid(T idx, T ni, T nj, T kk = T(0));
+
+        template <typename T>
+        bool limit_zero(T val)
+        {
+            return (val * val) < global::tol_scale;
+        }
 
         template <int dim, typename T, typename U, typename V>
         DEV void load_shared_buffer(
