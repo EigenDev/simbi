@@ -29,7 +29,7 @@ RMHD<dim>::~RMHD() = default;
 
 // Helpers
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 RMHD<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1_cell_spacing) {
@@ -59,7 +59,7 @@ RMHD<dim>::get_x1face(const lint ii, const int side) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 RMHD<dim>::get_x2face(const lint ii, const int side) const
 {
     switch (x2_cell_spacing) {
@@ -89,7 +89,7 @@ RMHD<dim>::get_x2face(const lint ii, const int side) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 RMHD<dim>::get_x3face(const lint ii, const int side) const
 {
     switch (x3_cell_spacing) {
@@ -135,12 +135,12 @@ RMHD<dim>::get_x3face(const lint ii, const int side) const
  * @param[in/out/in,out]ja:
  * @param[in/out/in,out]ka:
  * @param[in/out/in,out]nhat normal direction:
- * @return          GPU_CALLABLE_MEMBER
+ * @return          HD
  * @retval
  */
 template <int dim>
 template <Plane P, Corner C>
-GPU_CALLABLE_MEMBER real RMHD<dim>::calc_edge_emf(
+HD real RMHD<dim>::calc_edge_emf(
     const RMHD<dim>::conserved_t& fw,
     const RMHD<dim>::conserved_t& fe,
     const RMHD<dim>::conserved_t& fs,
@@ -241,7 +241,8 @@ GPU_CALLABLE_MEMBER real RMHD<dim>::calc_edge_emf(
                 }();
 
                 return (
-                    eavg + one_eigth * (de_dq2L - de_dq2R + de_dq1L - de_dq1R)
+                    eavg + one_eigth * (de_dq2L - de_dq2R) +
+                    one_eigth * (de_dq1L - de_dq1R)
                 );
             }
         default:   // ALPHA, Eq. (49)
@@ -307,7 +308,7 @@ GPU_CALLABLE_MEMBER real RMHD<dim>::calc_edge_emf(
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER real RMHD<dim>::curl_e(
+HD real RMHD<dim>::curl_e(
     const luint nhat,
     const real ejl,
     const real ejr,
@@ -446,7 +447,7 @@ GPU_CALLABLE_MEMBER real RMHD<dim>::curl_e(
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x1_differential(const lint ii
+HD constexpr real RMHD<dim>::get_x1_differential(const lint ii
 ) const
 {
     const real x1l   = get_x1face(ii, 0);
@@ -461,7 +462,7 @@ GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x1_differential(const lint ii
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x2_differential(const lint ii
+HD constexpr real RMHD<dim>::get_x2_differential(const lint ii
 ) const
 {
     if constexpr (dim == 1) {
@@ -490,7 +491,7 @@ GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x2_differential(const lint ii
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x3_differential(const lint ii
+HD constexpr real RMHD<dim>::get_x3_differential(const lint ii
 ) const
 {
     if constexpr (dim == 1) {
@@ -515,7 +516,7 @@ GPU_CALLABLE_MEMBER constexpr real RMHD<dim>::get_x3_differential(const lint ii
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real
+HD real
 RMHD<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
 {
     // the volume in cartesian coordinates is only nominal
@@ -620,7 +621,7 @@ template <int dim>
 void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 {
     const auto gr = gamma / (gamma - 1.0);
-    simbi::parallel_for(p, total_zones, [gr, this] GPU_LAMBDA(luint gid) {
+    simbi::parallel_for(p, total_zones, [gr, this] DEV(luint gid) {
         bool workLeftToDo = true;
         volatile __shared__ bool found_failure;
 
@@ -797,7 +798,7 @@ RMHD<dim>::primitive_t RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons
 */
 
 template <int dim>
-GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
+HD void RMHD<dim>::calc_max_wave_speeds(
     const RMHD<dim>::primitive_t& prims,
     const luint nhat,
     real speeds[],
@@ -926,7 +927,7 @@ GPU_CALLABLE_MEMBER void RMHD<dim>::calc_max_wave_speeds(
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
+HD RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
     const RMHD<dim>::primitive_t& primsL,
     const RMHD<dim>::primitive_t& primsR,
     const luint nhat
@@ -957,7 +958,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
 template <int dim>
-GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t
+HD RMHD<dim>::conserved_t
 RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t& prims) const
 {
     const real rho   = prims.rho;
@@ -1178,7 +1179,7 @@ void RMHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t
+HD RMHD<dim>::conserved_t
 RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
     const
 {
@@ -1219,7 +1220,7 @@ RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
+HD RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
     RMHD<dim>::primitive_t& prL,
     RMHD<dim>::primitive_t& prR,
     const real bface,
@@ -1263,12 +1264,12 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
     else {
         net_flux.chi = prL.chi * net_flux.den;
     }
-    net_flux.calc_electric_field(nhat);
+    // net_flux.calc_electric_field(nhat);
     return net_flux;
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
+HD RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     RMHD<dim>::primitive_t& prL,
     RMHD<dim>::primitive_t& prR,
     const real bface,
@@ -1339,9 +1340,9 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const real fbpsq = fpb1 * fpb1 + fpb2 * fpb2;
 
         const auto [a, b, c] = [&] {
-            // if (bfn) {
-            //     return std::make_tuple(fhlle, -(fhllm + uhlle), uhllm);
-            // }
+            if (bfn) {
+                return std::make_tuple(fhlle, -(fhllm + uhlle), uhllm);
+            }
 
             return std::make_tuple(
                 fhlle - fdb,
@@ -1377,8 +1378,12 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const real ds = vs * d;
         const real es = cfac * (ws * et - mnorm + pS * aS - vsdB * bn);
         const real mn = (es + pS) * aS - vsdB * bn;
-        const real mp1 = cfac * (-bn * (bp1 * invg2 + vsdB * vp1) + ws * ump1 - fmp1);
-        const real mp2 = cfac * (-bn * (bp2 * invg2 + vsdB * vp2) + ws * ump2 - fmp2);
+        const real mp1 =
+            bfn ? vs * ump1
+                    : cfac * (-bn * (bp1 * invg2 + vsdB * vp1) + ws * ump1 - fmp1);
+        const real mp2 =
+            bfn ? vs * ump2
+                    : cfac * (-bn * (bp2 * invg2 + vsdB * vp2) + ws * ump2 - fmp2);
         const real taus = es - ds;
 
         // start state
@@ -1406,7 +1411,7 @@ GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
+HD RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     RMHD<dim>::primitive_t& prL,
     RMHD<dim>::primitive_t& prR,
     const real bface,
@@ -1600,7 +1605,7 @@ template <int dim>
 void RMHD<dim>::advance(const ExecutionPolicy<>& p)
 {
     const luint extent = p.get_full_extent();
-    simbi::parallel_for(p, extent, [p, this] GPU_LAMBDA(const luint idx) {
+    simbi::parallel_for(p, extent, [p, this] DEV(const luint idx) {
         // x1,x2,x3 hydro riemann fluxes
         conserved_t f[10];
         conserved_t g[10];
@@ -2045,7 +2050,6 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
     });
 }
 
-
 // //===================================================================================================================
 // //                                            SIMULATE
 // //===================================================================================================================
@@ -2160,7 +2164,7 @@ void RMHD<dim>::simulate(
     inflow_zones.resize(dim * 2);
     bcs.resize(dim * 2);
     for (int i = 0; i < 2 * dim; i++) {
-        this->bcs[i] = boundary_cond_map.at(boundary_conditions[i]);
+        this->bcs[i]          = boundary_cond_map.at(boundary_conditions[i]);
         this->inflow_zones[i] = conserved_t{
           boundary_sources[i][0],
           boundary_sources[i][1],

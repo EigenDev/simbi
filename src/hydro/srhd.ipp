@@ -28,7 +28,7 @@ SRHD<dim>::~SRHD() = default;
 
 // Helpers
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 SRHD<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1_cell_spacing) {
@@ -58,7 +58,7 @@ SRHD<dim>::get_x1face(const lint ii, const int side) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 SRHD<dim>::get_x2face(const lint ii, const int side) const
 {
     switch (x2_cell_spacing) {
@@ -88,7 +88,7 @@ SRHD<dim>::get_x2face(const lint ii, const int side) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 SRHD<dim>::get_x3face(const lint ii, const int side) const
 {
     switch (x3_cell_spacing) {
@@ -118,7 +118,7 @@ SRHD<dim>::get_x3face(const lint ii, const int side) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real SRHD<dim>::get_x1_differential(const lint ii
+HD constexpr real SRHD<dim>::get_x1_differential(const lint ii
 ) const
 {
     const real x1l   = get_x1face(ii, 0);
@@ -133,7 +133,7 @@ GPU_CALLABLE_MEMBER constexpr real SRHD<dim>::get_x1_differential(const lint ii
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real SRHD<dim>::get_x2_differential(const lint ii
+HD constexpr real SRHD<dim>::get_x2_differential(const lint ii
 ) const
 {
     if constexpr (dim == 1) {
@@ -162,7 +162,7 @@ GPU_CALLABLE_MEMBER constexpr real SRHD<dim>::get_x2_differential(const lint ii
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real SRHD<dim>::get_x3_differential(const lint ii
+HD constexpr real SRHD<dim>::get_x3_differential(const lint ii
 ) const
 {
     if constexpr (dim == 1) {
@@ -187,7 +187,7 @@ GPU_CALLABLE_MEMBER constexpr real SRHD<dim>::get_x3_differential(const lint ii
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real
+HD real
 SRHD<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
 {
     // the volume in cartesian coordinates is only nominal
@@ -290,7 +290,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
     simbi::parallel_for(
         p,
         total_zones,
-        [prim_data, cons_data, press_data, troubled_data, this] GPU_LAMBDA(
+        [prim_data, cons_data, press_data, troubled_data, this] DEV(
             luint gid
         ) {
             bool workLeftToDo = true;
@@ -428,7 +428,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 template <int dim>
-GPU_CALLABLE_MEMBER SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
+HD SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
     const SRHD<dim>::primitive_t& primsL,
     const SRHD<dim>::primitive_t& primsR,
     const luint nhat
@@ -531,7 +531,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
 template <int dim>
-GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t
+HD SRHD<dim>::conserved_t
 SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t& prims) const
 {
     const real rho      = prims.rho;
@@ -746,7 +746,7 @@ void SRHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t
+HD SRHD<dim>::conserved_t
 SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t& prims, const luint nhat)
     const
 {
@@ -796,7 +796,7 @@ SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t& prims, const luint nhat)
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
+HD SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
     const SRHD<dim>::conserved_t& uL,
     const SRHD<dim>::conserved_t& uR,
     const SRHD<dim>::conserved_t& fL,
@@ -842,7 +842,7 @@ GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
+HD SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
     const SRHD<dim>::conserved_t& uL,
     const SRHD<dim>::conserved_t& uR,
     const SRHD<dim>::conserved_t& fL,
@@ -1245,7 +1245,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
          g1_source,
          g2_source,
          g3_source,
-         this] GPU_LAMBDA(const luint idx) {
+         this] DEV(const luint idx) {
             auto prim_buff = sm_proxy<primitive_t>(prim_data);
 
             const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);

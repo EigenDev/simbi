@@ -109,30 +109,25 @@ namespace simbi {
             return std::string("1");
         }
 
-        const auto get_xblock_dims() const
+        auto get_xblock_dims() const
         {
             return static_cast<luint>(std::stoi(readGpuEnvVar("GPUXBLOCK_SIZE"))
             );
         }
 
-        const auto get_yblock_dims() const
+        auto get_yblock_dims() const
         {
             return static_cast<luint>(std::stoi(readGpuEnvVar("GPUYBLOCK_SIZE"))
             );
         }
 
-        const auto get_zblock_dims() const
+        auto get_zblock_dims() const
         {
             return static_cast<luint>(std::stoi(readGpuEnvVar("GPUZBLOCK_SIZE"))
             );
         }
 
-        void define_tinterval(
-            real t,
-            real dlogt,
-            real chkpt_interval,
-            real chkpt_idx
-        )
+        void define_tinterval(real dlogt, real chkpt_interval)
         {
             real round_place = 1.0 / chkpt_interval;
             t_interval       = dlogt != 0
@@ -376,12 +371,7 @@ namespace simbi {
                 checkpoint_zones = xag;
             }
 
-            define_tinterval(
-                t,
-                dlogt,
-                chkpt_interval,
-                init_conditions.chkpt_idx
-            );
+            define_tinterval(dlogt, chkpt_interval);
             define_chkpt_idx(init_conditions.chkpt_idx);
         }
     };

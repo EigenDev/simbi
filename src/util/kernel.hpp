@@ -22,7 +22,7 @@
 
 namespace simbi {
     template <typename Function, typename... Arguments>
-    GPU_LAUNCHABLE void Kernel(Function f, Arguments... args)
+    KERNEL void Kernel(Function f, Arguments... args)
     {
         f(args...);
     }

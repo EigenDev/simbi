@@ -18,8 +18,8 @@
 #ifndef PARALLEL_FOR_HPP
 #define PARALLEL_FOR_HPP
 
-#include "build_options.hpp"   // for global::BuildPlatform, GPU_LAMBDA, Platform ...
-#include "thread_pool.hpp"        // for (anonymous), ThreadPool, get_nthreads
+#include "build_options.hpp"   // for global::BuildPlatform, DEV, Platform ...
+#include "thread_pool.hpp"     // for (anonymous), ThreadPool, get_nthreads
 #include "util/exec_policy.hpp"   // for ExecutionPolicy
 #include "util/launch.hpp"        // for launch
 #include "util/range.hpp"         // for range
@@ -43,7 +43,7 @@ namespace simbi {
         F function
     )
     {
-        simbi::launch(p, [first, last, function] GPU_LAMBDA() {
+        simbi::launch(p, [first, last, function] DEV() {
 #if GPU_CODE
             for (auto idx : range(first, last, globalThreadCount())) {
                 function(idx);
@@ -65,7 +65,7 @@ namespace simbi {
     void parallel_for(const ExecutionPolicy<>& p, index_type last, F function)
     {
         const auto first = static_cast<index_type>(0);
-        simbi::launch(p, [=] GPU_LAMBDA() {
+        simbi::launch(p, [=] DEV() {
 #if GPU_CODE
             for (auto idx : range(first, last, globalThreadCount())) {
                 function(idx);

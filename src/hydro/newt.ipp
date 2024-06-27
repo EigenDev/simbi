@@ -28,7 +28,7 @@ Newtonian<dim>::~Newtonian() = default;
 
 // Helpers
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 Newtonian<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1_cell_spacing) {
@@ -58,7 +58,7 @@ Newtonian<dim>::get_x1face(const lint ii, const int side) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 Newtonian<dim>::get_x2face(const lint ii, const int side) const
 {
     switch (x2_cell_spacing) {
@@ -88,7 +88,7 @@ Newtonian<dim>::get_x2face(const lint ii, const int side) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 Newtonian<dim>::get_x3face(const lint ii, const int side) const
 {
     switch (x3_cell_spacing) {
@@ -118,7 +118,7 @@ Newtonian<dim>::get_x3face(const lint ii, const int side) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 Newtonian<dim>::get_x1_differential(const lint ii) const
 {
     const real x1l   = get_x1face(ii, 0);
@@ -133,7 +133,7 @@ Newtonian<dim>::get_x1_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 Newtonian<dim>::get_x2_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
@@ -162,7 +162,7 @@ Newtonian<dim>::get_x2_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER constexpr real
+HD constexpr real
 Newtonian<dim>::get_x3_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
@@ -187,7 +187,7 @@ Newtonian<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-GPU_CALLABLE_MEMBER real Newtonian<dim>::get_cell_volume(
+HD real Newtonian<dim>::get_cell_volume(
     const lint ii,
     const lint jj,
     const lint kk
@@ -291,7 +291,7 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
     simbi::parallel_for(
         p,
         total_zones,
-        [cons_data, prim_data, troubled_data, this] GPU_LAMBDA(const luint gid
+        [cons_data, prim_data, troubled_data, this] DEV(const luint gid
         ) {
             real invdV = 1.0;
             if (homolog) {
@@ -350,7 +350,7 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 template <int dim>
-GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
+HD Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     const Newtonian<dim>::primitive_t& primsL,
     const Newtonian<dim>::primitive_t& primsR,
     const luint nhat
@@ -425,7 +425,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
 template <int dim>
-GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t
+HD Newtonian<dim>::conserved_t
 Newtonian<dim>::prims2cons(const Newtonian<dim>::primitive_t& prims) const
 {
     const real rho = prims.rho;
@@ -620,7 +620,7 @@ void Newtonian<dim>::adapt_dt(const ExecutionPolicy<>& p)
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
+HD Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
     const Newtonian<dim>::primitive_t& prims,
     const luint nhat
 ) const
@@ -667,7 +667,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
+HD Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
     const Newtonian<dim>::conserved_t& uL,
     const Newtonian<dim>::conserved_t& uR,
     const Newtonian<dim>::conserved_t& fL,
@@ -710,7 +710,7 @@ GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
 };
 
 template <int dim>
-GPU_CALLABLE_MEMBER Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
+HD Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     const Newtonian<dim>::conserved_t& uL,
     const Newtonian<dim>::conserved_t& uR,
     const Newtonian<dim>::conserved_t& fL,
@@ -897,7 +897,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
          g1_source,
          g2_source,
          g3_source,
-         this] GPU_LAMBDA(const luint idx) {
+         this] DEV(const luint idx) {
             auto prim_buff = sm_proxy<primitive_t>(prim_data);
             const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
             const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);

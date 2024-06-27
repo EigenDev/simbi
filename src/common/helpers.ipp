@@ -348,7 +348,7 @@ namespace simbi {
             const U* inflow_zones
         )
         {
-            simbi::parallel_for(p, 0, 1, [=] GPU_LAMBDA(const int gid) {
+            simbi::parallel_for(p, 0, 1, [=] DEV(const int gid) {
                 if (first_order) {
                     switch (boundary_conditions[0]) {
                         case simbi::BoundaryCondition::INFLOW:
@@ -451,7 +451,7 @@ namespace simbi {
             const int extent = p.get_full_extent();
             const int sx     = (global::col_maj) ? 1 : x1grid_size;
             const int sy     = (global::col_maj) ? x2grid_size : 1;
-            simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA(const int gid) {
+            simbi::parallel_for(p, 0, extent, [=] DEV(const int gid) {
                 const int ii = axid<2, BlkAx::I>(gid, x1grid_size, x2grid_size);
                 const int jj = axid<2, BlkAx::J>(gid, x1grid_size, x2grid_size);
                 if (first_order) {
@@ -799,7 +799,7 @@ namespace simbi {
             const int extent = p.get_full_extent();
             const int sx     = x1grid_size;
             const int sy     = x2grid_size;
-            simbi::parallel_for(p, 0, extent, [=] GPU_LAMBDA(const int gid) {
+            simbi::parallel_for(p, 0, extent, [=] DEV(const int gid) {
                 const int kk = axid<3, BlkAx::K>(gid, x1grid_size, x2grid_size);
                 const int jj =
                     axid<3, BlkAx::J>(gid, x1grid_size, x2grid_size, kk);
@@ -1487,7 +1487,7 @@ namespace simbi {
         };
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
-        GPU_LAUNCHABLE typename std::enable_if<is_1D_primitive<T>::value>::type
+        KERNEL typename std::enable_if<is_1D_primitive<T>::value>::type
         compute_dt(U* self, const V* prim_buffer, real* dt_min)
         {
 #if GPU_CODE
@@ -1541,7 +1541,7 @@ namespace simbi {
         }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
-        GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<T>::value>::type
+        KERNEL typename std::enable_if<is_2D_primitive<T>::value>::type
         compute_dt(
             U* self,
             const V* prim_buffer,
@@ -1708,7 +1708,7 @@ namespace simbi {
         }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
-        GPU_LAUNCHABLE typename std::enable_if<is_3D_primitive<T>::value>::type
+        KERNEL typename std::enable_if<is_3D_primitive<T>::value>::type
         compute_dt(
             U* self,
             const V* prim_buffer,
@@ -1862,7 +1862,7 @@ namespace simbi {
         }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
-        GPU_LAUNCHABLE
+        KERNEL
             typename std::enable_if<is_1D_mhd_primitive<T>::value>::type
             compute_dt(U* self, const V* prim_buffer, real* dt_min)
         {
@@ -1919,7 +1919,7 @@ namespace simbi {
         }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
-        GPU_LAUNCHABLE
+        KERNEL
             typename std::enable_if<is_2D_mhd_primitive<T>::value>::type
             compute_dt(
                 U* self,
@@ -2089,7 +2089,7 @@ namespace simbi {
         }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
-        GPU_LAUNCHABLE
+        KERNEL
             typename std::enable_if<is_3D_mhd_primitive<T>::value>::type
             compute_dt(
                 U* self,
@@ -2256,7 +2256,7 @@ namespace simbi {
         }
 
         template <int dim, typename T>
-        GPU_LAUNCHABLE void deviceReduceKernel(T* self, real* dt_min, lint nmax)
+        KERNEL void deviceReduceKernel(T* self, real* dt_min, lint nmax)
         {
 #if GPU_CODE
             real min  = INFINITY;
@@ -2292,7 +2292,7 @@ namespace simbi {
         };
 
         template <int dim, typename T>
-        GPU_LAUNCHABLE void
+        KERNEL void
         deviceReduceWarpAtomicKernel(T* self, real* dt_min, lint nmax)
         {
 #if GPU_CODE
@@ -2349,7 +2349,7 @@ namespace simbi {
         }
 
         template <typename T>
-        GPU_CALLABLE T cubic(T b, T c, T d)
+        HD T cubic(T b, T c, T d)
         {
             T p = c - b * b / 3.0;
             T q = 2.0 * b * b * b / 27.0 - b * c / 3.0 + d;
@@ -2383,7 +2383,7 @@ namespace simbi {
             https://stackoverflow.com/a/50747781/13874039
         --------------------------------------------*/
         template <typename T>
-        GPU_CALLABLE int quartic(T b, T c, T d, T e, T res[4])
+        HD int quartic(T b, T c, T d, T e, T res[4])
         {
             T p = c - 0.375 * b * b;
             T q = 0.125 * b * b * b - 0.5 * b * c + d;
@@ -2451,7 +2451,7 @@ namespace simbi {
 
         // Function to swap two elements
         template <typename T>
-        GPU_CALLABLE void myswap(T& a, T& b)
+        HD void myswap(T& a, T& b)
         {
             T temp = a;
             a      = b;
@@ -2460,7 +2460,7 @@ namespace simbi {
 
         // Partition the array and return the pivot index
         template <typename T, typename index_type>
-        GPU_CALLABLE index_type
+        HD index_type
         partition(T arr[], index_type low, index_type high)
         {
             T pivot = arr[high];   // Choose the rightmost element as the pivot
@@ -2478,7 +2478,7 @@ namespace simbi {
 
         // Quick sort implementation
         template <typename T, typename index_type>
-        GPU_CALLABLE void
+        HD void
         recursiveQuickSort(T arr[], index_type low, index_type high)
         {
             if (low < high) {
@@ -2491,7 +2491,7 @@ namespace simbi {
         }
 
         template <typename T, typename index_type>
-        GPU_CALLABLE void
+        HD void
         iterativeQuickSort(T arr[], index_type low, index_type high)
         {
             // Create an auxiliary stack
@@ -2531,12 +2531,12 @@ namespace simbi {
         }
 
         template <typename T, typename U>
-        GPU_SHARED T* sm_proxy(const U object)
+        SHARED T* sm_proxy(const U object)
         {
 #if GPU_CODE
             if constexpr (global::on_sm) {
                 // do we need an __align__() here? I don't think so...
-                GPU_EXTERN_SHARED unsigned char memory[];
+                EXTERN unsigned char memory[];
                 return reinterpret_cast<T*>(memory);
             }
             else {
@@ -2548,14 +2548,14 @@ namespace simbi {
         }
 
         template <typename T, typename U>
-        GPU_SHARED T* identity(const U& object)
+        SHARED T* identity(const U& object)
         {
             static auto objPtr = object.data();
             return objPtr;
         }
 
         template <typename index_type, typename T>
-        GPU_CALLABLE index_type flattened_index(
+        HD index_type flattened_index(
             index_type ii,
             index_type jj,
             index_type kk,
@@ -2573,7 +2573,7 @@ namespace simbi {
         }
 
         template <int dim, BlkAx axis, typename T>
-        GPU_CALLABLE T axid(T idx, T ni, T nj, T kk)
+        HD T axid(T idx, T ni, T nj, T kk)
         {
             if constexpr (dim == 1) {
                 if constexpr (axis != BlkAx::I) {
@@ -2640,7 +2640,7 @@ namespace simbi {
         }
 
         template <int dim, typename T, typename U, typename V>
-        GPU_DEV void load_shared_buffer(
+        DEV void load_shared_buffer(
             const ExecutionPolicy<>& p,
             T& buffer,
             const U& data,
@@ -2756,7 +2756,7 @@ namespace simbi {
         }
 
         template <int dim, typename T, typename idx>
-        GPU_CALLABLE void
+        HD void
         ib_modify(T& lhs, const T& rhs, const bool ib, const idx side)
         {
             if (ib) {
@@ -2774,7 +2774,7 @@ namespace simbi {
         }
 
         template <int dim, typename T, typename idx>
-        GPU_CALLABLE bool ib_check(
+        HD bool ib_check(
             T& arr,
             const idx ii,
             const idx jj,
@@ -2799,7 +2799,7 @@ namespace simbi {
         }
 
         template <Plane P, Corner C, Dir s>
-        GPU_CALLABLE lint
+        HD lint
         cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk)
         {
             constexpr lint half     = 1;

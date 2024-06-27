@@ -18,10 +18,10 @@
 #ifndef SRHD_HPP
 #define SRHD_HPP
 
-#include "base.hpp"             // for HydroBase
-#include "build_options.hpp"    // for real, GPU_CALLABLE_MEMBER, lint, luint
-#include "common/enums.hpp"     // for TIMESTEP_TYPE
-#include "common/helpers.hpp"   // for my_min, my_max, ...
+#include "base.hpp"                   // for HydroBase
+#include "build_options.hpp"          // for real, HD, lint, luint
+#include "common/enums.hpp"           // for TIMESTEP_TYPE
+#include "common/helpers.hpp"         // for my_min, my_max, ...
 #include "common/hydro_structs.hpp"   // for Conserved, Primitive
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
 #include "util/ndarray.hpp"           // for ndarray
@@ -88,18 +88,15 @@ namespace simbi {
 
         void advance(const ExecutionPolicy<>& p);
 
-        GPU_CALLABLE_MEMBER
-        eigenvals_t calc_eigenvals(
+        HD eigenvals_t calc_eigenvals(
             const primitive_t& primsL,
             const primitive_t& primsR,
             const luint nhat
         ) const;
 
-        GPU_CALLABLE_MEMBER
-        conserved_t prims2cons(const primitive_t& prims) const;
+        HD conserved_t prims2cons(const primitive_t& prims) const;
 
-        GPU_CALLABLE_MEMBER
-        conserved_t calc_hllc_flux(
+        HD conserved_t calc_hllc_flux(
             const conserved_t& uL,
             const conserved_t& uR,
             const conserved_t& fL,
@@ -110,12 +107,10 @@ namespace simbi {
             const real vface = 0.0
         ) const;
 
-        GPU_CALLABLE_MEMBER
-        conserved_t
+        HD conserved_t
         prims2flux(const primitive_t& prims, const luint nhat) const;
 
-        GPU_CALLABLE_MEMBER
-        conserved_t calc_hll_flux(
+        HD conserved_t calc_hll_flux(
             const conserved_t& uL,
             const conserved_t& uR,
             const conserved_t& fL,
@@ -172,28 +167,23 @@ namespace simbi {
             }
         }
 
-        GPU_CALLABLE_MEMBER
-        constexpr real get_x1face(const lint ii, const int side) const;
+        HD constexpr real get_x1face(const lint ii, const int side) const;
 
-        GPU_CALLABLE_MEMBER
-        constexpr real get_x2face(const lint ii, const int side) const;
+        HD constexpr real get_x2face(const lint ii, const int side) const;
 
-        GPU_CALLABLE_MEMBER
-        constexpr real get_x3face(const lint ii, const int side) const;
+        HD constexpr real get_x3face(const lint ii, const int side) const;
 
-        GPU_CALLABLE_MEMBER
-        constexpr real get_x1_differential(const lint ii) const;
+        HD constexpr real get_x1_differential(const lint ii) const;
 
-        GPU_CALLABLE_MEMBER
-        constexpr real get_x2_differential(const lint ii) const;
+        HD constexpr real get_x2_differential(const lint ii) const;
 
-        GPU_CALLABLE_MEMBER
-        constexpr real get_x3_differential(const lint ii) const;
+        HD constexpr real get_x3_differential(const lint ii) const;
 
-        GPU_CALLABLE_MEMBER
-        real
-        get_cell_volume(const lint ii, const lint jj = 0, const lint kk = 0)
-            const;
+        HD real get_cell_volume(
+            const lint ii,
+            const lint jj = 0,
+            const lint kk = 0
+        ) const;
 
         void emit_troubled_cells() const;
     };

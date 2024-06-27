@@ -137,26 +137,23 @@ using sig_bool = volatile bool;
 
 namespace global {
 #if SHARED_MEMORY
-#define GPU_SHARED __device__
+#define SHARED __device__
     // shorthand flag for using gpu shared memory
     constexpr bool on_sm = true;
 #else
-#define GPU_SHARED __device__ const
+#define SHARED __device__ const
     // shorthand flag for using gpu shared memory
     constexpr bool on_sm = false;
 #endif
     constexpr Platform BuildPlatform = Platform::GPU;
 }   // namespace global
 
-#define GPU_DEV                    __device__
-#define GPU_DEV_INLINE             __device__ inline
-#define GPU_LAUNCHABLE             __global__
-#define GPU_LAMBDA                 __device__
-#define GPU_CALLABLE               __host__ __device__
-#define GPU_CALLABLE_INLINE        __host__ __device__ inline
-#define GPU_CALLABLE_MEMBER        __host__ __device__
-#define GPU_CALLABLE_INLINE_MEMBER __host__ __device__ inline
-#define GPU_EXTERN_SHARED          extern __shared__
+#define DEV    __device__
+#define STATIC __device__ inline
+#define KERNEL __global__
+#define HD     __host__ __device__
+#define STATIC __host__ __device__ inline
+#define EXTERN extern __shared__
 
 #if GPU_PLATFORM_NVIDIA
 #include <cuda_runtime.h>
@@ -262,17 +259,13 @@ namespace global {
 #define CUDA_CODE 0
 #define HIP_CODE  0
 
-#define GPU_DEV
-#define GPU_LAUNCHABLE
-#define GPU_LAMBDA
-#define GPU_CALLABLE
-#define GPU_CALLABLE_INLINE inline
-#define GPU_CALLABLE_MEMBER
-#define GPU_CALLABLE_INLINE_MEMBER inline
-#define GPU_DEV_INLINE             inline
-#define __shared__                 static
-#define GPU_SHARED                 const
-#define GPU_EXTERN_SHARED
+#define DEV
+#define STATIC inline
+#define KERNEL
+#define HD
+#define SHARED     const
+#define __shared__ static
+#define EXTERN     static
 
 // Alias data types on host
 namespace simbi {

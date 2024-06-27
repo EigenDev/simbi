@@ -18,7 +18,7 @@
 #ifndef HELPERS_HIP_HPP
 #define HELPERS_HIP_HPP
 
-#include "build_options.hpp"   // for real, GPU_CALLABLE_INLINE, luint, lint
+#include "build_options.hpp"   // for real, STATIC, luint, lint
 #include "common/enums.hpp"    // for Geometry, BoundaryCondition, Solver
 #include "common/hydro_structs.hpp"
 #include "common/traits.hpp"      // for is_1D_primitive, is_2D_primitive
@@ -51,7 +51,7 @@ namespace simbi {
          * @return column index
          */
         template <typename index_type, typename T>
-        GPU_CALLABLE_INLINE index_type
+        STATIC index_type
         get_column(index_type idx, T width, T length = 1, index_type k = 0)
         {
             idx -= (k * width * length);
@@ -70,7 +70,7 @@ namespace simbi {
          * @return row index
          */
         template <typename index_type, typename T>
-        GPU_CALLABLE_INLINE index_type
+        STATIC index_type
         get_row(index_type idx, T width, T length = 1, index_type k = 0)
         {
             idx -= (k * width * length);
@@ -88,8 +88,7 @@ namespace simbi {
          * @return height index
          */
         template <typename index_type, typename T>
-        GPU_CALLABLE_INLINE index_type
-        get_height(index_type idx, T width, T length)
+        STATIC index_type get_height(index_type idx, T width, T length)
         {
             return idx / width / length;
         }
@@ -124,7 +123,7 @@ namespace simbi {
          * @return maximum
          */
         template <typename T>
-        GPU_CALLABLE_INLINE constexpr T my_max(const T a, const T b)
+        STATIC constexpr T my_max(const T a, const T b)
         {
             return a > b ? a : b;
         }
@@ -138,7 +137,7 @@ namespace simbi {
          * @return minimum
          */
         template <typename T>
-        GPU_CALLABLE_INLINE constexpr T my_min(const T a, const T b)
+        STATIC constexpr T my_min(const T a, const T b)
         {
             return a < b ? a : b;
         }
@@ -153,7 +152,7 @@ namespace simbi {
          * @return maximum
          */
         template <typename T>
-        GPU_CALLABLE_INLINE constexpr T my_max3(const T a, const T b, const T c)
+        STATIC constexpr T my_max3(const T a, const T b, const T c)
         {
             return (a > b) ? (a > c ? a : c) : b > c ? b : c;
         }
@@ -168,7 +167,7 @@ namespace simbi {
          * @return minimum
          */
         template <typename T>
-        GPU_CALLABLE_INLINE constexpr T my_min3(const T a, const T b, const T c)
+        STATIC constexpr T my_min3(const T a, const T b, const T c)
         {
             return (a < b) ? (a < c ? a : c) : b < c ? b : c;
         }
@@ -274,7 +273,7 @@ namespace simbi {
          * @return sign of val
          */
         template <typename T>
-        GPU_CALLABLE_INLINE constexpr int sgn(T val)
+        STATIC constexpr int sgn(T val)
         {
             return (T(0) < val) - (val < T(0));
         }
@@ -339,8 +338,7 @@ namespace simbi {
          * @param z
          * @return minmod value between x, y, and z
          */
-        GPU_CALLABLE_INLINE real
-        minmod(const real x, const real y, const real z)
+        STATIC real minmod(const real x, const real y, const real z)
         {
             return 0.25 * std::abs(sgn(x) + sgn(y)) * (sgn(x) + sgn(z)) *
                    my_min3(std::abs(x), std::abs(y), std::abs(z));
@@ -353,7 +351,7 @@ namespace simbi {
          * @param y
          * @return minmod value between x and y
          */
-        GPU_CALLABLE_INLINE real minmod(const real x, const real y)
+        STATIC real minmod(const real x, const real y)
         {
             return 0.5 * std::abs(sgn(x) + sgn(y)) * sgn(x) *
                    my_min(std::abs(x), std::abs(y));
@@ -366,7 +364,7 @@ namespace simbi {
          * @param y
          * @return van Leer value between x and y
          */
-        GPU_CALLABLE_INLINE real vanLeer(const real x, const real y)
+        STATIC real vanLeer(const real x, const real y)
         {
             if (x * y > 0.0) {
                 return static_cast<real>(2.0) * (x * y) / (x + y);
@@ -383,7 +381,7 @@ namespace simbi {
          * @param cellspacing
          * @return arithmetic or geometric mean between a and b
          */
-        GPU_CALLABLE_INLINE
+        STATIC
         real calc_any_mean(
             const real a,
             const real b,
@@ -402,14 +400,8 @@ namespace simbi {
 
         // the plm gradient in 3D hydro
         template <typename T>
-        GPU_CALLABLE_INLINE
-            typename std::enable_if<is_3D_primitive<T>::value, T>::type
-            plm_gradient(
-                const T& a,
-                const T& b,
-                const T& c,
-                const real plm_theta
-            )
+        STATIC typename std::enable_if<is_3D_primitive<T>::value, T>::type
+        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
         {
             const real rho = minmod(
                 (a - b).rho * plm_theta,
@@ -446,14 +438,8 @@ namespace simbi {
 
         // the plm gradient in 2D hydro
         template <typename T>
-        GPU_CALLABLE_INLINE
-            typename std::enable_if<is_2D_primitive<T>::value, T>::type
-            plm_gradient(
-                const T& a,
-                const T& b,
-                const T& c,
-                const real plm_theta
-            )
+        STATIC typename std::enable_if<is_2D_primitive<T>::value, T>::type
+        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
         {
             const real rho = minmod(
                 (a - b).rho * plm_theta,
@@ -485,14 +471,8 @@ namespace simbi {
 
         // the plm gradient in 1D hydro
         template <typename T>
-        GPU_CALLABLE_INLINE
-            typename std::enable_if<is_1D_primitive<T>::value, T>::type
-            plm_gradient(
-                const T& a,
-                const T& b,
-                const T& c,
-                const real plm_theta
-            )
+        STATIC typename std::enable_if<is_1D_primitive<T>::value, T>::type
+        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
         {
             const real rho = minmod(
                 (a - b).rho * plm_theta,
@@ -523,18 +503,12 @@ namespace simbi {
          * @param[in/out/in,out]b: left of center
          * @param[in/out/in,out]c: right of center
          * @param[in/out/in,out]plm_theta:
-         * @return          GPU_CALLABLE_INLINE
+         * @return          STATIC
          * @retval
          */
         template <typename T>
-        GPU_CALLABLE_INLINE
-            typename std::enable_if<is_3D_mhd_primitive<T>::value, T>::type
-            plm_gradient(
-                const T& a,
-                const T& b,
-                const T& c,
-                const real plm_theta
-            )
+        STATIC typename std::enable_if<is_3D_mhd_primitive<T>::value, T>::type
+        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
         {
             switch (comp_slope_limiter) {
                 case LIMITER::MINMOD:
@@ -605,14 +579,8 @@ namespace simbi {
 
         // the plm gradient in 2D MHD
         template <typename T>
-        GPU_CALLABLE_INLINE
-            typename std::enable_if<is_2D_mhd_primitive<T>::value, T>::type
-            plm_gradient(
-                const T& a,
-                const T& b,
-                const T& c,
-                const real plm_theta
-            )
+        STATIC typename std::enable_if<is_2D_mhd_primitive<T>::value, T>::type
+        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
         {
             const real rho = minmod(
                 (a - b).rho * plm_theta,
@@ -664,14 +632,8 @@ namespace simbi {
 
         // the plm gradient in 1D MHD
         template <typename T>
-        GPU_CALLABLE_INLINE
-            typename std::enable_if<is_1D_mhd_primitive<T>::value, T>::type
-            plm_gradient(
-                const T& a,
-                const T& b,
-                const T& c,
-                const real plm_theta
-            )
+        STATIC typename std::enable_if<is_1D_mhd_primitive<T>::value, T>::type
+        plm_gradient(const T& a, const T& b, const T& c, const real plm_theta)
         {
             const real rho = minmod(
                 (a - b).rho * plm_theta,
@@ -730,7 +692,7 @@ namespace simbi {
          * @return the nearest active index corresponding to the global index
          * given
          */
-        GPU_CALLABLE_INLINE
+        STATIC
         constexpr luint
         get_real_idx(const lint idx, const lint offset, const lint active_zones)
         {
@@ -771,7 +733,7 @@ namespace simbi {
          * @param qq  variational parameter
          * @return Lorentz factor from Eq.(18)
          */
-        GPU_CALLABLE_INLINE real calc_rmhd_lorentz(
+        STATIC real calc_rmhd_lorentz(
             const real ssq,
             const real bsq,
             const real msq,
@@ -794,7 +756,7 @@ namespace simbi {
          * @param qq rho * h * g *g
          * @return gas pressure from Eq.(19)
          */
-        GPU_CALLABLE_INLINE real
+        STATIC real
         calc_rmhd_pg(const real gr, const real d, const real w, const real qq)
         {
             return (qq - d * w) / (gr * w * w);
@@ -808,8 +770,7 @@ namespace simbi {
          * @param S lab frame momentum density
          * @param p pressure
          */
-        GPU_CALLABLE_INLINE real
-        newton_f(real gamma, real tau, real d, real s, real p)
+        STATIC real newton_f(real gamma, real tau, real d, real s, real p)
         {
             const auto et  = tau + d + p;
             const auto v2  = s * s / (et * et);
@@ -828,8 +789,7 @@ namespace simbi {
          * @param S lab frame momentum density
          * @param p pressure
          */
-        GPU_CALLABLE_INLINE real
-        newton_g(real gamma, real tau, real d, real s, real p)
+        STATIC real newton_g(real gamma, real tau, real d, real s, real p)
         {
             const auto et = tau + d + p;
             const auto v2 = s * s / (et * et);
@@ -852,7 +812,7 @@ namespace simbi {
          * @param qq energy density
          * @return Eq.(20)
          */
-        GPU_CALLABLE_INLINE std::tuple<real, real> newton_fg_mhd(
+        STATIC std::tuple<real, real> newton_fg_mhd(
             real gr,
             real tau,
             real d,
@@ -906,7 +866,7 @@ namespace simbi {
             TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
             typename U,
             typename V>
-        GPU_LAUNCHABLE typename std::enable_if<is_1D_primitive<T>::value>::type
+        KERNEL typename std::enable_if<is_1D_primitive<T>::value>::type
         compute_dt(U* s, const V* prim_buffer, real* dt_min);
 
         // compute the discrete dts for 2D primitive array
@@ -915,7 +875,7 @@ namespace simbi {
             TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
             typename U,
             typename V>
-        GPU_LAUNCHABLE typename std::enable_if<is_2D_primitive<T>::value>::type
+        KERNEL typename std::enable_if<is_2D_primitive<T>::value>::type
         compute_dt(
             U* s,
             const V* prim_buffer,
@@ -929,7 +889,7 @@ namespace simbi {
             TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
             typename U,
             typename V>
-        GPU_LAUNCHABLE typename std::enable_if<is_3D_primitive<T>::value>::type
+        KERNEL typename std::enable_if<is_3D_primitive<T>::value>::type
         compute_dt(
             U* s,
             const V* prim_buffer,
@@ -943,9 +903,8 @@ namespace simbi {
             TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
             typename U,
             typename V>
-        GPU_LAUNCHABLE
-            typename std::enable_if<is_1D_mhd_primitive<T>::value>::type
-            compute_dt(U* s, const V* prim_buffer, real* dt_min);
+        KERNEL typename std::enable_if<is_1D_mhd_primitive<T>::value>::type
+        compute_dt(U* s, const V* prim_buffer, real* dt_min);
 
         // compute the discrete dts for 2D MHD primitive array
         template <
@@ -953,14 +912,13 @@ namespace simbi {
             TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
             typename U,
             typename V>
-        GPU_LAUNCHABLE
-            typename std::enable_if<is_2D_mhd_primitive<T>::value>::type
-            compute_dt(
-                U* s,
-                const V* prim_buffer,
-                real* dt_min,
-                const simbi::Geometry geometry
-            );
+        KERNEL typename std::enable_if<is_2D_mhd_primitive<T>::value>::type
+        compute_dt(
+            U* s,
+            const V* prim_buffer,
+            real* dt_min,
+            const simbi::Geometry geometry
+        );
 
         // compute the discrete dts for 3D MHD primitive array
         template <
@@ -968,14 +926,13 @@ namespace simbi {
             TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE,
             typename U,
             typename V>
-        GPU_LAUNCHABLE
-            typename std::enable_if<is_3D_mhd_primitive<T>::value>::type
-            compute_dt(
-                U* s,
-                const V* prim_buffer,
-                real* dt_min,
-                const simbi::Geometry geometry
-            );
+        KERNEL typename std::enable_if<is_3D_mhd_primitive<T>::value>::type
+        compute_dt(
+            U* s,
+            const V* prim_buffer,
+            real* dt_min,
+            const simbi::Geometry geometry
+        );
 
         //======================================
         //              HELPER OVERLOADS
@@ -988,7 +945,7 @@ namespace simbi {
          * @param pr right pressure
          * @return true if smoothing needed, false otherwise
          */
-        GPU_CALLABLE_INLINE
+        STATIC
         bool quirk_strong_shock(real pl, real pr)
         {
             return std::abs(pr - pl) / helpers::my_min(pl, pr) >
@@ -1002,7 +959,7 @@ namespace simbi {
          * @param j
          * @return 1 for identity, 0 otherwise
          */
-        GPU_CALLABLE_INLINE
+        STATIC
         constexpr unsigned int kronecker(luint i, luint j) { return (i == j); }
 
         /**
@@ -1015,7 +972,7 @@ namespace simbi {
          * @param ny number of rows
          * @return row-major or column-major index for 2D array
          */
-        GPU_CALLABLE_INLINE
+        STATIC
         auto get_2d_idx(
             const luint ii,
             const luint jj,
@@ -1041,7 +998,7 @@ namespace simbi {
          * @param nz number of heights
          * @return row-major or column-major index for 3D array
          */
-        GPU_CALLABLE_INLINE
+        STATIC
         auto idx3(
             const luint ii,
             const luint jj,
@@ -1066,7 +1023,7 @@ namespace simbi {
          * @param geometry geometry of state
          * @return cell centroid
          */
-        GPU_CALLABLE_INLINE
+        STATIC
         auto get_cell_centroid(
             const real xr,
             const real xl,
@@ -1090,7 +1047,7 @@ namespace simbi {
          * @param step permutation steps
          * @return next permutation
          */
-        GPU_CALLABLE_INLINE
+        STATIC
         constexpr auto next_perm(const luint nhat, const luint step)
         {
             return ((nhat - 1) + step) % 3 + 1;
@@ -1104,12 +1061,11 @@ namespace simbi {
          * @param[in/out/in,out]ni:
          * @param[in/out/in,out]nj:
          * @param[in/out/in,out]nk:
-         * @return          GPU_CALLABLE
+         * @return          HD
          * @retval
          */
         template <Plane P, Corner C, Dir s>
-        GPU_CALLABLE lint
-        cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk);
+        HD lint cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk);
 
         // configure the ghost zones in 1D hydro
         template <typename T, typename U>
@@ -1159,7 +1115,7 @@ namespace simbi {
          * @param val
          * @return reduced min in the warp
          */
-        inline GPU_DEV real warpReduceMin(real val)
+        inline DEV real warpReduceMin(real val)
         {
 #if CUDA_CODE
             // Adapted from https://stackoverflow.com/a/59883722/13874039
@@ -1201,7 +1157,7 @@ namespace simbi {
          * @param val
          * @return block reduced value
          */
-        inline GPU_DEV real blockReduceMin(real val)
+        inline DEV real blockReduceMin(real val)
         {
 #if GPU_CODE
             __shared__ real
@@ -1233,10 +1189,10 @@ namespace simbi {
         };
 
         template <typename T>
-        GPU_LAUNCHABLE void deviceReduceKernel(T* self, lint nmax);
+        KERNEL void deviceReduceKernel(T* self, lint nmax);
 
         template <typename T>
-        GPU_LAUNCHABLE void deviceReduceWarpAtomicKernel(T* self, lint nmax);
+        KERNEL void deviceReduceWarpAtomicKernel(T* self, lint nmax);
 
         // display the CPU / GPU device properties
         void anyDisplayProps();
@@ -1280,50 +1236,46 @@ namespace simbi {
 
         // solve the cubic equation
         template <typename T>
-        GPU_CALLABLE T cubic(T b, T c, T d);
+        HD T cubic(T b, T c, T d);
 
         // solve the quartic equation
         template <typename T>
-        GPU_CALLABLE int quartic(T b, T c, T d, T e, T res[4]);
+        HD int quartic(T b, T c, T d, T e, T res[4]);
 
         // solve the cubic equation
         template <typename T>
-        GPU_CALLABLE int cubicPluto(T b, T c, T d, T z[]);
+        HD int cubicPluto(T b, T c, T d, T z[]);
 
         // solve the quartic equation
         template <typename T>
-        GPU_CALLABLE int quarticPluto(T b, T c, T d, T e, T res[4]);
+        HD int quarticPluto(T b, T c, T d, T e, T res[4]);
 
         // swap any two values
         template <typename T>
-        GPU_CALLABLE void swap(T& a, T& b);
+        HD void swap(T& a, T& b);
 
         // Partition the array and return the pivot index
         template <typename T, typename index_type>
-        GPU_CALLABLE index_type
-        partition(T arr[], index_type low, index_type high);
+        HD index_type partition(T arr[], index_type low, index_type high);
 
         // Quick sort implementation
         template <typename T, typename index_type>
-        GPU_CALLABLE void
-        recursiveQuickSort(T arr[], index_type low, index_type high);
+        HD void recursiveQuickSort(T arr[], index_type low, index_type high);
 
         template <typename T, typename index_type>
-        GPU_CALLABLE void
-        iterativeQuickSort(T arr[], index_type low, index_type high);
+        HD void iterativeQuickSort(T arr[], index_type low, index_type high);
 
         template <typename T, typename U>
-        GPU_SHARED T* sm_proxy(const U object);
+        SHARED T* sm_proxy(const U object);
 
         template <typename T, typename U>
-        GPU_SHARED T* identity(const U& object);
+        SHARED T* identity(const U& object);
 
         template <int dim, typename T, typename idx>
-        GPU_CALLABLE void
-        ib_modify(T& lhs, const T& rhs, const bool ib, const idx side);
+        HD void ib_modify(T& lhs, const T& rhs, const bool ib, const idx side);
 
         template <int dim, typename T, typename idx>
-        GPU_CALLABLE bool ib_check(
+        HD bool ib_check(
             T& arr,
             const idx ii,
             const idx jj,
@@ -1334,7 +1286,7 @@ namespace simbi {
         );
 
         template <typename index_type, typename T>
-        GPU_CALLABLE index_type flattened_index(
+        HD index_type flattened_index(
             index_type ii,
             index_type jj,
             index_type kk,
@@ -1344,10 +1296,10 @@ namespace simbi {
         );
 
         template <int dim, BlkAx axis, typename T>
-        GPU_CALLABLE T axid(T idx, T ni, T nj, T kk = T(0));
+        HD T axid(T idx, T ni, T nj, T kk = T(0));
 
         template <int dim, typename T, typename U, typename V>
-        GPU_DEV void load_shared_buffer(
+        DEV void load_shared_buffer(
             const ExecutionPolicy<>& p,
             T& buffer,
             const U& data,

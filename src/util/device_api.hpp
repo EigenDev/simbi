@@ -18,7 +18,7 @@
 #ifndef DEVICE_API_HPP
 #define DEVICE_API_HPP
 
-#include "build_options.hpp"   // for blockDim, threadIdx, GPU_CALLABLE_INLINE
+#include "build_options.hpp"   // for blockDim, threadIdx, STATIC
 #include <cstddef>             // for size_t
 #include <omp.h>               // for omp_get_thread_num
 #include <stdexcept>           // for runtime_error
@@ -119,7 +119,7 @@ namespace simbi {
             void deviceSynch();
             void threadFence();
 
-            GPU_DEV_INLINE void synchronize()
+            STATIC void synchronize()
             {
 #if GPU_CODE
                 __syncthreads();
@@ -130,7 +130,7 @@ namespace simbi {
 
     }   // namespace gpu
 
-    GPU_CALLABLE_INLINE
+    STATIC
     unsigned int globalThreadIdx()
     {
         if constexpr (global::on_gpu) {
@@ -147,14 +147,14 @@ namespace simbi {
         }
     }
 
-    GPU_CALLABLE_INLINE
+    STATIC
     unsigned int globalThreadCount()
     {
         return blockDim.x * gridDim.x * blockDim.y * gridDim.y * blockDim.z *
                gridDim.z;
     }
 
-    GPU_CALLABLE_INLINE
+    STATIC
     unsigned int get_ii_in2D()
     {
         if constexpr (global::col_maj) {
@@ -163,7 +163,7 @@ namespace simbi {
         return blockDim.x * blockIdx.x + threadIdx.x;
     }
 
-    GPU_CALLABLE_INLINE
+    STATIC
     unsigned int get_jj_in2D()
     {
         if constexpr (global::col_maj) {
@@ -173,7 +173,7 @@ namespace simbi {
     }
 
     template <global::Platform P = global::BuildPlatform>
-    GPU_CALLABLE_INLINE unsigned int get_tx()
+    STATIC unsigned int get_tx()
     {
         if constexpr (P == global::Platform::GPU) {
             if constexpr (global::col_maj) {
@@ -187,7 +187,7 @@ namespace simbi {
     }
 
     template <global::Platform P = global::BuildPlatform>
-    GPU_CALLABLE_INLINE unsigned int get_ty()
+    STATIC unsigned int get_ty()
     {
         if constexpr (P == global::Platform::GPU) {
             if constexpr (global::col_maj) {
@@ -201,7 +201,7 @@ namespace simbi {
     }
 
     template <global::Platform P = global::BuildPlatform>
-    GPU_CALLABLE_INLINE unsigned int get_threadId()
+    STATIC unsigned int get_threadId()
     {
 #if GPU_CODE
         return blockDim.x * blockDim.y * threadIdx.z +
