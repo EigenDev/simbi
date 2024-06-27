@@ -361,3 +361,6 @@ def display_top(
         logger.info(f"{len(other)} other: {size/1.024e9:.2f} GB")
     total = sum(stat.size for stat in top_stats)
     logger.info(f"Total allocated size: {total/1.024e9:.2f} GB")
+
+def tuple_of_tuples(x: Any) -> bool:
+    return all(isinstance(a, tuple) for a in x)
