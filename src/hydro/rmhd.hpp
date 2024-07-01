@@ -107,7 +107,6 @@ namespace simbi {
         HD conserved_t calc_hll_flux(
             primitive_t& prL,
             primitive_t& prR,
-            const real bface,
             const luint nhat,
             const real vface = 0.0
         ) const;
@@ -115,7 +114,6 @@ namespace simbi {
         HD conserved_t calc_hllc_flux(
             primitive_t& prL,
             primitive_t& prR,
-            const real bface,
             const luint nhat,
             const real vface = 0.0
         ) const;
@@ -123,7 +121,6 @@ namespace simbi {
         HD conserved_t calc_hlld_flux(
             primitive_t& prL,
             primitive_t& prR,
-            const real bface,
             const luint nhat,
             const real vface = 0.0
         ) const;
@@ -131,7 +128,6 @@ namespace simbi {
         HD conserved_t (RMHD<dim>::*riemann_solve)(
             primitive_t& prL,
             primitive_t& prR,
-            const real bface,
             const luint nhat,
             const real vface
         ) const;
@@ -258,8 +254,14 @@ namespace simbi {
             const luint nhat
         ) const
         {
-            static real eta[2];
+            static real eta[2], h[2];
             static real kv[2][3], bv[2][3], vv[2][3];
+
+            // compute "sign" of the normal bfield
+            // we do it this way to avoid exploding
+            // terms in the Alfven speed
+            const auto sgnBn = sgn(bn);
+            const auto bfn   = limit_zero(bn);
 
             // store the left and right prims (rotational)
             // and the contact prims
@@ -271,24 +273,26 @@ namespace simbi {
                 const auto aS   = lam[ii];
                 const auto rS   = r[ii];
                 const auto rmn  = rS.momentum(nhat);
-                const auto ret  = rS.total_energy();
                 const auto rmp1 = rS.momentum(np1);
                 const auto rmp2 = rS.momentum(np2);
                 const auto rbn  = rS.bcomponent(nhat);
                 const auto rbp1 = rS.bcomponent(np1);
                 const auto rbp2 = rS.bcomponent(np2);
+                const auto ret  = rS.total_energy();
 
                 // Eqs (26) - (30)
-                const real a = rmn - aS * ret + p * (1.0 - aS * aS);
-                const real g = rbp1 * rbp1 + rbp2 * rbp2;
-                const real c = rbp1 * rmp1 + rbp2 * rmp2;
-                const real q = -a - g + bn * bn * (1.0 - aS * aS);
-                real x = bn * (a * aS * bn + c) - (a + g) * (aS * p + ret);
+                const real a  = rmn - aS * ret + p * (1.0 - aS * aS);
+                const real g  = rbp1 * rbp1 + rbp2 * rbp2;
+                const real ag = (a + g);
+                const real c  = rbp1 * rmp1 + rbp2 * rmp2;
+                const real q  = -ag + bn * bn * (1.0 - aS * aS);
+                const real x  = bn * (a * aS * bn + c) - ag * (aS * p + ret);
 
                 // Eqs (23) - (25)
-                real vn  = (bn * (a * bn + aS * c) - (a + g) * (p + rmn)) / x;
-                real vp1 = (q * rmp1 + rbp1 * (c + bn * (aS * rmn - ret))) / x;
-                real vp2 = (q * rmp2 + rbp2 * (c + bn * (aS * rmn - ret))) / x;
+                const real term = (c + bn * (aS * rmn - ret));
+                const real vn   = (bn * (a * bn + aS * c) - ag * (p + rmn)) / x;
+                const real vp1  = (q * rmp1 + rbp1 * term) / x;
+                const real vp2  = (q * rmp2 + rbp2 * term) / x;
 
                 // Equation (21)
                 const real var1 = 1.0 / (aS - vn);
@@ -296,15 +300,29 @@ namespace simbi {
                 const real bp2  = (rbp2 - bn * vp2) * var1;
 
                 // Equation (31)
-                const real wt =
-                    p + (ret - (vn * rmn + vp1 * rmp1 + vp2 * rmp2)) * var1;
+                const real rdv = (vn * rmn + vp1 * rmp1 + vp2 * rmp2);
+                const real wt  = p + (ret - rdv) * var1;
 
-                // Equation (43)
-                eta[ii] = (ii < 1 ? -1.0 : 1.0) * sgn(bn) * std::sqrt(wt);
-                const real var2 = 1.0 / (aS * p + ret + bn * eta[ii]);
-                const real kn   = (rmn + p + rbn * eta[ii]) * var2;
-                const real kp1  = (rmp1 + rbp1 * eta[ii]) * var2;
-                const real kp2  = (rmp2 + rbp2 * eta[ii]) * var2;
+                // Equation (35) & (43)
+                eta[ii]         = (ii < 1 ? -1.0 : 1.0) * sgnBn * std::sqrt(wt);
+                h[ii]           = wt;
+                const auto etaS = eta[ii];
+                const real var2 = 1.0 / (aS * p + ret + bn * etaS);
+                const real kn   = (rmn + p + rbn * etaS) * var2;
+                const real kp1  = (rmp1 + rbp1 * etaS) * var2;
+                const real kp2  = (rmp2 + rbp2 * etaS) * var2;
+                if (std::isnan(kn)) {
+                    printf(
+                        "rmn: %.2e, p: %.2e, rbn: %.2e, etaS: %.2e, var2: "
+                        "%.2e\n",
+                        rmn,
+                        p,
+                        rbn,
+                        etaS,
+                        var2
+                    );
+                    std::cin.get();
+                }
 
                 vv[ii][0] = vn;
                 vv[ii][1] = vp1;
@@ -320,25 +338,25 @@ namespace simbi {
                 bv[ii][2] = bp2;
             }
 
-            // Load left and right states
-            const auto kL = kv[LF];
-            const auto kR = kv[RF];
-            const auto bL = bv[LF];
-            const auto bR = bv[RF];
-            const auto vL = vv[LF];
-            const auto vR = vv[RF];
+            // Load left and right vars
+            const auto kL   = kv[LF];
+            const auto kR   = kv[RF];
+            const auto bL   = bv[LF];
+            const auto bR   = bv[RF];
+            const auto vL   = vv[LF];
+            const auto vR   = vv[RF];
+            const auto etaL = eta[LF];
+            const auto etaR = eta[RF];
 
-            auto bterm = [bn](real b, real a, real vn, real v) {
-                return b * (a - vn) + bn * v;
+            auto bterm = [bn](real b, real lam, real vn, real v) {
+                return b * (lam - vn) + bn * v;
             };
 
             // Compute contact terms
             // Equation (45)
-            const real dkn  = (kR[0] - kL[0]);
+            const real dkn  = (kR[0] - kL[0] + global::tol_scale);
             const real var3 = 1.0 / dkn;
-            const real bcn  = (bterm(bR[0], kR[0], vR[0], vR[0]) -
-                              bterm(bL[0], kL[0], vL[0], vL[0])) *
-                             var3;
+            const real bcn  = bn;
             const real bcp1 = (bterm(bR[1], kR[0], vR[0], vR[1]) -
                                bterm(bL[1], kL[0], vL[0], vL[1])) *
                               var3;
@@ -353,8 +371,8 @@ namespace simbi {
             auto ksq      = kcn * kcn + kcp1 * kcp1 + kcp2 * kcp2;
             auto kdb      = kcn * bcn + kcp1 * bcp1 + kcp2 * bcp2;
             auto bhc      = kdb * dkn;
-            auto reg      = (1.0 - ksq) / (eta[LF] - kdb);
-            const real yL = (1.0 - ksq) / (eta[LF] * dkn - bhc);
+            auto reg      = bfn ? 0.0 : (1.0 - ksq) / (etaL - kdb);
+            const real yL = (1.0 - ksq) / (etaL * dkn - bhc);
 
             const real vncL  = kcn - bcn * reg;
             const real vpc1L = kcp1 - bcp1 * reg;
@@ -367,8 +385,8 @@ namespace simbi {
             ksq           = kcn * kcn + kcp1 * kcp1 + kcp2 * kcp2;
             kdb           = kcn * bcn + kcp1 * bcp1 + kcp2 * bcp2;
             bhc           = kdb * dkn;
-            reg           = (1.0 - ksq) / (eta[RF] - kdb);
-            const real yR = (1.0 - ksq) / (eta[RF] * dkn - bhc);
+            reg           = bfn ? 0.0 : (1.0 - ksq) / (etaR - kdb);
+            const real yR = (1.0 - ksq) / (etaR * dkn - bhc);
 
             const real vncR  = kcn - bcn * reg;
             const real vpc1R = kcp1 - bcp1 * reg;
@@ -377,29 +395,60 @@ namespace simbi {
             // Equation (48)
             const real f = dkn * (1.0 - bn * (yR - yL));
 
+            // printf("vncL: %.2e, vncR: %.2e\n", vncL, vncR);
+            // printf("f: %.2e\n", f);
+            // printf("dkn: %.2e\n", dkn);
             // Return prims for later computation
-            prims[0].vcomponent(nhat) = vv[LF][0];
-            prims[0].vcomponent(np1)  = vv[LF][1];
-            prims[0].vcomponent(np2)  = vv[LF][2];
-            prims[0].bcomponent(nhat) = bv[LF][0];
-            prims[0].bcomponent(np1)  = bv[LF][1];
-            prims[0].bcomponent(np2)  = bv[LF][2];
+            prims[0].vcomponent(nhat) = vL[0];
+            prims[0].vcomponent(np1)  = vL[1];
+            prims[0].vcomponent(np2)  = vL[2];
+            prims[0].bcomponent(nhat) = bL[0];
+            prims[0].bcomponent(np1)  = bL[1];
+            prims[0].bcomponent(np2)  = bL[2];
             prims[0].p                = kL[0];   // store the Alfven speed
 
-            prims[1].vcomponent(nhat) = vv[RF][0];
-            prims[1].vcomponent(np1)  = vv[RF][1];
-            prims[1].vcomponent(np2)  = vv[RF][2];
-            prims[1].bcomponent(nhat) = bv[RF][0];
-            prims[1].bcomponent(np1)  = bv[RF][1];
-            prims[1].bcomponent(np2)  = bv[RF][2];
+            prims[1].vcomponent(nhat) = vR[0];
+            prims[1].vcomponent(np1)  = vR[1];
+            prims[1].vcomponent(np2)  = vR[2];
+            prims[1].bcomponent(nhat) = bR[0];
+            prims[1].bcomponent(np1)  = bR[1];
+            prims[1].bcomponent(np2)  = bR[2];
             prims[1].p                = kR[0];   // store the Alfven speed
 
-            prims[2].vcomponent(nhat) = 0.5 * (vncL + vncR);
-            prims[2].vcomponent(np1)  = 0.5 * (vpc1L + vpc1R);
-            prims[2].vcomponent(np2)  = 0.5 * (vpc2L + vpc2R);
+            prims[2].vcomponent(nhat) = 0.5 * (vncR + vncL);
+            prims[2].vcomponent(np1)  = 0.5 * (vpc1R + vpc1L);
+            prims[2].vcomponent(np2)  = 0.5 * (vpc2R + vpc2L);
             prims[2].bcomponent(nhat) = bcn;
             prims[2].bcomponent(np1)  = bcp1;
             prims[2].bcomponent(np2)  = bcp2;
+
+            /* -- check if sweep makes physically sense -- */
+
+            auto success = (vncL - kL[0]) > -1.e-6;
+            success *= (kR[0] - vncR) > -1.e-6;
+
+            success *= (lam[0] - vL[0]) < 0.0;
+            success *= (lam[1] - vR[0]) > 0.0;
+
+            success *= (h[1] - p) > 0.0;
+            success *= (h[0] - p) > 0.0;
+            success *= (kL[0] - lam[0]) > -1.e-6;
+            success *= (lam[1] - kR[0]) > -1.e-6;
+
+            if (!success) {
+                printf("Solution not physical!\n");
+                printf("bn: %.5e\n", bn);
+                std::cout << bfn << "\n";
+                std::cout << kL[0] << "\n";
+                std::cout << "Check 1: " << (vncL - kL[0]) << "\n";
+                std::cout << "Check 2: " << (kR[0] - vncR) << "\n";
+                std::cout << "Check 3: " << (lam[0] - vL[0]) << "\n";
+                std::cout << "Check 4: " << (lam[1] - vR[0]) << "\n";
+                std::cout << "Check 5: " << (h[1] - p) << "\n";
+                std::cout << "Check 6: " << (h[0] - p) << "\n";
+                std::cout << "Check 7: " << (kL[0] - lam[0]) << "\n";
+                std::cout << "Check 8: " << (lam[1] - kR[0]) << "\n";
+            }
 
             return {f, prims[0], prims[1], prims[2]};
         }

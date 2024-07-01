@@ -711,11 +711,12 @@ RMHD<dim>::primitive_t RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons
     const real msq  = (m1 * m1 + m2 * m2 + m3 * m3);
     const real bsq  = (b1 * b1 + b2 * b2 + b3 * b3);
 
-    const real et  = tau + d;
-    const real a   = 3.0;
-    const real b   = -4.0 * (et - bsq);
-    const real c   = msq - 2.0 * et * bsq + bsq * bsq;
-    real qq        = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
+    const real et = tau + d;
+    const real a  = 3.0;
+    const real b  = -4.0 * (et - bsq);
+    const real c  = msq - 2.0 * et * bsq + bsq * bsq;
+    real qq       = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
+
     const real tol = d * global::tol_scale;
     int iter       = 0;
     real dqq;
@@ -1098,15 +1099,18 @@ RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
     const real m3    = (ed + bsq) * v3 - vdotb * b3;
     const real mn    = (nhat == 1) ? m1 : (nhat == 2) ? m2 : m3;
     const auto bmu   = mag_fourvec_t(prims);
+    const real ind1  = (nhat == 1) ? 0.0 : vn * b1 - v1 * bn;
+    const real ind2  = (nhat == 2) ? 0.0 : vn * b2 - v2 * bn;
+    const real ind3  = (nhat == 2) ? 0.0 : vn * b3 - v3 * bn;
     return {
       d * vn,
       m1 * vn + kronecker(nhat, 1) * p - bn * bmu.one * invlf,
       m2 * vn + kronecker(nhat, 2) * p - bn * bmu.two * invlf,
       m3 * vn + kronecker(nhat, 3) * p - bn * bmu.three * invlf,
       mn - d * vn,
-      vn * b1 - v1 * bn,
-      vn * b2 - v2 * bn,
-      vn * b3 - v3 * bn,
+      ind1,
+      ind2,
+      ind3,
       d * vn * chi
     };
 };
@@ -1115,18 +1119,15 @@ template <int dim>
 HD RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
     RMHD<dim>::primitive_t& prL,
     RMHD<dim>::primitive_t& prR,
-    const real bface,
     const luint nhat,
     const real vface
 ) const
 {
-    prL.bcomponent(nhat) = bface;
-    prR.bcomponent(nhat) = bface;
-    const auto uL        = prims2cons(prL);
-    const auto uR        = prims2cons(prR);
-    const auto fL        = prims2flux(prL, nhat);
-    const auto fR        = prims2flux(prR, nhat);
-    const auto lambda    = calc_eigenvals(prL, prR, nhat);
+    const auto uL     = prims2cons(prL);
+    const auto uR     = prims2cons(prR);
+    const auto fL     = prims2flux(prL, nhat);
+    const auto fR     = prims2flux(prR, nhat);
+    const auto lambda = calc_eigenvals(prL, prR, nhat);
     // Grab the fastest wave speeds
     const real aL  = lambda.afL;
     const real aR  = lambda.afR;
@@ -1164,17 +1165,14 @@ template <int dim>
 HD RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     RMHD<dim>::primitive_t& prL,
     RMHD<dim>::primitive_t& prR,
-    const real bface,
     const luint nhat,
     const real vface
 ) const
 {
-    prL.bcomponent(nhat) = bface;
-    prR.bcomponent(nhat) = bface;
-    const auto uL        = prims2cons(prL);
-    const auto uR        = prims2cons(prR);
-    const auto fL        = prims2flux(prL, nhat);
-    const auto fR        = prims2flux(prR, nhat);
+    const auto uL = prims2cons(prL);
+    const auto uR = prims2cons(prR);
+    const auto fL = prims2flux(prL, nhat);
+    const auto fR = prims2flux(prR, nhat);
 
     const auto lambda = calc_eigenvals(prL, prR, nhat);
     const real aL     = lambda.afL;
@@ -1208,7 +1206,7 @@ HD RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const auto np2 = next_perm(nhat, 2);
         // the normal component of the magnetic field is assumed to
         // be continuous across the interface, so bnL = bnR = bn
-        const real bn  = bface;   // hll_state.bcomponent(nhat);
+        const real bn  = hll_state.bcomponent(nhat);
         const real bp1 = hll_state.bcomponent(np1);
         const real bp2 = hll_state.bcomponent(np2);
 
@@ -1305,17 +1303,14 @@ template <int dim>
 HD RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     RMHD<dim>::primitive_t& prL,
     RMHD<dim>::primitive_t& prR,
-    const real bface,
     const luint nhat,
     const real vface
 ) const
 {
-    const auto uL        = prims2cons(prL);
-    const auto uR        = prims2cons(prR);
-    const auto fL        = prims2flux(prL, nhat);
-    const auto fR        = prims2flux(prR, nhat);
-    prL.bcomponent(nhat) = bface;
-    prR.bcomponent(nhat) = bface;
+    const auto uL = prims2cons(prL);
+    const auto uR = prims2cons(prR);
+    const auto fL = prims2flux(prL, nhat);
+    const auto fR = prims2flux(prR, nhat);
 
     const auto lambda = calc_eigenvals(prL, prR, nhat);
     const real aL     = lambda.afL;
@@ -1350,8 +1345,7 @@ HD RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         }
 
         // define the magnetic field normal to the zone
-        const auto bn = bface;   // hll_state.bcomponent(nhat);
-
+        const real bn = hll_state.bcomponent(nhat);
         // Eq. (12)
         const conserved_t r[2] = {uL * aLm - fL, uR * aRp - fR};
         const real lam[2]      = {aLm, aRp};
@@ -1359,60 +1353,67 @@ HD RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         //------------------------------------
         // Iteratively solve for the pressure
         //------------------------------------
-        //------------ initial pressure guess
         const auto etR = r[RF].total_energy();
         const auto etL = r[LF].total_energy();
         const auto mnL = r[LF].momentum(nhat);
         const auto mnR = r[RF].momentum(nhat);
 
-        const auto pcheck               = my_max(prL.p, prR.p);
-        const auto phll                 = cons2prim(hll_state);
-        real p0                         = phll.total_pressure();
+        //------------ initial pressure guess
+        const auto phll = cons2prim(hll_state);
+        real p0         = phll.total_pressure();
+
         const auto [p, prAL, prAR, prC] = [&] {
-            if (bn * bn / (pcheck * pcheck) < 0.01) {   // Eq.(53)
+            if (bn * bn / (p0 * p0) < 0.1) {   // Eq.(53)
                 // in this limit, the pressure is found exactly
-                const real a         = aRp - aLm;
-                const real b         = etR - etL + aRp * mnL - aLm * mnR;
-                const real c         = mnL * etR - mnR * etL;
-                const real quad      = my_max<real>(0.0, b * b - 4 * a * c);
-                const real p1        = 0.5 * (-b + std::sqrt(quad)) * afac;
-                auto [f, pL, pR, pC] = hlld_vdiff(p1, r, lam, bn, nhat);
-                return std::make_tuple(p1, pL, pR, pC);
+                const real a    = aRp - aLm;
+                const real b    = etR - etL + aRp * mnL - aLm * mnR;
+                const real c    = mnL * etR - mnR * etL;
+                const real quad = my_max<real>(0.0, b * b - 4.0 * a * c);
+                p0              = 0.5 * (-b + std::sqrt(quad)) * afac;
+            }
+            if (std::isnan(p0)) {
+                printf("nhat: %llu, PHLL is nan!\n", nhat);
+            }
+            auto [f0, pL, pR, pC] = hlld_vdiff(p0, r, lam, bn, nhat);
+            if (std::abs(f0) < global::tol_scale) {
+                return std::make_tuple(p0, pL, pR, pC);
             }
 
+            int iter = 0;
+            real p1  = 1.025 * p0;
             real dp;
-            auto [f0, pL, pR, pC] = hlld_vdiff(p0, r, lam, bn, nhat);
-            real p1               = 1.025 * p0;
             // Use the secant method to solve for the pressure
             do {
-                auto [f, ppL, ppR, ppC] = hlld_vdiff(p1, r, lam, bn, nhat);
+                auto [f1, ppL, ppR, ppC] = hlld_vdiff(p1, r, lam, bn, nhat);
 
-                dp = (p1 - p0) / (f - f0) * f;
+                dp = (p1 - p0) / (f1 - f0) * f1;
                 p0 = p1;
-                f0 = f;
+                f0 = f1;
                 p1 -= dp;
                 pL = ppL;
                 pR = ppR;
                 pC = ppC;
-            } while (dp > global::tol_scale);
+                iter++;
+
+            } while (std::abs(dp) > global::tol_scale * p1);
 
             return std::make_tuple(p1, pL, pR, pC);
         }();
 
         // speed of the contact wave
-        const real aC = prC.vcomponent(nhat);
+        const real vnc = prC.vcomponent(nhat);
 
-        // I've store the L/R Alfven speeds in the pressure
-        // since it is not used and the other velocity componenets
+        // I've stored the L/R Alfven speeds in the pressure
+        // since it is not used and the other velocity components
         // are occupied.
         const auto waL = prAL.p;
         const auto waR = prAR.p;
 
         // do compound inequalities in two steps
         const auto on_left =
-            (vface < waL && vface > aLm) || (vface > waL && vface < aC);
+            (vface < waL && vface > aLm) || (vface > waL && vface < vnc);
         const auto at_contact =
-            (vface < aC && vface > waL) || (vface > aC && vface < waR);
+            (vface < vnc && vface > waL) || (vface > vnc && vface < waR);
 
         const auto uc = on_left ? uL : uR;
         const auto pc = on_left ? prAL : prAR;
@@ -1422,17 +1423,18 @@ HD RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const auto wa = on_left ? waL : waR;
 
         // compute intermediate state across fast waves
-        const real vn   = pc.vcomponent(nhat);
+        // === Fast / Slow Waves ===
+        const real vna  = pc.vcomponent(nhat);
         const real vp1  = pc.vcomponent(np1);
         const real vp2  = pc.vcomponent(np2);
         const real bp1  = pc.bcomponent(np1);
         const real bp2  = pc.bcomponent(np2);
         const real vdbA = pc.vdotb();
 
-        const real fac = 1.0 / (wc - vn);
+        const real fac = 1.0 / (wc - vna);
         const real da  = rc.den * fac;
-        const real ea  = (rc.total_energy() + p * vn - vdbA * bn) * fac;
-        const real mn  = (ea + p) * vn - vdbA * bn;
+        const real ea  = (rc.total_energy() + p * vna - vdbA * bn) * fac;
+        const real mn  = (ea + p) * vna - vdbA * bn;
         const real mp1 = (ea + p) * vp1 - vdbA * bp1;
         const real mp2 = (ea + p) * vp2 - vdbA * bp2;
 
@@ -1446,10 +1448,13 @@ HD RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         ua.bcomponent(np1)  = bp1;
         ua.bcomponent(np2)  = bp2;
 
-        const auto fa = fc + (ua - uc) * wc;
+        const auto fa = fc + (ua - uc) * wa;
+
         if (!at_contact) {
             return fa - ua * vface;
         }
+
+        // === Contact Wave ===
 
         // compute jump conditions across alfven waves
         const real vdbC = prC.vdotb();
@@ -1458,10 +1463,10 @@ HD RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const real bp2C = prC.bcomponent(np2);
         const real vp1C = prC.vcomponent(np1);
         const real vp2C = prC.vcomponent(np2);
-        const real fac2 = 1.0 / (wa - aC);
-        const real dc   = da * (wa - vn) * fac2;
-        const real ec   = (ea * wa - mn + p * aC - vdbC * bn) * fac2;
-        const real mnc  = (ec + p) * aC - vdbC * bnC;
+        const real fac2 = 1.0 / (wa - vnc);
+        const real dc   = da * (wa - vna) * fac2;
+        const real ec   = (ea * wa - mn + p * vnc - vdbC * bn) * fac2;
+        const real mnc  = (ec + p) * vnc - vdbC * bn;
         const real mpc1 = (ec + p) * vp1C - vdbC * bp1C;
         const real mpc2 = (ec + p) * vp2C - vdbC * bp2C;
 
@@ -1475,7 +1480,7 @@ HD RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         uC.bcomponent(np1)  = bp1C;
         uC.bcomponent(np2)  = bp2C;
 
-        return fa + (uC - ua) * aC - uC * vface;
+        return fa + (uC - ua) * vnc - uC * vface;
     }();
 
     // upwind the concentration
@@ -1502,7 +1507,6 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
         conserved_t g[10];
         conserved_t h[10];
         primitive_t pL, pLL, pR, pRR;
-        real bface;
 
         // e1, e2, e3 values at cell edges
         real e1[4], e2[4], e3[4];
@@ -1628,10 +1632,6 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             pR = prim_buff
                 [idx3(txa + (q % 2) + 0, tya + vdir, tza + hdir, sx, sy, 0)];
 
-            // load the longitudinal magnetic field
-            bface =
-                bstag1[idx3(ii + (q % 2), js + vdir, ks + hdir, nxv, yg, zg)];
-
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
                     txa + (q % 2) - 2,
@@ -1654,17 +1654,13 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_x[(q % 2)], 1);
-            f[q] = (this->*riemann_solve)(pL, pR, bface, 1, 0);
+            f[q] = (this->*riemann_solve)(pL, pR, 1, 0);
 
             // fluxes in j direction
             pL = prim_buff
                 [idx3(txa + vdir, tya + (q % 2) - 1, tza + hdir, sx, sy, 0)];
             pR = prim_buff
                 [idx3(txa + vdir, tya + (q % 2) + 0, tza + hdir, sx, sy, 0)];
-
-            // load the longitudinal magnetic field
-            bface =
-                bstag2[idx3(is + vdir, jj + (q % 2), ks + hdir, xg, nyv, zg)];
 
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
@@ -1688,17 +1684,13 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_y[(q % 2)], 2);
-            g[q] = (this->*riemann_solve)(pL, pR, bface, 2, 0);
+            g[q] = (this->*riemann_solve)(pL, pR, 2, 0);
 
             // fluxes in k direction
             pL = prim_buff
                 [idx3(txa + vdir, tya + hdir, tza + (q % 2) - 1, sx, sy, 0)];
             pR = prim_buff
                 [idx3(txa + vdir, tya + hdir, tza + (q % 2) + 0, sx, sy, 0)];
-
-            // load the longitudinal magnetic field
-            bface =
-                bstag3[idx3(is + vdir, js + hdir, kk + (q % 2), xg, yg, nzv)];
 
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
@@ -1722,7 +1714,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_z[(q % 2)], 3);
-            h[q] = (this->*riemann_solve)(pL, pR, bface, 3, 0);
+            h[q] = (this->*riemann_solve)(pL, pR, 3, 0);
         }
         // std::cin.get();
 
