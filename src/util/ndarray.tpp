@@ -79,7 +79,7 @@ simbi::ndarray<DT, build_mode>::ndarray(std::vector<DT>&& rhs)
 
 // Copy the arrays and deallocate the RHS
 template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>&
+HD simbi::ndarray<DT, build_mode>&
 simbi::ndarray<DT, build_mode>::ndarray::operator=(ndarray other)
 {
     other.swap(*this);
@@ -191,37 +191,51 @@ constexpr size_type simbi::ndarray<DT, build_mode>::ndim() const
 // array at given index
 template <typename DT, global::Platform build_mode>
 template <typename IndexType>
-constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
+HD constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
 {
     // if given index is greater than the
     // size of array print Error
     if ((size_t) index >= sz) {
         printf(
-            "Error: array index: %llu out of bounds for ndarray of size: %zu "
+            "Error: array index: %" PRIu64
+            "out of bounds for ndarray of size: %zu "
             "\n",
             (luint) index,
             sz
         );
     }
-    // else return value at that index
+// else return value at that index
+#ifdef __CUDA_ARCH__
+    return dev_arr[index];
+#else
     return arr[index];
+#endif
 }
 
 // Template class to return the element of
 // array at given index
 template <typename DT, global::Platform build_mode>
 template <typename IndexType>
-constexpr DT simbi::ndarray<DT, build_mode>::operator[](IndexType index) const
+HD constexpr DT simbi::ndarray<DT, build_mode>::operator[](IndexType index
+) const
 {
     // if given index is greater than the
     // size of array print Error
-    if (index >= sz) {
-        std::cout << "Error: Array index: " << index
-                  << " out of bounds for ndarray of size: " << sz << "\n";
-        exit(0);
+    if ((size_t) index >= sz) {
+        printf(
+            "Error: array index: %" PRIu64
+            "out of bounds for ndarray of size: %zu "
+            "\n",
+            (luint) index,
+            sz
+        );
     }
     // else return value at that index
+#ifdef __CUDA_ARCH__
+    return dev_arr[index];
+#else
     return arr[index];
+#endif
 }
 
 template <typename DT, global::Platform build_mode>

@@ -150,7 +150,10 @@ namespace simbi {
         void print_shared_mem()
         {
             if constexpr (global::on_sm) {
-                printf("Requested shared memory: %llu bytes", shBlockBytes);
+                printf(
+                    "Requested shared memory: %" PRIu64 "bytes",
+                    shBlockBytes
+                );
             }
         }
 
@@ -160,17 +163,37 @@ namespace simbi {
             xblockdim = xag > gpu_block_dimx ? gpu_block_dimx : xag;
             yblockdim = yag > gpu_block_dimy ? gpu_block_dimy : yag;
             zblockdim = zag > gpu_block_dimz ? gpu_block_dimz : zag;
-            radius    = (spatial_order == "pcm") ? 1 : 2;
-            step      = (time_order == "rk1") ? 1.0 : 0.5;
-            sx        = (global::on_sm) ? xblockdim + 2 * radius : nx;
-            sy = (dim < 3) ? 1 : (global::on_sm) ? yblockdim + 2 * radius : ny;
+            if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                if (xblockdim * yblockdim * zblockdim < global::WARP_SIZE) {
+                    if (nz > 1) {
+                        xblockdim = 4;
+                        yblockdim = 4;
+                        zblockdim = 4;
+                    }
+                    else if (ny > 1) {
+                        xblockdim = 16;
+                        yblockdim = 16;
+                        zblockdim = 1;
+                    }
+                    else {
+                        xblockdim = 128;
+                        yblockdim = 1;
+                        zblockdim = 1;
+                    }
+                }
+            }
+            radius = (spatial_order == "pcm") ? 1 : 2;
+            step   = (time_order == "rk1") ? 1.0 : 0.5;
+            sx     = (global::on_sm) ? xblockdim + 2 * radius : nx;
+            sy = (dim < 2) ? 1 : (global::on_sm) ? yblockdim + 2 * radius : ny;
             sz = (dim < 3) ? 1 : (global::on_sm) ? zblockdim + 2 * radius : nz;
             xblockspace  = xblockdim + 2 * radius;
             yblockspace  = (dim < 2) ? 1 : yblockdim + 2 * radius;
             zblockspace  = (dim < 3) ? 1 : zblockdim + 2 * radius;
             shBlockSpace = xblockspace * yblockspace * zblockspace;
             shBlockBytes = shBlockSpace * sizeof(P) * global::on_sm;
-            fullP        = simbi::ExecutionPolicy(
+
+            fullP = simbi::ExecutionPolicy(
                 {nx, ny, nz},
                 {xblockdim, yblockdim, zblockdim}
             );

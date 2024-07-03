@@ -36,7 +36,7 @@ namespace simbi {
     class ndarray
     {
         template <typename Deleter>
-        using unique_p = std::unique_ptr<DT[], Deleter>;
+        using unique_p = util::smart_ptr<DT[], Deleter>;
 
       private:
         // Variable to store the size of the
@@ -49,7 +49,7 @@ namespace simbi {
 
         size_type dimensions;
 
-        std::unique_ptr<DT[]> arr;
+        util::smart_ptr<DT[]> arr;
 
         // Device-side array
         void* myGpuMalloc(size_type size)
@@ -87,7 +87,7 @@ namespace simbi {
         ndarray();
         ~ndarray();
         // Assignment operator
-        ndarray& operator=(ndarray rhs);
+        HD ndarray& operator=(ndarray rhs);
 
         void swap(ndarray& rhs);
 
@@ -127,11 +127,11 @@ namespace simbi {
 
         // Access operator (mutable)
         template <typename IndexType>
-        constexpr DT& operator[](IndexType);
+        HD constexpr DT& operator[](IndexType);
 
         // Const-access operator (read-only)
         template <typename IndexType>
-        constexpr DT operator[](IndexType) const;
+        HD constexpr DT operator[](IndexType) const;
 
         // Some math operator overloads
         constexpr ndarray& operator*(real);
@@ -167,29 +167,29 @@ namespace simbi {
             using pointer         = void;
             using reference       = void;
 
-            explicit iterator() : ptr(nullptr) {}
+            HD explicit iterator() : ptr(nullptr) {}
 
-            explicit iterator(DT* p) : ptr(p) {}
+            HD explicit iterator(DT* p) : ptr(p) {}
 
-            bool operator==(const iterator& rhs) const
+            HD bool operator==(const iterator& rhs) const
             {
                 return ptr == rhs.ptr;
             }
 
-            bool operator!=(const iterator& rhs) const
+            HD bool operator!=(const iterator& rhs) const
             {
                 return !(*this == rhs);
             }
 
-            DT operator*() const { return *ptr; }
+            HD DT operator*() const { return *ptr; }
 
-            iterator& operator++()
+            HD iterator& operator++()
             {
                 ++ptr;
                 return *this;
             }
 
-            iterator operator++(int)
+            HD iterator operator++(int)
             {
                 iterator temp(*this);
                 ++*this;
@@ -259,5 +259,5 @@ struct is_3darray<simbi::ndarray<simbi::ndarray<simbi::ndarray<U>>>> {
     static constexpr bool value = true;
 };
 
-#include "ndarray.ixx"
+#include "ndarray.tpp"
 #endif

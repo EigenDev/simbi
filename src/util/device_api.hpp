@@ -119,7 +119,7 @@ namespace simbi {
             void deviceSynch();
             void threadFence();
 
-            STATIC void synchronize()
+            DEV inline void synchronize()
             {
 #if GPU_CODE
                 __syncthreads();

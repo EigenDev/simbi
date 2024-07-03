@@ -30,6 +30,9 @@
 #include <string>                 // for string, operator<=>
 #include <type_traits>            // for enable_if
 
+// forward declaration
+struct PrimData;
+
 // Some useful global constants
 constexpr real QUIRK_THRESHOLD = 1e-4;
 
@@ -1123,13 +1126,15 @@ namespace simbi {
 #if __CUDA_ARCH__ >= 700
             mask = __match_any_sync(__activemask(), val);
 #else
+            const int tid = threadIdx.z * blockDim.x * blockDim.y +
+                            threadIdx.y * blockDim.x + threadIdx.x;
             unsigned tmask = __activemask();
             for (int i = 0; i < global::WARP_SIZE; i++) {
                 unsigned long long tval =
                     __shfl_sync(tmask, (unsigned long long) val, i);
                 unsigned my_mask =
                     __ballot_sync(tmask, (tval == (unsigned long long) val));
-                if (i == (threadIdx.x & (global::WARP_SIZE - 1))) {
+                if (i == (tid & (global::WARP_SIZE - 1))) {
                     mask = my_mask;
                 }
             }
@@ -1159,7 +1164,7 @@ namespace simbi {
         inline DEV real blockReduceMin(real val)
         {
 #if GPU_CODE
-            __shared__ real
+            static __shared__ real
                 shared[global::WARP_SIZE];   // Shared mem for 32 (Nvidia) / 64
                                              // (AMD) partial mins
             const int tid = threadIdx.z * blockDim.x * blockDim.y +
@@ -1169,12 +1174,12 @@ namespace simbi {
             int wid       = tid / global::WARP_SIZE;
 
             val = warpReduceMin(val);   // Each warp performs partial reduction
-
             if (lane == 0) {
                 shared[wid] = val;   // Write reduced value to shared memory
             }
             __syncthreads();   // Wait for all partial reductions
 
+            // printf("Lane[%d]: %f\n", lane, shared[lane]);
             // read from shared memory only if that warp existed
             val = (tid < bsz / global::WARP_SIZE) ? shared[lane] : val;
 
@@ -1298,7 +1303,7 @@ namespace simbi {
         HD T axid(T idx, T ni, T nj, T kk = T(0));
 
         template <typename T>
-        bool limit_zero(T val)
+        HD bool limit_zero(T val)
         {
             return (val * val) < global::tol_scale;
         }
@@ -1328,5 +1333,5 @@ namespace simbi {
     }   // namespace helpers
 }   // namespace simbi
 
-#include "helpers.ixx"
+#include "helpers.tpp"
 #endif

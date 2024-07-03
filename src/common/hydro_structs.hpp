@@ -1307,7 +1307,7 @@ namespace rmhd {
         // constexpr real e3() { return b3; }
         HD constexpr real& e3() { return b3; }
 
-        constexpr real ecomponent(luint nhat) const
+        HD constexpr real ecomponent(luint nhat) const
         {
             if (nhat == 1) {
                 return b1;
@@ -1324,17 +1324,17 @@ namespace rmhd {
         {
             if (nhat == 1) {
                 e1() = 0.0;
-                std::swap(e2(), e3());
+                global::swap(e2(), e3());
                 e3() *= -1.0;
             }
             else if (nhat == 2) {
                 e2() = 0.0;
-                std::swap(e1(), e3());
+                global::swap(e1(), e3());
                 e1() *= -1.0;
             }
             else {
                 e3() = 0.0;
-                std::swap(e2(), e1());
+                global::swap(e2(), e1());
                 e2() *= -1.0;
             }
         }

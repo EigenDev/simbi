@@ -1862,9 +1862,8 @@ namespace simbi {
         }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
-        KERNEL
-            typename std::enable_if<is_1D_mhd_primitive<T>::value>::type
-            compute_dt(U* self, const V* prim_buffer, real* dt_min)
+        KERNEL typename std::enable_if<is_1D_mhd_primitive<T>::value>::type
+        compute_dt(U* self, const V* prim_buffer, real* dt_min)
         {
 #if GPU_CODE
             real vPlus, vMinus;
@@ -1919,14 +1918,13 @@ namespace simbi {
         }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
-        KERNEL
-            typename std::enable_if<is_2D_mhd_primitive<T>::value>::type
-            compute_dt(
-                U* self,
-                const V* prim_buffer,
-                real* dt_min,
-                const simbi::Geometry geometry
-            )
+        KERNEL typename std::enable_if<is_2D_mhd_primitive<T>::value>::type
+        compute_dt(
+            U* self,
+            const V* prim_buffer,
+            real* dt_min,
+            const simbi::Geometry geometry
+        )
         {
 #if GPU_CODE
             real cfl_dt, v1p, v1m, v2p, v2m;
@@ -2089,14 +2087,13 @@ namespace simbi {
         }
 
         template <typename T, TIMESTEP_TYPE dt_type, typename U, typename V>
-        KERNEL
-            typename std::enable_if<is_3D_mhd_primitive<T>::value>::type
-            compute_dt(
-                U* self,
-                const V* prim_buffer,
-                real* dt_min,
-                const simbi::Geometry geometry
-            )
+        KERNEL typename std::enable_if<is_3D_mhd_primitive<T>::value>::type
+        compute_dt(
+            U* self,
+            const V* prim_buffer,
+            real* dt_min,
+            const simbi::Geometry geometry
+        )
         {
 #if GPU_CODE
             real cfl_dt;
@@ -2163,11 +2160,11 @@ namespace simbi {
                 }
 
                 const auto ireal =
-                    helpers::get_real_idx(ii, self->radius, self->xag);
+                    helpers::get_real_idx(ii, self->radius, self->nxv);
                 const auto jreal =
-                    helpers::get_real_idx(jj, self->radius, self->yag);
+                    helpers::get_real_idx(jj, self->radius, self->nyv);
                 const auto kreal =
-                    helpers::get_real_idx(kk, self->radius, self->zag);
+                    helpers::get_real_idx(kk, self->radius, self->nzv);
 
                 const auto x1l = self->get_x1face(ireal, 0);
                 const auto x1r = self->get_x1face(ireal, 1);
@@ -2178,6 +2175,8 @@ namespace simbi {
                 const auto x3l = self->get_x3face(kreal, 0);
                 const auto x3r = self->get_x3face(kreal, 1);
                 const auto dx3 = x3r - x3l;
+
+                // printf("dx1: %f, dx2: %f, dx3: %f\n", dx1, dx2, dx3);
                 switch (geometry) {
                     case simbi::Geometry::CARTESIAN:
                         {
@@ -2249,8 +2248,16 @@ namespace simbi {
                             break;
                         }
                 }   // end switch
-
+                // printf("[%lu], cfl: %f, cfl_dt: %f\n", gid, self->cfl,
+                // cfl_dt);
                 dt_min[gid] = self->cfl * cfl_dt;
+                // printf(
+                //     "dt_min[%lu] = %f, cfl: %f, cfl_dt: %f\n",
+                //     gid,
+                //     dt_min[gid],
+                //     self->cfl,
+                //     cfl_dt
+                // );
             }
 #endif
         }
@@ -2296,27 +2303,28 @@ namespace simbi {
         deviceReduceWarpAtomicKernel(T* self, real* dt_min, lint nmax)
         {
 #if GPU_CODE
-            real min  = INFINITY;
-            luint ii  = blockIdx.x * blockDim.x + threadIdx.x;
-            luint tid = threadIdx.z * blockDim.x * blockDim.y +
-                        threadIdx.y * blockDim.x + threadIdx.x;
+            real min        = INFINITY;
+            const luint ii  = blockIdx.x * blockDim.x + threadIdx.x;
+            const luint tid = threadIdx.z * blockDim.x * blockDim.y +
+                              threadIdx.y * blockDim.x + threadIdx.x;
             // luint bid  = blockIdx.z * gridDim.x * gridDim.y + blockIdx.y *
             // gridDim.x + blockIdx.x;
-            luint nt = blockDim.x * blockDim.y * blockDim.z * gridDim.x *
-                       gridDim.y * gridDim.z;
-            luint gid;
-            if constexpr (dim == 1) {
-                gid = ii;
-            }
-            else if constexpr (dim == 2) {
-                luint jj = blockIdx.y * blockDim.y + threadIdx.y;
-                gid      = self->nx * jj + ii;
-            }
-            else if constexpr (dim == 3) {
-                luint jj = blockIdx.y * blockDim.y + threadIdx.y;
-                luint kk = blockIdx.z * blockDim.z + threadIdx.z;
-                gid      = self->ny * self->nx * kk + self->nx * jj + ii;
-            }
+            const luint nt = blockDim.x * blockDim.y * blockDim.z * gridDim.x *
+                             gridDim.y * gridDim.z;
+            const luint gid = [&] {
+                if constexpr (dim == 1) {
+                    return ii;
+                }
+                else if constexpr (dim == 2) {
+                    luint jj = blockIdx.y * blockDim.y + threadIdx.y;
+                    return self->nx * jj + ii;
+                }
+                else if constexpr (dim == 3) {
+                    luint jj = blockIdx.y * blockDim.y + threadIdx.y;
+                    luint kk = blockIdx.z * blockDim.z + threadIdx.z;
+                    return self->ny * self->nx * kk + self->nx * jj + ii;
+                }
+            }();
             // reduce multiple elements per thread
             for (auto i = gid; i < nmax; i += nt) {
                 min = helpers::my_min(dt_min[i], min);
@@ -2460,8 +2468,7 @@ namespace simbi {
 
         // Partition the array and return the pivot index
         template <typename T, typename index_type>
-        HD index_type
-        partition(T arr[], index_type low, index_type high)
+        HD index_type partition(T arr[], index_type low, index_type high)
         {
             T pivot = arr[high];   // Choose the rightmost element as the pivot
             index_type i = low - 1;   // Index of the smaller element
@@ -2478,8 +2485,7 @@ namespace simbi {
 
         // Quick sort implementation
         template <typename T, typename index_type>
-        HD void
-        recursiveQuickSort(T arr[], index_type low, index_type high)
+        HD void recursiveQuickSort(T arr[], index_type low, index_type high)
         {
             if (low < high) {
                 index_type pivotIndex = partition(arr, low, high);
@@ -2491,8 +2497,7 @@ namespace simbi {
         }
 
         template <typename T, typename index_type>
-        HD void
-        iterativeQuickSort(T arr[], index_type low, index_type high)
+        HD void iterativeQuickSort(T arr[], index_type low, index_type high)
         {
             // Create an auxiliary stack
             T stack[4];
@@ -2550,8 +2555,20 @@ namespace simbi {
         template <typename T, typename U>
         SHARED T* identity(const U& object)
         {
+#if GPU_CODE
+            if constexpr (global::on_sm) {
+                // do we need an __align__() here? I don't think so...
+                EXTERN unsigned char memory[];
+                return reinterpret_cast<T*>(memory);
+            }
+            else {
+                static auto objPtr = object.dev_data();
+                return objPtr;
+            }
+#else
             static auto objPtr = object.data();
             return objPtr;
+#endif
         }
 
         template <typename index_type, typename T>
@@ -2756,8 +2773,7 @@ namespace simbi {
         }
 
         template <int dim, typename T, typename idx>
-        HD void
-        ib_modify(T& lhs, const T& rhs, const bool ib, const idx side)
+        HD void ib_modify(T& lhs, const T& rhs, const bool ib, const idx side)
         {
             if (ib) {
                 lhs.rho = rhs.rho;
@@ -2799,8 +2815,7 @@ namespace simbi {
         }
 
         template <Plane P, Corner C, Dir s>
-        HD lint
-        cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk)
+        HD lint cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk)
         {
             constexpr lint half     = 1;
             constexpr lint offset   = 1;

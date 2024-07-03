@@ -209,5 +209,5 @@ struct is_relativistic<simbi::Newtonian<3>> {
     static constexpr bool value = false;
 };
 
-#include "newt.ixx"
+#include "newt.tpp"
 #endif

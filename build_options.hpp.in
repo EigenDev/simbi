@@ -97,11 +97,6 @@ using atomic_cast = long long;
 #define __int_as_real __longlong_as_double
 #define __real_as_int __double_as_longlong
 using real = double;
-
-namespace global {
-    // newton-raphson tolerance scale
-    // constexpr real tol_scale = 1e-12;
-}   // namespace global
 #endif
 
 namespace global {
@@ -116,7 +111,6 @@ namespace global {
 
     // float or double precision tolerance scale
     constexpr real tol_scale = std::numeric_limits<real>::epsilon() * 1e3;
-
 
 //======================== Managed Memory Check
 #ifdef MANAGED_MEMORY
@@ -148,13 +142,12 @@ namespace global {
 }   // namespace global
 
 #define DEV    __device__
-#define STATIC __device__ inline
 #define KERNEL __global__
 #define HD     __host__ __device__
 #define STATIC __host__ __device__ inline
 #define EXTERN extern __shared__
 
-#if GPU_PLATFORM_NVIDIA
+#if defined(GPU_PLATFORM_NVIDIA)
 #include <cuda_runtime.h>
 #define CUDA_CODE 1
 
@@ -201,7 +194,7 @@ using devProp_t                        = cudaDeviceProp;
 using devError_t                       = cudaError_t;
 using devEvent_t                       = cudaEvent_t;
 using simbiStream_t                    = cudaStream_t;
-#elif GPU_PLATFORM_AMD
+#elif defined(GPU_PLATFORM_AMD)
 #include "hip/hip_runtime.h"
 #define HIP_CODE 1
 
@@ -297,5 +290,17 @@ namespace simbi {
 namespace global {
     // shorthand flag for gpu compilation check
     constexpr bool on_gpu = BuildPlatform == Platform::GPU;
+
+    template<typename T>
+    HD void inline swap(T& a, T& b)
+    {
+        #ifdef __CUDA_ARCH__
+        T temp = a;
+        a      = b;
+        b      = temp;
+        #else 
+        std::swap(a, b);
+        #endif
+    }
 }   // namespace global
 #endif

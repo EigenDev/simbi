@@ -11,9 +11,12 @@ namespace simbi {
             using value_type         = T;
             using type               = integral_constant;
 
-            constexpr operator value_type() const noexcept { return value; }
+            HD constexpr operator value_type() const noexcept { return value; }
 
-            constexpr value_type operator()() const noexcept { return value; }
+            HD constexpr value_type operator()() const noexcept
+            {
+                return value;
+            }
         };
 
         template <typename T, T... Ints>
@@ -21,7 +24,7 @@ namespace simbi {
             using type       = index_sequence;
             using value_type = T;
 
-            static constexpr T size() noexcept { return sizeof...(Ints); }
+            HD static constexpr T size() noexcept { return sizeof...(Ints); }
         };
 
         template <std::size_t N, std::size_t... Ints>
@@ -35,7 +38,7 @@ namespace simbi {
         };
 
         template <typename T, T... Vals, typename F>
-        constexpr void for_sequence(index_sequence<T, Vals...>, F f)
+        HD constexpr void for_sequence(index_sequence<T, Vals...>, F f)
         {
             (static_cast<void>(f(integral_constant<T, Vals>{})), ...);
         };

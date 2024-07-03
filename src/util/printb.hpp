@@ -107,5 +107,5 @@ namespace simbi {
 
 }   // namespace simbi
 
-#include "printb.ixx"
+#include "printb.tpp"
 #endif
