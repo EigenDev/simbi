@@ -327,34 +327,32 @@ def build_simbi(args: argparse.Namespace) -> tuple[str]:
     except IndexError:
         gpu_include = ""
 
-    # h5cc_show = get_output(["h5cc", "-show"]).split()
+
     h5pkg = get_output(["pkg-config", "--cflags", "hdf5"]).split()
     hdf5_include = " ".join(
         [include_dir[2:] for include_dir in filter(lambda x: x.startswith("-I"), h5pkg)]
     )
 
-    # if not hdf5_include:
-    #     hdf5_libpath = Path(
-    #         " ".join(
-    #             [
-    #                 lib_dir[2:]
-    #                 for lib_dir in filter(lambda x: x.startswith("-L"), h5cc_show)
-    #             ]
-    #         )
-    #     )
-    #     hdf5_include = hdf5_libpath.parents[0].resolve() / "include"
+    if not hdf5_include:
+        h5cc_show = get_output(["h5cc", "-show"]).split()
+        hdf5_libpath = Path(
+            " ".join(
+                [
+                    lib_dir[2:]
+                    for lib_dir in filter(lambda x: x.startswith("-L"), h5cc_show)
+                ]
+            )
+        )
+        hdf5_include = hdf5_libpath.parents[0].resolve() / "include"
 
     config_command = configure(args, reconfigure_flag, hdf5_include, gpu_include)
     subprocess.run(config_command, env=simbi_env, check=True)
     build_dir = f"{simbi_dir}/build"
     egg_dir = f"{simbi_dir}/simbi.egg-info"
+    
+    lib_dir = Path(simbi_dir / "simbi/libs")
+    lib_dir.mkdir(parents=True, exist_ok=True)
     if not args.configure:
-        extras = "" if not args.extras else "[extras]"
-        install_mode = (
-            "." + extras if args.install_mode == "default" else "-e" + "." + extras
-        )
-        lib_dir = Path(simbi_dir / "simbi/libs")
-        lib_dir.mkdir(parents=True, exist_ok=True)
         compile_child = subprocess.Popen(
             ["meson", "compile"] + args.verbose, cwd=f"{args.build_dir}"
         ).wait()
@@ -366,13 +364,18 @@ def build_simbi(args: argparse.Namespace) -> tuple[str]:
             return egg_dir, build_dir
         else:
             raise subprocess.CalledProcessError("Error ocurred during build")
-        
-    return egg_dir, build_dir
+    else:
+        return egg_dir, build_dir
     
 def install_simbi(args: argparse.Namespace) -> None:
     egg_dir, build_dir = build_simbi(args)
+    
+    extras = "" if not args.extras else "[extras]"
+    install_mode = (
+        "." + extras if args.install_mode == "default" else "-e" + "." + extras
+    )
     p1 = subprocess.Popen(
-        [sys.executable, "-m", "pip", "install", args.install_mode],
+        [sys.executable, "-m", "pip", "install", install_mode],
         stdout=subprocess.PIPE,
     )
     p2 = subprocess.Popen(

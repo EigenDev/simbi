@@ -119,6 +119,7 @@ if get_option('gpu_compilation').enabled()
                 f'-ccbin=@cc_var@',
                 '--ptxas-options=-v', 
                 '--extended-lambda',
+                '--expt-relaxed-constexpr',
                 '--compiler-options', 
                 f'-fPIC', '-O3', '-x=cu'
             ]
@@ -162,6 +163,7 @@ if get_option('gpu_compilation').enabled()
                 '--ptxas-options=-v', 
                 '-lineinfo',
                 '--extended-lambda',
+                '--expt-relaxed-constexpr',
                 '--compiler-options', 
                 f'-fPIC,@max_errors@', '-O3',
                 '-x=cu',
