@@ -85,7 +85,7 @@ namespace simbi {
          * @param gid  current global index
          * @return none
          */
-        primitive_t cons2prim(const conserved_t& cons) const;
+        HD primitive_t cons2prim(const conserved_t& cons) const;
 
         void advance(const ExecutionPolicy<>& p);
 
@@ -125,7 +125,7 @@ namespace simbi {
             const real vface = 0.0
         ) const;
 
-        HD conserved_t (RMHD<dim>::*riemann_solve)(
+        HD conserved_t (RMHD<dim>::* riemann_solve)(
             primitive_t& prL,
             primitive_t& prR,
             const luint nhat,
@@ -209,41 +209,22 @@ namespace simbi {
             dt_min.copyToGpu();
             density_source.copyToGpu();
             m1_source.copyToGpu();
-            if constexpr (dim > 1) {
-                m2_source.copyToGpu();
-            }
-            if constexpr (dim > 2) {
-                m3_source.copyToGpu();
-            }
-            if constexpr (dim > 1) {
-                object_pos.copyToGpu();
-            }
+            m2_source.copyToGpu();
+            m3_source.copyToGpu();
+            object_pos.copyToGpu();
             energy_source.copyToGpu();
             inflow_zones.copyToGpu();
             bcs.copyToGpu();
             troubled_cells.copyToGpu();
             sourceG1.copyToGpu();
-            if constexpr (dim > 1) {
-                sourceG2.copyToGpu();
-            }
-            if constexpr (dim > 2) {
-                sourceG3.copyToGpu();
-            }
+            sourceG2.copyToGpu();
+            sourceG3.copyToGpu();
             sourceB1.copyToGpu();
-            if constexpr (dim > 1) {
-                sourceB2.copyToGpu();
-            }
-            if constexpr (dim > 2) {
-                sourceB3.copyToGpu();
-            }
-
-            if constexpr (dim > 1) {
-                bstag1.copyToGpu();
-                bstag2.copyToGpu();
-                if constexpr (dim > 2) {
-                    bstag3.copyToGpu();
-                }
-            }
+            sourceB2.copyToGpu();
+            sourceB3.copyToGpu();
+            bstag1.copyToGpu();
+            bstag2.copyToGpu();
+            bstag3.copyToGpu();
         }
 
         HD std::tuple<real, primitive_t, primitive_t, primitive_t> hlld_vdiff(
@@ -253,8 +234,9 @@ namespace simbi {
             const real bn,
             const luint nhat
         ) const
+
         {
-            static real eta[2], h[2];
+            static real eta[2];
             static real kv[2][3], bv[2][3], vv[2][3];
 
             // compute "sign" of the normal bfield
@@ -304,25 +286,13 @@ namespace simbi {
                 const real wt  = p + (ret - rdv) * var1;
 
                 // Equation (35) & (43)
-                eta[ii]         = (ii < 1 ? -1.0 : 1.0) * sgnBn * std::sqrt(wt);
-                h[ii]           = wt;
+                eta[ii] = (ii < 1 ? -1.0 : 1.0) * sgnBn * std::sqrt(wt);
+                // h[ii]           = wt;
                 const auto etaS = eta[ii];
                 const real var2 = 1.0 / (aS * p + ret + bn * etaS);
                 const real kn   = (rmn + p + rbn * etaS) * var2;
                 const real kp1  = (rmp1 + rbp1 * etaS) * var2;
                 const real kp2  = (rmp2 + rbp2 * etaS) * var2;
-                if (std::isnan(kn)) {
-                    printf(
-                        "rmn: %.2e, p: %.2e, rbn: %.2e, etaS: %.2e, var2: "
-                        "%.2e\n",
-                        rmn,
-                        p,
-                        rbn,
-                        etaS,
-                        var2
-                    );
-                    std::cin.get();
-                }
 
                 vv[ii][0] = vn;
                 vv[ii][1] = vp1;
@@ -422,33 +392,33 @@ namespace simbi {
             prims[2].bcomponent(np1)  = bcp1;
             prims[2].bcomponent(np2)  = bcp2;
 
-            /* -- check if sweep makes physically sense -- */
+            /* -- check if sweep makes physical sense -- */
 
-            auto success = (vncL - kL[0]) > -1.e-6;
-            success *= (kR[0] - vncR) > -1.e-6;
+            // auto success = (vncL - kL[0]) > -1.e-6;
+            // success *= (kR[0] - vncR) > -1.e-6;
 
-            success *= (lam[0] - vL[0]) < 0.0;
-            success *= (lam[1] - vR[0]) > 0.0;
+            // success *= (lam[0] - vL[0]) < 0.0;
+            // success *= (lam[1] - vR[0]) > 0.0;
 
-            success *= (h[1] - p) > 0.0;
-            success *= (h[0] - p) > 0.0;
-            success *= (kL[0] - lam[0]) > -1.e-6;
-            success *= (lam[1] - kR[0]) > -1.e-6;
+            // success *= (h[1] - p) > 0.0;
+            // success *= (h[0] - p) > 0.0;
+            // success *= (kL[0] - lam[0]) > -1.e-6;
+            // success *= (lam[1] - kR[0]) > -1.e-6;
 
-            if (!success) {
-                printf("Solution not physical!\n");
-                printf("bn: %.5e\n", bn);
-                std::cout << bfn << "\n";
-                std::cout << kL[0] << "\n";
-                std::cout << "Check 1: " << (vncL - kL[0]) << "\n";
-                std::cout << "Check 2: " << (kR[0] - vncR) << "\n";
-                std::cout << "Check 3: " << (lam[0] - vL[0]) << "\n";
-                std::cout << "Check 4: " << (lam[1] - vR[0]) << "\n";
-                std::cout << "Check 5: " << (h[1] - p) << "\n";
-                std::cout << "Check 6: " << (h[0] - p) << "\n";
-                std::cout << "Check 7: " << (kL[0] - lam[0]) << "\n";
-                std::cout << "Check 8: " << (lam[1] - kR[0]) << "\n";
-            }
+            // if (!success) {
+            //     printf("Solution not physical!\n");
+            //     printf("bn: %.5e\n", bn);
+            //     std::cout << bfn << "\n";
+            //     std::cout << kL[0] << "\n";
+            //     std::cout << "Check 1: " << (vncL - kL[0]) << "\n";
+            //     std::cout << "Check 2: " << (kR[0] - vncR) << "\n";
+            //     std::cout << "Check 3: " << (lam[0] - vL[0]) << "\n";
+            //     std::cout << "Check 4: " << (lam[1] - vR[0]) << "\n";
+            //     std::cout << "Check 5: " << (h[1] - p) << "\n";
+            //     std::cout << "Check 6: " << (h[0] - p) << "\n";
+            //     std::cout << "Check 7: " << (kL[0] - lam[0]) << "\n";
+            //     std::cout << "Check 8: " << (lam[1] - kR[0]) << "\n";
+            // }
 
             return {f, prims[0], prims[1], prims[2]};
         }
@@ -470,5 +440,5 @@ struct is_relativistic_mhd<simbi::RMHD<3>> {
     static constexpr bool value = true;
 };
 
-#include "rmhd.ixx"
+#include "rmhd.tpp"
 #endif
