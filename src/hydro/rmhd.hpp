@@ -132,6 +132,46 @@ namespace simbi {
             const real vface
         ) const;
 
+        DEV conserved_t (RMHD<dim>::* d_riemann_solve)(
+            primitive_t& prL,
+            primitive_t& prR,
+            const luint nhat,
+            const real vface
+        ) const;
+
+        conserved_t (RMHD<dim>::* h_riemann_solve)(
+            primitive_t& prL,
+            primitive_t& prR,
+            const luint nhat,
+            const real vface
+        ) const;
+
+        HD void set_riemann_solver()
+        {
+            switch (sim_solver) {
+                case Solver::HLLE:
+                    this->h_riemann_solve = &RMHD<dim>::calc_hll_flux;
+                    break;
+                case Solver::HLLC:
+                    this->h_riemann_solve = &RMHD<dim>::calc_hllc_flux;
+                    break;
+                default:
+                    this->h_riemann_solve = &RMHD<dim>::calc_hlld_flux;
+                    break;
+            }
+            if constexpr (global::BuildPlatform == global::Platform::GPU) {
+                gpu::api::gpuMcFromSymbol(
+                    &this->d_riemann_solve,
+                    &this->h_riemann_solve,
+                    sizeof(void*)
+                );
+                this->riemann_solve = this->d_riemann_solve;
+            }
+            else {
+                this->riemann_solve = this->h_riemann_solve;
+            }
+        }
+
         HD conserved_t
         prims2flux(const primitive_t& prims, const luint nhat) const;
 

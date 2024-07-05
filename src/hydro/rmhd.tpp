@@ -1656,7 +1656,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_x[(q % 2)], 1);
-            f[q] = calc_hll_flux(pL, pR, 1, 0);
+            f[q] = (this->*riemann_solve)(pL, pR, 1, 0);
 
             // fluxes in j direction
             pL = prim_buff
@@ -1686,7 +1686,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_y[(q % 2)], 2);
-            g[q] = calc_hll_flux(pL, pR, 2, 0);
+            g[q] = (this->*riemann_solve)(pL, pR, 2, 0);
 
             // fluxes in k direction
             pL = prim_buff
@@ -1716,7 +1716,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_z[(q % 2)], 3);
-            h[q] = calc_hll_flux(pL, pR, 3, 0);
+            h[q] = (this->*riemann_solve)(pL, pR, 3, 0);
         }
 
         // compute edge emfs in clockwise direction wrt cell plane
@@ -1785,16 +1785,6 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 tya,
                 tza,
                 1
-            );
-            printf(
-                "[%lu] e1[%lu]: %f, e2[%lu]: %f, e3[%lu]: %f\n",
-                aid,
-                q,
-                e1[q],
-                q,
-                e2[q],
-                q,
-                e3[q]
             );
         });
 
@@ -2172,6 +2162,7 @@ void RMHD<dim>::simulate(
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
     print_shared_mem();
+    set_riemann_solver();
 
     cons2prim(fullP);
     if constexpr (global::on_gpu) {
@@ -2181,51 +2172,31 @@ void RMHD<dim>::simulate(
         adapt_dt<TIMESTEP_TYPE::MINIMUM>();
     }
 
-    // Choose the Riemann solver
-    switch (sim_solver) {
-        case Solver::HLLE:
-            this->riemann_solve = &RMHD<dim>::calc_hll_flux;
-            break;
-        case Solver::HLLC:
-            this->riemann_solve = &RMHD<dim>::calc_hllc_flux;
-            break;
-        default:
-            this->riemann_solve = &RMHD<dim>::calc_hlld_flux;
-            break;
-    }
-
     // Using a sigmoid decay function to represent when the source terms
     // turn off.
     time_constant = sigmoid(t, engine_duration, step * dt, constant_sources);
     // Save initial condition
     if (t == 0 || init_chkpt_idx == 0) {
         write_to_file(*this);
-        if constexpr (dim == 1) {
-            config_ghosts1D(
-                fullP,
-                cons.data(),
-                nx,
-                spatial_order == "pcm",
-                bcs.data(),
-                outer_zones.data(),
-                inflow_zones.data()
-            );
-        }
-        else if constexpr (dim == 2) {
-            config_ghosts2D(
-                fullP,
-                cons.data(),
-                nx,
-                ny,
-                spatial_order == "pcm",
-                geometry,
-                bcs.data(),
-                outer_zones.data(),
-                inflow_zones.data(),
-                half_sphere
-            );
-        }
-        else {
+        config_ghosts3D(
+            fullP,
+            cons.data(),
+            nx,
+            ny,
+            nz,
+            spatial_order == "pcm",
+            bcs.data(),
+            inflow_zones.data(),
+            half_sphere,
+            geometry
+        );
+    }
+
+    // Simulate :)
+    try {
+        simbi::detail::logger::with_logger(*this, tend, [&] {
+            advance(activeP);
+            cons2prim(fullP);
             config_ghosts3D(
                 fullP,
                 cons.data(),
@@ -2238,53 +2209,6 @@ void RMHD<dim>::simulate(
                 half_sphere,
                 geometry
             );
-        }
-    }
-
-    // Simulate :)
-    try {
-        simbi::detail::logger::with_logger(*this, tend, [&] {
-            advance(activeP);
-            cons2prim(fullP);
-            if constexpr (dim == 1) {
-                config_ghosts1D(
-                    fullP,
-                    cons.data(),
-                    nx,
-                    spatial_order == "pcm",
-                    bcs.data(),
-                    outer_zones.data(),
-                    inflow_zones.data()
-                );
-            }
-            else if constexpr (dim == 2) {
-                config_ghosts2D(
-                    fullP,
-                    cons.data(),
-                    nx,
-                    ny,
-                    spatial_order == "pcm",
-                    geometry,
-                    bcs.data(),
-                    outer_zones.data(),
-                    inflow_zones.data(),
-                    half_sphere
-                );
-            }
-            else {
-                config_ghosts3D(
-                    fullP,
-                    cons.data(),
-                    nx,
-                    ny,
-                    nz,
-                    spatial_order == "pcm",
-                    bcs.data(),
-                    inflow_zones.data(),
-                    half_sphere,
-                    geometry
-                );
-            }
 
             if constexpr (global::on_gpu) {
                 adapt_dt(fullP);
