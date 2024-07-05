@@ -170,6 +170,16 @@ namespace simbi {
                 error::check_err(status, "Failed to synch device(s)");
 #endif
             };
+
+            void gpuMcFromSymbol(void* dst, const void* symbol, size_t count)
+            {
+#if GPU_CODE
+                auto status =
+                    error::status_t(devMemcpyFromSymbol(dst, symbol, count));
+                error::check_err(status, "Failed to copy from symbol");
+#endif
+            }
+
         }   // namespace api
 
     }   // namespace gpu

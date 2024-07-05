@@ -30,6 +30,9 @@
 #include <csignal>     // for size_t
 #include <string>      // for allocator, string
 
+
+#define CALL(object,ptrToMember)  ((object)->*(ptrToMember))
+
 /*
  * defines a global namespace for functions and
  * variables scattered throughout the code
@@ -177,6 +180,11 @@ inline auto devEventRecord(cudaEvent_t stamp)
     return cudaEventRecord(stamp);
 };
 
+inline auto devMemcpyFromSymbol(void* dst, const void* symbol, size_t count)
+{
+    return cudaMemcpyFromSymbol(dst, symbol, count);
+};
+
 constexpr auto devMemcpy               = cudaMemcpy;
 constexpr auto devFree                 = cudaFree;
 constexpr auto devMemset               = cudaMemset;
@@ -213,6 +221,11 @@ constexpr auto devMallocManaged(T** devPtr, size_t size)
 {
     return hipMallocManaged(devPtr, size);
 }
+
+inline auto devMemcpyFromSymbol(void* dst, const void* symbol, size_t count)
+{
+    return hipMemcpyFromSymbol(dst, symbol, count);
+};
 
 inline auto devEventCreate(hipEvent_t* stamp) { return hipEventCreate(stamp); };
 

@@ -108,6 +108,7 @@ namespace simbi {
             void gpuMalloc(void* obj, size_t bytes);
             void gpuMallocManaged(void* obj, size_t bytes);
             void gpuFree(void* obj);
+            void gpuMcFromSymbol(void* dst, const void* symbol, size_t count);
             void gpuEventSynchronize(devEvent_t a);
             void gpuEventCreate(devEvent_t* a);
             void gpuEventDestroy(devEvent_t a);
