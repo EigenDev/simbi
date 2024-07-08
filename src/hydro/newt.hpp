@@ -20,7 +20,7 @@
 #define NEWT_HPP
 
 #include "base.hpp"                   // for HydroBase
-#include "build_options.hpp"          // for real, HD, lint, luint
+#include "build_options.hpp"          // for real, DUAL, lint, luint
 #include "common/helpers.hpp"         // for my_min, my_max, ...
 #include "common/hydro_structs.hpp"   // for Conserved, Primitive
 #include "util/exec_policy.hpp"       // for ExecutionPolicy
@@ -97,15 +97,15 @@ namespace simbi {
 
         void advance(const ExecutionPolicy<>& p);
 
-        HD eigenvals_t calc_eigenvals(
+        DUAL eigenvals_t calc_eigenvals(
             const primitive_t& primsL,
             const primitive_t& primsR,
             const luint nhat
         ) const;
 
-        HD conserved_t prims2cons(const primitive_t& prims) const;
+        DUAL conserved_t prims2cons(const primitive_t& prims) const;
 
-        HD conserved_t calc_hllc_flux(
+        DUAL conserved_t calc_hllc_flux(
             const conserved_t& uL,
             const conserved_t& uR,
             const conserved_t& fL,
@@ -116,10 +116,10 @@ namespace simbi {
             const real vface = 0.0
         ) const;
 
-        HD conserved_t
+        DUAL conserved_t
         prims2flux(const primitive_t& prims, const luint nhat) const;
 
-        HD conserved_t calc_hll_flux(
+        DUAL conserved_t calc_hlle_flux(
             const conserved_t& uL,
             const conserved_t& uR,
             const conserved_t& fL,
@@ -143,19 +143,19 @@ namespace simbi {
             std::optional<function_t> const& e_outer  = nullptr
         );
 
-        HD constexpr real get_x1face(const lint ii, const int side) const;
+        DUAL constexpr real get_x1face(const lint ii, const int side) const;
 
-        HD constexpr real get_x2face(const lint ii, const int side) const;
+        DUAL constexpr real get_x2face(const lint ii, const int side) const;
 
-        HD constexpr real get_x3face(const lint ii, const int side) const;
+        DUAL constexpr real get_x3face(const lint ii, const int side) const;
 
-        HD constexpr real get_x1_differential(const lint ii) const;
+        DUAL constexpr real get_x1_differential(const lint ii) const;
 
-        HD constexpr real get_x2_differential(const lint ii) const;
+        DUAL constexpr real get_x2_differential(const lint ii) const;
 
-        HD constexpr real get_x3_differential(const lint ii) const;
+        DUAL constexpr real get_x3_differential(const lint ii) const;
 
-        HD real get_cell_volume(
+        DUAL real get_cell_volume(
             const lint ii,
             const lint jj = 0,
             const lint kk = 0

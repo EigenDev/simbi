@@ -28,7 +28,7 @@ Newtonian<dim>::~Newtonian() = default;
 
 // Helpers
 template <int dim>
-HD constexpr real
+DUAL constexpr real
 Newtonian<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1_cell_spacing) {
@@ -58,7 +58,7 @@ Newtonian<dim>::get_x1face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real
+DUAL constexpr real
 Newtonian<dim>::get_x2face(const lint ii, const int side) const
 {
     switch (x2_cell_spacing) {
@@ -88,7 +88,7 @@ Newtonian<dim>::get_x2face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real
+DUAL constexpr real
 Newtonian<dim>::get_x3face(const lint ii, const int side) const
 {
     switch (x3_cell_spacing) {
@@ -118,7 +118,7 @@ Newtonian<dim>::get_x3face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real Newtonian<dim>::get_x1_differential(const lint ii) const
+DUAL constexpr real Newtonian<dim>::get_x1_differential(const lint ii) const
 {
     const real x1l   = get_x1face(ii, 0);
     const real x1r   = get_x1face(ii, 1);
@@ -132,7 +132,7 @@ HD constexpr real Newtonian<dim>::get_x1_differential(const lint ii) const
 }
 
 template <int dim>
-HD constexpr real Newtonian<dim>::get_x2_differential(const lint ii) const
+DUAL constexpr real Newtonian<dim>::get_x2_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -160,7 +160,7 @@ HD constexpr real Newtonian<dim>::get_x2_differential(const lint ii) const
 }
 
 template <int dim>
-HD constexpr real Newtonian<dim>::get_x3_differential(const lint ii) const
+DUAL constexpr real Newtonian<dim>::get_x3_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -184,7 +184,7 @@ HD constexpr real Newtonian<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-HD real Newtonian<dim>::get_cell_volume(
+DUAL real Newtonian<dim>::get_cell_volume(
     const lint ii,
     const lint jj,
     const lint kk
@@ -346,7 +346,7 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 template <int dim>
-HD Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
+DUAL Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
     const Newtonian<dim>::primitive_t& primsL,
     const Newtonian<dim>::primitive_t& primsR,
     const luint nhat
@@ -421,7 +421,7 @@ HD Newtonian<dim>::eigenvals_t Newtonian<dim>::calc_eigenvals(
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
 template <int dim>
-HD Newtonian<dim>::conserved_t
+DUAL Newtonian<dim>::conserved_t
 Newtonian<dim>::prims2cons(const Newtonian<dim>::primitive_t& prims) const
 {
     const real rho = prims.rho;
@@ -616,7 +616,7 @@ void Newtonian<dim>::adapt_dt(const ExecutionPolicy<>& p)
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-HD Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
+DUAL Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
     const Newtonian<dim>::primitive_t& prims,
     const luint nhat
 ) const
@@ -663,7 +663,7 @@ HD Newtonian<dim>::conserved_t Newtonian<dim>::prims2flux(
 };
 
 template <int dim>
-HD Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
+DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hlle_flux(
     const Newtonian<dim>::conserved_t& uL,
     const Newtonian<dim>::conserved_t& uR,
     const Newtonian<dim>::conserved_t& fL,
@@ -706,7 +706,7 @@ HD Newtonian<dim>::conserved_t Newtonian<dim>::calc_hll_flux(
 };
 
 template <int dim>
-HD Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
+DUAL Newtonian<dim>::conserved_t Newtonian<dim>::calc_hllc_flux(
     const Newtonian<dim>::conserved_t& uL,
     const Newtonian<dim>::conserved_t& uR,
     const Newtonian<dim>::conserved_t& fL,
@@ -1065,7 +1065,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                         break;
 
                     default:
-                        frf = calc_hll_flux(
+                        frf = calc_hlle_flux(
                             uxL,
                             uxR,
                             fL,
@@ -1076,7 +1076,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             vfaceR
                         );
                         if constexpr (dim > 1) {
-                            grf = calc_hll_flux(
+                            grf = calc_hlle_flux(
                                 uyL,
                                 uyR,
                                 gL,
@@ -1087,7 +1087,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             );
                         }
                         if constexpr (dim > 2) {
-                            hrf = calc_hll_flux(
+                            hrf = calc_hlle_flux(
                                 uzL,
                                 uzR,
                                 hL,
@@ -1177,7 +1177,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                         break;
 
                     default:
-                        flf = calc_hll_flux(
+                        flf = calc_hlle_flux(
                             uxL,
                             uxR,
                             fL,
@@ -1188,7 +1188,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             vfaceL
                         );
                         if constexpr (dim > 1) {
-                            glf = calc_hll_flux(
+                            glf = calc_hlle_flux(
                                 uyL,
                                 uyR,
                                 gL,
@@ -1199,7 +1199,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             );
                         }
                         if constexpr (dim > 2) {
-                            hlf = calc_hll_flux(
+                            hlf = calc_hlle_flux(
                                 uzL,
                                 uzR,
                                 hL,
@@ -1321,7 +1321,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                         break;
 
                     default:
-                        frf = calc_hll_flux(
+                        frf = calc_hlle_flux(
                             uxL,
                             uxR,
                             fL,
@@ -1332,7 +1332,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             vfaceR
                         );
                         if constexpr (dim > 1) {
-                            grf = calc_hll_flux(
+                            grf = calc_hlle_flux(
                                 uyL,
                                 uyR,
                                 gL,
@@ -1343,7 +1343,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             );
                         }
                         if constexpr (dim > 2) {
-                            hrf = calc_hll_flux(
+                            hrf = calc_hlle_flux(
                                 uzL,
                                 uzR,
                                 hL,
@@ -1437,7 +1437,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                         break;
 
                     default:
-                        flf = calc_hll_flux(
+                        flf = calc_hlle_flux(
                             uxL,
                             uxR,
                             fL,
@@ -1448,7 +1448,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             vfaceL
                         );
                         if constexpr (dim > 1) {
-                            glf = calc_hll_flux(
+                            glf = calc_hlle_flux(
                                 uyL,
                                 uyR,
                                 gL,
@@ -1459,7 +1459,7 @@ void Newtonian<dim>::advance(const ExecutionPolicy<>& p)
                             );
                         }
                         if constexpr (dim > 2) {
-                            hlf = calc_hll_flux(
+                            hlf = calc_hlle_flux(
                                 uzL,
                                 uzR,
                                 hL,

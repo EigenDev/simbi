@@ -204,6 +204,42 @@ namespace simbi {
             );
         }
 
+        void set_output_params(int dim, std::string regime)
+        {
+            setup.x1max           = x1[nxv - 1];
+            setup.x1min           = x1[0];
+            setup.x1              = x1;
+            setup.nx              = nx;
+            setup.ny              = ny;
+            setup.nz              = nz;
+            setup.xactive_zones   = xag;
+            setup.yactive_zones   = yag;
+            setup.zactive_zones   = zag;
+            setup.x1_cell_spacing = cell2str.at(x1_cell_spacing);
+            setup.x2_cell_spacing = cell2str.at(x2_cell_spacing);
+            setup.x3_cell_spacing = cell2str.at(x3_cell_spacing);
+            setup.ad_gamma        = gamma;
+            setup.spatial_order   = spatial_order;
+            setup.time_order      = time_order;
+            setup.coord_system    = coord_system;
+            setup.using_fourvelocity =
+                (global::VelocityType == global::Velocity::FourVelocity);
+            setup.regime              = regime;
+            setup.mesh_motion         = mesh_motion;
+            setup.boundary_conditions = boundary_conditions;
+            setup.dimensions          = dim;
+            if (dim > 1) {
+                setup.x2max = x2[nyv - 1];
+                setup.x2min = x2[0];
+                setup.x2    = x2;
+                if (dim > 2) {
+                    setup.x3max = x3[nzv - 1];
+                    setup.x3min = x3[0];
+                    setup.x3    = x3;
+                }
+            }
+        }
+
       protected:
         HydroBase() = default;
 

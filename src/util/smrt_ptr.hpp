@@ -90,7 +90,7 @@ namespace simbi {
 
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // dc_tor, c_tor and cc_tor
-            HD smart_ptr() : pData(0), pRef(0)
+            DUAL smart_ptr() : pData(0), pRef(0)
             {
                 // create new reference
                 pRef = new refcnt();
@@ -170,18 +170,18 @@ namespace simbi {
 
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // Returns a reference to the object pointed to
-            HD ptr_t& operator*() const { return *pData; }
+            DUAL ptr_t& operator*() const { return *pData; }
 
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // Invokes the -> operator on the pointer pointed too
             // NB. When you call the -> operator, the compiler  automatically
             //     calls the -> on the entity returned. This is a special,
             //     case, done to preserve normal indirection semantics.
-            HD ptr_t* operator->() const { return pData; }
+            DUAL ptr_t* operator->() const { return pData; }
 
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // Get the pointer being managed
-            HD ptr_t* get() const { return pData; }
+            DUAL ptr_t* get() const { return pData; }
 
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // Conversion to bool operator to facilitate logical pointer tests.
@@ -308,23 +308,26 @@ namespace simbi {
 
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // Returns a reference to the object pointed to
-            HD ptr_t& operator*() const { return *pData; }
+            DUAL ptr_t& operator*() const { return *pData; }
 
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // Invokes the -> operator on the pointer pointed too
             // NB. When you call the -> operator, the compiler  automatically
             //     calls the -> on the entity returned. This is a special,
             //     case, done to preserve normal indirection semantics.
-            HD ptr_t* operator->() const { return pData; }
+            DUAL ptr_t* operator->() const { return pData; }
 
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // Get the pointer being managed
-            HD ptr_t* get() const { return pData; }
+            DUAL ptr_t* get() const { return pData; }
 
             // Accessors.
-            HD ptrT& operator[](const std::size_t ii) { return get()[ii]; }
+            DUAL ptrT& operator[](const std::size_t ii) { return get()[ii]; }
 
-            HD ptrT operator[](const std::size_t ii) const { return get()[ii]; }
+            DUAL ptrT operator[](const std::size_t ii) const
+            {
+                return get()[ii];
+            }
 
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // Conversion to bool operator to facilitate logical pointer tests.

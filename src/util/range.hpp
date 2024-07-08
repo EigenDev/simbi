@@ -32,19 +32,19 @@ struct range_t {
         using iterator_category = std::input_iterator_tag;
         using value_type        = T;
 
-        HD iter(T current, T step) : current(current), step(step) {}
+        DUAL iter(T current, T step) : current(current), step(step) {}
 
-        HD T operator*() const { return current; }
+        DUAL T operator*() const { return current; }
 
-        HD T const* operator->() const { return &current; }
+        DUAL T const* operator->() const { return &current; }
 
-        HD iter& operator++()
+        DUAL iter& operator++()
         {
             current += step;
             return *this;
         }
 
-        HD iter operator++(int)
+        DUAL iter operator++(int)
         {
             auto copy = *this;
             ++*this;
@@ -52,13 +52,13 @@ struct range_t {
         }
 
         // Loses commutativity. Iterator-based ranges are simply broken. :-(
-        HD bool operator==(iter const& other) const
+        DUAL bool operator==(iter const& other) const
         {
             return step > 0 ? current >= other.current
                             : current < other.current;
         }
 
-        HD bool operator!=(iter const& other) const
+        DUAL bool operator!=(iter const& other) const
         {
             return not(*this == other);
         }
@@ -67,16 +67,16 @@ struct range_t {
         T step, current;
     };
 
-    HD range_t(T end) : rbegin(0, 1), rend(end, 1), rstep(1) {}
+    DUAL range_t(T end) : rbegin(0, 1), rend(end, 1), rstep(1) {}
 
-    HD range_t(T begin, T end, T step = 1)
+    DUAL range_t(T begin, T end, T step = 1)
         : rbegin(begin, step), rend(end, step), rstep(step)
     {
     }
 
-    HD iter begin() const { return rbegin; }
+    DUAL iter begin() const { return rbegin; }
 
-    HD iter end() const { return rend; }
+    DUAL iter end() const { return rend; }
 
   private:
     iter rbegin, rend;

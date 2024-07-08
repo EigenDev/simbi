@@ -2357,7 +2357,7 @@ namespace simbi {
         }
 
         template <typename T>
-        HD T cubic(T b, T c, T d)
+        DUAL T cubic(T b, T c, T d)
         {
             T p = c - b * b / 3.0;
             T q = 2.0 * b * b * b / 27.0 - b * c / 3.0 + d;
@@ -2391,7 +2391,7 @@ namespace simbi {
             https://stackoverflow.com/a/50747781/13874039
         --------------------------------------------*/
         template <typename T>
-        HD int quartic(T b, T c, T d, T e, T res[4])
+        DUAL int quartic(T b, T c, T d, T e, T res[4])
         {
             T p = c - 0.375 * b * b;
             T q = 0.125 * b * b * b - 0.5 * b * c + d;
@@ -2459,7 +2459,7 @@ namespace simbi {
 
         // Function to swap two elements
         template <typename T>
-        HD void myswap(T& a, T& b)
+        DUAL void myswap(T& a, T& b)
         {
             T temp = a;
             a      = b;
@@ -2468,7 +2468,7 @@ namespace simbi {
 
         // Partition the array and return the pivot index
         template <typename T, typename index_type>
-        HD index_type partition(T arr[], index_type low, index_type high)
+        DUAL index_type partition(T arr[], index_type low, index_type high)
         {
             T pivot = arr[high];   // Choose the rightmost element as the pivot
             index_type i = low - 1;   // Index of the smaller element
@@ -2485,7 +2485,7 @@ namespace simbi {
 
         // Quick sort implementation
         template <typename T, typename index_type>
-        HD void recursiveQuickSort(T arr[], index_type low, index_type high)
+        DUAL void recursiveQuickSort(T arr[], index_type low, index_type high)
         {
             if (low < high) {
                 index_type pivotIndex = partition(arr, low, high);
@@ -2497,7 +2497,7 @@ namespace simbi {
         }
 
         template <typename T, typename index_type>
-        HD void iterativeQuickSort(T arr[], index_type low, index_type high)
+        DUAL void iterativeQuickSort(T arr[], index_type low, index_type high)
         {
             // Create an auxiliary stack
             T stack[4];
@@ -2552,27 +2552,24 @@ namespace simbi {
 #endif
         }
 
-        template <typename T, typename U>
-        SHARED T* identity(const U& object)
+        template <typename T>
+        SHARED auto sm_or_identity(const T* object)
         {
 #if GPU_CODE
             if constexpr (global::on_sm) {
-                // do we need an __align__() here? I don't think so...
                 EXTERN unsigned char memory[];
                 return reinterpret_cast<T*>(memory);
             }
             else {
-                static auto objPtr = object.dev_data();
-                return objPtr;
+                return object;
             }
 #else
-            static auto objPtr = object.data();
-            return objPtr;
+            return object;
 #endif
         }
 
         template <typename index_type, typename T>
-        HD index_type flattened_index(
+        DUAL index_type flattened_index(
             index_type ii,
             index_type jj,
             index_type kk,
@@ -2590,7 +2587,7 @@ namespace simbi {
         }
 
         template <int dim, BlkAx axis, typename T>
-        HD T axid(T idx, T ni, T nj, T kk)
+        DUAL T axid(T idx, T ni, T nj, T kk)
         {
             if constexpr (dim == 1) {
                 if constexpr (axis != BlkAx::I) {
@@ -2728,7 +2725,7 @@ namespace simbi {
                 V tzl = p.blockSize.z;
                 // Load Shared memory into buffer for active zones plus
                 // ghosts
-                buffer[tza * sx * sy + tya * sx + txa] = data[aid];
+                buffer[idx3(txa, tya, tza, sx, sy, sz)] = data[aid];
                 if (tz == 0) {
                     if ((blockIdx.z == p.gridSize.z - 1) &&
                         (ka + p.blockSize.z > nk - radius + tz)) {
@@ -2773,7 +2770,7 @@ namespace simbi {
         }
 
         template <int dim, typename T, typename idx>
-        HD void ib_modify(T& lhs, const T& rhs, const bool ib, const idx side)
+        DUAL void ib_modify(T& lhs, const T& rhs, const bool ib, const idx side)
         {
             if (ib) {
                 lhs.rho = rhs.rho;
@@ -2790,7 +2787,7 @@ namespace simbi {
         }
 
         template <int dim, typename T, typename idx>
-        HD bool ib_check(
+        DUAL bool ib_check(
             T& arr,
             const idx ii,
             const idx jj,
@@ -2815,7 +2812,7 @@ namespace simbi {
         }
 
         template <Plane P, Corner C, Dir s>
-        HD lint cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk)
+        DUAL lint cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk)
         {
             constexpr lint half     = 1;
             constexpr lint offset   = 1;

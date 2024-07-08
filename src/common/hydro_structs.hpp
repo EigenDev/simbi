@@ -89,7 +89,7 @@ namespace generic_hydro {
         Primitive() = default;
 
         // Copy-Assignment Constructor
-        HD Derived& operator=(const Derived& other)
+        DUAL Derived& operator=(const Derived& other)
         {
             rho = other.rho;
             v1  = other.v1;
@@ -98,22 +98,22 @@ namespace generic_hydro {
             return *self();
         }
 
-        HD Primitive(real rho, real v1, real p)
+        DUAL Primitive(real rho, real v1, real p)
             : rho(rho), v1(v1), p(p), chi(0.0)
         {
         }
 
-        HD Primitive(real rho, real v1, real p, real chi)
+        DUAL Primitive(real rho, real v1, real p, real chi)
             : rho(rho), v1(v1), p(p), chi(chi)
         {
         }
 
-        HD Primitive(const Primitive& prim)
+        DUAL Primitive(const Primitive& prim)
             : rho(prim.rho), v1(prim.v1), p(prim.p), chi(prim.chi)
         {
         }
 
-        HD Derived operator+(const Derived& prim) const
+        DUAL Derived operator+(const Derived& prim) const
         {
             return Derived(
                 rho + prim.rho,
@@ -123,7 +123,7 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator-(const Derived& prim) const
+        DUAL Derived operator-(const Derived& prim) const
         {
             return Derived(
                 rho - prim.rho,
@@ -133,18 +133,18 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator/(const real c) const
+        DUAL Derived operator/(const real c) const
         {
             return Derived(rho / c, v1 / c, p / c, chi / c);
         }
 
-        HD Derived operator*(const real c) const
+        DUAL Derived operator*(const real c) const
         {
             return Derived(rho * c, v1 * c, p * c, chi * c);
         }
 
       private:
-        HD Derived* self() { return static_cast<Derived*>(this); }
+        DUAL Derived* self() { return static_cast<Derived*>(this); }
     };
 
     template <typename Derived>
@@ -158,7 +158,7 @@ namespace generic_hydro {
         ~Primitive() = default;
 
         // Copy-Assignment Constructor
-        HD Derived& operator=(const Derived& other)
+        DUAL Derived& operator=(const Derived& other)
         {
             rho = other.rho;
             v1  = other.v1;
@@ -168,17 +168,17 @@ namespace generic_hydro {
             return *self();
         }
 
-        HD Primitive(real rho, real v1, real v2, real p)
+        DUAL Primitive(real rho, real v1, real v2, real p)
             : rho(rho), v1(v1), v2(v2), p(p), chi(0.0)
         {
         }
 
-        HD Primitive(real rho, real v1, real v2, real p, real chi)
+        DUAL Primitive(real rho, real v1, real v2, real p, real chi)
             : rho(rho), v1(v1), v2(v2), p(p), chi(chi)
         {
         }
 
-        HD Primitive(const Primitive& prims)
+        DUAL Primitive(const Primitive& prims)
             : rho(prims.rho),
               v1(prims.v1),
               v2(prims.v2),
@@ -187,7 +187,7 @@ namespace generic_hydro {
         {
         }
 
-        HD Derived operator+(const Derived& prims) const
+        DUAL Derived operator+(const Derived& prims) const
         {
             return Derived(
                 rho + prims.rho,
@@ -198,7 +198,7 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator-(const Derived& prims) const
+        DUAL Derived operator-(const Derived& prims) const
         {
             return Derived(
                 rho - prims.rho,
@@ -209,18 +209,18 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator*(const real c) const
+        DUAL Derived operator*(const real c) const
         {
             return Derived(rho * c, v1 * c, v2 * c, p * c, chi * c);
         }
 
-        HD Derived operator/(const real c) const
+        DUAL Derived operator/(const real c) const
         {
             return Derived(rho / c, v1 / c, v2 / c, p / c, chi / c);
         }
 
       private:
-        HD Derived* self() { return static_cast<Derived*>(this); }
+        DUAL Derived* self() { return static_cast<Derived*>(this); }
     };
 
     template <typename Derived>
@@ -234,7 +234,7 @@ namespace generic_hydro {
         ~Primitive() = default;
 
         // Copy-Assignment Constructor
-        HD Derived& operator=(const Derived& other)
+        DUAL Derived& operator=(const Derived& other)
         {
             rho = other.rho;
             v1  = other.v1;
@@ -245,17 +245,17 @@ namespace generic_hydro {
             return *self();
         }
 
-        HD Primitive(real rho, real v1, real v2, real v3, real p)
+        DUAL Primitive(real rho, real v1, real v2, real v3, real p)
             : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(0.0)
         {
         }
 
-        HD Primitive(real rho, real v1, real v2, real v3, real p, real chi)
+        DUAL Primitive(real rho, real v1, real v2, real v3, real p, real chi)
             : rho(rho), v1(v1), v2(v2), v3(v3), p(p), chi(chi)
         {
         }
 
-        HD Primitive(const Primitive& prims)
+        DUAL Primitive(const Primitive& prims)
             : rho(prims.rho),
               v1(prims.v1),
               v2(prims.v2),
@@ -265,7 +265,7 @@ namespace generic_hydro {
         {
         }
 
-        HD Derived operator+(const Derived& prims) const
+        DUAL Derived operator+(const Derived& prims) const
         {
             return Derived(
                 rho + prims.rho,
@@ -277,7 +277,7 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator-(const Derived& prims) const
+        DUAL Derived operator-(const Derived& prims) const
         {
             return Derived(
                 rho - prims.rho,
@@ -289,18 +289,18 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator*(const real c) const
+        DUAL Derived operator*(const real c) const
         {
             return Derived(rho * c, v1 * c, v2 * c, v3 * c, p * c, chi * c);
         }
 
-        HD Derived operator/(const real c) const
+        DUAL Derived operator/(const real c) const
         {
             return Derived(rho / c, v1 / c, v2 / c, v3 / c, p / c, chi / c);
         }
 
       private:
-        HD Derived* self() { return static_cast<Derived*>(this); }
+        DUAL Derived* self() { return static_cast<Derived*>(this); }
     };
 
     template <int dim, typename Derived>
@@ -318,7 +318,7 @@ namespace generic_hydro {
         Conserved() = default;
 
         // Copy-Assignment Constructor
-        HD Derived& operator=(const Derived& other)
+        DUAL Derived& operator=(const Derived& other)
         {
             den = other.den;
             m1  = other.m1;
@@ -327,22 +327,22 @@ namespace generic_hydro {
             return *self();
         }
 
-        HD Conserved(real den, real m1, real nrg)
+        DUAL Conserved(real den, real m1, real nrg)
             : den(den), m1(m1), nrg(nrg), chi(0.0)
         {
         }
 
-        HD Conserved(real den, real m1, real nrg, real chi)
+        DUAL Conserved(real den, real m1, real nrg, real chi)
             : den(den), m1(m1), nrg(nrg), chi(chi)
         {
         }
 
-        HD Conserved(const Conserved& prim)
+        DUAL Conserved(const Conserved& prim)
             : den(prim.den), m1(prim.m1), nrg(prim.nrg), chi(prim.chi)
         {
         }
 
-        HD Derived operator+(const Derived& prim) const
+        DUAL Derived operator+(const Derived& prim) const
         {
             return Derived(
                 den + prim.den,
@@ -352,7 +352,7 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator-(const Derived& prim) const
+        DUAL Derived operator-(const Derived& prim) const
         {
             return Derived(
                 den - prim.den,
@@ -362,17 +362,17 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator/(const real c) const
+        DUAL Derived operator/(const real c) const
         {
             return Derived(den / c, m1 / c, nrg / c, chi / c);
         }
 
-        HD Derived operator*(const real c) const
+        DUAL Derived operator*(const real c) const
         {
             return Derived(den * c, m1 * c, nrg * c, chi * c);
         }
 
-        HD Derived& operator-=(const Derived& cons)
+        DUAL Derived& operator-=(const Derived& cons)
         {
             den -= cons.den;
             m1 -= cons.m1;
@@ -382,7 +382,7 @@ namespace generic_hydro {
         }
 
       private:
-        HD Derived* self() { return static_cast<Derived*>(this); }
+        DUAL Derived* self() { return static_cast<Derived*>(this); }
     };
 
     template <typename Derived>
@@ -396,7 +396,7 @@ namespace generic_hydro {
         ~Conserved() = default;
 
         // Copy-Assignment Constructor
-        HD Derived& operator=(const Derived& other)
+        DUAL Derived& operator=(const Derived& other)
         {
             den = other.den;
             m1  = other.m1;
@@ -406,17 +406,17 @@ namespace generic_hydro {
             return *self();
         }
 
-        HD Conserved(real den, real m1, real m2, real nrg)
+        DUAL Conserved(real den, real m1, real m2, real nrg)
             : den(den), m1(m1), m2(m2), nrg(nrg), chi(0.0)
         {
         }
 
-        HD Conserved(real den, real m1, real m2, real nrg, real chi)
+        DUAL Conserved(real den, real m1, real m2, real nrg, real chi)
             : den(den), m1(m1), m2(m2), nrg(nrg), chi(chi)
         {
         }
 
-        HD Conserved(const Conserved& prims)
+        DUAL Conserved(const Conserved& prims)
             : den(prims.den),
               m1(prims.m1),
               m2(prims.m2),
@@ -425,7 +425,7 @@ namespace generic_hydro {
         {
         }
 
-        HD Derived operator+(const Derived& cons) const
+        DUAL Derived operator+(const Derived& cons) const
         {
             return Derived(
                 den + cons.den,
@@ -436,7 +436,7 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator-(const Derived& cons) const
+        DUAL Derived operator-(const Derived& cons) const
         {
             return Derived(
                 den - cons.den,
@@ -447,17 +447,17 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator*(const real c) const
+        DUAL Derived operator*(const real c) const
         {
             return Derived(den * c, m1 * c, m2 * c, nrg * c, chi * c);
         }
 
-        HD Derived operator/(const real c) const
+        DUAL Derived operator/(const real c) const
         {
             return Derived(den / c, m1 / c, m2 / c, nrg / c, chi / c);
         }
 
-        HD Derived& operator-=(const Derived& cons)
+        DUAL Derived& operator-=(const Derived& cons)
         {
             den -= cons.den;
             m1 -= cons.m1;
@@ -468,7 +468,7 @@ namespace generic_hydro {
         }
 
       private:
-        HD Derived* self() { return static_cast<Derived*>(this); }
+        DUAL Derived* self() { return static_cast<Derived*>(this); }
     };
 
     template <typename Derived>
@@ -482,7 +482,7 @@ namespace generic_hydro {
         ~Conserved() = default;
 
         // Copy-Assignment Constructor
-        HD Derived& operator=(const Derived& other)
+        DUAL Derived& operator=(const Derived& other)
         {
             den = other.den;
             m1  = other.m1;
@@ -493,17 +493,17 @@ namespace generic_hydro {
             return *self();
         }
 
-        HD Conserved(real den, real m1, real m2, real m3, real nrg)
+        DUAL Conserved(real den, real m1, real m2, real m3, real nrg)
             : den(den), m1(m1), m2(m2), m3(m3), nrg(nrg), chi(0.0)
         {
         }
 
-        HD Conserved(real den, real m1, real m2, real m3, real nrg, real chi)
+        DUAL Conserved(real den, real m1, real m2, real m3, real nrg, real chi)
             : den(den), m1(m1), m2(m2), m3(m3), nrg(nrg), chi(chi)
         {
         }
 
-        HD Conserved(const Conserved& prims)
+        DUAL Conserved(const Conserved& prims)
             : den(prims.den),
               m1(prims.m1),
               m2(prims.m2),
@@ -513,7 +513,7 @@ namespace generic_hydro {
         {
         }
 
-        HD Derived operator+(const Derived& prims) const
+        DUAL Derived operator+(const Derived& prims) const
         {
             return Derived(
                 den + prims.den,
@@ -525,7 +525,7 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator-(const Derived& prims) const
+        DUAL Derived operator-(const Derived& prims) const
         {
             return Derived(
                 den - prims.den,
@@ -537,17 +537,17 @@ namespace generic_hydro {
             );
         }
 
-        HD Derived operator*(const real c) const
+        DUAL Derived operator*(const real c) const
         {
             return Derived(den * c, m1 * c, m2 * c, m3 * c, nrg * c, chi * c);
         }
 
-        HD Derived operator/(const real c) const
+        DUAL Derived operator/(const real c) const
         {
             return Derived(den / c, m1 / c, m2 / c, m3 / c, nrg / c, chi / c);
         }
 
-        HD Derived& operator-=(const Derived& cons)
+        DUAL Derived& operator-=(const Derived& cons)
         {
             den -= cons.den;
             m1 -= cons.m1;
@@ -559,7 +559,7 @@ namespace generic_hydro {
         }
 
       private:
-        HD Derived* self() { return static_cast<Derived*>(this); }
+        DUAL Derived* self() { return static_cast<Derived*>(this); }
     };
 
 }   // namespace generic_hydro
@@ -571,9 +571,9 @@ namespace hydro1d {
     struct Primitive : generic_hydro::Primitive<1, Primitive> {
         using generic_hydro::Primitive<1, Primitive>::Primitive;
 
-        HD constexpr real get_v() const { return v1; }
+        DUAL constexpr real get_v() const { return v1; }
 
-        HD constexpr real vcomponent(const luint nhat) const
+        DUAL constexpr real vcomponent(const luint nhat) const
         {
             if (nhat > 1) {
                 return 0;
@@ -581,7 +581,7 @@ namespace hydro1d {
             return v1;
         }
 
-        HD real get_energy_density(real gamma) const
+        DUAL real get_energy_density(real gamma) const
         {
             return p / (gamma - 1.0) + 0.5 * (rho * v1 * v1);
         }
@@ -590,9 +590,9 @@ namespace hydro1d {
     struct Conserved : generic_hydro::Conserved<1, Conserved> {
         using generic_hydro::Conserved<1, Conserved>::Conserved;
 
-        HD constexpr real& momentum() { return m1; }
+        DUAL constexpr real& momentum() { return m1; }
 
-        HD constexpr real momentum(const luint nhat) const
+        DUAL constexpr real momentum(const luint nhat) const
         {
             if (nhat == 1) {
                 return m1;
@@ -616,9 +616,9 @@ namespace hydro1d {
 
         ~Eigenvals() = default;
 
-        HD Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
+        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
 
-        HD Eigenvals(real aL, real aR, real aStar, real pStar)
+        DUAL Eigenvals(real aL, real aR, real aStar, real pStar)
             : aL(aL), aR(aR), aStar(aStar), pStar(pStar)
         {
         }
@@ -630,7 +630,7 @@ namespace hydro2d {
     struct Conserved : generic_hydro::Conserved<2, Conserved> {
         using generic_hydro::Conserved<2, Conserved>::Conserved;
 
-        HD constexpr real momentum(const luint nhat) const
+        DUAL constexpr real momentum(const luint nhat) const
         {
             if (nhat > 2) {
                 return 0;
@@ -638,7 +638,7 @@ namespace hydro2d {
             return (nhat == 1 ? m1 : m2);
         }
 
-        HD constexpr real& momentum(const luint nhat)
+        DUAL constexpr real& momentum(const luint nhat)
         {
             return (nhat == 1 ? m1 : m2);
         }
@@ -647,11 +647,11 @@ namespace hydro2d {
     struct Primitive : generic_hydro::Primitive<2, Primitive> {
         using generic_hydro::Primitive<2, Primitive>::Primitive;
 
-        HD constexpr real get_v1() const { return v1; }
+        DUAL constexpr real get_v1() const { return v1; }
 
-        HD constexpr real get_v2() const { return v2; }
+        DUAL constexpr real get_v2() const { return v2; }
 
-        HD constexpr real vcomponent(const luint nhat) const
+        DUAL constexpr real vcomponent(const luint nhat) const
         {
             if (nhat > 2) {
                 return 0;
@@ -659,7 +659,7 @@ namespace hydro2d {
             return (nhat == 1 ? v1 : v2);
         }
 
-        HD real get_energy_density(real gamma) const
+        DUAL real get_energy_density(real gamma) const
         {
             return p / (gamma - 1) + 0.5 * (rho * (v1 * v1 + v2 * v2));
         }
@@ -680,9 +680,9 @@ namespace hydro2d {
 
         real aL, aR, csL, csR, aStar, pStar;
 
-        HD Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
+        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
 
-        HD
+        DUAL
         Eigenvals(real aL, real aR, real csL, real csR, real aStar, real pStar)
             : aL(aL), aR(aR), csL(csL), csR(csR), aStar(aStar), pStar(pStar)
         {
@@ -695,12 +695,12 @@ namespace hydro3d {
     struct Conserved : generic_hydro::Conserved<3, Conserved> {
         using generic_hydro::Conserved<3, Conserved>::Conserved;
 
-        HD constexpr real momentum(const luint nhat) const
+        DUAL constexpr real momentum(const luint nhat) const
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
 
-        HD constexpr real& momentum(const luint nhat)
+        DUAL constexpr real& momentum(const luint nhat)
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
@@ -709,18 +709,18 @@ namespace hydro3d {
     struct Primitive : generic_hydro::Primitive<3, Primitive> {
         using generic_hydro::Primitive<3, Primitive>::Primitive;
 
-        HD constexpr real get_v1() const { return v1; }
+        DUAL constexpr real get_v1() const { return v1; }
 
-        HD constexpr real get_v2() const { return v2; }
+        DUAL constexpr real get_v2() const { return v2; }
 
-        HD constexpr real get_v3() const { return v3; }
+        DUAL constexpr real get_v3() const { return v3; }
 
-        HD constexpr real vcomponent(const luint nhat) const
+        DUAL constexpr real vcomponent(const luint nhat) const
         {
             return (nhat == 1 ? v1 : (nhat == 2) ? v2 : v3);
         }
 
-        HD real get_energy_density(real gamma) const
+        DUAL real get_energy_density(real gamma) const
         {
             return p / (gamma - 1) +
                    0.5 * (rho * (v1 * v1 + v2 * v2 + v3 * v3));
@@ -738,9 +738,9 @@ namespace hydro3d {
         Eigenvals()  = default;
         ~Eigenvals() = default;
 
-        HD Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
+        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
 
-        HD
+        DUAL
         Eigenvals(real aL, real aR, real csL, real csR, real aStar, real pStar)
             : aL(aL), aR(aR), csL(csL), csR(csR), aStar(aStar), pStar(pStar)
         {
@@ -757,7 +757,7 @@ namespace sr1d {
     struct Primitive : generic_hydro::Primitive<1, Primitive> {
         using generic_hydro::Primitive<1, Primitive>::Primitive;
 
-        HD constexpr real get_v() const
+        DUAL constexpr real get_v() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v1;
@@ -767,7 +767,7 @@ namespace sr1d {
             }
         }
 
-        HD constexpr real lorentz_factor() const
+        DUAL constexpr real lorentz_factor() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return 1.0 / std::sqrt(1.0 - v1 * v1);
@@ -777,7 +777,7 @@ namespace sr1d {
             }
         }
 
-        HD constexpr real lorentz_factor_squared() const
+        DUAL constexpr real lorentz_factor_squared() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return 1.0 / (1.0 - v1 * v1);
@@ -787,7 +787,7 @@ namespace sr1d {
             }
         }
 
-        HD constexpr real vcomponent(const luint nhat) const
+        DUAL constexpr real vcomponent(const luint nhat) const
         {
             if (nhat == 1) {
                 return get_v();
@@ -795,7 +795,7 @@ namespace sr1d {
             return 0.0;
         }
 
-        HD real get_enthalpy(real gamma) const
+        DUAL real get_enthalpy(real gamma) const
         {
             return 1.0 + gamma * p / (rho * (gamma - 1.0));
         }
@@ -804,9 +804,9 @@ namespace sr1d {
     struct Conserved : generic_hydro::Conserved<1, Conserved> {
         using generic_hydro::Conserved<1, Conserved>::Conserved;
 
-        HD constexpr real& momentum() { return m1; }
+        DUAL constexpr real& momentum() { return m1; }
 
-        HD constexpr real momentum(const luint nhat) const
+        DUAL constexpr real momentum(const luint nhat) const
         {
             if (nhat == 1) {
                 return m1;
@@ -830,9 +830,9 @@ namespace sr1d {
 
         ~Eigenvals() = default;
 
-        HD Eigenvals(real aL, real aR) : aL(aL), aR(aR), csL(0.0), csR(0.0) {}
+        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR), csL(0.0), csR(0.0) {}
 
-        HD Eigenvals(real aL, real aR, real csL, real csR)
+        DUAL Eigenvals(real aL, real aR, real csL, real csR)
             : aL(aL), aR(aR), csL(csL), csR(csR)
         {
         }
@@ -844,7 +844,7 @@ namespace sr2d {
     struct Conserved : generic_hydro::Conserved<2, Conserved> {
         using generic_hydro::Conserved<2, Conserved>::Conserved;
 
-        HD constexpr real momentum(const luint nhat) const
+        DUAL constexpr real momentum(const luint nhat) const
         {
             if (nhat > 2) {
                 return 0;
@@ -852,7 +852,7 @@ namespace sr2d {
             return (nhat == 1 ? m1 : m2);
         }
 
-        HD constexpr real& momentum(const luint nhat)
+        DUAL constexpr real& momentum(const luint nhat)
         {
             return (nhat == 1 ? m1 : m2);
         }
@@ -861,7 +861,7 @@ namespace sr2d {
     struct Primitive : generic_hydro::Primitive<2, Primitive> {
         using generic_hydro::Primitive<2, Primitive>::Primitive;
 
-        HD constexpr real vcomponent(const luint nhat) const
+        DUAL constexpr real vcomponent(const luint nhat) const
         {
             if (nhat > 2) {
                 return 0.0;
@@ -869,7 +869,7 @@ namespace sr2d {
             return (nhat == 1 ? get_v1() : get_v2());
         }
 
-        HD real lorentz_factor() const
+        DUAL real lorentz_factor() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2));
@@ -879,7 +879,7 @@ namespace sr2d {
             }
         }
 
-        HD real lorentz_factor_squared() const
+        DUAL real lorentz_factor_squared() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return 1.0 / (1.0 - (v1 * v1 + v2 * v2));
@@ -889,7 +889,7 @@ namespace sr2d {
             }
         }
 
-        HD constexpr real get_v1() const
+        DUAL constexpr real get_v1() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v1;
@@ -899,7 +899,7 @@ namespace sr2d {
             }
         }
 
-        HD constexpr real get_v2() const
+        DUAL constexpr real get_v2() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v2;
@@ -909,7 +909,7 @@ namespace sr2d {
             }
         }
 
-        HD real get_enthalpy(real gamma) const
+        DUAL real get_enthalpy(real gamma) const
         {
             return 1.0 + gamma * p / (rho * (gamma - 1.0));
         }
@@ -930,9 +930,9 @@ namespace sr2d {
 
         real aL, aR, csL, csR;
 
-        HD Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
+        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR) {}
 
-        HD Eigenvals(real aL, real aR, real csL, real csR)
+        DUAL Eigenvals(real aL, real aR, real csL, real csR)
             : aL(aL), aR(aR), csL(csL), csR(csR)
         {
         }
@@ -944,12 +944,12 @@ namespace sr3d {
     struct Conserved : generic_hydro::Conserved<3, Conserved> {
         using generic_hydro::Conserved<3, Conserved>::Conserved;
 
-        HD constexpr real momentum(const luint nhat) const
+        DUAL constexpr real momentum(const luint nhat) const
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
 
-        HD constexpr real& momentum(const luint nhat)
+        DUAL constexpr real& momentum(const luint nhat)
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
@@ -958,12 +958,12 @@ namespace sr3d {
     struct Primitive : generic_hydro::Primitive<3, Primitive> {
         using generic_hydro::Primitive<3, Primitive>::Primitive;
 
-        HD constexpr real vcomponent(const luint nhat) const
+        DUAL constexpr real vcomponent(const luint nhat) const
         {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
         }
 
-        HD real lorentz_factor() const
+        DUAL real lorentz_factor() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
@@ -973,7 +973,7 @@ namespace sr3d {
             }
         }
 
-        HD real lorentz_factor_squared() const
+        DUAL real lorentz_factor_squared() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return 1.0 / (1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
@@ -983,7 +983,7 @@ namespace sr3d {
             }
         }
 
-        HD constexpr real get_v1() const
+        DUAL constexpr real get_v1() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v1;
@@ -993,7 +993,7 @@ namespace sr3d {
             }
         }
 
-        HD constexpr real get_v2() const
+        DUAL constexpr real get_v2() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v2;
@@ -1003,7 +1003,7 @@ namespace sr3d {
             }
         }
 
-        HD constexpr real get_v3() const
+        DUAL constexpr real get_v3() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v3;
@@ -1013,7 +1013,7 @@ namespace sr3d {
             }
         }
 
-        HD real get_enthalpy(real gamma) const
+        DUAL real get_enthalpy(real gamma) const
         {
             return 1.0 + gamma * p / (rho * (gamma - 1.0));
         }
@@ -1031,9 +1031,9 @@ namespace sr3d {
         Eigenvals()  = default;
         ~Eigenvals() = default;
 
-        HD Eigenvals(real aL, real aR) : aL(aL), aR(aR), csL(0.0), csR(0.0) {}
+        DUAL Eigenvals(real aL, real aR) : aL(aL), aR(aR), csL(0.0), csR(0.0) {}
 
-        HD Eigenvals(real aL, real aR, real csL, real csR)
+        DUAL Eigenvals(real aL, real aR, real csL, real csR)
             : aL(aL), aR(aR), csL(csL), csR(csR)
         {
         }
@@ -1053,7 +1053,7 @@ namespace rmhd {
 
         ~AnyConserved() = default;
 
-        HD AnyConserved(real den, real m1, real nrg, real b1)
+        DUAL AnyConserved(real den, real m1, real nrg, real b1)
             : den(den),
               m1(m1),
               m2(0.0),
@@ -1066,7 +1066,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyConserved(real den, real m1, real nrg, real b1, real chi)
+        DUAL AnyConserved(real den, real m1, real nrg, real b1, real chi)
             : den(den),
               m1(m1),
               m2(0.0),
@@ -1079,7 +1079,8 @@ namespace rmhd {
         {
         }
 
-        HD AnyConserved(real den, real m1, real m2, real nrg, real b1, real b2)
+        DUAL
+        AnyConserved(real den, real m1, real m2, real nrg, real b1, real b2)
             : den(den),
               m1(m1),
               m2(m2),
@@ -1092,7 +1093,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyConserved(
+        DUAL AnyConserved(
             real den,
             real m1,
             real m2,
@@ -1113,7 +1114,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyConserved(
+        DUAL AnyConserved(
             real den,
             real m1,
             real m2,
@@ -1135,7 +1136,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyConserved(
+        DUAL AnyConserved(
             real den,
             real m1,
             real m2,
@@ -1158,7 +1159,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyConserved(const AnyConserved& u)
+        DUAL AnyConserved(const AnyConserved& u)
             : den(u.den),
               m1(u.m1),
               m2(u.m2),
@@ -1171,7 +1172,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyConserved operator+(const AnyConserved& p) const
+        DUAL AnyConserved operator+(const AnyConserved& p) const
         {
             return AnyConserved(
                 den + p.den,
@@ -1186,7 +1187,7 @@ namespace rmhd {
             );
         }
 
-        HD AnyConserved operator-(const AnyConserved& p) const
+        DUAL AnyConserved operator-(const AnyConserved& p) const
         {
             return AnyConserved(
                 den - p.den,
@@ -1201,7 +1202,7 @@ namespace rmhd {
             );
         }
 
-        HD AnyConserved operator*(const real c) const
+        DUAL AnyConserved operator*(const real c) const
         {
             return AnyConserved(
                 den * c,
@@ -1216,7 +1217,7 @@ namespace rmhd {
             );
         }
 
-        HD AnyConserved operator/(const real c) const
+        DUAL AnyConserved operator/(const real c) const
         {
             return AnyConserved(
                 den / c,
@@ -1231,7 +1232,7 @@ namespace rmhd {
             );
         }
 
-        HD AnyConserved& operator+=(const AnyConserved& cons)
+        DUAL AnyConserved& operator+=(const AnyConserved& cons)
         {
             den += cons.den;
             m1 += cons.m1;
@@ -1245,7 +1246,7 @@ namespace rmhd {
             return *this;
         }
 
-        HD AnyConserved& operator-=(const AnyConserved& cons)
+        DUAL AnyConserved& operator-=(const AnyConserved& cons)
         {
             den -= cons.den;
             m1 -= cons.m1;
@@ -1259,7 +1260,7 @@ namespace rmhd {
             return *this;
         }
 
-        HD AnyConserved& operator*=(const real c)
+        DUAL AnyConserved& operator*=(const real c)
         {
             den *= c;
             m1 *= c;
@@ -1273,41 +1274,41 @@ namespace rmhd {
             return *this;
         }
 
-        HD real total_energy() const { return den + nrg; }
+        DUAL real total_energy() const { return den + nrg; }
 
-        HD constexpr real momentum(const luint nhat) const
+        DUAL constexpr real momentum(const luint nhat) const
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
 
-        HD constexpr real& momentum(const luint nhat)
+        DUAL constexpr real& momentum(const luint nhat)
         {
             return (nhat == 1 ? m1 : (nhat == 2) ? m2 : m3);
         }
 
-        HD constexpr real& momentum() { return m1; }
+        DUAL constexpr real& momentum() { return m1; }
 
-        HD constexpr real bcomponent(const luint nhat) const
+        DUAL constexpr real bcomponent(const luint nhat) const
         {
             return (nhat == 1 ? b1 : (nhat == 2) ? b2 : b3);
         }
 
-        HD constexpr real& bcomponent(const luint nhat)
+        DUAL constexpr real& bcomponent(const luint nhat)
         {
             return (nhat == 1 ? b1 : (nhat == 2) ? b2 : b3);
         }
 
         //-------- E-field accessors ---------
         // constexpr real e1() { return b1; }
-        HD constexpr real& e1() { return b1; }
+        DUAL constexpr real& e1() { return b1; }
 
         // constexpr real e2() { return b2; }
-        HD constexpr real& e2() { return b2; }
+        DUAL constexpr real& e2() { return b2; }
 
         // constexpr real e3() { return b3; }
-        HD constexpr real& e3() { return b3; }
+        DUAL constexpr real& e3() { return b3; }
 
-        HD constexpr real ecomponent(luint nhat) const
+        DUAL constexpr real ecomponent(luint nhat) const
         {
             if (nhat == 1) {
                 return b1;
@@ -1320,7 +1321,7 @@ namespace rmhd {
             }
         }
 
-        HD void calc_electric_field(const luint nhat)
+        DUAL void calc_electric_field(const luint nhat)
         {
             if (nhat == 1) {
                 e1() = 0.0;
@@ -1348,7 +1349,7 @@ namespace rmhd {
 
         ~AnyPrimitive() = default;
 
-        HD AnyPrimitive& operator=(const AnyPrimitive& other
+        DUAL AnyPrimitive& operator=(const AnyPrimitive& other
         )   // III. copy assignment
         {
             if (this == &other) {
@@ -1368,7 +1369,7 @@ namespace rmhd {
             return *this;
         }
 
-        HD AnyPrimitive(real rho, real v1, real p, real b1)
+        DUAL AnyPrimitive(real rho, real v1, real p, real b1)
             : rho(rho),
               v1(v1),
               v2(0.0),
@@ -1381,7 +1382,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyPrimitive(real rho, real v1, real p, real b1, real chi)
+        DUAL AnyPrimitive(real rho, real v1, real p, real b1, real chi)
             : rho(rho),
               v1(v1),
               v2(0.0),
@@ -1394,7 +1395,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyPrimitive(real rho, real v1, real v2, real p, real b1, real b2)
+        DUAL AnyPrimitive(real rho, real v1, real v2, real p, real b1, real b2)
             : rho(rho),
               v1(v1),
               v2(v2),
@@ -1407,7 +1408,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyPrimitive(
+        DUAL AnyPrimitive(
             real rho,
             real v1,
             real v2,
@@ -1428,7 +1429,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyPrimitive(
+        DUAL AnyPrimitive(
             real rho,
             real v1,
             real v2,
@@ -1450,7 +1451,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyPrimitive(
+        DUAL AnyPrimitive(
             real rho,
             real v1,
             real v2,
@@ -1473,7 +1474,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyPrimitive(const AnyPrimitive& c)
+        DUAL AnyPrimitive(const AnyPrimitive& c)
             : rho(c.rho),
               v1(c.v1),
               v2(c.v2),
@@ -1486,7 +1487,7 @@ namespace rmhd {
         {
         }
 
-        HD AnyPrimitive operator+(const AnyPrimitive& e) const
+        DUAL AnyPrimitive operator+(const AnyPrimitive& e) const
         {
             return AnyPrimitive(
                 rho + e.rho,
@@ -1501,7 +1502,7 @@ namespace rmhd {
             );
         }
 
-        HD AnyPrimitive operator-(const AnyPrimitive& e) const
+        DUAL AnyPrimitive operator-(const AnyPrimitive& e) const
         {
             return AnyPrimitive(
                 rho - e.rho,
@@ -1516,7 +1517,7 @@ namespace rmhd {
             );
         }
 
-        HD AnyPrimitive operator*(const real c) const
+        DUAL AnyPrimitive operator*(const real c) const
         {
             return AnyPrimitive(
                 rho * c,
@@ -1531,7 +1532,7 @@ namespace rmhd {
             );
         }
 
-        HD AnyPrimitive operator/(const real c) const
+        DUAL AnyPrimitive operator/(const real c) const
         {
             return AnyPrimitive(
                 rho / c,
@@ -1546,7 +1547,7 @@ namespace rmhd {
             );
         }
 
-        HD AnyPrimitive& operator+=(const AnyPrimitive& prims)
+        DUAL AnyPrimitive& operator+=(const AnyPrimitive& prims)
         {
             rho += prims.rho;
             v1 += prims.v1;
@@ -1560,7 +1561,7 @@ namespace rmhd {
             return *this;
         }
 
-        HD AnyPrimitive& operator-=(const AnyPrimitive& prims)
+        DUAL AnyPrimitive& operator-=(const AnyPrimitive& prims)
         {
             rho -= prims.rho;
             v1 -= prims.v1;
@@ -1574,7 +1575,7 @@ namespace rmhd {
             return *this;
         }
 
-        HD AnyPrimitive& operator*=(const real c)
+        DUAL AnyPrimitive& operator*=(const real c)
         {
             rho *= c;
             v1 *= c;
@@ -1588,27 +1589,27 @@ namespace rmhd {
             return *this;
         }
 
-        HD constexpr real vcomponent(const luint nhat) const
+        DUAL constexpr real vcomponent(const luint nhat) const
         {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
         }
 
-        HD constexpr real& vcomponent(const luint nhat)
+        DUAL constexpr real& vcomponent(const luint nhat)
         {
             return nhat == 1 ? v1 : (nhat == 2) ? v2 : v3;
         }
 
-        HD constexpr real bcomponent(const luint nhat) const
+        DUAL constexpr real bcomponent(const luint nhat) const
         {
             return nhat == 1 ? b1 : (nhat == 2) ? b2 : b3;
         }
 
-        HD constexpr real& bcomponent(const luint nhat)
+        DUAL constexpr real& bcomponent(const luint nhat)
         {
             return nhat == 1 ? b1 : (nhat == 2) ? b2 : b3;
         }
 
-        HD constexpr real get_v1() const
+        DUAL constexpr real get_v1() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v1;
@@ -1618,7 +1619,7 @@ namespace rmhd {
             }
         }
 
-        HD constexpr real get_v2() const
+        DUAL constexpr real get_v2() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v2;
@@ -1628,7 +1629,7 @@ namespace rmhd {
             }
         }
 
-        HD constexpr real get_v3() const
+        DUAL constexpr real get_v3() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return v3;
@@ -1638,7 +1639,7 @@ namespace rmhd {
             }
         }
 
-        HD constexpr real lorentz_factor() const
+        DUAL constexpr real lorentz_factor() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return 1.0 / std::sqrt(1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
@@ -1648,7 +1649,7 @@ namespace rmhd {
             }
         }
 
-        HD constexpr real lorentz_factor_squared() const
+        DUAL constexpr real lorentz_factor_squared() const
         {
             if constexpr (global::VelocityType == global::Velocity::Beta) {
                 return 1.0 / (1.0 - (v1 * v1 + v2 * v2 + v3 * v3));
@@ -1658,30 +1659,30 @@ namespace rmhd {
             }
         }
 
-        HD real gas_enthalpy(real gamma) const
+        DUAL real gas_enthalpy(real gamma) const
         {
             return 1.0 + gamma * p / (rho * (gamma - 1.0));
         }
 
-        HD real vdotb() const { return (v1 * b1 + v2 * b2 + v3 * b3); }
+        DUAL real vdotb() const { return (v1 * b1 + v2 * b2 + v3 * b3); }
 
-        HD real bsquared() const { return (b1 * b1 + b2 * b2 + b3 * b3); }
+        DUAL real bsquared() const { return (b1 * b1 + b2 * b2 + b3 * b3); }
 
-        HD real total_pressure() const
+        DUAL real total_pressure() const
         {
             return p + 0.5 * (bsquared() / lorentz_factor_squared() +
                               vdotb() * vdotb());
         }
 
-        HD real total_enthalpy(const real gamma) const
+        DUAL real total_enthalpy(const real gamma) const
         {
             return gas_enthalpy(gamma) + bsquared() / lorentz_factor_squared() +
                    vdotb() * vdotb();
         }
 
-        HD real vsquared() const { return v1 * v1 + v2 * v2 + v3 * v3; }
+        DUAL real vsquared() const { return v1 * v1 + v2 * v2 + v3 * v3; }
 
-        HD real ecomponent(luint nhat) const
+        DUAL real ecomponent(luint nhat) const
         {
             if (nhat == 1) {
                 return v3 * b2 - v2 * b3;
@@ -1705,7 +1706,7 @@ namespace rmhd {
 
         ~mag_four_vec() = default;
 
-        HD mag_four_vec(const AnyPrimitive<dim>& prim)
+        DUAL mag_four_vec(const AnyPrimitive<dim>& prim)
             : lorentz(prim.lorentz_factor()),
               vdb(prim.vdotb()),
               zero(lorentz * vdb),
@@ -1715,7 +1716,7 @@ namespace rmhd {
         {
         }
 
-        HD mag_four_vec(const mag_four_vec& c)
+        DUAL mag_four_vec(const mag_four_vec& c)
             : lorentz(c.lorentz),
               vdb(c.vdb),
               zero(c.zero),
@@ -1725,12 +1726,12 @@ namespace rmhd {
         {
         }
 
-        HD real inner_product() const
+        DUAL real inner_product() const
         {
             return -zero * zero + one * one + two * two + three * three;
         }
 
-        HD constexpr real normal(const luint nhat) const
+        DUAL constexpr real normal(const luint nhat) const
         {
             return nhat == 1 ? one : nhat == 2 ? two : three;
         }
@@ -1751,14 +1752,14 @@ namespace rmhd {
 
         ~Eigenvals() = default;
 
-        HD Eigenvals(real afL, real afR) : afL(afL), afR(afR) {}
+        DUAL Eigenvals(real afL, real afR) : afL(afL), afR(afR) {}
 
-        HD Eigenvals(real afL, real afR, real csL, real csR)
+        DUAL Eigenvals(real afL, real afR, real csL, real csR)
             : afL(afL), afR(afR), csL(csL), csR(csR)
         {
         }
 
-        // HD Eigenvals(real afL, real afR,
+        // DUAL Eigenvals(real afL, real afR,
         // real asL, real asR, real csL, real csR) : afL(afL),
         // afR(afR), asL(asL), asR(asR), csL(csL), csR(csR) {}
     };

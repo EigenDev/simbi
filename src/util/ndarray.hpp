@@ -84,28 +84,26 @@ namespace simbi {
         unique_p<gpuDeleter> dev_arr;
 
       public:
-        ndarray();
-        ~ndarray();
+        DUAL ndarray();
+        DUAL ~ndarray();
         // Assignment operator
-        HD ndarray& operator=(ndarray rhs);
-
-        void swap(ndarray& rhs);
-
+        DUAL ndarray& operator=(ndarray rhs);
         // Initializer list constructor
-        ndarray(std::initializer_list<DT> list);
+        DUAL ndarray(std::initializer_list<DT> list);
 
         // Zero-initialize the array with defined size
-        ndarray(size_type size);
+        DUAL ndarray(size_type size);
 
         // Fill-initialize the array with defined size
-        ndarray(size_type size, const DT val);
+        DUAL ndarray(size_type size, const DT val);
 
         // Copy-constructor for array
-        ndarray(const ndarray& rhs);
-        ndarray(const std::vector<DT>& rhs);
+        DUAL ndarray(const ndarray& rhs);
+        DUAL ndarray(const std::vector<DT>& rhs);
 
         // Move-constructor for vector
-        ndarray(std::vector<DT>&& rhs);
+        DUAL ndarray(std::vector<DT>&& rhs);
+        void swap(ndarray& rhs);
 
         // Function that returns the number of
         // elements in array after pushing the data
@@ -127,11 +125,11 @@ namespace simbi {
 
         // Access operator (mutable)
         template <typename IndexType>
-        HD constexpr DT& operator[](IndexType);
+        DUAL constexpr DT& operator[](IndexType);
 
         // Const-access operator (read-only)
         template <typename IndexType>
-        HD constexpr DT operator[](IndexType) const;
+        DUAL constexpr DT operator[](IndexType) const;
 
         // Some math operator overloads
         constexpr ndarray& operator*(real);
@@ -144,13 +142,13 @@ namespace simbi {
         bool empty() const;
 
         // get pointers to underlying data ambiguously, on host, or on gpu
-        DT* data();
+        DUAL DT* data();
         DT* host_data();
-        DT* dev_data();
+        DUAL DT* dev_data();
 
-        DT* data() const;
+        DUAL DT* data() const;
         DT* host_data() const;
-        DT* dev_data() const;
+        DUAL DT* dev_data() const;
 
         // Iterator Class
         class iterator
@@ -167,29 +165,29 @@ namespace simbi {
             using pointer         = void;
             using reference       = void;
 
-            HD explicit iterator() : ptr(nullptr) {}
+            DUAL explicit iterator() : ptr(nullptr) {}
 
-            HD explicit iterator(DT* p) : ptr(p) {}
+            DUAL explicit iterator(DT* p) : ptr(p) {}
 
-            HD bool operator==(const iterator& rhs) const
+            DUAL bool operator==(const iterator& rhs) const
             {
                 return ptr == rhs.ptr;
             }
 
-            HD bool operator!=(const iterator& rhs) const
+            DUAL bool operator!=(const iterator& rhs) const
             {
                 return !(*this == rhs);
             }
 
-            HD DT operator*() const { return *ptr; }
+            DUAL DT operator*() const { return *ptr; }
 
-            HD iterator& operator++()
+            DUAL iterator& operator++()
             {
                 ++ptr;
                 return *this;
             }
 
-            HD iterator operator++(int)
+            DUAL iterator operator++(int)
             {
                 iterator temp(*this);
                 ++*this;

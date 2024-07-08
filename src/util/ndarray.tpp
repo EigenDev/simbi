@@ -2,20 +2,21 @@
 
 // Initializer list constructor
 template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::ndarray(std::initializer_list<DT> list)
+DUAL simbi::ndarray<DT, build_mode>::ndarray(std::initializer_list<DT> list)
     : simbi::ndarray<DT, build_mode>(list.size())
 {
     std::copy(std::begin(list), std::end(list), arr.get());
 };
 
 template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::ndarray() : sz(0), nd_capacity(0), dimensions(1)
+DUAL simbi::ndarray<DT, build_mode>::ndarray()
+    : sz(0), nd_capacity(0), dimensions(1)
 {
 }
 
 // Zero-initialize the array with defined size
 template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::ndarray(size_type size)
+DUAL simbi::ndarray<DT, build_mode>::ndarray(size_type size)
     : sz(size), nd_capacity(size * sizeof(DT)), dimensions(1)
 {
     arr.reset(new DT[nd_capacity]);   // zero initialize all members.
@@ -24,7 +25,7 @@ simbi::ndarray<DT, build_mode>::ndarray(size_type size)
 };
 
 template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::ndarray(size_type size, const DT val)
+DUAL simbi::ndarray<DT, build_mode>::ndarray(size_type size, const DT val)
     : sz(size), nd_capacity(size * sizeof(DT)), dimensions(1)
 {
     arr.reset(new DT[nd_capacity]);
@@ -39,8 +40,8 @@ simbi::ndarray<DT, build_mode>::ndarray(size_type size, const DT val)
 
 // Copy-constructor for array
 template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::ndarray(const ndarray& rhs)
-    : sz(rhs.sz), arr(new DT[rhs.sz]), dimensions(rhs.dimensions)
+DUAL simbi::ndarray<DT, build_mode>::ndarray(const ndarray& rhs)
+    : sz(rhs.sz), dimensions(rhs.dimensions), arr(new DT[rhs.sz])
 {
     // Copy from GPU if data exists there
     copyBetweenGpu(rhs);
@@ -53,7 +54,7 @@ simbi::ndarray<DT, build_mode>::ndarray(const ndarray& rhs)
 
 // Copy-constructor for vector
 template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::ndarray(const std::vector<DT>& rhs)
+DUAL simbi::ndarray<DT, build_mode>::ndarray(const std::vector<DT>& rhs)
     : sz(rhs.size()),
       nd_capacity(rhs.capacity() * sizeof(DT)),
       dimensions(1),
@@ -66,7 +67,7 @@ simbi::ndarray<DT, build_mode>::ndarray(const std::vector<DT>& rhs)
 
 // Move-constructor for vector
 template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::ndarray(std::vector<DT>&& rhs)
+DUAL simbi::ndarray<DT, build_mode>::ndarray(std::vector<DT>&& rhs)
     : sz(rhs.size()),
       nd_capacity(rhs.capacity() * sizeof(DT)),
       dimensions(1),
@@ -79,7 +80,7 @@ simbi::ndarray<DT, build_mode>::ndarray(std::vector<DT>&& rhs)
 
 // Copy the arrays and deallocate the RHS
 template <typename DT, global::Platform build_mode>
-HD simbi::ndarray<DT, build_mode>&
+DUAL simbi::ndarray<DT, build_mode>&
 simbi::ndarray<DT, build_mode>::ndarray::operator=(ndarray other)
 {
     other.swap(*this);
@@ -191,7 +192,7 @@ constexpr size_type simbi::ndarray<DT, build_mode>::ndim() const
 // array at given index
 template <typename DT, global::Platform build_mode>
 template <typename IndexType>
-HD constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
+DUAL constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
 {
     // if given index is greater than the
     // size of array print Error
@@ -216,7 +217,7 @@ HD constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
 // array at given index
 template <typename DT, global::Platform build_mode>
 template <typename IndexType>
-HD constexpr DT simbi::ndarray<DT, build_mode>::operator[](IndexType index
+DUAL constexpr DT simbi::ndarray<DT, build_mode>::operator[](IndexType index
 ) const
 {
     // if given index is greater than the
@@ -319,7 +320,7 @@ DT simbi::ndarray<DT, build_mode>::front() const
 }
 
 template <typename DT, global::Platform build_mode>
-simbi::ndarray<DT, build_mode>::~ndarray()
+DUAL simbi::ndarray<DT, build_mode>::~ndarray()
 {
 }
 
@@ -453,19 +454,19 @@ DT* simbi::ndarray<DT, build_mode>::host_data() const
 };
 
 template <typename DT, global::Platform build_mode>
-DT* simbi::ndarray<DT, build_mode>::dev_data()
+DUAL DT* simbi::ndarray<DT, build_mode>::dev_data()
 {
     return dev_arr.get();
 };
 
 template <typename DT, global::Platform build_mode>
-DT* simbi::ndarray<DT, build_mode>::dev_data() const
+DUAL DT* simbi::ndarray<DT, build_mode>::dev_data() const
 {
     return dev_arr.get();
 };
 
 template <typename DT, global::Platform build_mode>
-DT* simbi::ndarray<DT, build_mode>::data()
+DUAL DT* simbi::ndarray<DT, build_mode>::data()
 {
     if (sz == 0) {
         return nullptr;

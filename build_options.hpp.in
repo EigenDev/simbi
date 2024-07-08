@@ -30,9 +30,6 @@
 #include <csignal>     // for size_t
 #include <string>      // for allocator, string
 
-
-#define CALL(object,ptrToMember)  ((object)->*(ptrToMember))
-
 /*
  * defines a global namespace for functions and
  * variables scattered throughout the code
@@ -128,8 +125,10 @@ namespace global {
 //=========================== RUNTIME CHECK
 #if GPU_CODE
 using sig_bool = volatile bool;
-#define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...)                    \
-    kernel_name<<<((gridsize), (blocksize))>>>(__VA_ARGS__);
+#define SINGLE(kernel_name, ...) kernel_name<<<1, 1>>>(__VA_ARGS__);
+
+#define CALL(kernel_name, gridsize, blocksize, ...)                    \
+    kernel_name<<<(gridsize), (blocksize)>>>(__VA_ARGS__);
 
 namespace global {
 #if SHARED_MEMORY
@@ -146,7 +145,7 @@ namespace global {
 
 #define DEV    __device__
 #define KERNEL __global__
-#define HD     __host__ __device__
+#define DUAL     __host__ __device__
 #define STATIC __host__ __device__ inline
 #define EXTERN extern __shared__
 
@@ -251,7 +250,8 @@ using simbiStream_t                    = hipStream_t;
 #endif
 #else
 using sig_bool = std::atomic<bool>;
-#define LAUNCH_ASYNC(kernel_name, gridsize, blocksize, ...)                    \
+#define SINGLE(kernel_name, ...) kernel_name(__VA_ARGS__);
+#define CALL(kernel_name, gridsize, blocksize, ...)                    \
     kernel_name(__VA_ARGS__);
 
 namespace global {
@@ -267,7 +267,7 @@ namespace global {
 #define DEV
 #define STATIC inline
 #define KERNEL
-#define HD
+#define DUAL
 #define SHARED     const
 #define __shared__ static
 #define EXTERN     static
@@ -305,7 +305,7 @@ namespace global {
     constexpr bool on_gpu = BuildPlatform == Platform::GPU;
 
     template<typename T>
-    HD void inline swap(T& a, T& b)
+    DUAL void inline swap(T& a, T& b)
     {
         #ifdef __CUDA_ARCH__
         T temp = a;

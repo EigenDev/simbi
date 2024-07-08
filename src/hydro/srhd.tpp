@@ -28,7 +28,7 @@ SRHD<dim>::~SRHD() = default;
 
 // Helpers
 template <int dim>
-HD constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
+DUAL constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -57,7 +57,7 @@ HD constexpr real SRHD<dim>::get_x1face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real SRHD<dim>::get_x2face(const lint ii, const int side) const
+DUAL constexpr real SRHD<dim>::get_x2face(const lint ii, const int side) const
 {
     switch (x2_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -86,7 +86,7 @@ HD constexpr real SRHD<dim>::get_x2face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real SRHD<dim>::get_x3face(const lint ii, const int side) const
+DUAL constexpr real SRHD<dim>::get_x3face(const lint ii, const int side) const
 {
     switch (x3_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -115,7 +115,7 @@ HD constexpr real SRHD<dim>::get_x3face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real SRHD<dim>::get_x1_differential(const lint ii) const
+DUAL constexpr real SRHD<dim>::get_x1_differential(const lint ii) const
 {
     const real x1l   = get_x1face(ii, 0);
     const real x1r   = get_x1face(ii, 1);
@@ -129,7 +129,7 @@ HD constexpr real SRHD<dim>::get_x1_differential(const lint ii) const
 }
 
 template <int dim>
-HD constexpr real SRHD<dim>::get_x2_differential(const lint ii) const
+DUAL constexpr real SRHD<dim>::get_x2_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -157,7 +157,7 @@ HD constexpr real SRHD<dim>::get_x2_differential(const lint ii) const
 }
 
 template <int dim>
-HD constexpr real SRHD<dim>::get_x3_differential(const lint ii) const
+DUAL constexpr real SRHD<dim>::get_x3_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -181,7 +181,7 @@ HD constexpr real SRHD<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-HD real
+DUAL real
 SRHD<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
 {
     // the volume in cartesian coordinates is only nominal
@@ -420,7 +420,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 //                              EIGENVALUE CALCULATIONS
 //----------------------------------------------------------------------------------------------------------
 template <int dim>
-HD SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
+DUAL SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
     const SRHD<dim>::primitive_t& primsL,
     const SRHD<dim>::primitive_t& primsR,
     const luint nhat
@@ -523,7 +523,7 @@ HD SRHD<dim>::eigenvals_t SRHD<dim>::calc_eigenvals(
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
 template <int dim>
-HD SRHD<dim>::conserved_t
+DUAL SRHD<dim>::conserved_t
 SRHD<dim>::prims2cons(const SRHD<dim>::primitive_t& prims) const
 {
     const real rho      = prims.rho;
@@ -738,7 +738,7 @@ void SRHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-HD SRHD<dim>::conserved_t
+DUAL SRHD<dim>::conserved_t
 SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t& prims, const luint nhat)
     const
 {
@@ -788,7 +788,7 @@ SRHD<dim>::prims2flux(const SRHD<dim>::primitive_t& prims, const luint nhat)
 };
 
 template <int dim>
-HD SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
+DUAL SRHD<dim>::conserved_t SRHD<dim>::calc_hlle_flux(
     const SRHD<dim>::conserved_t& uL,
     const SRHD<dim>::conserved_t& uR,
     const SRHD<dim>::conserved_t& fL,
@@ -834,7 +834,7 @@ HD SRHD<dim>::conserved_t SRHD<dim>::calc_hll_flux(
 };
 
 template <int dim>
-HD SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
+DUAL SRHD<dim>::conserved_t SRHD<dim>::calc_hllc_flux(
     const SRHD<dim>::conserved_t& uL,
     const SRHD<dim>::conserved_t& uR,
     const SRHD<dim>::conserved_t& fL,
@@ -1423,7 +1423,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             break;
                         }
                     default:
-                        frf = calc_hll_flux(
+                        frf = calc_hlle_flux(
                             uxL,
                             uxR,
                             fL,
@@ -1434,7 +1434,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             vfaceR
                         );
                         if constexpr (dim > 1) {
-                            grf = calc_hll_flux(
+                            grf = calc_hlle_flux(
                                 uyL,
                                 uyR,
                                 gL,
@@ -1445,7 +1445,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             );
                         }
                         if constexpr (dim > 2) {
-                            hrf = calc_hll_flux(
+                            hrf = calc_hlle_flux(
                                 uzL,
                                 uzR,
                                 hL,
@@ -1548,7 +1548,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             break;
                         }
                     default:
-                        flf = calc_hll_flux(
+                        flf = calc_hlle_flux(
                             uxL,
                             uxR,
                             fL,
@@ -1559,7 +1559,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             vfaceL
                         );
                         if constexpr (dim > 1) {
-                            glf = calc_hll_flux(
+                            glf = calc_hlle_flux(
                                 uyL,
                                 uyR,
                                 gL,
@@ -1570,7 +1570,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             );
                         }
                         if constexpr (dim > 2) {
-                            hlf = calc_hll_flux(
+                            hlf = calc_hlle_flux(
                                 uzL,
                                 uzR,
                                 hL,
@@ -1707,7 +1707,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             break;
                         }
                     default:
-                        frf = calc_hll_flux(
+                        frf = calc_hlle_flux(
                             uxL,
                             uxR,
                             fL,
@@ -1718,7 +1718,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             vfaceR
                         );
                         if constexpr (dim > 1) {
-                            grf = calc_hll_flux(
+                            grf = calc_hlle_flux(
                                 uyL,
                                 uyR,
                                 gL,
@@ -1730,7 +1730,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             );
                         }
                         if constexpr (dim > 2) {
-                            hrf = calc_hll_flux(
+                            hrf = calc_hlle_flux(
                                 uzL,
                                 uzR,
                                 hL,
@@ -1841,7 +1841,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                         }
 
                     default:
-                        flf = calc_hll_flux(
+                        flf = calc_hlle_flux(
                             uxL,
                             uxR,
                             fL,
@@ -1852,7 +1852,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             vfaceL
                         );
                         if constexpr (dim > 1) {
-                            glf = calc_hll_flux(
+                            glf = calc_hlle_flux(
                                 uyL,
                                 uyR,
                                 gL,
@@ -1864,7 +1864,7 @@ void SRHD<dim>::advance(const ExecutionPolicy<>& p)
                             );
                         }
                         if constexpr (dim > 2) {
-                            hlf = calc_hll_flux(
+                            hlf = calc_hlle_flux(
                                 uzL,
                                 uzR,
                                 hL,
