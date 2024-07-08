@@ -2720,50 +2720,62 @@ namespace simbi {
                 gpu::api::synchronize();
             }
             else {
-                V txl = p.blockSize.x;
-                V tyl = p.blockSize.y;
-                V tzl = p.blockSize.z;
+                const auto x_excess = my_max<lint>(0, ia + p.blockSize.x - ni + 1);
+                const auto y_excess = my_max<lint>(0, ja + p.blockSize.y - nj + 1);
+                const auto z_excess = my_max<lint>(0, ka + p.blockSize.z - nk + 1);
+                // printf("xexcess: %ld, yexcess: %ld, zexcess: %ld\n", x_excess, y_excess, z_excess);
+                const auto txl = p.blockSize.x - x_excess;
+                const auto tyl = p.blockSize.y - y_excess;
+                const auto tzl = p.blockSize.z - z_excess;
+                // printf("ia + txl: %ld, ja + tyl: %ld, ka + tzl: %ld\n", ia + txl, ja + tyl, ka + tzl);
+                printf("txa + txl: %ld, tya + tyl: %ld, tza + tzl: %ld\n", txa + txl, tya + tyl, tza + tzl);
                 // Load Shared memory into buffer for active zones plus
                 // ghosts
-                buffer[idx3(txa, tya, tza, sx, sy, sz)] = data[aid];
-                if (tz == 0) {
-                    if ((blockIdx.z == p.gridSize.z - 1) &&
-                        (ka + p.blockSize.z > nk - radius + tz)) {
-                        tzl = nk - radius - ka + tz;
-                    }
-                    for (int q = 1; q < radius + 1; q++) {
-                        const auto re = tzl + q - 1;
-                        buffer[(tza - q) * sx * sy + tya * sx + txa] =
-                            data[(ka - q) * ni * nj + ja * ni + ia];
-                        buffer[(tza + re) * sx * sy + tya * sx + txa] =
-                            data[(ka + re) * ni * nj + ja * ni + ia];
-                    }
+                buffer[idx3(txa, tya, tza, sx, sy, 0.0)] = data[aid];
+                if (tz < radius) {
+                    buffer[idx3(txa, tya, tza - radius, sx, sy, 0)] = data[idx3(ia, ja, ka - radius, ni, nj, nk)];
+                    buffer[idx3(txa, tya, tza + tzl, sx, sy, 0)] = data[idx3(ia, ja, ka + tzl, ni, nj, nk)];
+                    // if ((blockIdx.z == p.gridSize.z - 1) &&
+                    //     (ka + p.blockSize.z > nk - radius + tz)) {
+                    //     tzl = nk - radius - ka + tz;
+                    // }
+                    // for (int q = 1; q < radius + 1; q++) {
+                    //     const auto re = tzl + q - 1;
+                    //     buffer[(tza - q) * sx * sy + tya * sx + txa] =
+                    //         data[(ka - q) * ni * nj + ja * ni + ia];
+                    //     buffer[(tza + re) * sx * sy + tya * sx + txa] =
+                    //         data[(ka + re) * ni * nj + ja * ni + ia];
+                    // }
                 }
-                if (ty == 0) {
-                    if ((blockIdx.y == p.gridSize.y - 1) &&
-                        (ja + p.blockSize.y > nj - radius + ty)) {
-                        tyl = nj - radius - ja + ty;
-                    }
-                    for (int q = 1; q < radius + 1; q++) {
-                        const auto re = tyl + q - 1;
-                        buffer[tza * sx * sy + (tya - q) * sx + txa] =
-                            data[ka * ni * nj + (ja - q) * ni + ia];
-                        buffer[tza * sx * sy + (tya + re) * sx + txa] =
-                            data[ka * ni * nj + (ja + re) * ni + ia];
-                    }
+                if (ty < radius) {
+                    buffer[idx3(txa, tya - radius, tza, sx, sy, 0)] = data[idx3(ia, ja - radius, ka, ni, nj, nk)];
+                    buffer[idx3(txa, tya + tyl, tza, sx, sy, 0)] = data[idx3(ia, ja + tyl, ka, ni, nj, nk)];
+                    // if ((blockIdx.y == p.gridSize.y - 1) &&
+                    //     (ja + p.blockSize.y > nj - radius + ty)) {
+                    //     tyl = nj - radius - ja + ty;
+                    // }
+                    // for (int q = 1; q < radius + 1; q++) {
+                    //     const auto re = tyl + q - 1;
+                    //     buffer[tza * sx * sy + (tya - q) * sx + txa] =
+                    //         data[ka * ni * nj + (ja - q) * ni + ia];
+                    //     buffer[tza * sx * sy + (tya + re) * sx + txa] =
+                    //         data[ka * ni * nj + (ja + re) * ni + ia];
+                    // }
                 }
-                if (tx == 0) {
-                    if ((blockIdx.x == p.gridSize.x - 1) &&
-                        (ia + p.blockSize.x > ni - radius + tx)) {
-                        txl = ni - radius - ia + tx;
-                    }
-                    for (int q = 1; q < radius + 1; q++) {
-                        const auto re = txl + q - 1;
-                        buffer[tza * sx * sy + tya * sx + txa - q] =
-                            data[ka * ni * nj + ja * ni + ia - q];
-                        buffer[tza * sx * sy + tya * sx + txa + re] =
-                            data[ka * ni * nj + ja * ni + ia + re];
-                    }
+                if (tx < radius) {
+                    buffer[idx3(txa - radius, tya, tza, sx, sy, 0)] = data[idx3(ia - radius, ja, ka, ni, nj, nk)];
+                    buffer[idx3(txa + txl, tya, tza, sx, sy, 0)] = data[idx3(ia + txl, ja, ka, ni, nj, nk)];
+                    // if ((blockIdx.x == p.gridSize.x - 1) &&
+                    //     (ia + p.blockSize.x > ni - radius + tx)) {
+                    //     txl = ni - radius - ia + tx;
+                    // }
+                    // for (int q = 1; q < radius + 1; q++) {
+                    //     const auto re = txl + q - 1;
+                    //     buffer[tza * sx * sy + tya * sx + txa - q] =
+                    //         data[ka * ni * nj + ja * ni + ia - q];
+                    //     buffer[tza * sx * sy + tya * sx + txa + re] =
+                    //         data[ka * ni * nj + ja * ni + ia + re];
+                    // }
                 }
                 gpu::api::synchronize();
             }
