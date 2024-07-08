@@ -1,6 +1,6 @@
 from numpy.typing import NDArray
 from typing import Optional, Union, Sequence, Callable, final, Tuple, Any, cast, Iterable, Type
-from numpy import float64 as numpy_float, string_ as numpy_string, int64 as numpy_int
+from numpy import float64 as numpy_float, str_ as numpy_string, int64 as numpy_int
 
 FloatOrArray = Union[float, NDArray[Any]]
 FloatOrNone  = Optional[float] 
