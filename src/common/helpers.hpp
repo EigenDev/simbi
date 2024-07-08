@@ -332,6 +332,20 @@ namespace simbi {
             const int size
         );
 
+        /**
+         * @brief set the riemann solver function pointer on
+         * the device or the host depending on the platform
+         *
+         * @tparam T
+         * @param hydro_class
+         * @return void
+         */
+        template <typename T>
+        KERNEL void hybrid_set_riemann_solver(T hydro_class)
+        {
+            hydro_class->set_riemann_solver();
+        }
+
         //-------------------Inline for Speed -------------------------
         /**
          * @brief compute the minmod slope limiter
@@ -1063,11 +1077,11 @@ namespace simbi {
          * @param[in/out/in,out]ni:
          * @param[in/out/in,out]nj:
          * @param[in/out/in,out]nk:
-         * @return          HD
+         * @return
          * @retval
          */
         template <Plane P, Corner C, Dir s>
-        HD lint cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk);
+        DUAL lint cidx(lint ii, lint jj, lint kk, luint ni, luint nj, luint nk);
 
         // configure the ghost zones in 1D hydro
         template <typename T, typename U>
@@ -1240,46 +1254,47 @@ namespace simbi {
 
         // solve the cubic equation
         template <typename T>
-        HD T cubic(T b, T c, T d);
+        DUAL T cubic(T b, T c, T d);
 
         // solve the quartic equation
         template <typename T>
-        HD int quartic(T b, T c, T d, T e, T res[4]);
+        DUAL int quartic(T b, T c, T d, T e, T res[4]);
 
         // solve the cubic equation
         template <typename T>
-        HD int cubicPluto(T b, T c, T d, T z[]);
+        DUAL int cubicPluto(T b, T c, T d, T z[]);
 
         // solve the quartic equation
         template <typename T>
-        HD int quarticPluto(T b, T c, T d, T e, T res[4]);
+        DUAL int quarticPluto(T b, T c, T d, T e, T res[4]);
 
         // swap any two values
         template <typename T>
-        HD void swap(T& a, T& b);
+        DUAL void swap(T& a, T& b);
 
         // Partition the array and return the pivot index
         template <typename T, typename index_type>
-        HD index_type partition(T arr[], index_type low, index_type high);
+        DUAL index_type partition(T arr[], index_type low, index_type high);
 
         // Quick sort implementation
         template <typename T, typename index_type>
-        HD void recursiveQuickSort(T arr[], index_type low, index_type high);
+        DUAL void recursiveQuickSort(T arr[], index_type low, index_type high);
 
         template <typename T, typename index_type>
-        HD void iterativeQuickSort(T arr[], index_type low, index_type high);
+        DUAL void iterativeQuickSort(T arr[], index_type low, index_type high);
 
         template <typename T, typename U>
         SHARED T* sm_proxy(const U object);
 
-        template <typename T, typename U>
-        SHARED T* identity(const U& object);
+        template <typename T>
+        SHARED auto sm_or_identity(const T* object);
 
         template <int dim, typename T, typename idx>
-        HD void ib_modify(T& lhs, const T& rhs, const bool ib, const idx side);
+        DUAL void
+        ib_modify(T& lhs, const T& rhs, const bool ib, const idx side);
 
         template <int dim, typename T, typename idx>
-        HD bool ib_check(
+        DUAL bool ib_check(
             T& arr,
             const idx ii,
             const idx jj,
@@ -1290,7 +1305,7 @@ namespace simbi {
         );
 
         template <typename index_type, typename T>
-        HD index_type flattened_index(
+        DUAL index_type flattened_index(
             index_type ii,
             index_type jj,
             index_type kk,
@@ -1300,10 +1315,10 @@ namespace simbi {
         );
 
         template <int dim, BlkAx axis, typename T>
-        HD T axid(T idx, T ni, T nj, T kk = T(0));
+        DUAL T axid(T idx, T ni, T nj, T kk = T(0));
 
         template <typename T>
-        HD bool limit_zero(T val)
+        DUAL bool limit_zero(T val)
         {
             return (val * val) < global::tol_scale;
         }

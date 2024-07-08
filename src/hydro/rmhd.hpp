@@ -48,6 +48,14 @@ namespace simbi {
                      dim == 2,
                      std::function<real(real, real)>,
                      std::function<real(real, real, real)>>>;
+        template <typename T>
+        using RiemannFuncPointer = conserved_t (T::*)(
+            primitive_t&,
+            primitive_t&,
+            const luint,
+            const real
+        ) const;
+        RiemannFuncPointer<RMHD<dim>> riemann_solve;
 
         function_t dens_outer;
         function_t mom1_outer;
@@ -85,94 +93,62 @@ namespace simbi {
          * @param gid  current global index
          * @return none
          */
-        HD primitive_t cons2prim(const conserved_t& cons) const;
+        DUAL primitive_t cons2prim(const conserved_t& cons) const;
 
         void advance(const ExecutionPolicy<>& p);
 
-        HD void calc_max_wave_speeds(
+        DUAL void calc_max_wave_speeds(
             const primitive_t& prims,
             const luint nhat,
             real speeds[],
             real& cs2
         ) const;
 
-        HD eigenvals_t calc_eigenvals(
+        DUAL eigenvals_t calc_eigenvals(
             const primitive_t& primsL,
             const primitive_t& primsR,
             const luint nhat
         ) const;
 
-        HD conserved_t prims2cons(const primitive_t& prims) const;
+        DUAL conserved_t prims2cons(const primitive_t& prims) const;
 
-        HD conserved_t calc_hll_flux(
+        DUAL conserved_t calc_hlle_flux(
             primitive_t& prL,
             primitive_t& prR,
             const luint nhat,
             const real vface = 0.0
         ) const;
 
-        HD conserved_t calc_hllc_flux(
+        DUAL conserved_t calc_hllc_flux(
             primitive_t& prL,
             primitive_t& prR,
             const luint nhat,
             const real vface = 0.0
         ) const;
 
-        HD conserved_t calc_hlld_flux(
+        DUAL conserved_t calc_hlld_flux(
             primitive_t& prL,
             primitive_t& prR,
             const luint nhat,
             const real vface = 0.0
         ) const;
 
-        HD conserved_t (RMHD<dim>::* riemann_solve)(
-            primitive_t& prL,
-            primitive_t& prR,
-            const luint nhat,
-            const real vface
-        ) const;
-
-        DEV conserved_t (RMHD<dim>::* d_riemann_solve)(
-            primitive_t& prL,
-            primitive_t& prR,
-            const luint nhat,
-            const real vface
-        ) const;
-
-        conserved_t (RMHD<dim>::* h_riemann_solve)(
-            primitive_t& prL,
-            primitive_t& prR,
-            const luint nhat,
-            const real vface
-        ) const;
-
-        HD void set_riemann_solver()
+        DUAL void set_riemann_solver()
         {
             switch (sim_solver) {
                 case Solver::HLLE:
-                    this->h_riemann_solve = &RMHD<dim>::calc_hll_flux;
+                    this->riemann_solve = &RMHD<dim>::calc_hlle_flux;
                     break;
                 case Solver::HLLC:
-                    this->h_riemann_solve = &RMHD<dim>::calc_hllc_flux;
+                    this->riemann_solve = &RMHD<dim>::calc_hllc_flux;
                     break;
                 default:
-                    this->h_riemann_solve = &RMHD<dim>::calc_hlld_flux;
+                    this->riemann_solve = &RMHD<dim>::calc_hlld_flux;
                     break;
-            }
-            if constexpr (global::BuildPlatform == global::Platform::GPU) {
-                gpu::api::gpuMcFromSymbol(
-                    &this->d_riemann_solve,
-                    &this->h_riemann_solve,
-                    sizeof(void*)
-                );
-                this->riemann_solve = this->d_riemann_solve;
-            }
-            else {
-                this->riemann_solve = this->h_riemann_solve;
             }
         }
 
-        HD conserved_t
+        DUAL conserved_t
         prims2flux(const primitive_t& prims, const luint nhat) const;
 
         template <TIMESTEP_TYPE dt_type = TIMESTEP_TYPE::ADAPTIVE>
@@ -191,25 +167,25 @@ namespace simbi {
             std::optional<function_t> const& e_outer  = nullptr
         );
 
-        HD constexpr real get_x1face(const lint ii, const int side) const;
+        DUAL constexpr real get_x1face(const lint ii, const int side) const;
 
-        HD constexpr real get_x2face(const lint ii, const int side) const;
+        DUAL constexpr real get_x2face(const lint ii, const int side) const;
 
-        HD constexpr real get_x3face(const lint ii, const int side) const;
+        DUAL constexpr real get_x3face(const lint ii, const int side) const;
 
-        HD constexpr real get_x1_differential(const lint ii) const;
+        DUAL constexpr real get_x1_differential(const lint ii) const;
 
-        HD constexpr real get_x2_differential(const lint ii) const;
+        DUAL constexpr real get_x2_differential(const lint ii) const;
 
-        HD constexpr real get_x3_differential(const lint ii) const;
+        DUAL constexpr real get_x3_differential(const lint ii) const;
 
-        HD real get_cell_volume(
+        DUAL real get_cell_volume(
             const lint ii,
             const lint jj = 0,
             const lint kk = 0
         ) const;
 
-        HD real curl_e(
+        DUAL real curl_e(
             const luint nhat,
             const real ejl,
             const real ejr,
@@ -222,7 +198,7 @@ namespace simbi {
          * @retval
          */
         template <Plane P, Corner C>
-        HD real calc_edge_emf(
+        DUAL real calc_edge_emf(
             const conserved_t& fw,
             const conserved_t& fe,
             const conserved_t& fs,
@@ -267,7 +243,7 @@ namespace simbi {
             bstag3.copyToGpu();
         }
 
-        HD std::tuple<real, primitive_t, primitive_t, primitive_t> hlld_vdiff(
+        DUAL std::tuple<real, primitive_t, primitive_t, primitive_t> hlld_vdiff(
             const real p,
             const conserved_t r[2],
             const real lam[2],

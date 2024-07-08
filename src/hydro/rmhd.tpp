@@ -29,7 +29,7 @@ RMHD<dim>::~RMHD() = default;
 
 // Helpers
 template <int dim>
-HD constexpr real RMHD<dim>::get_x1face(const lint ii, const int side) const
+DUAL constexpr real RMHD<dim>::get_x1face(const lint ii, const int side) const
 {
     switch (x1_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -58,7 +58,7 @@ HD constexpr real RMHD<dim>::get_x1face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real RMHD<dim>::get_x2face(const lint ii, const int side) const
+DUAL constexpr real RMHD<dim>::get_x2face(const lint ii, const int side) const
 {
     switch (x2_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -87,7 +87,7 @@ HD constexpr real RMHD<dim>::get_x2face(const lint ii, const int side) const
 }
 
 template <int dim>
-HD constexpr real RMHD<dim>::get_x3face(const lint ii, const int side) const
+DUAL constexpr real RMHD<dim>::get_x3face(const lint ii, const int side) const
 {
     switch (x3_cell_spacing) {
         case simbi::Cellspacing::LINSPACE:
@@ -137,7 +137,7 @@ HD constexpr real RMHD<dim>::get_x3face(const lint ii, const int side) const
  */
 template <int dim>
 template <Plane P, Corner C>
-HD real RMHD<dim>::calc_edge_emf(
+DUAL real RMHD<dim>::calc_edge_emf(
     const RMHD<dim>::conserved_t& fw,
     const RMHD<dim>::conserved_t& fe,
     const RMHD<dim>::conserved_t& fs,
@@ -172,12 +172,12 @@ HD real RMHD<dim>::calc_edge_emf(
     const auto nep = prims[neidx];
 
     // get mean efields
-    const real esw       = swp.ecomponent(nhat);
-    const real ese       = sep.ecomponent(nhat);
-    const real enw       = nwp.ecomponent(nhat);
-    const real ene       = nep.ecomponent(nhat);
-    const real one_eigth = static_cast<real>(0.125);
-    const real eavg      = static_cast<real>(0.25) * (ew + ee + es + en);
+    const real esw        = swp.ecomponent(nhat);
+    const real ese        = sep.ecomponent(nhat);
+    const real enw        = nwp.ecomponent(nhat);
+    const real ene        = nep.ecomponent(nhat);
+    const real one_eighth = static_cast<real>(0.125);
+    const real eavg       = static_cast<real>(0.25) * (ew + ee + es + en);
 
     // Decides at compile time which method to use
     switch (comp_ct_type) {
@@ -191,7 +191,7 @@ HD real RMHD<dim>::calc_edge_emf(
                 // output value is written. floating points ops
                 // and all that...
                 return (
-                    eavg + one_eigth * (de_dq2L - de_dq2R + de_dq1L - de_dq1R)
+                    eavg + one_eighth * (de_dq2L - de_dq2R + de_dq1L - de_dq1R)
                 );
             }
         case CTTYPE::CONTACT:   // Eq. (51)
@@ -237,7 +237,7 @@ HD real RMHD<dim>::calc_edge_emf(
                 }();
 
                 return (
-                    eavg + one_eigth * (de_dq2L - de_dq2R + de_dq1L - de_dq1R)
+                    eavg + one_eighth * (de_dq2L - de_dq2R + de_dq1L - de_dq1R)
                 );
             }
         default:   // ALPHA, Eq. (49)
@@ -295,14 +295,14 @@ HD real RMHD<dim>::calc_edge_emf(
                                      alpha * (bp1se - bp1s - bp1ne + bp1n);
 
                 return (
-                    eavg + one_eigth * (de_dq2L - de_dq2R + de_dq1L - de_dq1R)
+                    eavg + one_eighth * (de_dq2L - de_dq2R + de_dq1L - de_dq1R)
                 );
             }
     }
 };
 
 template <int dim>
-HD real RMHD<dim>::curl_e(
+DUAL real RMHD<dim>::curl_e(
     const luint nhat,
     const real ejl,
     const real ejr,
@@ -441,7 +441,7 @@ HD real RMHD<dim>::curl_e(
 }
 
 template <int dim>
-HD constexpr real RMHD<dim>::get_x1_differential(const lint ii) const
+DUAL constexpr real RMHD<dim>::get_x1_differential(const lint ii) const
 {
     const real x1l   = get_x1face(ii, 0);
     const real x1r   = get_x1face(ii, 1);
@@ -455,7 +455,7 @@ HD constexpr real RMHD<dim>::get_x1_differential(const lint ii) const
 }
 
 template <int dim>
-HD constexpr real RMHD<dim>::get_x2_differential(const lint ii) const
+DUAL constexpr real RMHD<dim>::get_x2_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -483,7 +483,7 @@ HD constexpr real RMHD<dim>::get_x2_differential(const lint ii) const
 }
 
 template <int dim>
-HD constexpr real RMHD<dim>::get_x3_differential(const lint ii) const
+DUAL constexpr real RMHD<dim>::get_x3_differential(const lint ii) const
 {
     if constexpr (dim == 1) {
         switch (geometry) {
@@ -507,7 +507,7 @@ HD constexpr real RMHD<dim>::get_x3_differential(const lint ii) const
 }
 
 template <int dim>
-HD real
+DUAL real
 RMHD<dim>::get_cell_volume(const lint ii, const lint jj, const lint kk) const
 {
     // the volume in cartesian coordinates is only nominal
@@ -695,7 +695,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
  * @return none
  */
 template <int dim>
-HD RMHD<dim>::primitive_t
+DUAL RMHD<dim>::primitive_t
 RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
 {
     const auto gr   = gamma / (gamma - 1.0);
@@ -762,7 +762,7 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
 */
 
 template <int dim>
-HD void RMHD<dim>::calc_max_wave_speeds(
+DUAL void RMHD<dim>::calc_max_wave_speeds(
     const RMHD<dim>::primitive_t& prims,
     const luint nhat,
     real speeds[],
@@ -891,7 +891,7 @@ HD void RMHD<dim>::calc_max_wave_speeds(
 }
 
 template <int dim>
-HD RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
+DUAL RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
     const RMHD<dim>::primitive_t& primsL,
     const RMHD<dim>::primitive_t& primsR,
     const luint nhat
@@ -922,7 +922,7 @@ HD RMHD<dim>::eigenvals_t RMHD<dim>::calc_eigenvals(
 //                              CALCULATE THE STATE ARRAY
 //-----------------------------------------------------------------------------------------
 template <int dim>
-HD RMHD<dim>::conserved_t
+DUAL RMHD<dim>::conserved_t
 RMHD<dim>::prims2cons(const RMHD<dim>::primitive_t& prims) const
 {
     const real rho   = prims.rho;
@@ -1076,7 +1076,7 @@ void RMHD<dim>::adapt_dt(const ExecutionPolicy<>& p)
 //                                            FLUX CALCULATIONS
 //===================================================================================================================
 template <int dim>
-HD RMHD<dim>::conserved_t
+DUAL RMHD<dim>::conserved_t
 RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
     const
 {
@@ -1120,7 +1120,7 @@ RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
 };
 
 template <int dim>
-HD RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
+DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     RMHD<dim>::primitive_t& prL,
     RMHD<dim>::primitive_t& prR,
     const luint nhat,
@@ -1166,7 +1166,7 @@ HD RMHD<dim>::conserved_t RMHD<dim>::calc_hll_flux(
 };
 
 template <int dim>
-HD RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
+DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     RMHD<dim>::primitive_t& prL,
     RMHD<dim>::primitive_t& prR,
     const luint nhat,
@@ -1304,7 +1304,7 @@ HD RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
 };
 
 template <int dim>
-HD RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
+DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     RMHD<dim>::primitive_t& prL,
     RMHD<dim>::primitive_t& prR,
     const luint nhat,
@@ -1502,8 +1502,18 @@ HD RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
 template <int dim>
 void RMHD<dim>::advance(const ExecutionPolicy<>& p)
 {
-    const luint extent = p.get_full_extent();
-    simbi::parallel_for(p, extent, [p, this] DEV(const luint idx) {
+
+    printf(
+        "p_BlockDim: %d, %d, %d\n",
+        p.blockSize.x,
+        p.blockSize.y,
+        p.blockSize.z
+    );
+    printf("p_GridDim: %d, %d, %d\n", p.gridSize.x, p.gridSize.y, p.gridSize.z);
+    std::cin.get();
+    const luint extent  = p.get_full_extent();
+    const auto prim_dat = prims.data();
+    simbi::parallel_for(p, extent, [p, prim_dat, this] DEV(const luint idx) {
         // x1,x2,x3 hydro riemann fluxes
         conserved_t f[10];
         conserved_t g[10];
@@ -1515,27 +1525,15 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
 
         // primitive buffer that returns dynamic shared array
         // if working with shared memory on GPU, identity otherwise
-        auto prim_buff = identity<primitive_t>(prims);
+        const auto prim_buff = sm_or_identity(prim_dat);
 
         const luint kk = axid<dim, BlkAx::K>(idx, xag, yag);
         const luint jj = axid<dim, BlkAx::J>(idx, xag, yag, kk);
         const luint ii = axid<dim, BlkAx::I>(idx, xag, yag, kk);
 
         if constexpr (global::on_gpu) {
-            if constexpr (dim == 1) {
-                if (ii >= xag) {
-                    return;
-                }
-            }
-            else if constexpr (dim == 2) {
-                if ((ii >= xag) || (jj >= yag)) {
-                    return;
-                }
-            }
-            else {
-                if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
-                    return;
-                }
+            if ((ii >= xag) || (jj >= yag) || (kk >= zag)) {
+                return;
             }
         }
 
@@ -1634,6 +1632,12 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             pR = prim_buff
                 [idx3(txa + (q % 2) + 0, tya + vdir, tza + hdir, sx, sy, 0)];
 
+            // printf(
+            //     "x-direction, ii: %ld, pL: %f, pR: %f\n",
+            //     ii,
+            //     pL.rho,
+            //     pR.rho
+            // );
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
                     txa + (q % 2) - 2,
@@ -1664,6 +1668,12 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             pR = prim_buff
                 [idx3(txa + vdir, tya + (q % 2) + 0, tza + hdir, sx, sy, 0)];
 
+            // printf(
+            //     "y-direction, ii: %ld, pL: %f, pR: %f\n",
+            //     ii,
+            //     pL.rho,
+            //     pR.rho
+            // );
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
                     txa + vdir,
@@ -1694,6 +1704,12 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             pR = prim_buff
                 [idx3(txa + vdir, tya + hdir, tza + (q % 2) + 0, sx, sy, 0)];
 
+            // printf(
+            //     "z-direction, ii: %ld, pL: %f, pR: %f\n",
+            //     ii,
+            //     pL.rho,
+            //     pR.rho
+            // );
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
                     txa + vdir,
@@ -2079,40 +2095,6 @@ void RMHD<dim>::simulate(
         };
     }
 
-    // Write some info about the setup for writeup later
-    setup.x1max = x1[nxv - 1];
-    setup.x1min = x1[0];
-    setup.x1    = x1;
-    if constexpr (dim > 1) {
-        setup.x2max = x2[nyv - 1];
-        setup.x2min = x2[0];
-        setup.x2    = x2;
-    }
-    if constexpr (dim > 2) {
-        setup.x3max = x3[nzv - 1];
-        setup.x3min = x3[0];
-        setup.x3    = x3;
-    }
-    setup.nx              = nx;
-    setup.ny              = ny;
-    setup.nz              = nz;
-    setup.xactive_zones   = xag;
-    setup.yactive_zones   = yag;
-    setup.zactive_zones   = zag;
-    setup.x1_cell_spacing = cell2str.at(x1_cell_spacing);
-    setup.x2_cell_spacing = cell2str.at(x2_cell_spacing);
-    setup.x3_cell_spacing = cell2str.at(x3_cell_spacing);
-    setup.ad_gamma        = gamma;
-    setup.spatial_order   = spatial_order;
-    setup.time_order      = time_order;
-    setup.coord_system    = coord_system;
-    setup.using_fourvelocity =
-        (global::VelocityType == global::Velocity::FourVelocity);
-    setup.regime              = "srmhd";
-    setup.mesh_motion         = mesh_motion;
-    setup.boundary_conditions = boundary_conditions;
-    setup.dimensions          = dim;
-
     // allocate space for face-centered magnetic fields
     bstag1.resize(nxv * (yag + 2) * (zag + 2));
     bstag2.resize((xag + 2) * nyv * (zag + 2));
@@ -2157,12 +2139,13 @@ void RMHD<dim>::simulate(
         cons[i]        = conserved_t{d, m1, m2, m3, tau, b1, b2, b3, dchi};
     }
 
-    // Deallocate duplicate memory and setup the system
+    // set up the problem and dispatch of old state
+    set_output_params(dim, "srmhd");
     deallocate_state();
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
     print_shared_mem();
-    set_riemann_solver();
+    SINGLE(helpers::hybrid_set_riemann_solver, this);
 
     cons2prim(fullP);
     if constexpr (global::on_gpu) {
@@ -2230,6 +2213,7 @@ void RMHD<dim>::simulate(
                 x1min += step * dt * vmin;
                 hubble_param = adot(t) / a(t);
             }
+            std::cin.get();
         });
     }
     catch (const SimulationFailureException& e) {
