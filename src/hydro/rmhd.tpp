@@ -1502,15 +1502,6 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
 template <int dim>
 void RMHD<dim>::advance(const ExecutionPolicy<>& p)
 {
-
-    printf(
-        "p_BlockDim: %d, %d, %d\n",
-        p.blockSize.x,
-        p.blockSize.y,
-        p.blockSize.z
-    );
-    printf("p_GridDim: %d, %d, %d\n", p.gridSize.x, p.gridSize.y, p.gridSize.z);
-    std::cin.get();
     const luint extent  = p.get_full_extent();
     const auto prim_dat = prims.data();
     simbi::parallel_for(p, extent, [p, prim_dat, this] DEV(const luint idx) {
@@ -2174,7 +2165,6 @@ void RMHD<dim>::simulate(
             geometry
         );
     }
-
     // Simulate :)
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
@@ -2213,7 +2203,6 @@ void RMHD<dim>::simulate(
                 x1min += step * dt * vmin;
                 hubble_param = adot(t) / a(t);
             }
-            std::cin.get();
         });
     }
     catch (const SimulationFailureException& e) {

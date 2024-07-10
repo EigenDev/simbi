@@ -198,11 +198,11 @@ DUAL constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
     // size of array print Error
     if ((size_t) index >= sz) {
         printf(
-            "Error: array index: %" PRIu64
-            "out of bounds for ndarray of size: %zu "
+            "Error: array index %" PRIu64
+            " out of bounds for ndarray of size %" PRIu64
             "\n",
             (luint) index,
-            sz
+            (luint) sz
         );
     }
 // else return value at that index
@@ -224,11 +224,11 @@ DUAL constexpr DT simbi::ndarray<DT, build_mode>::operator[](IndexType index
     // size of array print Error
     if ((size_t) index >= sz) {
         printf(
-            "Error: array index: %" PRIu64
-            "out of bounds for ndarray of size: %zu "
+            "Error: array index %" PRIu64
+            " out of bounds for ndarray of size %" PRIu64
             "\n",
             (luint) index,
-            sz
+            (luint) sz
         );
     }
     // else return value at that index
