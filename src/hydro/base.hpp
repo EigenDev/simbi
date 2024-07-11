@@ -151,8 +151,8 @@ namespace simbi {
         {
             if constexpr (global::on_sm) {
                 printf(
-                    "Requested shared memory: %" PRIu64 "bytes",
-                    shBlockBytes
+                    "Requested shared memory: %.3e kB\n",
+                    static_cast<real>(shBlockBytes / 1024)
                 );
             }
         }
