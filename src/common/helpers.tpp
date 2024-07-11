@@ -2679,7 +2679,7 @@ namespace simbi {
             if constexpr (dim == 1) {
                 V txl = p.blockSize.x;
                 // Check if the active index exceeds the active zones
-                // if it does, then this thread buffer will taken on the
+                // if it does, then this thread buffer will take on the
                 // ghost index at the very end and return
                 buffer[txa] = data[ia];
                 if (tx < radius) {
