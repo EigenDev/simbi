@@ -665,8 +665,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
             const real chi   = qq / wsq - d * vsq / (1.0 + w);
             const real pg    = (1.0 / gr) * chi;
             edens_guess[gid] = qq;
-            if constexpr (global::VelocityType ==
-                          global::Velocity::FourVelocity) {
+            if constexpr (global::VelocityType == global::Velocity::FourVelocity) {
                 v1 *= w;
                 v2 *= w;
                 v3 *= w;
@@ -1623,12 +1622,41 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             pR = prim_buff
                 [idx3(txa + (q % 2) + 0, tya + vdir, tza + hdir, sx, sy, 0)];
 
-            // printf(
-            //     "x-direction, ii: %ld, pL: %f, pR: %f\n",
-            //     ii,
-            //     pL.rho,
-            //     pR.rho
-            // );
+            if (ii == 1051) {
+                printf(
+                    "x-direction, q: %ld, ii: %ld, txL: %ld, txR: %ld, ty: "
+                    "%ld, tza: "
+                    "%ld, pbL: %f, pbR: %f, pgL: %f, pgR: "
+                    "%f\n",
+                    q,
+                    ii,
+                    txa + (q % 2) - 1,
+                    txa + (q % 2) + 0,
+                    tya + vdir,
+                    tza + hdir,
+                    pL.rho,
+                    pR.rho,
+                    prims[idx3(
+                              ia + (q % 2) - 1,
+                              ja + vdir,
+                              ka + hdir,
+                              nx,
+                              ny,
+                              0
+                          )]
+                        .rho,
+                    prims[idx3(
+                              ia + (q % 2) + 0,
+                              ja + vdir,
+                              ka + hdir,
+                              nx,
+                              ny,
+                              0
+                          )]
+                        .rho
+                );
+            }
+
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
                     txa + (q % 2) - 2,
@@ -1660,11 +1688,12 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 [idx3(txa + vdir, tya + (q % 2) + 0, tza + hdir, sx, sy, 0)];
 
             // printf(
-            //     "y-direction, ii: %ld, pL: %f, pR: %f\n",
-            //     ii,
-            //     pL.rho,
-            //     pR.rho
+            //     "y-direction, q: %ld, jj: %ld, pbL: %f, pbR: %f, pgL: %f,
+            //     pgR: %f\n", q, jj, pL.rho, pR.rho, prims[idx3(ia + vdir, ja +
+            //     (q % 2) - 1, ka + hdir, nx, ny, 0)].rho, prims[idx3(ia +
+            //     vdir, ja + (q % 2) - 0, ka + hdir, nx, ny, 0)].rho
             // );
+
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
                     txa + vdir,
@@ -1695,12 +1724,6 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             pR = prim_buff
                 [idx3(txa + vdir, tya + hdir, tza + (q % 2) + 0, sx, sy, 0)];
 
-            // printf(
-            //     "z-direction, ii: %ld, pL: %f, pR: %f\n",
-            //     ii,
-            //     pL.rho,
-            //     pR.rho
-            // );
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
                     txa + vdir,
@@ -2169,6 +2192,8 @@ void RMHD<dim>::simulate(
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
             advance(activeP);
+            gpu::api::deviceSynch();
+            std::cin.get();
             cons2prim(fullP);
             config_ghosts3D(
                 fullP,
