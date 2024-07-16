@@ -1622,14 +1622,19 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             pR = prim_buff
                 [idx3(txa + (q % 2) + 0, tya + vdir, tza + hdir, sx, sy, 0)];
 
-            if (ii == 1051) {
+            if (pL.rho == 0 || pR.rho == 0) {
                 printf(
-                    "x-direction, q: %ld, ii: %ld, txL: %ld, txR: %ld, ty: "
+                    "x-direction, q: %ld, ii: %ld, jj: %lu, kk: %lu, txa: %lu, "
+                    "txaL: %ld, txaR: "
+                    "%ld, tya: "
                     "%ld, tza: "
                     "%ld, pbL: %f, pbR: %f, pgL: %f, pgR: "
                     "%f\n",
                     q,
                     ii,
+                    jj,
+                    kk,
+                    txa,
                     txa + (q % 2) - 1,
                     txa + (q % 2) + 0,
                     tya + vdir,
@@ -1687,12 +1692,45 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
             pR = prim_buff
                 [idx3(txa + vdir, tya + (q % 2) + 0, tza + hdir, sx, sy, 0)];
 
-            // printf(
-            //     "y-direction, q: %ld, jj: %ld, pbL: %f, pbR: %f, pgL: %f,
-            //     pgR: %f\n", q, jj, pL.rho, pR.rho, prims[idx3(ia + vdir, ja +
-            //     (q % 2) - 1, ka + hdir, nx, ny, 0)].rho, prims[idx3(ia +
-            //     vdir, ja + (q % 2) - 0, ka + hdir, nx, ny, 0)].rho
-            // );
+            if (pL.rho == 0 || pR.rho == 0) {
+                printf(
+                    "y-direction, q: %ld, ii: %ld, jj: %lu, kk: %lu, tya: %lu, "
+                    "tyaL: %ld, tyaR: "
+                    "%ld, txa: "
+                    "%ld, tza: "
+                    "%ld, pbL: %f, pbR: %f, pgL: %f, pgR: "
+                    "%f\n",
+                    q,
+                    ii,
+                    jj,
+                    kk,
+                    tya,
+                    tya + (q % 2) - 1,
+                    tya + (q % 2) + 0,
+                    txa + vdir,
+                    tza + hdir,
+                    pL.rho,
+                    pR.rho,
+                    prims[idx3(
+                              ia + vdir,
+                              ja + (q % 2) - 1,
+                              ka + hdir,
+                              nx,
+                              ny,
+                              0
+                          )]
+                        .rho,
+                    prims[idx3(
+                              ia + vdir,
+                              ja + (q % 2) + 0,
+                              ka + hdir,
+                              nx,
+                              ny,
+                              0
+                          )]
+                        .rho
+                );
+            }
 
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
@@ -1723,6 +1761,46 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 [idx3(txa + vdir, tya + hdir, tza + (q % 2) - 1, sx, sy, 0)];
             pR = prim_buff
                 [idx3(txa + vdir, tya + hdir, tza + (q % 2) + 0, sx, sy, 0)];
+
+            if (pL.rho == 0 || pR.rho == 0) {
+                printf(
+                    "z-direction, q: %ld, ii: %ld, jj: %lu, kk: %lu, tza: %lu, "
+                    "tzaL: %ld, tzaR: "
+                    "%ld, txa: "
+                    "%ld, tya: "
+                    "%ld, pbL: %f, pbR: %f, pgL: %f, pgR: "
+                    "%f\n",
+                    q,
+                    ii,
+                    jj,
+                    kk,
+                    tza,
+                    tza + (q % 2) - 1,
+                    tza + (q % 2) + 0,
+                    txa + vdir,
+                    tya + hdir,
+                    pL.rho,
+                    pR.rho,
+                    prims[idx3(
+                              ia + vdir,
+                              ja + hdir,
+                              ka + (q % 2) - 1,
+                              nx,
+                              ny,
+                              0
+                          )]
+                        .rho,
+                    prims[idx3(
+                              ia + vdir,
+                              ja + hdir,
+                              ka + (q % 2) + 0,
+                              nx,
+                              ny,
+                              0
+                          )]
+                        .rho
+                );
+            }
 
             if (!use_pcm) {
                 pLL = prim_buff[idx3(
@@ -2192,8 +2270,8 @@ void RMHD<dim>::simulate(
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
             advance(activeP);
-            gpu::api::deviceSynch();
-            std::cin.get();
+            // gpu::api::deviceSynch();
+            // std::cin.get();
             cons2prim(fullP);
             config_ghosts3D(
                 fullP,
