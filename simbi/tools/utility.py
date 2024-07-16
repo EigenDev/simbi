@@ -166,6 +166,7 @@ def read_file(
     p: Any
     chi: Any
 
+    # TODO: deprecate this function
     def try_read(
         dset: Union[h5py.AttributeManager, h5py.File],
         key: str,
@@ -314,7 +315,7 @@ def read_file(
         
         # if loading in vertices, convert to cell centers
         for key in mesh.keys():
-            if len(mesh[key] > setup[f"{key}active"]):
+            if len(mesh[key]) > setup[f"{key}active"]:
                 mesh[key] = calc_centroid(mesh[key], coord_system=setup["coord_system"])
         
         if setup["x1max"] > mesh["x1"][-1]:

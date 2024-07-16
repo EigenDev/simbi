@@ -634,8 +634,7 @@ class Visualizer:
                                 vmax=color_range[1],
                             )
                         }
-
-                    print(var.min())
+                    
                     self.frames += [
                         ax.pcolormesh(
                             xx,
