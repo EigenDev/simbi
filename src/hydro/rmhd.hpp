@@ -42,12 +42,12 @@ namespace simbi {
         using eigenvals_t     = rmhd::Eigenvals;
         using mag_fourvec_t   = rmhd::mag_four_vec<dim>;
         using function_t      = typename std::conditional_t<
-                 dim == 1,
-                 std::function<real(real)>,
-                 std::conditional_t<
-                     dim == 2,
-                     std::function<real(real, real)>,
-                     std::function<real(real, real, real)>>>;
+            dim == 1,
+            std::function<real(real)>,
+            std::conditional_t<
+                dim == 2,
+                std::function<real(real, real)>,
+                std::function<real(real, real, real)>>>;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             primitive_t&,
@@ -456,5 +456,5 @@ struct is_relativistic_mhd<simbi::RMHD<3>> {
     static constexpr bool value = true;
 };
 
-#include "rmhd.tpp"
+#include "rmhd.ipp"
 #endif
