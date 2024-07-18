@@ -46,5 +46,5 @@ namespace simbi {
 
 }   // namespace simbi
 
-#include "driver.tpp"
+#include "driver.ipp"
 #endif

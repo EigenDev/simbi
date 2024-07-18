@@ -1,7 +1,7 @@
 /**
     UNITS is a library built to maintain some dimensional-type safety to
     physcs calculation
-    @file units.tpp
+    @file units.ipp
     @author Marcus DuPont
     @version 0.1 05/10/22
 */
@@ -534,7 +534,7 @@ namespace units {
     template <typename T>
     struct yes {
         yes() = default;
-        ~yes() {};
+        ~yes(){};
 
         void foo()
         {
@@ -987,8 +987,7 @@ namespace units {
                             const auto cf = Celcius(Kelvin(1.0)).value;
                             newvalue *= std::pow(cf, powk);
                         }
-                        else if (uTransform.tempType ==
-                                 Temperature_t::Fahrenheit) {
+                        else if (uTransform.tempType == Temperature_t::Fahrenheit) {
                             const auto cf = Fahrenheit(Kelvin(1.0)).value;
                             newvalue *= std::pow(cf, powk);
                         }
@@ -998,8 +997,7 @@ namespace units {
                             const auto cf = Kelvin(Celcius(1.0)).value;
                             newvalue *= std::pow(cf, powk);
                         }
-                        else if (uTransform.tempType ==
-                                 Temperature_t::Fahrenheit) {
+                        else if (uTransform.tempType == Temperature_t::Fahrenheit) {
                             const auto cf = Fahrenheit(Celcius(1.0)).value;
                             newvalue *= std::pow(cf, powk);
                         }

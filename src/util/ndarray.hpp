@@ -257,5 +257,5 @@ struct is_3darray<simbi::ndarray<simbi::ndarray<simbi::ndarray<U>>>> {
     static constexpr bool value = true;
 };
 
-#include "ndarray.tpp"
+#include "ndarray.ipp"
 #endif
