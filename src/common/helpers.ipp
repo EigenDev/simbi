@@ -279,7 +279,8 @@ namespace simbi {
                 if (sim_state.t == 0) {
                     return static_cast<real>(0.0);
                 }
-                else if (sim_state.dlogt != 0.0 && sim_state.init_chkpt_idx == 0) {
+                else if (sim_state.dlogt != 0.0 &&
+                         sim_state.init_chkpt_idx == 0) {
                     return static_cast<real>(0.0);
                 }
                 return sim_state.t_interval;
@@ -2736,37 +2737,29 @@ namespace simbi {
                         buffer[idx3(txa, tya, tza + re, sx, sy, 0)] =
                             data[idx3(ia, ja, ka + re, ni, nj, nk)];
 
-                        // x1 zones
-                        buffer[idx3(txa + q, tya, tza - q, sx, sy, 0)] =
-                            data[idx3(ia + q, ja, ka - q, ni, nj, nk)];
-                        buffer[idx3(txa + q, tya, tza + re, sx, sy, 0)] =
-                            data[idx3(ia + q, ja, ka + re, ni, nj, nk)];
+                        for (int bdr = 1; bdr < radius + 1; bdr++) {
+                            // x1 zones
+                            buffer[idx3(txa + bdr, tya, tza - q, sx, sy, 0)] =
+                                data[idx3(ia + bdr, ja, ka - q, ni, nj, nk)];
+                            buffer[idx3(txa + bdr, tya, tza + re, sx, sy, 0)] =
+                                data[idx3(ia + bdr, ja, ka + re, ni, nj, nk)];
 
-                        buffer[idx3(txa - q, tya, tza - q, sx, sy, 0)] =
-                            data[idx3(ia - q, ja, ka - q, ni, nj, nk)];
-                        buffer[idx3(txa - q, tya, tza + re, sx, sy, 0)] =
-                            data[idx3(ia - q, ja, ka + re, ni, nj, nk)];
+                            buffer[idx3(txa - bdr, tya, tza - q, sx, sy, 0)] =
+                                data[idx3(ia - bdr, ja, ka - q, ni, nj, nk)];
+                            buffer[idx3(txa - bdr, tya, tza + re, sx, sy, 0)] =
+                                data[idx3(ia - bdr, ja, ka + re, ni, nj, nk)];
 
-                        // // x2 zones
-                        buffer[idx3(txa, tya + q, tza - q, sx, sy, 0)] =
-                            data[idx3(ia, ja + q, ka - q, ni, nj, nk)];
-                        buffer[idx3(txa, tya + q, tza + re, sx, sy, 0)] =
-                            data[idx3(ia, ja + q, ka + re, ni, nj, nk)];
+                            // x2 zones
+                            buffer[idx3(txa, tya + bdr, tza - q, sx, sy, 0)] =
+                                data[idx3(ia, ja + bdr, ka - q, ni, nj, nk)];
+                            buffer[idx3(txa, tya + bdr, tza + re, sx, sy, 0)] =
+                                data[idx3(ia, ja + bdr, ka + re, ni, nj, nk)];
 
-                        buffer[idx3(txa, tya - q, tza - q, sx, sy, 0)] =
-                            data[idx3(ia, ja - q, ka - q, ni, nj, nk)];
-                        buffer[idx3(txa, tya - q, tza + re, sx, sy, 0)] =
-                            data[idx3(ia, ja - q, ka + re, ni, nj, nk)];
-
-                        // buffer[idx3(txa - q, tya - q, tza - q, sx, sy, 0)] =
-                        //     data[idx3(ia - q, ja - q, ka - q, ni, nj, nk)];
-                        // buffer[idx3(txa - q, tya - q, tza + re, sx, sy, 0)] =
-                        //     data[idx3(ia - q, ja - q, ka + re, ni, nj, nk)];
-
-                        // buffer[idx3(txa + q, tya + q, tza - q, sx, sy, 0)] =
-                        //     data[idx3(ia + q, ja + q, ka - q, ni, nj, nk)];
-                        // buffer[idx3(txa + q, tya + q, tza + re, sx, sy, 0)] =
-                        //     data[idx3(ia + q, ja + q, ka + re, ni, nj, nk)];
+                            buffer[idx3(txa, tya - bdr, tza - q, sx, sy, 0)] =
+                                data[idx3(ia, ja - bdr, ka - q, ni, nj, nk)];
+                            buffer[idx3(txa, tya - bdr, tza + re, sx, sy, 0)] =
+                                data[idx3(ia, ja - bdr, ka + re, ni, nj, nk)];
+                        }
                     }
                 }
                 if (ty == 0) {
@@ -2781,38 +2774,29 @@ namespace simbi {
                         buffer[idx3(txa, tya + re, tza, sx, sy, 0)] =
                             data[idx3(ia, ja + re, ka, ni, nj, nk)];
 
-                        // x1 zones
-                        buffer[idx3(txa + q, tya - q, tza, sx, sy, 0)] =
-                            data[idx3(ia + q, ja - q, ka, ni, nj, nk)];
-                        buffer[idx3(txa + q, tya + re, tza, sx, sy, 0)] =
-                            data[idx3(ia + q, ja + re, ka, ni, nj, nk)];
+                        for (int bdr = 1; bdr < radius + 1; bdr++) {
+                            // x1 zones
+                            buffer[idx3(txa + bdr, tya - q, tza, sx, sy, 0)] =
+                                data[idx3(ia + bdr, ja - q, ka, ni, nj, nk)];
+                            buffer[idx3(txa + bdr, tya + re, tza, sx, sy, 0)] =
+                                data[idx3(ia + bdr, ja + re, ka, ni, nj, nk)];
 
-                        buffer[idx3(txa - q, tya - q, tza, sx, sy, 0)] =
-                            data[idx3(ia - q, ja - q, ka, ni, nj, nk)];
-                        buffer[idx3(txa - q, tya + re, tza, sx, sy, 0)] =
-                            data[idx3(ia - q, ja + re, ka, ni, nj, nk)];
+                            buffer[idx3(txa - bdr, tya - q, tza, sx, sy, 0)] =
+                                data[idx3(ia - bdr, ja - q, ka, ni, nj, nk)];
+                            buffer[idx3(txa - bdr, tya + re, tza, sx, sy, 0)] =
+                                data[idx3(ia - bdr, ja + re, ka, ni, nj, nk)];
 
-                        // // // x3 zones
-                        // buffer[idx3(txa, tya - q, tza + q, sx, sy, 0)] =
-                        //     data[idx3(ia, ja - q, ka + q, ni, nj, nk)];
-                        // buffer[idx3(txa, tya + re, tza + q, sx, sy, 0)] =
-                        //     data[idx3(ia, ja + re, ka + q, ni, nj, nk)];
+                            // x3 zones
+                            buffer[idx3(txa, tya - q, tza + bdr, sx, sy, 0)] =
+                                data[idx3(ia, ja - q, ka + bdr, ni, nj, nk)];
+                            buffer[idx3(txa, tya + re, tza + bdr, sx, sy, 0)] =
+                                data[idx3(ia, ja + re, ka + bdr, ni, nj, nk)];
 
-                        // buffer[idx3(txa, tya - q, tza - q, sx, sy, 0)] =
-                        //     data[idx3(ia, ja - q, ka - q, ni, nj, nk)];
-                        // buffer[idx3(txa, tya + re, tza - q, sx, sy, 0)] =
-                        //     data[idx3(ia, ja + re, ka - q, ni, nj, nk)];
-
-                        // // combo
-                        // buffer[idx3(txa + q, tya - q, tza + q, sx, sy, 0)] =
-                        //     data[idx3(ia + q, ja - q, ka + q, ni, nj, nk)];
-                        // buffer[idx3(txa + q, tya + re, tza + q, sx, sy, 0)] =
-                        //     data[idx3(ia + q, ja + re, ka + q, ni, nj, nk)];
-
-                        // buffer[idx3(txa - q, tya - q, tza - q, sx, sy, 0)] =
-                        //     data[idx3(ia - q, ja - q, ka - q, ni, nj, nk)];
-                        // buffer[idx3(txa - q, tya + re, tza - q, sx, sy, 0)] =
-                        //     data[idx3(ia - q, ja + re, ka - q, ni, nj, nk)];
+                            buffer[idx3(txa, tya - q, tza - bdr, sx, sy, 0)] =
+                                data[idx3(ia, ja - q, ka - bdr, ni, nj, nk)];
+                            buffer[idx3(txa, tya + re, tza - bdr, sx, sy, 0)] =
+                                data[idx3(ia, ja + re, ka - bdr, ni, nj, nk)];
+                        }
                     }
                 }
                 if (tx == 0) {
@@ -2827,38 +2811,29 @@ namespace simbi {
                         buffer[idx3(txa + re, tya, tza, sx, sy, 0)] =
                             data[idx3(ia + re, ja, ka, ni, nj, nk)];
 
-                        // x2 zones
-                        // buffer[idx3(txa - q, tya - q, tza, sx, sy, 0)] =
-                        //     data[idx3(ia - q, ja - q, ka, ni, nj, nk)];
-                        // buffer[idx3(txa + re, tya - q, tza, sx, sy, 0)] =
-                        //     data[idx3(ia + re, ja - q, ka, ni, nj, nk)];
+                        for (int bdr = 1; bdr < radius + 1; bdr++) {
+                            // x2 zones
+                            buffer[idx3(txa - q, tya - bdr, tza, sx, sy, 0)] =
+                                data[idx3(ia - q, ja - bdr, ka, ni, nj, nk)];
+                            buffer[idx3(txa + re, tya - bdr, tza, sx, sy, 0)] =
+                                data[idx3(ia + re, ja - bdr, ka, ni, nj, nk)];
 
-                        // buffer[idx3(txa - q, tya + q, tza, sx, sy, 0)] =
-                        //     data[idx3(ia - q, ja + q, ka, ni, nj, nk)];
-                        // buffer[idx3(txa + re, tya + q, tza, sx, sy, 0)] =
-                        //     data[idx3(ia + re, ja + q, ka, ni, nj, nk)];
+                            buffer[idx3(txa - q, tya + bdr, tza, sx, sy, 0)] =
+                                data[idx3(ia - q, ja + bdr, ka, ni, nj, nk)];
+                            buffer[idx3(txa + re, tya + bdr, tza, sx, sy, 0)] =
+                                data[idx3(ia + re, ja + bdr, ka, ni, nj, nk)];
 
-                        // // x3 zones
-                        // buffer[idx3(txa - q, tya, tza + q, sx, sy, 0)] =
-                        //     data[idx3(ia - q, ja, ka + q, ni, nj, nk)];
-                        // buffer[idx3(txa + re, tya, tza + q, sx, sy, 0)] =
-                        //     data[idx3(ia + re, ja, ka + q, ni, nj, nk)];
+                            // x3 zones
+                            buffer[idx3(txa - q, tya, tza + bdr, sx, sy, 0)] =
+                                data[idx3(ia - q, ja, ka + bdr, ni, nj, nk)];
+                            buffer[idx3(txa + re, tya, tza + bdr, sx, sy, 0)] =
+                                data[idx3(ia + re, ja, ka + bdr, ni, nj, nk)];
 
-                        // buffer[idx3(txa - q, tya, tza - q, sx, sy, 0)] =
-                        //     data[idx3(ia - q, ja, ka - q, ni, nj, nk)];
-                        // buffer[idx3(txa + re, tya, tza - q, sx, sy, 0)] =
-                        //     data[idx3(ia + re, ja, ka - q, ni, nj, nk)];
-
-                        // // combo
-                        // buffer[idx3(txa - q, tya - q, tza - q, sx, sy, 0)] =
-                        //     data[idx3(ia - q, ja - q, ka - q, ni, nj, nk)];
-                        // buffer[idx3(txa + re, tya - q, tza - q, sx, sy, 0)] =
-                        //     data[idx3(ia + re, ja - q, ka - q, ni, nj, nk)];
-
-                        // buffer[idx3(txa - q, tya + q, tza + q, sx, sy, 0)] =
-                        //     data[idx3(ia - q, ja + q, ka + q, ni, nj, nk)];
-                        // buffer[idx3(txa + re, tya + q, tza + q, sx, sy, 0)] =
-                        //     data[idx3(ia + re, ja + q, ka + q, ni, nj, nk)];
+                            buffer[idx3(txa - q, tya, tza - bdr, sx, sy, 0)] =
+                                data[idx3(ia - q, ja, ka - bdr, ni, nj, nk)];
+                            buffer[idx3(txa + re, tya, tza - bdr, sx, sy, 0)] =
+                                data[idx3(ia + re, ja, ka - bdr, ni, nj, nk)];
+                        }
                     }
                 }
                 gpu::api::synchronize();
