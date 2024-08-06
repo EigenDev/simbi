@@ -42,12 +42,12 @@ namespace simbi {
         using eigenvals_t     = rmhd::Eigenvals;
         using mag_fourvec_t   = rmhd::mag_four_vec<dim>;
         using function_t      = typename std::conditional_t<
-            dim == 1,
-            std::function<real(real)>,
-            std::conditional_t<
-                dim == 2,
-                std::function<real(real, real)>,
-                std::function<real(real, real, real)>>>;
+                 dim == 1,
+                 std::function<real(real)>,
+                 std::conditional_t<
+                     dim == 2,
+                     std::function<real(real, real)>,
+                     std::function<real(real, real, real)>>>;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
             primitive_t&,
@@ -252,7 +252,7 @@ namespace simbi {
         ) const
 
         {
-            static real eta[2];
+            static real eta[2], enthalpy[2];
             static real kv[2][3], bv[2][3], vv[2][3];
 
             // compute "sign" of the normal bfield
@@ -300,6 +300,8 @@ namespace simbi {
                 // Equation (31)
                 const real rdv = (vn * rmn + vp1 * rmp1 + vp2 * rmp2);
                 const real wt  = p + (ret - rdv) * var1;
+
+                enthalpy[ii] = wt;
 
                 // Equation (35) & (43)
                 eta[ii] = (ii < 1 ? -1.0 : 1.0) * sgnBn * std::sqrt(wt);
@@ -410,31 +412,31 @@ namespace simbi {
 
             /* -- check if sweep makes physical sense -- */
 
-            // auto success = (vncL - kL[0]) > -1.e-6;
-            // success *= (kR[0] - vncR) > -1.e-6;
+            auto success = (vncL - kL[0]) > -1.e-6;
+            success *= (kR[0] - vncR) > -1.e-6;
 
-            // success *= (lam[0] - vL[0]) < 0.0;
-            // success *= (lam[1] - vR[0]) > 0.0;
+            success *= (lam[0] - vL[0]) < 0.0;
+            success *= (lam[1] - vR[0]) > 0.0;
 
-            // success *= (h[1] - p) > 0.0;
-            // success *= (h[0] - p) > 0.0;
-            // success *= (kL[0] - lam[0]) > -1.e-6;
-            // success *= (lam[1] - kR[0]) > -1.e-6;
+            success *= (enthalpy[1] - p) > 0.0;
+            success *= (enthalpy[0] - p) > 0.0;
+            success *= (kL[0] - lam[0]) > -1.e-6;
+            success *= (lam[1] - kR[0]) > -1.e-6;
 
-            // if (!success) {
-            //     printf("Solution not physical!\n");
-            //     printf("bn: %.5e\n", bn);
-            //     std::cout << bfn << "\n";
-            //     std::cout << kL[0] << "\n";
-            //     std::cout << "Check 1: " << (vncL - kL[0]) << "\n";
-            //     std::cout << "Check 2: " << (kR[0] - vncR) << "\n";
-            //     std::cout << "Check 3: " << (lam[0] - vL[0]) << "\n";
-            //     std::cout << "Check 4: " << (lam[1] - vR[0]) << "\n";
-            //     std::cout << "Check 5: " << (h[1] - p) << "\n";
-            //     std::cout << "Check 6: " << (h[0] - p) << "\n";
-            //     std::cout << "Check 7: " << (kL[0] - lam[0]) << "\n";
-            //     std::cout << "Check 8: " << (lam[1] - kR[0]) << "\n";
-            // }
+            if (!success) {
+                printf("Solution not physical!\n");
+                printf("bn: %.5e\n", bn);
+                printf("bfn: %d\n", bfn);
+                printf("kL[0]: %.5e\n", kL[0]);
+                printf("Check 1: %f\n", (vncL - kL[0]));
+                printf("Check 2: %f\n", (kR[0] - vncR));
+                printf("Check 3: %f\n", (lam[0] - vL[0]));
+                printf("Check 4: %f\n", (lam[1] - vR[0]));
+                printf("Check 5: %f\n", (enthalpy[1] - p));
+                printf("Check 6: %f\n", (enthalpy[0] - p));
+                printf("Check 7: %f\n", (kL[0] - lam[0]));
+                printf("Check 8: %f\n", (lam[1] - kR[0]));
+            }
 
             return {f, prims[0], prims[1], prims[2]};
         }
