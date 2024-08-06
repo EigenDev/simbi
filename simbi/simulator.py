@@ -8,6 +8,7 @@ import inspect
 import importlib
 import tracemalloc
 import simbi.detail as detail
+from pathlib import Path
 from itertools import chain, repeat
 from .detail import initial_condition as simbi_ic
 from .detail import helpers
@@ -548,11 +549,12 @@ class Hydro:
             self.start_time = 1e-16
 
         # Check whether the specified path exists or not
-        if not os.path.exists(data_directory):
+        data_path: Path = Path(data_directory)
+        if not Path.is_dir(data_path):
             # Create a new directory because it does not exist
-            os.makedirs(data_directory)
+            Path.mkdir(data_path, parents=True)
             logger.info(
-                f"The data directory provided does not exist. Creating the {data_directory} directory now!"
+                f"The data directory provided does not exist. Creating the {data_path} directory now!"
             )
 
         if compute_mode in ["cpu", "omp"]:
