@@ -31,6 +31,8 @@
 #include <type_traits>                // for conditional_t
 #include <vector>                     // for vector
 
+sig_bool hll_fail_safe = false;
+
 namespace simbi {
     template <int dim>
     struct RMHD : public HydroBase {
@@ -247,7 +249,7 @@ namespace simbi {
             const real p,
             const conserved_t r[2],
             const real lam[2],
-            const real bn,
+            real bn,
             const luint nhat
         ) const
 
@@ -255,11 +257,10 @@ namespace simbi {
             static real eta[2], enthalpy[2];
             static real kv[2][3], bv[2][3], vv[2][3];
 
-            // compute "sign" of the normal bfield
-            // we do it this way to avoid exploding
-            // terms in the Alfven speed
-            const auto sgnBn = sgn(bn);
-            const auto bfn   = limit_zero(bn);
+            if (limit_zero(bn)) {
+                bn = 0.0;
+            }
+            const auto sgnBn = sgn(bn) + global::tol_scale;
 
             // store the left and right prims (rotational)
             // and the contact prims
@@ -304,8 +305,7 @@ namespace simbi {
                 enthalpy[ii] = wt;
 
                 // Equation (35) & (43)
-                eta[ii] = (ii < 1 ? -1.0 : 1.0) * sgnBn * std::sqrt(wt);
-                // h[ii]           = wt;
+                eta[ii] = std::pow(-1.0, ii + 1) * sgnBn * std::sqrt(wt);
                 const auto etaS = eta[ii];
                 const real var2 = 1.0 / (aS * p + ret + bn * etaS);
                 const real kn   = (rmn + p + rbn * etaS) * var2;
@@ -342,7 +342,7 @@ namespace simbi {
 
             // Compute contact terms
             // Equation (45)
-            const real dkn  = (kR[0] - kL[0] + global::tol_scale);
+            const real dkn  = (kR[0] - kL[0]) + global::tol_scale;
             const real var3 = 1.0 / dkn;
             const real bcn  = bn;
             const real bcp1 = (bterm(bR[1], kR[0], vR[0], vR[1]) -
@@ -359,9 +359,10 @@ namespace simbi {
             auto ksq      = kcn * kcn + kcp1 * kcp1 + kcp2 * kcp2;
             auto kdb      = kcn * bcn + kcp1 * bcp1 + kcp2 * bcp2;
             auto bhc      = kdb * dkn;
-            auto reg      = bfn ? 0.0 : (1.0 - ksq) / (etaL - kdb);
+            auto reg      = (1.0 - ksq) / (etaL - kdb);
             const real yL = (1.0 - ksq) / (etaL * dkn - bhc);
 
+            // Left side Eq.(47)
             const real vncL  = kcn - bcn * reg;
             const real vpc1L = kcp1 - bcp1 * reg;
             const real vpc2L = kcp2 - bcp2 * reg;
@@ -373,19 +374,40 @@ namespace simbi {
             ksq           = kcn * kcn + kcp1 * kcp1 + kcp2 * kcp2;
             kdb           = kcn * bcn + kcp1 * bcp1 + kcp2 * bcp2;
             bhc           = kdb * dkn;
-            reg           = bfn ? 0.0 : (1.0 - ksq) / (etaR - kdb);
+            reg           = (1.0 - ksq) / (etaR - kdb);
             const real yR = (1.0 - ksq) / (etaR * dkn - bhc);
 
+            // Right side Eq. (47)
             const real vncR  = kcn - bcn * reg;
             const real vpc1R = kcp1 - bcp1 * reg;
             const real vpc2R = kcp2 - bcp2 * reg;
 
+            // printf(
+            //     "vncL: %.2e, vncR: %.2e, lamL: %.2e, lamR: %.2e, bc: %.2e, "
+            //     "regL: %.2e, regR: %.2e\n",
+            //     vncL,
+            //     vncR,
+            //     kL[0],
+            //     kR[0],
+            //     bcn,
+            //     regL,
+            //     regR
+            // );
+
             // Equation (48)
+            // const real f = [&] {
+            //     if (limit_zero(dkn)) {
+            //         return 0.0;
+            //     }
+            //     else if (limit_zero(bn)) {
+            //         return dkn;
+            //     }
+            //     else {
+            //         return dkn * (1.0 - bn * (yR - yL));
+            //     }
+            // }();
             const real f = dkn * (1.0 - bn * (yR - yL));
 
-            // printf("vncL: %.2e, vncR: %.2e\n", vncL, vncR);
-            // printf("f: %.2e\n", f);
-            // printf("dkn: %.2e\n", dkn);
             // Return prims for later computation
             prims[0].vcomponent(nhat) = vL[0];
             prims[0].vcomponent(np1)  = vL[1];
@@ -393,7 +415,7 @@ namespace simbi {
             prims[0].bcomponent(nhat) = bL[0];
             prims[0].bcomponent(np1)  = bL[1];
             prims[0].bcomponent(np2)  = bL[2];
-            prims[0].p                = kL[0];   // store the Alfven speed
+            prims[0].alfven()         = kL[0];
 
             prims[1].vcomponent(nhat) = vR[0];
             prims[1].vcomponent(np1)  = vR[1];
@@ -401,7 +423,7 @@ namespace simbi {
             prims[1].bcomponent(nhat) = bR[0];
             prims[1].bcomponent(np1)  = bR[1];
             prims[1].bcomponent(np2)  = bR[2];
-            prims[1].p                = kR[0];   // store the Alfven speed
+            prims[1].alfven()         = kR[0];
 
             prims[2].vcomponent(nhat) = 0.5 * (vncR + vncL);
             prims[2].vcomponent(np1)  = 0.5 * (vpc1R + vpc1L);
@@ -410,33 +432,25 @@ namespace simbi {
             prims[2].bcomponent(np1)  = bcp1;
             prims[2].bcomponent(np2)  = bcp2;
 
-            /* -- check if sweep makes physical sense -- */
+            // check if solution is physically consistent Eq. (54)
+            auto physical = (vncL - kL[0]) > -global::tol_scale;
+            physical *= (kR[0] - vncR) > -global::tol_scale;
 
-            auto success = (vncL - kL[0]) > -1.e-6;
-            success *= (kR[0] - vncR) > -1.e-6;
+            physical *= (lam[0] - vL[0]) < 0.0;
+            physical *= (lam[1] - vR[0]) > 0.0;
 
-            success *= (lam[0] - vL[0]) < 0.0;
-            success *= (lam[1] - vR[0]) > 0.0;
+            physical *= (enthalpy[1] - p) > 0.0;
+            physical *= (enthalpy[0] - p) > 0.0;
+            physical *= (kL[0] - lam[0]) > -global::tol_scale;
+            physical *= (lam[1] - kR[0]) > -global::tol_scale;
 
-            success *= (enthalpy[1] - p) > 0.0;
-            success *= (enthalpy[0] - p) > 0.0;
-            success *= (kL[0] - lam[0]) > -1.e-6;
-            success *= (lam[1] - kR[0]) > -1.e-6;
-
-            if (!success) {
-                printf("Solution not physical!\n");
-                printf("bn: %.5e\n", bn);
-                printf("bfn: %d\n", bfn);
-                printf("kL[0]: %.5e\n", kL[0]);
-                printf("Check 1: %f\n", (vncL - kL[0]));
-                printf("Check 2: %f\n", (kR[0] - vncR));
-                printf("Check 3: %f\n", (lam[0] - vL[0]));
-                printf("Check 4: %f\n", (lam[1] - vR[0]));
-                printf("Check 5: %f\n", (enthalpy[1] - p));
-                printf("Check 6: %f\n", (enthalpy[0] - p));
-                printf("Check 7: %f\n", (kL[0] - lam[0]));
-                printf("Check 8: %f\n", (lam[1] - kR[0]));
+            if (!physical) {
+                hll_fail_safe = true;
             }
+
+            // if (sgn(vncL) != sgn(vncR)) {
+            //     printf("vncL: %f, vncR: %f\n", vncL, vncR);
+            // }
 
             return {f, prims[0], prims[1], prims[2]};
         }

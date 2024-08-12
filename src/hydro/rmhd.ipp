@@ -725,8 +725,6 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
         qq -= dqq;
 
         if (iter >= global::MAX_ITER || std::isnan(qq)) {
-            // dt             = INFINITY;
-            // inFailureState = true;
             break;
         }
         iter++;
@@ -736,19 +734,20 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
     const real qqd = qq + d;
     const real rat = s / qqd;
     const real fac = 1.0 / (qqd + bsq);
-    const real v1  = fac * (m1 + rat * b1);
-    const real v2  = fac * (m2 + rat * b2);
-    const real v3  = fac * (m3 + rat * b3);
+    real v1        = fac * (m1 + rat * b1);
+    real v2        = fac * (m2 + rat * b2);
+    real v3        = fac * (m3 + rat * b3);
     const real vsq = v1 * v1 + v2 * v2 + v3 * v3;
-    const real w   = std::sqrt(1.0 / (1.0 - vsq));
-    const real chi = qq / (w * w) - (d * vsq) / (1.0 + w);
+    const real wsq = 1.0 / (1.0 - vsq);
+    const real w   = std::sqrt(wsq);
+    const real chi = qq / wsq - d * vsq / (1.0 + w);
     const real pg  = (1.0 / gr) * chi;
     if constexpr (global::VelocityType == global::Velocity::FourVelocity) {
-        return {d / w, v1 * w, v2 * w, v3 * w, pg, b1, b2, b3, dchi / d};
+        v1 *= w;
+        v2 *= w;
+        v3 *= w;
     }
-    else {
-        return {d / w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
-    }
+    return {d / w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -1316,11 +1315,11 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const auto lambda = calc_eigenvals(prL, prR, nhat);
     const real aL     = lambda.afL;
     const real aR     = lambda.afR;
-    const real aLm    = aL < 0 ? aL : 0;
-    const real aRp    = aR > 0 ? aR : 0;
+    const real aLm    = aL < 0.0 ? aL : 0.0;
+    const real aRp    = aR > 0.0 ? aR : 0.0;
 
-    //---- Check wave speeds before wasting computations
     auto net_flux = [&] {
+        //---- Check wave speeds before wasting computations
         if (vface <= aLm) {
             return fL - uL * vface;
         }
@@ -1345,8 +1344,9 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
             }
         }
 
-        // define the magnetic field normal to the zone
+        // define the magnetic field normal to the zone direction
         const real bn = hll_state.bcomponent(nhat);
+
         // Eq. (12)
         const conserved_t r[2] = {uL * aLm - fL, uR * aRp - fR};
         const real lam[2]      = {aLm, aRp};
@@ -1366,10 +1366,11 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const auto [p, prAL, prAR, prC] = [&] {
             if (bn * bn / (p0 * p0) < 0.1) {   // Eq.(53)
                 // in this limit, the pressure is found exactly
+                // through Eq. (55)
                 const real a    = aRp - aLm;
                 const real b    = etR - etL + aRp * mnL - aLm * mnR;
                 const real c    = mnL * etR - mnR * etL;
-                const real quad = my_max<real>(0.0, b * b - 4.0 * a * c);
+                const real quad = b * b - 4.0 * a * c;
                 p0              = 0.5 * (-b + std::sqrt(quad)) * afac;
             }
 
@@ -1378,9 +1379,9 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
                 return std::make_tuple(p0, pL, pR, pC);
             }
 
-            int iter = 0;
-            real p1  = 1.025 * p0;
+            real p1 = p0 + 1.e-6;
             real dp;
+            auto iter = 0;
             // Use the secant method to solve for the pressure
             do {
                 auto [f1, ppL, ppR, ppC] = hlld_vdiff(p1, r, lam, bn, nhat);
@@ -1392,45 +1393,56 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
                 pL = ppL;
                 pR = ppR;
                 pC = ppC;
-                iter++;
 
-            } while (std::abs(dp) > global::tol_scale * p1);
+                if (++iter >= global::MAX_ITER) {
+                    hll_fail_safe = true;
+                    break;
+                }
+
+                if (p1 < 0.0) {
+                    printf("Negative press: iter: %llu!\n", n);
+                }
+
+            } while (std::abs(dp) > global::tol_scale * p1 ||
+                     std::abs(f0) > global::tol_scale);
 
             return std::make_tuple(p1, pL, pR, pC);
         }();
 
+        if (hll_fail_safe) {
+            hll_fail_safe = false;
+            return hll_flux - hll_state * vface;
+        }
+
         // speed of the contact wave
         const real vnc = prC.vcomponent(nhat);
 
-        // I've stored the L/R Alfven speeds in the pressure
-        // since it is not used and the other velocity components
-        // are occupied.
-        const auto waL = prAL.p;
-        const auto waR = prAR.p;
+        const auto laL = prAL.alfven();
+        const auto laR = prAR.alfven();
 
         // do compound inequalities in two steps
         const auto on_left =
-            (vface < waL && vface > aLm) || (vface > waL && vface < vnc);
+            (vface < laL && vface > aLm) || (vface > laL && vface < vnc);
         const auto at_contact =
-            (vface < vnc && vface > waL) || (vface > vnc && vface < waR);
+            (vface < vnc && vface > laL) || (vface > vnc && vface < laR);
 
         const auto uc = on_left ? uL : uR;
-        const auto pc = on_left ? prAL : prAR;
+        const auto pa = on_left ? prAL : prAR;
         const auto fc = on_left ? fL : fR;
         const auto rc = on_left ? r[LF] : r[RF];
-        const auto wc = on_left ? aLm : aRp;
-        const auto wa = on_left ? waL : waR;
+        const auto lc = on_left ? aLm : aRp;
+        const auto la = on_left ? laL : laR;
 
-        // compute intermediate state across fast waves
+        // compute intermediate state across fast waves (Section 3.1)
         // === Fast / Slow Waves ===
-        const real vna  = pc.vcomponent(nhat);
-        const real vp1  = pc.vcomponent(np1);
-        const real vp2  = pc.vcomponent(np2);
-        const real bp1  = pc.bcomponent(np1);
-        const real bp2  = pc.bcomponent(np2);
-        const real vdbA = pc.vdotb();
+        const real vna  = pa.vcomponent(nhat);
+        const real vp1  = pa.vcomponent(np1);
+        const real vp2  = pa.vcomponent(np2);
+        const real bp1  = pa.bcomponent(np1);
+        const real bp2  = pa.bcomponent(np2);
+        const real vdbA = pa.vdotb();
 
-        const real fac = 1.0 / (wc - vna);
+        const real fac = 1.0 / (lc - vna);
         const real da  = rc.den * fac;
         const real ea  = (rc.total_energy() + p * vna - vdbA * bn) * fac;
         const real mn  = (ea + p) * vna - vdbA * bn;
@@ -1447,24 +1459,23 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         ua.bcomponent(np1)  = bp1;
         ua.bcomponent(np2)  = bp2;
 
-        const auto fa = fc + (ua - uc) * wa;
+        const auto fa = fc + (ua - uc) * la;
 
         if (!at_contact) {
             return fa - ua * vface;
         }
 
         // === Contact Wave ===
-
-        // compute jump conditions across alfven waves
+        // compute jump conditions across alfven waves (Section 3.3)
         const real vdbC = prC.vdotb();
         const real bnC  = prC.bcomponent(nhat);
         const real bp1C = prC.bcomponent(np1);
         const real bp2C = prC.bcomponent(np2);
         const real vp1C = prC.vcomponent(np1);
         const real vp2C = prC.vcomponent(np2);
-        const real fac2 = 1.0 / (wa - vnc);
-        const real dc   = da * (wa - vna) * fac2;
-        const real ec   = (ea * wa - mn + p * vnc - vdbC * bn) * fac2;
+        const real fac2 = 1.0 / (la - vnc);
+        const real dc   = da * (la - vna) * fac2;
+        const real ec   = (ea * la - mn + p * vnc - vdbC * bn) * fac2;
         const real mnc  = (ec + p) * vnc - vdbC * bn;
         const real mpc1 = (ec + p) * vp1C - vdbC * bp1C;
         const real mpc2 = (ec + p) * vp2C - vdbC * bp2C;

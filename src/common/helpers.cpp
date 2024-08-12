@@ -11,7 +11,7 @@ using namespace H5;
 namespace simbi {
     namespace helpers {
         // Flag that detects whether program was terminated by external forces
-        std::atomic<bool> killsig_received = false;
+        sig_bool killsig_received = false;
 
         InterruptException::InterruptException(int s) : status(s) {}
 
