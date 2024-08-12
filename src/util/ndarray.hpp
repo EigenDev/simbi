@@ -84,10 +84,10 @@ namespace simbi {
         unique_p<gpuDeleter> dev_arr;
 
       public:
-        DUAL ndarray();
-        DUAL ~ndarray();
+        ndarray();
+        ~ndarray();
         // Assignment operator
-        DUAL ndarray& operator=(ndarray rhs);
+        ndarray& operator=(ndarray rhs);
         // Initializer list constructor
         DUAL ndarray(std::initializer_list<DT> list);
 
@@ -99,7 +99,7 @@ namespace simbi {
 
         // Copy-constructor for array
         DUAL ndarray(const ndarray& rhs);
-        DUAL ndarray(const std::vector<DT>& rhs);
+        ndarray(const std::vector<DT>& rhs);
 
         // Move-constructor for vector
         DUAL ndarray(std::vector<DT>&& rhs);

@@ -54,10 +54,10 @@ namespace simbi {
         // Default deleter for scalar types
         template <typename ptrT>
         struct default_delete {
-            default_delete() = default;
+            DUAL default_delete() = default;
 
             template <typename U>
-            default_delete(const default_delete<U>&)
+            DUAL default_delete(const default_delete<U>&)
             {
             }
 
@@ -67,7 +67,7 @@ namespace simbi {
         // Default deleter for array types
         template <typename ptrT>
         struct default_delete<ptrT[]> {
-            void operator()(ptrT* ptr) const { delete[] ptr; }
+            DUAL void operator()(ptrT* ptr) const { delete[] ptr; }
         };
 
         // =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=

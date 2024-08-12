@@ -9,8 +9,7 @@ DUAL simbi::ndarray<DT, build_mode>::ndarray(std::initializer_list<DT> list)
 };
 
 template <typename DT, global::Platform build_mode>
-DUAL simbi::ndarray<DT, build_mode>::ndarray()
-    : sz(0), nd_capacity(0), dimensions(1)
+simbi::ndarray<DT, build_mode>::ndarray() : sz(0), nd_capacity(0), dimensions(1)
 {
 }
 
@@ -54,7 +53,7 @@ DUAL simbi::ndarray<DT, build_mode>::ndarray(const ndarray& rhs)
 
 // Copy-constructor for vector
 template <typename DT, global::Platform build_mode>
-DUAL simbi::ndarray<DT, build_mode>::ndarray(const std::vector<DT>& rhs)
+simbi::ndarray<DT, build_mode>::ndarray(const std::vector<DT>& rhs)
     : sz(rhs.size()),
       nd_capacity(rhs.capacity() * sizeof(DT)),
       dimensions(1),
@@ -80,7 +79,7 @@ DUAL simbi::ndarray<DT, build_mode>::ndarray(std::vector<DT>&& rhs)
 
 // Copy the arrays and deallocate the RHS
 template <typename DT, global::Platform build_mode>
-DUAL simbi::ndarray<DT, build_mode>&
+simbi::ndarray<DT, build_mode>&
 simbi::ndarray<DT, build_mode>::ndarray::operator=(ndarray other)
 {
     other.swap(*this);
@@ -199,8 +198,7 @@ DUAL constexpr DT& simbi::ndarray<DT, build_mode>::operator[](IndexType index)
     if ((size_t) index >= sz) {
         printf(
             "Error: array index %" PRIu64
-            " out of bounds for ndarray of size %" PRIu64
-            "\n",
+            " out of bounds for ndarray of size %" PRIu64 "\n",
             (luint) index,
             (luint) sz
         );
@@ -225,8 +223,7 @@ DUAL constexpr DT simbi::ndarray<DT, build_mode>::operator[](IndexType index
     if ((size_t) index >= sz) {
         printf(
             "Error: array index %" PRIu64
-            " out of bounds for ndarray of size %" PRIu64
-            "\n",
+            " out of bounds for ndarray of size %" PRIu64 "\n",
             (luint) index,
             (luint) sz
         );
@@ -320,7 +317,7 @@ DT simbi::ndarray<DT, build_mode>::front() const
 }
 
 template <typename DT, global::Platform build_mode>
-DUAL simbi::ndarray<DT, build_mode>::~ndarray()
+simbi::ndarray<DT, build_mode>::~ndarray()
 {
 }
 
