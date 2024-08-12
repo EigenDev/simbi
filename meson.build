@@ -224,8 +224,6 @@ templates = [
     'src/util/printb.ipp',
 ]
 
-
-run_command('python', '-m', 'cython', '--cplus', 'src/call_obj.pyx', check: true)
 cpu_ext = py3.extension_module(
     'cpu_ext',
     ['src/cpu_ext.pyx', 'src/call_obj.pyx'] + sources + headers + templates,
