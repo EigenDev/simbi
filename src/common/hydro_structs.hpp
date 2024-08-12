@@ -1589,6 +1589,14 @@ namespace rmhd {
             return *this;
         }
 
+        // I've run out of variables, but I
+        // need to store the Alfven speed
+        // for the HLLD solver, so I'll store
+        // it in the pressure variable
+        DUAL constexpr real alfven() const { return p; }
+
+        DUAL constexpr real& alfven() { return p; }
+
         DUAL constexpr real vcomponent(const luint nhat) const
         {
             return nhat == 1 ? get_v1() : (nhat == 2) ? get_v2() : get_v3();
