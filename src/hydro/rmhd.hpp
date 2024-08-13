@@ -31,8 +31,6 @@
 #include <type_traits>                // for conditional_t
 #include <vector>                     // for vector
 
-sig_bool hll_fail_safe = false;
-
 namespace simbi {
     template <int dim>
     struct RMHD : public HydroBase {
@@ -52,10 +50,11 @@ namespace simbi {
                      std::function<real(real, real, real)>>>;
         template <typename T>
         using RiemannFuncPointer = conserved_t (T::*)(
-            primitive_t&,
-            primitive_t&,
+            const primitive_t&,
+            const primitive_t&,
             const luint,
-            const real
+            const real,
+            const luint
         ) const;
         RiemannFuncPointer<RMHD<dim>> riemann_solve;
 
@@ -115,24 +114,27 @@ namespace simbi {
         DUAL conserved_t prims2cons(const primitive_t& prims) const;
 
         DUAL conserved_t calc_hlle_flux(
-            primitive_t& prL,
-            primitive_t& prR,
+            const primitive_t& prL,
+            const primitive_t& prR,
             const luint nhat,
-            const real vface = 0.0
+            const real vface,
+            const luint gid
         ) const;
 
         DUAL conserved_t calc_hllc_flux(
-            primitive_t& prL,
-            primitive_t& prR,
+            const primitive_t& prL,
+            const primitive_t& prR,
             const luint nhat,
-            const real vface = 0.0
+            const real vface,
+            const luint gid
         ) const;
 
         DUAL conserved_t calc_hlld_flux(
-            primitive_t& prL,
-            primitive_t& prR,
+            const primitive_t& prL,
+            const primitive_t& prR,
             const luint nhat,
-            const real vface = 0.0
+            const real vface,
+            const luint gid
         ) const;
 
         DUAL void set_riemann_solver()
@@ -245,220 +247,22 @@ namespace simbi {
             bstag3.copyToGpu();
         }
 
-        DUAL std::tuple<real, primitive_t, primitive_t, primitive_t> hlld_vdiff(
+        DUAL std::tuple<real, primitive_t, primitive_t, primitive_t, bool>
+        hlld_vdiff(
             const real p,
             const conserved_t r[2],
             const real lam[2],
             real bn,
-            const luint nhat
-        ) const
-
-        {
-            static real eta[2], enthalpy[2];
-            static real kv[2][3], bv[2][3], vv[2][3];
-
-            if (limit_zero(bn)) {
-                bn = 0.0;
-            }
-            const auto sgnBn = sgn(bn) + global::tol_scale;
-
-            // store the left and right prims (rotational)
-            // and the contact prims
-            primitive_t prims[3];
-            const auto np1 = next_perm(nhat, 1);
-            const auto np2 = next_perm(nhat, 2);
-            // compute Alfven terms
-            for (int ii = 0; ii < 2; ii++) {
-                const auto aS   = lam[ii];
-                const auto rS   = r[ii];
-                const auto rmn  = rS.momentum(nhat);
-                const auto rmp1 = rS.momentum(np1);
-                const auto rmp2 = rS.momentum(np2);
-                const auto rbn  = rS.bcomponent(nhat);
-                const auto rbp1 = rS.bcomponent(np1);
-                const auto rbp2 = rS.bcomponent(np2);
-                const auto ret  = rS.total_energy();
-
-                // Eqs (26) - (30)
-                const real a  = rmn - aS * ret + p * (1.0 - aS * aS);
-                const real g  = rbp1 * rbp1 + rbp2 * rbp2;
-                const real ag = (a + g);
-                const real c  = rbp1 * rmp1 + rbp2 * rmp2;
-                const real q  = -ag + bn * bn * (1.0 - aS * aS);
-                const real x  = bn * (a * aS * bn + c) - ag * (aS * p + ret);
-
-                // Eqs (23) - (25)
-                const real term = (c + bn * (aS * rmn - ret));
-                const real vn   = (bn * (a * bn + aS * c) - ag * (p + rmn)) / x;
-                const real vp1  = (q * rmp1 + rbp1 * term) / x;
-                const real vp2  = (q * rmp2 + rbp2 * term) / x;
-
-                // Equation (21)
-                const real var1 = 1.0 / (aS - vn);
-                const real bp1  = (rbp1 - bn * vp1) * var1;
-                const real bp2  = (rbp2 - bn * vp2) * var1;
-
-                // Equation (31)
-                const real rdv = (vn * rmn + vp1 * rmp1 + vp2 * rmp2);
-                const real wt  = p + (ret - rdv) * var1;
-
-                enthalpy[ii] = wt;
-
-                // Equation (35) & (43)
-                eta[ii] = std::pow(-1.0, ii + 1) * sgnBn * std::sqrt(wt);
-                const auto etaS = eta[ii];
-                const real var2 = 1.0 / (aS * p + ret + bn * etaS);
-                const real kn   = (rmn + p + rbn * etaS) * var2;
-                const real kp1  = (rmp1 + rbp1 * etaS) * var2;
-                const real kp2  = (rmp2 + rbp2 * etaS) * var2;
-
-                vv[ii][0] = vn;
-                vv[ii][1] = vp1;
-                vv[ii][2] = vp2;
-
-                // the normal component of the k-vector is the Alfven speed
-                kv[ii][0] = kn;
-                kv[ii][1] = kp1;
-                kv[ii][2] = kp2;
-
-                bv[ii][0] = bn;
-                bv[ii][1] = bp1;
-                bv[ii][2] = bp2;
-            }
-
-            // Load left and right vars
-            const auto kL   = kv[LF];
-            const auto kR   = kv[RF];
-            const auto bL   = bv[LF];
-            const auto bR   = bv[RF];
-            const auto vL   = vv[LF];
-            const auto vR   = vv[RF];
-            const auto etaL = eta[LF];
-            const auto etaR = eta[RF];
-
-            auto bterm = [bn](real b, real lam, real vn, real v) {
-                return b * (lam - vn) + bn * v;
-            };
-
-            // Compute contact terms
-            // Equation (45)
-            const real dkn  = (kR[0] - kL[0]) + global::tol_scale;
-            const real var3 = 1.0 / dkn;
-            const real bcn  = bn;
-            const real bcp1 = (bterm(bR[1], kR[0], vR[0], vR[1]) -
-                               bterm(bL[1], kL[0], vL[0], vL[1])) *
-                              var3;
-            const real bcp2 = (bterm(bR[2], kR[0], vR[0], vR[2]) -
-                               bterm(bL[2], kL[0], vL[0], vL[2])) *
-                              var3;
-
-            // Left side Eq.(49)
-            real kcn      = kL[0];
-            real kcp1     = kL[1];
-            real kcp2     = kL[2];
-            auto ksq      = kcn * kcn + kcp1 * kcp1 + kcp2 * kcp2;
-            auto kdb      = kcn * bcn + kcp1 * bcp1 + kcp2 * bcp2;
-            auto bhc      = kdb * dkn;
-            auto reg      = (1.0 - ksq) / (etaL - kdb);
-            const real yL = (1.0 - ksq) / (etaL * dkn - bhc);
-
-            // Left side Eq.(47)
-            const real vncL  = kcn - bcn * reg;
-            const real vpc1L = kcp1 - bcp1 * reg;
-            const real vpc2L = kcp2 - bcp2 * reg;
-
-            // Right side Eq. (49)
-            kcn           = kR[0];
-            kcp1          = kR[1];
-            kcp2          = kR[2];
-            ksq           = kcn * kcn + kcp1 * kcp1 + kcp2 * kcp2;
-            kdb           = kcn * bcn + kcp1 * bcp1 + kcp2 * bcp2;
-            bhc           = kdb * dkn;
-            reg           = (1.0 - ksq) / (etaR - kdb);
-            const real yR = (1.0 - ksq) / (etaR * dkn - bhc);
-
-            // Right side Eq. (47)
-            const real vncR  = kcn - bcn * reg;
-            const real vpc1R = kcp1 - bcp1 * reg;
-            const real vpc2R = kcp2 - bcp2 * reg;
-
-            // printf(
-            //     "vncL: %.2e, vncR: %.2e, lamL: %.2e, lamR: %.2e, bc: %.2e, "
-            //     "regL: %.2e, regR: %.2e\n",
-            //     vncL,
-            //     vncR,
-            //     kL[0],
-            //     kR[0],
-            //     bcn,
-            //     regL,
-            //     regR
-            // );
-
-            // Equation (48)
-            // const real f = [&] {
-            //     if (limit_zero(dkn)) {
-            //         return 0.0;
-            //     }
-            //     else if (limit_zero(bn)) {
-            //         return dkn;
-            //     }
-            //     else {
-            //         return dkn * (1.0 - bn * (yR - yL));
-            //     }
-            // }();
-            const real f = dkn * (1.0 - bn * (yR - yL));
-
-            // Return prims for later computation
-            prims[0].vcomponent(nhat) = vL[0];
-            prims[0].vcomponent(np1)  = vL[1];
-            prims[0].vcomponent(np2)  = vL[2];
-            prims[0].bcomponent(nhat) = bL[0];
-            prims[0].bcomponent(np1)  = bL[1];
-            prims[0].bcomponent(np2)  = bL[2];
-            prims[0].alfven()         = kL[0];
-
-            prims[1].vcomponent(nhat) = vR[0];
-            prims[1].vcomponent(np1)  = vR[1];
-            prims[1].vcomponent(np2)  = vR[2];
-            prims[1].bcomponent(nhat) = bR[0];
-            prims[1].bcomponent(np1)  = bR[1];
-            prims[1].bcomponent(np2)  = bR[2];
-            prims[1].alfven()         = kR[0];
-
-            prims[2].vcomponent(nhat) = 0.5 * (vncR + vncL);
-            prims[2].vcomponent(np1)  = 0.5 * (vpc1R + vpc1L);
-            prims[2].vcomponent(np2)  = 0.5 * (vpc2R + vpc2L);
-            prims[2].bcomponent(nhat) = bcn;
-            prims[2].bcomponent(np1)  = bcp1;
-            prims[2].bcomponent(np2)  = bcp2;
-
-            // check if solution is physically consistent Eq. (54)
-            auto physical = (vncL - kL[0]) > -global::tol_scale;
-            physical *= (kR[0] - vncR) > -global::tol_scale;
-
-            physical *= (lam[0] - vL[0]) < 0.0;
-            physical *= (lam[1] - vR[0]) > 0.0;
-
-            physical *= (enthalpy[1] - p) > 0.0;
-            physical *= (enthalpy[0] - p) > 0.0;
-            physical *= (kL[0] - lam[0]) > -global::tol_scale;
-            physical *= (lam[1] - kR[0]) > -global::tol_scale;
-
-            if (!physical) {
-                hll_fail_safe = true;
-            }
-
-            // if (sgn(vncL) != sgn(vncR)) {
-            //     printf("vncL: %f, vncR: %f\n", vncL, vncR);
-            // }
-
-            return {f, prims[0], prims[1], prims[2]};
-        }
+            const luint nhat,
+            const luint gid
+        ) const;
     };
+
 }   // namespace simbi
 
 template <>
 struct is_relativistic_mhd<simbi::RMHD<1>> {
+
     static constexpr bool value = true;
 };
 

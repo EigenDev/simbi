@@ -668,7 +668,8 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                 v2 *= w;
                 v3 *= w;
             }
-            prims[gid] = {d / w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
+            prims[gid] =
+                primitive_t{d / w, v1, v2, v3, pg, b1, b2, b3, dchi / d};
 
             workLeftToDo = false;
 
@@ -1117,10 +1118,11 @@ RMHD<dim>::prims2flux(const RMHD<dim>::primitive_t& prims, const luint nhat)
 
 template <int dim>
 DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
-    RMHD<dim>::primitive_t& prL,
-    RMHD<dim>::primitive_t& prR,
+    const RMHD<dim>::primitive_t& prL,
+    const RMHD<dim>::primitive_t& prR,
     const luint nhat,
-    const real vface
+    const real vface,
+    const luint gid
 ) const
 {
     const auto uL     = prims2cons(prL);
@@ -1163,10 +1165,11 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
 
 template <int dim>
 DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
-    RMHD<dim>::primitive_t& prL,
-    RMHD<dim>::primitive_t& prR,
+    const RMHD<dim>::primitive_t& prL,
+    const RMHD<dim>::primitive_t& prR,
     const luint nhat,
-    const real vface
+    const real vface,
+    const luint gid
 ) const
 {
     const auto uL = prims2cons(prL);
@@ -1300,11 +1303,228 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
 };
 
 template <int dim>
-DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
-    RMHD<dim>::primitive_t& prL,
-    RMHD<dim>::primitive_t& prR,
+DUAL std::tuple<
+    real,
+    typename RMHD<dim>::primitive_t,
+    typename RMHD<dim>::primitive_t,
+    typename RMHD<dim>::primitive_t,
+    bool>
+RMHD<dim>::hlld_vdiff(
+    const real p,
+    const RMHD<dim>::conserved_t r[2],
+    const real lam[2],
+    real bn,
     const luint nhat,
-    const real vface
+    const luint gid
+) const
+
+{
+    bool success = true;
+    real eta[2], enthalpy[2];
+    real kv[2][3], bv[2][3], vv[2][3];
+
+    const auto bfn   = limit_zero(bn);
+    const auto sgnBn = sgn(bn) + global::tol_scale;
+
+    // store the left and right prims (rotational)
+    // and the contact prims
+    primitive_t prims[3];
+    const auto np1 = next_perm(nhat, 1);
+    const auto np2 = next_perm(nhat, 2);
+    // compute Alfven terms
+    for (int ii = 0; ii < 2; ii++) {
+        const auto aS   = lam[ii];
+        const auto rS   = r[ii];
+        const auto rmn  = rS.momentum(nhat);
+        const auto rmp1 = rS.momentum(np1);
+        const auto rmp2 = rS.momentum(np2);
+        const auto rbn  = rS.bcomponent(nhat);
+        const auto rbp1 = rS.bcomponent(np1);
+        const auto rbp2 = rS.bcomponent(np2);
+        const auto ret  = rS.total_energy();
+
+        // Eqs (26) - (30)
+        const real a  = rmn - aS * ret + p * (1.0 - aS * aS);
+        const real g  = rbp1 * rbp1 + rbp2 * rbp2;
+        const real ag = (a + g);
+        const real c  = rbp1 * rmp1 + rbp2 * rmp2;
+        const real q  = -ag + bn * bn * (1.0 - aS * aS);
+        const real x  = bn * (a * aS * bn + c) - ag * (aS * p + ret);
+
+        // Eqs (23) - (25)
+        const real term = (c + bn * (aS * rmn - ret));
+        const real vn   = (bn * (a * bn + aS * c) - ag * (p + rmn)) / x;
+        const real vp1  = (q * rmp1 + rbp1 * term) / x;
+        const real vp2  = (q * rmp2 + rbp2 * term) / x;
+
+        // Equation (21)
+        const real var1 = 1.0 / (aS - vn);
+        const real bp1  = (rbp1 - bn * vp1) * var1;
+        const real bp2  = (rbp2 - bn * vp2) * var1;
+
+        // Equation (31)
+        const real rdv = (vn * rmn + vp1 * rmp1 + vp2 * rmp2);
+        const real wt  = p + (ret - rdv) * var1;
+
+        enthalpy[ii] = wt;
+
+        // Equation (35) & (43)
+        eta[ii]         = std::pow(-1.0, ii + 1) * sgnBn * std::sqrt(wt);
+        const auto etaS = eta[ii];
+        const real var2 = 1.0 / (aS * p + ret + bn * etaS);
+        const real kn   = (rmn + p + rbn * etaS) * var2;
+        const real kp1  = (rmp1 + rbp1 * etaS) * var2;
+        const real kp2  = (rmp2 + rbp2 * etaS) * var2;
+
+        vv[ii][0] = vn;
+        vv[ii][1] = vp1;
+        vv[ii][2] = vp2;
+
+        // the normal component of the k-vector is the Alfven speed
+        kv[ii][0] = kn;
+        kv[ii][1] = kp1;
+        kv[ii][2] = kp2;
+
+        bv[ii][0] = bn;
+        bv[ii][1] = bp1;
+        bv[ii][2] = bp2;
+    }
+
+    // Load left and right vars
+    const auto kL   = kv[LF];
+    const auto kR   = kv[RF];
+    const auto bL   = bv[LF];
+    const auto bR   = bv[RF];
+    const auto vL   = vv[LF];
+    const auto vR   = vv[RF];
+    const auto etaL = eta[LF];
+    const auto etaR = eta[RF];
+
+    auto bterm = [bn](real b, real lam, real vn, real v) {
+        return b * (lam - vn) + bn * v;
+    };
+
+    // Compute contact terms
+    // Equation (45)
+    const auto dkn  = (kR[0] - kL[0]) + global::tol_scale;
+    const auto var3 = 1.0 / dkn;
+    const auto bcn  = bn;
+    const auto bcp1 = (bterm(bR[1], kR[0], vR[0], vR[1]) -
+                       bterm(bL[1], kL[0], vL[0], vL[1])) *
+                      var3;
+    const auto bcp2 = (bterm(bR[2], kR[0], vR[0], vR[2]) -
+                       bterm(bL[2], kL[0], vL[0], vL[2])) *
+                      var3;
+
+    // Left side Eq.(49)
+    const auto kcnL  = kL[0];
+    const auto kcp1L = kL[1];
+    const auto kcp2L = kL[2];
+    const auto ksqL  = kcnL * kcnL + kcp1L * kcp1L + kcp2L * kcp2L;
+    const auto kdbL  = kcnL * bcn + kcp1L * bcp1 + kcp2L * bcp2;
+    const auto bhcL  = kdbL * dkn;
+    const auto regL  = bfn ? 0.0 : (1.0 - ksqL) / (etaL - kdbL);
+    const auto yL    = (1.0 - ksqL) / (etaL * dkn - bhcL);
+
+    // Left side Eq.(47)
+    const auto vncL  = kcnL - bcn * regL;
+    const auto vpc1L = kcp1L - bcp1 * regL;
+    const auto vpc2L = kcp2L - bcp2 * regL;
+
+    // Right side Eq. (49)
+    const auto kcnR  = kR[0];
+    const auto kcp1R = kR[1];
+    const auto kcp2R = kR[2];
+    const auto ksqR  = kcnR * kcnR + kcp1R * kcp1R + kcp2R * kcp2R;
+    const auto kdbR  = kcnR * bcn + kcp1R * bcp1 + kcp2R * bcp2;
+    const auto bhcR  = kdbR * dkn;
+    const auto regR  = bfn ? 0.0 : (1.0 - ksqR) / (etaR - kdbR);
+    const auto yR    = (1.0 - ksqR) / (etaR * dkn - bhcR);
+
+    // Right side Eq. (47)
+    const auto vncR  = kcnR - bcn * regR;
+    const auto vpc1R = kcp1R - bcp1 * regR;
+    const auto vpc2R = kcp2R - bcp2 * regR;
+
+    // Equation (48)
+    const auto f = dkn * (1.0 - bn * (yR - yL));
+
+    // check if solution is physically consistent, Eq. (54)
+    auto physical = (vncL - kL[0]) > -global::tol_scale;
+    if (physical) {
+        physical = (kR[0] - vncR) > -global::tol_scale;
+    }
+    if (physical) {
+        physical = (lam[0] - vL[0]) < 0.0;
+    }
+    if (physical) {
+        physical = (lam[1] - vR[0]) > 0.0;
+    }
+    if (physical) {
+        physical = (enthalpy[1] - p) > 0.0;
+    }
+    if (physical) {
+        physical = (enthalpy[0] - p) > 0.0;
+    }
+    if (physical) {
+        physical = (kL[0] - lam[0]) > -global::tol_scale;
+    }
+    if (physical) {
+        physical = (lam[1] - kR[0]) > -global::tol_scale;
+    }
+
+    if (!physical) {
+        // printf("Solution not physical at idx: %ld!\n", gid);
+        // printf("bn: %.5e\n", bn);
+        // printf("bfn: %d\n", bfn);
+        // printf("vncL: %.5e\n", vncL);
+        // printf("vncR: %.5e\n", vncR);
+        // printf("vAL: %.5e\n", vL[0]);
+        // printf("vAR: %.5e\n", vR[0]);
+        // printf("lamAL: %.5e\n", kL[0]);
+        // printf("lamAR: %.5e\n", kR[0]);
+        // printf("lamBL: %.5e\n", lam[0]);
+        // printf("lamBR: %.5e\n", lam[1]);
+        // printf("wR: %.5e\n", enthalpy[1]);
+        // printf("wL: %.5e\n", enthalpy[0]);
+        // printf("p: %.5e\n\n", p);
+        success = false;
+    }
+
+    // Return prims for later computation
+    prims[0].vcomponent(nhat) = vL[0];
+    prims[0].vcomponent(np1)  = vL[1];
+    prims[0].vcomponent(np2)  = vL[2];
+    prims[0].bcomponent(nhat) = bL[0];
+    prims[0].bcomponent(np1)  = bL[1];
+    prims[0].bcomponent(np2)  = bL[2];
+    prims[0].alfven()         = kL[0];
+
+    prims[1].vcomponent(nhat) = vR[0];
+    prims[1].vcomponent(np1)  = vR[1];
+    prims[1].vcomponent(np2)  = vR[2];
+    prims[1].bcomponent(nhat) = bR[0];
+    prims[1].bcomponent(np1)  = bR[1];
+    prims[1].bcomponent(np2)  = bR[2];
+    prims[1].alfven()         = kR[0];
+
+    prims[2].vcomponent(nhat) = 0.5 * (vncR + vncL);
+    prims[2].vcomponent(np1)  = 0.5 * (vpc1R + vpc1L);
+    prims[2].vcomponent(np2)  = 0.5 * (vpc2R + vpc2L);
+    prims[2].bcomponent(nhat) = bcn;
+    prims[2].bcomponent(np1)  = bcp1;
+    prims[2].bcomponent(np2)  = bcp2;
+
+    return {f, prims[0], prims[1], prims[2], success};
+};
+
+template <int dim>
+DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
+    const RMHD<dim>::primitive_t& prL,
+    const RMHD<dim>::primitive_t& prR,
+    const luint nhat,
+    const real vface,
+    const luint gid
 ) const
 {
     const auto uL = prims2cons(prL);
@@ -1360,10 +1580,10 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const auto mnR = r[RF].momentum(nhat);
 
         //------------ initial pressure guess
-        const auto phll = cons2prim(hll_state);
-        real p0         = phll.total_pressure();
+        const auto prim_hll = cons2prim(hll_state);
+        auto p0             = prim_hll.total_pressure();
 
-        const auto [p, prAL, prAR, prC] = [&] {
+        const auto [p, prAL, prAR, prC, success] = [&] {
             if (bn * bn / (p0 * p0) < 0.1) {   // Eq.(53)
                 // in this limit, the pressure is found exactly
                 // through Eq. (55)
@@ -1373,44 +1593,37 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
                 const real quad = b * b - 4.0 * a * c;
                 p0              = 0.5 * (-b + std::sqrt(quad)) * afac;
             }
-
-            auto [f0, pL, pR, pC] = hlld_vdiff(p0, r, lam, bn, nhat);
-            if (std::abs(f0) < global::tol_scale) {
-                return std::make_tuple(p0, pL, pR, pC);
-            }
+            auto [f0, pL, pR, pC, physical] =
+                hlld_vdiff(p0, r, lam, bn, nhat, gid);
 
             real p1 = p0 + 1.e-6;
-            real dp;
+            real dp, f1;
             auto iter = 0;
             // Use the secant method to solve for the pressure
             do {
-                auto [f1, ppL, ppR, ppC] = hlld_vdiff(p1, r, lam, bn, nhat);
+                std::tie(f1, pL, pR, pC, physical) =
+                    hlld_vdiff(p1, r, lam, bn, nhat, gid);
 
                 dp = (p1 - p0) / (f1 - f0) * f1;
                 p0 = p1;
                 f0 = f1;
                 p1 -= dp;
-                pL = ppL;
-                pR = ppR;
-                pC = ppC;
 
-                if (++iter >= global::MAX_ITER) {
-                    hll_fail_safe = true;
+                if (++iter >= global::MAX_ITER || !physical) {
                     break;
-                }
-
-                if (p1 < 0.0) {
-                    printf("Negative press: iter: %llu!\n", n);
                 }
 
             } while (std::abs(dp) > global::tol_scale * p1 ||
                      std::abs(f0) > global::tol_scale);
 
-            return std::make_tuple(p1, pL, pR, pC);
+            return std::make_tuple(p1, pL, pR, pC, physical);
         }();
 
-        if (hll_fail_safe) {
-            hll_fail_safe = false;
+        if (!success) {
+            printf("global iter: %ld\n", n);
+#if !GPU_CODE
+            std::cin.get();
+#endif
             return hll_flux - hll_state * vface;
         }
 
@@ -1432,6 +1645,23 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const auto rc = on_left ? r[LF] : r[RF];
         const auto lc = on_left ? aLm : aRp;
         const auto la = on_left ? laL : laR;
+
+        //         if (n == 35) {
+        //             printf(
+        //                 "vface: %.2e, vnc: %.2e, lL: %.2e, lR: %.2e, laL:
+        //                 %.2e, laR: "
+        //                 "%.2e\n",
+        //                 vface,
+        //                 vnc,
+        //                 aLm,
+        //                 aRp,
+        //                 laL,
+        //                 laR
+        //             );
+        // #if !GPU_CODE
+        //             std::cin.get();
+        // #endif
+        //         }
 
         // compute intermediate state across fast waves (Section 3.1)
         // === Fast / Slow Waves ===
@@ -1653,7 +1883,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_x[(q % 2)], 1);
-            f[q] = (this->*riemann_solve)(pL, pR, 1, 0);
+            f[q] = (this->*riemann_solve)(pL, pR, 1, 0, idx);
 
             // fluxes in j direction
             pL = prim_buff
@@ -1683,7 +1913,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_y[(q % 2)], 2);
-            g[q] = (this->*riemann_solve)(pL, pR, 2, 0);
+            g[q] = (this->*riemann_solve)(pL, pR, 2, 0, idx);
 
             // fluxes in k direction
             pL = prim_buff
@@ -1713,7 +1943,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_z[(q % 2)], 3);
-            h[q] = (this->*riemann_solve)(pL, pR, 3, 0);
+            h[q] = (this->*riemann_solve)(pL, pR, 3, 0, idx);
         }
 
         // compute edge emfs in clockwise direction wrt cell plane
