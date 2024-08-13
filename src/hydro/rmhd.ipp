@@ -662,8 +662,7 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
             const real chi   = qq / wsq - d * vsq / (1.0 + w);
             const real pg    = (1.0 / gr) * chi;
             edens_guess[gid] = qq;
-            if constexpr (global::VelocityType ==
-                          global::Velocity::FourVelocity) {
+            if constexpr (global::VelocityType == global::Velocity::FourVelocity) {
                 v1 *= w;
                 v2 *= w;
                 v3 *= w;
@@ -1620,10 +1619,6 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         }();
 
         if (!success) {
-            printf("global iter: %ld\n", n);
-#if !GPU_CODE
-            std::cin.get();
-#endif
             return hll_flux - hll_state * vface;
         }
 
