@@ -1318,7 +1318,7 @@ namespace simbi {
         DUAL T axid(T idx, T ni, T nj, T kk = T(0));
 
         template <typename T>
-        DUAL bool limit_zero(T val)
+        DUAL bool goes_to_zero(T val)
         {
             return (val * val) < global::tol_scale;
         }
