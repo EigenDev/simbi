@@ -662,7 +662,8 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
             const real chi   = qq / wsq - d * vsq / (1.0 + w);
             const real pg    = (1.0 / gr) * chi;
             edens_guess[gid] = qq;
-            if constexpr (global::VelocityType == global::Velocity::FourVelocity) {
+            if constexpr (global::VelocityType ==
+                          global::Velocity::FourVelocity) {
                 v1 *= w;
                 v2 *= w;
                 v3 *= w;
@@ -1213,7 +1214,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const real bp2 = hll_state.bcomponent(np2);
 
         // check if normal magnetic field is approaching zero
-        const auto bfn = limit_zero(bn);
+        const auto bfn = goes_to_zero(bn);
 
         const real uhlld = hll_state.den;
         const real uhllm = hll_state.momentum(nhat);
@@ -1321,8 +1322,6 @@ RMHD<dim>::hlld_vdiff(
     bool success = true;
     real eta[2], enthalpy[2];
     real kv[2][3], bv[2][3], vv[2][3];
-
-    const auto bfn   = limit_zero(bn);
     const auto sgnBn = sgn(bn) + global::tol_scale;
 
     // store the left and right prims (rotational)
@@ -1422,7 +1421,7 @@ RMHD<dim>::hlld_vdiff(
     const auto ksqL  = kcnL * kcnL + kcp1L * kcp1L + kcp2L * kcp2L;
     const auto kdbL  = kcnL * bcn + kcp1L * bcp1 + kcp2L * bcp2;
     const auto bhcL  = kdbL * dkn;
-    const auto regL  = bfn ? 0.0 : (1.0 - ksqL) / (etaL - kdbL);
+    const auto regL  = (1.0 - ksqL) / (etaL - kdbL);
     const auto yL    = (1.0 - ksqL) / (etaL * dkn - bhcL);
 
     // Left side Eq.(47)
@@ -1437,7 +1436,7 @@ RMHD<dim>::hlld_vdiff(
     const auto ksqR  = kcnR * kcnR + kcp1R * kcp1R + kcp2R * kcp2R;
     const auto kdbR  = kcnR * bcn + kcp1R * bcp1 + kcp2R * bcp2;
     const auto bhcR  = kdbR * dkn;
-    const auto regR  = bfn ? 0.0 : (1.0 - ksqR) / (etaR - kdbR);
+    const auto regR  = (1.0 - ksqR) / (etaR - kdbR);
     const auto yR    = (1.0 - ksqR) / (etaR * dkn - bhcR);
 
     // Right side Eq. (47)
@@ -1446,7 +1445,17 @@ RMHD<dim>::hlld_vdiff(
     const auto vpc2R = kcp2R - bcp2 * regR;
 
     // Equation (48)
-    const auto f = dkn * (1.0 - bn * (yR - yL));
+    const auto f = [&] {
+        if (goes_to_zero(dkn)) {
+            return 0.0;
+        }
+        else if (goes_to_zero(bn)) {
+            return dkn;
+        }
+        else {
+            return dkn * (1.0 - bn * (yR - yL));
+        }
+    }();
 
     // check if solution is physically consistent, Eq. (54)
     auto physical = (vncL - kL[0]) > -global::tol_scale;
@@ -1595,25 +1604,25 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
             auto [f0, pL, pR, pC, physical] =
                 hlld_vdiff(p0, r, lam, bn, nhat, gid);
 
-            real p1 = p0 + 1.e-6;
+            real p1 = p0 * 1.025;
             real dp, f1;
-            auto iter = 0;
+            auto iter = 1;
             // Use the secant method to solve for the pressure
             do {
                 std::tie(f1, pL, pR, pC, physical) =
                     hlld_vdiff(p1, r, lam, bn, nhat, gid);
 
+                if (iter > 7 || !physical || std::isnan(f1) ||
+                    (std::abs(f1) > std::abs(f0) && iter > 4)) {
+                    break;
+                }
                 dp = (p1 - p0) / (f1 - f0) * f1;
                 p0 = p1;
                 f0 = f1;
                 p1 -= dp;
+                iter++;
 
-                if (++iter >= global::MAX_ITER || !physical) {
-                    break;
-                }
-
-            } while (std::abs(dp) > global::tol_scale * p1 ||
-                     std::abs(f0) > global::tol_scale);
+            } while (std::abs(dp) > 1.e-5 * p1 || std::abs(f0) > 1.e-6);
 
             return std::make_tuple(p1, pL, pR, pC, physical);
         }();
