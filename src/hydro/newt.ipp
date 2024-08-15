@@ -2172,9 +2172,9 @@ void Newtonian<dim>::simulate(
         });
     }
     catch (const SimulationFailureException& e) {
-        std::cout << std::string(80, '=') << "\n";
+        std::cerr << std::string(80, '=') << "\n";
         std::cerr << e.what() << '\n';
-        std::cout << std::string(80, '=') << "\n";
+        std::cerr << std::string(80, '=') << "\n";
         troubled_cells.copyFromGpu();
         cons.copyFromGpu();
         prims.copyFromGpu();
