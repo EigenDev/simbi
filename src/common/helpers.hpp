@@ -989,12 +989,8 @@ namespace simbi {
          * @return row-major or column-major index for 2D array
          */
         STATIC
-        auto get_2d_idx(
-            const luint ii,
-            const luint jj,
-            const luint nx,
-            const luint ny
-        )
+        auto
+        idx2(const luint ii, const luint jj, const luint nx, const luint ny)
         {
             if constexpr (global::col_maj) {
                 return ii * ny + jj;
