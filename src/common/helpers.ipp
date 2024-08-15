@@ -2676,7 +2676,7 @@ namespace simbi {
         )
         {
 
-            const V aid = ka * nj * ni + ja * ni + ia;
+            const V aid = idx3(ia, ja, ka, ni, nj, nk);
             if constexpr (dim == 1) {
                 V txl = p.blockSize.x;
                 // Check if the active index exceeds the active zones
@@ -2698,24 +2698,26 @@ namespace simbi {
                 V tyl = p.blockSize.y;
                 // Load Shared memory into buffer for active zones plus
                 // ghosts
-                buffer[tya * sx + txa * sy] = data[aid];
+                buffer[idx2(txa, tya, sx, sy)] = data[aid];
                 if (ty < radius) {
                     if (blockIdx.y == p.gridSize.y - 1 &&
                         (ja + p.blockSize.y > nj - radius + ty)) {
                         tyl = nj - radius - ja + ty;
                     }
-                    buffer[(tya - radius) * sx + txa] =
-                        data[(ja - radius) * ni + ia];
-                    buffer[(tya + tyl) * sx + txa] = data[(ja + tyl) * ni + ia];
+                    buffer[idx2(txa, tya - radius, sx, sy)] =
+                        data[idx2(ia, ja - radius, ni, nj)];
+                    buffer[idx2(txa, tya + txl, sx, sy)] =
+                        data[idx2(ia, ja + tyl, ni, nj)];
                 }
                 if (tx < radius) {
                     if (blockIdx.x == p.gridSize.x - 1 &&
                         (ia + p.blockSize.x > ni - radius + tx)) {
                         txl = ni - radius - ia + tx;
                     }
-                    buffer[tya * sx + txa - radius] =
-                        data[ja * ni + (ia - radius)];
-                    buffer[tya * sx + txa + txl] = data[ja * ni + (ia + txl)];
+                    buffer[idx2(txa - radius, tya, sx, sy)] =
+                        data[idx2(ia - radius, ja, ni, nj)];
+                    buffer[idx2(txa + txl, tya, sx, sy)] =
+                        data[idx2(ia + txl, ja, ni, nj)];
                 }
                 gpu::api::synchronize();
             }
