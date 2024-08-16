@@ -1422,7 +1422,7 @@ RMHD<dim>::hlld_vdiff(
     const auto kdbL  = kcnL * bcn + kcp1L * bcp1 + kcp2L * bcp2;
     const auto bhcL  = kdbL * dkn;
     const auto regL  = (1.0 - ksqL) / (etaL - kdbL);
-    const auto yL    = (1.0 - ksqL) / (etaL * dkn - bhcL);
+    const auto yL    = dkn * (1.0 - ksqL) / (etaL * dkn - kdbL);
 
     // Left side Eq.(47)
     const auto vncL  = kcnL - bcn * regL;
@@ -1437,7 +1437,7 @@ RMHD<dim>::hlld_vdiff(
     const auto kdbR  = kcnR * bcn + kcp1R * bcp1 + kcp2R * bcp2;
     const auto bhcR  = kdbR * dkn;
     const auto regR  = (1.0 - ksqR) / (etaR - kdbR);
-    const auto yR    = (1.0 - ksqR) / (etaR * dkn - bhcR);
+    const auto yR    = dkn * (1.0 - ksqR) / (etaR * dkn - kdbR);
 
     // Right side Eq. (47)
     const auto vncR  = kcnR - bcn * regR;
@@ -1445,17 +1445,18 @@ RMHD<dim>::hlld_vdiff(
     const auto vpc2R = kcp2R - bcp2 * regR;
 
     // Equation (48)
-    const auto f = [&] {
-        if (goes_to_zero(dkn)) {
-            return 0.0;
-        }
-        else if (goes_to_zero(bn)) {
-            return dkn;
-        }
-        else {
-            return dkn * (1.0 - bn * (yR - yL));
-        }
-    }();
+    const auto f = vncL - vncR;
+    // const auto f = [&] {
+    //     if (goes_to_zero(dkn)) {
+    //         return 0.0;
+    //     }
+    //     else if (goes_to_zero(bn)) {
+    //         return dkn;
+    //     }
+    //     else {
+    //         return dkn * (1.0 - bn * (yR - yL));
+    //     }
+    // }();
 
     // check if solution is physically consistent, Eq. (54)
     auto physical = (vncL - kL[0]) > -global::tol_scale;
@@ -1479,6 +1480,12 @@ RMHD<dim>::hlld_vdiff(
     }
     if (physical) {
         physical = (lam[1] - kR[0]) > -global::tol_scale;
+    }
+    if (physical) {
+        physical = std::abs(kR[0]) < 1.0;
+    }
+    if (physical) {
+        physical = std::abs(kL[0]) < 1.0;
     }
 
     if (!physical) {
@@ -1604,6 +1611,10 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
             auto [f0, pL, pR, pC, physical] =
                 hlld_vdiff(p0, r, lam, bn, nhat, gid);
 
+            if (std::abs(f0) < global::tol_scale) {
+                return std::make_tuple(p0, pL, pR, pC, physical);
+            }
+
             real p1 = p0 * 1.025;
             real dp, f1;
             auto iter = 1;
@@ -1612,8 +1623,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
                 std::tie(f1, pL, pR, pC, physical) =
                     hlld_vdiff(p1, r, lam, bn, nhat, gid);
 
-                if (iter > 7 || !physical || std::isnan(f1) ||
-                    (std::abs(f1) > std::abs(f0) && iter > 4)) {
+                if (iter > global::MAX_ITER || !physical) {
                     break;
                 }
                 dp = (p1 - p0) / (f1 - f0) * f1;
@@ -1622,7 +1632,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
                 p1 -= dp;
                 iter++;
 
-            } while (std::abs(dp) > 1.e-5 * p1 || std::abs(f0) > 1.e-6);
+            } while (std::abs(dp) > global::tol_scale * p1 ||
+                     std::abs(f0) > global::tol_scale);
 
             return std::make_tuple(p1, pL, pR, pC, physical);
         }();
@@ -1634,14 +1645,15 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         // speed of the contact wave
         const real vnc = prC.vcomponent(nhat);
 
+        // Alfven speeds
         const auto laL = prAL.alfven();
         const auto laR = prAR.alfven();
 
         // do compound inequalities in two steps
         const auto on_left =
-            (vface < laL && vface > aLm) || (vface > laL && vface < vnc);
+            (vface <= laL && vface > aLm) || (vface > laL && vface <= vnc);
         const auto at_contact =
-            (vface < vnc && vface > laL) || (vface > vnc && vface < laR);
+            (vface <= vnc && vface > laL) || (vface > vnc && vface <= laR);
 
         const auto uc = on_left ? uL : uR;
         const auto pa = on_left ? prAL : prAR;
@@ -1649,23 +1661,6 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const auto rc = on_left ? r[LF] : r[RF];
         const auto lc = on_left ? aLm : aRp;
         const auto la = on_left ? laL : laR;
-
-        //         if (n == 35) {
-        //             printf(
-        //                 "vface: %.2e, vnc: %.2e, lL: %.2e, lR: %.2e, laL:
-        //                 %.2e, laR: "
-        //                 "%.2e\n",
-        //                 vface,
-        //                 vnc,
-        //                 aLm,
-        //                 aRp,
-        //                 laL,
-        //                 laR
-        //             );
-        // #if !GPU_CODE
-        //             std::cin.get();
-        // #endif
-        //         }
 
         // compute intermediate state across fast waves (Section 3.1)
         // === Fast / Slow Waves ===
@@ -1714,17 +1709,17 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const real mpc1 = (ec + p) * vp1C - vdbC * bp1C;
         const real mpc2 = (ec + p) * vp2C - vdbC * bp2C;
 
-        conserved_t uC;
-        uC.den              = dc;
-        uC.momentum(nhat)   = mnc;
-        uC.momentum(np1)    = mpc1;
-        uC.momentum(np2)    = mpc2;
-        uC.nrg              = ec - dc;
-        uC.bcomponent(nhat) = bnC;
-        uC.bcomponent(np1)  = bp1C;
-        uC.bcomponent(np2)  = bp2C;
+        conserved_t ut;
+        ut.den              = dc;
+        ut.momentum(nhat)   = mnc;
+        ut.momentum(np1)    = mpc1;
+        ut.momentum(np2)    = mpc2;
+        ut.nrg              = ec - dc;
+        ut.bcomponent(nhat) = bnC;
+        ut.bcomponent(np1)  = bp1C;
+        ut.bcomponent(np2)  = bp2C;
 
-        return fa + (uC - ua) * vnc - uC * vface;
+        return fa + (ut - ua) * vnc - ut * vface;
     }();
 
     // upwind the concentration
@@ -2430,9 +2425,9 @@ void RMHD<dim>::simulate(
         });
     }
     catch (const SimulationFailureException& e) {
-        std::cout << std::string(80, '=') << "\n";
+        std::cerr << std::string(80, '=') << "\n";
         std::cerr << e.what() << '\n';
-        std::cout << std::string(80, '=') << "\n";
+        std::cerr << std::string(80, '=') << "\n";
         troubled_cells.copyFromGpu();
         cons.copyFromGpu();
         prims.copyFromGpu();
