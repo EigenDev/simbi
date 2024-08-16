@@ -4,6 +4,11 @@ project('simbi', 'c', 'cpp', 'cython',
     default_options : { 'cpp_std': 'c++20', 'cpp_args': ['-march=native']},
 )
 
+# silence the deprecated numpy API warnings until the numpy teams
+# fixes the issue
+add_project_arguments('-DNPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION', language : 'cpp')
+add_project_arguments('-DCYTHON_EXTERN_C=extern "C++"', language : 'cpp')
+
 # BUILD CONFIG
 conf_data = configuration_data()
 conf_data.set10('FLOAT_PRECISION', get_option('precision') == 'single')
