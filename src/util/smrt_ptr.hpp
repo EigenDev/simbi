@@ -54,7 +54,7 @@ namespace simbi {
         // Default deleter for scalar types
         template <typename ptrT>
         struct default_delete {
-            DUAL default_delete() = default;
+            default_delete() = default;
 
             template <typename U>
             DUAL default_delete(const default_delete<U>&)
@@ -201,7 +201,7 @@ namespace simbi {
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // A dummy member function used to represent a logically true
             // boolean value, used by the conversion to bool operator.
-            void true_eval() {};
+            void true_eval(){};
 
           private:
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -347,7 +347,7 @@ namespace simbi {
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
             // A dummy member function used to represent a logically true
             // boolean value, used by the conversion to bool operator.
-            void true_eval() {};
+            void true_eval(){};
 
           private:
             //=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
