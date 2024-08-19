@@ -995,13 +995,13 @@ void RMHD<dim>::adapt_dt()
         const real dx1 = x1r - x1l;
         switch (geometry) {
             case simbi::Geometry::CARTESIAN:
-                cfl_dt = std::min(
+                cfl_dt = std ::min(
                     {dx1 / (std::max(v1p, v1m)),
                      dx2 / (std::max(v2p, v2m)),
                      dx3 / (std::max(v3p, v3m))}
                 );
-                break;
 
+                break;
             case simbi::Geometry::SPHERICAL:
                 {
                     const real x2l = get_x2face(jj, 0);
@@ -1577,19 +1577,26 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         //------------------------------------
         // Iteratively solve for the pressure
         //------------------------------------
-        const auto et_hll  = hll_state.total_energy();
-        const auto fet_hll = hll_flux.total_energy();
-        const auto mn_hll  = hll_state.momentum(nhat);
-        const auto fmn_hll = hll_flux.momentum(nhat);
 
         //------------ initial pressure guess
         const auto prim_hll = cons2prim(hll_state);
-        auto p0             = prim_hll.total_pressure();
+        real p0             = prim_hll.total_pressure();
+
+        // params to smoothen secant method if HLLD fails
+        constexpr real prat_lim      = 0.01;    // pressure ratio limit
+        constexpr real pguess_offset = 1.e-5;   // pressure guess offset
+        constexpr real vc_extension  = 1.e-6;   // extension of the contact wave
+        constexpr int num_tries      = 10;      // secant iterations
+        constexpr real ftol          = 1.0e-12;   // tolerance for the residuals
 
         const auto [p, prAL, prAR, prC, success] = [&] {
-            if (bn * bn / (p0 * p0) < 0.1) {   // Eq.(53)
-                // in this limit, the pressure is found exactly
-                // through Eq. (55)
+            if (bn * bn / p0 < prat_lim) {   // Eq.(53)
+                // in this limit, the pressure is found through Eq. (55)
+                const real et_hll  = hll_state.total_energy();
+                const real fet_hll = hll_flux.total_energy();
+                const real mn_hll  = hll_state.momentum(nhat);
+                const real fmn_hll = hll_flux.momentum(nhat);
+
                 const real a    = 1.0;
                 const real b    = et_hll - fmn_hll;
                 const real c    = fet_hll * mn_hll - et_hll * fmn_hll;
@@ -1603,9 +1610,10 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
                 return std::make_tuple(p0, pL, pR, pC, physical);
             }
 
-            real p1 = p0 * 1.015;
+            const real ptol = p0 * global::tol_scale;
+            real p1         = p0 + pguess_offset;
             real dp;
-            auto iter = 1;
+            auto iter = 0;
             // Use the secant method to solve for the pressure
             do {
                 auto [f1, psL, psR, psC, ok] =
@@ -1615,15 +1623,18 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
                 pR       = psR;
                 pC       = psC;
                 physical = ok;
-                if (iter++ > global::MAX_ITER || !ok) {
-                    break;
-                }
+
                 dp = (p1 - p0) / (f1 - f0) * f1;
                 p0 = p1;
                 f0 = f1;
                 p1 -= dp;
-            } while (std::abs(dp) > global::tol_scale * p1 ||
-                     std::abs(f0) > global::tol_scale);
+
+                if (iter++ > num_tries || !ok) {
+                    physical = false;
+                    break;
+                }
+
+            } while (std::abs(dp) > ptol || std::abs(f0) > ftol);
 
             return std::make_tuple(p1, pL, pR, pC, physical);
         }();
@@ -1636,14 +1647,13 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const real vnc = prC.vcomponent(nhat);
 
         // Alfven speeds
-        const auto laL = prAL.alfven();
-        const auto laR = prAR.alfven();
+        const real laL = prAL.alfven();
+        const real laR = prAR.alfven();
 
         // do compound inequalities in two steps
-        const auto on_left =
-            (vface <= laL && vface >= aLm) || (vface >= laL && vface <= vnc);
-        const auto at_contact =
-            (vface <= vnc && vface >= laL) || (vface >= vnc && vface <= laR);
+        const auto on_left    = laL >= vface - vc_extension;
+        const auto on_right   = laR <= vface + vc_extension;
+        const auto at_contact = !on_left && !on_right;
 
         const auto uc = on_left ? uL : uR;
         const auto pa = on_left ? prAL : prAR;
@@ -1659,14 +1669,14 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const real vp2  = pa.vcomponent(np2);
         const real bp1  = pa.bcomponent(np1);
         const real bp2  = pa.bcomponent(np2);
-        const real vdbA = pa.vdotb();
+        const real vdba = pa.vdotb();
 
         const real fac = 1.0 / (lc - vna);
         const real da  = rc.den * fac;
-        const real ea  = (rc.total_energy() + p * vna - vdbA * bn) * fac;
-        const real mn  = (ea + p) * vna - vdbA * bn;
-        const real mp1 = (ea + p) * vp1 - vdbA * bp1;
-        const real mp2 = (ea + p) * vp2 - vdbA * bp2;
+        const real ea  = (rc.total_energy() + p * vna - vdba * bn) * fac;
+        const real mn  = (ea + p) * vna - vdba * bn;
+        const real mp1 = (ea + p) * vp1 - vdba * bp1;
+        const real mp2 = (ea + p) * vp2 - vdba * bp2;
 
         conserved_t ua;
         ua.den              = da;
