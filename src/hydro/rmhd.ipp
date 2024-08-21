@@ -1419,9 +1419,8 @@ RMHD<dim>::hlld_vdiff(
     const auto kcp2L = kL[2];
     const auto ksqL  = kcnL * kcnL + kcp1L * kcp1L + kcp2L * kcp2L;
     const auto kdbL  = kcnL * bcn + kcp1L * bcp1 + kcp2L * bcp2;
-    const auto bhcL  = kdbL * dkn;
     const auto regL  = (1.0 - ksqL) / (etaL - kdbL);
-    const auto yL    = (1.0 - ksqL) / (etaL * dkn - bhcL);
+    const auto yL    = regL * var3;
 
     // Left side Eq.(47)
     const auto vncL  = kcnL - bcn * regL;
@@ -1434,9 +1433,8 @@ RMHD<dim>::hlld_vdiff(
     const auto kcp2R = kR[2];
     const auto ksqR  = kcnR * kcnR + kcp1R * kcp1R + kcp2R * kcp2R;
     const auto kdbR  = kcnR * bcn + kcp1R * bcp1 + kcp2R * bcp2;
-    const auto bhcR  = kdbR * dkn;
     const auto regR  = (1.0 - ksqR) / (etaR - kdbR);
-    const auto yR    = (1.0 - ksqR) / (etaR * dkn - bhcR);
+    const auto yR    = regR * var3;
 
     // Right side Eq. (47)
     const auto vncR  = kcnR - bcn * regR;
@@ -1444,54 +1442,31 @@ RMHD<dim>::hlld_vdiff(
     const auto vpc2R = kcp2R - bcp2 * regR;
 
     // Equation (48)
-    const auto f = dkn * (1.0 - bn * (yR - yL));
+    const auto f = [=] {
+        if (goes_to_zero(dkn)) {
+            return 0.0;
+        }
+        else if (goes_to_zero(bn)) {
+            return dkn;
+        }
+        else {
+            return dkn * (1.0 - bn * (yR - yL));
+        }
+    }();
 
     // check if solution is physically consistent, Eq. (54)
-    auto physical = (vncL - kL[0]) > -global::tol_scale;
-    if (physical) {
-        physical = (kR[0] - vncR) > -global::tol_scale;
-    }
-    if (physical) {
-        physical = (lam[0] - vL[0]) < 0.0;
-    }
-    if (physical) {
-        physical = (lam[1] - vR[0]) > 0.0;
-    }
-    if (physical) {
-        physical = (enthalpy[1] - p) > 0.0;
-    }
-    if (physical) {
-        physical = (enthalpy[0] - p) > 0.0;
-    }
-    if (physical) {
-        physical = (kL[0] - lam[0]) > -global::tol_scale;
-    }
-    if (physical) {
-        physical = (lam[1] - kR[0]) > -global::tol_scale;
-    }
-    if (physical) {
-        physical = std::abs(kR[0]) < 1.0;
-    }
-    if (physical) {
-        physical = std::abs(kL[0]) < 1.0;
-    }
+    auto eqn54ok = (vncL - kL[0]) > -global::tol_scale;
+    eqn54ok &= (kR[0] - vncR) > -global::tol_scale;
+    eqn54ok &= (lam[0] - vL[0]) < 0.0;
+    eqn54ok &= (lam[1] - vR[0]) > 0.0;
+    eqn54ok &= (enthalpy[1] - p) > 0.0;
+    eqn54ok &= (enthalpy[0] - p) > 0.0;
+    eqn54ok &= (kL[0] - lam[0]) > -global::tol_scale;
+    eqn54ok &= (lam[1] - kR[0]) > -global::tol_scale;
 
-    if (!physical) {
-        // printf("Solution not physical at idx: %ld!\n", gid);
-        // printf("bn: %.5e\n", bn);
-        // printf("bfn: %d\n", bfn);
-        // printf("vncL: %.5e\n", vncL);
-        // printf("vncR: %.5e\n", vncR);
-        // printf("vAL: %.5e\n", vL[0]);
-        // printf("vAR: %.5e\n", vR[0]);
-        // printf("lamAL: %.5e\n", kL[0]);
-        // printf("lamAR: %.5e\n", kR[0]);
-        // printf("lamBL: %.5e\n", lam[0]);
-        // printf("lamBR: %.5e\n", lam[1]);
-        // printf("wR: %.5e\n", enthalpy[1]);
-        // printf("wL: %.5e\n", enthalpy[0]);
-        // printf("p: %.5e\n\n", p);
+    if (!eqn54ok) {
         success = false;
+        return {f, primitive_t(), primitive_t(), primitive_t(), success};
     }
 
     // Return prims for later computation
@@ -1584,12 +1559,12 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
 
         // params to smoothen secant method if HLLD fails
         constexpr real prat_lim      = 0.01;    // pressure ratio limit
-        constexpr real pguess_offset = 1.e-5;   // pressure guess offset
+        constexpr real pguess_offset = 1.e-6;   // pressure guess offset
         constexpr real vc_extension  = 1.e-6;   // extension of the contact wave
-        constexpr int num_tries      = 10;      // secant iterations
+        constexpr int num_tries      = 3;       // max number of secant tries
         constexpr real ftol          = 1.0e-12;   // tolerance for the residuals
 
-        const auto [p, prAL, prAR, prC, success] = [&] {
+        const auto [p, prAL, prAR, prC, hlld_successful] = [&] {
             if (bn * bn / p0 < prat_lim) {   // Eq.(53)
                 // in this limit, the pressure is found through Eq. (55)
                 const real et_hll  = hll_state.total_energy();
@@ -1610,8 +1585,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
                 return std::make_tuple(p0, pL, pR, pC, physical);
             }
 
-            const real ptol = p0 * global::tol_scale;
-            real p1         = p0 + pguess_offset;
+            const real ptol = p0 * 1.e-8;
+            real p1         = p0 * (1.0 + pguess_offset);
             real dp;
             auto iter = 0;
             // Use the secant method to solve for the pressure
@@ -1629,7 +1604,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
                 f0 = f1;
                 p1 -= dp;
 
-                if (iter++ > num_tries || !ok) {
+                if (iter++ == num_tries || !ok) {
                     physical = false;
                     break;
                 }
@@ -1639,7 +1614,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
             return std::make_tuple(p1, pL, pR, pC, physical);
         }();
 
-        if (!success) {
+        if (!hlld_successful) {
             return hll_flux - hll_state * vface;
         }
 
@@ -1651,9 +1626,12 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const real laR = prAR.alfven();
 
         // do compound inequalities in two steps
-        const auto on_left    = laL >= vface - vc_extension;
+        auto on_left          = laL >= vface - vc_extension;
         const auto on_right   = laR <= vface + vc_extension;
         const auto at_contact = !on_left && !on_right;
+        if (at_contact) {
+            on_left = vnc > 0.0;
+        }
 
         const auto uc = on_left ? uL : uR;
         const auto pa = on_left ? prAL : prAR;
