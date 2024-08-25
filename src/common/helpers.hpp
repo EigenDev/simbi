@@ -1316,7 +1316,7 @@ namespace simbi {
         template <typename T>
         DUAL bool goes_to_zero(T val)
         {
-            return (val * val) < global::tol_scale;
+            return (val * val) < global::epsilon;
         }
 
         template <int dim, typename T, typename U, typename V>
