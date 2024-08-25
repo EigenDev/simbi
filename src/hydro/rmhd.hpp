@@ -53,8 +53,7 @@ namespace simbi {
             const primitive_t&,
             const primitive_t&,
             const luint,
-            const real,
-            const luint
+            const real
         ) const;
         RiemannFuncPointer<RMHD<dim>> riemann_solve;
 
@@ -117,24 +116,21 @@ namespace simbi {
             const primitive_t& prL,
             const primitive_t& prR,
             const luint nhat,
-            const real vface,
-            const luint gid
+            const real vface
         ) const;
 
         DUAL conserved_t calc_hllc_flux(
             const primitive_t& prL,
             const primitive_t& prR,
             const luint nhat,
-            const real vface,
-            const luint gid
+            const real vface
         ) const;
 
         DUAL conserved_t calc_hlld_flux(
             const primitive_t& prL,
             const primitive_t& prR,
             const luint nhat,
-            const real vface,
-            const luint gid
+            const real vface
         ) const;
 
         DUAL void set_riemann_solver()
@@ -150,6 +146,11 @@ namespace simbi {
                     this->riemann_solve = &RMHD<dim>::calc_hlld_flux;
                     break;
             }
+        }
+
+        void set_the_riemann_solver()
+        {
+            SINGLE(helpers::hybrid_set_riemann_solver, this);
         }
 
         DUAL conserved_t
@@ -247,14 +248,15 @@ namespace simbi {
             bstag3.copyToGpu();
         }
 
-        DUAL std::tuple<real, primitive_t, primitive_t, primitive_t, bool>
-        hlld_vdiff(
+        DUAL real hlld_vdiff(
             const real p,
             const conserved_t r[2],
             const real lam[2],
-            real bn,
+            const real bn,
             const luint nhat,
-            const luint gid
+            primitive_t& praL,
+            primitive_t& praR,
+            primitive_t& prC
         ) const;
     };
 

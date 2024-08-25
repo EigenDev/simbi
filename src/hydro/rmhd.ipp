@@ -533,19 +533,21 @@ void RMHD<dim>::emit_troubled_cells() const
             const real x3l    = get_x3face(kreal, 0);
             const real x3r    = get_x3face(kreal, 1);
             const real x1mean = calc_any_mean(x1l, x1r, x1_cell_spacing);
-            const real x2mean = calc_any_mean(x2l, x2r, x2_cell_spacing);
-            const real x3mean = calc_any_mean(x3l, x3r, x3_cell_spacing);
-            const real m1     = cons[gid].momentum(1);
-            const real m2     = cons[gid].momentum(2);
-            const real m3     = cons[gid].momentum(3);
-            const real et     = (cons[gid].den + cons[gid].nrg);
-            const real b1     = cons[gid].bcomponent(1);
-            const real b2     = cons[gid].bcomponent(2);
-            const real b3     = cons[gid].bcomponent(3);
-            const real m      = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
-            const real vsq    = (m * m) / (et * et);
-            const real bsq    = (b1 * b1 + b2 * b2 + b3 * b3);
-            const real w      = 1.0 / std::sqrt(1.0 - vsq);
+            const real x2mean =
+                yag == 1 ? 0.0 : calc_any_mean(x2l, x2r, x2_cell_spacing);
+            const real x3mean =
+                zag == 1 ? 0.0 : calc_any_mean(x3l, x3r, x3_cell_spacing);
+            const real m1  = cons[gid].momentum(1);
+            const real m2  = cons[gid].momentum(2);
+            const real m3  = cons[gid].momentum(3);
+            const real et  = (cons[gid].den + cons[gid].nrg);
+            const real b1  = cons[gid].bcomponent(1);
+            const real b2  = cons[gid].bcomponent(2);
+            const real b3  = cons[gid].bcomponent(3);
+            const real m   = std::sqrt(m1 * m1 + m2 * m2 + m3 * m3);
+            const real vsq = (m * m) / (et * et);
+            const real bsq = (b1 * b1 + b2 * b2 + b3 * b3);
+            const real w   = 1.0 / std::sqrt(1.0 - vsq);
             fprintf(
                 stderr,
                 "\nCons2Prim cannot converge\nDensity: %.2e, Pressure: "
@@ -631,14 +633,14 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
 
             int iter       = 0;
             real qq        = edens_guess[gid];
-            const real tol = d * global::tol_scale;
+            const real tol = d * global::epsilon;
             real dqq;
             do {
                 auto [f, g] = newton_fg_mhd(gr, tau, d, ssq, bsq, msq, qq);
                 dqq         = f / g;
                 qq -= dqq;
 
-                if (iter >= global::MAX_ITER || std::isnan(qq)) {
+                if (iter >= global::MAX_ITER || !std::isfinite(qq)) {
 
                     troubled_cells[gid] = 1;
                     dt                  = INFINITY;
@@ -662,7 +664,8 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
             const real chi   = qq / wsq - d * vsq / (1.0 + w);
             const real pg    = (1.0 / gr) * chi;
             edens_guess[gid] = qq;
-            if constexpr (global::VelocityType == global::Velocity::FourVelocity) {
+            if constexpr (global::VelocityType ==
+                          global::Velocity::FourVelocity) {
                 v1 *= w;
                 v2 *= w;
                 v3 *= w;
@@ -715,8 +718,9 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
     const real b  = -4.0 * (et - bsq);
     const real c  = msq - 2.0 * et * bsq + bsq * bsq;
     real qq       = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
+    qq            = my_max(qq, d);
 
-    const real tol = d * global::tol_scale;
+    const real tol = d * global::epsilon;
     int iter       = 0;
     real dqq;
     do {
@@ -724,7 +728,8 @@ RMHD<dim>::cons2prim(const RMHD<dim>::conserved_t& cons) const
         dqq         = f / g;
         qq -= dqq;
 
-        if (iter >= global::MAX_ITER || std::isnan(qq)) {
+        if (iter >= global::MAX_ITER || !std::isfinite(qq)) {
+            qq = INFINITY;
             break;
         }
         iter++;
@@ -807,7 +812,7 @@ DUAL void RMHD<dim>::calc_max_wave_speeds(
     const real bn    = prims.bcomponent(nhat);
     const real bn2   = bn * bn;
     const real vn    = prims.vcomponent(nhat);
-    if (prims.vsquared() < global::tol_scale) {   // Eq.(57)
+    if (prims.vsquared() < global::epsilon) {   // Eq.(57)
         const real fac  = 1.0 / (rho * h + bmusq);
         const real a    = 1.0;
         const real b    = -(bmusq + rho * h * cs2 + bn2 * cs2) * fac;
@@ -816,7 +821,7 @@ DUAL void RMHD<dim>::calc_max_wave_speeds(
         speeds[3]       = std::sqrt(0.5 * (-b + disq));
         speeds[0]       = -speeds[3];
     }
-    else if (bn2 < global::tol_scale) {   // Eq. (58)
+    else if (bn2 < global::epsilon) {   // Eq. (58)
         const real g2 = prims.lorentz_factor_squared();
         const real vdbperp =
             prims.vdotb() - prims.vcomponent(nhat) * prims.bcomponent(nhat);
@@ -1120,8 +1125,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlle_flux(
     const RMHD<dim>::primitive_t& prL,
     const RMHD<dim>::primitive_t& prR,
     const luint nhat,
-    const real vface,
-    const luint gid
+    const real vface
 ) const
 {
     const auto uL     = prims2cons(prL);
@@ -1167,8 +1171,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
     const RMHD<dim>::primitive_t& prL,
     const RMHD<dim>::primitive_t& prR,
     const luint nhat,
-    const real vface,
-    const luint gid
+    const real vface
 ) const
 {
     const auto uL = prims2cons(prL);
@@ -1302,32 +1305,25 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
 };
 
 template <int dim>
-DUAL std::tuple<
-    real,
-    typename RMHD<dim>::primitive_t,
-    typename RMHD<dim>::primitive_t,
-    typename RMHD<dim>::primitive_t,
-    bool>
-RMHD<dim>::hlld_vdiff(
+DUAL real RMHD<dim>::hlld_vdiff(
     const real p,
     const RMHD<dim>::conserved_t r[2],
     const real lam[2],
-    real bn,
+    const real bn,
     const luint nhat,
-    const luint gid
+    RMHD<dim>::primitive_t& praL,
+    RMHD<dim>::primitive_t& praR,
+    RMHD<dim>::primitive_t& prC
 ) const
 
 {
-    bool success = true;
     real eta[2], enthalpy[2];
     real kv[2][3], bv[2][3], vv[2][3];
-    const auto sgnBn = sgn(bn) + global::tol_scale;
+    const auto sgnBn = sgn(bn) + global::epsilon;
 
-    // store the left and right prims (rotational)
-    // and the contact prims
-    primitive_t prims[3];
     const auto np1 = next_perm(nhat, 1);
     const auto np2 = next_perm(nhat, 2);
+
     // compute Alfven terms
     for (int ii = 0; ii < 2; ii++) {
         const auto aS   = lam[ii];
@@ -1366,7 +1362,7 @@ RMHD<dim>::hlld_vdiff(
         enthalpy[ii] = wt;
 
         // Equation (35) & (43)
-        eta[ii]         = std::pow(-1.0, ii + 1) * sgnBn * std::sqrt(wt);
+        eta[ii]         = (ii == 0 ? -1.0 : 1.0) * sgnBn * std::sqrt(wt);
         const auto etaS = eta[ii];
         const real var2 = 1.0 / (aS * p + ret + bn * etaS);
         const real kn   = (rmn + p + rbn * etaS) * var2;
@@ -1397,22 +1393,17 @@ RMHD<dim>::hlld_vdiff(
     const auto etaL = eta[LF];
     const auto etaR = eta[RF];
 
-    auto bterm = [bn](real b, real lam, real vn, real v) {
-        return b * (lam - vn) + bn * v;
-    };
-
     // Compute contact terms
     // Equation (45)
-    const auto dkn  = (kR[0] - kL[0]) + global::tol_scale;
+    const auto dkn  = (kR[0] - kL[0]) + global::epsilon;
     const auto var3 = 1.0 / dkn;
     const auto bcn  = bn;
-    const auto bcp1 = (bterm(bR[1], kR[0], vR[0], vR[1]) -
-                       bterm(bL[1], kL[0], vL[0], vL[1])) *
+    const auto bcp1 = ((bR[1] * (kR[0] - vR[0]) + bn * vR[1]) -
+                       (bL[1] * (kL[0] - vL[0]) + bn * vL[1])) *
                       var3;
-    const auto bcp2 = (bterm(bR[2], kR[0], vR[0], vR[2]) -
-                       bterm(bL[2], kL[0], vL[0], vL[2])) *
+    const auto bcp2 = ((bR[2] * (kR[0] - vR[0]) + bn * vR[2]) -
+                       (bL[2] * (kL[0] - vL[0]) + bn * vL[2])) *
                       var3;
-
     // Left side Eq.(49)
     const auto kcnL  = kL[0];
     const auto kcp1L = kL[1];
@@ -1455,45 +1446,44 @@ RMHD<dim>::hlld_vdiff(
     }();
 
     // check if solution is physically consistent, Eq. (54)
-    auto eqn54ok = (vncL - kL[0]) > -global::tol_scale;
-    eqn54ok &= (kR[0] - vncR) > -global::tol_scale;
+    auto eqn54ok = (vncL - kL[0]) > -global::epsilon;
+    eqn54ok &= (kR[0] - vncR) > -global::epsilon;
     eqn54ok &= (lam[0] - vL[0]) < 0.0;
     eqn54ok &= (lam[1] - vR[0]) > 0.0;
     eqn54ok &= (enthalpy[1] - p) > 0.0;
     eqn54ok &= (enthalpy[0] - p) > 0.0;
-    eqn54ok &= (kL[0] - lam[0]) > -global::tol_scale;
-    eqn54ok &= (lam[1] - kR[0]) > -global::tol_scale;
+    eqn54ok &= (kL[0] - lam[0]) > -global::epsilon;
+    eqn54ok &= (lam[1] - kR[0]) > -global::epsilon;
 
     if (!eqn54ok) {
-        success = false;
-        return {f, primitive_t(), primitive_t(), primitive_t(), success};
+        return INFINITY;
     }
 
     // Return prims for later computation
-    prims[0].vcomponent(nhat) = vL[0];
-    prims[0].vcomponent(np1)  = vL[1];
-    prims[0].vcomponent(np2)  = vL[2];
-    prims[0].bcomponent(nhat) = bL[0];
-    prims[0].bcomponent(np1)  = bL[1];
-    prims[0].bcomponent(np2)  = bL[2];
-    prims[0].alfven()         = kL[0];
+    praL.vcomponent(nhat) = vL[0];
+    praL.vcomponent(np1)  = vL[1];
+    praL.vcomponent(np2)  = vL[2];
+    praL.bcomponent(nhat) = bL[0];
+    praL.bcomponent(np1)  = bL[1];
+    praL.bcomponent(np2)  = bL[2];
+    praL.alfven()         = kL[0];
 
-    prims[1].vcomponent(nhat) = vR[0];
-    prims[1].vcomponent(np1)  = vR[1];
-    prims[1].vcomponent(np2)  = vR[2];
-    prims[1].bcomponent(nhat) = bR[0];
-    prims[1].bcomponent(np1)  = bR[1];
-    prims[1].bcomponent(np2)  = bR[2];
-    prims[1].alfven()         = kR[0];
+    praR.vcomponent(nhat) = vR[0];
+    praR.vcomponent(np1)  = vR[1];
+    praR.vcomponent(np2)  = vR[2];
+    praR.bcomponent(nhat) = bR[0];
+    praR.bcomponent(np1)  = bR[1];
+    praR.bcomponent(np2)  = bR[2];
+    praR.alfven()         = kR[0];
 
-    prims[2].vcomponent(nhat) = 0.5 * (vncR + vncL);
-    prims[2].vcomponent(np1)  = 0.5 * (vpc1R + vpc1L);
-    prims[2].vcomponent(np2)  = 0.5 * (vpc2R + vpc2L);
-    prims[2].bcomponent(nhat) = bcn;
-    prims[2].bcomponent(np1)  = bcp1;
-    prims[2].bcomponent(np2)  = bcp2;
+    prC.vcomponent(nhat) = 0.5 * (vncR + vncL);
+    prC.vcomponent(np1)  = 0.5 * (vpc1R + vpc1L);
+    prC.vcomponent(np2)  = 0.5 * (vpc2R + vpc2L);
+    prC.bcomponent(nhat) = bcn;
+    prC.bcomponent(np1)  = bcp1;
+    prC.bcomponent(np2)  = bcp2;
 
-    return {f, prims[0], prims[1], prims[2], success};
+    return f;
 };
 
 template <int dim>
@@ -1501,8 +1491,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const RMHD<dim>::primitive_t& prL,
     const RMHD<dim>::primitive_t& prR,
     const luint nhat,
-    const real vface,
-    const luint gid
+    const real vface
 ) const
 {
     const auto uL = prims2cons(prL);
@@ -1516,8 +1505,8 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
     const real aLm    = aL < 0.0 ? aL : 0.0;
     const real aRp    = aR > 0.0 ? aR : 0.0;
 
-    auto net_flux = [&] {
-        //---- Check wave speeds before wasting computations
+    auto net_flux = [&]() {
+        //---- Check Wave Speeds before wasting computations
         if (vface <= aLm) {
             return fL - uL * vface;
         }
@@ -1525,16 +1514,12 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
             return fR - uR * vface;
         }
 
-        const auto np1  = next_perm(nhat, 1);
-        const auto np2  = next_perm(nhat, 2);
-        const real afac = 1.0 / (aRp - aLm);
-
         //-------------------Calculate the HLL Intermediate State
-        const auto hll_state = (uR * aRp - uL * aLm - fR + fL) * afac;
+        const auto hll_state = (uR * aRp - uL * aLm - fR + fL) / (aRp - aLm);
 
         //------------------Calculate the RHLLE Flux---------------
         const auto hll_flux =
-            (fL * aRp - fR * aLm + (uR - uL) * aRp * aLm) * afac;
+            (fL * aRp - fR * aLm + (uR - uL) * aRp * aLm) / (aRp - aLm);
 
         if (quirk_smoothing) {
             if (quirk_strong_shock(prL.p, prR.p)) {
@@ -1542,29 +1527,35 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
             }
         }
 
-        // define the magnetic field normal to the zone direction
+        // get the perpendicular directional unit vectors
+        const auto np1 = next_perm(nhat, 1);
+        const auto np2 = next_perm(nhat, 2);
+        // the normal component of the magnetic field is assumed to
+        // be continuous across the interface, so bnL = bnR = bn
         const real bn = hll_state.bcomponent(nhat);
 
         // Eq. (12)
         const conserved_t r[2] = {uL * aLm - fL, uR * aRp - fR};
         const real lam[2]      = {aLm, aRp};
 
+        // L / R Alfven prims and Contact prims
+        primitive_t prAL, prAR, prC;
+
         //------------------------------------
         // Iteratively solve for the pressure
         //------------------------------------
-
         //------------ initial pressure guess
-        const auto prim_hll = cons2prim(hll_state);
-        real p0             = prim_hll.total_pressure();
+        auto p0 = cons2prim(hll_state).total_pressure();
 
         // params to smoothen secant method if HLLD fails
+        constexpr real feps          = global::epsilon;
+        constexpr real peps          = global::epsilon;
         constexpr real prat_lim      = 0.01;    // pressure ratio limit
         constexpr real pguess_offset = 1.e-6;   // pressure guess offset
-        constexpr real vc_extension  = 1.e-6;   // extension of the contact wave
-        constexpr int num_tries      = 3;       // max number of secant tries
-        constexpr real ftol          = 1.0e-12;   // tolerance for the residuals
+        constexpr int num_tries      = 15;      // secant tries before giving up
+        bool hlld_success            = true;
 
-        const auto [p, prAL, prAR, prC, hlld_successful] = [&] {
+        const auto p = [&] {
             if (bn * bn / p0 < prat_lim) {   // Eq.(53)
                 // in this limit, the pressure is found through Eq. (55)
                 const real et_hll  = hll_state.total_energy();
@@ -1572,49 +1563,41 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
                 const real mn_hll  = hll_state.momentum(nhat);
                 const real fmn_hll = hll_flux.momentum(nhat);
 
-                const real a    = 1.0;
                 const real b    = et_hll - fmn_hll;
                 const real c    = fet_hll * mn_hll - et_hll * fmn_hll;
-                const real quad = b * b - 4.0 * a * c;
+                const real quad = my_max(0.0, b * b - 4.0 * c);
                 p0              = 0.5 * (-b + std::sqrt(quad));
             }
-            auto [f0, pL, pR, pC, physical] =
-                hlld_vdiff(p0, r, lam, bn, nhat, gid);
 
-            if (std::abs(f0) < global::tol_scale) {
-                return std::make_tuple(p0, pL, pR, pC, physical);
+            auto f0 = hlld_vdiff(p0, r, lam, bn, nhat, prAL, prAR, prC);
+            if (std::abs(f0) < feps) {
+                return p0;
             }
 
-            const real ptol = p0 * 1.e-8;
+            const real ptol = p0 * peps;
             real p1         = p0 * (1.0 + pguess_offset);
+            auto iter       = 0;
             real dp;
-            auto iter = 0;
             // Use the secant method to solve for the pressure
             do {
-                auto [f1, psL, psR, psC, ok] =
-                    hlld_vdiff(p1, r, lam, bn, nhat, gid);
-
-                pL       = psL;
-                pR       = psR;
-                pC       = psC;
-                physical = ok;
+                auto f1 = hlld_vdiff(p1, r, lam, bn, nhat, prAL, prAR, prC);
 
                 dp = (p1 - p0) / (f1 - f0) * f1;
                 p0 = p1;
                 f0 = f1;
                 p1 -= dp;
 
-                if (iter++ == num_tries || !ok) {
-                    physical = false;
+                if (iter++ > num_tries || !std::isfinite(f1)) {
+                    hlld_success = false;
                     break;
                 }
 
-            } while (std::abs(dp) > ptol || std::abs(f0) > ftol);
+            } while (std::abs(dp) > ptol || std::abs(f0) > feps);
 
-            return std::make_tuple(p1, pL, pR, pC, physical);
+            return p1;
         }();
 
-        if (!hlld_successful) {
+        if (!hlld_success) {
             return hll_flux - hll_state * vface;
         }
 
@@ -1626,12 +1609,10 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         const real laR = prAR.alfven();
 
         // do compound inequalities in two steps
-        auto on_left          = laL >= vface - vc_extension;
-        const auto on_right   = laR <= vface + vc_extension;
-        const auto at_contact = !on_left && !on_right;
-        if (at_contact) {
-            on_left = vnc > 0.0;
-        }
+        const auto on_left =
+            (vface < laL && vface > aLm) || (vface > laL && vface < vnc);
+        const auto at_contact =
+            (vface < vnc && vface > laL) || (vface > vnc && vface < laR);
 
         const auto uc = on_left ? uL : uR;
         const auto pa = on_left ? prAL : prAR;
@@ -1666,7 +1647,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         ua.bcomponent(np1)  = bp1;
         ua.bcomponent(np2)  = bp2;
 
-        const auto fa = fc + (ua - uc) * la;
+        const auto fa = fc + (ua - uc) * lc;
 
         if (!at_contact) {
             return fa - ua * vface;
@@ -1697,7 +1678,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hlld_flux(
         ut.bcomponent(np1)  = bp1C;
         ut.bcomponent(np2)  = bp2C;
 
-        return fa + (ut - ua) * vnc - ut * vface;
+        return fa + (ut - ua) * la - ut * vface;
     }();
 
     // upwind the concentration
@@ -1860,7 +1841,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_x[(q % 2)], 1);
-            f[q] = (this->*riemann_solve)(pL, pR, 1, 0, idx);
+            f[q] = (this->*riemann_solve)(pL, pR, 1, 0);
 
             // fluxes in j direction
             pL = prim_buff
@@ -1890,7 +1871,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_y[(q % 2)], 2);
-            g[q] = (this->*riemann_solve)(pL, pR, 2, 0, idx);
+            g[q] = (this->*riemann_solve)(pL, pR, 2, 0);
 
             // fluxes in k direction
             pL = prim_buff
@@ -1920,7 +1901,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
                 pR = pR - plm_gradient(pR, pL, pRR, plm_theta) * 0.5;
             }
             ib_modify<dim>(pR, pL, object_z[(q % 2)], 3);
-            h[q] = (this->*riemann_solve)(pL, pR, 3, 0, idx);
+            h[q] = (this->*riemann_solve)(pL, pR, 3, 0);
         }
 
         // compute edge emfs in clockwise direction wrt cell plane
@@ -2333,8 +2314,7 @@ void RMHD<dim>::simulate(
     offload();
     compute_bytes_and_strides<primitive_t>(dim);
     print_shared_mem();
-    SINGLE(helpers::hybrid_set_riemann_solver, this);
-
+    set_the_riemann_solver();
     cons2prim(fullP);
     if constexpr (global::on_gpu) {
         adapt_dt<TIMESTEP_TYPE::MINIMUM>(fullP);
@@ -2362,6 +2342,7 @@ void RMHD<dim>::simulate(
             geometry
         );
     }
+
     // Simulate :)
     try {
         simbi::detail::logger::with_logger(*this, tend, [&] {
