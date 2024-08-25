@@ -110,7 +110,7 @@ namespace global {
 #endif
 
     // float or double precision tolerance scale
-    constexpr real tol_scale = std::numeric_limits<real>::epsilon() * 1e3;
+    constexpr real epsilon = std::numeric_limits<real>::epsilon() * 1e3;
 
 //======================== Managed Memory Check
 #ifdef MANAGED_MEMORY
@@ -127,7 +127,7 @@ namespace global {
 using sig_bool = volatile bool;
 #define SINGLE(kernel_name, ...) kernel_name<<<1, 1>>>(__VA_ARGS__);
 
-#define CALL(kernel_name, gridsize, blocksize, ...)                    \
+#define CALL(kernel_name, gridsize, blocksize, ...)                            \
     kernel_name<<<(gridsize), (blocksize)>>>(__VA_ARGS__);
 
 namespace global {
@@ -145,7 +145,7 @@ namespace global {
 
 #define DEV    __device__
 #define KERNEL __global__
-#define DUAL     __host__ __device__
+#define DUAL   __host__ __device__
 #define STATIC __host__ __device__ inline
 #define EXTERN extern __shared__
 
@@ -250,9 +250,8 @@ using simbiStream_t                    = hipStream_t;
 #endif
 #else
 using sig_bool = std::atomic<bool>;
-#define SINGLE(kernel_name, ...) kernel_name(__VA_ARGS__);
-#define CALL(kernel_name, gridsize, blocksize, ...)                    \
-    kernel_name(__VA_ARGS__);
+#define SINGLE(kernel_name, ...)                    kernel_name(__VA_ARGS__);
+#define CALL(kernel_name, gridsize, blocksize, ...) kernel_name(__VA_ARGS__);
 
 namespace global {
     constexpr auto BuildPlatform = Platform::CPU;
@@ -304,16 +303,16 @@ namespace global {
     // shorthand flag for gpu compilation check
     constexpr bool on_gpu = BuildPlatform == Platform::GPU;
 
-    template<typename T>
+    template <typename T>
     DUAL void inline swap(T& a, T& b)
     {
-        #ifdef __CUDA_ARCH__
+#ifdef __CUDA_ARCH__
         T temp = a;
         a      = b;
         b      = temp;
-        #else 
+#else
         std::swap(a, b);
-        #endif
+#endif
     }
 }   // namespace global
 #endif
