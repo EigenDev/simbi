@@ -166,7 +166,6 @@ if get_option('gpu_compilation').enabled()
                 f'-arch=sm_@gpu_arch@', 
                 f'-ccbin=@cc_var@',
                 '--ptxas-options=-v', 
-                '-lineinfo',
                 '--extended-lambda',
                 '--expt-relaxed-constexpr',
                 '--compiler-options', 
