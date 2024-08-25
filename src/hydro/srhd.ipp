@@ -340,7 +340,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                 // f = newton_f(gamma, tau, d, S, peq);
                 int iter       = 0;
                 real peq       = press_data[gid];
-                const real tol = d * global::tol_scale;
+                const real tol = d * global::epsilon;
                 real f, g;
                 do {
                     // compute x_[k+1]
@@ -352,7 +352,7 @@ void SRHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                     // f     = newton_f(gamma, tau, d, S, peq);
                     // pstar = peq - f / g;
 
-                    if (iter >= global::MAX_ITER || std::isnan(peq)) {
+                    if (iter >= global::MAX_ITER || !std::isfinite(peq)) {
                         troubled_data[gid] = 1;
                         dt                 = INFINITY;
                         inFailureState     = true;

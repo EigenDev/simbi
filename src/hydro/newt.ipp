@@ -333,7 +333,7 @@ void Newtonian<dim>::cons2prim(const ExecutionPolicy<>& p)
                 prim_data[gid] = {rho, v1, v2, v3, pre, rho_chi / rho};
             }
 
-            if (pre < 0 || std::isnan(pre)) {
+            if (pre < 0 || !std::isfinite(pre)) {
                 troubled_data[gid] = 1;
                 inFailureState     = true;
                 dt                 = INFINITY;
