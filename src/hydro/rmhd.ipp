@@ -1459,7 +1459,7 @@ DUAL real RMHD<dim>::hlld_vdiff(
         return INFINITY;
     }
 
-    // Return prims for later computation
+    // Fill in the Alfven (L / R) and Contact Prims
     praL.vcomponent(nhat) = vL[0];
     praL.vcomponent(np1)  = vL[1];
     praL.vcomponent(np2)  = vL[2];
