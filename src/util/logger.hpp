@@ -360,6 +360,7 @@ namespace simbi {
                     catch (helpers::InterruptException& e) {
                         util::writeln("Interrupt Exception: {}", e.what());
                         sim_state.inFailureState = true;
+                        sim_state.wasInterrupted = true;
                         helpers::write_to_file(sim_state);
                     }
                 }

@@ -310,11 +310,11 @@ namespace simbi {
                 tnow = create_step_str(t_interval, tchunk_order_of_mag);
             }
             else {
-                if (sim_state.hasCrashed) {
-                    tnow = "crashed";
+                if (sim_state.wasInterrupted) {
+                    tnow = "interrupted";
                 }
                 else {
-                    tnow = "interrupted";
+                    tnow = "crashed";
                 }
             }
             const auto filename = string_format(

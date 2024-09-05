@@ -593,29 +593,14 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
         real invdV = 1.0;
         while (!found_failure && workLeftToDo) {
             if (homolog) {
-                if constexpr (dim == 1) {
-                    const auto ireal = get_real_idx(gid, radius, active_zones);
-                    const real dV    = get_cell_volume(ireal);
-                    invdV            = 1.0 / dV;
-                }
-                else if constexpr (dim == 2) {
-                    const luint ii   = gid % nx;
-                    const luint jj   = gid / nx;
-                    const auto ireal = get_real_idx(ii, radius, xag);
-                    const auto jreal = get_real_idx(jj, radius, yag);
-                    const real dV    = get_cell_volume(ireal, jreal);
-                    invdV            = 1.0 / dV;
-                }
-                else {
-                    const luint kk   = get_height(gid, xag, yag);
-                    const luint jj   = get_row(gid, xag, yag, kk);
-                    const luint ii   = get_column(gid, xag, yag, kk);
-                    const auto ireal = get_real_idx(ii, radius, xag);
-                    const auto jreal = get_real_idx(jj, radius, yag);
-                    const auto kreal = get_real_idx(kk, radius, zag);
-                    const real dV    = get_cell_volume(ireal, jreal, kreal);
-                    invdV            = 1.0 / dV;
-                }
+                const luint kk   = get_height(gid, xag, yag);
+                const luint jj   = get_row(gid, xag, yag, kk);
+                const luint ii   = get_column(gid, xag, yag, kk);
+                const auto ireal = get_real_idx(ii, radius, xag);
+                const auto jreal = get_real_idx(jj, radius, yag);
+                const auto kreal = get_real_idx(kk, radius, zag);
+                const real dV    = get_cell_volume(ireal, jreal, kreal);
+                invdV            = 1.0 / dV;
             }
             const real d    = cons[gid].den * invdV;
             const real m1   = cons[gid].momentum(1) * invdV;
@@ -641,7 +626,18 @@ void RMHD<dim>::cons2prim(const ExecutionPolicy<>& p)
                 qq -= dqq;
 
                 if (iter >= global::MAX_ITER || !std::isfinite(qq)) {
-
+                    printf(
+                        "iter: %d, qq: %.2e, bsq: %.2e, msq: %.2e, d: %.2e, "
+                        "tau: %.2e, s: %.2e, ssq: %.2e\n",
+                        iter,
+                        qq,
+                        bsq,
+                        msq,
+                        d,
+                        tau,
+                        s,
+                        ssq
+                    );
                     troubled_cells[gid] = 1;
                     dt                  = INFINITY;
                     inFailureState      = true;
@@ -1244,18 +1240,21 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
                 uhllm - fdb
             );
         }();
-        const real quad  = -0.5 * (b + sgn(b) * std::sqrt(b * b - 4.0 * a * c));
-        const real aS    = c * (1.0 / quad);
+        const real quad = -0.5 * (b + sgn(b) * std::sqrt(b * b - 4.0 * a * c));
+        const auto aS   = c / quad;
+        // const real quad  = 1.0 + std::sqrt(1.0 - 4.0 * a * c / (b * b));
+        // const real aS    = -2.0 * c / (b * quad);
         const real vp1   = bfn ? 0.0 : (bp1 * aS - fpb1) / bn;   // Eq. (38)
         const real vp2   = bfn ? 0.0 : (bp2 * aS - fpb2) / bn;   // Eq. (38)
         const real invg2 = (1.0 - (aS * aS + vp1 * vp1 + vp2 * vp2));
         const real vsdB  = (aS * bn + vp1 * bp1 + vp2 * bp2);
         const real pS    = -aS * (fhlle - bn * vsdB) + fhllm + bn * bn * invg2;
 
-        const auto u  = (vface <= aS) ? uL : uR;
-        const auto f  = (vface <= aS) ? fL : fR;
-        const auto pr = (vface <= aS) ? prL : prR;
-        const auto ws = (vface <= aS) ? aLm : aRp;
+        const auto on_left = vface < aS;
+        const auto u       = on_left ? uL : uR;
+        const auto f       = on_left ? fL : fR;
+        const auto pr      = on_left ? prL : prR;
+        const auto ws      = on_left ? aLm : aRp;
 
         const real d     = u.den;
         const real mnorm = u.momentum(nhat);
@@ -1278,7 +1277,6 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         const real mp2 =
             bfn ? vs * ump2
                     : cfac * (-bn * (bp2 * invg2 + vsdB * vp2) + ws * ump2 - fmp2);
-        const real taus = es - ds;
 
         // start state
         conserved_t us;
@@ -1286,7 +1284,7 @@ DUAL RMHD<dim>::conserved_t RMHD<dim>::calc_hllc_flux(
         us.momentum(nhat)   = mn;
         us.momentum(np1)    = mp1;
         us.momentum(np2)    = mp2;
-        us.nrg              = taus;
+        us.nrg              = es - ds;
         us.bcomponent(nhat) = bn;
         us.bcomponent(np1)  = bfn ? vs * pr.bcomponent(np1) : bp1;
         us.bcomponent(np2)  = bfn ? vs * pr.bcomponent(np2) : bp2;
@@ -1997,9 +1995,9 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
 
         // const auto s = [&] {
         //     if (use_rk1) {
-        //         conserved_t{};
+        //         return conserved_t{};
         //     }
-        //     conserved_t{0.0, b1c, b2c, b3c, b3c * v3c, 0.0, 0.0, v3c};
+        //     return conserved_t{0.0, b1c, b2c, b3c, b3c * v3c, 0.0, 0.0, v3c};
         // }();
 
         // const auto mhd_sx1 = s * db1_dx1;
@@ -2009,7 +2007,7 @@ void RMHD<dim>::advance(const ExecutionPolicy<>& p)
         b2c = static_cast<real>(0.5) * (b2L + b2R);
         b3c = static_cast<real>(0.5) * (b3L + b3R);
 
-        // TODO: implement functional source and gravity vals
+        // TODO: implement functional source and gravity
         const auto source_terms = conserved_t{};
         // Gravity
         const auto gravity = conserved_t{};
@@ -2298,17 +2296,18 @@ void RMHD<dim>::simulate(
         // https://articles.adsabs.harvard.edu/pdf/2007MNRAS.378.1118M (we
         // take vsq = 1)
         const real bsq = (b1 * b1 + b2 * b2 + b3 * b3);
-        const real msq = (m1 * m1 + m2 * m2 + b3 * m3);
+        const real msq = (m1 * m1 + m2 * m2 + m3 * m3);
         const real et  = tau + d;
         const real a   = 3.0;
         const real b   = -4.0 * (et - bsq);
         const real c   = msq - 2.0 * et * bsq + bsq * bsq;
         const real qq  = (-b + std::sqrt(b * b - 4.0 * a * c)) / (2.0 * a);
-        edens_guess[i] = std::max(qq - d, d);
+        const real qr  = std::max(qq, d);
+        edens_guess[i] = qr - d;
         cons[i]        = conserved_t{d, m1, m2, m3, tau, b1, b2, b3, dchi};
     }
 
-    // set up the problem and dispatch of old state
+    // set up the problem and release old state from memory
     set_output_params(dim, "srmhd");
     deallocate_state();
     offload();

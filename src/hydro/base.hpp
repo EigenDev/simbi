@@ -71,7 +71,7 @@ namespace simbi {
         std::string spatial_order, time_order;
         bool use_pcm, use_rk1, linspace, mesh_motion, adaptive_mesh_motion;
         bool half_sphere, quirk_smoothing, constant_sources, all_outer_bounds;
-        bool homolog, hasCrashed;
+        bool homolog, hasCrashed, wasInterrupted;
         bool null_den, null_mom1, null_mom2, null_mom3, null_nrg;
         bool null_mag1, null_mag2, null_mag3;
         bool nullg1, nullg2, nullg3;

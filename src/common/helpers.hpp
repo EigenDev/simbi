@@ -850,7 +850,7 @@ namespace simbi {
             const auto ig2 = 1.0 - v2;
             const auto g2  = 1.0 / ig2;
             const auto g   = std::sqrt(g2);
-            const auto chi = qq / g2 - d * v2 / (g + 1.0);
+            const auto chi = qq * ig2 - d * v2 / (g + 1.0);
 
             const auto dv2_dq =
                 -2.0 * y2 * (3.0 * rat + y1 * (rat * bsq * bsq / qqd + msq));
